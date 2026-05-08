@@ -7,6 +7,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
     {
         public const string CameraColorName = "CameraColor"; // 定义相机颜色目标的统一资源名，避免不同地方手写字符串出错。
 
+        public const string CameraDepthName = "CameraDepth"; // 定义相机深度目标的统一资源名，后续 DepthPrepass、透明排序和后处理会依赖它。
+
         private readonly Dictionary<string, BurtRenderTargetHandle> renderTargets = new Dictionary<string, BurtRenderTargetHandle>(); // 创建渲染目标字典，用资源名映射到渲染目标句柄。
 
         public void Clear() // 定义清空函数，每次重新组装 RenderGraph 前调用。
@@ -15,7 +17,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         }
 
         public BurtRenderTargetHandle RegisterRenderTarget( // 定义注册渲染目标的函数，外部通过它把 RenderTargetIdentifier 放进资源表。
-            string name, // 接收资源逻辑名称，例如 CameraColor。
+            string name, // 接收资源逻辑名称，例如 CameraColor 或 CameraDepth。
             RenderTargetIdentifier identifier) // 接收 Unity 实际渲染目标标识。
         {
             if (string.IsNullOrEmpty(name)) // 如果传入名称为空，说明调用方没有给资源提供有效名字。
@@ -53,6 +55,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetCameraColor() // 定义读取 CameraColor 的快捷函数。
         {
             return GetRenderTarget(CameraColorName); // 使用统一名称从资源表读取相机颜色目标。
+        }
+
+        public BurtRenderTargetHandle RegisterCameraDepth(RenderTargetIdentifier identifier) // 定义注册 CameraDepth 的快捷函数。
+        {
+            return RegisterRenderTarget(CameraDepthName, identifier); // 使用统一名称把相机深度目标注册进资源表。
+        }
+
+        public BurtRenderTargetHandle GetCameraDepth() // 定义读取 CameraDepth 的快捷函数。
+        {
+            return GetRenderTarget(CameraDepthName); // 使用统一名称从资源表读取相机深度目标。
         }
     }
 }

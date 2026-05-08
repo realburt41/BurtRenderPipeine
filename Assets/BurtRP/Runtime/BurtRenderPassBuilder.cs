@@ -45,6 +45,16 @@
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.CameraColorName); // 使用统一资源名声明写入 CameraColor。
         }
 
+        public BurtRenderTargetHandle ReadCameraDepth() // 定义声明读取 CameraDepth 的快捷函数。
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.CameraDepthName); // 使用统一资源名声明读取 CameraDepth。
+        }
+
+        public BurtRenderTargetHandle WriteCameraDepth() // 定义声明写入 CameraDepth 的快捷函数。
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.CameraDepthName); // 使用统一资源名声明写入 CameraDepth。
+        }
+
         private BurtRenderTargetHandle GetRenderTarget(string name) // 定义从资源表读取渲染目标的内部辅助函数。
         {
             if (ResourceRegistry == null) // 如果资源注册表为空，说明当前 Builder 没有可查询的资源来源。

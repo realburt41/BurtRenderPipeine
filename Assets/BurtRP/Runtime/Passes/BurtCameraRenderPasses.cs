@@ -29,7 +29,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
-            builder.WriteCameraColor(); // 声明这个 Pass 会把 CameraColor 设置为后续绘制目标。
+            builder.WriteCameraColor(); // 声明这个 Pass 会把 CameraColor 设置为后续颜色绘制目标。
+
+            builder.WriteCameraDepth(); // 声明这个 Pass 会让后续绘制使用当前相机深度缓冲。
         }
 
         public override void Execute(BurtRenderGraphContext context) // 实现 BurtRenderPass 的执行函数。
@@ -38,14 +40,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             var cameraColorTarget = context.CameraColorTarget; // 从 GraphContext 中取出 RenderGraph 的相机颜色目标句柄。
 
+            var cameraDepthTarget = context.CameraDepthTarget; // 从 GraphContext 中取出 RenderGraph 的相机深度目标句柄。
+
             if (!cameraColorTarget.IsValid) // 如果 CameraColorTarget 无效，说明当前图没有可绑定的颜色输出目标。
             {
                 return; // 直接结束这个 Pass，避免绑定 default RenderTargetIdentifier。
             }
 
+            if (!cameraDepthTarget.IsValid) // 如果 CameraDepthTarget 无效，说明当前图没有可用的深度目标。
+            {
+                return; // 直接结束这个 Pass，避免后续绘制缺失深度缓冲语义。
+            }
+
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
-            cmd.SetRenderTarget(cameraColorTarget.Identifier); // 把 CameraColorTarget 指向的实际渲染目标设置为后续绘制输出位置。
+            cmd.SetRenderTarget(cameraColorTarget.Identifier); // 当前阶段颜色和深度都来自 CameraTarget，所以先只显式绑定 CameraColor。
 
             renderContext.ExecuteCommandBuffer(cmd); // 把 CommandBuffer 里的设置渲染目标命令提交给 ScriptableRenderContext。
 
@@ -60,6 +69,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
             builder.WriteCameraColor(); // 声明这个 Pass 会清理并写入 CameraColor。
+
+            builder.WriteCameraDepth(); // 声明这个 Pass 会清理并写入 CameraDepth。
         }
 
         public override void Execute(BurtRenderGraphContext context) // 实现 BurtRenderPass 的执行函数。
@@ -133,6 +144,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
             builder.WriteCameraColor(); // 声明这个 Pass 会把不透明物体颜色写入 CameraColor。
+
+            builder.WriteCameraDepth(); // 声明这个 Pass 会通过深度测试和 ZWrite 写入 CameraDepth。
         }
 
         public override void Execute(BurtRenderGraphContext context) // 实现 BurtRenderPass 的执行函数。
@@ -161,6 +174,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
+            builder.ReadCameraDepth(); // 声明这个 Pass 会参考当前深度状态来把天空盒放在场景背景位置。
+
             builder.WriteCameraColor(); // 声明这个 Pass 在 Skybox 模式下会把天空盒颜色写入 CameraColor。
         }
 
@@ -199,7 +214,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
-            builder.WriteCameraColor(); // 声明这个 Pass 会把透明物体混合结果写入 CameraColor。
+            builder.ReadCameraColor(); // 声明透明物体需要读取已有 CameraColor 作为混合背景。
+
+            builder.ReadCameraDepth(); // 声明透明物体需要读取当前 CameraDepth 参与深度测试。
+
+            builder.WriteCameraColor(); // 声明透明混合结果会写回 CameraColor。
         }
 
         public override void Execute(BurtRenderGraphContext context) // 实现 BurtRenderPass 的执行函数。

@@ -1,4 +1,5 @@
-﻿using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 ScriptableRenderContext。
+﻿using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Debug 输出 RenderGraph 调试信息。
+using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 ScriptableRenderContext。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtRP 运行时代码保持一致。
 {
@@ -42,6 +43,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
             var graphContext = new BurtRenderGraphContext(context, request, asset, renderGraph.Resources); // 创建 RenderGraph 执行上下文，并把资源注册表传给每个 Pass。
 
             renderGraph.Execute(graphContext); // 执行 RenderGraph 里已经组装好的所有 Pass。
+
+            if (asset != null && asset.EnableRenderGraphDebug) // 如果管线资产开启了 RenderGraph 调试输出，就把当前图的资源声明打印到 Console。
+            {
+                Debug.Log(renderGraph.DumpDebugInfo(request)); // 输出 RenderGraph 调试文本，包含 Pass 顺序和资源读写关系。
+            }
 
             context.Submit(); // 把当前 request 累积的所有渲染命令提交给 Unity 执行。
         }

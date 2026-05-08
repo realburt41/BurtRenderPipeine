@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 List 保存 Pass 和资源使用记录。
+using System.Text; // 引入文本构建命名空间，用来高效拼接 RenderGraph 调试字符串。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和其他 BurtRP 代码处在同一个模块里。
 {
@@ -22,7 +23,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
             resourceUsages.Clear(); // 清空上一轮 Pass 的资源读写声明，避免调试数据残留。
 
-            resources.Clear(); // 清空上一轮 request 注册的资源，避免 CameraColor 等资源残留到下一次渲染。
+            resources.Clear(); // 清空上一轮 request 注册的资源，避免 CameraColor 和 CameraDepth 等资源残留到下一次渲染。
         }
 
         public void ImportRequestResources(BurtRenderRequest request) // 定义从 request 导入基础资源的函数。
@@ -38,6 +39,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             }
 
             resources.RegisterCameraColor(request.TargetIdentifier); // 把 request 的原始输出目标注册成 RenderGraph 的 CameraColor 资源。
+
+            resources.RegisterCameraDepth(request.TargetIdentifier); // 当前阶段还没有独立 Depth RT，所以先把同一个 CameraTarget 注册成 CameraDepth。
         }
 
         public void AddPass(BurtRenderPass pass) // 定义添加 Pass 的函数，Assembler 会通过它把 Pass 放进图里。
@@ -72,6 +75,39 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             }
         }
 
+        public string DumpDebugInfo(BurtRenderRequest request) // 定义生成 RenderGraph 调试文本的函数，用来输出 Pass 和资源读写声明。
+        {
+            var builder = new StringBuilder(); // 创建字符串构建器，避免多次字符串相加产生额外 GC。
+
+            builder.AppendLine("[BurtRenderGraph]"); // 写入调试信息标题，方便你在 Console 里搜索。
+
+            AppendRequestInfo(builder, request); // 写入当前 request 的基础信息，例如类型和相机名。
+
+            builder.Append("Pass Count: "); // 写入 Pass 数量标签。
+
+            builder.AppendLine(passes.Count.ToString()); // 写入当前 RenderGraph 中的 Pass 数量。
+
+            for (var usageIndex = 0; usageIndex < resourceUsages.Count; usageIndex++) // 遍历所有 Pass 的资源使用记录。
+            {
+                var usage = resourceUsages[usageIndex]; // 取出当前索引对应的资源使用记录。
+
+                if (usage == null) // 如果资源使用记录为空，说明收集阶段存在异常数据。
+                {
+                    continue; // 跳过空记录，继续输出后面的记录。
+                }
+
+                builder.Append("Pass: "); // 写入 Pass 标签。
+
+                builder.AppendLine(usage.PassName); // 写入 Pass 名称。
+
+                AppendRenderTargetList(builder, "  Read", usage.ReadRenderTargets); // 写入当前 Pass 声明读取的渲染目标列表。
+
+                AppendRenderTargetList(builder, "  Write", usage.WriteRenderTargets); // 写入当前 Pass 声明写入的渲染目标列表。
+            }
+
+            return builder.ToString(); // 返回完整调试文本给调用方打印。
+        }
+
         private void ConfigurePasses() // 定义资源声明收集函数，用来调用每个 Pass 的 Configure。
         {
             resourceUsages.Clear(); // 每次执行前清空旧声明，保证 ResourceUsages 只描述当前图。
@@ -91,6 +127,60 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
                 resourceUsages.Add(builder.Usage); // 把当前 Pass 的资源使用记录保存到 RenderGraph。
             }
+        }
+
+        private static void AppendRequestInfo(StringBuilder builder, BurtRenderRequest request) // 定义写入 request 基础信息的辅助函数。
+        {
+            if (request == null) // 如果 request 为空，说明当前调试信息没有对应渲染任务。
+            {
+                builder.AppendLine("Request: null"); // 写入空 request 标记。
+
+                return; // 结束 request 信息输出。
+            }
+
+            builder.Append("Request: "); // 写入 request 标签。
+
+            builder.Append(request.Type); // 写入 request 类型，例如 MainCamera 或 Preview。
+
+            builder.Append(" | Camera: "); // 写入相机标签分隔符。
+
+            builder.AppendLine(request.Camera != null ? request.Camera.name : "null"); // 写入相机名称，如果相机为空就写 null。
+        }
+
+        private static void AppendRenderTargetList( // 定义写入渲染目标列表的辅助函数。
+            StringBuilder builder, // 接收字符串构建器，用来追加文本。
+            string label, // 接收列表标签，例如 Read 或 Write。
+            IReadOnlyList<BurtRenderTargetHandle> handles) // 接收要输出的渲染目标句柄列表。
+        {
+            builder.Append(label); // 写入列表标签。
+
+            builder.Append(": "); // 写入标签和值之间的分隔符。
+
+            if (handles == null || handles.Count == 0) // 如果列表为空，说明这个 Pass 没有声明该方向的资源。
+            {
+                builder.AppendLine("<none>"); // 写入空列表标记。
+
+                return; // 结束列表输出。
+            }
+
+            for (var handleIndex = 0; handleIndex < handles.Count; handleIndex++) // 遍历当前资源列表里的所有句柄。
+            {
+                if (handleIndex > 0) // 如果不是第一个资源，就需要先写分隔符。
+                {
+                    builder.Append(", "); // 写入多个资源之间的分隔符。
+                }
+
+                var handle = handles[handleIndex]; // 取出当前索引对应的渲染目标句柄。
+
+                builder.Append(handle.Name); // 写入资源名称，例如 CameraColor 或 CameraDepth。
+
+                if (!handle.IsValid) // 如果句柄无效，说明资源表里没有找到对应资源。
+                {
+                    builder.Append("(Invalid)"); // 在资源名后标记 Invalid，方便你定位资源注册问题。
+                }
+            }
+
+            builder.AppendLine(); // 当前资源列表写完后换行。
         }
     }
 }
