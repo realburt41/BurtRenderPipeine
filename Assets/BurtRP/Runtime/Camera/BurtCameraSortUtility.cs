@@ -52,7 +52,7 @@ namespace Burt.RenderPipeline
                 return -1;
             }
 
-            // 首先比较每帧创建 request 时缓存下来的 SortLayer，数值越小越早渲染。
+            // 首先比较每帧创建 request 时缓存下来的 SortLayer，数值越小越早渲染，保持旧的主要排序行为。
             var sortCompare = left.SortLayer.CompareTo(right.SortLayer);
 
             // 如果 SortLayer 不相等，就直接使用这个比较结果，不再看其他字段。
@@ -62,7 +62,23 @@ namespace Burt.RenderPipeline
                 return sortCompare;
             }
 
-            // SortLayer 相同时，用左侧相机的 InstanceID 作为稳定的次级排序键；没有相机时使用 0 兜底。
+            // 同一 SortLayer 内先按逻辑栈编号排序，让同一个 stackId 的 Base/Overlay/UI 更容易聚在一起。
+            var stackCompare = left.StackId.CompareTo(right.StackId);
+            if (stackCompare != 0)
+            {
+                // 返回逻辑栈编号比较结果；第一版只排序，不做跨栈合成。
+                return stackCompare;
+            }
+
+            // 同一层同一栈内再按角色排序：Base -> Overlay -> UI -> SceneView -> Preview。
+            var roleCompare = GetRoleSortOrder(left.CameraRole).CompareTo(GetRoleSortOrder(right.CameraRole));
+            if (roleCompare != 0)
+            {
+                // 返回角色比较结果，让叠加相机默认排在基础相机之后。
+                return roleCompare;
+            }
+
+            // SortLayer、StackId 和角色都相同时，用左侧相机的 InstanceID 作为稳定的次级排序键；没有相机时使用 0 兜底。
             var leftId = left.Camera != null ? left.Camera.GetInstanceID() : 0;
 
             // SortLayer 相同时，用右侧相机的 InstanceID 作为稳定的次级排序键；没有相机时使用 0 兜底。
@@ -70,6 +86,27 @@ namespace Burt.RenderPipeline
 
             // 返回相机 InstanceID 的比较结果，让同层 request 的顺序在同一帧内保持确定。
             return leftId.CompareTo(rightId);
+        }
+
+        // 把相机角色转换为同层排序权重；数值越小越早执行。
+        private static int GetRoleSortOrder(BurtCameraRole role)
+        {
+            // 第一版只定义基础顺序，不在这里做任何合成或清屏策略。
+            switch (role)
+            {
+                case BurtCameraRole.Base:
+                    return 0;
+                case BurtCameraRole.Overlay:
+                    return 1;
+                case BurtCameraRole.UI:
+                    return 2;
+                case BurtCameraRole.SceneView:
+                    return 3;
+                case BurtCameraRole.Preview:
+                    return 4;
+                default:
+                    return 100;
+            }
         }
     }
 }

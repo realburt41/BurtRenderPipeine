@@ -1,4 +1,4 @@
-using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 Dictionary 保存资源表。
+using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 Dictionary 和 HashSet 保存资源表与外部导入标记。
 using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Shader.PropertyToID 生成临时 RT 的整数 ID。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 RenderTargetIdentifier。
 
@@ -28,42 +28,69 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int MainLightShadowMapId = Shader.PropertyToID(MainLightShadowMapShaderName); // 把主光阴影图 shader 名称转换成整数 ID，让 CommandBuffer 申请、释放和绑定同一个临时 RT。
 
+        private const string UnnamedRenderTargetName = "UnnamedRenderTarget"; // 定义空资源名的兜底名称，避免 Dictionary 接收 null 或空字符串。
+
         private readonly Dictionary<string, BurtRenderTargetHandle> renderTargets = new Dictionary<string, BurtRenderTargetHandle>(); // 创建渲染目标字典，用资源名映射到渲染目标句柄。
+
+        private readonly HashSet<string> externalRenderTargets = new HashSet<string>(); // 记录由相机或外部系统提供的资源，Read-before-Write 校验会把它们视为已有生产者。
 
         public void Clear() // 定义清空函数，每次重新组装 RenderGraph 前调用。
         {
             renderTargets.Clear(); // 清空上一轮 request 注册的所有渲染目标，避免资源残留到下一轮渲染。
+
+            externalRenderTargets.Clear(); // 清空外部导入标记，避免跨相机误判资源生产者。
         }
 
         public BurtRenderTargetHandle RegisterRenderTarget( // 定义注册渲染目标的函数，外部通过它把 RenderTargetIdentifier 放进资源表。
             string name, // 接收资源逻辑名称，例如 CameraColor 或 CameraDepth。
             RenderTargetIdentifier identifier) // 接收 Unity 实际渲染目标标识。
         {
-            if (string.IsNullOrEmpty(name)) // 如果传入名称为空，说明调用方没有给资源提供有效名字。
+            return RegisterRenderTarget(name, identifier, false); // 默认注册为图内资源，需要有 Pass 写入后才算生产完成。
+        }
+
+        public BurtRenderTargetHandle RegisterRenderTarget( // 定义带外部导入标记的注册函数，供 FinalCameraTarget 等外部资源使用。
+            string name, // 接收资源逻辑名称，例如 FinalCameraTarget。
+            RenderTargetIdentifier identifier, // 接收 Unity 实际渲染目标标识。
+            bool isExternal) // 标记这个资源是否由 RenderGraph 外部已经提供。
+        {
+            var safeName = NormalizeResourceName(name); // 统一处理空资源名，保证资源表 key 可用且 Debug 输出稳定。
+
+            var handle = new BurtRenderTargetHandle(safeName, identifier); // 把资源名和 Unity 渲染目标标识包装成 BurtRenderTargetHandle。
+
+            renderTargets[safeName] = handle; // 把句柄写入资源表，如果同名资源已存在就覆盖旧值。
+
+            if (isExternal) // 外部资源不需要图内生产者，例如相机最终输出目标。
             {
-                name = "UnnamedRenderTarget"; // 使用一个兜底名称，避免 Dictionary 使用 null 或空字符串。
+                externalRenderTargets.Add(safeName); // 记录外部导入资源名，供 Read-before-Write 校验使用。
             }
-
-            var handle = new BurtRenderTargetHandle(name, identifier); // 把资源名和 Unity 渲染目标标识包装成 BurtRenderTargetHandle。
-
-            renderTargets[name] = handle; // 把句柄写入资源表，如果同名资源已存在就覆盖旧值。
+            else
+            {
+                externalRenderTargets.Remove(safeName); // 图内资源被重新注册时清理外部标记，避免校验误判。
+            }
 
             return handle; // 返回刚注册好的资源句柄，方便调用方立刻使用。
         }
 
         public BurtRenderTargetHandle GetRenderTarget(string name) // 定义根据名称读取渲染目标句柄的函数。
         {
-            if (string.IsNullOrEmpty(name)) // 如果传入名称为空，说明调用方请求的是无效资源。
-            {
-                return BurtRenderTargetHandle.Invalid("UnnamedRenderTarget"); // 返回无效句柄，避免调用方误用空名称资源。
-            }
+            var safeName = NormalizeResourceName(name); // 统一处理空名称，避免后续字典查询不稳定。
 
-            if (renderTargets.TryGetValue(name, out var handle)) // 尝试从资源表里找到指定名称的渲染目标。
+            if (renderTargets.TryGetValue(safeName, out var handle)) // 尝试从资源表里找到指定名称的渲染目标。
             {
                 return handle; // 找到时返回资源表里保存的有效句柄。
             }
 
-            return BurtRenderTargetHandle.Invalid(name); // 找不到时返回带资源名的无效句柄，方便调试缺失资源。
+            return BurtRenderTargetHandle.Invalid(safeName); // 找不到时返回带资源名的无效句柄，方便调试缺失资源。
+        }
+
+        public bool ContainsRenderTarget(string name) // 判断某个资源名是否已经注册到当前资源表。
+        {
+            return renderTargets.ContainsKey(NormalizeResourceName(name)); // 使用同一套名称归一化逻辑，避免空名判断和 GetRenderTarget 分叉。
+        }
+
+        public bool IsExternalRenderTarget(string name) // 判断某个资源是否来自 RenderGraph 外部。
+        {
+            return externalRenderTargets.Contains(NormalizeResourceName(name)); // 外部资源可被读取而不需要图内写入生产者。
         }
 
         public BurtRenderTargetHandle RegisterCameraColor(RenderTargetIdentifier identifier) // 定义注册 CameraColor 的快捷函数。
@@ -83,7 +110,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public BurtRenderTargetHandle RegisterFinalCameraTarget(RenderTargetIdentifier identifier) // 定义注册最终相机输出目标的快捷函数。
         {
-            return RegisterRenderTarget(FinalCameraTargetName, identifier); // 使用统一名称把 request.TargetIdentifier 保存为 FinalCameraTarget，避免它再被误当成 CameraColor。
+            return RegisterRenderTarget(FinalCameraTargetName, identifier, true); // 最终输出来自相机/backbuffer，校验时视为外部已存在资源。
         }
 
         public BurtRenderTargetHandle GetFinalCameraTarget() // 定义读取最终相机输出目标的快捷函数。
@@ -119,6 +146,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetMainLightShadowMap() // 定义读取 MainLightShadowMap 的快捷函数。
         {
             return GetRenderTarget(MainLightShadowMapName); // 使用统一名称从资源表读取主光阴影图目标。
+        }
+
+        private static string NormalizeResourceName(string name) // 归一化资源名，避免 null 或空字符串破坏资源表和依赖校验。
+        {
+            return string.IsNullOrEmpty(name) ? UnnamedRenderTargetName : name; // 空名统一映射到兜底名称，Debug 中仍会看到异常资源名。
         }
     }
 }

@@ -1,99 +1,100 @@
-using UnityEngine; // Imports Unity types such as Color, Vector3, LightType, and RenderSettings.
-using UnityEngine.Rendering; // Imports SRP types such as CullingResults and VisibleLight.
+using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Color、Vector3、LightType 和 RenderSettings。
+using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 CullingResults 和 VisibleLight。
 
-namespace Burt.RenderPipeline // Keeps lighting data inside the same BurtRP runtime namespace as requests and passes.
+namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光数据和 request、pass 保持在同一模块里。
 {
-    public sealed class BurtLightingData // Stores all lighting information collected for one BurtRenderRequest.
+    public sealed class BurtLightingData // 保存一个 BurtRenderRequest 收集到的灯光信息。
     {
-        private static readonly Vector3 DefaultMainLightDirection = new Vector3(0.3f, 0.8f, 0.4f).normalized; // Defines a stable fallback direction when no Directional Light is visible.
+        private static readonly Vector3 DefaultMainLightDirection = new Vector3(0.3f, 0.8f, 0.4f).normalized; // 定义没有可见方向光时使用的稳定兜底方向。
 
-        public bool HasMainLight { get; private set; } // Tells later passes whether a real visible Directional Light was found.
+        public bool HasMainLight { get; private set; } // 标记当前 request 是否找到了真实可见的方向光。
 
-        public int MainLightIndex { get; private set; } // Stores the index of the selected main light inside CullingResults.visibleLights.
+        public int MainLightIndex { get; private set; } // 保存主光在 CullingResults.visibleLights 里的索引。
 
-        public int VisibleLightCount { get; private set; } // Stores how many visible lights Unity reported for the current camera.
+        public int VisibleLightCount { get; private set; } // 保存当前相机剔除结果里可见灯光的数量，主要用于调试和后续多光源扩展。
 
-        public Vector3 MainLightDirection { get; private set; } // Stores the world-space direction from the shaded point toward the selected main light.
+        public Vector3 MainLightDirection { get; private set; } // 保存从着色点指向主光的世界空间方向。
 
-        public Color MainLightColor { get; private set; } // Stores the selected main light color after Unity applies light intensity.
+        public Color MainLightColor { get; private set; } // 保存 Unity 计算过强度后的主光最终颜色。
 
-        public Color AmbientLightColor { get; private set; } // Stores the ambient color that BurtRP/Lit adds as baseline lighting.
+        public Color AmbientLightColor { get; private set; } // 保存从 Unity Lighting 设置读取到的原始环境光颜色，Simple Lit 路径会直接使用它。
 
+        public BurtShadowData ShadowData { get; private set; } // 保存主光对应的阴影数据，后续 shadow pass 会读取它。
 
-        public BurtShadowData ShadowData { get; private set; } // Stores shadow data derived from the selected main light for future shadow passes.
-        private BurtLightingData() // Hides direct construction so callers use Create or Default and always get initialized data.
+        private BurtLightingData() // 隐藏构造函数，强制调用方通过 Create 或 Default 获得已初始化的数据。
         {
-        } // The constructor body is empty because initialization is centralized in ResetToDefaults and ResolveMainLight.
+        } // 构造函数不直接写初始化逻辑，避免和 ResetToDefaults、ResolveMainLight 的规则重复。
 
-        public static BurtLightingData Default() // Creates lighting data that is valid even when no culling results are available.
+        public static BurtLightingData Default() // 创建一个即使没有剔除结果也可用的默认灯光数据。
         {
-            var data = new BurtLightingData(); // Allocates a new lighting data object for the caller.
+            var data = new BurtLightingData(); // 创建灯光数据对象。
 
-            data.ResetToDefaults(0); // Initializes fallback light, ambient light, and visible-light count.
+            data.ResetToDefaults(0); // 按 0 个可见灯光初始化兜底主光、环境光和阴影数据。
 
-            return data; // Returns initialized fallback lighting data.
+            return data; // 返回初始化完成的默认灯光数据。
         }
 
-        public static BurtLightingData Create(CullingResults cullingResults) // Builds lighting data from Unity's culling results for one render request.
+        public static BurtLightingData Create(CullingResults cullingResults) // 从 Unity 当前相机的剔除结果里构建灯光数据。
         {
-            var visibleLights = cullingResults.visibleLights; // Reads Unity's visible-light list for the current camera.
+            var visibleLights = cullingResults.visibleLights; // 读取 Unity 给当前相机筛出的可见灯光列表。
 
-            var data = new BurtLightingData(); // Allocates a new lighting data object for this request.
+            var data = new BurtLightingData(); // 创建本次 request 专用的灯光数据对象。
 
-            data.ResetToDefaults(visibleLights.Length); // Initializes fallback lighting before trying to find a real main light.
+            data.ResetToDefaults(visibleLights.Length); // 先写入安全默认值，后面找到真实主光时再覆盖。
 
-            data.ResolveMainLight(visibleLights); // Searches visible lights and stores the first usable Directional Light.
+            data.ResolveMainLight(visibleLights); // 遍历可见灯光，选择第一盏方向光作为 BurtRP 当前主光。
 
-            return data; // Returns lighting data ready for BurtSetupLightingPass to upload.
+            return data; // 返回已经准备好上传给 BurtSetupLightingPass 的灯光数据。
         }
 
-        private void ResetToDefaults(int visibleLightCount) // Initializes this object to a safe fallback lighting state.
+        private void ResetToDefaults(int visibleLightCount) // 把对象重置到安全的默认光照状态。
         {
-            HasMainLight = false; // Marks that no real main light has been selected yet.
+            HasMainLight = false; // 先标记为没有找到真实主光。
 
-            MainLightIndex = -1; // Uses -1 to mean the main light does not map to a visible-light list entry.
+            MainLightIndex = -1; // 使用 -1 表示当前主光不对应 visibleLights 中的真实索引。
 
-            VisibleLightCount = visibleLightCount; // Stores the visible-light count for debug and future light-list logic.
+            VisibleLightCount = visibleLightCount; // 保存可见光数量，方便调试输出和后续多光源逻辑使用。
 
-            MainLightDirection = DefaultMainLightDirection; // Uses the fallback direction so Lit materials still show shape without scene lights.
+            MainLightDirection = DefaultMainLightDirection; // 使用兜底方向，避免无主光时 Lit 材质完全失去形体光照。
 
-            MainLightColor = Color.white; // Uses white fallback light so Lit materials are not black by default.
+            MainLightColor = Color.white; // 使用白色兜底主光，避免没有灯光时材质直接变黑。
 
-            AmbientLightColor = RenderSettings.ambientLight; // Reads Unity's ambient color as BurtRP's first simple ambient-light source.
+            AmbientLightColor = RenderSettings.ambientLight; // 读取 Unity Lighting 面板里的环境光颜色，后续 SetupLightingPass 会原样上传给 Simple Lit 路径。
 
-            ShadowData = BurtShadowData.None(); // Initializes shadow data to a valid no-shadow state before main-light selection.
+            ShadowData = BurtShadowData.None(); // 初始化为无阴影状态，找到主光后再生成真正的阴影数据。
         }
 
-        private void ResolveMainLight(Unity.Collections.NativeArray<VisibleLight> visibleLights) // Finds the first visible Directional Light and stores it as BurtRP's main light.
+        private void ResolveMainLight(Unity.Collections.NativeArray<VisibleLight> visibleLights) // 查找第一盏可见方向光，并把它保存为 BurtRP 主光。
         {
-            for (var lightIndex = 0; lightIndex < visibleLights.Length; lightIndex++) // Iterates all lights visible to the current camera.
+            for (var lightIndex = 0; lightIndex < visibleLights.Length; lightIndex++) // 遍历当前相机能看到的所有灯光。
             {
-                var visibleLight = visibleLights[lightIndex]; // Copies the current visible light data out of Unity's native array.
+                var visibleLight = visibleLights[lightIndex]; // 从 NativeArray 中取出当前灯光数据。
 
-                if (visibleLight.lightType != LightType.Directional) // Checks whether this light is a Directional Light.
+                if (visibleLight.lightType != LightType.Directional) // 当前阶段只支持方向光作为主光。
                 {
-                    continue; // Skips non-directional lights because the current Lit shader supports only one main Directional Light.
+                    continue; // 非方向光先跳过，后续多光源阶段再接入。
                 }
 
-                var forwardColumn = visibleLight.localToWorldMatrix.GetColumn(2); // Reads the light transform forward axis from Unity's visible-light matrix.
+                var forwardColumn = visibleLight.localToWorldMatrix.GetColumn(2); // 读取灯光变换矩阵里的 forward 轴。
 
-                var directionTowardLight = new Vector3(-forwardColumn.x, -forwardColumn.y, -forwardColumn.z); // Converts light forward into a direction from the shaded point toward the light.
+                var directionTowardLight = new Vector3(-forwardColumn.x, -forwardColumn.y, -forwardColumn.z); // Unity 方向光 forward 指向光照射方向，这里取反得到从表面指向光源的方向。
 
-                if (directionTowardLight.sqrMagnitude <= 0.0001f) // Guards against an invalid zero-length light direction.
+                if (directionTowardLight.sqrMagnitude <= 0.0001f) // 防御异常矩阵导致的零长度方向。
                 {
-                    continue; // Skips this light and continues searching for a usable Directional Light.
+                    continue; // 当前灯光方向无效，继续查找下一盏灯。
                 }
 
-                HasMainLight = true; // Marks that a real scene Directional Light was selected.
+                HasMainLight = true; // 标记已经找到真实可见主光。
 
-                MainLightIndex = lightIndex; // Stores which visible-light entry became the main light.
+                MainLightIndex = lightIndex; // 记录主光在 visibleLights 里的索引，阴影系统会使用这个索引。
 
-                MainLightDirection = directionTowardLight.normalized; // Stores the normalized world-space direction used by Lambert lighting.
+                MainLightDirection = directionTowardLight.normalized; // 保存归一化后的世界空间主光方向。
 
-                MainLightColor = visibleLight.finalColor; // Stores Unity's final visible color, including light color and intensity.
+                MainLightColor = visibleLight.finalColor; // 保存 Unity 已经乘过 light color 和 intensity 的最终颜色。
 
-                ShadowData = BurtShadowData.CreateForMainLight(visibleLight, lightIndex); // Captures shadow settings from the selected main light for later shadow-map work.
-                return; // Stops after the first Directional Light, which is BurtRP's current main-light selection rule.
+                ShadowData = BurtShadowData.CreateForMainLight(visibleLight, lightIndex); // 根据当前主光和索引创建主光阴影数据。
+
+                return; // 当前规则只取第一盏方向光，所以找到后直接结束。
             }
         }
     }

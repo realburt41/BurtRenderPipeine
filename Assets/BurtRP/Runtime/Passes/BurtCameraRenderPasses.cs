@@ -9,6 +9,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         private static readonly ShaderTagId BurtDepthOnly = new ShaderTagId("BurtDepthOnly"); // Names the BurtRP depth-only pass used by the depth prepass.
 
+        private static readonly PerObjectData ForwardPerObjectData = // 定义前向颜色绘制需要 Unity 为每个 Renderer 绑定的内置间接光数据。
+            PerObjectData.ReflectionProbes | // 请求 Unity 绑定 unity_SpecCube0 / unity_SpecCube0_HDR，让 Reflection Probe 间接高光能生效。
+            PerObjectData.Lightmaps | // 请求 Unity 绑定光照贴图相关数据，给后续接入 baked GI 预留正确 per-object 数据。
+            PerObjectData.LightProbe | // 请求 Unity 绑定 unity_SHAr 等 SH 数据，让 ShadeSH9 能读到 Light Probe / Ambient Probe。
+            PerObjectData.LightProbeProxyVolume | // 请求 Unity 绑定 LPPV 数据，避免使用 Light Probe Proxy Volume 的物体丢失间接光。
+            PerObjectData.LightData | // 请求 Unity 绑定基础 per-object 光照数据，保持和 URP 常见配置一致。
+            PerObjectData.OcclusionProbe | // 请求 Unity 绑定 probe occlusion 数据，后续如果接入 shadow mask/AO 可直接读取。
+            PerObjectData.OcclusionProbeProxyVolume | // 请求 Unity 绑定 LPPV 版本的 occlusion 数据，和 LightProbeProxyVolume 配套。
+            PerObjectData.ShadowMask; // 请求 Unity 绑定 shadow mask 数据，给后续 baked shadow / mixed lighting 预留。
+
         private static readonly ShaderTagId SRPDefaultUnlit = new ShaderTagId("SRPDefaultUnlit"); // Names Unity's generic SRP unlit pass so the unsupported-shader pass can catch it.
 
         private static readonly ShaderTagId ForwardBase = new ShaderTagId("ForwardBase"); // Names the Built-in pipeline forward pass so the unsupported-shader pass can catch it.
@@ -46,6 +56,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         public static DrawingSettings CreateForwardDrawingSettings(SortingSettings sortingSettings) // Creates drawing settings for normal BurtRP forward color rendering.
         {
             var drawingSettings = new DrawingSettings(BurtForward, sortingSettings); // Matches only BurtForward, making the main render path strict and BurtRP-owned.
+
+            drawingSettings.perObjectData = ForwardPerObjectData; // 让 Unity 在 DrawRenderers 时真正上传 SH、Reflection Probe 等 per-object 间接光数据。
 
             return drawingSettings; // Returns the configured forward drawing settings to the caller pass.
         }
@@ -408,10 +420,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var renderContext = context.ScriptableContext; // 读取 Unity SRP 上下文，后面用它提交 CommandBuffer。
             var request = context.Request; // 读取当前渲染请求，后面用它取得预先解析好的灯光数据。
             var lightingData = ResolveLightingData(request); // 取得 request 级灯光数据；如果 request 异常则返回安全默认值。
-            var shadowData = BurtShadowUtility.ResolveMainLightShadowData(request, context.Asset); // 读取合并 PipelineAsset 后的主光阴影数据，让资产开关和 bias 生效。
+            var asset = context.Asset; // 读取当前 BurtRenderPipelineAsset，后面用它合并主光阴影资产配置。
+            var shadowData = BurtShadowUtility.ResolveMainLightShadowData(request, asset); // 读取合并 PipelineAsset 后的主光阴影数据，让资产开关和 bias 生效。
             var mainLightDirection = lightingData.MainLightDirection; // 读取主光世界空间方向。
             var mainLightColor = lightingData.MainLightColor; // 读取主光颜色。
-            var ambientLightColor = lightingData.AmbientLightColor; // 读取环境光颜色。
+            var ambientLightColor = lightingData.AmbientLightColor; // 读取 Unity Lighting 设置里的环境光颜色，SimpleLit 路径继续使用它。
             var mainLightShadowStrength = ResolveMainLightShadowStrength(shadowData); // 读取最终阴影强度，没有阴影或资产关闭时返回 0。
             var mainLightShadowTexelSize = BurtShadowUtility.CreateMainLightShadowTexelSize(shadowData); // 计算 shadow map texel size，给 receiver 端软阴影采样使用。
             var mainLightShadowSampleBias = shadowData != null && shadowData.HasMainLightShadow ? shadowData.MainLightShadowSampleBias : 0f; // 只有有阴影时才上传采样 bias。

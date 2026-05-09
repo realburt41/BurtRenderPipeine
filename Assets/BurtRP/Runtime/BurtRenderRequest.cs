@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -9,14 +7,23 @@ namespace Burt.RenderPipeline
     // 定义 BurtRP 的渲染请求类型。
     public enum BurtRenderRequestType
     {
-        // 主场景相机请求，当前阶段所有普通 Camera 都先归到这个类型。
-        MainCamera = 0,
+        // 基础场景相机请求，当前仍走现有 Forward 渲染路径。
+        BaseCamera = 0,
+
+        // 兼容旧命名；后续代码应优先使用 BaseCamera。
+        MainCamera = BaseCamera,
+
+        // Overlay 相机请求，第一版只分类和排序，不做复杂合成。
+        OverlayCamera = 1,
 
         // UI 相机请求，后面做 UI 合成时会使用。
-        UICamera = 1,
+        UICamera = 2,
+
+        // SceneView 相机请求，用来和 GameView/Base 相机区分调试。
+        SceneView = 3,
 
         // 预览相机请求，后面做材质预览或编辑器预览时会使用。
-        Preview = 2,
+        Preview = 4,
 
         // 未知请求类型，用来兜底。
         Unknown = 255
@@ -33,6 +40,18 @@ namespace Burt.RenderPipeline
 
         // 保存当前请求对应的 BurtRP 相机扩展数据。
         public BurtCameraData CameraData { get; private set; }
+
+        // 保存当前请求解析后的相机栈角色，避免后续排序和调试重复推导。
+        public BurtCameraRole CameraRole { get; private set; }
+
+        // 保存当前请求所属的逻辑栈编号；没有 BurtCameraData 时默认归到 0 号栈。
+        public int StackId { get; private set; }
+
+        // 记录 Overlay 相机是否希望清颜色；第一版只缓存意图，不直接改变 Forward 清屏。
+        public bool OverlayClearsColor { get; private set; }
+
+        // 记录 Overlay 相机是否希望清深度；第一版只缓存意图，不直接改变 Forward 清屏。
+        public bool OverlayClearsDepth { get; private set; }
 
         // 保存当前请求的剔除结果。
         public CullingResults CullingResults { get; private set; }
@@ -66,6 +85,10 @@ namespace Burt.RenderPipeline
 
             // 标记请求类型未知。
             request.Type = BurtRenderRequestType.Unknown;
+
+            // 无效请求没有实际相机，使用 Base 和 0 号栈作为安全兜底值。
+            request.CameraRole = BurtCameraRole.Base;
+            request.StackId = 0;
 
 
             request.LightingData = BurtLightingData.Default(); // Gives invalid requests safe fallback lighting data in case debug code inspects them.
@@ -105,14 +128,27 @@ namespace Burt.RenderPipeline
             // 在 Cull 前写入阴影剔除距离，否则 Unity 可能不会为 DrawShadows 收集可投影物体。
             ApplyShadowCullingParameters(ref cullingParameters, camera, asset);
 
+            // 在 Cull 前声明当前管线需要 reflection probe，否则部分 Unity 版本可能不会为 per-object probe 绑定准备数据。
+            ApplyIndirectLightingCullingParameters(ref cullingParameters);
+
             // 使用 Unity 内置剔除系统得到当前相机可见物体。
             var cullingResults = context.Cull(ref cullingParameters);
 
             // 创建一个新的请求对象。
             var request = new BurtRenderRequest();
 
+            // 先解析相机角色，后续 request 类型、排序和调试都复用这个结果，保证同一帧内分类一致。
+            request.CameraRole = BurtCameraUtility.ResolveCameraRole(camera, cameraData);
+
             // 记录请求类型，并把相机分类规则集中交给 BurtCameraUtility，避免 request 类继续膨胀。
-            request.Type = BurtCameraUtility.ResolveRequestType(camera, cameraData);
+            request.Type = BurtCameraUtility.ResolveRequestType(request.CameraRole);
+
+            // 记录逻辑栈编号；没有 BurtCameraData 的 Unity 内部相机默认归到 0 号栈。
+            request.StackId = cameraData != null ? cameraData.StackId : 0;
+
+            // 记录 Overlay 清屏意图，当前只作为数据基础设施，不改变现有 Forward 渲染结果。
+            request.OverlayClearsColor = cameraData != null && cameraData.OverlayClearsColor;
+            request.OverlayClearsDepth = cameraData != null && cameraData.OverlayClearsDepth;
 
             // 记录原生相机。
             request.Camera = camera;
@@ -156,6 +192,11 @@ namespace Burt.RenderPipeline
             }
 
             cullingParameters.shadowDistance = Mathf.Max(0f, shadowDistance); // 把最终非负距离写入 Unity culling 参数，让 DrawShadows 拿到正确的投影物集合。
+        }
+
+        private static void ApplyIndirectLightingCullingParameters(ref ScriptableCullingParameters cullingParameters) // 定义间接光剔除参数写入函数，确保 Unity 准备 Reflection Probe 数据。
+        {
+            cullingParameters.cullingOptions |= CullingOptions.NeedsReflectionProbes; // 告诉 Unity 当前 SRP 需要反射探针数据，后续 DrawRenderers 的 perObjectData 才能绑定 unity_SpecCube0。
         }
 
 

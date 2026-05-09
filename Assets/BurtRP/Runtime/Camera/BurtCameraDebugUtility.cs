@@ -81,6 +81,16 @@ namespace Burt.RenderPipeline
                 // 写入 BurtRP request 类型，用来确认 ResolveRequestType 的分类结果。
                 builder.Append(" RequestType=").Append(request.Type);
 
+                // 写入相机栈角色，用来确认 Base/Overlay/UI/SceneView/Preview 分类结果。
+                builder.Append(" Role=").Append(request.CameraRole);
+
+                // 写入逻辑栈编号，用来确认同一个栈内的 Base/Overlay/UI 是否聚合排序。
+                builder.Append(" StackId=").Append(request.StackId);
+
+                // 写入 Overlay 清屏意图；当前只是数据记录，不代表已经执行合成清屏。
+                builder.Append(" OverlayClearColor=").Append(request.OverlayClearsColor);
+                builder.Append(" OverlayClearDepth=").Append(request.OverlayClearsDepth);
+
                 // 写入 BurtRP 实际用于排序的 SortLayer，用来确认 RenderOrder/Camera.depth 是否已经被当前帧读取。
                 builder.Append(" SortLayer=").Append(request.SortLayer);
 

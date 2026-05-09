@@ -1,4 +1,4 @@
-﻿// Defines a separate shader menu entry so transparent Lit materials do not modify or depend on BurtLit.shader.
+// Defines a separate shader menu entry so transparent Lit materials do not modify or depend on BurtLit.shader.
 Shader "BurtRP/Lit Transparent"
 {
     // Defines material properties shown in Unity's Inspector for transparent Lit materials.
@@ -43,6 +43,9 @@ Shader "BurtRP/Lit Transparent"
 
             // Declares Frag as the fragment shader entry point for this pass.
             #pragma fragment Frag
+
+            // BurtLighting.hlsl 里包含 reflection probe 的显式 LOD 采样函数，即使透明路径暂时不调用也保持 target 能力一致。
+            #pragma target 3.0
 
             // Includes Unity transform helpers such as UnityObjectToClipPos, UnityObjectToWorldNormal, and TRANSFORM_TEX.
             #include "UnityCG.cginc"

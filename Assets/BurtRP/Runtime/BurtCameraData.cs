@@ -4,6 +4,25 @@ using UnityEngine;
 // 定义 Burt 自己的渲染管线命名空间，和其他 BurtRP 运行时代码保持一致。
 namespace Burt.RenderPipeline
 {
+    // 定义 BurtRP 第一版相机栈角色；当前只用于 request 分类和排序，不负责真正的合成。
+    public enum BurtCameraRole
+    {
+        // 基础场景相机，作为一个相机栈的起点。
+        Base = 0,
+
+        // 叠加相机，预留给角色描边、小地图或特殊层叠加。
+        Overlay = 1,
+
+        // UI 相机，预留给后续 UI 渲染或合成阶段。
+        UI = 2,
+
+        // Unity 编辑器 SceneView 相机，和 GameView 相机分开标记。
+        SceneView = 3,
+
+        // Unity 预览相机，通常来自 Inspector 或材质预览。
+        Preview = 4
+    }
+
     // 定义 BurtRP 自己的相机清屏模式。
     public enum BurtCameraClearMode
     {
@@ -38,6 +57,18 @@ namespace Burt.RenderPipeline
         // 控制这个相机在多相机情况下的渲染顺序，数值越小越先渲染。
         [SerializeField] private int renderOrder = 0;
 
+        // 声明这个相机在 BurtRP 相机栈里的角色；第一版只影响 request 分类和同层排序，不改变 Forward 渲染内容。
+        [SerializeField] private BurtCameraRole cameraRole = BurtCameraRole.Base;
+
+        // 声明这个相机属于哪个逻辑栈；Base/Overlay/UI 可以用同一个 stackId 表示后续应合成到同一组。
+        [SerializeField] private int stackId = 0;
+
+        // 声明 Overlay 相机是否希望清理颜色；当前只记录意图，第一版不会执行复杂叠加合成。
+        [SerializeField] private bool overlayClearsColor = false;
+
+        // 声明 Overlay 相机是否希望清理深度；当前只记录意图，第一版不会改变现有 Forward 清屏结果。
+        [SerializeField] private bool overlayClearsDepth = true;
+
         // 控制是否把 BurtRP 的 renderOrder 自动同步到 Unity 原生 Camera.depth；这只是为了让 Unity 原生相机面板和外部工具看到一致深度，不作为 BurtRP 排序的唯一来源。
         [SerializeField] private bool syncRenderOrderToCameraDepth = true;
 
@@ -58,6 +89,18 @@ namespace Burt.RenderPipeline
 
         // 暴露只读属性，让渲染器可以在每帧创建 request 时直接读取 renderOrder，用于 BurtRP 自己的相机排序。
         public int RenderOrder => renderOrder;
+
+        // 暴露只读属性，让 request 分类逻辑可以读取相机栈角色。
+        public BurtCameraRole CameraRole => cameraRole;
+
+        // 暴露只读属性，让排序和调试逻辑可以读取逻辑栈编号。
+        public int StackId => stackId;
+
+        // 暴露只读属性，记录 Overlay 相机是否希望清颜色，供后续合成阶段使用。
+        public bool OverlayClearsColor => overlayClearsColor;
+
+        // 暴露只读属性，记录 Overlay 相机是否希望清深度，供后续合成阶段使用。
+        public bool OverlayClearsDepth => overlayClearsDepth;
 
         // 暴露只读属性，让渲染器可以读取 clearMode，用于决定清屏策略。
         public BurtCameraClearMode ClearMode => clearMode;

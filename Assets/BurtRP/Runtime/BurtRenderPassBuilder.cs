@@ -10,7 +10,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
 
         public BurtRenderPassResourceUsage Usage { get; } // 保存当前 Pass 的资源使用记录，RenderGraph 会在配置阶段收集它。
 
+        public BurtRenderPassBuilder( // 保留旧构造函数，避免已有外部测试或工具直接创建 Builder 时失效。
+            BurtRenderPass pass, // 接收正在配置的 RenderPass，用它的名称创建资源使用记录。
+            BurtRenderRequest request, // 接收当前 RenderGraph 正在处理的渲染请求，让 Pass 可以根据相机任务声明资源。
+            BurtRenderPipelineAsset asset, // 接收当前 BurtRP 管线资产，让 Pass 可以根据 Inspector 开关声明资源。
+            BurtRenderGraphResourceRegistry resourceRegistry) // 接收当前 RenderGraph 的资源注册表。
+            : this(-1, pass, request, asset, resourceRegistry)
+        {
+        }
+
         public BurtRenderPassBuilder( // 定义构造函数，用来为某个 Pass 创建资源声明 Builder。
+            int passIndex, // 接收 Pass 在 RenderGraph 中的顺序索引，用于 Debug 输出。
             BurtRenderPass pass, // 接收正在配置的 RenderPass，用它的名称创建资源使用记录。
             BurtRenderRequest request, // 接收当前 RenderGraph 正在处理的渲染请求，让 Pass 可以根据相机任务声明资源。
             BurtRenderPipelineAsset asset, // 接收当前 BurtRP 管线资产，让 Pass 可以根据 Inspector 开关声明资源。
@@ -24,11 +34,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
 
             var passName = pass != null ? pass.Name : "NullPass"; // 如果 Pass 存在就读取它的名称，否则使用空 Pass 兜底名称。
 
-            Usage = new BurtRenderPassResourceUsage(passName); // 为当前 Pass 创建一份资源使用记录。
+            Usage = new BurtRenderPassResourceUsage(passIndex, passName); // 为当前 Pass 创建一份带顺序索引的资源使用记录。
         }
 
         public BurtRenderTargetHandle ReadRenderTarget(string name) // 定义声明读取某个渲染目标资源的函数。
         {
+            if (string.IsNullOrEmpty(name)) // 空资源名会让依赖图无法准确定位生产者和消费者。
+            {
+                Usage.AddValidationMessage("ReadRenderTarget 收到空资源名。"); // 记录空名问题，但仍返回无效句柄保持旧流程安全。
+            }
+
             var handle = GetRenderTarget(name); // 从资源注册表里读取指定名称的渲染目标句柄。
 
             Usage.AddReadRenderTarget(handle); // 把这个句柄记录为当前 Pass 的读取资源。
@@ -38,6 +53,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
 
         public BurtRenderTargetHandle WriteRenderTarget(string name) // 定义声明写入某个渲染目标资源的函数。
         {
+            if (string.IsNullOrEmpty(name)) // 空资源名会让依赖图无法准确定位生产者和消费者。
+            {
+                Usage.AddValidationMessage("WriteRenderTarget 收到空资源名。"); // 记录空名问题，但仍返回无效句柄保持旧流程安全。
+            }
+
             var handle = GetRenderTarget(name); // 从资源注册表里读取指定名称的渲染目标句柄。
 
             Usage.AddWriteRenderTarget(handle); // 把这个句柄记录为当前 Pass 的写入资源。
@@ -89,6 +109,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         {
             if (ResourceRegistry == null) // 如果资源注册表为空，说明当前 Builder 没有可查询的资源来源。
             {
+                Usage.AddValidationMessage("资源注册表为空，无法解析资源: " + (string.IsNullOrEmpty(name) ? "<empty>" : name)); // 记录资源表缺失，避免 Debug 只看到 Invalid。
+
                 return BurtRenderTargetHandle.Invalid(name); // 返回无效句柄，让使用记录保留资源名但不绑定真实目标。
             }
 
