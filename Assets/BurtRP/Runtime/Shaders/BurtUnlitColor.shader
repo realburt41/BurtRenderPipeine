@@ -1,4 +1,4 @@
-// 定义 Shader 在 Unity Shader 菜单里的路径和名称。
+﻿// 定义 Shader 在 Unity Shader 菜单里的路径和名称。
 Shader "BurtRP/UnlitColor"
 {
     // 定义材质面板可编辑的属性区域。
@@ -14,7 +14,143 @@ Shader "BurtRP/UnlitColor"
         // 给 SubShader 打标签，RenderType 表示这是不透明物体，RenderPipeline 标记这是 BurtRP shader。
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
 
-        // 定义一个真正执行绘制的 Pass。
+        // 定义深度预写 Pass，只写深度，不写颜色。
+        Pass
+        {
+            // 给深度 Pass 起一个名字，方便 Frame Debugger 里识别。
+            Name "Burt Depth Only"
+
+            // 设置 LightMode 为 BurtDepthOnly，让 BurtDepthPrepass 能匹配到这个 Pass。
+            Tags { "LightMode" = "BurtDepthOnly" }
+
+            // 关闭颜色写入，让这个 Pass 只影响深度缓冲。
+            ColorMask 0
+
+            // 开启深度写入，让这个 Pass 能把不透明物体深度写进 CameraDepth。
+            ZWrite On
+
+            // 使用小于等于深度测试，和常见不透明绘制保持一致。
+            ZTest LEqual
+
+            // 开始 HLSL shader 程序。
+            HLSLPROGRAM
+
+            // 声明顶点 shader 函数名是 VertDepth。
+            #pragma vertex VertDepth
+
+            // 声明片元 shader 函数名是 FragDepth。
+            #pragma fragment FragDepth
+
+            // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
+            #include "UnityCG.cginc"
+
+            // 定义深度 Pass 的顶点输入结构。
+            struct DepthAttributes
+            {
+                // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
+                float4 positionOS : POSITION;
+            };
+
+            // 定义深度 Pass 的顶点输出结构。
+            struct DepthVaryings
+            {
+                // 输出裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
+                float4 positionCS : SV_POSITION;
+            };
+
+            // 定义深度 Pass 的顶点 shader 函数。
+            DepthVaryings VertDepth(DepthAttributes input)
+            {
+                // 创建一个输出结构变量，用来保存顶点 shader 的输出结果。
+                DepthVaryings output;
+
+                // 把模型空间顶点位置转换到裁剪空间，让 GPU 能进行深度光栅化。
+                output.positionCS = UnityObjectToClipPos(input.positionOS);
+
+                // 返回顶点 shader 输出结果。
+                return output;
+            }
+
+            // 定义深度 Pass 的片元 shader 函数。
+            float4 FragDepth(DepthVaryings input) : SV_Target
+            {
+                // 返回任意颜色值，因为 ColorMask 0 会禁止实际颜色写入。
+                return 0;
+            }
+
+            // 结束 HLSL shader 程序。
+            ENDHLSL
+        }
+
+        // 定义阴影投射 Pass，Burt Draw Main Light Shadow Caster 会用它把物体写进主光阴影图。
+        Pass
+        {
+            // 给阴影 Pass 起一个名字，方便 Frame Debugger 里识别。
+            Name "Burt Unlit Shadow Caster"
+
+            // 使用 Unity 标准 ShadowCaster LightMode，因为 ScriptableRenderContext.DrawShadows 会查找这个标签。
+            Tags { "LightMode" = "ShadowCaster" }
+
+            // 关闭颜色写入，因为 shadow map 只需要深度信息。
+            ColorMask 0
+
+            // 开启深度写入，让这个 Pass 能把投影物体深度写进 MainLightShadowMap。
+            ZWrite On
+
+            // 使用小于等于深度测试，和其他不透明深度 Pass 保持一致。
+            ZTest LEqual
+
+            // 开始 HLSL shader 程序。
+            HLSLPROGRAM
+
+            // 声明顶点 shader 函数名是 VertShadow。
+            #pragma vertex VertShadow
+
+            // 声明片元 shader 函数名是 FragShadow。
+            #pragma fragment FragShadow
+
+            // 引入 Unity 的基础 shader 工具函数，UnityObjectToClipPos 会使用当前主光视图投影矩阵。
+            #include "UnityCG.cginc"
+
+            // 定义阴影 Pass 的顶点输入结构。
+            struct ShadowAttributes
+            {
+                // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
+                float4 positionOS : POSITION;
+            };
+
+            // 定义阴影 Pass 的顶点输出结构。
+            struct ShadowVaryings
+            {
+                // 输出主光裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
+                float4 positionCS : SV_POSITION;
+            };
+
+            // 定义阴影 Pass 的顶点 shader 函数。
+            ShadowVaryings VertShadow(ShadowAttributes input)
+            {
+                // 创建一个输出结构变量，用来保存顶点 shader 的输出结果。
+                ShadowVaryings output;
+
+                // 把模型空间顶点位置转换到主光裁剪空间，让 GPU 写入 shadow map 深度。
+                output.positionCS = UnityObjectToClipPos(input.positionOS);
+
+                // 返回顶点 shader 输出结果。
+                return output;
+            }
+
+            // 定义阴影 Pass 的片元 shader 函数。
+            float4 FragShadow(ShadowVaryings input) : SV_Target
+            {
+                // 返回任意颜色值，因为 ColorMask 0 会禁止实际颜色写入。
+                return 0;
+            }
+
+            // 结束 HLSL shader 程序。
+            ENDHLSL
+        }
+
+        // 定义一个真正执行颜色绘制的 Pass。
         Pass
         {
             // 给 Pass 起一个名字，方便 Frame Debugger 里识别。
@@ -22,6 +158,12 @@ Shader "BurtRP/UnlitColor"
 
             // 设置 LightMode 为 BurtForward，让 BurtRenderPipeline.cs 里的 DrawingSettings 能匹配到这个 Pass。
             Tags { "LightMode" = "BurtForward" }
+
+            // 开启深度写入，当前阶段 Forward Pass 仍保持传统不透明写深度行为。
+            ZWrite On
+
+            // 使用小于等于深度测试，让已经通过 DepthPrepass 的像素可以通过。
+            ZTest LEqual
 
             // 开始 HLSL shader 程序。
             HLSLPROGRAM

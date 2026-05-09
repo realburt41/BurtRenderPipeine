@@ -1,15 +1,25 @@
-﻿namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和其他 BurtRP 代码处在同一个模块里。
+namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和其他 BurtRP 代码处在同一个模块里。
 {
     public sealed class BurtRenderPassBuilder // 定义 RenderPass 配置阶段使用的 Builder，用来让 Pass 声明资源读写关系。
     {
+        public BurtRenderRequest Request { get; } // 保存当前渲染请求，供 Pass.Configure 根据相机任务或 request 类型调整资源声明。
+
+        public BurtRenderPipelineAsset Asset { get; } // 保存当前管线资产，供 Pass.Configure 根据 Inspector 配置开关调整资源声明。
+
         public BurtRenderGraphResourceRegistry ResourceRegistry { get; } // 保存当前 RenderGraph 的资源注册表，Builder 通过它查找资源句柄。
 
         public BurtRenderPassResourceUsage Usage { get; } // 保存当前 Pass 的资源使用记录，RenderGraph 会在配置阶段收集它。
 
         public BurtRenderPassBuilder( // 定义构造函数，用来为某个 Pass 创建资源声明 Builder。
             BurtRenderPass pass, // 接收正在配置的 RenderPass，用它的名称创建资源使用记录。
+            BurtRenderRequest request, // 接收当前 RenderGraph 正在处理的渲染请求，让 Pass 可以根据相机任务声明资源。
+            BurtRenderPipelineAsset asset, // 接收当前 BurtRP 管线资产，让 Pass 可以根据 Inspector 开关声明资源。
             BurtRenderGraphResourceRegistry resourceRegistry) // 接收当前 RenderGraph 的资源注册表。
         {
+            Request = request; // 把当前渲染请求保存到 Request 属性里，供 Pass.Configure 使用。
+
+            Asset = asset; // 把当前管线资产保存到 Asset 属性里，供 Pass.Configure 使用。
+
             ResourceRegistry = resourceRegistry; // 把资源注册表保存到 ResourceRegistry 属性里。
 
             var passName = pass != null ? pass.Name : "NullPass"; // 如果 Pass 存在就读取它的名称，否则使用空 Pass 兜底名称。
@@ -53,6 +63,16 @@
         public BurtRenderTargetHandle WriteCameraDepth() // 定义声明写入 CameraDepth 的快捷函数。
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.CameraDepthName); // 使用统一资源名声明写入 CameraDepth。
+        }
+
+        public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.MainLightShadowMapName); // 使用统一资源名声明读取主光阴影图。
+        }
+
+        public BurtRenderTargetHandle WriteMainLightShadowMap() // 定义声明写入 MainLightShadowMap 的快捷函数。
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.MainLightShadowMapName); // 使用统一资源名声明写入主光阴影图。
         }
 
         private BurtRenderTargetHandle GetRenderTarget(string name) // 定义从资源表读取渲染目标的内部辅助函数。

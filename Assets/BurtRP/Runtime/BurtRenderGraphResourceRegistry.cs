@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 Dictionary 保存资源表。
+using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 Dictionary 保存资源表。
+using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Shader.PropertyToID 生成临时 RT 的整数 ID。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 RenderTargetIdentifier。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册表和其他 BurtRP 代码处在同一个模块里。
@@ -8,6 +9,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string CameraColorName = "CameraColor"; // 定义相机颜色目标的统一资源名，避免不同地方手写字符串出错。
 
         public const string CameraDepthName = "CameraDepth"; // 定义相机深度目标的统一资源名，后续 DepthPrepass、透明排序和后处理会依赖它。
+
+        public const string CameraDepthTextureShaderName = "_BurtCameraDepthTexture"; // 定义真实相机深度 RT 的 shader 名称，后续 shader 采样深度时会使用它。
+
+        public static readonly int CameraDepthTextureId = Shader.PropertyToID(CameraDepthTextureShaderName); // 把 shader 名称转换成整数 ID，CommandBuffer 使用整数 ID 会更稳定也更高效。
+
+        public const string MainLightShadowMapName = "MainLightShadowMap"; // 定义主光阴影图在 RenderGraph 里的统一资源名，后续阴影绘制和光照采样都通过它建立依赖。
+
+        public const string MainLightShadowMapShaderName = "_BurtMainLightShadowMap"; // 定义主光阴影图暴露给 shader 的全局纹理名称，后续 Lit shader 会用这个名字采样阴影。
+
+        public static readonly int MainLightShadowMapId = Shader.PropertyToID(MainLightShadowMapShaderName); // 把主光阴影图 shader 名称转换成整数 ID，让 CommandBuffer 申请、释放和绑定同一个临时 RT。
 
         private readonly Dictionary<string, BurtRenderTargetHandle> renderTargets = new Dictionary<string, BurtRenderTargetHandle>(); // 创建渲染目标字典，用资源名映射到渲染目标句柄。
 
@@ -57,6 +68,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(CameraColorName); // 使用统一名称从资源表读取相机颜色目标。
         }
 
+        public BurtRenderTargetHandle RegisterCameraDepthTexture() // 定义注册 BurtRP 自己创建的 CameraDepth 临时 RT 的快捷函数。
+        {
+            return RegisterCameraDepth(new RenderTargetIdentifier(CameraDepthTextureId)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 CameraDepth。
+        }
+
         public BurtRenderTargetHandle RegisterCameraDepth(RenderTargetIdentifier identifier) // 定义注册 CameraDepth 的快捷函数。
         {
             return RegisterRenderTarget(CameraDepthName, identifier); // 使用统一名称把相机深度目标注册进资源表。
@@ -65,6 +81,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetCameraDepth() // 定义读取 CameraDepth 的快捷函数。
         {
             return GetRenderTarget(CameraDepthName); // 使用统一名称从资源表读取相机深度目标。
+        }
+
+        public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。
+        {
+            return RegisterMainLightShadowMap(new RenderTargetIdentifier(MainLightShadowMapId)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 MainLightShadowMap。
+        }
+
+        public BurtRenderTargetHandle RegisterMainLightShadowMap(RenderTargetIdentifier identifier) // 定义注册 MainLightShadowMap 的快捷函数。
+        {
+            return RegisterRenderTarget(MainLightShadowMapName, identifier); // 使用统一名称把主光阴影图目标注册进资源表。
+        }
+
+        public BurtRenderTargetHandle GetMainLightShadowMap() // 定义读取 MainLightShadowMap 的快捷函数。
+        {
+            return GetRenderTarget(MainLightShadowMapName); // 使用统一名称从资源表读取主光阴影图目标。
         }
     }
 }

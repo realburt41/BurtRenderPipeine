@@ -37,6 +37,8 @@ namespace Burt.RenderPipeline
         // 保存当前请求的剔除结果。
         public CullingResults CullingResults { get; private set; }
 
+
+        public BurtLightingData LightingData { get; private set; } // Stores lighting data collected for this render request, so passes do not choose lights themselves.
         // 保存当前请求最终要输出到哪个渲染目标。
         public RenderTargetIdentifier TargetIdentifier { get; private set; }
         
@@ -65,6 +67,8 @@ namespace Burt.RenderPipeline
             // 标记请求类型未知。
             request.Type = BurtRenderRequestType.Unknown;
 
+
+            request.LightingData = BurtLightingData.Default(); // Gives invalid requests safe fallback lighting data in case debug code inspects them.
             // 返回这个无效请求。
             return request;
         }
@@ -115,6 +119,8 @@ namespace Burt.RenderPipeline
             // 记录剔除结果。
             request.CullingResults = cullingResults;
 
+
+            request.LightingData = BurtLightingData.Create(cullingResults); // Builds request-level lighting data from the same culling results used for drawing.
             // 记录输出目标。
             request.TargetIdentifier = ResolveTargetIdentifier(camera);
             

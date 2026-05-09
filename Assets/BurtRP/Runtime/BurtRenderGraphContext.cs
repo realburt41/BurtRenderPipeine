@@ -38,6 +38,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle MainLightShadowMapTarget // 定义读取 MainLightShadowMap 的快捷属性，方便 Pass 不直接操作资源名。
+        {
+            get // 定义属性 getter，每次访问时从资源注册表读取最新的 MainLightShadowMap。
+            {
+                if (ResourceRegistry == null) // 如果资源注册表为空，说明当前上下文没有可用资源表。
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.MainLightShadowMapName); // 返回无效 MainLightShadowMap 句柄，避免 Pass 绑定错误阴影目标。
+                }
+
+                return ResourceRegistry.GetMainLightShadowMap(); // 从资源注册表读取 MainLightShadowMap 句柄。
+            }
+        }
+
         public BurtRenderGraphContext( // 定义构造函数，用来创建一次 RenderGraph 执行上下文。
             ScriptableRenderContext scriptableContext, // 接收 Unity SRP 传入的渲染上下文。
             BurtRenderRequest request, // 接收当前正在执行的 Burt 渲染请求。

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 List 保存 Pass 和资源使用记录。
+using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 List 保存 Pass 和资源使用记录。
 using System.Text; // 引入文本构建命名空间，用来高效拼接 RenderGraph 调试字符串。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和其他 BurtRP 代码处在同一个模块里。
@@ -40,7 +40,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
             resources.RegisterCameraColor(request.TargetIdentifier); // 把 request 的原始输出目标注册成 RenderGraph 的 CameraColor 资源。
 
-            resources.RegisterCameraDepth(request.TargetIdentifier); // 当前阶段还没有独立 Depth RT，所以先把同一个 CameraTarget 注册成 CameraDepth。
+            resources.RegisterCameraDepthTexture(); // 把 BurtRP 自己的临时深度 RT 注册成 CameraDepth，让颜色目标和深度目标真正分离。
+
+            if (ShouldRegisterMainLightShadowMap(request)) // 如果当前 request 的主光需要阴影，就把主光阴影图纳入资源表。
+            {
+                resources.RegisterMainLightShadowMapTexture(); // 注册主光阴影图临时 RT，让后续分配、绘制和释放 Pass 使用同一个资源句柄。
+            }
+        }
+
+        private static bool ShouldRegisterMainLightShadowMap(BurtRenderRequest request) // 定义判断当前 request 是否需要注册主光阴影图的辅助函数。
+        {
+            return BurtShadowUtility.ShouldUseMainLightShadow(request); // 复用阴影工具的判定逻辑，保证资源注册和 Pass 组装使用同一套条件。
         }
 
         public void AddPass(BurtRenderPass pass) // 定义添加 Pass 的函数，Assembler 会通过它把 Pass 放进图里。
@@ -60,7 +70,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 return; // 直接结束执行，避免后面访问空对象。
             }
 
-            ConfigurePasses(); // 在真正执行前收集所有 Pass 的资源读写声明。
+            ConfigurePasses(context); // 在真正执行前收集所有 Pass 的资源读写声明，并把当前上下文传给配置阶段。
 
             for (var passIndex = 0; passIndex < passes.Count; passIndex++) // 从前到后遍历当前图里的所有 Pass。
             {
@@ -96,7 +106,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     continue; // 跳过空记录，继续输出后面的记录。
                 }
 
-                builder.Append("Pass: "); // 写入 Pass 标签。
+                builder.Append("Pass #"); // 写入 Pass 顺序编号标签，方便你在 Console 里确认执行顺序。
+
+                builder.Append(usageIndex); // 写入当前资源使用记录的索引，这个索引对应当前 RenderGraph 的 Pass 顺序。
+
+                builder.Append(": "); // 写入编号和 Pass 名称之间的分隔符。
 
                 builder.AppendLine(usage.PassName); // 写入 Pass 名称。
 
@@ -108,7 +122,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             return builder.ToString(); // 返回完整调试文本给调用方打印。
         }
 
-        private void ConfigurePasses() // 定义资源声明收集函数，用来调用每个 Pass 的 Configure。
+        private void ConfigurePasses(BurtRenderGraphContext context) // 定义资源声明收集函数，用来调用每个 Pass 的 Configure，并给 Builder 提供当前上下文。
         {
             resourceUsages.Clear(); // 每次执行前清空旧声明，保证 ResourceUsages 只描述当前图。
 
@@ -121,7 +135,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     continue; // 跳过空 Pass，避免创建无意义资源声明。
                 }
 
-                var builder = new BurtRenderPassBuilder(pass, resources); // 为当前 Pass 创建资源声明 Builder。
+                var builder = new BurtRenderPassBuilder(pass, context.Request, context.Asset, resources); // 为当前 Pass 创建资源声明 Builder，并注入当前 request 与 asset。
 
                 pass.Configure(builder); // 让当前 Pass 声明自己读取和写入哪些资源。
 
@@ -184,3 +198,4 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
         }
     }
 }
+
