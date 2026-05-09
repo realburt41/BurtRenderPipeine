@@ -145,23 +145,29 @@ float3 BurtEvaluateIndirectSpecularPBR(BurtSurfaceData surfaceData, float3 norma
     // 根据观察方向和法线计算环境反射方向，reflect 的入射方向需要从相机指向表面，所以使用 -v。
     float3 reflectionDirectionWS = reflect(-v, n);
 
-    // 从 smoothness 得到 GGX roughness，同时也用于选择 reflection probe 的模糊 mip。
+    // 从 smoothness 得到感知 roughness，同时也用于选择 reflection probe 的模糊 mip。
     float roughness = BurtBRDFRoughness(surfaceData);
 
-    // 采样 Unity 当前 reflection probe / sky reflection，得到真实探针间接高光。
+    // 采样 Unity 当前 reflection probe / sky reflection，得到已经按 roughness 预过滤过的环境高光。
     float3 specularRadiance = BurtSampleIndirectSpecularRadiance(reflectionDirectionWS, roughness);
 
     // 计算当前材质的 F0，非金属接近 0.04，金属使用 baseColor。
     float3 f0 = BurtBRDFSpecularF0(surfaceData);
 
-    // 计算 NdotV，视线越掠射 Fresnel 越强。
+    // 计算当前材质的 F90，用来让环境高光和直接高光使用同一套 Fresnel 端点。
+    float3 f90 = BurtBRDFF90(f0);
+
+    // 计算 NdotV，视线越掠射 DFG 近似会给出越强的边缘反射权重。
     float nDotV = saturate(dot(n, v));
 
-    // 使用 Schlick Fresnel 估算环境镜面反射的视角相关强度。
-    float3 fresnel = BurtFresnelSchlick(nDotV, f0);
+    // 参考 XRender 的 PrefilteredDFG_Approx，得到 IBL 高光需要的 F0/F90 权重。
+    float2 dfg = BurtPrefilteredDFGApprox(roughness, nDotV);
+
+    // 把 DFG 应用到 F0/F90 上，比单纯 Fresnel 更接近预积分环境 BRDF。
+    float3 envBRDF = BurtEvaluateSpecularDFG(f0, f90, dfg);
 
     // AO 当前只影响间接光，不影响主光直接光；这里让反射探针也被环境遮蔽控制。
-    return specularRadiance * fresnel * saturate(surfaceData.occlusion);
+    return specularRadiance * envBRDF * saturate(surfaceData.occlusion);
 }
 
 // 计算 PBR 间接光总和：间接漫反射 + 间接镜面反射。
@@ -195,8 +201,8 @@ float3 BurtEvaluateSpecular(BurtSurfaceData surfaceData, BurtLight light, float3
     // 用 pow 计算 Blinn-Phong 高光强度。
     float specularTerm = pow(specularNdotH, specularPower);
 
-    // 把材质高光颜色、灯光颜色、受光可见性和阴影衰减相乘得到最终高光。
-    return surfaceData.specularColor * light.color * specularTerm * diffuseVisibility * light.shadowAttenuation;
+    // 把内部 F0、灯光颜色、受光可见性和阴影衰减相乘得到最终高光。
+    return BurtBRDFSpecularF0(surfaceData) * light.color * specularTerm * diffuseVisibility * light.shadowAttenuation;
 }
 
 // 计算 BurtRP 当前的完整简单 Lit 模型：环境光 + 一个带阴影的 Lambert 主光。

@@ -11,8 +11,15 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         Smoothness = 102, // 材质调试：显示最终光滑度，包含标量 Smoothness 与 Mask Map A 通道。
         Metallic = 103, // 材质调试：显示最终金属度，包含标量 Metallic 与 Mask Map R 通道。
         Occlusion = 104, // 材质调试：显示环境遮蔽，方便检查 Mask Map 的 G 通道和强度混合结果。
+        Reflectance = 105, // 材质调试：显示 XRender 风格 reflectance，0.5 会映射到常见非金属 F0=0.04。
+        Roughness = 106, // 材质调试：显示材质感知粗糙度，也就是 1 - Smoothness 后的结果。
+        SpecularAARoughness = 107, // 材质调试：显示直接高光实际粗糙度，包含 Specular AA 的拓宽结果。
         Lighting = 200, // 光照调试：显示不含自发光的 PBR 总光照结果。
         IndirectLighting = 201, // 光照调试：只显示 PBR 间接光，方便检查 SH 漫反射和 Reflection Probe 镜面反射。
+        DirectDiffuse = 202, // 光照调试：只显示直接漫反射，方便检查 NdotL、阴影和 1/PI。
+        DirectSpecular = 203, // 光照调试：只显示直接高光，方便排查 smoothness 拉满后的高光宽度。
+        IndirectDiffuse = 204, // 光照调试：只显示间接漫反射，方便检查 SH / Light Probe。
+        IndirectSpecular = 205, // 光照调试：只显示间接高光，方便检查 Reflection Probe 和 DFG。
         CameraDepth = 300, // 全屏调试：复用 BurtRP 当前已有的 CameraDepth debug pass。
         MainLightShadow = 301 // 全屏调试：复用 BurtRP 当前已有的 MainLightShadow debug pass。
     }

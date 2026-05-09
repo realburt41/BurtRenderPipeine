@@ -16,6 +16,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
         private readonly BurtRenderPass setRenderTargetPass = new BurtSetRenderTargetPass(); // 创建设置渲染目标 Pass，并在整个管线生命周期内复用它。
 
+        private readonly BurtRenderPass seedOverlayCameraColorPass = new BurtSeedOverlayCameraColorPass(); // 创建 Overlay 颜色继承 Pass，让不清颜色的叠加相机先拿到当前最终目标内容。
+
         private readonly BurtRenderPass clearRenderTargetPass = new BurtClearRenderTargetPass(); // 创建清屏 Pass，并在整个管线生命周期内复用它。
 
 
@@ -88,6 +90,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             }
 
 
+            if (ShouldSeedOverlayCameraColor(request)) // 如果 Overlay 不清颜色，就先把当前最终目标复制到中间颜色 RT，避免后续绘制从未初始化颜色开始。
+            {
+                graph.AddPass(seedOverlayCameraColorPass); // 把 Base 已经写入的最终目标作为 Overlay 的颜色底图，形成第一版保守合成。
+            }
+
             graph.AddPass(setRenderTargetPass); // 把设置渲染目标 Pass 添加到 RenderGraph，保证后续 Pass 画到正确目标。
 
             graph.AddPass(clearRenderTargetPass); // 把清屏 Pass 添加到 RenderGraph，保证颜色和深度状态可控。
@@ -128,6 +135,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             graph.AddPass(releaseCameraColorPass); // 在 FinalBlit 之后释放 CameraColor 临时颜色 RT，避免下一次 request 误用旧内容。
 
             graph.AddPass(releaseCameraDepthPass); // 最后把 CameraDepth 释放 Pass 添加到 RenderGraph，避免临时 RT 泄漏到下一次 request。
+        }
+
+        private static bool ShouldSeedOverlayCameraColor(BurtRenderRequest request) // 定义 Overlay 是否需要继承当前最终颜色的辅助函数。
+        {
+            if (request == null) // 如果 request 为空，说明调用方传入了异常数据。
+            {
+                return false; // 返回 false，避免为异常 request 添加额外 Pass。
+            }
+
+            return request.Type == BurtRenderRequestType.OverlayCamera && !request.OverlayClearsColor; // Overlay 默认不清颜色时需要复制 Base 结果作为底图。
         }
 
         private static bool ShouldUseDepthPrepass(BurtRenderPipelineAsset asset) // 定义判断是否启用 Depth Prepass 的辅助函数。

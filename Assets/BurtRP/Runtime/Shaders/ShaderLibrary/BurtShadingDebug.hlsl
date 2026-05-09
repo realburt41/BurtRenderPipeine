@@ -1,4 +1,4 @@
-// BurtRP 的材质 Shading Debug 工具库，负责把 Editor Overlay 选择的调试模式转换成片元颜色。
+﻿// BurtRP 的材质 Shading Debug 工具库，负责把 Editor Overlay 选择的调试模式转换成片元颜色。
 #ifndef BURT_SHADING_DEBUG_INCLUDED // 开始 include guard，防止同一个 shader 编译单元里重复定义调试函数。
 #define BURT_SHADING_DEBUG_INCLUDED // 标记 BurtShadingDebug.hlsl 已经被包含过，后续重复 include 会被跳过。
 
@@ -13,8 +13,46 @@ static const float BURT_SHADING_DEBUG_MODE_NORMAL_WS = 101.0f; // 对应 C# Burt
 static const float BURT_SHADING_DEBUG_MODE_SMOOTHNESS = 102.0f; // 对应 C# BurtShadingDebugMode.Smoothness，用来显示最终材质光滑度。
 static const float BURT_SHADING_DEBUG_MODE_METALLIC = 103.0f; // 对应 C# BurtShadingDebugMode.Metallic，用来显示最终材质金属度。
 static const float BURT_SHADING_DEBUG_MODE_OCCLUSION = 104.0f; // 对应 C# BurtShadingDebugMode.Occlusion，用来显示材质环境遮蔽。
+static const float BURT_SHADING_DEBUG_MODE_REFLECTANCE = 105.0f; // 对应 C# BurtShadingDebugMode.Reflectance，用来显示 XRender 风格介质反射率。
+static const float BURT_SHADING_DEBUG_MODE_ROUGHNESS = 106.0f; // 对应 C# BurtShadingDebugMode.Roughness，用来显示材质感知粗糙度。
+static const float BURT_SHADING_DEBUG_MODE_SPECULAR_AA_ROUGHNESS = 107.0f; // 对应 C# BurtShadingDebugMode.SpecularAARoughness，用来显示直接高光实际粗糙度。
 static const float BURT_SHADING_DEBUG_MODE_LIGHTING = 200.0f; // 对应 C# BurtShadingDebugMode.Lighting，用来显示不含自发光的 PBR 总光照结果。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_LIGHTING = 201.0f; // 对应 C# BurtShadingDebugMode.IndirectLighting，用来显示 PBR 间接光。
+static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE = 202.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuse，用来显示直接漫反射。
+static const float BURT_SHADING_DEBUG_MODE_DIRECT_SPECULAR = 203.0f; // 对应 C# BurtShadingDebugMode.DirectSpecular，用来显示直接高光。
+static const float BURT_SHADING_DEBUG_MODE_INDIRECT_DIFFUSE = 204.0f; // 对应 C# BurtShadingDebugMode.IndirectDiffuse，用来显示 SH / Light Probe 漫反射。
+static const float BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR = 205.0f; // 对应 C# BurtShadingDebugMode.IndirectSpecular，用来显示 Reflection Probe 镜面反射。
+
+// 保存片元已经算好的调试数据，避免 Debug View 重新计算一套和正常渲染不一致的光照。
+struct BurtShadingDebugData
+{
+    // 保存世界空间法线，用于 NormalWS 调试模式。
+    float3 normalWS;
+
+    // 保存 PBR 总光照，不包含自发光。
+    float3 lightingColor;
+
+    // 保存直接漫反射贡献，已经包含主光颜色、NdotL 和阴影。
+    float3 directDiffuseColor;
+
+    // 保存直接镜面高光贡献，已经包含主光颜色、NdotL 和阴影。
+    float3 directSpecularColor;
+
+    // 保存间接漫反射贡献，主要来自 Unity SH / Light Probe。
+    float3 indirectDiffuseColor;
+
+    // 保存间接镜面贡献，主要来自 Unity Reflection Probe / Sky Reflection。
+    float3 indirectSpecularColor;
+
+    // 保存材质 reflectance，用来确认材质面板输入的介质反射率。
+    float reflectance;
+
+    // 保存材质感知粗糙度，也就是 1 - smoothness 后的结果。
+    float perceptualRoughness;
+
+    // 保存直接高光实际使用的粗糙度，包含 Specular AA 对极光滑高光的拓宽。
+    float specularAARoughness;
+};
 
 bool BurtIsShadingDebugEnabled() // 判断当前是否启用了任意 shading debug 模式。
 {
@@ -32,7 +70,7 @@ float3 BurtEncodeNormalWSForDebug(float3 normalWS) // 把世界空间法线编�
     return safeNormalWS * 0.5f + 0.5f; // 把 [-1, 1] 的法线范围映射到 [0, 1] 的颜色范围。
 }
 
-bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, float3 normalWS, float3 lightingColor, float3 indirectLightingColor, out float3 debugColor) // 尝试根据当前模式生成材质调试颜色。
+bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadingDebugData data, out float3 debugColor) // 尝试根据当前模式生成材质调试颜色。
 {
     debugColor = float3(0.0f, 0.0f, 0.0f); // 先清空输出颜色，保证未命中任何模式时不会返回未初始化值。
 
@@ -49,7 +87,7 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, float3 nor
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_NORMAL_WS)) // NormalWS 模式显示法线贴图影响后的世界空间法线。
     {
-        debugColor = BurtEncodeNormalWSForDebug(normalWS); // 把世界法线从方向值编码成可视化颜色。
+        debugColor = BurtEncodeNormalWSForDebug(data.normalWS); // 把世界法线从方向值编码成可视化颜色。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
@@ -71,15 +109,57 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, float3 nor
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_REFLECTANCE)) // Reflectance 模式显示材质介质反射率。
+    {
+        debugColor = float3(data.reflectance, data.reflectance, data.reflectance); // 直接显示 reflectance，0.5 对应常见非金属 F0=0.04。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ROUGHNESS)) // Roughness 模式显示材质感知粗糙度。
+    {
+        debugColor = float3(data.perceptualRoughness, data.perceptualRoughness, data.perceptualRoughness); // 把粗糙度复制到 RGB，越黑表示越光滑。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SPECULAR_AA_ROUGHNESS)) // SpecularAARoughness 模式显示高光实际粗糙度。
+    {
+        debugColor = float3(data.specularAARoughness, data.specularAARoughness, data.specularAARoughness); // 越亮表示 Specular AA 把高光拓得越宽。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_LIGHTING)) // Lighting 模式显示 PBR 总光照结果。
     {
-        debugColor = max(lightingColor, float3(0.0f, 0.0f, 0.0f)); // 保留 HDR 光照强度但去掉负值，便于观察阴影、高光和间接光分布。
+        debugColor = max(data.lightingColor, float3(0.0f, 0.0f, 0.0f)); // 保留 HDR 光照强度但去掉负值，便于观察阴影、高光和间接光分布。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_INDIRECT_LIGHTING)) // IndirectLighting 模式只显示 PBR 间接光。
     {
-        debugColor = max(indirectLightingColor, float3(0.0f, 0.0f, 0.0f)); // 保留 HDR 间接光强度，方便检查 SH 和 Reflection Probe 是否生效。
+        debugColor = max(data.indirectDiffuseColor + data.indirectSpecularColor, float3(0.0f, 0.0f, 0.0f)); // 把间接漫反射和间接高光相加后显示。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE)) // DirectDiffuse 模式只显示直接漫反射。
+    {
+        debugColor = max(data.directDiffuseColor, float3(0.0f, 0.0f, 0.0f)); // 显示主光漫反射项，方便排查 1/PI、NdotL 和阴影。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIRECT_SPECULAR)) // DirectSpecular 模式只显示直接高光。
+    {
+        debugColor = max(data.directSpecularColor, float3(0.0f, 0.0f, 0.0f)); // 显示主光 GGX 高光项，方便排查 smoothness 拉满后高光是否过窄。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_INDIRECT_DIFFUSE)) // IndirectDiffuse 模式只显示间接漫反射。
+    {
+        debugColor = max(data.indirectDiffuseColor, float3(0.0f, 0.0f, 0.0f)); // 显示 Unity SH / Light Probe 漫反射，方便检查间接漫反射是否存在。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR)) // IndirectSpecular 模式只显示间接高光。
+    {
+        debugColor = max(data.indirectSpecularColor, float3(0.0f, 0.0f, 0.0f)); // 显示 Reflection Probe 镜面项，方便检查探针和 DFG 是否生效。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 

@@ -57,16 +57,16 @@ namespace Burt.RenderPipeline
         // 控制这个相机在多相机情况下的渲染顺序，数值越小越先渲染。
         [SerializeField] private int renderOrder = 0;
 
-        // 声明这个相机在 BurtRP 相机栈里的角色；第一版只影响 request 分类和同层排序，不改变 Forward 渲染内容。
+        // 声明这个相机在 BurtRP 相机栈里的角色；当前会影响 request 分类、同层排序和 Overlay 清屏策略，不触碰 PBR/Shader。
         [SerializeField] private BurtCameraRole cameraRole = BurtCameraRole.Base;
 
         // 声明这个相机属于哪个逻辑栈；Base/Overlay/UI 可以用同一个 stackId 表示后续应合成到同一组。
         [SerializeField] private int stackId = 0;
 
-        // 声明 Overlay 相机是否希望清理颜色；当前只记录意图，第一版不会执行复杂叠加合成。
+        // 声明 Overlay 相机是否希望清理颜色；默认不清颜色，让 Overlay 可以叠加在 Base 输出之上。
         [SerializeField] private bool overlayClearsColor = false;
 
-        // 声明 Overlay 相机是否希望清理深度；当前只记录意图，第一版不会改变现有 Forward 清屏结果。
+        // 声明 Overlay 相机是否希望清理深度；默认清深度，避免 Base 深度挡住 Overlay 物体。
         [SerializeField] private bool overlayClearsDepth = true;
 
         // 控制是否把 BurtRP 的 renderOrder 自动同步到 Unity 原生 Camera.depth；这只是为了让 Unity 原生相机面板和外部工具看到一致深度，不作为 BurtRP 排序的唯一来源。
@@ -96,10 +96,10 @@ namespace Burt.RenderPipeline
         // 暴露只读属性，让排序和调试逻辑可以读取逻辑栈编号。
         public int StackId => stackId;
 
-        // 暴露只读属性，记录 Overlay 相机是否希望清颜色，供后续合成阶段使用。
+        // 暴露只读属性，记录 Overlay 相机是否希望清颜色，供 request 和清屏 Pass 使用。
         public bool OverlayClearsColor => overlayClearsColor;
 
-        // 暴露只读属性，记录 Overlay 相机是否希望清深度，供后续合成阶段使用。
+        // 暴露只读属性，记录 Overlay 相机是否希望清深度，供 request 和清屏 Pass 使用。
         public bool OverlayClearsDepth => overlayClearsDepth;
 
         // 暴露只读属性，让渲染器可以读取 clearMode，用于决定清屏策略。

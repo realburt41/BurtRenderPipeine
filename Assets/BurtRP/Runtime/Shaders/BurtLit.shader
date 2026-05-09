@@ -19,8 +19,8 @@ Shader "BurtRP/Lit"
         // 定义法线贴图强度，0 表示退回几何法线，1 表示使用贴图原始强度。
         _NormalScale ("Normal Scale", Range(0, 2)) = 1
 
-        // 定义非金属 F0 的倍率，默认白色表示使用标准 0.04 介质反射率。
-        _SpecularColor ("Specular F0 Scale", Color) = (1, 1, 1, 1)
+        // 定义 XRender / Frostbite 风格的介质反射率，0.5 会映射到常见非金属 F0=0.04。
+        _Reflectance ("Reflectance", Range(0, 1)) = 0.5
 
         // 定义金属度，0 表示非金属介质，1 表示金属材质。
         _Metallic ("Metallic", Range(0, 1)) = 0
@@ -422,7 +422,7 @@ Shader "BurtRP/Lit"
                 float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
 
                 // 使用基础色、高光颜色、标量参数和 Mask Map 构建完整 PBR 表面数据。
-                BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _SpecularColor.rgb, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
+                BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
 
                 // Samples the main-light shadow attenuation using the shared shadow receiver helper.
                 float shadowAttenuation = BurtSampleMainLightShadow(input.shadowCoord);
@@ -430,20 +430,65 @@ Shader "BurtRP/Lit"
                 // Builds the current main light from BurtRP global lighting variables and this pixel's shadow value.
                 BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
 
-                // 计算 PBR 间接光，当前使用 Unity SH 漫反射和 Unity Reflection Probe 镜面反射。
-                float3 indirectLightingColor = BurtEvaluateIndirectPBR(surfaceData, normalWS, viewDirectionWS);
+                // 单独计算 PBR 间接漫反射，方便 Debug View 拆分观察 SH / Light Probe 贡献。
+                float3 indirectDiffuseColor = BurtEvaluateIndirectDiffusePBR(surfaceData, normalWS);
 
-                // 计算单主光 PBR 直接光，后续多光源也会继续复用同一套直接光 BRDF。
-                float3 directLightingColor = BurtEvaluateDirectPBR(surfaceData, mainLight.color, mainLight.directionWS, normalWS, viewDirectionWS, mainLight.shadowAttenuation);
+                // 单独计算 PBR 间接高光，方便 Debug View 拆分观察 Reflection Probe 和 DFG 贡献。
+                float3 indirectSpecularColor = BurtEvaluateIndirectSpecularPBR(surfaceData, normalWS, viewDirectionWS);
+
+                // 合并间接漫反射和间接高光，得到完整 PBR 间接光。
+                float3 indirectLightingColor = indirectDiffuseColor + indirectSpecularColor;
+
+                // 计算单主光 PBR 直接光拆分结果，后续多光源也会继续复用同一套直接光 BRDF。
+                BurtDirectPBRComponents directLightingComponents = BurtEvaluateDirectPBRComponents(surfaceData, mainLight.color, mainLight.directionWS, normalWS, viewDirectionWS, mainLight.shadowAttenuation);
+
+                // 取出直接漫反射贡献，供最终光照和 Debug View 共同使用。
+                float3 directDiffuseColor = directLightingComponents.diffuse;
+
+                // 取出直接高光贡献，供最终光照和 Debug View 共同使用。
+                float3 directSpecularColor = directLightingComponents.specular;
+
+                // 合并直接漫反射和直接高光，得到完整 PBR 直接光。
+                float3 directLightingColor = directDiffuseColor + directSpecularColor;
 
                 // 合并直接光和间接光，得到不含自发光的 PBR 总光照结果。
                 float3 lightingColor = indirectLightingColor + directLightingColor;
+
+                // 创建 Shading Debug 数据结构，确保 Debug View 读取的就是当前片元真实渲染使用的数据。
+                BurtShadingDebugData debugData;
+
+                // 写入世界空间法线，NormalWS Debug View 会把它编码成颜色。
+                debugData.normalWS = normalWS;
+
+                // 写入总光照结果，Lighting Debug View 会显示它。
+                debugData.lightingColor = lightingColor;
+
+                // 写入直接漫反射结果，DirectDiffuse Debug View 会显示它。
+                debugData.directDiffuseColor = directDiffuseColor;
+
+                // 写入直接高光结果，DirectSpecular Debug View 会显示它。
+                debugData.directSpecularColor = directSpecularColor;
+
+                // 写入间接漫反射结果，IndirectDiffuse Debug View 会显示它。
+                debugData.indirectDiffuseColor = indirectDiffuseColor;
+
+                // 写入间接高光结果，IndirectSpecular Debug View 会显示它。
+                debugData.indirectSpecularColor = indirectSpecularColor;
+
+                // 写入材质 reflectance，Reflectance Debug View 会用它检查非金属反射率输入。
+                debugData.reflectance = surfaceData.reflectance;
+
+                // 写入材质感知粗糙度，Roughness Debug View 会显示 1 - smoothness 后的结果。
+                debugData.perceptualRoughness = BurtBRDFRoughness(surfaceData);
+
+                // 写入直接高光实际粗糙度，SpecularAARoughness Debug View 会显示 AA 后的结果。
+                debugData.specularAARoughness = BurtBRDFDirectSpecularRoughness(surfaceData, normalWS);
 
                 // 创建一个临时调试颜色变量，只有命中材质 debug 模式时才会被真正输出。
                 float3 debugColor;
 
                 // 如果 Overlay 选择了材质类 debug 模式，就直接输出调试颜色，避免自发光或后处理干扰观察。
-                if (BurtTryEvaluateMaterialShadingDebug(surfaceData, normalWS, lightingColor, indirectLightingColor, debugColor))
+                if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
                 {
                     // 返回材质 debug 颜色，同时保留材质 alpha，方便后续透明调试继续沿用同一逻辑。
                     return float4(debugColor, surfaceData.alpha);

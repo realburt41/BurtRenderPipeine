@@ -118,6 +118,47 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
         }
     }
 
+    internal sealed class BurtSeedOverlayCameraColorPass : BurtRenderPass // 定义 Overlay 颜色继承 Pass，负责在不清颜色时把当前最终目标复制进中间颜色 RT。
+    {
+        public override string Name => "Burt Seed Overlay Camera Color"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
+
+        public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
+        {
+            builder.ReadFinalCameraTarget(); // 声明读取当前最终目标，通常里面已经有 Base 相机输出。
+
+            builder.WriteCameraColor(); // 声明写入中间 CameraColor，让 Overlay 后续绘制叠加在这个底图上。
+        }
+
+        public override void Execute(BurtRenderGraphContext context) // 实现 Overlay 颜色继承 Pass 的执行函数。
+        {
+            var request = context.Request; // 从 GraphContext 中取出当前渲染请求，用来确认是否仍然是 Overlay。
+
+            if (request == null || request.Type != BurtRenderRequestType.OverlayCamera || request.OverlayClearsColor) // 只服务于不清颜色的 Overlay request。
+            {
+                return; // 其他 request 不需要复制最终目标，直接跳过。
+            }
+
+            var renderContext = context.ScriptableContext; // 从 GraphContext 中取出 Unity SRP 渲染上下文。
+
+            var cameraColorTarget = context.CameraColorTarget; // 读取 Overlay 将要绘制的中间颜色目标。
+
+            var finalCameraTarget = context.FinalCameraTarget; // 读取当前最终目标，Base 相机通常已经把结果写在这里。
+
+            if (!cameraColorTarget.IsValid || !finalCameraTarget.IsValid) // 如果任一目标无效，就不能安全执行复制。
+            {
+                return; // 直接跳过，避免绑定无效 RenderTargetIdentifier。
+            }
+
+            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+
+            cmd.Blit(finalCameraTarget.Identifier, cameraColorTarget.Identifier); // 把已有最终颜色复制到 Overlay 的中间颜色 RT，作为不清颜色叠加的底图。
+
+            renderContext.ExecuteCommandBuffer(cmd); // 把复制命令提交给 ScriptableRenderContext。
+
+            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+        }
+    }
+
     internal sealed class BurtClearRenderTargetPass : BurtRenderPass // 定义清屏 Pass，负责根据 BurtCameraData 清理颜色和深度缓冲。
     {
         public override string Name => "Burt Clear Render Target"; // 返回这个 Pass 的名称，方便 CommandBuffer 和 Frame Debugger 显示。
@@ -148,23 +189,39 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 clearMode = cameraData.ClearMode; // 从 BurtCameraData 中读取清屏模式。
             }
 
-            if (clearMode == BurtCameraClearMode.DontClear) // 如果清屏模式是不清屏，就不需要执行 ClearRenderTarget。
+            var isOverlayRequest = request.Type == BurtRenderRequestType.OverlayCamera; // Overlay 相机使用显式清屏意图，不再直接套用 Base 的清屏模式。
+
+            var clearDepth = true; // Base/SceneView/Preview 保持旧行为：只要不是 DontClear，就清理深度。
+
+            var clearColorBuffer = false; // 默认不清理颜色缓冲，后面根据清屏模式或 Overlay 意图决定是否改为 true。
+
+            if (isOverlayRequest) // Overlay 的清屏行为由 OverlayClearsColor/OverlayClearsDepth 决定。
             {
-                return; // 直接结束这个 Pass，让后续绘制保留当前目标里的旧内容。
+                clearDepth = request.OverlayClearsDepth; // Overlay 是否清深度只看相机栈意图，默认会清深度。
+
+                clearColorBuffer = request.OverlayClearsColor; // Overlay 默认不清颜色，只有显式勾选时才清颜色。
+
+                if (!clearDepth && !clearColorBuffer) // 如果 Overlay 两个缓冲都不清，就不需要发 ClearRenderTarget。
+                {
+                    return; // 直接结束这个 Pass，保留前面 Seed Pass 复制来的颜色和已有深度状态。
+                }
             }
-
-            var clearDepth = true; // 当前只要不是 DontClear，就清理深度，避免上一相机的深度影响当前相机。
-
-            var clearColorBuffer = false; // 默认不清理颜色缓冲，后面根据清屏模式决定是否改为 true。
-
-            if (clearMode == BurtCameraClearMode.SolidColor) // 如果是纯色清屏模式，就需要清理颜色缓冲。
+            else
             {
-                clearColorBuffer = true; // 标记需要清理颜色缓冲。
-            }
+                if (clearMode == BurtCameraClearMode.DontClear) // 如果非 Overlay 清屏模式是不清屏，就不需要执行 ClearRenderTarget。
+                {
+                    return; // 直接结束这个 Pass，让后续绘制保留当前目标里的旧内容。
+                }
 
-            if (clearMode == BurtCameraClearMode.Skybox) // 如果是天空盒模式，也先清理颜色缓冲作为天空盒绘制前的底色。
-            {
-                clearColorBuffer = true; // 标记需要清理颜色缓冲。
+                if (clearMode == BurtCameraClearMode.SolidColor) // 如果是纯色清屏模式，就需要清理颜色缓冲。
+                {
+                    clearColorBuffer = true; // 标记需要清理颜色缓冲。
+                }
+
+                if (clearMode == BurtCameraClearMode.Skybox) // 如果是天空盒模式，也先清理颜色缓冲作为天空盒绘制前的底色。
+                {
+                    clearColorBuffer = true; // 标记需要清理颜色缓冲。
+                }
             }
 
             var clearColor = Color.black; // 定义默认清屏颜色，避免 asset 或 cameraData 为空时没有兜底颜色。

@@ -8,6 +8,9 @@ sampler2D _BaseMap;
 // 声明 Mask Map 贴图，Forward PBR 会把 R 当金属度、G 当环境遮蔽、A 当光滑度。
 sampler2D _MaskMap;
 
+// 定义 XRender / Frostbite 风格的默认 reflectance，0.5 会映射到常见非金属 F0=0.04。
+static const float BURT_INPUT_DEFAULT_REFLECTANCE = 0.5f;
+
 // 保存光照函数需要的材质表面属性。
 struct BurtSurfaceData
 {
@@ -17,8 +20,8 @@ struct BurtSurfaceData
     // 单独保存 alpha，方便 Forward pass 在光照后直接把透明度传给输出。
     float alpha;
 
-    // 保存材质高光颜色，Specular 光照会用它控制高光颜色和强度。
-    float3 specularColor;
+    // 保存材质介质反射率参数，参考 XRender Reflectance，0.5 会映射到非金属 F0=0.04。
+    float reflectance;
 
     // 保存材质光滑度，数值越高，高光越小越锐利。
     float smoothness;
@@ -117,8 +120,8 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor)
     // 把 alpha 拆出来单独保存，避免后续代码反复从 baseColor.a 里取值。
     surfaceData.alpha = baseColor.a;
 
-    // 默认不启用高光，避免旧 shader 调用这个函数后突然多出 specular 表现。
-    surfaceData.specularColor = float3(0.0f, 0.0f, 0.0f);
+    // 默认使用 XRender 的 reflectance=0.5，对应常见非金属 F0=0.04。
+    surfaceData.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
 
     // 默认光滑度设为 0.5，给后续显式开启高光的路径提供中间值。
     surfaceData.smoothness = 0.5f;
@@ -133,10 +136,10 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor)
     return surfaceData;
 }
 
-// 根据基础颜色、高光颜色和光滑度创建 BurtSurfaceData。
-BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float3 specularColor, float smoothness)
+// 根据基础颜色、reflectance 和光滑度创建 BurtSurfaceData。
+BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float smoothness)
 {
-    // 创建一个输出结构体，下面逐项填充，避免依赖旧的默认高光设置。
+    // 创建一个输出结构体，下面逐项填充，避免依赖旧的默认参数。
     BurtSurfaceData surfaceData;
 
     // 保存当前片元的基础颜色，漫反射和环境光会使用它。
@@ -145,24 +148,24 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float3 specularColor, fl
     // 保存 alpha，让 Forward pass 可以保持材质透明度输出。
     surfaceData.alpha = baseColor.a;
 
-    // 保存材质高光颜色，Specular 光照会使用它。
-    surfaceData.specularColor = specularColor;
+    // 保存 XRender 风格 reflectance，而不是直接暴露 F0。
+    surfaceData.reflectance = saturate(reflectance);
 
     // 把光滑度限制到 0 到 1，避免材质面板或脚本传入异常值。
     surfaceData.smoothness = saturate(smoothness);
 
-    // 旧的 specular 调用不传 metallic，所以默认按非金属处理。
+    // 这个重载不传 metallic，所以默认按非金属处理。
     surfaceData.metallic = 0.0f;
 
-    // 旧的 specular 调用不传 occlusion，所以默认不遮蔽环境光。
+    // 这个重载不传 occlusion，所以默认不遮蔽环境光。
     surfaceData.occlusion = 1.0f;
 
     // 返回填充完成的表面数据。
     return surfaceData;
 }
 
-// 根据基础颜色、高光颜色、光滑度和金属度创建 BurtSurfaceData。
-BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float3 specularColor, float smoothness, float metallic)
+// 根据基础颜色、reflectance、光滑度和金属度创建 BurtSurfaceData。
+BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float smoothness, float metallic)
 {
     // 创建一个输出结构体，下面逐项填充，供 PBR BRDF 使用。
     BurtSurfaceData surfaceData;
@@ -173,8 +176,8 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float3 specularColor, fl
     // 保存 alpha，让 Forward pass 可以保持材质透明度输出。
     surfaceData.alpha = baseColor.a;
 
-    // 保存高光颜色，当前 PBR 版本把它作为非金属 F0 的美术倍率。
-    surfaceData.specularColor = specularColor;
+    // 保存 XRender 风格 reflectance，它后续会在 BRDF 内部映射成非金属 F0。
+    surfaceData.reflectance = saturate(reflectance);
 
     // 把光滑度限制到 0 到 1，避免异常材质参数影响 BRDF。
     surfaceData.smoothness = saturate(smoothness);
@@ -189,8 +192,8 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float3 specularColor, fl
     return surfaceData;
 }
 
-// 根据基础颜色、高光颜色、标量参数和 Mask Map 创建完整 PBR 用 BurtSurfaceData。
-BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float3 specularColor, float smoothness, float metallic, float4 maskMap, float occlusionStrength)
+// 根据基础颜色、reflectance、标量参数和 Mask Map 创建完整 PBR 用 BurtSurfaceData。
+BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float smoothness, float metallic, float4 maskMap, float occlusionStrength)
 {
     // 创建一个输出结构体，下面逐项填充，供 PBR BRDF 和环境遮蔽共同使用。
     BurtSurfaceData surfaceData;
@@ -201,8 +204,8 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float3 specularColor, fl
     // 保存 alpha，让 Forward pass 可以保持材质透明度输出。
     surfaceData.alpha = baseColor.a;
 
-    // 保存高光颜色，当前 PBR 版本把它作为非金属 F0 的美术倍率。
-    surfaceData.specularColor = specularColor;
+    // 保存 XRender 风格 reflectance，而不是把 F0 直接暴露给材质。
+    surfaceData.reflectance = saturate(reflectance);
 
     // 标量 Smoothness 与 Mask Map A 通道相乘，得到最终光滑度。
     surfaceData.smoothness = BurtResolveSmoothness(smoothness, maskMap);

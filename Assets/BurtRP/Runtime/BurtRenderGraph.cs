@@ -1,5 +1,5 @@
 using System; // 引入基础命名空间，用来捕获 Configure 阶段异常并写入诊断信息。
-using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 List、Dictionary 和 HashSet 保存 Pass 与资源校验状态。
+using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 List 保存 Pass、资源声明和校验消息。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和其他 BurtRP 代码处在同一个模块里。
 {
@@ -145,86 +145,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
         private void ValidateConfiguredGraph() // 对已收集的资源声明做轻量校验，当前阶段只产生日志，不改变实际渲染行为。
         {
-            if (passes.Count == 0) // 如果图里没有 Pass，说明组装器没有产生任何可执行步骤。
-            {
-                AddValidationMessage("RenderGraph 没有有效 Pass。"); // 记录空图问题，Debug 输出时给出明确原因。
-            }
-
-            var writtenResources = new HashSet<string>(); // 记录已经由前序 Pass 写入过的资源，用于检测 Read-before-Write。
-
-            for (var usageIndex = 0; usageIndex < resourceUsages.Count; usageIndex++) // 按执行顺序检查每个 Pass 的声明。
-            {
-                var usage = resourceUsages[usageIndex]; // 取出当前 Pass 的资源使用记录。
-
-                if (usage == null) // 正常情况下不会为空，但保留防御逻辑。
-                {
-                    AddValidationMessage("ResourceUsage #" + usageIndex + " 为空。"); // 记录空资源使用记录。
-
-                    continue; // 空记录没有可校验内容。
-                }
-
-                if (!usage.HasResourceDeclarations) // 没有任何读写声明的 Pass 对依赖图不可见。
-                {
-                    usage.AddValidationMessage("Pass 未声明任何资源读写。"); // 记录空 Pass/空声明问题，帮助补齐 Configure。
-                }
-
-                ValidateReadResources(usage, writtenResources); // 先检查读取，确保读资源来自外部或已经被前序 Pass 写过。
-
-                AddWrittenResources(usage, writtenResources); // 再记录写入，让后续 Pass 可以把这些资源视为已有生产者。
-            }
-        }
-
-        private void ValidateReadResources( // 检查单个 Pass 的读取资源是否已经存在生产者。
-            BurtRenderPassResourceUsage usage, // 接收当前 Pass 的资源使用记录。
-            HashSet<string> writtenResources) // 接收前序 Pass 已写入资源集合。
-        {
-            var reads = usage.ReadRenderTargets; // 缓存读取列表，减少属性访问并提升可读性。
-
-            for (var readIndex = 0; readIndex < reads.Count; readIndex++) // 遍历当前 Pass 声明读取的所有资源。
-            {
-                var handle = reads[readIndex]; // 取出当前读取资源。
-
-                if (!handle.IsValid) // 无效资源已经由 Usage 记录缺失提示，这里避免继续做生产者判断。
-                {
-                    continue; // 跳过无效资源，避免同一问题重复刷屏。
-                }
-
-                var resourceName = handle.Name; // 读取资源逻辑名，后续用于生产者集合查询。
-
-                if (string.IsNullOrEmpty(resourceName)) // 空资源名无法可靠参与依赖校验。
-                {
-                    continue; // 空名问题已在 Usage 里记录，这里不重复提示。
-                }
-
-                if (resources.IsExternalRenderTarget(resourceName)) // 外部导入资源不需要图内生产者，例如 FinalCameraTarget。
-                {
-                    continue; // 外部资源视为已经可读。
-                }
-
-                if (!writtenResources.Contains(resourceName)) // 没有外部生产者，也没有前序 Pass 写入，就是读前未写。
-                {
-                    usage.AddValidationMessage("Read-before-Write: " + resourceName + " 在读取前没有前序生产者。"); // 记录资源顺序问题但不改变执行顺序。
-                }
-            }
-        }
-
-        private static void AddWrittenResources( // 把当前 Pass 的写入资源加入生产者集合。
-            BurtRenderPassResourceUsage usage, // 接收当前 Pass 的资源使用记录。
-            HashSet<string> writtenResources) // 接收要更新的已写资源集合。
-        {
-            var writes = usage.WriteRenderTargets; // 缓存写入列表，减少属性访问并提升可读性。
-
-            for (var writeIndex = 0; writeIndex < writes.Count; writeIndex++) // 遍历当前 Pass 声明写入的所有资源。
-            {
-                var handle = writes[writeIndex]; // 取出当前写入资源。
-
-                if (!handle.IsValid || string.IsNullOrEmpty(handle.Name)) // 无效或空名资源不能作为可靠生产者。
-                {
-                    continue; // 跳过不可用资源，相关问题已由 Usage 记录。
-                }
-
-                writtenResources.Add(handle.Name); // 记录资源已经被当前或前序 Pass 写入，供后续读取校验。
-            }
+            BurtRenderGraphValidationUtility.ValidateConfiguredGraph(passes, resourceUsages, resources, AddValidationMessage); // 交给诊断工具集中检查读写声明，保持执行类只负责调度。
         }
 
         private void AddValidationMessage(string message) // 定义图级别校验消息追加函数，带简单去重避免 Debug 开关打开时噪音过大。

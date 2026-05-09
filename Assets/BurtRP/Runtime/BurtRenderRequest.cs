@@ -47,10 +47,10 @@ namespace Burt.RenderPipeline
         // 保存当前请求所属的逻辑栈编号；没有 BurtCameraData 时默认归到 0 号栈。
         public int StackId { get; private set; }
 
-        // 记录 Overlay 相机是否希望清颜色；第一版只缓存意图，不直接改变 Forward 清屏。
+        // 记录 Overlay 相机是否希望清颜色；Forward 清屏 Pass 会按这个意图决定是否清颜色。
         public bool OverlayClearsColor { get; private set; }
 
-        // 记录 Overlay 相机是否希望清深度；第一版只缓存意图，不直接改变 Forward 清屏。
+        // 记录 Overlay 相机是否希望清深度；Forward 清屏 Pass 会按这个意图决定是否清深度。
         public bool OverlayClearsDepth { get; private set; }
 
         // 保存当前请求的剔除结果。
@@ -146,7 +146,7 @@ namespace Burt.RenderPipeline
             // 记录逻辑栈编号；没有 BurtCameraData 的 Unity 内部相机默认归到 0 号栈。
             request.StackId = cameraData != null ? cameraData.StackId : 0;
 
-            // 记录 Overlay 清屏意图，当前只作为数据基础设施，不改变现有 Forward 渲染结果。
+            // 记录 Overlay 清屏意图，后续 Forward 清屏 Pass 会用它接入最小相机栈合成行为。
             request.OverlayClearsColor = cameraData != null && cameraData.OverlayClearsColor;
             request.OverlayClearsDepth = cameraData != null && cameraData.OverlayClearsDepth;
 

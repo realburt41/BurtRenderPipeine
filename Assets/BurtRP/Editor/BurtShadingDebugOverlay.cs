@@ -52,8 +52,15 @@ namespace Burt.RenderPipeline.Editor // 使用 BurtRP Editor 命名空间，把�
             BurtShadingDebugMode.Smoothness, // 光滑度调试模式，会显示标量和 Mask Map A 通道合成后的最终 smoothness。
             BurtShadingDebugMode.Metallic, // 金属度调试模式，会显示标量和 Mask Map R 通道合成后的最终 metallic。
             BurtShadingDebugMode.Occlusion, // 环境遮蔽调试模式，用来检查 Mask Map G 通道和 Occlusion Strength。
+            BurtShadingDebugMode.Reflectance, // Reflectance 调试模式，用来检查 XRender 风格反射率输入。
+            BurtShadingDebugMode.Roughness, // 粗糙度调试模式，用来检查 smoothness 到 perceptual roughness 的转换。
+            BurtShadingDebugMode.SpecularAARoughness, // 高光 AA 粗糙度调试模式，用来观察高光是否被像素法线变化拓宽。
             BurtShadingDebugMode.Lighting, // 光照调试模式，会显示不含自发光的 PBR 总光照结果。
             BurtShadingDebugMode.IndirectLighting, // 间接光调试模式，只显示 SH 漫反射和 Reflection Probe 镜面反射。
+            BurtShadingDebugMode.DirectDiffuse, // 直接漫反射调试模式，只显示主光 diffuse 贡献。
+            BurtShadingDebugMode.DirectSpecular, // 直接高光调试模式，只显示主光 specular 贡献。
+            BurtShadingDebugMode.IndirectDiffuse, // 间接漫反射调试模式，只显示 SH / Light Probe diffuse 贡献。
+            BurtShadingDebugMode.IndirectSpecular, // 间接高光调试模式，只显示 Reflection Probe specular 贡献。
             BurtShadingDebugMode.CameraDepth, // 复用已有 CameraDepth 全屏 debug pass。
             BurtShadingDebugMode.MainLightShadow // 复用已有 MainLightShadow 全屏 debug pass。
         };

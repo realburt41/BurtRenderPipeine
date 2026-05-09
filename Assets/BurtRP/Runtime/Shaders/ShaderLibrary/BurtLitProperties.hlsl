@@ -23,8 +23,8 @@ CBUFFER_START(UnityPerMaterial)
     // 保存法线贴图强度，Forward 用它缩放 normal map 扰动。
     float _NormalScale;
 
-    // 保存高光颜色，Forward 用它控制 specular 的颜色和强度。
-    float4 _SpecularColor;
+    // 保存 XRender 风格 reflectance，Forward 会在 BRDF 内部把它映射成非金属 F0。
+    float _Reflectance;
 
     // 保存金属度标量，最终 metallic 会等于这个标量乘以 Mask Map 的 R 通道。
     float _Metallic;
