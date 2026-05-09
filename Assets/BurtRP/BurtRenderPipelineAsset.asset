@@ -12,4 +12,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2eea437df4f8f694bbd78bcae9747146, type: 3}
   m_Name: BurtRenderPipelineAsset
   m_EditorClassIdentifier: 
-  clearColor: {r: 0.02, g: 0.02, b: 0.025, a: 1}
+  clearColor: {r: 0, g: 0, b: 0, a: 1}
+  enableDepthPrepass: 1
+  enableDepthDebugView: 0
+  depthDebugScale: 50
+  enableMainLightShadows: 1
+  mainLightShadowResolution: 2048
+  mainLightShadowDistance: 50
+  mainLightShadowDepthBias: 0.05
+  mainLightShadowNormalBias: 0.001
+  mainLightShadowSampleBias: 0.005
+  enableMainLightShadowDebugView: 0
+  mainLightShadowDebugExposure: 1
+  mainLightShadowDebugYFlipMode: 0
+  enableMainLightShadowDebugLog: 0
+  enableUnsupportedShaderDebug: 1
+  enableRenderGraphDebug: 0
+  enableCameraSortDebugLog: 0
