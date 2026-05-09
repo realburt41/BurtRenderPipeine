@@ -43,6 +43,9 @@ Shader "Hidden/BurtRP/DebugCameraDepth"
             // 声明深度显示缩放，C# Pass 会从 BurtRenderPipelineAsset 传入这个值。
             float _BurtDepthDebugScale;
 
+            // 声明深度调试图的 Y 预翻转开关；这个开关用来抵消后续 FinalBlit 对 CameraColor 的翻转。
+            float _BurtDepthDebugYFlip;
+
             // 定义顶点输入结构，全屏三角形只需要系统提供的顶点 ID。
             struct Attributes
             {
@@ -83,7 +86,14 @@ Shader "Hidden/BurtRP/DebugCameraDepth"
             float4 Frag(Varyings input) : SV_Target
             {
                 // 从 BurtRP 的 CameraDepth 深度纹理中采样原始硬件深度。
-                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.uv);
+                float2 depthUv = input.uv; // 复制全屏三角形插值出来的 UV，后面会按需要修改 y 值。
+
+                if (_BurtDepthDebugYFlip > 0.5f) // 如果当前相机的最终输出会在 FinalBlit 中翻转，这里提前把深度采样反向一次。
+                {
+                    depthUv.y = 1.0f - depthUv.y; // 把深度纹理采样坐标上下翻转，让调试图经过 FinalBlit 之后仍然保持正向。
+                }
+
+                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, depthUv);
 
                 // 把非线性的硬件深度转换成 0 到 1 的线性相机深度。
                 float linear01Depth = Linear01Depth(rawDepth);

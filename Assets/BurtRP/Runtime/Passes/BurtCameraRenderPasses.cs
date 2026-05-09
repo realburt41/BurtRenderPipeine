@@ -74,105 +74,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         }
     }
 
-    internal static class BurtRenderTargetDescriptorUtility // 定义渲染目标描述工具类，用来集中创建 BurtRP 自己管理的 RT 描述。
-    {
-        public static RenderTextureDescriptor CreateCameraDepthDescriptor(Camera camera) // 定义创建相机深度 RT 描述的函数。
-        {
-            var width = 1; // 定义默认宽度为 1，避免相机尺寸异常时创建 0 宽 RT。
-
-            var height = 1; // 定义默认高度为 1，避免相机尺寸异常时创建 0 高 RT。
-
-            if (camera != null) // 如果当前 request 有有效相机，就优先从相机读取目标尺寸。
-            {
-                width = Mathf.Max(1, camera.pixelWidth); // 使用相机像素宽度，并强制最小为 1。
-
-                height = Mathf.Max(1, camera.pixelHeight); // 使用相机像素高度，并强制最小为 1。
-
-                if (camera.targetTexture != null) // 如果相机输出到 RenderTexture，就以 targetTexture 的尺寸为准。
-                {
-                    width = Mathf.Max(1, camera.targetTexture.width); // 使用 targetTexture 宽度，并强制最小为 1。
-
-                    height = Mathf.Max(1, camera.targetTexture.height); // 使用 targetTexture 高度，并强制最小为 1。
-                }
-            }
-
-            var descriptor = new RenderTextureDescriptor(width, height, RenderTextureFormat.Depth, 32); // 创建深度专用 RT 描述，32 位深度让深度测试更稳定。
-
-            descriptor.msaaSamples = 1; // 当前阶段先关闭 MSAA，避免深度 RT 和相机颜色目标采样数不匹配。
-
-            descriptor.useMipMap = false; // 深度缓冲不需要 mipmap，关闭后可以减少无意义资源开销。
-
-            descriptor.autoGenerateMips = false; // 深度缓冲不生成 mipmap，避免 Unity 做额外工作。
-
-            return descriptor; // 返回创建好的深度 RT 描述，供分配 Pass 使用。
-        }
-
-        public static RenderTextureDescriptor CreateMainLightShadowMapDescriptor(BurtShadowData shadowData) // 定义创建主光阴影图 RT 描述的函数。
-        {
-            var resolution = 1024; // 定义默认阴影图分辨率，避免 shadowData 缺失时创建非法尺寸。
-
-            if (shadowData != null) // 如果当前 request 提供了阴影数据，就优先使用灯光解析出来的分辨率。
-            {
-                resolution = Mathf.Max(1, shadowData.MainLightShadowResolution); // 读取主光阴影分辨率，并强制最小为 1。
-            }
-
-            var descriptor = new RenderTextureDescriptor(resolution, resolution, RenderTextureFormat.Shadowmap, 32); // 创建 Shadowmap 格式的深度纹理描述，供主光阴影 Pass 写入深度。
-
-            descriptor.msaaSamples = 1; // 阴影图不使用 MSAA，保证后续深度采样和比较逻辑简单稳定。
-
-            descriptor.useMipMap = false; // 阴影图当前阶段不生成 mipmap，避免多余显存和生成开销。
-
-            descriptor.autoGenerateMips = false; // 关闭自动 mipmap 生成，防止 Unity 对深度纹理做无意义的额外处理。
-
-            return descriptor; // 返回创建好的主光阴影图描述，供分配 Pass 使用。
-        }
-    }
-
-    internal sealed class BurtAllocateCameraDepthPass : BurtRenderPass // 定义 CameraDepth 分配 Pass，负责为当前 request 创建真实深度 RT。
-    {
-        public override string Name => "Burt Allocate Camera Depth"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
-
-        public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
-        {
-            builder.WriteCameraDepth(); // 声明这个 Pass 会创建并写入 CameraDepth 资源的生命周期状态。
-        }
-
-        public override void Execute(BurtRenderGraphContext context) // 实现 CameraDepth 分配 Pass 的执行函数。
-        {
-            var renderContext = context.ScriptableContext; // 从 GraphContext 中取出 Unity SRP 渲染上下文。
-
-            var request = context.Request; // 从 GraphContext 中取出当前渲染请求。
-
-            var camera = request.Camera; // 从 request 中取出当前相机，用来决定深度 RT 尺寸。
-
-            var cameraDepthTarget = context.CameraDepthTarget; // 从 GraphContext 中取出 CameraDepth 资源句柄。
-
-            if (!cameraDepthTarget.IsValid) // 如果 CameraDepth 句柄无效，说明资源表没有注册深度目标。
-            {
-                return; // 直接结束这个 Pass，避免申请一个无法被后续 Pass 找到的 RT。
-            }
-
-            var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraDepthDescriptor(camera); // 根据当前相机创建深度 RT 描述。
-
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
-
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.CameraDepthTextureId, descriptor, FilterMode.Point); // 申请一个临时深度 RT，并绑定到 CameraDepth 的全局 ID。
-
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier); // 把 CameraDepth 暴露成全局纹理，方便后续 shader 或 pass 采样。
-
-            renderContext.ExecuteCommandBuffer(cmd); // 把申请 RT 的命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
-        }
-    }
-
     internal sealed class BurtAllocateMainLightShadowMapPass : BurtRenderPass // 定义主光阴影图分配 Pass，负责为当前 request 创建主光 shadow map。
     {
         public override string Name => "Burt Allocate Main Light Shadow Map"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
-            if (!BurtShadowUtility.ShouldUseMainLightShadow(builder.Request)) // 如果当前 request 没有主光阴影，就不声明阴影图写入。
+            if (!BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset)) // 如果当前 request 没有主光阴影，就不声明阴影图写入。
             {
                 return; // 直接结束资源声明，避免 Debug 输出无效的 MainLightShadowMap 依赖。
             }
@@ -186,12 +94,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             var request = context.Request; // 从 GraphContext 中取出当前渲染请求。
 
-            if (!BurtShadowUtility.ShouldUseMainLightShadow(request)) // 如果当前 request 不需要主光阴影，就不申请阴影图。
+            if (!BurtShadowUtility.ShouldUseMainLightShadow(request, context.Asset)) // 如果当前 request 不需要主光阴影，就不申请阴影图。
             {
                 return; // 直接结束这个 Pass，避免无意义的临时 RT 分配。
             }
 
-            var shadowData = BurtShadowUtility.ResolveMainLightShadowData(request); // 从 request 中安全读取主光阴影参数。
+            var shadowData = BurtShadowUtility.ResolveMainLightShadowData(request, context.Asset); // 从 request 中安全读取主光阴影参数。
 
             var shadowMapTarget = context.MainLightShadowMapTarget; // 从 GraphContext 中取出 MainLightShadowMap 资源句柄。
 
@@ -204,7 +112,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.MainLightShadowMapId, descriptor, FilterMode.Bilinear); // 申请主光阴影图临时 RT，并绑定到统一的全局 ID。
+            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.MainLightShadowMapId, descriptor, FilterMode.Bilinear); // Uses bilinear filtering so the hardware shadow sampler can smooth compare edges instead of amplifying point-sample bands.
 
             cmd.SetRenderTarget(shadowMapTarget.Identifier); // 把主光阴影图绑定为当前渲染目标，为后续 ShadowCaster 绘制做准备。
 
@@ -226,13 +134,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         private static readonly Vector3 MainLightShadowCascadeSplit = Vector3.zero; // 单 cascade 不需要分割比例，所以传入零向量作为 Unity 计算矩阵的占位参数。
 
+        private static readonly int MainLightDirectionId = Shader.PropertyToID("_BurtMainLightDirection"); // 缓存主光方向属性 ID，ShadowCaster 顶点偏移需要用它计算法线和光向夹角。
+
         private static readonly int MainLightWorldToShadowId = Shader.PropertyToID("_BurtMainLightWorldToShadow"); // 缓存世界空间到主光阴影纹理空间矩阵的 shader 属性 ID。
+
+        private static readonly int MainLightShadowStrengthId = Shader.PropertyToID("_BurtMainLightShadowStrength"); // 缓存主光阴影强度属性 ID，阴影绘制失败时会把它清零避免采样旧图。
+
+        private static readonly int MainLightShadowTexelSizeId = Shader.PropertyToID("_BurtMainLightShadowTexelSize"); // 缓存 shadow map texel size 属性 ID，receiver 端软阴影采样会用它偏移 UV。
+
+        private static readonly int MainLightShadowSampleBiasId = Shader.PropertyToID("_BurtMainLightShadowSampleBias"); // 缓存接收端采样 bias 属性 ID，替代 shader 内部硬编码偏移。
+
+        private static readonly int MainLightShadowNormalBiasId = Shader.PropertyToID("_BurtMainLightShadowNormalBias"); // 缓存 ShadowCaster 顶点 normal bias 属性 ID，让 shader 使用资产参数做几何偏移。
+
+        private static readonly int MainLightShadowSoftnessId = Shader.PropertyToID("_BurtMainLightShadowSoftness"); // 缓存软阴影开关属性 ID，让 Light 的 Hard/Soft 设置能影响 receiver 采样。
 
         public override string Name => "Burt Draw Main Light Shadow Caster"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
-            if (!BurtShadowUtility.ShouldUseMainLightShadow(builder.Request)) // 如果当前 request 没有可用主光阴影，就不声明阴影图写入。
+            if (!BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset)) // 如果当前 request 没有可用主光阴影，就不声明阴影图写入。
             {
                 return; // 直接结束资源声明，避免 Debug 输出无效的 MainLightShadowMap 依赖。
             }
@@ -246,7 +166,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             var request = context.Request; // 从 GraphContext 中取出当前渲染请求，用来访问相机、剔除结果和灯光数据。
 
-            if (!BurtShadowUtility.ShouldUseMainLightShadow(request)) // 如果当前 request 不需要主光阴影，就不执行阴影绘制。
+            if (!BurtShadowUtility.ShouldUseMainLightShadow(request, context.Asset)) // 如果当前 request 不需要主光阴影，就不执行阴影绘制。
             {
                 return; // 直接结束这个 Pass，避免无意义的矩阵计算和 DrawShadows 调用。
             }
@@ -258,7 +178,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 return; // 直接结束这个 Pass，避免后面恢复相机状态时空引用。
             }
 
-            var shadowData = BurtShadowUtility.ResolveMainLightShadowData(request); // 从 request 中安全读取主光阴影参数。
+            var shadowData = BurtShadowUtility.ResolveMainLightShadowData(request, context.Asset); // 从 request 中安全读取主光阴影参数。
 
             if (shadowData == null) // 如果阴影数据为空，说明 request 没有有效灯光阴影信息。
             {
@@ -274,8 +194,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             if (!TryGetMainLightShadowMatrices(request, shadowData, out var viewMatrix, out var projectionMatrix, out var splitData)) // 计算主光视角的阴影视图矩阵、投影矩阵和裁剪数据。
             {
+                DisableMainLightShadowReceiverGlobals(renderContext); // 计算失败时主动关闭接收端阴影，避免 Lit shader 继续使用上一帧的矩阵和 shadow map。
+
                 return; // 如果 Unity 无法计算阴影矩阵，说明当前主光或剔除数据不足，直接跳过阴影绘制。
             }
+
+            var worldToShadowMatrix = CreateWorldToShadowMatrix(viewMatrix, projectionMatrix); // 预先构造世界到 shadow map UV/depth 空间的矩阵，便于后续一次性上传。
+
+            var shadowTexelSize = BurtShadowUtility.CreateMainLightShadowTexelSize(shadowData); // 根据最终阴影分辨率计算 texel size，软阴影和调试视图都会使用。
+
+            var mainLightDirection = ResolveMainLightDirection(request); // 读取当前 request 的主光方向，ShadowCaster 顶点偏移不能依赖上一帧残留的全局方向。
+
+            var shadowNormalBias = ResolveMainLightShadowNormalBias(shadowData, projectionMatrix); // 将 Inspector 上的 normal bias 折算成世界空间距离，避免直接把 0.4 当作 0.4 米偏移。
+
+            var shadowSoftness = shadowData.IsMainLightShadowSoft ? 1f : 0f; // 把 Light 的 Soft/Hard 阴影设置转换成 shader 侧的 0/1 开关。
 
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
@@ -285,7 +217,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             cmd.SetViewProjectionMatrices(viewMatrix, projectionMatrix); // 把 GPU 当前矩阵切到主光视角，让 ShadowCaster 从灯光方向渲染。
 
-            cmd.SetGlobalMatrix(MainLightWorldToShadowId, CreateWorldToShadowMatrix(viewMatrix, projectionMatrix)); // 上传世界空间到阴影纹理空间的矩阵，后续 Lit shader 会用它采样 shadow map。
+            cmd.SetGlobalVector(MainLightDirectionId, new Vector4(mainLightDirection.x, mainLightDirection.y, mainLightDirection.z, 0f)); // 上传当前主光方向，ShadowCaster shader 会用它判断法线偏移强度。
+
+            cmd.SetGlobalMatrix(MainLightWorldToShadowId, worldToShadowMatrix); // 上传世界空间到阴影纹理空间的矩阵，后续 Lit shader 会用它采样 shadow map。
+
+            cmd.SetGlobalVector(MainLightShadowTexelSizeId, shadowTexelSize); // 上传 shadow map texel size，让 receiver 端可以做可控的邻域采样。
+
+            cmd.SetGlobalFloat(MainLightShadowNormalBiasId, shadowNormalBias); // 上传世界空间 normal bias，ShadowCaster 顶点 shader 会沿法线推开 caster。
+
+            cmd.SetGlobalFloat(MainLightShadowSampleBiasId, shadowData.MainLightShadowSampleBias); // 上传接收端深度比较偏移，替代 shader 中固定 0.001 的写法。
+
+            cmd.SetGlobalFloat(MainLightShadowSoftnessId, shadowSoftness); // 上传软阴影开关，让 Lit shader 按 Light 的 Hard/Soft 阴影设置选择采样数量。
+
+            cmd.SetGlobalFloat(MainLightShadowStrengthId, shadowData.MainLightShadowStrength); // 上传阴影强度，确保阴影成功绘制后 receiver 端才会使用它。
+
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.MainLightShadowMapId, shadowMapTarget.Identifier); // 再次绑定当前 request 的 shadow map，避免多相机时全局纹理残留。
+
+            cmd.SetGlobalDepthBias(shadowData.MainLightShadowDepthBias, 0f); // normal bias 已交给 ShadowCaster 顶点偏移处理，这里只保留硬件常量 depth bias，避免同一参数被当作 slope bias 重复使用。
 
             renderContext.ExecuteCommandBuffer(cmd); // 把绑定目标、清理深度和设置矩阵的命令提交给 ScriptableRenderContext。
 
@@ -295,9 +243,74 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             shadowDrawingSettings.splitData = splitData; // 把 Unity 计算出的阴影裁剪数据交给 DrawShadows，避免绘制不在阴影范围内的物体。
 
-            renderContext.DrawShadows(ref shadowDrawingSettings); // 绘制所有对主光投影的可见物体，shader 需要提供 LightMode=ShadowCaster 的 Pass。
+            try // 使用 try/finally 保护渲染状态恢复，避免 DrawShadows 抛错后把深度 bias 留给后续颜色 Pass。
+            {
+                renderContext.DrawShadows(ref shadowDrawingSettings); // 绘制所有对主光投影的可见物体，shader 需要提供 LightMode=ShadowCaster 的 Pass。
+            }
+            finally // 无论阴影绘制是否成功，都要恢复状态。
+            {
+                ResetMainLightShadowCasterState(renderContext, camera); // 清掉 ShadowCaster 专用深度 bias，并把视图投影恢复到当前相机。
+            }
+        }
 
-            renderContext.SetupCameraProperties(camera); // 阴影绘制修改了视图投影矩阵，这里恢复相机矩阵，避免后续相机颜色 Pass 继续用灯光矩阵。
+        private static void ResetMainLightShadowCasterState(ScriptableRenderContext renderContext, Camera camera) // 恢复 ShadowCaster Pass 修改过的全局渲染状态。
+        {
+            var cmd = CommandBufferPool.Get("Burt Reset Main Light Shadow Caster State"); // 获取一个独立 CommandBuffer，避免复用已经提交的 shadow draw 命令。
+            cmd.SetGlobalDepthBias(0f, 0f); // 把 ShadowCaster 阶段设置的深度偏移清零，避免影响后续相机颜色绘制。
+            cmd.SetGlobalFloat(MainLightShadowNormalBiasId, 0f); // 清空 ShadowCaster 顶点 normal bias，避免下一个 request 没有阴影时沿用旧偏移。
+            renderContext.ExecuteCommandBuffer(cmd); // 提交深度偏移恢复命令。
+            CommandBufferPool.Release(cmd); // 释放恢复用 CommandBuffer，避免每帧分配。
+
+            if (camera != null) // 如果当前 request 仍然有有效相机，就恢复相机矩阵。
+            {
+                renderContext.SetupCameraProperties(camera); // 阴影绘制修改了视图投影矩阵，这里恢复相机矩阵和 Unity 内置相机参数。
+            }
+        }
+
+        private static void DisableMainLightShadowReceiverGlobals(ScriptableRenderContext renderContext) // 关闭 receiver 端主光阴影全局变量。
+        {
+            var cmd = CommandBufferPool.Get("Burt Disable Main Light Shadow Receiver"); // 获取一个 CommandBuffer，用来清理 shader 侧阴影状态。
+            cmd.SetGlobalFloat(MainLightShadowStrengthId, 0f); // 把阴影强度清零，让 Lit shader 直接跳过 shadow map 采样。
+            cmd.SetGlobalMatrix(MainLightWorldToShadowId, Matrix4x4.identity); // 把世界到阴影矩阵重置为单位矩阵，避免调试时看到上一帧矩阵。
+            cmd.SetGlobalVector(MainLightShadowTexelSizeId, Vector4.zero); // 清空 texel size，避免软阴影采样使用上一张 shadow map 的尺寸。
+            cmd.SetGlobalFloat(MainLightShadowSampleBiasId, 0f); // 清空采样 bias，保证无阴影状态完全可控。
+            cmd.SetGlobalFloat(MainLightShadowSoftnessId, 0f); // 清空软阴影开关，避免无阴影时执行额外采样逻辑。
+            renderContext.ExecuteCommandBuffer(cmd); // 提交全局阴影状态清理命令。
+            CommandBufferPool.Release(cmd); // 释放清理用 CommandBuffer，避免每帧分配。
+        }
+
+        private static Vector3 ResolveMainLightDirection(BurtRenderRequest request) // 从当前 request 解析 ShadowCaster 顶点偏移使用的主光方向。
+        {
+            var lightingData = request != null ? request.LightingData : null; // request 缺失时不能访问灯光数据，需要走安全兜底。
+            var direction = lightingData != null ? lightingData.MainLightDirection : Vector3.forward; // 正常情况下使用 BurtLightingData 已归一化的“点到光源”方向。
+
+            if (direction.sqrMagnitude <= 0.0001f) // 防止异常零向量传进 shader 后让法线偏移计算失去方向参考。
+            {
+                return Vector3.forward; // 只作为极端兜底；有效主光阴影流程中通常不会走到这里。
+            }
+
+            return direction.normalized; // 再归一化一次，保证 shader 收到稳定方向而不是受外部数据长度影响。
+        }
+
+        private static float ResolveMainLightShadowNormalBias(BurtShadowData shadowData, Matrix4x4 projectionMatrix) // 把 Inspector normal bias 转成 ShadowCaster shader 可直接使用的世界空间偏移。
+        {
+            if (shadowData == null || shadowData.MainLightShadowResolution <= 0) // 没有有效阴影数据或分辨率时不能计算 texel 尺寸。
+            {
+                return 0f; // 返回 0 表示完全关闭顶点 normal bias。
+            }
+
+            var normalBias = Mathf.Max(0f, shadowData.MainLightShadowNormalBias); // 保护用户输入，避免负数把 caster 拉回表面造成 acne。
+
+            if (normalBias <= 0f) // 用户显式把 normal bias 调成 0 时应完全禁用几何偏移。
+            {
+                return 0f; // 直接返回 0，shader 分支外的乘法也会得到无偏移结果。
+            }
+
+            var projectionWidth = Mathf.Abs(projectionMatrix.m00) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m00) : 0f; // 从方向光正交投影矩阵反推出 shadow 覆盖的世界宽度。
+            var projectionHeight = Mathf.Abs(projectionMatrix.m11) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m11) : 0f; // 从方向光正交投影矩阵反推出 shadow 覆盖的世界高度。
+            var worldTexelSize = Mathf.Max(projectionWidth, projectionHeight) / Mathf.Max(1, shadowData.MainLightShadowResolution); // normal bias 使用 texel 倍率语义，分辨率越高单 texel 世界距离越小。
+
+            return normalBias * worldTexelSize; // 上传世界单位偏移，让 shader 不需要知道投影矩阵和分辨率。
         }
 
         private static bool TryGetMainLightShadowMatrices( // 定义计算主光阴影矩阵的辅助函数。
@@ -373,202 +386,77 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         }
     }
 
-    internal sealed class BurtSetRenderTargetPass : BurtRenderPass // 定义设置渲染目标的 Pass，负责把 CameraColorTarget 和 CameraDepthTarget 绑定到 GPU。
+    internal sealed class BurtSetupLightingPass : BurtRenderPass // 上传当前 request 的主光、环境光和阴影接收端全局参数。
     {
-        public override string Name => "Burt Set Render Target"; // 返回这个 Pass 的名称，方便 CommandBuffer 和 Frame Debugger 显示。
-
-        public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
-        {
-            builder.WriteCameraColor(); // 声明这个 Pass 会把 CameraColor 设置为后续颜色绘制目标。
-
-            builder.WriteCameraDepth(); // 声明这个 Pass 会让后续绘制使用当前相机深度缓冲。
-        }
-
-        public override void Execute(BurtRenderGraphContext context) // 实现 BurtRenderPass 的执行函数。
-        {
-            var renderContext = context.ScriptableContext; // 从 GraphContext 中取出 Unity SRP 渲染上下文。
-
-            var cameraColorTarget = context.CameraColorTarget; // 从 GraphContext 中取出 RenderGraph 的相机颜色目标句柄。
-
-            var cameraDepthTarget = context.CameraDepthTarget; // 从 GraphContext 中取出 RenderGraph 的相机深度目标句柄。
-
-            if (!cameraColorTarget.IsValid) // 如果 CameraColorTarget 无效，说明当前图没有可绑定的颜色输出目标。
-            {
-                return; // 直接结束这个 Pass，避免绑定 default RenderTargetIdentifier。
-            }
-
-            if (!cameraDepthTarget.IsValid) // 如果 CameraDepthTarget 无效，说明当前图没有可用的深度目标。
-            {
-                return; // 直接结束这个 Pass，避免后续绘制缺失深度缓冲语义。
-            }
-
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
-
-            cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 同时绑定颜色目标和 BurtRP 自己的深度目标，让后续绘制真正写入独立 CameraDepth。
-
-            renderContext.ExecuteCommandBuffer(cmd); // 把 CommandBuffer 里的设置渲染目标命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
-        }
-    }
-
-    internal sealed class BurtClearRenderTargetPass : BurtRenderPass // 定义清屏 Pass，负责根据 BurtCameraData 清理颜色和深度缓冲。
-    {
-        public override string Name => "Burt Clear Render Target"; // 返回这个 Pass 的名称，方便 CommandBuffer 和 Frame Debugger 显示。
-
-        public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
-        {
-            builder.WriteCameraColor(); // 声明这个 Pass 会清理并写入 CameraColor。
-
-            builder.WriteCameraDepth(); // 声明这个 Pass 会清理并写入 CameraDepth。
-        }
-
-        public override void Execute(BurtRenderGraphContext context) // 实现 BurtRenderPass 的执行函数。
-        {
-            var renderContext = context.ScriptableContext; // 从 GraphContext 中取出 Unity SRP 渲染上下文。
-
-            var request = context.Request; // 从 GraphContext 中取出当前渲染请求。
-
-            var asset = context.Asset; // 从 GraphContext 中取出当前管线资产配置。
-
-            var camera = request.Camera; // 从 request 中取出当前相机。
-
-            var cameraData = request.CameraData; // 从 request 中取出当前相机的 BurtCameraData。
-
-            var clearMode = BurtCameraClearMode.SolidColor; // 定义默认清屏模式，如果没有 BurtCameraData 就使用纯色清屏。
-
-            if (cameraData != null) // 如果当前相机挂了 BurtCameraData，就使用相机自己的清屏配置。
-            {
-                clearMode = cameraData.ClearMode; // 从 BurtCameraData 中读取清屏模式。
-            }
-
-            if (clearMode == BurtCameraClearMode.DontClear) // 如果清屏模式是不清屏，就不需要执行 ClearRenderTarget。
-            {
-                return; // 直接结束这个 Pass，让后续绘制保留当前目标里的旧内容。
-            }
-
-            var clearDepth = true; // 当前只要不是 DontClear，就清理深度，避免上一相机的深度影响当前相机。
-
-            var clearColorBuffer = false; // 默认不清理颜色缓冲，后面根据清屏模式决定是否改为 true。
-
-            if (clearMode == BurtCameraClearMode.SolidColor) // 如果是纯色清屏模式，就需要清理颜色缓冲。
-            {
-                clearColorBuffer = true; // 标记需要清理颜色缓冲。
-            }
-
-            if (clearMode == BurtCameraClearMode.Skybox) // 如果是天空盒模式，也先清理颜色缓冲作为天空盒绘制前的底色。
-            {
-                clearColorBuffer = true; // 标记需要清理颜色缓冲。
-            }
-
-            var clearColor = Color.black; // 定义默认清屏颜色，避免 asset 或 cameraData 为空时没有兜底颜色。
-
-            if (cameraData != null) // 如果相机有 BurtCameraData，就优先使用相机自己的清屏颜色。
-            {
-                clearColor = cameraData.ClearColor; // 从 BurtCameraData 中读取清屏颜色。
-            }
-            else if (asset != null) // 如果没有 BurtCameraData，但是管线资产存在，就使用管线资产的默认清屏颜色。
-            {
-                clearColor = asset.ClearColor; // 从 BurtRenderPipelineAsset 中读取默认清屏颜色。
-            }
-
-            if (clearMode == BurtCameraClearMode.Skybox && camera != null) // 如果是天空盒模式，并且当前相机有效，就使用相机背景色作为天空盒前的底色。
-            {
-                clearColor = camera.backgroundColor; // 使用 Unity Camera 的 backgroundColor 作为清屏颜色。
-            }
-
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
-
-            cmd.ClearRenderTarget(clearDepth, clearColorBuffer, clearColor); // 向 CommandBuffer 写入清理深度和颜色缓冲的命令。
-
-            renderContext.ExecuteCommandBuffer(cmd); // 把清屏命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
-        }
-    }
-
-    internal sealed class BurtSetupLightingPass : BurtRenderPass // Uploads request-level lighting data for BurtRP/Lit shaders.
-    {
-        private static readonly int MainLightDirectionId = Shader.PropertyToID("_BurtMainLightDirection"); // Caches the shader property ID for the main light direction.
-
-        private static readonly int MainLightColorId = Shader.PropertyToID("_BurtMainLightColor"); // Caches the shader property ID for the main light color.
-
-        private static readonly int AmbientLightColorId = Shader.PropertyToID("_BurtAmbientLightColor"); // Caches the shader property ID for the ambient light color.
-
+        private static readonly int MainLightDirectionId = Shader.PropertyToID("_BurtMainLightDirection"); // 缓存主光方向属性 ID，避免每帧字符串查找。
+        private static readonly int MainLightColorId = Shader.PropertyToID("_BurtMainLightColor"); // 缓存主光颜色属性 ID，避免每帧字符串查找。
+        private static readonly int AmbientLightColorId = Shader.PropertyToID("_BurtAmbientLightColor"); // 缓存环境光颜色属性 ID，避免每帧字符串查找。
+        private static readonly int MainLightWorldToShadowId = Shader.PropertyToID("_BurtMainLightWorldToShadow"); // 缓存世界到主光阴影空间矩阵属性 ID，用来在无阴影时主动清理旧矩阵。
         private static readonly int MainLightShadowStrengthId = Shader.PropertyToID("_BurtMainLightShadowStrength"); // 缓存主光阴影强度属性 ID，后续 Lit shader 用它决定是否采样 shadow map。
+        private static readonly int MainLightShadowTexelSizeId = Shader.PropertyToID("_BurtMainLightShadowTexelSize"); // 缓存 shadow map texel size 属性 ID，软阴影采样会使用。
+        private static readonly int MainLightShadowSampleBiasId = Shader.PropertyToID("_BurtMainLightShadowSampleBias"); // 缓存接收端采样 bias 属性 ID，避免 shader 内部硬编码。
+        private static readonly int MainLightShadowSoftnessId = Shader.PropertyToID("_BurtMainLightShadowSoftness"); // 缓存软阴影开关属性 ID，让 Light 的 Hard/Soft 设置进入 shader。
 
-        public override string Name => "Burt Setup Lighting"; // Names this pass for RenderGraph debug output and Frame Debugger markers.
+        public override string Name => "Burt Setup Lighting"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
 
-        public override void Configure(BurtRenderPassBuilder builder) // Declares the resources used by this pass.
+        public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
-        } // This pass only uploads global shader constants, so it does not read or write RenderGraph render targets.
+        } // 这个 Pass 只上传全局 shader 常量，不读取或写入 RenderGraph 渲染目标。
 
-        public override void Execute(BurtRenderGraphContext context) // Executes the lighting setup pass.
+        public override void Execute(BurtRenderGraphContext context) // 执行灯光和阴影接收端参数上传。
         {
-            var renderContext = context.ScriptableContext; // Reads Unity's SRP context so this pass can submit the CommandBuffer.
-
-            var request = context.Request; // Reads the current render request so this pass can access precomputed lighting data.
-
-            var lightingData = ResolveLightingData(request); // Gets request-level lighting data or a safe fallback when the request is missing it.
-
-            var mainLightDirection = lightingData.MainLightDirection; // Reads the selected world-space direction toward the main light.
-
-            var mainLightColor = lightingData.MainLightColor; // Reads the selected main light color.
-
-            var ambientLightColor = lightingData.AmbientLightColor; // Reads the ambient light color stored during request creation.
-
-            var mainLightShadowStrength = ResolveMainLightShadowStrength(lightingData); // 读取当前主光阴影强度，没有阴影时返回 0，避免 shader 使用上一帧阴影状态。
-
-            var cmd = CommandBufferPool.Get(Name); // Gets a pooled CommandBuffer named after this pass.
-
-            cmd.SetGlobalVector(MainLightDirectionId, new Vector4(mainLightDirection.x, mainLightDirection.y, mainLightDirection.z, 0f)); // Uploads the normalized world-space direction from the shaded point toward the main light.
-
-            cmd.SetGlobalColor(MainLightColorId, mainLightColor); // Uploads the main light color that BurtRP/Lit multiplies with diffuse lighting.
-
-            cmd.SetGlobalColor(AmbientLightColorId, ambientLightColor); // Uploads the ambient color that BurtRP/Lit adds as a small baseline light.
-
-            cmd.SetGlobalFloat(MainLightShadowStrengthId, mainLightShadowStrength); // 上传主光阴影强度，让后续 Lit shader 可以在 0 时完全跳过阴影影响。
-
-            renderContext.ExecuteCommandBuffer(cmd); // Submits the lighting globals to Unity's render context.
-
-            CommandBufferPool.Release(cmd); // Releases the CommandBuffer back to Unity's pool to avoid per-frame allocations.
+            var renderContext = context.ScriptableContext; // 读取 Unity SRP 上下文，后面用它提交 CommandBuffer。
+            var request = context.Request; // 读取当前渲染请求，后面用它取得预先解析好的灯光数据。
+            var lightingData = ResolveLightingData(request); // 取得 request 级灯光数据；如果 request 异常则返回安全默认值。
+            var shadowData = BurtShadowUtility.ResolveMainLightShadowData(request, context.Asset); // 读取合并 PipelineAsset 后的主光阴影数据，让资产开关和 bias 生效。
+            var mainLightDirection = lightingData.MainLightDirection; // 读取主光世界空间方向。
+            var mainLightColor = lightingData.MainLightColor; // 读取主光颜色。
+            var ambientLightColor = lightingData.AmbientLightColor; // 读取环境光颜色。
+            var mainLightShadowStrength = ResolveMainLightShadowStrength(shadowData); // 读取最终阴影强度，没有阴影或资产关闭时返回 0。
+            var mainLightShadowTexelSize = BurtShadowUtility.CreateMainLightShadowTexelSize(shadowData); // 计算 shadow map texel size，给 receiver 端软阴影采样使用。
+            var mainLightShadowSampleBias = shadowData != null && shadowData.HasMainLightShadow ? shadowData.MainLightShadowSampleBias : 0f; // 只有有阴影时才上传采样 bias。
+            var mainLightShadowSoftness = shadowData != null && shadowData.HasMainLightShadow && shadowData.IsMainLightShadowSoft ? 1f : 0f; // 把主光 Hard/Soft 阴影类型转换为 shader 可读的 0/1。
+            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            cmd.SetGlobalVector(MainLightDirectionId, new Vector4(mainLightDirection.x, mainLightDirection.y, mainLightDirection.z, 0f)); // 上传归一化的主光方向，Lit shader 用它计算 Lambert 漫反射。
+            cmd.SetGlobalColor(MainLightColorId, mainLightColor); // 上传主光颜色，Lit shader 会把它乘到直接光上。
+            cmd.SetGlobalColor(AmbientLightColorId, ambientLightColor); // 上传环境光颜色，Lit shader 会用它保留阴影区域的基础亮度。
+            cmd.SetGlobalMatrix(MainLightWorldToShadowId, Matrix4x4.identity); // 每个 request 开始先清理阴影矩阵，真正绘制阴影成功后 ShadowCaster Pass 会覆盖它。
+            cmd.SetGlobalFloat(MainLightShadowStrengthId, mainLightShadowStrength); // 上传最终阴影强度，0 表示 receiver 完全跳过 shadow map 采样。
+            cmd.SetGlobalVector(MainLightShadowTexelSizeId, mainLightShadowTexelSize); // 上传 shadow map texel size，软阴影采样会根据它偏移邻域 UV。
+            cmd.SetGlobalFloat(MainLightShadowSampleBiasId, mainLightShadowSampleBias); // 上传接收端采样 bias，替代 shader 内的固定 0.001 偏移。
+            cmd.SetGlobalFloat(MainLightShadowSoftnessId, mainLightShadowSoftness); // 上传软阴影开关，Hard 阴影只做中心点比较，Soft 阴影做简单邻域采样。
+            renderContext.ExecuteCommandBuffer(cmd); // 把灯光和阴影全局参数提交给 Unity 渲染上下文。
+            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
         }
 
-        private static BurtLightingData ResolveLightingData(BurtRenderRequest request) // Returns lighting data for the request or creates a fallback object when it is unavailable.
+        private static BurtLightingData ResolveLightingData(BurtRenderRequest request) // 安全读取 request 里的灯光数据。
         {
-            if (request == null) // Checks whether the caller provided a render request.
+            if (request == null) // 如果调用方没有提供 request，就没有可读取的灯光上下文。
             {
-                return BurtLightingData.Default(); // Returns fallback lighting data because there is no request to read from.
+                return BurtLightingData.Default(); // 返回默认灯光数据，保证 shader 仍能收到有效全局变量。
             }
 
-            if (request.LightingData == null) // Checks whether request creation failed to attach lighting data.
+            if (request.LightingData == null) // 如果 request 创建阶段没有附加 LightingData，就使用兜底数据。
             {
-                return BurtLightingData.Default(); // Returns fallback lighting data so shaders still receive valid globals.
+                return BurtLightingData.Default(); // 返回默认灯光数据，避免空引用。
             }
 
-            return request.LightingData; // Returns the lighting data computed during request creation.
+            return request.LightingData; // 返回 request 创建阶段收集好的灯光数据。
         }
 
-        private static float ResolveMainLightShadowStrength(BurtLightingData lightingData) // 定义从灯光数据里安全读取主光阴影强度的辅助函数。
+        private static float ResolveMainLightShadowStrength(BurtShadowData shadowData) // 从合并后的阴影数据中读取最终阴影强度。
         {
-            if (lightingData == null) // 如果灯光数据为空，说明当前 request 没有可用灯光上下文。
+            if (shadowData == null) // 如果没有阴影数据，说明当前 request 无法产生主光阴影。
             {
                 return 0f; // 返回 0 表示关闭阴影，避免 shader 采样无效 shadow map。
             }
 
-            var shadowData = lightingData.ShadowData; // 从灯光数据中读取阴影数据。
-
-            if (shadowData == null) // 如果阴影数据为空，说明当前 request 没有主光阴影信息。
+            if (!shadowData.HasMainLightShadow) // 如果 Light 或 PipelineAsset 关闭了阴影，就不应该产生阴影衰减。
             {
                 return 0f; // 返回 0 表示关闭阴影。
             }
 
-            if (!shadowData.HasMainLightShadow) // 如果主光没有开启有效阴影，shader 不应该产生阴影衰减。
-            {
-                return 0f; // 返回 0 表示关闭阴影。
-            }
-
-            return shadowData.MainLightShadowStrength; // 返回主光阴影强度，让 shader 按灯光 Inspector 的 Shadow Strength 混合阴影。
+            return shadowData.MainLightShadowStrength; // 返回最终阴影强度，让 shader 按 Light 的 Shadow Strength 混合阴影。
         }
     }
 
@@ -819,6 +707,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         private static readonly int DepthDebugScaleId = Shader.PropertyToID("_BurtDepthDebugScale"); // 缓存深度调试缩放属性 ID，避免每帧通过字符串查找。
 
+        private static readonly int DepthDebugYFlipId = Shader.PropertyToID("_BurtDepthDebugYFlip"); // 缓存深度调试 Y 预翻转属性 ID，避免每帧通过字符串查找。
+
         private Material debugDepthMaterial; // 缓存调试深度材质，避免每帧重复创建 Material。
 
         private bool hasLoggedMissingShader; // 记录是否已经输出过缺失 shader 警告，避免 Console 每帧刷屏。
@@ -863,6 +753,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             material.SetFloat(DepthDebugScaleId, depthDebugScale); // 把深度显示缩放传给 shader，用来增强深度灰度对比。
 
+            var depthDebugYFlip = BurtFinalBlitUtility.ResolveFinalBlitYFlip(context.Request); // 复用最终输出的翻转规则，因为深度调试图写进 CameraColor 后还会经过 FinalBlit。
+
+            material.SetFloat(DepthDebugYFlipId, depthDebugYFlip); // 把预翻转开关传给深度调试 shader，防止最终屏幕里的调试图上下颠倒。
+
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier); // 只绑定 CameraColor，因为这个全屏调试 Pass 不需要写入深度。
@@ -905,13 +799,120 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         }
     }
 
+    internal sealed class BurtDebugMainLightShadowMapPass : BurtRenderPass // 定义主光 shadow map 调试 Pass，负责把阴影图画到 CameraColor。
+    {
+        private const string DebugShadowShaderName = "Hidden/BurtRP/DebugMainLightShadowMap"; // 定义调试 shadow map shader 的查找名称，必须和 shader 文件里的名称一致。
+        private static readonly int ShadowDebugExposureId = Shader.PropertyToID("_BurtMainLightShadowDebugExposure"); // 缓存调试曝光属性 ID，避免每帧字符串查找。
+        private static readonly int ShadowDebugYFlipId = Shader.PropertyToID("_BurtMainLightShadowDebugYFlip"); // Caches the debug Y pre-flip property so the pass does not search this shader name every frame.
+        private Material debugShadowMaterial; // 缓存运行时调试材质，避免每帧重复创建 Material。
+        private bool hasLoggedMissingShader; // 记录是否已经输出过缺失 shader 警告，避免 Console 每帧刷屏。
+        public override string Name => "Burt Debug Main Light Shadow Map"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
+
+        public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
+        {
+            if (!BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset)) // 如果当前 request 没有有效主光阴影，就不声明 shadow map 依赖。
+            {
+                return; // 直接结束资源声明，避免 Debug 输出无效资源依赖。
+            }
+
+            if (builder.Asset == null || !builder.Asset.EnableMainLightShadowDebugView) // 如果资产没有开启 shadow map 调试视图，就不声明覆盖 CameraColor。
+            {
+                return; // 直接结束资源声明，保持正常渲染图干净。
+            }
+
+            builder.ReadMainLightShadowMap(); // 声明这个 Pass 会读取主光 shadow map。
+            builder.WriteCameraColor(); // 声明这个 Pass 会把调试结果写回最终 CameraColor。
+        }
+
+        public override void Execute(BurtRenderGraphContext context) // 执行主光 shadow map 可视化。
+        {
+            var renderContext = context.ScriptableContext; // 从 GraphContext 中取出 Unity SRP 渲染上下文。
+            var request = context.Request; // 从 GraphContext 中取出当前渲染请求，用来再次判断阴影是否有效。
+            if (!BurtShadowUtility.ShouldUseMainLightShadow(request, context.Asset)) // 如果执行阶段发现阴影已无效，就跳过调试绘制。
+            {
+                return; // 直接结束，避免读取未申请的 shadow map。
+            }
+
+            var cameraColorTarget = context.CameraColorTarget; // 读取 CameraColor 目标，调试图会覆盖到这里。
+            var shadowMapTarget = context.MainLightShadowMapTarget; // 读取 MainLightShadowMap 目标，调试 shader 会采样它。
+            if (!cameraColorTarget.IsValid || !shadowMapTarget.IsValid) // 如果颜色目标或 shadow map 无效，就无法显示调试图。
+            {
+                return; // 直接结束，避免绑定或采样无效资源。
+            }
+
+            var material = GetDebugShadowMaterial(); // 获取或创建 shadow map 调试材质。
+            if (material == null) // 如果材质创建失败，说明 shader 没找到或导入失败。
+            {
+                return; // 直接结束，避免提交无效绘制命令。
+            }
+
+            var exposure = context.Asset != null ? context.Asset.MainLightShadowDebugExposure : 1f; // 从资产读取调试曝光，资产缺失时使用默认 1。
+            material.SetFloat(ShadowDebugExposureId, exposure); // 把曝光倍率传给 shader，便于放大或压暗 shadow map 深度显示。
+            var debugYFlip = ResolveMainLightShadowDebugYFlip(context.Request, context.Asset); // 解析主光 shadow map 调试图最终要传给 shader 的 Y 翻转开关。
+            material.SetFloat(ShadowDebugYFlipId, debugYFlip); // 把解析后的 Y 翻转开关传给调试 shader，让 shader 只负责执行一次采样方向修正。
+            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            cmd.SetRenderTarget(cameraColorTarget.Identifier); // 绑定 CameraColor 作为绘制目标，因为调试视图只覆盖颜色不写深度。
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.MainLightShadowMapId, shadowMapTarget.Identifier); // 确保 shader 采样的是当前 request 的主光 shadow map。
+            cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，让 shader 把 shadow map 转成灰度图。
+            renderContext.ExecuteCommandBuffer(cmd); // 提交调试绘制命令给 ScriptableRenderContext。
+            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+        }
+
+        private static float ResolveMainLightShadowDebugYFlip(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 根据资产配置和最终输出规则解析 shadow map 调试图的 Y 翻转值。
+        {
+            var finalBlitYFlip = BurtFinalBlitUtility.ResolveFinalBlitYFlip(request); // 先取得 CameraColor 输出到最终目标时是否会翻转，这是所有调试图都必须考虑的最后一步。
+
+            var yFlipMode = asset != null ? asset.MainLightShadowDebugYFlipMode : BurtShadowDebugYFlipMode.MatchFinalBlit; // 如果资产存在就读取 Inspector 模式，资产缺失时使用默认模式。
+
+            if (yFlipMode == BurtShadowDebugYFlipMode.InvertFinalBlit) // 如果选择反向 FinalBlit 模式，就把默认结果取反。
+            {
+                return finalBlitYFlip > 0.5f ? 0f : 1f; // FinalBlit 会翻时这里不翻，FinalBlit 不翻时这里翻。
+            }
+
+            if (yFlipMode == BurtShadowDebugYFlipMode.ForceNoFlip) // 如果选择强制不翻转，就忽略相机窗口和平台差异。
+            {
+                return 0f; // 返回 0 表示 shader 直接使用原始 shadow map UV。
+            }
+
+            if (yFlipMode == BurtShadowDebugYFlipMode.ForceFlip) // 如果选择强制翻转，就忽略相机窗口和平台差异。
+            {
+                return 1f; // 返回 1 表示 shader 使用 1 - uv.y 采样 shadow map。
+            }
+
+            return finalBlitYFlip; // 默认和 Depth Debug 一样复用 FinalBlit 预翻转规则，保持调试图链路一致。
+        }
+
+        private Material GetDebugShadowMaterial() // 获取或创建 shadow map 调试材质。
+        {
+            if (debugShadowMaterial != null) // 如果之前已经创建过材质，就直接复用。
+            {
+                return debugShadowMaterial; // 返回缓存材质。
+            }
+
+            var shader = Shader.Find(DebugShadowShaderName); // 按名称查找 shadow map 调试 shader。
+            if (shader == null) // 如果 shader 查找失败，说明 shader 文件未导入或名称不一致。
+            {
+                if (!hasLoggedMissingShader) // 如果还没有输出过警告，就输出一次。
+                {
+                    Debug.LogWarning("BurtRP could not find shader: " + DebugShadowShaderName); // 输出缺失 shader 警告，方便定位资源问题。
+                    hasLoggedMissingShader = true; // 标记已经输出过警告，避免每帧刷屏。
+                }
+                return null; // 返回空材质，调用方会跳过这个 Pass。
+            }
+
+            debugShadowMaterial = new Material(shader); // 使用查找到的 shader 创建运行时材质。
+            debugShadowMaterial.hideFlags = HideFlags.HideAndDontSave; // 隐藏运行时材质并避免它被保存到场景或资产中。
+            return debugShadowMaterial; // 返回缓存好的调试材质。
+        }
+    }
+
     internal sealed class BurtReleaseMainLightShadowMapPass : BurtRenderPass // 定义主光阴影图释放 Pass，负责在当前 request 结束时释放 shadow map 临时 RT。
     {
         public override string Name => "Burt Release Main Light Shadow Map"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
-            if (!BurtShadowUtility.ShouldUseMainLightShadow(builder.Request)) // 如果当前 request 没有主光阴影，就不声明阴影图读取。
+            if (!BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset)) // 如果当前 request 没有主光阴影，就不声明阴影图读取。
             {
                 return; // 直接结束资源声明，避免 Debug 输出无效的 MainLightShadowMap 依赖。
             }
@@ -925,7 +926,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             var request = context.Request; // 从 GraphContext 中取出当前渲染请求。
 
-            if (!BurtShadowUtility.ShouldUseMainLightShadow(request)) // 如果当前 request 不需要主光阴影，就不释放阴影图。
+            if (!BurtShadowUtility.ShouldUseMainLightShadow(request, context.Asset)) // 如果当前 request 不需要主光阴影，就不释放阴影图。
             {
                 return; // 直接结束这个 Pass，避免释放一个没有申请过的临时 RT。
             }
@@ -947,33 +948,4 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         }
     }
 
-    internal sealed class BurtReleaseCameraDepthPass : BurtRenderPass // 定义 CameraDepth 释放 Pass，负责在当前 request 渲染结束后释放临时深度 RT。
-    {
-        public override string Name => "Burt Release Camera Depth"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
-
-        public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
-        {
-            builder.ReadCameraDepth(); // 声明这个 Pass 依赖 CameraDepth，表示它要结束这个深度资源的生命周期。
-        }
-
-        public override void Execute(BurtRenderGraphContext context) // 实现 CameraDepth 释放 Pass 的执行函数。
-        {
-            var renderContext = context.ScriptableContext; // 从 GraphContext 中取出 Unity SRP 渲染上下文。
-
-            var cameraDepthTarget = context.CameraDepthTarget; // 从 GraphContext 中取出 CameraDepth 资源句柄。
-
-            if (!cameraDepthTarget.IsValid) // 如果 CameraDepth 句柄无效，说明当前图没有申请过这个资源。
-            {
-                return; // 直接结束这个 Pass，避免释放不存在的临时 RT。
-            }
-
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
-
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.CameraDepthTextureId); // 释放前面申请的 CameraDepth 临时 RT，避免资源泄漏。
-
-            renderContext.ExecuteCommandBuffer(cmd); // 把释放 RT 的命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
-        }
-    }
 }

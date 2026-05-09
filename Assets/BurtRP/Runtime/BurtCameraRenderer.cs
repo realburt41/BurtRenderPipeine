@@ -36,7 +36,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             renderGraph.Clear(); // 清空上一次 request 留下的 Pass 和资源，准备组装当前 request 的图。
 
-            renderGraph.ImportRequestResources(request); // 把 request 的基础渲染目标导入 RenderGraph 资源表，例如 CameraColor。
+            renderGraph.ImportRequestResources(request, asset); // 把 request 的基础渲染目标导入 RenderGraph 资源表，并让资源注册使用当前管线资产配置。
 
             request.GraphAssembler.Assemble(renderGraph, request, asset); // 让当前 request 指定的 Assembler 把 Pass 添加到 RenderGraph。
 

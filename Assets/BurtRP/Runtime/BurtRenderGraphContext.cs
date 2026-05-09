@@ -25,6 +25,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle FinalCameraTarget // 定义读取最终相机输出目标的快捷属性，方便 FinalBlit 不直接操作资源名。
+        {
+            get // 定义属性 getter，每次访问时从资源注册表读取最新的 FinalCameraTarget。
+            {
+                if (ResourceRegistry == null) // 如果资源注册表为空，说明当前上下文没有可用资源表。
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FinalCameraTargetName); // 返回无效最终目标句柄，避免 FinalBlit 绑定错误输出。
+                }
+
+                return ResourceRegistry.GetFinalCameraTarget(); // 从资源注册表读取最终相机输出目标句柄。
+            }
+        }
+
         public BurtRenderTargetHandle CameraDepthTarget // 定义读取 CameraDepth 的快捷属性，方便 Pass 不直接操作资源名。
         {
             get // 定义属性 getter，每次访问时从资源注册表读取最新的 CameraDepth。

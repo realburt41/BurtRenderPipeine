@@ -6,7 +6,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 {
     public sealed class BurtRenderGraphResourceRegistry // 定义 RenderGraph 资源注册表，用来集中保存当前图可访问的渲染资源。
     {
-        public const string CameraColorName = "CameraColor"; // 定义相机颜色目标的统一资源名，避免不同地方手写字符串出错。
+        public const string CameraColorName = "CameraColor"; // 定义 BurtRP 中间相机颜色目标的统一资源名，后续所有场景绘制都先写到这个临时颜色 RT。
+
+        public const string IntermediateCameraColorName = CameraColorName; // 给中间颜色 RT 提供更直观的别名，方便后续代码表达“先渲染到中间目标”的语义。
+
+        public const string FinalCameraTargetName = "FinalCameraTarget"; // 定义最终相机输出目标的统一资源名，用来保存 request.TargetIdentifier 指向的 backbuffer 或 targetTexture。
+
+        public const string CameraColorTextureShaderName = "_BurtCameraColorTexture"; // 定义中间颜色 RT 暴露给 shader 的全局纹理名称，FinalBlit 会通过它采样相机颜色。
+
+        public static readonly int CameraColorTextureId = Shader.PropertyToID(CameraColorTextureShaderName); // 把中间颜色 RT 的 shader 名称转换成整数 ID，保证申请、绑定、释放都使用同一个临时 RT。
 
         public const string CameraDepthName = "CameraDepth"; // 定义相机深度目标的统一资源名，后续 DepthPrepass、透明排序和后处理会依赖它。
 
@@ -66,6 +74,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetCameraColor() // 定义读取 CameraColor 的快捷函数。
         {
             return GetRenderTarget(CameraColorName); // 使用统一名称从资源表读取相机颜色目标。
+        }
+
+        public BurtRenderTargetHandle RegisterCameraColorTexture() // 定义注册 BurtRP 自己创建的 CameraColor 临时颜色 RT 的快捷函数。
+        {
+            return RegisterCameraColor(new RenderTargetIdentifier(CameraColorTextureId)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 CameraColor 中间目标。
+        }
+
+        public BurtRenderTargetHandle RegisterFinalCameraTarget(RenderTargetIdentifier identifier) // 定义注册最终相机输出目标的快捷函数。
+        {
+            return RegisterRenderTarget(FinalCameraTargetName, identifier); // 使用统一名称把 request.TargetIdentifier 保存为 FinalCameraTarget，避免它再被误当成 CameraColor。
+        }
+
+        public BurtRenderTargetHandle GetFinalCameraTarget() // 定义读取最终相机输出目标的快捷函数。
+        {
+            return GetRenderTarget(FinalCameraTargetName); // 使用统一名称从资源表读取 backbuffer 或相机 targetTexture。
         }
 
         public BurtRenderTargetHandle RegisterCameraDepthTexture() // 定义注册 BurtRP 自己创建的 CameraDepth 临时 RT 的快捷函数。

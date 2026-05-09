@@ -19,9 +19,9 @@ namespace Burt.RenderPipeline
         // 创建单相机渲染器。
         private readonly BurtCameraRenderer cameraRenderer = new();
 
-        private readonly BurtRenderGraphAssembler defaultGraphAssembler = new BurtForwardGraphAssembler(); // 创建默认 Forward 组装器，当前阶段所有普通 request 都先使用它。RenderCameras 
+        private readonly BurtRenderGraphAssembler defaultGraphAssembler = new BurtForwardGraphAssembler(); // 创建默认 Forward 组装器，当前阶段所有普通 request 都先使用它。RenderCameras
         private readonly List<BurtRenderRequest> requests = new();
-        
+
         // BurtRenderPipeline 构造函数。
         public BurtRenderPipeline(BurtRenderPipelineAsset asset)
         {
@@ -49,7 +49,7 @@ namespace Burt.RenderPipeline
             // 执行共享的渲染逻辑。
             RenderCameras(context, cameras);
         }
-        
+
         private void RenderCameras(ScriptableRenderContext context, Camera[] cameras)
         {
             // 清空上一帧的 request 列表。
@@ -59,7 +59,7 @@ namespace Burt.RenderPipeline
             foreach (var camera in cameras)
             {
                 // 从当前相机创建 BurtRenderRequest。
-                var request = BurtRenderRequest.CreateCameraRequest(context, camera);
+                var request = BurtRenderRequest.CreateCameraRequest(context, camera, asset);
 
                 // 如果 request 无效，就不加入列表。
                 if (!request.IsValid)
@@ -69,7 +69,7 @@ namespace Burt.RenderPipeline
                 }
 
                 request.SetGraphAssembler(defaultGraphAssembler); // 给当前 request 指定默认的 Forward 渲染图组装器。
-                
+
                 // 把有效 request 加入列表。
                 requests.Add(request);
             }
@@ -88,7 +88,7 @@ namespace Burt.RenderPipeline
             foreach (var camera in cameras)
             {
                 // 从当前相机创建 BurtRenderRequest。
-                var request = BurtRenderRequest.CreateCameraRequest(context, camera);
+                var request = BurtRenderRequest.CreateCameraRequest(context, camera, asset);
 
                 // 如果 request 无效，就不加入列表。
                 if (!request.IsValid)
@@ -98,7 +98,7 @@ namespace Burt.RenderPipeline
                 }
 
                 request.SetGraphAssembler(defaultGraphAssembler); // 给当前 request 指定默认的 Forward 渲染图组装器。
-                
+
                 // 把有效 request 加入列表。
                 requests.Add(request);
             }
@@ -106,32 +106,39 @@ namespace Burt.RenderPipeline
             // 执行所有 request。
             ExecuteRequests(context);
         }
-        
+
         // 排序并执行所有 BurtRenderRequest。
         private void ExecuteRequests(ScriptableRenderContext context)
         {
-            // 按 request 的 SortLayer 从小到大排序。
-            requests.Sort(CompareRequests);
+            // 按 request 的 SortLayer 从小到大排序，比较规则集中放在 BurtCameraSortUtility 里维护。
+            requests.Sort(BurtCameraSortUtility.CompareRequests);
+
+            // 如果资产上打开了相机排序日志，就在真正执行渲染前输出当前帧的排序快照。
+            if (asset != null && asset.EnableCameraSortDebugLog)
+            {
+                // 把已经排序完成的 request 列表交给调试工具，确保日志顺序和实际执行顺序一致。
+                BurtCameraDebugUtility.LogSortedRequests(requests);
+            }
 
             foreach (var request in requests) // 遍历排序后的每一个渲染请求。
             {
                 // 开始单个 request 的处理逻辑。
                 if (request == null) // 如果 request 对象为空，说明列表里有异常数据。
                 {
-                    continue; 
-                } 
+                    continue;
+                }
 
                 if (!request.IsValid) // 如果 request 被标记为无效，说明它不应该参与渲染。
                 {
-                    continue; 
-                } 
+                    continue;
+                }
 
                 var camera = request.Camera; // 从 request 里取出这次渲染任务对应的 Unity 原生 Camera。
 
                 if (camera == null) // 如果 request 没有关联相机，当前阶段 BurtRP 暂时无法执行它。
                 {
                     continue; // 跳过这个没有相机的 request。
-                } 
+                }
 
                 BeginCameraRendering(context, camera); // 通知 Unity 和外部监听者：这个相机开始渲染。
 
@@ -148,61 +155,5 @@ namespace Burt.RenderPipeline
             }
         }
 
-        // request 排序比较函数。
-        private static int CompareRequests(BurtRenderRequest left, BurtRenderRequest right)
-        {
-            // 如果左侧 request 为空，则排到后面。
-            if (left == null)
-            {
-                // 返回 1 表示 left 在 right 后面。
-                return 1;
-            }
-
-            // 如果右侧 request 为空，则排到后面。
-            if (right == null)
-            {
-                // 返回 -1 表示 left 在 right 前面。
-                return -1;
-            }
-
-            // 先比较 SortLayer。
-            var sortCompare = left.SortLayer.CompareTo(right.SortLayer);
-
-            // 如果 SortLayer 不同，就直接返回比较结果。
-            if (sortCompare != 0)
-            {
-                // 返回 SortLayer 比较结果。
-                return sortCompare;
-            }
-
-            // 如果其中一个 request 没有相机，就用 0 作为实例 ID。
-            var leftId = left.Camera != null ? left.Camera.GetInstanceID() : 0;
-
-            // 如果其中一个 request 没有相机，就用 0 作为实例 ID。
-            var rightId = right.Camera != null ? right.Camera.GetInstanceID() : 0;
-
-            // SortLayer 相同时，用 Camera 实例 ID 做稳定排序。
-            return leftId.CompareTo(rightId);
-        }
-        // 读取相机上的 BurtCameraData.RenderOrder。
-        private static int GetCameraRenderOrder(Camera camera)
-        {
-            // 如果相机为空，就返回默认顺序 0。
-            if (camera == null)
-            {
-                // 返回默认渲染顺序。
-                return 0;
-            }
-
-            // 尝试从相机 GameObject 上获取 BurtCameraData。
-            if (camera.TryGetComponent(out BurtCameraData cameraData))
-            {
-                // 如果获取成功，就返回 BurtCameraData 里的渲染顺序。
-                return cameraData.RenderOrder;
-            }
-
-            // 如果没有 BurtCameraData，就返回默认顺序 0。
-            return 0;
-        }
     }
 }

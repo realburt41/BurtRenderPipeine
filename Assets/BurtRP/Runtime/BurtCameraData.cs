@@ -38,7 +38,7 @@ namespace Burt.RenderPipeline
         // 控制这个相机在多相机情况下的渲染顺序，数值越小越先渲染。
         [SerializeField] private int renderOrder = 0;
 
-        // 控制是否把 BurtRP 的 renderOrder 自动同步到 Unity 原生 Camera.depth。
+        // 控制是否把 BurtRP 的 renderOrder 自动同步到 Unity 原生 Camera.depth；这只是为了让 Unity 原生相机面板和外部工具看到一致深度，不作为 BurtRP 排序的唯一来源。
         [SerializeField] private bool syncRenderOrderToCameraDepth = true;
 
         // 控制这个相机渲染前如何清理颜色和深度缓冲。
@@ -56,7 +56,7 @@ namespace Burt.RenderPipeline
         // 暴露只读属性，让渲染器可以读取 enableRender，但外部不能随意改字段。
         public bool EnableRender => enableRender;
 
-        // 暴露只读属性，让渲染器可以读取 renderOrder，用于相机排序。
+        // 暴露只读属性，让渲染器可以在每帧创建 request 时直接读取 renderOrder，用于 BurtRP 自己的相机排序。
         public int RenderOrder => renderOrder;
 
         // 暴露只读属性，让渲染器可以读取 clearMode，用于决定清屏策略。
@@ -88,7 +88,7 @@ namespace Burt.RenderPipeline
         // Unity 每帧调用这个函数；因为有 ExecuteAlways，编辑器非播放状态也可能调用。
         private void Update()
         {
-            // 每帧检查 renderOrder 是否变化，变化时同步到 Camera.depth。
+            // 每帧检查 renderOrder 是否变化，变化时同步到 Camera.depth；BurtRP 排序仍然会在创建 request 时直接读取 RenderOrder。
             SyncRenderOrderToCameraDepth(forceSync: false);
         }
 
@@ -106,7 +106,7 @@ namespace Burt.RenderPipeline
             cachedCamera = GetComponent<Camera>();
         }
 
-        // 把 BurtRP 的 renderOrder 同步到 Unity 原生 Camera.depth。
+        // 把 BurtRP 的 renderOrder 同步到 Unity 原生 Camera.depth；这个函数只负责对齐 Unity 原生字段，排序权威来源在 BurtCameraSortUtility.ResolveSortLayer。
         private void SyncRenderOrderToCameraDepth(bool forceSync)
         {
             // 如果用户不希望同步到 Camera.depth，就直接跳过。

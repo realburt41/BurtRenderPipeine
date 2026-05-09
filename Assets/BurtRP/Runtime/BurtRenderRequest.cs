@@ -41,7 +41,7 @@ namespace Burt.RenderPipeline
         public BurtLightingData LightingData { get; private set; } // Stores lighting data collected for this render request, so passes do not choose lights themselves.
         // 保存当前请求最终要输出到哪个渲染目标。
         public RenderTargetIdentifier TargetIdentifier { get; private set; }
-        
+
         // 保存当前请求的排序层，后续多个 request 会按它排序。
         public int SortLayer { get; private set; }
 
@@ -49,12 +49,12 @@ namespace Burt.RenderPipeline
         public bool IsValid { get; private set; }
 
         public BurtRenderGraphAssembler GraphAssembler { get; private set; } // 保存当前 request 应该使用哪一个渲染图组装器。
-        
+
         public void SetGraphAssembler(BurtRenderGraphAssembler graphAssembler) // 给当前 request 设置渲染图组装器。
         {
             GraphAssembler = graphAssembler; // 保存传入的组装器引用，后面 BurtCameraRenderer 会通过它拿到 Pass 列表。
         }
-        
+
         // 创建一个无效请求，作为失败时的返回值。
         public static BurtRenderRequest Invalid()
         {
@@ -75,7 +75,8 @@ namespace Burt.RenderPipeline
 
         public static BurtRenderRequest CreateCameraRequest(
             ScriptableRenderContext context,
-            Camera camera)
+            Camera camera,
+            BurtRenderPipelineAsset asset)
         {
             // 如果相机为空，直接返回无效请求。
             if (camera == null)
@@ -86,30 +87,33 @@ namespace Burt.RenderPipeline
 
             // 尝试从相机上读取 BurtCameraData。
             camera.TryGetComponent(out BurtCameraData cameraData);
-            
+
             // 如果相机挂了 BurtCameraData 并且禁用渲染，就返回无效请求。
             if (cameraData != null && !cameraData.EnableRender)
             {
                 // 返回无效请求。
                 return Invalid();
             }
-            
+
             // 尝试从相机获取剔除参数。
             if (!camera.TryGetCullingParameters(out var cullingParameters))
             {
                 // 如果获取失败，就返回无效请求。
                 return Invalid();
             }
-            
+
+            // 在 Cull 前写入阴影剔除距离，否则 Unity 可能不会为 DrawShadows 收集可投影物体。
+            ApplyShadowCullingParameters(ref cullingParameters, camera, asset);
+
             // 使用 Unity 内置剔除系统得到当前相机可见物体。
             var cullingResults = context.Cull(ref cullingParameters);
 
             // 创建一个新的请求对象。
             var request = new BurtRenderRequest();
-            
-            // 记录请求类型。
-            request.Type = ResolveRequestType(camera, cameraData);
-            
+
+            // 记录请求类型，并把相机分类规则集中交给 BurtCameraUtility，避免 request 类继续膨胀。
+            request.Type = BurtCameraUtility.ResolveRequestType(camera, cameraData);
+
             // 记录原生相机。
             request.Camera = camera;
 
@@ -123,9 +127,9 @@ namespace Burt.RenderPipeline
             request.LightingData = BurtLightingData.Create(cullingResults); // Builds request-level lighting data from the same culling results used for drawing.
             // 记录输出目标。
             request.TargetIdentifier = ResolveTargetIdentifier(camera);
-            
-            // 记录排序层。
-            request.SortLayer = ResolveSortLayer(camera, cameraData);
+
+            // 每帧创建 request 时都重新读取 BurtCameraData.RenderOrder 或 Camera.depth，避免排序结果只在相机启用/禁用时才刷新。
+            request.SortLayer = BurtCameraSortUtility.ResolveSortLayer(camera, cameraData);
 
             // 标记请求有效。
             request.IsValid = true;
@@ -133,21 +137,28 @@ namespace Burt.RenderPipeline
             // 返回创建好的请求。
             return request;
         }
-        
-        // 根据相机和相机数据推导请求类型。
-        private static BurtRenderRequestType ResolveRequestType(Camera camera, BurtCameraData cameraData)
+
+        private static void ApplyShadowCullingParameters( // 定义阴影剔除参数写入函数，专门在 Unity Cull 前调整 shadowDistance。
+            ref ScriptableCullingParameters cullingParameters, // 接收 Unity 即将用于 Cull 的参数引用，函数会直接修改其中的 shadowDistance。
+            Camera camera, // 接收当前相机，用来限制阴影距离不能超过相机远裁剪面。
+            BurtRenderPipelineAsset asset) // 接收当前管线资产，用来读取主光阴影距离和总开关。
         {
-            // 如果是预览相机，就返回 Preview 类型。
-            if (camera.cameraType == CameraType.Preview)
+            var shadowDistance = BurtShadowData.DefaultMainLightShadowDistance; // 先使用 BurtRP 默认阴影距离，保证 asset 缺失时也能收集基础阴影 caster。
+
+            if (asset != null) // 如果当前有管线资产，就优先使用资产上的阴影设置。
             {
-                // 返回预览请求类型。
-                return BurtRenderRequestType.Preview;
+                shadowDistance = asset.EnableMainLightShadows ? asset.MainLightShadowDistance : 0f; // 资产关闭主光阴影时把 shadowDistance 清零，避免 Unity 做无意义阴影剔除。
             }
 
-            // 当前阶段还没有 UI 相机规则，所以默认都作为主相机请求。
-            return BurtRenderRequestType.MainCamera;
+            if (camera != null) // 如果相机有效，就用相机远裁剪面限制阴影距离。
+            {
+                shadowDistance = Mathf.Min(shadowDistance, camera.farClipPlane); // 阴影距离不能超过相机能看到的最远范围，避免扩大无效阴影剔除。
+            }
+
+            cullingParameters.shadowDistance = Mathf.Max(0f, shadowDistance); // 把最终非负距离写入 Unity culling 参数，让 DrawShadows 拿到正确的投影物集合。
         }
-        
+
+
         // 根据相机推导输出目标。
         private static RenderTargetIdentifier ResolveTargetIdentifier(Camera camera)
         {
@@ -161,19 +172,6 @@ namespace Burt.RenderPipeline
             // 如果没有 targetTexture，就输出到当前 CameraTarget，也就是 GameView/backbuffer。
             return new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget);
         }
-        
-        // 根据相机和相机数据推导排序层。
-        private static int ResolveSortLayer(Camera camera, BurtCameraData cameraData)
-        {
-            // 如果存在 BurtCameraData，就使用它的 RenderOrder 作为排序层。
-            if (cameraData != null)
-            {
-                // 返回 BurtCameraData 上配置的渲染顺序。
-                return cameraData.RenderOrder;
-            }
 
-            // 如果没有 BurtCameraData，就用 Unity 原生 Camera.depth 作为排序层。
-            return Mathf.RoundToInt(camera.depth);
-        }
     }
 }

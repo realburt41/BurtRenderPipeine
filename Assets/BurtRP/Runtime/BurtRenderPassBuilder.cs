@@ -55,6 +55,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.CameraColorName); // 使用统一资源名声明写入 CameraColor。
         }
 
+        public BurtRenderTargetHandle ReadFinalCameraTarget() // 定义声明读取最终相机输出目标的快捷函数。
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.FinalCameraTargetName); // 使用统一资源名声明读取 FinalCameraTarget。
+        }
+
+        public BurtRenderTargetHandle WriteFinalCameraTarget() // 定义声明写入最终相机输出目标的快捷函数。
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.FinalCameraTargetName); // 使用统一资源名声明写入 FinalCameraTarget。
+        }
+
         public BurtRenderTargetHandle ReadCameraDepth() // 定义声明读取 CameraDepth 的快捷函数。
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.CameraDepthName); // 使用统一资源名声明读取 CameraDepth。

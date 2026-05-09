@@ -4,6 +4,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 {
     public sealed class BurtForwardGraphAssembler : BurtRenderGraphAssembler // 定义 BurtRP 的前向渲染图组装器，负责决定普通相机要执行哪些 Pass。
     {
+        private readonly BurtRenderPass allocateCameraColorPass = new BurtAllocateCameraColorPass(); // 创建 CameraColor 分配 Pass，用来为当前相机申请 BurtRP 自己管理的中间颜色 RT。
+
         private readonly BurtRenderPass allocateCameraDepthPass = new BurtAllocateCameraDepthPass(); // 创建 CameraDepth 分配 Pass，用来为当前相机申请独立深度 RT。
 
         private readonly BurtRenderPass allocateMainLightShadowMapPass = new BurtAllocateMainLightShadowMapPass(); // 创建主光阴影图分配 Pass，用来为开启阴影的主光申请 shadow map。
@@ -27,10 +29,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
         private readonly BurtRenderPass drawTransparentPass = new BurtDrawTransparentPass(); // 创建透明物体绘制 Pass，并在整个管线生命周期内复用它。
 
         private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // Reuses the pass that renders unsupported shaders with an obvious error material.
-        private readonly BurtRenderPass debugCameraDepthPass = new BurtDebugCameraDepthPass(); // 创建 CameraDepth 调试 Pass，用来把深度纹理画到最终颜色目标上。
+        private readonly BurtRenderPass debugCameraDepthPass = new BurtDebugCameraDepthPass(); // 创建 CameraDepth 调试 Pass，用来把深度纹理画到中间颜色目标上。
+
+        private readonly BurtRenderPass debugMainLightShadowMapPass = new BurtDebugMainLightShadowMapPass(); // 创建主光 shadow map 调试 Pass，用来检查阴影图是否写入了内容。
+
+        private readonly BurtRenderPass finalBlitPass = new BurtFinalBlitPass(); // 创建最终拷贝 Pass，用来把中间 CameraColor 输出到 request 指定的最终目标。
 
         private readonly BurtRenderPass releaseMainLightShadowMapPass = new BurtReleaseMainLightShadowMapPass(); // 创建主光阴影图释放 Pass，用来在当前相机渲染结束后释放 shadow map 临时 RT。
 
+
+        private readonly BurtRenderPass releaseCameraColorPass = new BurtReleaseCameraColorPass(); // 创建 CameraColor 释放 Pass，用来在 FinalBlit 完成后释放临时颜色 RT。
 
         private readonly BurtRenderPass releaseCameraDepthPass = new BurtReleaseCameraDepthPass(); // 创建 CameraDepth 释放 Pass，用来在当前相机渲染结束后释放临时深度 RT。
 
@@ -61,9 +69,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 return; // 直接结束组装。
             }
 
-            graph.AddPass(allocateCameraDepthPass); // 先把 CameraDepth 分配 Pass 添加到 RenderGraph，保证后续绑定深度目标时 RT 已经存在。
+            var useMainLightShadow = BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 合并 Light 与 PipelineAsset 设置后判断本相机是否需要主光阴影。
 
-            if (BurtShadowUtility.ShouldUseMainLightShadow(request)) // 如果当前 request 的主光需要阴影，就把 shadow map 生命周期加入图里。
+            var mainLightShadowMapIsValid = graph.Resources.GetMainLightShadowMap().IsValid; // 读取 RenderGraph 中 MainLightShadowMap 句柄是否有效，诊断资源注册是否符合阴影决策。
+
+            BurtShadowUtility.LogMainLightShadowDiagnostics(request, asset, useMainLightShadow, mainLightShadowMapIsValid); // 在阴影启用决策完成后输出一次受资产开关控制的结构化诊断日志。
+
+            graph.AddPass(allocateCameraColorPass); // 先把 CameraColor 分配 Pass 添加到 RenderGraph，保证后续场景绘制写入 BurtRP 管理的中间颜色 RT。
+
+            graph.AddPass(allocateCameraDepthPass); // 再把 CameraDepth 分配 Pass 添加到 RenderGraph，保证后续绑定深度目标时 RT 已经存在。
+
+            graph.AddPass(setupLightingPass); // 在阴影 Pass 前上传灯光和阴影默认全局参数，避免上一帧或上一相机的阴影状态残留。
+
+            if (useMainLightShadow) // 如果当前 request 的主光需要阴影，就把 shadow map 生命周期加入图里。
             {
                 graph.AddPass(allocateMainLightShadowMapPass); // 在相机颜色目标绑定前申请主光阴影图，后续 ShadowCaster Pass 会先写它。
                 graph.AddPass(drawMainLightShadowCasterPass); // 立刻绘制主光 ShadowCaster，把阴影深度写进刚申请的 MainLightShadowMap。
@@ -74,8 +92,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
             graph.AddPass(clearRenderTargetPass); // 把清屏 Pass 添加到 RenderGraph，保证颜色和深度状态可控。
 
-
-            graph.AddPass(setupLightingPass); // Uploads main light and ambient light globals before depth and color drawing use them.
             if (ShouldUseDepthPrepass(asset)) // 如果管线资产允许 Depth Prepass，就把深度预写阶段加入图中。
             {
                 graph.AddPass(depthPrepass); // 把深度预写 Pass 添加到 RenderGraph，让不透明物体先写入 CameraDepth。
@@ -97,10 +113,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 graph.AddPass(debugCameraDepthPass); // 把 CameraDepth 调试 Pass 添加到 RenderGraph，让它读取深度并覆盖 CameraColor。
             }
 
-            if (BurtShadowUtility.ShouldUseMainLightShadow(request)) // 如果当前 request 申请过主光阴影图，就在相机渲染结束前释放它。
+            if (ShouldUseMainLightShadowDebugView(asset, useMainLightShadow)) // 如果资产开启了主光阴影调试视图，并且当前相机真的生成了 shadow map。
+            {
+                graph.AddPass(debugMainLightShadowMapPass); // 把主光 shadow map 调试 Pass 添加到 RenderGraph，方便直接检查阴影图内容。
+            }
+
+            graph.AddPass(finalBlitPass); // 把中间 CameraColor 拷贝到 request.TargetIdentifier，完成 BurtRP 内部 RT 到最终输出目标的交接。
+
+            if (useMainLightShadow) // 如果当前 request 申请过主光阴影图，就在相机渲染结束前释放它。
             {
                 graph.AddPass(releaseMainLightShadowMapPass); // 释放主光阴影图临时 RT，确保阴影资源生命周期被 RenderGraph 明确管理。
             }
+
+            graph.AddPass(releaseCameraColorPass); // 在 FinalBlit 之后释放 CameraColor 临时颜色 RT，避免下一次 request 误用旧内容。
 
             graph.AddPass(releaseCameraDepthPass); // 最后把 CameraDepth 释放 Pass 添加到 RenderGraph，避免临时 RT 泄漏到下一次 request。
         }
@@ -133,6 +158,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             }
 
             return asset.EnableDepthDebugView; // 返回资产 Inspector 上配置的深度调试开关。
+        }
+
+        private static bool ShouldUseMainLightShadowDebugView( // 判断是否启用主光 shadow map 调试视图。
+            BurtRenderPipelineAsset asset, // 接收管线资产，读取调试开关。
+            bool useMainLightShadow) // 接收已经计算好的主光阴影启用状态，避免重复合并阴影数据。
+        {
+            if (!useMainLightShadow) // 如果当前相机没有生成 shadow map，就没有可视化目标。
+            {
+                return false; // 返回 false，避免 debug pass 读取无效资源。
+            }
+
+            if (asset == null) // 如果资产为空，说明没有 Inspector 开关来源。
+            {
+                return false; // 默认关闭 shadow map 调试，避免覆盖正常画面。
+            }
+
+            return asset.EnableMainLightShadowDebugView; // 使用资产上的主光 shadow map 调试开关。
         }
     }
 }

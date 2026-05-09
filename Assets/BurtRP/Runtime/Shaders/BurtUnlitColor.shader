@@ -112,11 +112,20 @@ Shader "BurtRP/UnlitColor"
             // 引入 Unity 的基础 shader 工具函数，UnityObjectToClipPos 会使用当前主光视图投影矩阵。
             #include "UnityCG.cginc"
 
+            // 保存当前 request 的主光方向，ShadowCaster 顶点偏移需要用它计算法线和光向夹角。
+            float4 _BurtMainLightDirection;
+
+            // 保存 C# 已折算到世界单位的 normal bias，ShadowCaster 只在顶点阶段使用它。
+            float _BurtMainLightShadowNormalBias;
+
             // 定义阴影 Pass 的顶点输入结构。
             struct ShadowAttributes
             {
                 // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
                 float4 positionOS : POSITION;
+
+                // 读取模型空间法线，ShadowCaster normal bias 需要沿世界法线推开顶点。
+                float3 normalOS : NORMAL;
             };
 
             // 定义阴影 Pass 的顶点输出结构。
@@ -126,14 +135,41 @@ Shader "BurtRP/UnlitColor"
                 float4 positionCS : SV_POSITION;
             };
 
+            // 根据法线和主光方向计算 ShadowCaster 顶点的世界空间 normal bias。
+            float3 ApplyBurtShadowCasterNormalBias(float4 positionOS, float3 normalOS)
+            {
+                // 先把顶点转到世界空间再偏移，避免非等比缩放时模型空间距离不一致。
+                float3 positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
+
+                // 法线和光向必须处在同一世界空间，才能正确判断表面是否处于掠射角。
+                float3 normalWS = UnityObjectToWorldNormal(normalOS);
+                normalWS *= rsqrt(max(dot(normalWS, normalWS), 0.000001f));
+
+                // C# 每次 ShadowCaster 绘制前都会上传当前主光方向，这里做安全归一化避免长度影响偏移。
+                float3 lightDirectionWS = _BurtMainLightDirection.xyz;
+                lightDirectionWS *= rsqrt(max(dot(lightDirectionWS, lightDirectionWS), 0.000001f));
+
+                // C# 已按 shadow texel 把 bias 转成世界单位，这里只做非负保护避免反向拉回表面。
+                float normalBias = max(0.0f, _BurtMainLightShadowNormalBias);
+
+                // 表面越接近掠射角越容易出现 self-shadow，所以用 1 - NdotL 放大法线偏移。
+                float normalBiasScale = (1.0f - saturate(dot(normalWS, lightDirectionWS))) * normalBias;
+
+                // 沿世界法线推出 caster 顶点，让 shadow map 深度和接收面错开一小段距离。
+                return positionWS + normalWS * normalBiasScale;
+            }
+
             // 定义阴影 Pass 的顶点 shader 函数。
             ShadowVaryings VertShadow(ShadowAttributes input)
             {
                 // 创建一个输出结构变量，用来保存顶点 shader 的输出结果。
                 ShadowVaryings output;
 
-                // 把模型空间顶点位置转换到主光裁剪空间，让 GPU 写入 shadow map 深度。
-                output.positionCS = UnityObjectToClipPos(input.positionOS);
+                // 在进入主光裁剪空间前先应用 normal bias，这样偏移会真实写进 shadow map 深度。
+                float3 biasedPositionWS = ApplyBurtShadowCasterNormalBias(input.positionOS, input.normalOS);
+
+                // 使用 BurtDrawMainLightShadowCasterPass 设置的主光 VP 矩阵，把偏移后的世界坐标写入 shadow map。
+                output.positionCS = mul(UNITY_MATRIX_VP, float4(biasedPositionWS, 1.0f));
 
                 // 返回顶点 shader 输出结果。
                 return output;
