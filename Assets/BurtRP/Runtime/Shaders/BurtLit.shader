@@ -484,6 +484,13 @@ Shader "BurtRP/Lit"
                 // 写入直接高光实际粗糙度，SpecularAARoughness Debug View 会显示 AA 后的结果。
                 debugData.specularAARoughness = BurtBRDFDirectSpecularRoughness(surfaceData, normalWS);
 
+                // 写入直接高光能量补偿，使用和 BRDF 相同的 F0、粗糙度和 NdotV，便于检查 LUT.z 是否过亮或过暗。
+                float specularEnergyNdotV = saturate(dot(BurtSafeNormalize(normalWS), BurtSafeNormalize(viewDirectionWS)));
+                debugData.specularEnergyCompensation = BurtComputeSpecularEnergyCompensation(BurtBRDFSpecularF0(surfaceData), debugData.specularAARoughness, specularEnergyNdotV);
+
+                // 写入间接高光遮蔽项，保持和间接镜面反射一样的 AO、NdotV 和粗糙度输入。
+                debugData.specularOcclusion = BurtComputeIndirectSpecularOcclusion(specularEnergyNdotV, surfaceData.occlusion, debugData.perceptualRoughness);
+
                 // 创建一个临时调试颜色变量，只有命中材质 debug 模式时才会被真正输出。
                 float3 debugColor;
 

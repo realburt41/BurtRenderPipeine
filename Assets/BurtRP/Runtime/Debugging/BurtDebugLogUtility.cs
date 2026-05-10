@@ -10,6 +10,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，保证
 
         public const string CameraPrefix = "[BurtCamera]"; // 定义 Camera 子系统前缀，给相机分类、排序、请求调试输出预留统一标签。
 
+        public const string FramePrefix = "[BurtFrame]"; // 定义 Frame 子系统前缀，给一帧内 Camera Stack 分组诊断使用。
+
         public const string ShadowPrefix = "[BurtShadow]"; // 定义 Shadow 子系统前缀，给阴影诊断日志预留统一标签，避免每个文件自己写字符串。
 
         public static string BuildScopedPrefix(string subsystemPrefix) // 根据子系统前缀生成完整日志前缀，例如 [BurtRP][BurtRenderGraph]。

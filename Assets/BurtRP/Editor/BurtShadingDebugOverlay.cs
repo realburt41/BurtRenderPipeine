@@ -55,6 +55,8 @@ namespace Burt.RenderPipeline.Editor // 使用 BurtRP Editor 命名空间，把�
             BurtShadingDebugMode.Reflectance, // Reflectance 调试模式，用来检查 XRender 风格反射率输入。
             BurtShadingDebugMode.Roughness, // 粗糙度调试模式，用来检查 smoothness 到 perceptual roughness 的转换。
             BurtShadingDebugMode.SpecularAARoughness, // 高光 AA 粗糙度调试模式，用来观察高光是否被像素法线变化拓宽。
+            BurtShadingDebugMode.SpecularEnergyCompensation, // 高光能量补偿调试模式。
+            BurtShadingDebugMode.SpecularOcclusion, // 间接高光遮蔽调试模式。
             BurtShadingDebugMode.Lighting, // 光照调试模式，会显示不含自发光的 PBR 总光照结果。
             BurtShadingDebugMode.IndirectLighting, // 间接光调试模式，只显示 SH 漫反射和 Reflection Probe 镜面反射。
             BurtShadingDebugMode.DirectDiffuse, // 直接漫反射调试模式，只显示主光 diffuse 贡献。

@@ -1,4 +1,4 @@
-﻿using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 ScriptableRenderContext。
+using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 ScriptableRenderContext。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下文类和其他 BurtRP 代码处在同一个模块里。
 {
@@ -64,11 +64,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
-        public BurtRenderGraphContext( // 定义构造函数，用来创建一次 RenderGraph 执行上下文。
+        public BurtRequestRenderOptions RenderOptions { get; } // 保存当前 request 的栈级执行选项，Pass 可以通过它判断 RT 生命周期策略。
+
+        public BurtRenderGraphContext( // 保留旧构造函数，让没有显式传入执行选项的调用方继续走单 request 生命周期。
             ScriptableRenderContext scriptableContext, // 接收 Unity SRP 传入的渲染上下文。
             BurtRenderRequest request, // 接收当前正在执行的 Burt 渲染请求。
             BurtRenderPipelineAsset asset, // 接收 BurtRP 管线资产配置。
             BurtRenderGraphResourceRegistry resourceRegistry) // 接收当前 RenderGraph 的资源注册表。
+            : this(scriptableContext, request, asset, resourceRegistry, BurtRequestRenderOptions.CreateSingleRequest()) // 把旧调用统一转发到新构造函数，并使用旧行为默认选项。
+        {
+        }
+
+        public BurtRenderGraphContext( // 定义新构造函数，用来创建一次带栈级执行选项的 RenderGraph 执行上下文。
+            ScriptableRenderContext scriptableContext, // 接收 Unity SRP 传入的渲染上下文。
+            BurtRenderRequest request, // 接收当前正在执行的 Burt 渲染请求。
+            BurtRenderPipelineAsset asset, // 接收 BurtRP 管线资产配置。
+            BurtRenderGraphResourceRegistry resourceRegistry, // 接收当前 RenderGraph 的资源注册表。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RenderTarget 生命周期选项。
         {
             ScriptableContext = scriptableContext; // 把 Unity SRP 渲染上下文保存到 ScriptableContext 属性里。
 
@@ -77,6 +89,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             Asset = asset; // 把管线资产保存到 Asset 属性里。
 
             ResourceRegistry = resourceRegistry; // 把 RenderGraph 的资源注册表保存到 ResourceRegistry 属性里。
+
+            RenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // 保存执行选项，传入空值时回退到旧单 request 生命周期。
         }
     }
 }

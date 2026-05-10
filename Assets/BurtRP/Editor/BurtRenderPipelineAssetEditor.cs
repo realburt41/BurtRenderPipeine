@@ -13,6 +13,8 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private SerializedProperty enableDepthDebugView; // 缓存 Depth Debug 覆盖 CameraColor 的开关字段。
         private SerializedProperty depthDebugScale; // 缓存 Depth Debug 的显示缩放字段。
 
+        private SerializedProperty preintegratedFGLut; // 缓存 PBR 预积分 FG LUT 字段。
+
         private SerializedProperty enableMainLightShadows; // 缓存主光阴影总开关字段。
         private SerializedProperty mainLightShadowResolution; // 缓存主光阴影图分辨率字段。
         private SerializedProperty mainLightShadowDistance; // 缓存主光阴影距离字段。
@@ -28,11 +30,13 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private SerializedProperty enableRenderGraphDebug; // 缓存 RenderGraph 调试日志字段。
 
         private SerializedProperty enableCameraSortDebugLog; // 缓存相机排序调试日志字段。
+        private SerializedProperty enableRenderFrameDebugLog; // 缓存 Frame/Stack 分组调试日志字段。
 
         private static readonly GUIContent ClearColorLabel = new("Clear Color", "默认清屏颜色，供 BurtRP 清屏 Pass 使用。"); // 定义 General 分组显示文本。
         private static readonly GUIContent DepthPrepassLabel = new("Depth Prepass", "开启后先写入 CameraDepth，便于后续深度相关 Pass 使用。"); // 定义 Depth Prepass 显示文本。
         private static readonly GUIContent DepthDebugLabel = new("Depth Debug View", "开启后把 CameraDepth 可视化到 CameraColor。"); // 定义 Depth Debug 显示文本。
         private static readonly GUIContent DepthScaleLabel = new("Depth Debug Scale", "调整深度可视化亮度缩放，数值越大近处深度越明显。"); // 定义 Depth Debug 缩放显示文本。
+        private static readonly GUIContent PreintegratedFGLutLabel = new("Preintegrated FG LUT", "用于 IBL 间接高光的 DFG/GGX 预积分查找表。"); // 定义 PBR 预积分 LUT 显示文本。
         private static readonly GUIContent MainLightShadowLabel = new("Enable Shadows", "允许 BurtRP 为主方向光渲染 shadow map。"); // 定义主光阴影总开关显示文本。
         private static readonly GUIContent ShadowResolutionLabel = new("Resolution", "主光阴影图默认分辨率。"); // 定义阴影分辨率显示文本。
         private static readonly GUIContent ShadowDistanceLabel = new("Distance", "主光阴影最大剔除距离。"); // 定义阴影距离显示文本。
@@ -46,6 +50,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private static readonly GUIContent UnsupportedShaderDebugLabel = new("Unsupported Shader Debug", "用 Unity 错误材质标记非 BurtRP Shader，方便发现错误材质。"); // 定义不支持 Shader 调试显示文本。
         private static readonly GUIContent RenderGraphDebugLabel = new("RenderGraph Debug", "输出 RenderGraph 调试信息，可能每帧写入 Console。"); // 定义 RenderGraph 调试显示文本。
         private static readonly GUIContent CameraSortDebugLabel = new("Camera Sort Debug Log", "输出相机 request 排序列表，多相机调试时使用。"); // 定义相机排序调试显示文本。
+        private static readonly GUIContent RenderFrameDebugLabel = new("Render Frame Debug Log", "输出 Frame/Stack 分组日志。"); // 定义 Frame/Stack 分组调试显示文本。
 
         private void OnEnable() // Unity 选中资源或脚本重载后调用，用于绑定所有序列化字段。
         {
@@ -54,6 +59,8 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             enableDepthPrepass = FindProperty(nameof(enableDepthPrepass)); // 绑定深度预写开关。
             enableDepthDebugView = FindProperty(nameof(enableDepthDebugView)); // 绑定深度调试视图开关。
             depthDebugScale = FindProperty(nameof(depthDebugScale)); // 绑定深度调试缩放。
+
+            preintegratedFGLut = FindProperty(nameof(preintegratedFGLut)); // 绑定 PBR 预积分 FG LUT。
 
             enableMainLightShadows = FindProperty(nameof(enableMainLightShadows)); // 绑定主光阴影总开关。
             mainLightShadowResolution = FindProperty(nameof(mainLightShadowResolution)); // 绑定主光阴影分辨率。
@@ -70,6 +77,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             enableRenderGraphDebug = FindProperty(nameof(enableRenderGraphDebug)); // 绑定 RenderGraph 调试开关。
 
             enableCameraSortDebugLog = FindProperty(nameof(enableCameraSortDebugLog)); // 绑定相机排序日志开关。
+            enableRenderFrameDebugLog = FindProperty(nameof(enableRenderFrameDebugLog)); // 绑定 Frame/Stack 分组日志开关。
         }
 
         public override void OnInspectorGUI() // 绘制 BurtRenderPipelineAsset 的完整中文分组 Inspector。
@@ -78,6 +86,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
 
             DrawGeneralGroup(); // 绘制 General 分组。
             DrawDepthGroup(); // 绘制 Depth 分组。
+            DrawPBRGroup(); // 绘制 PBR 分组。
             DrawMainLightShadowGroup(); // 绘制 Main Light Shadows 分组。
             DrawDebugGroup(); // 绘制 Debug 分组。
             DrawCameraDebugGroup(); // 绘制 Camera Debug 分组。
@@ -89,6 +98,13 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         {
             DrawSectionHeader("General / 通用"); // 显示中英文分组标题。
             DrawProperty(clearColor, ClearColorLabel); // 绘制默认清屏颜色字段。
+        }
+
+        private void DrawPBRGroup() // 绘制 PBR 设置。
+        {
+            DrawSectionHeader("PBR / Shading"); // 显示 PBR 分组标题。
+            DrawProperty(preintegratedFGLut, PreintegratedFGLutLabel); // 绘制预积分 FG LUT 引用。
+            EditorGUILayout.HelpBox("PreintegratedFG.exr 用于 PBR IBL DFG。", MessageType.Info); // 提示 LUT 数据用途。
         }
 
         private void DrawDepthGroup() // 绘制深度相关设置和 Depth Debug 提示。
@@ -132,6 +148,8 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         {
             DrawSectionHeader("Camera Debug / 相机调试"); // 显示相机调试分组标题。
             DrawProperty(enableCameraSortDebugLog, CameraSortDebugLabel); // 绘制相机排序日志开关。
+            DrawProperty(enableRenderFrameDebugLog, RenderFrameDebugLabel); // 绘制 Frame/Stack 分组日志开关。
+            EditorGUILayout.HelpBox("Render Frame Debug 只输出分组诊断，不改变画面。", MessageType.Info); // 提示 Frame Debug 只做诊断。
         }
 
         private SerializedProperty FindProperty(string propertyName) // 按字段名查找 SerializedProperty，并在缺失时输出错误方便定位字段改名。

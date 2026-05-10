@@ -16,6 +16,8 @@ static const float BURT_SHADING_DEBUG_MODE_OCCLUSION = 104.0f; // 对应 C# Burt
 static const float BURT_SHADING_DEBUG_MODE_REFLECTANCE = 105.0f; // 对应 C# BurtShadingDebugMode.Reflectance，用来显示 XRender 风格介质反射率。
 static const float BURT_SHADING_DEBUG_MODE_ROUGHNESS = 106.0f; // 对应 C# BurtShadingDebugMode.Roughness，用来显示材质感知粗糙度。
 static const float BURT_SHADING_DEBUG_MODE_SPECULAR_AA_ROUGHNESS = 107.0f; // 对应 C# BurtShadingDebugMode.SpecularAARoughness，用来显示直接高光实际粗糙度。
+static const float BURT_SHADING_DEBUG_MODE_SPECULAR_ENERGY_COMPENSATION = 108.0f; // 对应 C# BurtShadingDebugMode.SpecularEnergyCompensation，用来显示直接高光能量补偿强度。
+static const float BURT_SHADING_DEBUG_MODE_SPECULAR_OCCLUSION = 109.0f; // 对应 C# BurtShadingDebugMode.SpecularOcclusion，用来显示间接高光遮蔽。
 static const float BURT_SHADING_DEBUG_MODE_LIGHTING = 200.0f; // 对应 C# BurtShadingDebugMode.Lighting，用来显示不含自发光的 PBR 总光照结果。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_LIGHTING = 201.0f; // 对应 C# BurtShadingDebugMode.IndirectLighting，用来显示 PBR 间接光。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE = 202.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuse，用来显示直接漫反射。
@@ -52,6 +54,12 @@ struct BurtShadingDebugData
 
     // 保存直接高光实际使用的粗糙度，包含 Specular AA 对极光滑高光的拓宽。
     float specularAARoughness;
+
+    // 保存直接高光多次散射能量补偿，1 表示没有补偿，大于 1 表示 LUT.z 正在补回能量。
+    float3 specularEnergyCompensation;
+
+    // 保存间接高光遮蔽项，1 表示不遮蔽。
+    float specularOcclusion;
 };
 
 bool BurtIsShadingDebugEnabled() // 判断当前是否启用了任意 shading debug 模式。
@@ -124,6 +132,18 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SPECULAR_AA_ROUGHNESS)) // SpecularAARoughness 模式显示高光实际粗糙度。
     {
         debugColor = float3(data.specularAARoughness, data.specularAARoughness, data.specularAARoughness); // 越亮表示 Specular AA 把高光拓得越宽。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SPECULAR_ENERGY_COMPENSATION)) // SpecularEnergyCompensation 模式显示直接高光能量补偿。
+    {
+        debugColor = saturate((data.specularEnergyCompensation - 1.0f) * 0.5f); // 黑色表示无补偿，越亮表示多次散射补偿越强，2 倍补偿约为 0.5 灰。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SPECULAR_OCCLUSION)) // SpecularOcclusion 模式显示间接高光遮蔽。
+    {
+        debugColor = float3(data.specularOcclusion, data.specularOcclusion, data.specularOcclusion); // 越亮表示反射探针被保留越多。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 

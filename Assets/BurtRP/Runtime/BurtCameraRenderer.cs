@@ -1,4 +1,4 @@
-﻿using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Debug 输出 RenderGraph 调试信息。
+using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Debug 输出 RenderGraph 调试信息。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 ScriptableRenderContext。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtRP 运行时代码保持一致。
@@ -7,10 +7,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
     {
         private readonly BurtRenderGraph renderGraph = new BurtRenderGraph(); // 创建一个可复用的 RenderGraph，用来承载当前 request 的 Pass 列表和资源表。
 
-        public void Render( // 定义渲染入口函数。
+        public void Render( // 保留旧渲染入口，未传入 options 时保持每个 request 独立分配、FinalBlit 和释放 RT。
             ScriptableRenderContext context, // 接收 Unity SRP 提供的渲染上下文。
             BurtRenderRequest request, // 接收已经构建好的 Burt 渲染请求。
             BurtRenderPipelineAsset asset) // 接收 BurtRP 管线资产配置。
+        {
+            Render(context, request, asset, BurtRequestRenderOptions.CreateSingleRequest()); // 把旧入口转发到新入口，并使用旧单 request 生命周期。
+        }
+
+        public void Render( // 定义带执行选项的新渲染入口，让 Camera Stack 可以控制 RT 生命周期。
+            ScriptableRenderContext context, // 接收 Unity SRP 提供的渲染上下文。
+            BurtRenderRequest request, // 接收已经构建好的 Burt 渲染请求。
+            BurtRenderPipelineAsset asset, // 接收 BurtRP 管线资产配置。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RenderTarget 生命周期选项。
         {
             if (request == null) // 如果 request 为空，说明调用方传入了异常数据。
             {
@@ -32,6 +41,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
                 return; // 直接结束函数，避免执行未知渲染流程。
             }
 
+            var safeRenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // 传入空 options 时回退旧行为，避免调用方漏传导致 RT 不分配。
+
             context.SetupCameraProperties(request.Camera); // 设置当前相机的矩阵、裁剪参数和 Unity 内置 shader 变量。
 
             BurtShadingDebugSettings.ApplyGlobalShaderProperties(); // 每个相机渲染前刷新 Shading Debug 全局参数，避免编辑器切换或域重载后 shader 读到旧值。
@@ -40,9 +51,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             renderGraph.ImportRequestResources(request, asset); // 把 request 的基础渲染目标导入 RenderGraph 资源表，并让资源注册使用当前管线资产配置。
 
-            request.GraphAssembler.Assemble(renderGraph, request, asset); // 让当前 request 指定的 Assembler 把 Pass 添加到 RenderGraph。
+            request.GraphAssembler.Assemble(renderGraph, request, asset, safeRenderOptions); // 让当前 request 指定的 Assembler 按栈级 RT 选项把 Pass 添加到 RenderGraph。
 
-            var graphContext = new BurtRenderGraphContext(context, request, asset, renderGraph.Resources); // 创建 RenderGraph 执行上下文，并把资源注册表传给每个 Pass。
+            var graphContext = new BurtRenderGraphContext(context, request, asset, renderGraph.Resources, safeRenderOptions); // 创建 RenderGraph 执行上下文，并把资源表与执行选项传给每个 Pass。
 
             renderGraph.Execute(graphContext); // 执行 RenderGraph 里已经组装好的所有 Pass。
 
@@ -55,4 +66,3 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
         }
     }
 }
-

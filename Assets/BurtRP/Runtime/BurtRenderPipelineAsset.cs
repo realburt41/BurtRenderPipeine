@@ -22,6 +22,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         [SerializeField] private float depthDebugScale = 50f; // 定义深度可视化的亮度缩放，数值越大越容易看清近处深度变化。
 
+        [Header("PBR / Shading")] // 把 PBR 共享查找表集中显示，方便确认 BRDF 使用的全局资源。
+        [SerializeField] private Texture2D preintegratedFGLut; // 保存预积分 FG LUT，默认指向 Assets/Textures/PreintegratedFG.exr。
+
         [Header("Main Light Shadows")] // 把主光阴影配置集中显示在 Inspector，便于按项目需求统一调试。
         [SerializeField] private bool enableMainLightShadows = true; // 定义 BurtRP 是否允许渲染主方向光阴影；关闭后即使 Light 开了 Shadow 也不会申请 shadow map。
 
@@ -49,6 +52,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         [Header("Camera Debug")] // 把相机相关调试开关单独分组，避免和阴影、深度等其他模块混在一起。
         [SerializeField] private bool enableCameraSortDebugLog = false; // 定义是否输出相机 request 排序列表，默认关闭，避免每帧多相机时刷 Console。
+        [SerializeField] private bool enableRenderFrameDebugLog = false; // 定义是否输出 Frame/Stack 分组日志，默认关闭，避免每帧打印相机栈诊断。
 
         public Color ClearColor => clearColor; // 暴露默认清屏颜色给渲染 Pass 使用。
 
@@ -57,6 +61,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public bool EnableDepthDebugView => enableDepthDebugView; // 暴露深度可视化开关给 Graph Assembler 使用。
 
         public float DepthDebugScale => Mathf.Max(0.0001f, depthDebugScale); // 暴露经过保护的深度可视化缩放，避免 shader 收到 0 或负数。
+
+        public Texture2D PreintegratedFGLut => preintegratedFGLut; // 暴露预积分 FG LUT，RenderPipeline 会把它绑定成全局 shader 纹理。
 
         public bool EnableMainLightShadows => enableMainLightShadows; // 暴露主光阴影总开关，让阴影数据和 Pass 组装都能统一判断是否启用。
 
@@ -83,6 +89,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public bool EnableRenderGraphDebug => enableRenderGraphDebug; // 暴露 RenderGraph 调试开关给 BurtCameraRenderer 使用。
 
         public bool EnableCameraSortDebugLog => enableCameraSortDebugLog; // 暴露相机排序调试开关给 BurtRenderPipeline 使用，只有打开时才会输出每帧 request 列表。
+
+        public bool EnableRenderFrameDebugLog => enableRenderFrameDebugLog; // 暴露 Frame/Stack 分组调试开关给 BurtRenderPipeline 使用，只诊断分组不改变渲染结果。
 
         protected override UnityEngine.Rendering.RenderPipeline CreatePipeline() // Unity 会调用这个函数来创建真正运行时的 RenderPipeline 实例。
         {

@@ -101,14 +101,28 @@ float3 BurtSampleIndirectDiffuseIrradiance(float3 normalWS)
     return max(shIrradiance, float3(0.0f, 0.0f, 0.0f));
 }
 
+
+// 把感知粗糙度映射到 Unity reflection probe mip；参考 XRender 的 log2 曲线，让低 roughness 保留更多锐利反射。
+float BurtPerceptualRoughnessToReflectionMip(float perceptualRoughness)
+{
+    // Unity 内置 spec cube 常见有效 mip 近似为 0..6，先保持现有资源假设不引入额外全局参数。
+    const float maxMipLevel = 6.0f;
+
+    // log2 曲线不能接受 0，所以使用 BurtRP 的最小感知粗糙度保护镜面端。
+    float safeRoughness = max(saturate(perceptualRoughness), BURT_MIN_PERCEPTUAL_ROUGHNESS);
+
+    // 对齐 XRender ComputeReflectionCaptureMipFromRoughness 的启发式：粗糙端走高 mip，光滑端尽量贴近 mip0。
+    float levelFrom1x1 = 1.0f - 1.2f * log2(safeRoughness);
+    return clamp(maxMipLevel - 1.0f - levelFrom1x1, 0.0f, maxMipLevel);
+}
 // 采样 BurtRP 当前的间接镜面反射环境色。
 float3 BurtSampleIndirectSpecularRadiance(float3 reflectionDirectionWS, float roughness)
 {
     // 归一化反射方向，让 cubemap 采样方向稳定。
     float3 safeReflectionDirectionWS = BurtSafeNormalize(reflectionDirectionWS);
 
-    // 把 roughness 映射到 Unity reflection probe 的 mip 级别；6 是 Unity 常见的 spec cube LOD 步数近似。
-    float mipLevel = saturate(roughness) * 6.0f;
+    // 使用 XRender 风格 roughness->mip 曲线，避免高 smoothness 反射被线性映射过早打糊。
+    float mipLevel = BurtPerceptualRoughnessToReflectionMip(roughness);
 
     // 采样 Unity 当前绑定的 reflection probe / sky reflection cubemap，恢复之前的探针反射效果。
     float4 encodedSpecular = UNITY_SAMPLE_TEXCUBE_LOD(unity_SpecCube0, safeReflectionDirectionWS, mipLevel);
@@ -160,14 +174,18 @@ float3 BurtEvaluateIndirectSpecularPBR(BurtSurfaceData surfaceData, float3 norma
     // 计算 NdotV，视线越掠射 DFG 近似会给出越强的边缘反射权重。
     float nDotV = saturate(dot(n, v));
 
-    // 参考 XRender 的 PrefilteredDFG_Approx，得到 IBL 高光需要的 F0/F90 权重。
-    float2 dfg = BurtPrefilteredDFGApprox(roughness, nDotV);
+    // 优先从 PreintegratedFG LUT 读取 DFG.xy，未绑定时回退到解析近似。
+    float2 dfg = BurtEvaluateSpecularDFGTerms(roughness, nDotV);
 
     // 把 DFG 应用到 F0/F90 上，比单纯 Fresnel 更接近预积分环境 BRDF。
     float3 envBRDF = BurtEvaluateSpecularDFG(f0, f90, dfg);
 
-    // AO 当前只影响间接光，不影响主光直接光；这里让反射探针也被环境遮蔽控制。
-    return specularRadiance * envBRDF * saturate(surfaceData.occlusion);
+    // 根据 AO、NdotV 和粗糙度计算间接高光遮蔽。
+    // 用 Specular Occlusion 替代直接乘 AO，保留掠射角高光。
+    float specularOcclusion = BurtComputeIndirectSpecularOcclusion(nDotV, surfaceData.occlusion, roughness);
+
+    // 只影响间接镜面反射，直接高光仍由阴影和 NdotL 控制。
+    return specularRadiance * envBRDF * specularOcclusion;
 }
 
 // 计算 PBR 间接光总和：间接漫反射 + 间接镜面反射。

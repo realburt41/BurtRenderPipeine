@@ -14,14 +14,22 @@ static const float BURT_INV_PI = 0.31830988618f;
 // 定义最小感知粗糙度；0.045 对应当前 BurtRP 的基础高光下限，避免完全镜面造成数值尖峰。
 static const float BURT_MIN_PERCEPTUAL_ROUGHNESS = 0.045f;
 
-// 定义屏幕空间法线方差权重；0.25 对应 XRender 注释里提到的半像素重建核近似。
-static const float BURT_SPECULAR_AA_SCREEN_SPACE_VARIANCE = 0.25f;
+// 定义屏幕空间法线方差权重；对齐 XRender 默认值 0.1，避免默认过滤过强导致极光滑高光峰值被过度压低。
+static const float BURT_SPECULAR_AA_SCREEN_SPACE_VARIANCE = 0.1f;
 
-// 定义高光 AA 能额外增加的最大粗糙度阈值，避免法线变化过大时把镜面高光抹得太糊。
-static const float BURT_SPECULAR_AA_THRESHOLD = 0.18f;
+// 定义高光 AA 能额外增加的最大粗糙度阈值；对齐 XRender 默认值 0.2，限制法线变化过大时的最大拓宽幅度。
+static const float BURT_SPECULAR_AA_THRESHOLD = 0.2f;
 
 // 定义 XRender / Frostbite 使用的最大介质 F0，reflectance=1 时非金属 F0 会达到 0.16。
 static const float BURT_MATERIAL_MAX_DIELECTRIC_F0 = 0.16f;
+
+// 声明 BurtRP 预积分 FG LUT；C# 会绑定 Assets/Textures/PreintegratedFG.exr 或关闭开关走解析近似。
+sampler2D _BurtPreIntegratedFG;
+float _BurtPreIntegratedFGEnabled;
+
+// 定义预积分 FG LUT 的尺寸；当前资源按 XRender 默认 128x128 生成。
+static const float BURT_PREINTEGRATED_FG_LUT_SIZE = 128.0f;
+static const float BURT_PREINTEGRATED_FG_LUT_INV_SIZE = 1.0f / BURT_PREINTEGRATED_FG_LUT_SIZE;
 
 // 对标 XRender 的 rcp_safe，用一个下限保护倒数，避免 BRDF 分母为 0 产生 NaN。
 float BurtRcpSafe(float value)
@@ -206,6 +214,42 @@ float2 BurtPrefilteredDFGApprox(float roughness, float nDotV)
     return float2(-1.04f, 1.04f) * a004 + r.zw;
 }
 
+// 把 0..1 的 LUT 坐标移动到半 texel 中心，避免采到边缘外推值。
+float2 BurtRemapPreIntegratedFGUV(float2 uv)
+{
+    // 对齐 XRender Remap01CoordToHalfTexelCoord，保证 128x128 LUT 的首尾采样落在 texel 中心。
+    return uv * (1.0f - BURT_PREINTEGRATED_FG_LUT_INV_SIZE) + 0.5f * BURT_PREINTEGRATED_FG_LUT_INV_SIZE;
+}
+
+// 采样预积分 FG LUT，RGB 分别保存 DFG.x、DFG.y 和能量补偿使用的单次散射能量 Z。
+float3 BurtSamplePreIntegratedFG(float roughness, float nDotV)
+{
+    // XRender 使用 float2(NdotV, 1 - PerceptualRoughness) 作为 LUT 坐标。
+    float2 uv = float2(saturate(nDotV), 1.0f - saturate(roughness));
+    uv = BurtRemapPreIntegratedFGUV(uv);
+    return tex2D(_BurtPreIntegratedFG, uv).rgb;
+}
+
+// 读取预积分 FG；没有绑定 LUT 时回退到已有解析 DFG，保证材质仍可渲染。
+float3 BurtEvaluatePreIntegratedFG(float roughness, float nDotV)
+{
+    // 解析近似只提供 DFG.xy，因此用 DFG.x + DFG.y 近似能量补偿项，作为无 LUT 的安全 fallback。
+    float2 approxDFG = BurtPrefilteredDFGApprox(roughness, nDotV);
+    float approxEnergy = clamp(approxDFG.x + approxDFG.y, 0.001f, 1.0f);
+    float3 approxFG = float3(approxDFG, approxEnergy);
+
+    // 当 C# 确认 LUT 已绑定时使用贴图结果，否则完全使用解析近似。
+    float3 lutFG = BurtSamplePreIntegratedFG(roughness, nDotV);
+    return lerp(approxFG, lutFG, saturate(_BurtPreIntegratedFGEnabled));
+}
+
+// 返回环境 BRDF 使用的 DFG.xy；优先使用 PreintegratedFG.exr，回退到解析近似。
+float2 BurtEvaluateSpecularDFGTerms(float roughness, float nDotV)
+{
+    // LUT 的 xy 对应 XRender 注释里的 ibl brdf 两项，后续会分别乘 F0 和 F90。
+    return BurtEvaluatePreIntegratedFG(roughness, nDotV).xy;
+}
+
 // 把 DFG 的 AB 两项应用到 F0/F90 上，得到环境镜面反射的 BRDF 权重。
 float3 BurtEvaluateSpecularDFG(float3 f0, float3 f90, float2 dfg)
 {
@@ -213,7 +257,33 @@ float3 BurtEvaluateSpecularDFG(float3 f0, float3 f90, float2 dfg)
     return f0 * dfg.x + f90 * dfg.y;
 }
 
+// 参考 XRender ComputeEnergyCompensation，用 LUT.z 的单次散射能量计算多次散射补偿。
+float3 BurtComputeSpecularEnergyCompensation(float3 f0, float roughness, float nDotV)
+{
+    // PreintegratedFG.z 对应 XRender Energy.z；没有 LUT 时由解析近似提供保守 fallback。
+    float singleScatterEnergy = clamp(BurtEvaluatePreIntegratedFG(roughness, nDotV).z, 0.001f, 1.0f);
+
+    // XRender 公式：1 + F0 * (1 / Z - 1)，Z 越低说明单次散射漏能越多，需要越多补偿。
+    return 1.0f + f0 * (BurtRcpSafe(singleScatterEnergy) - 1.0f);
+}
+
+// 参考 XRender 的 AO 高光遮蔽公式。
+float BurtComputeSpecularOcclusionFromAO(float nDotV, float ao, float linearRoughness)
+{
+    // 粗糙度越高，AO 对高光遮蔽越平滑。
+    float exponent = exp2(-16.0f * saturate(linearRoughness) - 1.0f);
+    return saturate(pow(max(saturate(nDotV) + saturate(ao), BURT_EPSILON), exponent) - 1.0f + saturate(ao));
+}
+
+// 使用感知粗糙度，内部转线性粗糙度。
+float BurtComputeIndirectSpecularOcclusion(float nDotV, float ao, float perceptualRoughness)
+{
+    // 和 DFG/GGX 的粗糙度语义保持一致。
+    return BurtComputeSpecularOcclusionFromAO(nDotV, ao, BurtBRDFLinearRoughness(perceptualRoughness));
+}
+
 // 保存直接 PBR 光照拆分结果，方便正常渲染和 Debug View 共用同一套 BRDF 计算。
+
 struct BurtDirectPBRComponents
 {
     // 保存直接漫反射最终贡献，已经包含灯光颜色、NdotL 和阴影衰减。
@@ -303,6 +373,10 @@ BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
 
     // XRender 的 specular lobe 是 D * V * F，其中 V 已经是 G / (4NoVNoL)。
     float3 specularBRDF = d * visibility * f;
+
+    // 对齐 XRender 直接高光能量补偿，粗糙材质会补回 GGX 单次散射损失的高光能量。
+    float3 energyCompensation = BurtComputeSpecularEnergyCompensation(f0, roughness, nDotV);
+    specularBRDF *= energyCompensation;
 
     // 计算 Lambert diffuse BRDF，使用预先定义好的 PI 倒数减少一次除法。
     float3 diffuseBRDF = kD * diffuseColor * BURT_INV_PI;
