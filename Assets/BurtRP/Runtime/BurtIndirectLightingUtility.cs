@@ -24,6 +24,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
         private static readonly int SkyReflectionOverrideId = Shader.PropertyToID("_BurtSkyReflectionOverride"); // 标记 SkyLight 是否显式接管 specular，避免关闭时回落到 Unity legacy probe。
         private static readonly int SkyReflectionMaxMipId = Shader.PropertyToID("_BurtSkyReflectionMaxMip"); // 缓存 BurtRP 全局天空反射真实最大 mip 属性 ID，shader 会再限制到反射预过滤有效范围。
         private static readonly int SkyReflectionRotationId = Shader.PropertyToID("_BurtSkyReflectionRotation"); // 缓存 SkyLight 指定 cubemap 的水平旋转参数，xy 分别是 cos/sin。
+        private static readonly int SkyDiffuseCubemapEnabledId = Shader.PropertyToID("_BurtSkyDiffuseCubemapEnabled"); // 缓存 SpecifiedCubemap 是否同时驱动 diffuse 环境光。
+        private static readonly int SkyDiffuseCubemapIntensityId = Shader.PropertyToID("_BurtSkyDiffuseCubemapIntensity"); // 缓存 diffuse cubemap 近似采样强度。
+        private static readonly int SkyDiffuseCubemapTintId = Shader.PropertyToID("_BurtSkyDiffuseCubemapTint"); // 缓存 diffuse cubemap tint。
+        private static readonly int SkyDiffuseCubemapMipId = Shader.PropertyToID("_BurtSkyDiffuseCubemapMip"); // 缓存 diffuse cubemap 近似采样 mip。
         private static readonly int SkyLowerHemisphereEnabledId = Shader.PropertyToID("_BurtSkyLowerHemisphereEnabled"); // 缓存 SkyLight 下半球覆盖开关。
         private static readonly int SkyLowerHemisphereDiffuseColorId = Shader.PropertyToID("_BurtSkyLowerHemisphereDiffuseColor"); // 缓存下半球 diffuse 覆盖颜色。
         private static readonly int SkyLowerHemisphereSpecularColorId = Shader.PropertyToID("_BurtSkyLowerHemisphereSpecularColor"); // 缓存下半球 specular 覆盖颜色。
@@ -57,6 +61,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             public string Source;
         }
 
+        private struct ResolvedSkyDiffuseCubemap // 保存 SpecifiedCubemap 驱动 diffuse 的近似采样参数。
+        {
+            public bool Enabled;
+            public float Intensity;
+            public Color Tint;
+            public float Mip;
+            public string Source;
+        }
+
         public static void UploadGlobalIndirectLighting(CommandBuffer cmd) // 保留旧入口，旧调用没有相机上下文时只能解析全局自定义/默认反射。
         {
             UploadGlobalIndirectLighting(cmd, null); // 转发到新入口，让所有上传逻辑保持同一套实现。
@@ -72,6 +85,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             var skyLightActive = TryResolveActiveSkyLight(camera, out var skyLight);
             var ambientProbe = skyLightActive ? ResolveSkyLightAmbientProbe(skyLight) : RenderSettings.ambientProbe;
             var skyReflection = skyLightActive ? ResolveSkyLightReflection(camera, skyLight) : ResolveSkyReflection(camera);
+            var skyDiffuseCubemap = skyLightActive ? ResolveSkyLightDiffuseCubemap(skyLight, skyReflection.Texture) : CreateDisabledSkyDiffuseCubemap();
             var lowerHemisphere = skyLightActive ? ResolveSkyLightLowerHemisphere(skyLight) : CreateDisabledLowerHemisphere();
             var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity);
             var skyReflectionIntensity = skyLightActive ? skyReflection.IntensityMultiplier : renderSettingsReflectionIntensity * Mathf.Max(0f, skyReflection.IntensityMultiplier);
@@ -83,6 +97,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             }
 
             UploadSkyLowerHemisphere(cmd, lowerHemisphere);
+            UploadSkyDiffuseCubemap(cmd, skyDiffuseCubemap);
             UploadSkyReflection(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflectionIntensity, skyReflection.Tint, skyReflection.ForceOverride, skyReflection.Rotation);
         }
 
@@ -100,6 +115,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
 
             var skyLightActive = TryResolveActiveSkyLight(camera, out var skyLight);
             var skyReflection = skyLightActive ? ResolveSkyLightReflection(camera, skyLight) : ResolveSkyReflection(camera);
+            var skyDiffuseCubemap = skyLightActive ? ResolveSkyLightDiffuseCubemap(skyLight, skyReflection.Texture) : CreateDisabledSkyDiffuseCubemap();
             var lowerHemisphere = skyLightActive ? ResolveSkyLightLowerHemisphere(skyLight) : CreateDisabledLowerHemisphere();
             var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity);
             var effectiveDiffuseIntensity = skyLightActive && skyLight.affectDiffuse ? skyLight.EffectiveDiffuseIntensity : 1f;
@@ -124,6 +140,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             builder.AppendLine();
 
             builder.Append("  IndirectDiffuseSource=").Append(skyLightActive ? ResolveSkyLightDiffuseSource(skyLight) : "RenderSettings.ambientProbe");
+            builder.Append(" DiffuseCubemap=").Append(skyDiffuseCubemap.Source);
+            builder.Append(" DiffuseCubemapMip=").Append(skyDiffuseCubemap.Mip.ToString("0.###"));
             builder.Append(" IndirectSpecularSource=").Append(skyReflection.Source);
             builder.Append(" LowerHemisphere=").Append(lowerHemisphere.Source);
             builder.Append(" LowerDiffuse=").Append(FormatColor(lowerHemisphere.DiffuseColor));
@@ -167,6 +185,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             cmd.SetGlobalFloat(SkyLowerHemisphereEnabledId, lowerHemisphere.Enabled ? 1f : 0f);
             cmd.SetGlobalVector(SkyLowerHemisphereDiffuseColorId, SanitizeColorVector(lowerHemisphere.DiffuseColor));
             cmd.SetGlobalVector(SkyLowerHemisphereSpecularColorId, SanitizeColorVector(lowerHemisphere.SpecularColor));
+        }
+
+        private static void UploadSkyDiffuseCubemap(CommandBuffer cmd, ResolvedSkyDiffuseCubemap skyDiffuseCubemap) // 上传 SpecifiedCubemap diffuse 近似采样参数。
+        {
+            cmd.SetGlobalFloat(SkyDiffuseCubemapEnabledId, skyDiffuseCubemap.Enabled ? 1f : 0f);
+            cmd.SetGlobalFloat(SkyDiffuseCubemapIntensityId, Mathf.Max(0f, skyDiffuseCubemap.Intensity));
+            cmd.SetGlobalVector(SkyDiffuseCubemapTintId, SanitizeTint(skyDiffuseCubemap.Tint));
+            cmd.SetGlobalFloat(SkyDiffuseCubemapMipId, Mathf.Max(0f, skyDiffuseCubemap.Mip));
         }
 
         private static void UploadSkyReflection(CommandBuffer cmd, Texture skyReflection, Vector4 skyReflectionHDR, float intensity, Color tint, bool forceOverride, Vector4 rotation) // 上传全局天空/场景反射纹理。
@@ -215,7 +241,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 return "SkyLight.DiffuseDisabled";
             }
 
-            return skyLight.sourceType == BurtSkyLightSourceType.ConstantColor ? "SkyLight.constantColor" : "RenderSettings.ambientProbe";
+            if (skyLight.sourceType == BurtSkyLightSourceType.ConstantColor)
+            {
+                return "SkyLight.constantColor";
+            }
+
+            return skyLight.sourceType == BurtSkyLightSourceType.SpecifiedCubemap && skyLight.cubemap != null ? "SkyLight.SpecifiedCubemapApprox" : "RenderSettings.ambientProbe";
         }
 
         private static SphericalHarmonicsL2 ResolveSkyLightAmbientProbe(BurtSkyLight skyLight)
@@ -248,7 +279,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
 
         private static ResolvedSkyReflection ResolveSkyLightReflection(Camera camera, BurtSkyLight skyLight)
         {
-            if (skyLight == null || !skyLight.affectSpecular)
+            if (skyLight == null)
             {
                 return CreateDisabledSkyReflection(skyLight, "SkyLight.SpecularDisabled");
             }
@@ -260,8 +291,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                     {
                         Texture = skyLight.cubemap,
                         HDRDecodeValues = DefaultSkyReflectionHDR,
-                        IntensityMultiplier = skyLight.cubemap != null ? skyLight.EffectiveSpecularIntensity : 0f,
-                        Source = skyLight.cubemap != null ? "SkyLight.SpecifiedCubemap" : "SkyLight.SpecifiedCubemapMissing",
+                        IntensityMultiplier = skyLight.cubemap != null && skyLight.affectSpecular ? skyLight.EffectiveSpecularIntensity : 0f,
+                        Source = skyLight.cubemap != null ? (skyLight.affectSpecular ? "SkyLight.SpecifiedCubemap" : "SkyLight.SpecifiedCubemapDiffuseOnly") : "SkyLight.SpecifiedCubemapMissing",
                         Tint = skyLight.SafeTint,
                         ForceOverride = true,
                         Rotation = ResolveSkyReflectionRotation(skyLight)
@@ -269,6 +300,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 case BurtSkyLightSourceType.ConstantColor:
                     return CreateDisabledSkyReflection(skyLight, "SkyLight.ConstantColorSpecularDisabled");
                 case BurtSkyLightSourceType.CapturedScene:
+                    if (!skyLight.affectSpecular)
+                    {
+                        return CreateDisabledSkyReflection(skyLight, "SkyLight.SpecularDisabled");
+                    }
+
                     var capturedFallback = ResolveSkyReflection(camera);
                     capturedFallback.Source = "SkyLight.CapturedSceneUnimplemented->" + capturedFallback.Source;
                     capturedFallback.IntensityMultiplier *= skyLight.EffectiveSpecularIntensity;
@@ -277,6 +313,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                     capturedFallback.Rotation = DefaultSkyReflectionRotation;
                     return capturedFallback;
                 default:
+                    if (!skyLight.affectSpecular)
+                    {
+                        return CreateDisabledSkyReflection(skyLight, "SkyLight.SpecularDisabled");
+                    }
+
                     var renderSettingsReflection = ResolveSkyReflection(camera);
                     renderSettingsReflection.Source = "SkyLight.RenderSettings->" + renderSettingsReflection.Source;
                     renderSettingsReflection.IntensityMultiplier *= skyLight.EffectiveSpecularIntensity;
@@ -318,6 +359,35 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 DiffuseColor = Color.clear,
                 SpecularColor = Color.clear,
                 Source = "Preserve"
+            };
+        }
+
+        private static ResolvedSkyDiffuseCubemap ResolveSkyLightDiffuseCubemap(BurtSkyLight skyLight, Texture skyReflectionTexture)
+        {
+            if (skyLight == null || !skyLight.affectDiffuse || skyLight.sourceType != BurtSkyLightSourceType.SpecifiedCubemap || skyReflectionTexture == null)
+            {
+                return CreateDisabledSkyDiffuseCubemap();
+            }
+
+            return new ResolvedSkyDiffuseCubemap
+            {
+                Enabled = skyLight.EffectiveDiffuseIntensity > 0f,
+                Intensity = skyLight.EffectiveDiffuseIntensity,
+                Tint = skyLight.SafeTint,
+                Mip = CalculateSkyReflectionSpecularMipMax(skyReflectionTexture),
+                Source = "SkyLight.SpecifiedCubemapApprox"
+            };
+        }
+
+        private static ResolvedSkyDiffuseCubemap CreateDisabledSkyDiffuseCubemap()
+        {
+            return new ResolvedSkyDiffuseCubemap
+            {
+                Enabled = false,
+                Intensity = 0f,
+                Tint = Color.white,
+                Mip = 0f,
+                Source = "Disabled"
             };
         }
 

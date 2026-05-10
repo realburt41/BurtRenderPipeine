@@ -64,6 +64,12 @@ float _BurtSkyReflectionMaxMip;
 // 保存 SkyLight 指定 cubemap 的水平旋转参数，xy 分别是 cos/sin。
 float4 _BurtSkyReflectionRotation;
 
+// SpecifiedCubemap 可用同一张 cubemap 以高 mip 近似 diffuse 环境光，作为完整 SH/卷积链路前的第一版。
+float _BurtSkyDiffuseCubemapEnabled;
+float _BurtSkyDiffuseCubemapIntensity;
+float4 _BurtSkyDiffuseCubemapTint;
+float _BurtSkyDiffuseCubemapMip;
+
 // 保存 SkyLight 下半球覆盖参数；diffuse/specular 分开预乘各自强度，alpha 是覆盖混合权重。
 float _BurtSkyLowerHemisphereEnabled;
 float4 _BurtSkyLowerHemisphereDiffuseColor;
@@ -138,6 +144,16 @@ float3 BurtRotateSkyReflectionDirection(float3 directionWS)
     return BurtSafeNormalize(float3(dot(rotDirX, safeDirectionWS), safeDirectionWS.y, dot(rotDirZ, safeDirectionWS)));
 }
 
+float3 BurtSampleSkyDiffuseCubemap(float3 normalWS)
+{
+    float3 safeNormalWS = BurtSafeNormalize(normalWS);
+    float3 skySampleDirectionWS = BurtRotateSkyReflectionDirection(safeNormalWS);
+    float4 encodedSkyDiffuse = UNITY_SAMPLE_TEXCUBE_LOD(_BurtSkyReflectionTexture, skySampleDirectionWS, max(_BurtSkyDiffuseCubemapMip, 0.0f));
+    float3 skyDiffuse = DecodeHDR(encodedSkyDiffuse, _BurtSkyReflectionHDR) * max(_BurtSkyDiffuseCubemapTint.rgb, float3(0.0f, 0.0f, 0.0f)) * max(_BurtSkyDiffuseCubemapIntensity, 0.0f);
+    skyDiffuse = BurtApplySkyLowerHemisphere(skyDiffuse, safeNormalWS, _BurtSkyLowerHemisphereDiffuseColor);
+    return max(skyDiffuse, float3(0.0f, 0.0f, 0.0f));
+}
+
 float3 BurtEvaluateAmbientSH9(float3 normalWS) // 使用 BurtRP 自己上传的 SH 常量评估环境漫反射照度。
 {
     float3 safeNormalWS = BurtSafeNormalize(normalWS); // 先安全归一化世界空间法线，避免异常法线放大 SH 结果。
@@ -208,6 +224,11 @@ float3 BurtEvaluateAmbient(float3 baseColor, float3 ambientColor)
 // 采样 BurtRP 当前的间接漫反射环境照度。
 float3 BurtSampleIndirectDiffuseIrradiance(float3 normalWS)
 {
+    if (_BurtSkyDiffuseCubemapEnabled > 0.5f)
+    {
+        return BurtSampleSkyDiffuseCubemap(normalWS);
+    }
+
     if (_BurtAmbientSHEnabled > 0.5f) // 如果 C# 已经上传 BurtRP 自己的 ambient probe SH。
     {
         return BurtEvaluateAmbientSH9(normalWS); // 直接使用稳定的 BurtRP 全局 SH 数据源，避免 Deferred fullscreen pass 依赖 per-object 状态。
@@ -806,7 +827,8 @@ float3 BurtEvaluateSpecular(BurtSurfaceData surfaceData, BurtLight light, float3
 float3 BurtEvaluateSimpleLit(BurtSurfaceData surfaceData, BurtLight mainLight, float3 normalWS)
 {
     // 使用材质基础色和全局环境光计算 ambient 部分。
-    float3 ambientColor = BurtEvaluateAmbient(surfaceData.baseColor.rgb, BurtGetAmbientLightColor());
+    float3 ambientIrradiance = _BurtSkyDiffuseCubemapEnabled > 0.5f ? BurtSampleSkyDiffuseCubemap(normalWS) : BurtGetAmbientLightColor();
+    float3 ambientColor = BurtEvaluateAmbient(surfaceData.baseColor.rgb, ambientIrradiance);
 
     // 使用材质基础色、主光数据和法线计算 direct diffuse 部分。
     float3 diffuseColor = BurtEvaluateDiffuse(surfaceData.baseColor.rgb, mainLight, normalWS);

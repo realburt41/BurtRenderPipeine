@@ -589,6 +589,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             sampler2D _BurtPostProcessSourceTexture;
             float4 _BurtBloomTexelSize;
             float _BurtBloomThreshold;
+            float _BurtBloomSoftKnee;
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -618,21 +619,34 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float3 ApplyBloomThreshold(float3 color)
             {
-                float bloomLuminance = BurtBloomPerceivedLuminance(color) - _BurtBloomThreshold;
-                float bloomAmount = saturate(bloomLuminance * 0.5);
-                return color * bloomAmount;
+                float brightness = BurtBloomPerceivedLuminance(color);
+                float knee = max(_BurtBloomThreshold * _BurtBloomSoftKnee, 0.0001);
+                float soft = clamp(brightness - _BurtBloomThreshold + knee, 0.0, 2.0 * knee);
+                soft = soft * soft / (4.0 * knee);
+                float contribution = max(soft, brightness - _BurtBloomThreshold);
+                contribution /= max(brightness, 0.0001);
+                return color * saturate(contribution);
+            }
+
+            float3 SampleBloomPrefilter(float2 uv)
+            {
+                return ApplyBloomThreshold(max(tex2D(_BurtPostProcessSourceTexture, uv).rgb, 0.0));
             }
 
             float4 Frag(Varyings input) : SV_Target
             {
                 float2 texel = _BurtBloomTexelSize.xy;
                 float2 sourceUv = BurtBloomSourceUV(input.uv);
-                float3 color = tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)).rgb;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, -1.0)).rgb;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)).rgb;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 1.0)).rgb;
-                color *= 0.25;
-                return float4(ApplyBloomThreshold(max(color, 0.0)), 1.0);
+                float3 color = SampleBloomPrefilter(sourceUv) * 4.0;
+                color += SampleBloomPrefilter(sourceUv + texel * float2(1.0, 0.0)) * 2.0;
+                color += SampleBloomPrefilter(sourceUv + texel * float2(-1.0, 0.0)) * 2.0;
+                color += SampleBloomPrefilter(sourceUv + texel * float2(0.0, 1.0)) * 2.0;
+                color += SampleBloomPrefilter(sourceUv + texel * float2(0.0, -1.0)) * 2.0;
+                color += SampleBloomPrefilter(sourceUv + texel * float2(1.0, 1.0));
+                color += SampleBloomPrefilter(sourceUv + texel * float2(-1.0, 1.0));
+                color += SampleBloomPrefilter(sourceUv + texel * float2(1.0, -1.0));
+                color += SampleBloomPrefilter(sourceUv + texel * float2(-1.0, -1.0));
+                return float4(max(color * (1.0 / 16.0), 0.0), 1.0);
             }
             ENDHLSL
         }
@@ -679,11 +693,16 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             {
                 float2 texel = _BurtBloomTexelSize.xy;
                 float2 sourceUv = BurtBloomSourceUV(input.uv);
-                float3 color = tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)).rgb;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, -1.0)).rgb;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)).rgb;
+                float3 color = tex2D(_BurtPostProcessSourceTexture, sourceUv).rgb * 4.0;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 0.0)).rgb * 2.0;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 0.0)).rgb * 2.0;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(0.0, 1.0)).rgb * 2.0;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(0.0, -1.0)).rgb * 2.0;
                 color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 1.0)).rgb;
-                return float4(max(color * 0.25, 0.0), 1.0);
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, -1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)).rgb;
+                return float4(max(color * (1.0 / 16.0), 0.0), 1.0);
             }
             ENDHLSL
         }

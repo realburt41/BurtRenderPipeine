@@ -69,6 +69,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static readonly int BloomThresholdId = Shader.PropertyToID("_BurtBloomThreshold"); // 缓存 Bloom 预过滤阈值属性 ID。
 
+        private static readonly int BloomSoftKneeId = Shader.PropertyToID("_BurtBloomSoftKnee"); // 缓存 Bloom 软阈值属性 ID，降低小亮点跨像素移动时的闪烁。
+
         private static readonly int BloomTexelSizeId = Shader.PropertyToID("_BurtBloomTexelSize"); // 缓存 Bloom 当前源纹理 texel size 属性 ID。
 
         private static readonly int BloomBlurDirectionId = Shader.PropertyToID("_BurtBloomBlurDirection"); // 缓存 PC Bloom 高斯模糊方向和半径。
@@ -294,6 +296,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             }
 
             cmd.SetGlobalFloat(BloomThresholdId, settings.Threshold); // 上传 Bloom 阈值。
+            cmd.SetGlobalFloat(BloomSoftKneeId, settings.SoftKnee); // 上传 Bloom 软阈值，让 prefilter 过渡更连续。
             cmd.SetRenderTarget(new RenderTargetIdentifier(BloomMipTextureIds[0])); // prefilter 写入 mip0。
             SetBloomSource(cmd, cameraColorTarget.Identifier, camera); // CameraColor 是 prefilter 源。
             cmd.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1); // 执行高光预过滤。
