@@ -1,5 +1,6 @@
 using System.Collections.Generic; // 引入泛型集合命名空间，用 IReadOnlyList、Dictionary 和 List 组织 Pass 与资源关系。
 using System.Text; // 引入文本构建命名空间，用 StringBuilder 组合多行 RenderGraph dump。
+using UnityEngine; // 引入 UnityEngine 命名空间，用 Camera、RenderTexture 和 RenderTextureDescriptor 输出 RT 诊断状态。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工具能直接访问 BurtRenderRequest 和资源使用类型。
 {
@@ -42,7 +43,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var renderOptionsCapacity = renderOptions != null ? 256 : 48; // RT 生命周期行较长，预留额外空间减少 StringBuilder 扩容。
 
-            var pipelineStateCapacity = 420; // Pipeline State 会额外打印 Renderer Mode、GBuffer Debug 来源和 Shading Debug 状态，预留固定容量。
+            var pipelineStateCapacity = 1650; // Pipeline/Camera/RT/PostProcess/Deferred/Material 状态会额外打印多行诊断信息，预留固定容量。
 
             var capacity = BaseDumpCapacity + renderOptionsCapacity + pipelineStateCapacity + usageCount * PerPassDumpCapacity + validationCount * 96; // 根据 Pass、校验、RT 选项和管线状态数量估算字符串容量。
 
@@ -101,7 +102,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             AppendRenderOptions(builder, renderOptions); // 写入 RT 生命周期决策，让你不用只靠 Pass 列表反推 Allocate、FinalBlit 和 Release。
 
-            AppendPipelineState(builder, asset); // 写入管线和调试状态，方便对齐 Forward / Deferred 时确认当前到底由哪个开关驱动画面。
+            AppendPipelineState(builder, request, asset); // 写入管线和调试状态，方便对齐 Forward / Deferred 时确认当前到底由哪个开关驱动画面。
+
+            AppendCameraState(builder, request); // 写入当前相机的 HDR、尺寸和 targetTexture 状态，用来排查 Game/Scene/Preview 差异。
+
+            AppendRenderTargetState(builder, request, asset, resourceRegistry); // 写入 CameraColor、CameraDepth、PostProcessColor、GBuffer 和最终目标的格式状态。
+
+            AppendPostProcessState(builder, request, asset); // 写入后处理框架、Volume Tonemapping 和 Color Adjustments 的运行状态。
+
+            AppendDeferredState(builder, request, asset, resourceRegistry); // 写入 Deferred GBuffer 注册和调试模式状态，方便确认 Deferred 分支是否真的生效。
+
+            if (IsPreviewOrReflectionRequest(request)) // Preview/Reflection 强制走 Forward，Deferred 材质分类对资产预览或 Probe 捕获没有意义。
+            {
+                builder.AppendLine("Deferred Material State:"); // 保留段落标题，方便对比普通 Deferred dump。
+
+                builder.AppendLine("  <skipped: preview/reflection request uses Forward path>"); // 明确说明 Preview/Reflection 被隔离到 Forward 路径。
+            }
+            else
+            {
+                BurtDeferredMaterialDebugUtility.AppendDebugState(builder, request, asset); // 写入 Deferred 材质分类诊断，确认场景材质会进入 GBuffer、ForwardOnly 还是可能在 Deferred 下不可见。
+            }
 
             BurtDebugLogUtility.AppendKeyValueLine(builder, "Pass Count", passCount); // 写入 RenderGraph 中的 Pass 数量，和实际执行列表保持一致。
 
@@ -176,6 +196,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
         private static void AppendPipelineState( // 写入当前管线资产和调试开关状态。
             StringBuilder builder, // 接收要写入的字符串构建器。
+            BurtRenderRequest request, // 接收当前渲染请求，用来让间接光 Debug 按相机选择场景 ReflectionProbe。
             BurtRenderPipelineAsset asset) // 接收当前管线资产，可能为空。
         {
             builder.AppendLine("Pipeline State:"); // 单独成段输出，避免和 RT 生命周期或 Pass 列表混在一起。
@@ -198,6 +219,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var gBufferSource = BurtGBufferDebugViewUtility.ResolveGBufferDebugViewSource(asset); // 解析 GBuffer Debug 的来源，区分资产面板和 Overlay。
 
             builder.Append("  RendererMode=").Append(asset.RendererMode); // 写入当前渲染路径，用来确认正在看 Forward 还是 Deferred。
+
+            builder.Append(" EffectiveRendererMode=").Append(IsDeferredRequest(request, asset) ? "Deferred" : "Forward"); // 写入当前 request 实际走的渲染路径，Preview 会强制走 Forward。
 
             builder.Append(" DeferredForwardOnlyOpaqueFallback=").Append(asset.EnableDeferredForwardOpaqueFallback); // 写入 Deferred 后 ForwardOnly 不透明兜底开关，方便确认是否会绘制不能写 GBuffer 的专用前向物体。
 
@@ -227,7 +250,272 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.AppendLine(); // 结束第三行全屏调试状态。
 
-            BurtIndirectLightingUtility.AppendDebugState(builder); // 写入 BurtRP 全局间接光数据源状态，方便确认 Deferred 不再依赖 Forward DrawRenderers 副作用。
+            BurtIndirectLightingUtility.AppendDebugState(builder, request != null ? request.Camera : null); // 写入 BurtRP 全局间接光数据源状态，方便确认 Deferred 不再依赖 Forward DrawRenderers 副作用。
+        }
+
+        private static void AppendCameraState( // 写入当前相机本身的诊断状态。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            BurtRenderRequest request) // 接收当前渲染请求，用来读取相机和最终输出目标。
+        {
+            builder.AppendLine("Camera State:"); // 单独成段输出，方便和 RT 格式、后处理状态分开扫描。
+
+            var camera = request != null ? request.Camera : null; // 从 request 安全读取相机，request 为空时保持 camera 为空。
+
+            if (camera == null) // 如果没有相机，说明当前 dump 来自异常路径。
+            {
+                builder.AppendLine("  Camera=<none>"); // 明确写出没有相机，避免后续字段看起来像被截断。
+
+                return; // 没有相机时无法继续读取 HDR、像素尺寸或 targetTexture。
+            }
+
+            builder.Append("  Name=").Append(camera.name); // 写入相机名称，方便和 Console 中的 Request 行对应。
+
+            builder.Append(" CameraType=").Append(camera.cameraType); // 写入 Unity 相机类型，区分 Game、SceneView 和 Preview。
+
+            builder.Append(" PixelSize=").Append(Mathf.Max(1, camera.pixelWidth)).Append('x').Append(Mathf.Max(1, camera.pixelHeight)); // 写入相机当前像素尺寸。
+
+            builder.Append(" AllowHDR=").Append(camera.allowHDR); // 写入相机 HDR 开关，排查 HDR 能量是否可能被提前截断。
+
+            builder.Append(" TargetTexture=").Append(FormatRenderTextureName(camera.targetTexture)); // 写入 targetTexture 名称或 <none>。
+
+            builder.Append(" FinalTarget=").Append(request != null ? request.TargetIdentifier.ToString() : "<none>"); // 写入 request 最终输出目标，方便确认是否写到 CameraTarget 或 RenderTexture。
+
+            builder.AppendLine(); // 结束相机状态行。
+
+            if (camera.targetTexture != null) // 如果相机输出到 RenderTexture，就补充目标 RT 的真实格式。
+            {
+                builder.Append("  TargetTextureState="); // 写入 targetTexture 详情标签。
+
+                AppendRenderTextureState(builder, camera.targetTexture); // 输出 targetTexture 的尺寸、格式、HDR/LDR 和采样数。
+
+                builder.AppendLine(); // targetTexture 详情行结束。
+            }
+        }
+
+        private static void AppendRenderTargetState( // 写入 BurtRP 中间 RT 的格式和注册状态。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            BurtRenderRequest request, // 接收当前渲染请求，用来推导 RT 描述。
+            BurtRenderPipelineAsset asset, // 接收管线资产，用来判断哪些资源理论上会注册。
+            BurtRenderGraphResourceRegistry resourceRegistry) // 接收 RenderGraph 资源表，用来输出实际注册状态。
+        {
+            builder.AppendLine("Render Target State:"); // 单独成段输出，后续排查 HDR/LDR 和格式问题时优先看这里。
+
+            var camera = request != null ? request.Camera : null; // 从 request 安全读取相机，描述工具会对空相机回退 1x1。
+
+            AppendDescriptorLine(builder, "CameraColor", BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.CameraColorName); // 输出 CameraColor 中间 RT 描述。
+
+            AppendDescriptorLine(builder, "CameraDepth", BurtRenderTargetDescriptorUtility.CreateCameraDepthDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.CameraDepthName); // 输出 CameraDepth 中间 RT 描述。
+
+            if (BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset)) // 只有当前 request 实际会使用后处理框架时，才输出 PostProcessColor 描述。
+            {
+                AppendDescriptorLine(builder, "PostProcessColor", BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.PostProcessColorName); // 输出后处理 ping-pong RT 描述。
+            }
+            else // 当前 request 不执行后处理框架。
+            {
+                AppendSkippedRenderTargetLine(builder, "PostProcessColor", resourceRegistry, BurtRenderGraphResourceRegistry.PostProcessColorName); // 写出跳过状态，方便确认不是资源丢失。
+            }
+
+            if (IsDeferredRequest(request, asset)) // 当前 request 真正走 Deferred 时才会申请 GBuffer。
+            {
+                AppendDescriptorLine(builder, "GBuffer0", BurtRenderTargetDescriptorUtility.CreateGBuffer0Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer0Name); // 输出 GBuffer0 格式，第一版保存 baseColor/occlusion。
+
+                AppendDescriptorLine(builder, "GBuffer1", BurtRenderTargetDescriptorUtility.CreateGBuffer1Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name); // 输出 GBuffer1 格式，第一版保存 normal/metallic/smoothness。
+
+                AppendDescriptorLine(builder, "GBuffer2", BurtRenderTargetDescriptorUtility.CreateGBuffer2Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name); // 输出 GBuffer2 格式，第一版保存 emission/reflectance。
+            }
+            else // Forward 模式不注册 GBuffer。
+            {
+                AppendSkippedRenderTargetLine(builder, "GBuffer0", resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer0Name); // 写出 GBuffer0 跳过状态。
+
+                AppendSkippedRenderTargetLine(builder, "GBuffer1", resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name); // 写出 GBuffer1 跳过状态。
+
+                AppendSkippedRenderTargetLine(builder, "GBuffer2", resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name); // 写出 GBuffer2 跳过状态。
+            }
+
+            builder.Append("  FinalCameraTarget Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.FinalCameraTargetName)); // 写入最终输出目标是否已注册。
+
+            builder.Append(" Identifier=").Append(request != null ? request.TargetIdentifier.ToString() : "<none>"); // 写入最终目标 RenderTargetIdentifier，定位 CameraTarget 或具体 RenderTexture。
+
+            builder.AppendLine(); // 结束最终输出目标行。
+        }
+
+        private static void AppendPostProcessState( // 写入后处理框架和 Volume 效果状态。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            BurtRenderRequest request, // 接收当前渲染请求，用来判断后处理是否应该执行。
+            BurtRenderPipelineAsset asset) // 接收当前管线资产，用来读取后处理框架设置。
+        {
+            builder.AppendLine("PostProcess State:"); // 单独成段输出，方便排查 No-op、Tonemapping 和 Color Adjustments。
+
+            var settings = asset != null ? asset.PostProcessSettings : null; // 从资产安全读取后处理框架设置。
+
+            var assetEnabled = settings != null && settings.EnablePostProcessing; // 判断资产上的后处理总开关。
+
+            var noOpCopy = settings != null && settings.EnableNoOpCopy; // 判断资产上的 No-op Copy 验证开关。
+
+            var shouldRunFramework = BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 解析当前 request 最终是否会插入后处理链。
+
+            var tonemappingMode = BurtPostProcessUtility.ResolveTonemappingMode(asset); // 解析当前 Volume 中真正生效的 Tonemapping 模式。
+
+            var postExposureMultiplier = BurtPostProcessUtility.ResolvePostExposureMultiplier(asset); // 解析当前 Volume 中 Tonemapping 前曝光倍率。
+
+            var useColorAdjustments = BurtPostProcessUtility.ShouldUseColorAdjustments(request, asset); // 判断当前 Volume 是否启用基础颜色调整。
+
+            builder.Append("  AssetEnabled=").Append(assetEnabled); // 写入后处理总开关。
+
+            builder.Append(" NoOpCopy=").Append(noOpCopy); // 写入 No-op Copy 开关。
+
+            builder.Append(" ShouldRunFramework=").Append(shouldRunFramework); // 写入当前 request 是否真正执行后处理链。
+
+            builder.Append(" Tonemapping=").Append(tonemappingMode); // 写入 Volume 解析后的 Tonemapping 模式。
+
+            builder.Append(" PostExposureMul=").Append(postExposureMultiplier.ToString("0.###")); // 写入 EV 转换后的线性曝光倍率。
+
+            builder.Append(" ColorAdjustments=").Append(useColorAdjustments); // 写入是否启用颜色调整。
+
+            builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
+
+            builder.AppendLine(); // 结束后处理状态行。
+        }
+
+        private static void AppendDeferredState( // 写入 Deferred 相关资源和调试状态。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            BurtRenderRequest request, // 接收当前渲染请求，用来判断 Preview 是否强制走 Forward。
+            BurtRenderPipelineAsset asset, // 接收管线资产，用来读取 Deferred 开关。
+            BurtRenderGraphResourceRegistry resourceRegistry) // 接收资源表，用来确认 GBuffer 是否注册。
+        {
+            builder.AppendLine("Deferred State:"); // 单独成段输出，让 Deferred 分支是否生效一眼可见。
+
+            var isDeferred = IsDeferredRequest(request, asset); // 判断当前 request 是否真的处于 Deferred 路径。
+
+            builder.Append("  Enabled=").Append(isDeferred); // 写入 Deferred 是否启用。
+
+            builder.Append(" ForwardOnlyFallback=").Append(asset != null && asset.EnableDeferredForwardOpaqueFallback); // 写入 Deferred 后 ForwardOnly 兜底开关。
+
+            builder.Append(" GBuffer0Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer0Name)); // 写入 GBuffer0 是否已注册。
+
+            builder.Append(" GBuffer1Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name)); // 写入 GBuffer1 是否已注册。
+
+            builder.Append(" GBuffer2Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name)); // 写入 GBuffer2 是否已注册。
+
+            builder.Append(" GBufferDebugMode=").Append(asset != null ? BurtGBufferDebugViewUtility.ResolveGBufferDebugViewMode(asset).ToString() : "<none>"); // 写入最终 GBuffer Debug 模式。
+
+            builder.Append(" GBufferDebugSource=").Append(asset != null ? BurtGBufferDebugViewUtility.ResolveGBufferDebugViewSource(asset).ToString() : "<none>"); // 写入 GBuffer Debug 来源。
+
+            builder.AppendLine(); // 结束 Deferred 状态行。
+        }
+
+        private static void AppendDescriptorLine( // 写入一行 RenderTextureDescriptor 诊断信息。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            string label, // 接收资源显示名称。
+            RenderTextureDescriptor descriptor, // 接收要输出的 RT 描述。
+            BurtRenderGraphResourceRegistry resourceRegistry, // 接收资源表，用来判断资源是否注册。
+            string resourceName) // 接收资源表中的逻辑名称。
+        {
+            builder.Append("  ").Append(label); // 写入资源标签。
+
+            builder.Append(" Registered=").Append(IsRegistered(resourceRegistry, resourceName)); // 写入资源是否已注册到当前图。
+
+            builder.Append(" "); // 写入一个空格分隔注册状态和描述内容。
+
+            AppendDescriptorState(builder, descriptor); // 写入尺寸、格式、sRGB、MSAA 等描述信息。
+
+            builder.AppendLine(); // 当前资源行结束。
+        }
+
+        private static void AppendSkippedRenderTargetLine( // 写入一个当前路径不使用的资源状态。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            string label, // 接收资源显示名称。
+            BurtRenderGraphResourceRegistry resourceRegistry, // 接收资源表，用来判断资源是否意外注册。
+            string resourceName) // 接收资源表中的逻辑名称。
+        {
+            builder.Append("  ").Append(label); // 写入资源标签。
+
+            builder.Append(" Registered=").Append(IsRegistered(resourceRegistry, resourceName)); // 写入当前图是否注册了这个资源，方便发现条件分支不一致。
+
+            builder.AppendLine(" <skipped>"); // 明确表示这个资源在当前渲染路径中不会分配。
+        }
+
+        private static void AppendDescriptorState( // 把 RenderTextureDescriptor 转成紧凑的可读文本。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            RenderTextureDescriptor descriptor) // 接收 RT 描述。
+        {
+            builder.Append("Size=").Append(descriptor.width).Append('x').Append(descriptor.height); // 写入 RT 尺寸。
+
+            builder.Append(" ColorFormat=").Append(descriptor.colorFormat); // 写入旧版 RenderTextureFormat，方便和 Inspector targetTexture 对齐。
+
+            builder.Append(" GraphicsFormat=").Append(descriptor.graphicsFormat); // 写入底层 GraphicsFormat，排查平台格式选择时更准确。
+
+            builder.Append(" DepthBits=").Append(descriptor.depthBufferBits); // 写入深度位数，区分颜色 RT 和深度 RT。
+
+            builder.Append(" sRGB=").Append(descriptor.sRGB); // 写入 sRGB 标记，排查 Gamma/Linear 或 copy 变色问题。
+
+            builder.Append(" MSAA=").Append(descriptor.msaaSamples); // 写入 MSAA 采样数，排查 MRT 或 FinalBlit 采样数不一致。
+
+            builder.Append(" MipMap=").Append(descriptor.useMipMap); // 写入是否生成 mip，排查不必要的相机 RT mip 开销。
+
+            builder.Append(" Dimension=").Append(descriptor.dimension); // 写入纹理维度，确认当前不是意外的数组或 cube。
+        }
+
+        private static void AppendRenderTextureState( // 把真实 RenderTexture 转成紧凑可读文本。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            RenderTexture renderTexture) // 接收真实 targetTexture，可能为空。
+        {
+            if (renderTexture == null) // 如果没有 targetTexture。
+            {
+                builder.Append("<none>"); // 写入空占位。
+
+                return; // 没有更多信息。
+            }
+
+            builder.Append("Name=").Append(FormatRenderTextureName(renderTexture)); // 写入 RenderTexture 名称或实例 ID。
+
+            builder.Append(" Size=").Append(renderTexture.width).Append('x').Append(renderTexture.height); // 写入真实 RT 尺寸。
+
+            builder.Append(" Format=").Append(renderTexture.format); // 写入 RenderTextureFormat，方便判断 HDR/LDR。
+
+            builder.Append(" GraphicsFormat=").Append(renderTexture.graphicsFormat); // 写入底层 GraphicsFormat。
+
+            builder.Append(" DepthBits=").Append(renderTexture.depth); // 写入 targetTexture 自带深度位数。
+
+            builder.Append(" sRGB=").Append(renderTexture.sRGB); // 写入 sRGB 标记，排查颜色空间问题。
+
+            builder.Append(" MSAA=").Append(renderTexture.antiAliasing); // 写入真实 RT 抗锯齿采样数。
+
+            builder.Append(" MipMap=").Append(renderTexture.useMipMap); // 写入是否使用 mipmap。
+
+            builder.Append(" Dimension=").Append(renderTexture.dimension); // 写入纹理维度。
+        }
+
+        private static string FormatRenderTextureName(RenderTexture renderTexture) // 生成 RenderTexture 的简短名称。
+        {
+            if (renderTexture == null) // 如果没有 RenderTexture。
+            {
+                return "<none>"; // 返回空占位。
+            }
+
+            return string.IsNullOrEmpty(renderTexture.name) ? "InstanceID " + renderTexture.GetInstanceID() : renderTexture.name; // 有名称时输出名称，没有名称时输出 InstanceID。
+        }
+
+        private static bool IsRegistered( // 判断资源表里是否注册了某个逻辑资源。
+            BurtRenderGraphResourceRegistry resourceRegistry, // 接收资源表，可能为空。
+            string resourceName) // 接收资源逻辑名。
+        {
+            return resourceRegistry != null && resourceRegistry.ContainsRenderTarget(resourceName); // 资源表存在且包含该名称时返回 true。
+        }
+
+        private static bool IsDeferredRequest(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 判断当前 request 实际是否使用 Deferred 路径。
+        {
+            if (IsPreviewOrReflectionRequest(request)) // Preview/Reflection 已在 Pipeline 层强制走 Forward。
+            {
+                return false; // 返回 false，让 Debug 输出和实际组装器、资源注册保持一致。
+            }
+
+            return asset != null && asset.RendererMode == BurtRendererMode.Deferred; // 非 Preview 时跟随资产上的 Renderer Mode。
+        }
+
+        private static bool IsPreviewOrReflectionRequest(BurtRenderRequest request) // 判断当前 request 是否被强制隔离到 Forward 辅助路径。
+        {
+            return request != null && (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection); // Preview 和 Reflection 都不应显示为 Deferred。
         }
 
         private static void AppendValidationMessages( // 写入 RenderGraph 校验消息。

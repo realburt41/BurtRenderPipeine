@@ -90,7 +90,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         [SerializeField] private bool enableUnsupportedShaderDebug = true; // 定义是否绘制不支持的 Shader 为错误材质，方便迁移材质时立刻发现漏改的 shader。
 
-        [SerializeField] private bool enableRenderGraphDebug = false; // 定义 RenderGraph 调试输出开关，默认关闭，避免每帧刷 Console。
+        [SerializeField] private bool enableRenderGraphDebug = false; // 定义 RenderGraph 调试捕获开关，默认关闭，避免每帧生成长文本。
+
+        [SerializeField] private bool enableRenderGraphDebugConsoleLog = false; // 定义是否把捕获到的 RenderGraph Debug 继续输出到 Console；默认关闭，优先走剪切板按钮。
 
         [Header("Camera Debug")] // 把相机相关调试开关单独分组，避免和阴影、深度等其他模块混在一起。
         [SerializeField] private bool enableCameraSortDebugLog = false; // 定义是否输出相机 request 排序列表，默认关闭，避免每帧多相机时刷 Console。
@@ -140,9 +142,50 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         public bool EnableRenderGraphDebug => enableRenderGraphDebug; // 暴露 RenderGraph 调试开关给 BurtCameraRenderer 使用。
 
+        public bool EnableRenderGraphDebugConsoleLog => enableRenderGraphDebugConsoleLog; // 暴露 RenderGraph Console 输出开关，让渲染器决定是否继续打印长日志。
+
         public bool EnableCameraSortDebugLog => enableCameraSortDebugLog; // 暴露相机排序调试开关给 BurtRenderPipeline 使用，只有打开时才会输出每帧 request 列表。
 
         public bool EnableRenderFrameDebugLog => enableRenderFrameDebugLog; // 暴露 Frame/Stack 分组调试开关给 BurtRenderPipeline 使用，只诊断分组不改变渲染结果。
+
+        public bool HasLatestRenderGraphDebugDump => BurtRenderGraphDebugClipboardUtility.HasLatestDump; // 暴露最近一次 RenderGraph Debug 是否已经缓存，供自定义 Inspector 控制按钮启用状态。
+
+        public string LatestRenderGraphDebugDumpSummary => BurtRenderGraphDebugClipboardUtility.LatestDumpSummary; // 暴露最近一次 RenderGraph Debug 摘要，供 Inspector 显示给用户确认。
+
+        public bool HasLatestRenderGraphDebugDumpForRequestType(BurtRenderRequestType requestType) // 查询指定 request 类型是否已有缓存。
+        {
+            return BurtRenderGraphDebugClipboardUtility.HasLatestDumpForRequestType(requestType); // 转发到按类型缓存工具，避免 Inspector 直接依赖静态实现细节。
+        }
+
+        public string GetLatestRenderGraphDebugDumpSummary(BurtRenderRequestType requestType) // 获取指定 request 类型的最近一次 dump 摘要。
+        {
+            return BurtRenderGraphDebugClipboardUtility.GetLatestDumpSummary(requestType); // 返回 SceneView/Preview/Reflection 各自的摘要。
+        }
+
+        public void RequestCopyNextRenderGraphDebugDumpToClipboard() // 请求下一次渲染图 dump 生成后自动复制到剪切板。
+        {
+            BurtRenderGraphDebugClipboardUtility.RequestCopyNextDumpToClipboard(); // 把一次性复制请求交给静态缓存工具，下一次 request 渲染时会消费它。
+        }
+
+        public void RequestCopyNextRenderGraphDebugDumpToClipboard(BurtRenderRequestType requestType) // 请求下一次指定 request 类型的渲染图 dump 自动复制到剪切板。
+        {
+            BurtRenderGraphDebugClipboardUtility.RequestCopyNextDumpToClipboard(requestType); // 设置按 request 类型过滤的一次性复制请求。
+        }
+
+        public bool CopyLatestRenderGraphDebugDumpToClipboard() // 复制最近一次 RenderGraph Debug 到系统剪切板。
+        {
+            return BurtRenderGraphDebugClipboardUtility.CopyLatestDumpToClipboard(); // 复用剪切板工具的复制逻辑，并把是否成功返回给 Inspector。
+        }
+
+        public bool CopyLatestRenderGraphDebugDumpToClipboard(BurtRenderRequestType requestType) // 复制指定 request 类型最近一次 RenderGraph Debug 到系统剪切板。
+        {
+            return BurtRenderGraphDebugClipboardUtility.CopyLatestDumpToClipboard(requestType); // 复用按类型复制逻辑，避免 SceneView 覆盖 Preview/Reflection。
+        }
+
+        public void ClearLatestRenderGraphDebugDump() // 清空最近一次 RenderGraph Debug 缓存。
+        {
+            BurtRenderGraphDebugClipboardUtility.ClearLatestDump(); // 复用剪切板工具清空完整文本、摘要和一次性请求。
+        }
 
         private bool IsDeferredRendererMode => rendererMode == BurtRendererMode.Deferred; // 提供给 Odin ShowIf 使用，让 Deferred 专属配置只在 Deferred 模式下显示。
 

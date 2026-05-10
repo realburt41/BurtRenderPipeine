@@ -193,17 +193,23 @@ float3 BurtSampleIndirectDiffuseIrradiance(float3 normalWS)
 }
 
 
+// XRender / Unity reflection capture 的有效预过滤 LOD 范围通常按 0..6 设计，不等同于 cubemap 真实 mip 链长度。
+static const float BURT_REFLECTION_CAPTURE_SPECULAR_MIP_MAX = 6.0f;
+
 // 出处：XRender/Shaders/Library/ShadingIBL.hlsl::ComputeReflectionCaptureMipFromRoughness；roughness 到反射探针 mip 的 log2 曲线。
 float ComputeReflectionCaptureMipFromRoughness(float perceptualRoughness, float cubemapMaxMip)
 {
+    // C# 传入的是纹理真实 mip 上限，例如 512 probe 会是 9；XRender 公式需要的是反射预过滤有效 LOD 上限，所以这里限制到 0..6。
+    float specularMipMax = min(max(cubemapMaxMip, 0.0f), BURT_REFLECTION_CAPTURE_SPECULAR_MIP_MAX);
+
     // log2 曲线不能接受 0，所以使用 BurtRP 的最小感知粗糙度保护镜面端。
     float safeRoughness = max(saturate(perceptualRoughness), BURT_MIN_PERCEPTUAL_ROUGHNESS);
 
     // 对齐 XRender / UE 的启发式：粗糙端走高 mip，光滑端尽量贴近 mip0。
     float levelFrom1x1 = 1.0f - 1.2f * log2(safeRoughness);
 
-    // Unity 内置 spec cube 常见有效 mip 近似为 0..6，这里由调用方传入上限方便 Deferred 后续替换资源。
-    return clamp(cubemapMaxMip - 1.0f - levelFrom1x1, 0.0f, cubemapMaxMip);
+    // 用有效预过滤范围算 LOD，避免高分辨率 probe 的真实 mip 数把满光滑材质推到模糊 mip。
+    return clamp(specularMipMax - 1.0f - levelFrom1x1, 0.0f, specularMipMax);
 }
 
 // BurtRP 适配函数：采样 BurtRP 全局天空反射 cubemap，旧路径才回退 Unity 当前绑定的 reflection probe。

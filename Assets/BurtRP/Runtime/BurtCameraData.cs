@@ -20,7 +20,10 @@ namespace Burt.RenderPipeline
         SceneView = 3,
 
         // Unity 预览相机，通常来自 Inspector 或材质预览。
-        Preview = 4
+        Preview = 4,
+
+        // Unity 反射探针捕获相机，通常来自 ReflectionProbe 烘焙、实时刷新或相关预览。
+        Reflection = 5
     }
 
     // 定义 BurtRP 自己的相机清屏模式。

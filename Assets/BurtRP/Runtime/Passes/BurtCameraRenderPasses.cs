@@ -43,6 +43,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         private static readonly ShaderTagId LightweightForward = new ShaderTagId("LightweightForward"); // 定义旧 LWRP Forward LightMode，方便 Unsupported Pass 报告旧 SRP 材质。
 
+
+
+
+
+        private static readonly ShaderTagId[] EditorPreviewShaderTagIds = new ShaderTagId[] // Preview 需要兼容 Unity 内部预览 shader，不能只匹配 BurtForward。
+        {
+            BurtForward, // BurtRP 自己的材质预览仍优先走正式前向 Pass。
+            BurtForwardOnly, // 允许只实现 ForwardOnly 的 BurtRP 特殊材质在 Preview 中可见。
+            SRPDefaultUnlit, // Unity/SRP 默认未标记 Pass 会落到这里，Inspector 预览大量使用它。
+            ForwardBase, // Built-in 预览 shader 常见的前向 Pass 名称。
+            Always, // Unity 内部预览 shader 常用 Always Pass。
+            UniversalForward, // 兼容 URP 风格预览 shader。
+            UniversalForwardOnly, // 兼容 URP ForwardOnly 风格预览 shader。
+            LightweightForward, // 兼容旧 LWRP 风格预览 shader。
+            Vertex, // 兼容 Built-in 顶点光照 fallback。
+            VertexLMRGBM, // 兼容 Built-in lightmap RGBM fallback。
+            VertexLM, // 兼容 Built-in lightmap fallback。
+            PrepassBase, // 兜底旧 Built-in deferred prepass 名称，避免预览物体静默消失。
+        };
+
         private static readonly ShaderTagId[] UnsupportedShaderTagIds = new ShaderTagId[] // 列出 BurtRP 不接管的 LightMode，这些材质会被错误材质明确显示出来。
         {
             SRPDefaultUnlit, // 把通用 SRP Unlit shader 视为不支持，除非它迁移到 BurtForward。
@@ -89,6 +109,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             drawingSettings.overrideMaterial = errorMaterial; // 强制匹配到的不支持 shader 使用 Unity 错误材质绘制。
 
             return drawingSettings; // 返回配置好的不支持 shader 绘制设置，供调用方 Pass 使用。
+        }
+
+        public static DrawingSettings CreateEditorPreviewDrawingSettings(SortingSettings sortingSettings) // 创建 Unity Editor Preview 专用绘制设置。
+        {
+            var drawingSettings = new DrawingSettings(EditorPreviewShaderTagIds[0], sortingSettings); // Preview 首选 BurtForward，同时继续注册 Unity 内部预览 Pass。
+
+            for (var shaderTagIndex = 1; shaderTagIndex < EditorPreviewShaderTagIds.Length; shaderTagIndex++) // 把兼容 LightMode 全部注册进 DrawingSettings。
+            {
+                drawingSettings.SetShaderPassName(shaderTagIndex, EditorPreviewShaderTagIds[shaderTagIndex]); // 允许 Cubemap/ReflectionProbe 预览使用内置 shader 绘制。
+            }
+
+            drawingSettings.perObjectData = ForwardPerObjectData; // 如果预览的是 BurtRP 材质，仍然给它绑定基础 per-object 间接光数据。
+
+            return drawingSettings; // 返回配置好的 Preview 绘制设置。
         }
 
         public static DrawingSettings CreateDepthDrawingSettings(SortingSettings sortingSettings) // 创建 BurtRP 深度预写使用的 DrawingSettings。
@@ -460,7 +494,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             cmd.SetGlobalVector(MainLightDirectionId, new Vector4(mainLightDirection.x, mainLightDirection.y, mainLightDirection.z, 0f)); // 上传归一化的主光方向，Lit shader 用它计算 Lambert 漫反射。
             cmd.SetGlobalColor(MainLightColorId, mainLightColor); // 上传主光颜色，Lit shader 会把它乘到直接光上。
             cmd.SetGlobalColor(AmbientLightColorId, ambientLightColor); // 上传环境光颜色，Lit shader 会用它保留阴影区域的基础亮度。
-            BurtIndirectLightingUtility.UploadGlobalIndirectLighting(cmd); // 上传 BurtRP 自己的全局间接光数据源，让 Deferred fullscreen pass 不依赖 Forward DrawRenderers 副作用。
+            BurtIndirectLightingUtility.UploadGlobalIndirectLighting(cmd, request != null ? request.Camera : null); // 上传 BurtRP 自己的全局间接光数据源，让 Deferred fullscreen pass 不依赖 Forward DrawRenderers 副作用。
             cmd.SetGlobalMatrix(MainLightWorldToShadowId, Matrix4x4.identity); // 每个 request 开始先清理阴影矩阵，真正绘制阴影成功后 ShadowCaster Pass 会覆盖它。
             cmd.SetGlobalFloat(MainLightShadowStrengthId, mainLightShadowStrength); // 上传最终阴影强度，0 表示 receiver 完全跳过 shadow map 采样。
             cmd.SetGlobalVector(MainLightShadowTexelSizeId, mainLightShadowTexelSize); // 上传 shadow map texel size，软阴影采样会根据它偏移邻域 UV。
@@ -623,6 +657,75 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var filteringSettings = new FilteringSettings(RenderQueueRange.opaque); // 只允许不透明队列通过，透明仍交给后面的 Draw Transparent Pass。
 
             renderContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings); // 绘制所有显式声明 BurtForwardOnly 的可见不透明物体。
+        }
+    }
+
+    internal sealed class BurtDrawEditorPreviewPass : BurtRenderPass // 定义编辑器 Preview 专用绘制 Pass，兼容 Unity 内部资产预览 shader。
+    {
+        public override string Name => "Burt Draw Editor Preview"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 识别 Preview 是否走专用路径。
+
+        public override void Configure(BurtRenderPassBuilder builder) // 声明 Preview 绘制会使用的资源。
+        {
+            builder.ReadLightingGlobals(); // BurtRP 材质预览仍可能需要基础灯光全局状态。
+
+            builder.ReadShadowGlobals(); // 读取 Setup Lighting 写入的默认阴影状态，避免 shader 读到上一相机残留。
+
+            if (BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset)) // 如果 Preview 场景真的生成了主光阴影，就声明 shadow map 依赖。
+            {
+                builder.ReadMainLightShadowMap(); // 让 Preview 中的 BurtRP lit 材质可以保持和 Forward 路径一致。
+            }
+
+            builder.WriteCameraColor(); // Preview 结果写入中间颜色，后续仍统一交给 FinalBlit 输出。
+
+            builder.WriteCameraDepth(); // Preview 内部物体需要正常深度测试和写入。
+        }
+
+        public override void Execute(BurtRenderGraphContext context) // 执行编辑器 Preview 绘制。
+        {
+            var renderContext = context.ScriptableContext; // 读取 Unity SRP 上下文，用来提交渲染目标绑定和 DrawRenderers。
+
+            var request = context.Request; // 读取当前 request，用来访问相机和剔除结果。
+
+            var camera = request.Camera; // Preview 相机来自 Unity 编辑器内部。
+
+            var cameraColorTarget = context.CameraColorTarget; // 读取 Preview 中间颜色目标。
+
+            var cameraDepthTarget = context.CameraDepthTarget; // 读取 Preview 中间深度目标。
+
+            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid) // 任一目标无效时不能安全绘制。
+            {
+                return; // 直接跳过，避免把 Unity 内部预览画到错误目标。
+            }
+
+            var cmd = CommandBufferPool.Get(Name); // 重新绑定目标，防止前序内部预览状态影响 DrawRenderers。
+
+            cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 使用 BurtRP 当前 request 的颜色和深度目标。
+
+            renderContext.ExecuteCommandBuffer(cmd); // 提交绑定命令。
+
+            CommandBufferPool.Release(cmd); // 释放 CommandBuffer，避免每帧分配。
+
+            DrawPreviewRenderers(renderContext, request, camera, RenderQueueRange.opaque, SortingCriteria.CommonOpaque); // 先绘制不透明预览物体。
+
+            DrawPreviewRenderers(renderContext, request, camera, RenderQueueRange.transparent, SortingCriteria.CommonTransparent); // 再绘制透明预览物体。
+        }
+
+        private static void DrawPreviewRenderers( // 绘制一段指定队列范围的 Preview renderer。
+            ScriptableRenderContext renderContext, // 接收 Unity 渲染上下文。
+            BurtRenderRequest request, // 接收当前 request，用来读取剔除结果。
+            Camera camera, // 接收当前 Preview 相机。
+            RenderQueueRange renderQueueRange, // 接收要绘制的不透明或透明队列范围。
+            SortingCriteria sortingCriteria) // 接收对应队列的排序规则。
+        {
+            var sortingSettings = new SortingSettings(camera); // 基于 Preview 相机创建排序设置。
+
+            sortingSettings.criteria = sortingCriteria; // 使用调用方指定的不透明或透明排序。
+
+            var drawingSettings = BurtDrawingSettingsUtility.CreateEditorPreviewDrawingSettings(sortingSettings); // 使用 Preview 专用的宽松 LightMode 列表。
+
+            var filteringSettings = new FilteringSettings(renderQueueRange); // 只绘制当前队列范围，保证透明物体顺序在不透明之后。
+
+            renderContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings); // 绘制 Unity 内部资产预览和 BurtRP 材质预览物体。
         }
     }
 

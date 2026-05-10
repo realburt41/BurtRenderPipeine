@@ -24,6 +24,13 @@ namespace Burt.RenderPipeline
                 return BurtCameraRole.Preview;
             }
 
+            // Unity 的 Reflection 相机来自 ReflectionProbe 捕获或相关编辑器预览，需要和 Game/Base 隔离。
+            if (camera.cameraType == CameraType.Reflection)
+            {
+                // 返回 Reflection 角色，让它走反射探针专用的稳定 Forward 路径。
+                return BurtCameraRole.Reflection;
+            }
+
             // SceneView 来自编辑器视图，优先按编辑器相机处理，避免误归类到 GameView 的 Base 栈。
             if (camera.cameraType == CameraType.SceneView)
             {
@@ -56,6 +63,8 @@ namespace Burt.RenderPipeline
                     return BurtRenderRequestType.SceneView;
                 case BurtCameraRole.Preview:
                     return BurtRenderRequestType.Preview;
+                case BurtCameraRole.Reflection:
+                    return BurtRenderRequestType.Reflection;
                 case BurtCameraRole.Base:
                 default:
                     return BurtRenderRequestType.BaseCamera;

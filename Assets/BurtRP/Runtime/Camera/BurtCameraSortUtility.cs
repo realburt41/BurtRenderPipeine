@@ -70,7 +70,7 @@ namespace Burt.RenderPipeline
                 return stackCompare;
             }
 
-            // 同一层同一栈内再按角色排序：Base -> Overlay -> UI -> SceneView -> Preview。
+            // 同一层同一栈内再按角色排序：Base -> Overlay -> UI -> SceneView -> Preview -> Reflection。
             var roleCompare = GetRoleSortOrder(left.CameraRole).CompareTo(GetRoleSortOrder(right.CameraRole));
             if (roleCompare != 0)
             {
@@ -104,6 +104,8 @@ namespace Burt.RenderPipeline
                     return 3;
                 case BurtCameraRole.Preview:
                     return 4;
+                case BurtCameraRole.Reflection:
+                    return 5;
                 default:
                     return 100;
             }

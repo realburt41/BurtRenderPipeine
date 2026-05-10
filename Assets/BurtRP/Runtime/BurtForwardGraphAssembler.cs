@@ -24,6 +24,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
         private readonly BurtRenderPass drawOpaquePass = new BurtDrawOpaquePass(); // 创建不透明物体绘制 Pass，并在整个管线生命周期内复用它。
 
+        private readonly BurtRenderPass drawEditorPreviewPass = new BurtDrawEditorPreviewPass(); // 创建编辑器 Preview 专用绘制 Pass，兼容 Unity 内部资产预览 shader。
+
         private readonly BurtRenderPass drawSkyboxPass = new BurtDrawSkyboxPass(); // 创建天空盒绘制 Pass，并在整个管线生命周期内复用它。
 
         private readonly BurtRenderPass drawTransparentPass = new BurtDrawTransparentPass(); // 创建透明物体绘制 Pass，并在整个管线生命周期内复用它。
@@ -120,20 +122,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
             graph.AddPass(clearRenderTargetPass); // 把清屏 Pass 添加到 RenderGraph，保证颜色和深度状态可控。
 
-            if (ShouldUseDepthPrepass(asset)) // 如果管线资产允许 Depth Prepass，就把深度预写阶段加入图中。
+            if (IsPreviewRequest(request)) // Unity Inspector/Asset Preview 需要宽松 LightMode，不能走普通 BurtForward-only 场景绘制。
             {
-                graph.AddPass(depthPrepass); // 把深度预写 Pass 添加到 RenderGraph，让不透明物体先写入 CameraDepth。
+                graph.AddPass(drawEditorPreviewPass); // 只绘制 Preview 专用 Pass，避免 Cubemap/ReflectionProbe 预览被普通场景路径吞掉。
             }
-
-            graph.AddPass(drawOpaquePass); // 把不透明物体绘制 Pass 添加到 RenderGraph，让它在已有深度基础上写入颜色。
-
-            graph.AddPass(drawSkyboxPass); // 把天空盒 Pass 添加到 RenderGraph，由 Pass 自己决定是否真正绘制。
-
-            graph.AddPass(drawTransparentPass); // 把透明物体绘制 Pass 添加到 RenderGraph，让透明物体最后做混合。
-
-            if (ShouldUseUnsupportedShaderDebug(asset)) // 如果开启了不支持 Shader 调试，就在普通场景绘制后插入错误材质绘制。
+            else // 非 Preview 保持原来的 Forward 场景绘制路径。
             {
-                graph.AddPass(drawUnsupportedShadersPass); // 添加不支持 Shader 调试 Pass，让非 BurtRP 材质容易被发现。
+                if (ShouldUseDepthPrepass(asset)) // 如果管线资产允许 Depth Prepass，就把深度预写阶段加入图中。
+                {
+                    graph.AddPass(depthPrepass); // 把深度预写 Pass 添加到 RenderGraph，让不透明物体先写入 CameraDepth。
+                }
+
+                graph.AddPass(drawOpaquePass); // 把不透明物体绘制 Pass 添加到 RenderGraph，让它在已有深度基础上写入颜色。
+
+                graph.AddPass(drawSkyboxPass); // 把天空盒 Pass 添加到 RenderGraph，由 Pass 自己决定是否真正绘制。
+
+                graph.AddPass(drawTransparentPass); // 把透明物体绘制 Pass 添加到 RenderGraph，让透明物体最后做混合。
+
+                if (ShouldUseUnsupportedShaderDebug(request, asset)) // 如果开启了不支持 Shader 调试，就在普通场景绘制后插入错误材质绘制。
+                {
+                    graph.AddPass(drawUnsupportedShadersPass); // 添加不支持 Shader 调试 Pass，让非 BurtRP 材质容易被发现。
+                }
             }
 
             if (ShouldUsePostProcessFramework(request, asset, safeRenderOptions)) // 如果后处理框架启用且当前 request 会 FinalBlit，就插入全屏后处理链路。
@@ -143,12 +152,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 graph.AddPass(releasePostProcessColorPass); // 释放后处理中间 RT，确保临时资源生命周期清晰。
             }
 
-            if (ShouldUseDepthDebugView(asset)) // 如果管线资产开启了深度调试视图，就在释放深度 RT 之前插入可视化 Pass。
+            if (!IsPreviewOrReflectionRequest(request) && ShouldUseDepthDebugView(asset)) // Preview/Reflection 不叠加场景调试视图，避免资产预览或 Probe 捕获被深度图覆盖。
             {
                 graph.AddPass(debugCameraDepthPass); // 把 CameraDepth 调试 Pass 添加到 RenderGraph，让它读取深度并覆盖 CameraColor。
             }
 
-            if (ShouldUseMainLightShadowDebugView(asset, useMainLightShadow)) // 如果资产开启了主光阴影调试视图，并且当前相机真的生成了 shadow map。
+            if (!IsPreviewOrReflectionRequest(request) && ShouldUseMainLightShadowDebugView(asset, useMainLightShadow)) // Preview/Reflection 不叠加场景阴影调试视图，避免辅助渲染被覆盖。
             {
                 graph.AddPass(debugMainLightShadowMapPass); // 把主光 shadow map 调试 Pass 添加到 RenderGraph，方便直接检查阴影图内容。
             }
@@ -191,6 +200,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             return request.Type == BurtRenderRequestType.OverlayCamera && !request.OverlayClearsColor; // 非共享 Overlay 默认不清颜色时需要复制最终目标作为底图。
         }
 
+        private static bool IsPreviewRequest(BurtRenderRequest request) // 判断当前 request 是否来自 Unity 编辑器 Preview。
+        {
+            return request != null && request.Type == BurtRenderRequestType.Preview; // Preview 包括 Cubemap、ReflectionProbe、材质和 Camera 预览窗口。
+        }
+
+        private static bool IsPreviewOrReflectionRequest(BurtRenderRequest request) // 判断当前 request 是否来自 Unity 辅助预览或 ReflectionProbe 捕获。
+        {
+            return request != null && (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection); // 这些 request 不应叠加场景调试视图。
+        }
+
         private static bool ShouldUseDepthPrepass(BurtRenderPipelineAsset asset) // 定义判断是否启用 Depth Prepass 的辅助函数。
         {
             if (asset == null) // 如果资产为空，说明当前没有配置来源。
@@ -201,8 +220,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             return asset.EnableDepthPrepass; // 返回资产 Inspector 上配置的 Depth Prepass 开关。
         }
 
-        private static bool ShouldUseUnsupportedShaderDebug(BurtRenderPipelineAsset asset) // 定义判断是否插入不支持 Shader 调试 Pass 的辅助函数。
+        private static bool ShouldUseUnsupportedShaderDebug(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 定义判断是否插入不支持 Shader 调试 Pass 的辅助函数。
         {
+            if (IsPreviewOrReflectionRequest(request)) // Unity 资产预览和 ReflectionProbe 捕获经常使用内部 shader，不应该被错误材质调试覆盖。
+            {
+                return false; // 保持辅助渲染稳定，避免 Cubemap/ReflectionProbe 被画成错误材质。
+            }
+
             if (asset == null) // 如果资产为空，说明当前没有 Inspector 配置来源。
             {
                 return true; // 默认开启错误材质显示，避免不支持材质静默消失。

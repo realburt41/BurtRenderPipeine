@@ -249,11 +249,11 @@ namespace Burt.RenderPipeline
             // 重置编辑器相机标记。
             IsEditorCameraGroup = false;
         }
-        // 判断角色是否属于编辑器辅助相机；这些相机暂时不参与 Game 相机栈合并。
+        // 判断角色是否属于编辑器或引擎辅助相机；这些相机暂时不参与 Game 相机栈合并。
         private static bool IsEditorOnlyRole(BurtCameraRole role)
         {
-            // SceneView 和 Preview 都来自编辑器窗口，应当独立分组。
-            return role == BurtCameraRole.SceneView || role == BurtCameraRole.Preview;
+            // SceneView、Preview 和 Reflection 都应当独立分组，避免和 Game 相机共享 RT 生命周期。
+            return role == BurtCameraRole.SceneView || role == BurtCameraRole.Preview || role == BurtCameraRole.Reflection;
         }
     }
     // 表示一帧内所有有效 BurtRenderRequest 的分组快照；当前只为后续栈级渲染和调试服务。

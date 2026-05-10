@@ -79,7 +79,7 @@ namespace Burt.RenderPipeline
                     continue;
                 }
 
-                request.SetGraphAssembler(ResolveGraphAssembler()); // 根据管线资产的 Renderer Mode 给当前 request 指定对应渲染图组装器。
+                request.SetGraphAssembler(ResolveGraphAssembler(request)); // 根据管线资产和 request 类型给当前 request 指定对应渲染图组装器。
 
                 // 把有效 request 加入列表。
                 requests.Add(request);
@@ -108,7 +108,7 @@ namespace Burt.RenderPipeline
                     continue;
                 }
 
-                request.SetGraphAssembler(ResolveGraphAssembler()); // 根据管线资产的 Renderer Mode 给当前 request 指定对应渲染图组装器。
+                request.SetGraphAssembler(ResolveGraphAssembler(request)); // 根据管线资产和 request 类型给当前 request 指定对应渲染图组装器。
 
                 // 把有效 request 加入列表。
                 requests.Add(request);
@@ -127,8 +127,13 @@ namespace Burt.RenderPipeline
             Shader.SetGlobalFloat(PreIntegratedFGEnabledId, lut != null ? 1.0f : 0.0f);
         }
 
-        private BurtRenderGraphAssembler ResolveGraphAssembler() // 根据当前管线资产选择本次 request 使用的 RenderGraph 组装器。
+        private BurtRenderGraphAssembler ResolveGraphAssembler(BurtRenderRequest request) // 根据当前管线资产和 request 类型选择本次 request 使用的 RenderGraph 组装器。
         {
+            if (request != null && (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection)) // Unity Inspector/Asset Preview 和 ReflectionProbe 捕获不适合走 Deferred GBuffer 路径。
+            {
+                return forwardGraphAssembler; // 预览/反射探针窗口强制使用稳定 Forward 路径，避免 Cubemap/ReflectionProbe 被 Deferred 管线破坏。
+            }
+
             if (asset == null) // 如果资产为空，说明没有 Renderer Mode 配置来源。
             {
                 return forwardGraphAssembler; // 返回 Forward 组装器，保持最安全的默认行为。

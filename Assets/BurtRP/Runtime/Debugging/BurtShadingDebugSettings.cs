@@ -43,6 +43,10 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         DirectSpecular = 203, // 光照调试：只显示直接高光，方便排查 smoothness 拉满后的高光宽度。
         IndirectDiffuse = 204, // 光照调试：只显示间接漫反射，方便检查 SH / Light Probe。
         IndirectSpecular = 205, // 光照调试：只显示间接高光，方便检查 Reflection Probe 和 DFG。
+        ShadowAttenuation = 206, // 光照调试：只显示主光阴影衰减，白色表示不被阴影遮挡。
+        AmbientOcclusion = 207, // 光照调试：只显示当前参与间接光遮蔽的 AO 输入。
+        Emission = 208, // 光照调试：只显示自发光贡献，方便确认 GBuffer / Forward 是否正确叠加 emission。
+        FinalLighting = 209, // 光照调试：显示写入 CameraColor 前的最终材质光照，包含 PBR 光照和自发光。
         CameraDepth = 300, // 全屏调试：复用 BurtRP 当前已有的 CameraDepth debug pass。
         MainLightShadow = 301 // 全屏调试：复用 BurtRP 当前已有的 MainLightShadow debug pass。
     }

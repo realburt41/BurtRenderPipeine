@@ -623,6 +623,12 @@ Shader "BurtRP/Lit"
                 // 取出不含自发光的 PBR 总光照，后续 finalColor 会在它基础上叠加 Emission。
                 float3 lightingColor = pbrComponents.lighting;
 
+                // 采样自发光颜色，它不受灯光和阴影影响，会直接叠加到最终颜色。
+                float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
+
+                // 先合成最终材质颜色，后续 FinalLighting Debug 可以直接观察后处理前的材质输出。
+                float3 finalColor = lightingColor + emissionColor;
+
                 // 用 Forward 当前片元数据做一次 GBuffer 编码再解码，提前验证 Deferred 后续会消费的材质/法线还原路径。
                 BurtGBufferData debugGBufferSourceData = BurtCreateGBufferData(surfaceData, normalWS, float3(0.0f, 0.0f, 0.0f));
 
@@ -655,6 +661,18 @@ Shader "BurtRP/Lit"
 
                 // 写入间接高光结果，IndirectSpecular Debug View 会显示它。
                 debugData.indirectSpecularColor = pbrComponents.indirectSpecular;
+
+                // 写入主光阴影衰减，ShadowAttenuation Debug View 用它确认当前像素的阴影接收结果。
+                debugData.shadowAttenuation = shadowAttenuation;
+
+                // 写入参与间接光遮蔽的 AO，AmbientOcclusion Debug View 用它确认 Mask Map G 和强度混合结果。
+                debugData.ambientOcclusion = surfaceData.occlusion;
+
+                // 写入自发光贡献，Emission Debug View 用它确认 Emission Map 和 HDR Emission Color 是否生效。
+                debugData.emissionColor = emissionColor;
+
+                // 写入最终材质光照，FinalLighting Debug View 用它对比 Forward 输出和后处理前画面。
+                debugData.finalLightingColor = finalColor;
 
                 // 写入材质 reflectance，Reflectance Debug View 会用它检查非金属反射率输入。
                 debugData.reflectance = surfaceData.reflectance;
@@ -743,15 +761,6 @@ Shader "BurtRP/Lit"
                     // 返回材质 debug 颜色，同时保留材质 alpha，方便后续透明调试继续沿用同一逻辑。
                     return float4(debugColor, surfaceData.alpha);
                 }
-
-                // 采样自发光颜色，它不受灯光和阴影影响，会直接叠加到最终颜色。
-                float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
-
-                // 用光照结果初始化最终颜色，后续再叠加自发光，便于 Detail Lighting debug 单独观察不含自发光的部分。
-                float3 finalColor = lightingColor;
-
-                // 把自发光叠加到光照结果上，让材质可以自己发亮。
-                finalColor += emissionColor;
 
                 // Returns the lit color and preserves the material alpha value for future transparent/alpha-clip work.
                 return float4(finalColor, surfaceData.alpha);

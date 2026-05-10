@@ -59,12 +59,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             renderGraph.Execute(graphContext); // 执行 RenderGraph 里已经组装好的所有 Pass。
 
-            if (asset != null && asset.EnableRenderGraphDebug) // 如果管线资产开启了 RenderGraph 调试输出，就把当前图的资源声明打印到 Console。
+            if (ShouldCaptureRenderGraphDebug(request, asset)) // 如果资产开启了常驻捕获，或用户点击了匹配当前 request 的下一帧复制按钮，就生成一份 RenderGraph Debug 文本。
             {
-                Debug.Log(renderGraph.DumpDebugInfo(request, asset, safeRenderOptions)); // 输出 RenderGraph 调试文本，包含 Pass 顺序、资源读写关系、RT 生命周期和当前管线调试状态。
+                var renderGraphDebugDump = renderGraph.DumpDebugInfo(request, asset, safeRenderOptions); // 生成完整 RenderGraph Debug 文本，包含 Pass 顺序、资源读写关系、RT 生命周期和当前管线调试状态。
+
+                BurtRenderGraphDebugClipboardUtility.StoreLatestDump(request, renderGraphDebugDump); // 缓存最近一次 dump，Inspector 按钮可以直接复制到剪切板。
+
+                if (BurtRenderGraphDebugClipboardUtility.ConsumeCopyNextDumpRequest(request)) // 如果用户点击过“下一帧复制”且当前 request 命中过滤条件，就在本次 dump 生成后立刻消费请求。
+                {
+                    BurtRenderGraphDebugClipboardUtility.CopyLatestDumpToClipboardAndLog(request.Type); // 把刚生成的目标类型 dump 写进剪切板，并输出一条短确认日志。
+                }
+
+                if (asset != null && asset.EnableRenderGraphDebugConsoleLog) // 只有显式打开 Console Log 时，才继续把完整长文本打印到 Console。
+                {
+                    Debug.Log(renderGraphDebugDump); // 输出完整 RenderGraph Debug 文本；默认关闭，避免每帧刷屏。
+                }
             }
 
             context.Submit(); // 把当前 request 累积的所有渲染命令提交给 Unity 执行。
+        }
+
+        private static bool ShouldCaptureRenderGraphDebug(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 判断当前 request 是否需要生成 RenderGraph Debug 文本。
+        {
+            if (asset != null && asset.EnableRenderGraphDebug) // 如果资产上开启了常驻 RenderGraph Debug 捕获。
+            {
+                return true; // 返回 true，每帧都缓存最近一次 dump，供按钮随时复制。
+            }
+
+            return BurtRenderGraphDebugClipboardUtility.ShouldCaptureNextDumpForRequest(request); // 如果用户点击了“一帧复制”，只让匹配 request 生成一次 dump。
         }
     }
 }

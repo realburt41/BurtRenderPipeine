@@ -128,6 +128,9 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 // 从 GBuffer 进入 PBR shading core，评估主光直射、SH 间接漫反射和 Reflection Probe 间接高光。
                 BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponentsFromGBuffer(shadingGBufferData, mainLight, viewDirectionWS);
 
+                // 先合成最终材质颜色，后续 Shading Debug 可以直接观察写入 CameraColor 前的最终结果。
+                float3 finalColor = pbrComponents.lighting + gbufferData.emission;
+
                 // 创建一份 SurfaceData；Shading Debug 的公共函数使用 SurfaceData 读取材质输入类调试项。
                 BurtSurfaceData debugSurfaceData;
 
@@ -172,6 +175,18 @@ Shader "Hidden/BurtRP/DeferredLighting"
 
                 // 写入间接高光结果，IndirectSpecular Debug View 会显示 Reflection Probe / Sky Reflection 贡献。
                 debugData.indirectSpecularColor = pbrComponents.indirectSpecular;
+
+                // 写入主光阴影衰减，ShadowAttenuation Debug View 用它确认 Deferred 接收阴影是否和 Forward 一致。
+                debugData.shadowAttenuation = shadowAttenuation;
+
+                // 写入参与间接光计算的 AO，AmbientOcclusion Debug View 用它确认 GBuffer0.a 是否进入 lighting。
+                debugData.ambientOcclusion = gbufferData.occlusion;
+
+                // 写入 GBuffer 保存的自发光贡献，Emission Debug View 用它确认 GBuffer2.rgb 是否被最终叠加。
+                debugData.emissionColor = gbufferData.emission;
+
+                // 写入最终材质光照，FinalLighting Debug View 用它对比 Deferred Lighting 输出和后处理前画面。
+                debugData.finalLightingColor = finalColor;
 
                 // 写入材质 reflectance，Reflectance Debug View 会用它检查 GBuffer2.a 是否按 XRender 语义还原。
                 debugData.reflectance = gbufferData.reflectance;
@@ -260,9 +275,6 @@ Shader "Hidden/BurtRP/DeferredLighting"
                     // Deferred Lighting Pass 只处理 opaque GBuffer，所以 debug 输出 alpha 固定为 1。
                     return float4(debugColor, 1.0f);
                 }
-
-                // Deferred Lighting 输出不含透明物；这里只把 PBR 光照和 GBuffer emission 相加写回 CameraColor。
-                float3 finalColor = pbrComponents.lighting + gbufferData.emission;
 
                 // 返回给 CameraColor，后续 Skybox、Transparent、PostProcess 和 FinalBlit 继续处理。
                 return float4(finalColor, 1.0f);

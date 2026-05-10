@@ -60,7 +60,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
         public static RenderTextureDescriptor CreateGBuffer1Descriptor(Camera camera) // 定义创建 Deferred GBuffer1 RT 描述的函数。
         {
-            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32); // GBuffer1 第一版保存 oct normal.rg、metallic.b、smoothness.a，普通 8 位通道先满足最小闭环。
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf); // GBuffer1 保存 oct normal.rg、metallic.b、smoothness.a；直接高光对法线量化很敏感，所以用 16 位通道避免格子状高光。
         }
 
         public static RenderTextureDescriptor CreateGBuffer2Descriptor(Camera camera) // 定义创建 Deferred GBuffer2 RT 描述的函数。

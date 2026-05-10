@@ -19,6 +19,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让清屏工具
                 return BurtCameraClearMode.SolidColor; // 使用纯色清屏作为安全兜底，避免未知 request 直接继承旧画面。
             }
 
+            if (request.CameraRole == BurtCameraRole.Preview) // Inspector/Asset Preview 背景固定为黑色，不跟随选中相机或 Unity Preview 相机的 clearFlags。
+            {
+                return BurtCameraClearMode.SolidColor; // Preview 统一清成纯色黑底，避免被场景相机清屏配置污染。
+            }
+
             var cameraData = ResolveClearCameraData(request); // 解析真正用于清屏的 BurtCameraData，SceneView/Preview 在编辑器下可以借用当前选中相机的数据。
 
             if (cameraData != null) // 如果相机挂了 BurtCameraData，就以 BurtRP 自己的配置为最高优先级。
@@ -39,6 +44,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让清屏工具
             BurtRenderPipelineAsset asset, // 接收管线资产，用来读取默认清屏色。
             BurtCameraClearMode clearMode) // 接收已经解析好的清屏模式，避免重复计算。
         {
+            if (request != null && request.CameraRole == BurtCameraRole.Preview) // Preview 背景固定黑色，避免 Cubemap/ReflectionProbe 预览借用场景相机颜色。
+            {
+                return Color.black; // 返回黑色作为所有编辑器预览窗口的默认底色。
+            }
+
             var cameraData = ResolveClearCameraData(request); // 安全解析清屏数据来源，request 为空或没有可用数据时得到 null。
 
             if (cameraData != null) // 如果相机挂了 BurtCameraData，就优先使用相机自己的清屏颜色。
@@ -68,6 +78,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让清屏工具
                 return null; // 返回 null，让调用方继续走 Unity clearFlags 或资产默认值。
             }
 
+            if (request.CameraRole == BurtCameraRole.Preview || request.CameraRole == BurtCameraRole.Reflection) // Preview/Reflection 不借用选中 Camera 的 BurtCameraData。
+            {
+                return null; // 让 Preview 走固定黑底，Reflection 走 Unity 自身 clearFlags，而不是跟随当前场景相机。
+            }
+
             if (request.CameraData != null) // 如果当前 request 自己就有关联 BurtCameraData，这是最直接、最可靠的数据来源。
             {
                 return request.CameraData; // 直接返回 request 自己的 BurtCameraData。
@@ -90,6 +105,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让清屏工具
             if (request == null) // 如果 request 为空，说明没有明确的数据来源。
             {
                 return "Fallback"; // 返回兜底来源名称，方便日志识别异常路径。
+            }
+
+            if (request.CameraRole == BurtCameraRole.Preview) // Preview 已固定为黑底，不再跟随 Unity Camera 或选中 BurtCameraData。
+            {
+                return "PreviewDefaultBlack"; // 返回 Preview 专用来源名，方便日志确认预览窗口没有被场景清屏污染。
+            }
+
+            if (request.CameraRole == BurtCameraRole.Reflection) // ReflectionProbe 捕获不借用选中 Camera 的 BurtCameraData。
+            {
+                return "UnityReflectionCamera"; // 返回反射探针相机来源名，方便诊断 Probe 捕获是否被场景相机污染。
             }
 
             if (request.CameraData != null) // 当前 request 直接拥有 BurtCameraData 时，这是最明确的数据来源。
@@ -124,9 +149,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让清屏工具
                 return true; // SceneView 必须尊重 Unity 自己的 Skybox 开关，否则 Scene 窗口不会切到天空盒。
             }
 
-            if (request.CameraRole == BurtCameraRole.Preview) // Preview 相机来自 Inspector 或预览窗口，也通常没有 BurtCameraData。
+            if (request.CameraRole == BurtCameraRole.Reflection) // ReflectionProbe 捕获相机需要尊重 Unity 为 probe 设置的 clearFlags。
             {
-                return true; // Preview 使用 Unity 自己的 clearFlags，避免预览窗口背景表现异常。
+                return true; // 反射探针捕获不使用 BurtRP 资产默认清屏色，避免污染 cubemap。
             }
 
             return false; // 普通 Game/Base/Overlay/UI 相机仍然以 BurtCameraData 为主要配置来源。

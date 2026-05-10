@@ -100,6 +100,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 return false; // 返回 false，保持资源注册和渲染执行条件一致。
             }
 
+            if (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection) // Preview/Reflection request 会强制走 Forward，不注册 GBuffer。
+            {
+                return false; // 返回 false，让资源表和实际 Forward 组装器保持一致。
+            }
+
             if (asset == null) // 如果资产为空，就没有 Renderer Mode 配置来源。
             {
                 return false; // 返回 false，默认保持 Forward 行为。

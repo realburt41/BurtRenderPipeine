@@ -25,6 +25,9 @@ namespace Burt.RenderPipeline
         // 预览相机请求，后面做材质预览或编辑器预览时会使用。
         Preview = 4,
 
+        // 反射探针捕获请求，来自 Unity ReflectionProbe 的 cubemap face 渲染。
+        Reflection = 5,
+
         // 未知请求类型，用来兜底。
         Unknown = 255
     }

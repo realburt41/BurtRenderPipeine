@@ -24,6 +24,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return false; // 返回 false，避免创建尺寸不明确的 PostProcessColor RT。
             }
 
+            if (IsPreviewOrReflectionRequest(request)) // Unity Inspector/Asset Preview 和 ReflectionProbe 捕获不应该被项目里的 Volume Tonemapping 或调色影响。
+            {
+                return false; // 返回 false，避免 Cubemap/ReflectionProbe 等辅助渲染被后处理链改变颜色或曝光。
+            }
+
             if (asset == null) // 如果管线资产为空，说明当前没有 Inspector 配置来源。
             {
                 return false; // 返回 false，默认不启用后处理，避免异常配置改变画面。
@@ -63,6 +68,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return false; // 返回 false，避免在异常相机任务里执行颜色调整。
             }
 
+            if (IsPreviewOrReflectionRequest(request)) // Preview / Reflection 不使用项目 Volume 调色，避免资产预览颜色被场景后处理污染。
+            {
+                return false; // 返回 false，让后处理 Pass 不上传 Color Adjustments。
+            }
+
             if (!IsPostProcessEnabled(asset)) // 如果管线资产没有开启后处理框架，Volume 调色不允许改变画面。
             {
                 return false; // 返回 false，让后处理 Pass 不上传颜色调整参数。
@@ -90,6 +100,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             if (camera == null) // 如果相机为空，就没有 Transform 可以参与本地 Volume 混合。
             {
                 return; // 直接返回，后续解析会使用 VolumeStack 当前值或默认值。
+            }
+
+            if (IsPreviewOrReflectionRequest(request)) // Preview / Reflection 相机来自 Unity 辅助渲染，不应该刷新或继承场景 Volume。
+            {
+                return; // 直接返回，避免资产预览或 ReflectionProbe 捕获被场景 Tonemapping/Color Adjustments 影响。
             }
 
             if (asset == null) // 如果资产为空，就没有后处理 Volume LayerMask 配置来源。
@@ -259,6 +274,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             var settings = asset.PostProcessSettings; // 读取资产上的后处理框架设置。
 
             return settings != null && settings.EnablePostProcessing; // 只有设置存在且总开关打开时，Volume 效果才允许生效。
+        }
+
+        private static bool IsPreviewOrReflectionRequest(BurtRenderRequest request) // 判断当前 request 是否来自 Unity 编辑器预览或 ReflectionProbe 捕获。
+        {
+            return request != null && (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection); // 这些 request 都不应继承场景后处理。
         }
 
         private static bool HasActiveTonemappingVolume() // 定义判断当前 VolumeStack 是否存在有效 Tonemapping 的辅助函数。

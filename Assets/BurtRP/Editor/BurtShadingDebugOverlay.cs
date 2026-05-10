@@ -91,6 +91,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Indirect Diffuse"; // 显示 SH / Light Probe 漫反射。
                 case BurtShadingDebugMode.IndirectSpecular:
                     return "Indirect Specular"; // 显示 Reflection Probe / Sky 高光。
+                case BurtShadingDebugMode.ShadowAttenuation:
+                    return "Shadow Attenuation"; // 显示主光阴影衰减，白色表示不在阴影中。
+                case BurtShadingDebugMode.AmbientOcclusion:
+                    return "Ambient Occlusion (Lighting)"; // 显示真正参与间接光遮蔽的 AO。
+                case BurtShadingDebugMode.Emission:
+                    return "Emission"; // 显示自发光贡献。
+                case BurtShadingDebugMode.FinalLighting:
+                    return "Final Lighting"; // 显示写入 CameraColor 前的最终材质颜色。
                 case BurtShadingDebugMode.CameraDepth:
                     return "Camera Depth"; // 已有全屏深度调试。
                 case BurtShadingDebugMode.MainLightShadow:
@@ -195,7 +203,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.DirectSpecular, // 直接高光最终贡献。
             BurtShadingDebugMode.IndirectLighting, // 间接光总和。
             BurtShadingDebugMode.IndirectDiffuse, // 间接漫反射。
-            BurtShadingDebugMode.IndirectSpecular // 间接高光。
+            BurtShadingDebugMode.IndirectSpecular, // 间接高光。
+            BurtShadingDebugMode.ShadowAttenuation, // 主光阴影衰减。
+            BurtShadingDebugMode.AmbientOcclusion, // 参与 lighting 的 AO。
+            BurtShadingDebugMode.Emission, // 自发光贡献。
+            BurtShadingDebugMode.FinalLighting // PBR 光照加自发光后的最终材质颜色。
         });
 
         public static readonly BurtShadingDebugGroup Fullscreen = new BurtShadingDebugGroup("Fullscreen / Render Data", "Fullscreen", new[] // BurtRP 现有全屏调试入口。

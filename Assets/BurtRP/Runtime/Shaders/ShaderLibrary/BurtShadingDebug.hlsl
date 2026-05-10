@@ -45,6 +45,10 @@ static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE = 202.0f; // 对应 C#
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_SPECULAR = 203.0f; // 对应 C# BurtShadingDebugMode.DirectSpecular，用来显示直接高光。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_DIFFUSE = 204.0f; // 对应 C# BurtShadingDebugMode.IndirectDiffuse，用来显示 SH / Light Probe 漫反射。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR = 205.0f; // 对应 C# BurtShadingDebugMode.IndirectSpecular，用来显示 Reflection Probe 镜面反射。
+static const float BURT_SHADING_DEBUG_MODE_SHADOW_ATTENUATION = 206.0f; // 对应 C# BurtShadingDebugMode.ShadowAttenuation，用来显示主光阴影衰减。
+static const float BURT_SHADING_DEBUG_MODE_AMBIENT_OCCLUSION = 207.0f; // 对应 C# BurtShadingDebugMode.AmbientOcclusion，用来显示参与间接光遮蔽的 AO。
+static const float BURT_SHADING_DEBUG_MODE_EMISSION = 208.0f; // 对应 C# BurtShadingDebugMode.Emission，用来显示自发光贡献。
+static const float BURT_SHADING_DEBUG_MODE_FINAL_LIGHTING = 209.0f; // 对应 C# BurtShadingDebugMode.FinalLighting，用来显示写入 CameraColor 前的最终材质光照。
 
 // 保存片元已经算好的调试数据，避免 Debug View 重新计算一套和正常渲染不一致的光照。
 struct BurtShadingDebugData
@@ -66,6 +70,18 @@ struct BurtShadingDebugData
 
     // 保存间接镜面贡献，主要来自 Unity Reflection Probe / Sky Reflection。
     float3 indirectSpecularColor;
+
+    // 保存主光阴影衰减，1 表示不被阴影遮挡，0 表示完全落在阴影中。
+    float shadowAttenuation;
+
+    // 保存参与间接光遮蔽的 AO 输入，Forward 来自 surfaceData，Deferred 来自 GBuffer 解码。
+    float ambientOcclusion;
+
+    // 保存自发光贡献，Forward 来自 Emission Map，Deferred 来自 GBuffer2.rgb。
+    float3 emissionColor;
+
+    // 保存材质最终写入 CameraColor 前的颜色，包含 PBR 光照和自发光。
+    float3 finalLightingColor;
 
     // 保存材质 reflectance，用来确认材质面板输入的介质反射率。
     float reflectance;
@@ -396,6 +412,30 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR)) // IndirectSpecular 模式只显示间接高光。
     {
         debugColor = max(data.indirectSpecularColor, float3(0.0f, 0.0f, 0.0f)); // 显示 Reflection Probe 镜面项，方便检查探针和 DFG 是否生效。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_ATTENUATION)) // ShadowAttenuation 模式显示主光阴影衰减。
+    {
+        debugColor = float3(data.shadowAttenuation, data.shadowAttenuation, data.shadowAttenuation); // 白色表示无阴影，黑色表示完全被遮挡。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_AMBIENT_OCCLUSION)) // AmbientOcclusion 模式显示参与间接光遮蔽的 AO。
+    {
+        debugColor = float3(data.ambientOcclusion, data.ambientOcclusion, data.ambientOcclusion); // AO 越暗表示间接漫反射和间接高光越容易被压暗。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_EMISSION)) // Emission 模式只显示自发光贡献。
+    {
+        debugColor = max(data.emissionColor, float3(0.0f, 0.0f, 0.0f)); // 保留 HDR 自发光强度但去掉负值，方便检查贴图和颜色是否进入最终颜色。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_FINAL_LIGHTING)) // FinalLighting 模式显示写入 CameraColor 前的材质最终颜色。
+    {
+        debugColor = max(data.finalLightingColor, float3(0.0f, 0.0f, 0.0f)); // 显示 PBR 光照加自发光后的最终材质输出，用来对比后处理前后的差异。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
