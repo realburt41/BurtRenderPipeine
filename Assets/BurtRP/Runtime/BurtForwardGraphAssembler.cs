@@ -30,6 +30,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
         private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // 创建不支持 Shader 的调试 Pass，让非 BurtRP 材质显示为明显的错误材质。
 
+        private readonly BurtRenderPass allocatePostProcessColorPass = new BurtAllocatePostProcessColorPass(); // 创建后处理颜色分配 Pass，用来申请 PostProcessColor 中间 RT。
+
+        private readonly BurtRenderPass postProcessPass = new BurtPostProcessPass(); // 创建第一版后处理 Pass，用来执行 No-op Copy 或 Tonemapping。
+
+        private readonly BurtRenderPass releasePostProcessColorPass = new BurtReleasePostProcessColorPass(); // 创建后处理颜色释放 Pass，用来在后处理完成后释放 PostProcessColor。
+
         private readonly BurtRenderPass debugCameraDepthPass = new BurtDebugCameraDepthPass(); // 创建 CameraDepth 调试 Pass，用来把深度纹理画到中间颜色目标上。
 
         private readonly BurtRenderPass debugMainLightShadowMapPass = new BurtDebugMainLightShadowMapPass(); // 创建主光 shadow map 调试 Pass，用来检查阴影图是否写入了内容。
@@ -130,6 +136,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 graph.AddPass(drawUnsupportedShadersPass); // 添加不支持 Shader 调试 Pass，让非 BurtRP 材质容易被发现。
             }
 
+            if (ShouldUsePostProcessFramework(request, asset, safeRenderOptions)) // 如果后处理框架启用且当前 request 会 FinalBlit，就插入全屏后处理链路。
+            {
+                graph.AddPass(allocatePostProcessColorPass); // 申请后处理中间颜色 RT，避免 CameraColor 自读自写导致平台不稳定。
+                graph.AddPass(postProcessPass); // 执行 CameraColor -> PostProcessColor -> CameraColor，必要时在第一段拷贝里应用 Tonemapping。
+                graph.AddPass(releasePostProcessColorPass); // 释放后处理中间 RT，确保临时资源生命周期清晰。
+            }
+
             if (ShouldUseDepthDebugView(asset)) // 如果管线资产开启了深度调试视图，就在释放深度 RT 之前插入可视化 Pass。
             {
                 graph.AddPass(debugCameraDepthPass); // 把 CameraDepth 调试 Pass 添加到 RenderGraph，让它读取深度并覆盖 CameraColor。
@@ -196,6 +209,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             }
 
             return asset.EnableUnsupportedShaderDebug; // 返回资产 Inspector 上配置的不支持 Shader 调试开关。
+        }
+
+        private static bool ShouldUsePostProcessFramework( // 定义判断是否启用后处理框架的辅助函数。
+            BurtRenderRequest request, // 接收当前渲染请求，用来确认相机任务是否有效。
+            BurtRenderPipelineAsset asset, // 接收管线资产，用来读取后处理设置。
+            BurtRequestRenderOptions renderOptions) // 接收栈级 RT 生命周期选项，用来避免在共享相机栈的中间 request 上提前执行后处理。
+        {
+            if (renderOptions != null && !renderOptions.ShouldFinalBlit) // 如果当前 request 不是最终输出点，说明后面还会有 Overlay 或同栈相机继续写入 CameraColor。
+            {
+                return false; // 返回 false，把后处理推迟到真正 FinalBlit 之前，避免相机栈里重复执行效果。
+            }
+
+            return BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 复用后处理工具逻辑，保证 ForwardGraph 和资源注册条件一致。
         }
 
         private static bool ShouldUseDepthDebugView(BurtRenderPipelineAsset asset) // 定义判断是否启用 CameraDepth 调试视图的辅助函数。

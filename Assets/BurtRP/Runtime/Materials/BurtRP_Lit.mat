@@ -44,12 +44,12 @@ Material:
     - _AlphaClip: 0
     - _Cutoff: 0.5
     - _Metallic: 0
-    - _NormalScale: 0.28
+    - _NormalScale: 0.011
     - _OcclusionStrength: 1
-    - _Reflectance: 1
-    - _Smoothness: 0.718
+    - _Reflectance: 0.471
+    - _Smoothness: 0.904
     m_Colors:
-    - _BaseColor: {r: 0.5660378, g: 0.5660378, b: 0.5660378, a: 1}
+    - _BaseColor: {r: 0.8679245, g: 0.7169819, b: 0, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

@@ -44,6 +44,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor; // 返回创建好的颜色 RT 描述，供分配 Pass 使用。
         }
 
+        public static RenderTextureDescriptor CreatePostProcessColorDescriptor(Camera camera) // 定义创建后处理中间颜色 RT 描述的函数。
+        {
+            var descriptor = CreateCameraColorDescriptor(camera); // 后处理中间颜色需要和 CameraColor 尺寸、HDR 和 targetTexture 格式保持一致。
+
+            descriptor.depthBufferBits = 0; // 后处理颜色 RT 不需要深度缓冲，深度仍由 CameraDepth 单独管理。
+
+            return descriptor; // 返回后处理颜色 RT 描述，供分配 Pass 使用。
+        }
+
         public static RenderTextureDescriptor CreateCameraDepthDescriptor(Camera camera) // 定义创建相机深度 RT 描述的函数。
         {
             var width = 1; // 定义默认宽度为 1，避免相机尺寸异常时创建 0 宽 RT。

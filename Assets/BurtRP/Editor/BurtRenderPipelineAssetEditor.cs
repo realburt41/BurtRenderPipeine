@@ -15,6 +15,9 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
 
         private SerializedProperty preintegratedFGLut; // 缓存 PBR 预积分 FG LUT 字段。
 
+        private SerializedProperty postProcessSettings; // 缓存后处理框架设置字段，具体效果参数会从 Global Volume 读取。
+        private SerializedProperty postProcessVolumeLayerMask; // 缓存后处理 Volume 查询层字段，Global Volume 需要通过它参与后处理。
+
         private SerializedProperty enableMainLightShadows; // 缓存主光阴影总开关字段。
         private SerializedProperty mainLightShadowResolution; // 缓存主光阴影图分辨率字段。
         private SerializedProperty mainLightShadowDistance; // 缓存主光阴影距离字段。
@@ -37,6 +40,8 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private static readonly GUIContent DepthDebugLabel = new("Depth Debug View", "开启后把 CameraDepth 可视化到 CameraColor。"); // 定义 Depth Debug 显示文本。
         private static readonly GUIContent DepthScaleLabel = new("Depth Debug Scale", "调整深度可视化亮度缩放，数值越大近处深度越明显。"); // 定义 Depth Debug 缩放显示文本。
         private static readonly GUIContent PreintegratedFGLutLabel = new("Preintegrated FG LUT", "用于 IBL 间接高光的 DFG/GGX 预积分查找表。"); // 定义 PBR 预积分 LUT 显示文本。
+        private static readonly GUIContent PostProcessSettingsLabel = new("Post Process Settings", "后处理框架设置，具体效果参数从 Global Volume 读取。"); // 定义后处理设置显示文本。
+        private static readonly GUIContent PostProcessVolumeLayerMaskLabel = new("Post Process Volume Layer Mask", "后处理 Global Volume 查询层，Tonemapping 等效果参数从匹配的 Volume Profile 读取。"); // 定义后处理 Volume 层显示文本。
         private static readonly GUIContent MainLightShadowLabel = new("Enable Shadows", "允许 BurtRP 为主方向光渲染 shadow map。"); // 定义主光阴影总开关显示文本。
         private static readonly GUIContent ShadowResolutionLabel = new("Resolution", "主光阴影图默认分辨率。"); // 定义阴影分辨率显示文本。
         private static readonly GUIContent ShadowDistanceLabel = new("Distance", "主光阴影最大剔除距离。"); // 定义阴影距离显示文本。
@@ -61,6 +66,9 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             depthDebugScale = FindProperty(nameof(depthDebugScale)); // 绑定深度调试缩放。
 
             preintegratedFGLut = FindProperty(nameof(preintegratedFGLut)); // 绑定 PBR 预积分 FG LUT。
+
+            postProcessSettings = FindProperty(nameof(postProcessSettings)); // 绑定后处理设置，让现有自定义 Inspector 也能显示新配置。
+            postProcessVolumeLayerMask = FindProperty(nameof(postProcessVolumeLayerMask)); // 绑定后处理 Volume 查询层，让 Global Volume 可以按 LayerMask 过滤。
 
             enableMainLightShadows = FindProperty(nameof(enableMainLightShadows)); // 绑定主光阴影总开关。
             mainLightShadowResolution = FindProperty(nameof(mainLightShadowResolution)); // 绑定主光阴影分辨率。
@@ -87,6 +95,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             DrawGeneralGroup(); // 绘制 General 分组。
             DrawDepthGroup(); // 绘制 Depth 分组。
             DrawPBRGroup(); // 绘制 PBR 分组。
+            DrawPostProcessGroup(); // 绘制 Post Processing 分组。
             DrawMainLightShadowGroup(); // 绘制 Main Light Shadows 分组。
             DrawDebugGroup(); // 绘制 Debug 分组。
             DrawCameraDebugGroup(); // 绘制 Camera Debug 分组。
@@ -105,6 +114,14 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             DrawSectionHeader("PBR / Shading"); // 显示 PBR 分组标题。
             DrawProperty(preintegratedFGLut, PreintegratedFGLutLabel); // 绘制预积分 FG LUT 引用。
             EditorGUILayout.HelpBox("PreintegratedFG.exr 用于 PBR IBL DFG。", MessageType.Info); // 提示 LUT 数据用途。
+        }
+
+        private void DrawPostProcessGroup() // 绘制后处理框架设置；Tonemapping、Bloom 等具体效果参数走 Global Volume。
+        {
+            DrawSectionHeader("Post Processing / 后处理"); // 显示后处理分组标题。
+            DrawPropertyWithChildren(postProcessSettings, PostProcessSettingsLabel); // 绘制后处理设置对象和子字段，让框架开关能直接在现有 Inspector 里编辑。
+            DrawProperty(postProcessVolumeLayerMask, PostProcessVolumeLayerMaskLabel); // 绘制 Volume 查询层，用户可以决定哪些 Global Volume 会影响 BurtRP 后处理。
+            EditorGUILayout.HelpBox("当前后处理链路是 CameraColor -> PostProcessColor -> CameraColor；Tonemapping 参数从 Global Volume 读取，FinalBlit 仍然负责最终输出方向。", MessageType.Info); // 提示当前 Tonemapping 的配置来源和 FinalBlit 的职责。
         }
 
         private void DrawDepthGroup() // 绘制深度相关设置和 Depth Debug 提示。
@@ -177,6 +194,16 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             }
 
             EditorGUILayout.PropertyField(property, label); // 绘制字段并保留 Unity 默认 Undo、多对象编辑和 prefab 逻辑。
+        }
+
+        private static void DrawPropertyWithChildren(SerializedProperty property, GUIContent label) // 安全绘制带子字段的对象属性，给内嵌配置类使用。
+        {
+            if (property == null) // 如果运行时代码字段被改名或删除，避免 Inspector 抛空引用异常。
+            {
+                return; // 跳过缺失字段，错误已由 FindProperty 输出。
+            }
+
+            EditorGUILayout.PropertyField(property, label, true); // 绘制对象本身和所有子字段，确保 BurtPostProcessSettings 可以直接展开编辑。
         }
     }
 }

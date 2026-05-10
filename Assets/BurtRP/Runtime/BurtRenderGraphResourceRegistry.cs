@@ -22,6 +22,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int CameraDepthTextureId = Shader.PropertyToID(CameraDepthTextureShaderName); // 把 shader 名称转换成整数 ID，CommandBuffer 使用整数 ID 会更稳定也更高效。
 
+        public const string PostProcessColorName = "PostProcessColor"; // 定义后处理中间颜色目标的统一资源名，No-op Copy 和后续效果链会通过它做 ping-pong。
+
+        public const string PostProcessColorTextureShaderName = "_BurtPostProcessColorTexture"; // 定义后处理中间颜色 RT 暴露给 shader 的全局纹理名称。
+
+        public static readonly int PostProcessColorTextureId = Shader.PropertyToID(PostProcessColorTextureShaderName); // 把后处理中间颜色名称转换成整数 ID，申请、绑定和释放都会复用它。
+
         public const string MainLightShadowMapName = "MainLightShadowMap"; // 定义主光阴影图在 RenderGraph 里的统一资源名，后续阴影绘制和光照采样都通过它建立依赖。
 
         public const string MainLightShadowMapShaderName = "_BurtMainLightShadowMap"; // 定义主光阴影图暴露给 shader 的全局纹理名称，后续 Lit shader 会用这个名字采样阴影。
@@ -131,6 +137,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetCameraDepth() // 定义读取 CameraDepth 的快捷函数。
         {
             return GetRenderTarget(CameraDepthName); // 使用统一名称从资源表读取相机深度目标。
+        }
+
+        public BurtRenderTargetHandle RegisterPostProcessColorTexture() // 定义注册 BurtRP 后处理中间颜色临时 RT 的快捷函数。
+        {
+            return RegisterPostProcessColor(new RenderTargetIdentifier(PostProcessColorTextureId)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 PostProcessColor。
+        }
+
+        public BurtRenderTargetHandle RegisterPostProcessColor(RenderTargetIdentifier identifier) // 定义注册 PostProcessColor 的快捷函数。
+        {
+            return RegisterRenderTarget(PostProcessColorName, identifier); // 使用统一名称把后处理中间颜色目标注册进资源表。
+        }
+
+        public BurtRenderTargetHandle GetPostProcessColor() // 定义读取 PostProcessColor 的快捷函数。
+        {
+            return GetRenderTarget(PostProcessColorName); // 使用统一名称从资源表读取后处理中间颜色目标。
         }
 
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。

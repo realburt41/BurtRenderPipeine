@@ -17,6 +17,13 @@ MonoBehaviour:
   enableDepthDebugView: 0
   depthDebugScale: 50
   preintegratedFGLut: {fileID: 2800000, guid: 7bc59e552e7f6e74f893b90c1f15fc48, type: 3}
+  postProcessSettings:
+    enablePostProcessing: 1
+    enableNoOpCopy: 1
+    enableFrameworkDebugLog: 0
+  postProcessVolumeLayerMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
   enableMainLightShadows: 1
   mainLightShadowResolution: 2048
   mainLightShadowDistance: 50
@@ -30,3 +37,4 @@ MonoBehaviour:
   enableUnsupportedShaderDebug: 1
   enableRenderGraphDebug: 0
   enableCameraSortDebugLog: 0
+  enableRenderFrameDebugLog: 0

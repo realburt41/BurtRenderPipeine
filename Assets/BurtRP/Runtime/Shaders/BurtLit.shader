@@ -309,10 +309,13 @@ Shader "BurtRP/Lit"
             // Includes BurtRP simple main-light diffuse and ambient lighting helpers.
             #include "ShaderLibrary/BurtLighting.hlsl"
 
+            // 引入 BurtRP GBuffer 编解码约定；这里只做 shader 侧 roundtrip debug，不绑定任何 RenderTarget 生命周期。
+            #include "ShaderLibrary/BurtGBuffer.hlsl"
+
             // Includes BurtRP main-light shadow receiver helpers.
             #include "ShaderLibrary/BurtShadows.hlsl"
 
-            // 引入 BurtRP shading debug 工具，Forward pass 会根据 Overlay 选择输出 Albedo、Normal、Smoothness、Metallic 或 Lighting。
+            // 引入 BurtRP shading debug 工具，Forward pass 会根据 Overlay 选择输出 Albedo、Normal、Smoothness、Metallic 或 Detail Lighting。
             #include "ShaderLibrary/BurtShadingDebug.hlsl"
 
             // 引入 BurtRP Lit 统一材质 CBUFFER，Forward pass 直接使用同一份 SRP Batcher 字段布局。
@@ -430,11 +433,30 @@ Shader "BurtRP/Lit"
                 // Builds the current main light from BurtRP global lighting variables and this pixel's shadow value.
                 BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
 
+                // 为当前 shading 准备一份可按 Debug View 覆盖的 SurfaceData，正常渲染时它和原始 surfaceData 完全一致。
+                BurtSurfaceData shadingSurfaceData = surfaceData;
+
+                // 出处：XRender/Shaders/SlabDebug/SlabDebugEvaluator/SlabDebug.Evaluate.Prev.hlsl::DEBUGID_LIGHTING_DETAIL_LIGHTING；Detail Lighting 用 0.18 中灰替换 Base.Color 来观察光照细节。
+                if (BurtIsShadingDebugEnabled() && BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING))
+                {
+                    // 只替换参与 shading 的 BaseColor，不改原始 surfaceData，避免 Albedo / Reflectance 等材质 Debug 读到被覆盖后的值。
+                    shadingSurfaceData.baseColor.rgb = float3(0.18f, 0.18f, 0.18f);
+                }
+
                 // 统一调用 PBR shading 入口，让 Forward 和未来 Deferred 共享同一套光照拆分结果。
-                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS);
+                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(shadingSurfaceData, mainLight, normalWS, viewDirectionWS);
 
                 // 取出不含自发光的 PBR 总光照，后续 finalColor 会在它基础上叠加 Emission。
                 float3 lightingColor = pbrComponents.lighting;
+
+                // 用 Forward 当前片元数据做一次 GBuffer 编码再解码，提前验证 Deferred 后续会消费的材质/法线还原路径。
+                BurtGBufferData debugGBufferSourceData = BurtCreateGBufferData(surfaceData, normalWS, float3(0.0f, 0.0f, 0.0f));
+
+                // 按 BurtGBuffer.hlsl 顶部约定生成三张逻辑 GBuffer；这里只在 shader 内部 roundtrip，不写入真实 RT。
+                BurtEncodedGBuffer debugEncodedGBuffer = BurtEncodeGBuffer(debugGBufferSourceData);
+
+                // 从逻辑 GBuffer 解码回语义数据，Debug View 读取的是这份解码结果。
+                BurtGBufferData debugDecodedGBufferData = BurtDecodeGBuffer(debugEncodedGBuffer);
 
                 // 创建 Shading Debug 数据结构，确保 Debug View 读取的就是当前片元真实渲染使用的数据。
                 BurtShadingDebugData debugData;
@@ -442,8 +464,8 @@ Shader "BurtRP/Lit"
                 // 写入世界空间法线，NormalWS Debug View 会把它编码成颜色。
                 debugData.normalWS = normalWS;
 
-                // 写入总光照结果，Lighting Debug View 会显示它。
-                debugData.lightingColor = pbrComponents.lighting;
+                // 写入 Detail Lighting 结果，DetailLighting Debug View 会显示中灰 BaseColor 下的光照细节。
+                debugData.detailLightingColor = pbrComponents.lighting;
 
                 // 写入直接漫反射结果，DirectDiffuse Debug View 会显示它。
                 debugData.directDiffuseColor = pbrComponents.directDiffuse;
@@ -469,8 +491,71 @@ Shader "BurtRP/Lit"
                 // 写入直接高光能量补偿，便于检查 LUT.z 是否过亮或过暗。
                 debugData.specularEnergyCompensation = pbrComponents.specularEnergyCompensation;
 
+                // 写入间接高光能量补偿，便于检查 Reflection Probe 高光是否也对齐 XRender 补能。
+                debugData.indirectSpecularEnergyCompensation = pbrComponents.indirectSpecularEnergyCompensation;
+
+                // 写入 XRender EnergyPreservation，EnergyPreservation Debug View 会显示 diffuse 底层保能比例。
+                debugData.energyPreservation = pbrComponents.energyPreservation;
+
                 // 写入间接高光遮蔽项，保持和间接镜面反射一样的 AO、NdotV 和粗糙度输入。
                 debugData.specularOcclusion = pbrComponents.specularOcclusion;
+
+                // 写入 XRender DiffuseColor，DiffuseColor Debug View 会显示 metallic 扣除后的漫反射颜色。
+                debugData.diffuseColor = pbrComponents.diffuseColor;
+
+                // 写入 reflectance / metallic / baseColor 还原出的 F0，F0 Debug View 只读这个中间结果，不暴露面板参数。
+                debugData.f0 = pbrComponents.f0;
+
+                // 写入 Schlick Fresnel 的 F90，当前默认对齐 XRender DefaultLit 的 1。
+                debugData.f90 = pbrComponents.f90;
+
+                // 写入直接 GGX D 项，DirectBRDFD Debug View 会缩放显示高 smoothness 下的 NDF 峰值。
+                debugData.directBRDFD = pbrComponents.directBRDFD;
+
+                // 写入直接 Smith Joint Visibility 项，用来检查几何遮蔽是否压暗高光。
+                debugData.directBRDFVisibility = pbrComponents.directBRDFVisibility;
+
+                // 写入直接 Schlick Fresnel 项，用来检查 F0 和视角输入。
+                debugData.directBRDFFresnel = pbrComponents.directBRDFFresnel;
+
+                // 写入直接 diffuse lobe，当前默认 Lambert，后续启用 Burley 时这里会同步变化。
+                debugData.directDiffuseLobe = pbrComponents.directDiffuseLobe;
+
+                // 写入未乘灯光颜色、NdotL 和阴影的直接 diffuse BRDF。
+                debugData.directDiffuseBRDF = pbrComponents.directDiffuseBRDF;
+
+                // 写入未乘灯光颜色、NdotL 和阴影的直接 specular BRDF。
+                debugData.directSpecularBRDF = pbrComponents.directSpecularBRDF;
+
+                // 写入 Specular AA 法线方差，SpecularAANormalVariance Debug View 会放大显示。
+                debugData.specularAANormalVariance = pbrComponents.specularAANormalVariance;
+
+                // 写入 Specular AA 增加的感知粗糙度，SpecularAARoughnessDelta Debug View 会放大显示。
+                debugData.specularAARoughnessDelta = pbrComponents.specularAARoughnessDelta;
+
+                // 写入间接高光 DFG.xy，IndirectSpecularDFG Debug View 会显示为 R/G 通道。
+                debugData.indirectSpecularDFG = pbrComponents.indirectSpecularDFG;
+
+                // 写入 F0/F90 应用 DFG 后的环境 BRDF，用来检查 Reflection Probe 前的 BRDF 权重。
+                debugData.indirectSpecularEnvBRDF = pbrComponents.indirectSpecularEnvBRDF;
+
+                // 写入 GBuffer 解码后的 BaseColor，用来检查 GBuffer0.rgb 的材质颜色还原。
+                debugData.gbufferBaseColor = debugDecodedGBufferData.baseColor;
+
+                // 写入 GBuffer 解码后的世界空间法线，用来检查 octahedron normal 编码精度和方向。
+                debugData.gbufferNormalWS = debugDecodedGBufferData.normalWS;
+
+                // 写入 GBuffer 解码后的 Metallic，用来检查 GBuffer1.b 的材质还原。
+                debugData.gbufferMetallic = debugDecodedGBufferData.metallic;
+
+                // 写入 GBuffer 解码后的 Smoothness，用来检查 GBuffer1.a 的面板语义还原。
+                debugData.gbufferSmoothness = debugDecodedGBufferData.smoothness;
+
+                // 写入 GBuffer 解码后的 AO，用来检查 GBuffer0.a 的间接光遮蔽输入。
+                debugData.gbufferOcclusion = debugDecodedGBufferData.occlusion;
+
+                // 写入 GBuffer 解码后的 Reflectance，用来检查 GBuffer2.a 的 XRender reflectance 输入。
+                debugData.gbufferReflectance = debugDecodedGBufferData.reflectance;
 
                 // 创建一个临时调试颜色变量，只有命中材质 debug 模式时才会被真正输出。
                 float3 debugColor;
@@ -485,7 +570,7 @@ Shader "BurtRP/Lit"
                 // 采样自发光颜色，它不受灯光和阴影影响，会直接叠加到最终颜色。
                 float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
 
-                // 用光照结果初始化最终颜色，后续再叠加自发光，便于 Lighting debug 单独观察不含自发光的部分。
+                // 用光照结果初始化最终颜色，后续再叠加自发光，便于 Detail Lighting debug 单独观察不含自发光的部分。
                 float3 finalColor = lightingColor;
 
                 // 把自发光叠加到光照结果上，让材质可以自己发亮。

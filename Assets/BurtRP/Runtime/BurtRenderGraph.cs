@@ -54,10 +54,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
             resources.RegisterCameraDepthTexture(); // 把 BurtRP 自己的临时深度 RT 注册成 CameraDepth，让颜色目标和深度目标真正分离。
 
+            if (ShouldRegisterPostProcessColor(request, asset)) // 如果当前 request 启用了后处理框架，就把后处理中间颜色纳入资源表。
+            {
+                resources.RegisterPostProcessColorTexture(); // 注册 PostProcessColor 临时 RT，让分配、No-op Copy 和释放 Pass 使用同一个资源句柄。
+            }
+
             if (ShouldRegisterMainLightShadowMap(request, asset)) // 如果当前 request 的主光需要阴影，就把主光阴影图纳入资源表。
             {
                 resources.RegisterMainLightShadowMapTexture(); // 注册主光阴影图临时 RT，让后续分配、绘制和释放 Pass 使用同一个资源句柄。
             }
+        }
+
+        private static bool ShouldRegisterPostProcessColor( // 定义判断当前 request 是否需要注册后处理中间颜色图的辅助函数。
+            BurtRenderRequest request, // 接收当前渲染请求，用来确认后处理任务是否有效。
+            BurtRenderPipelineAsset asset) // 接收当前管线资产，用来读取后处理设置。
+        {
+            return BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 复用后处理工具的判定逻辑，保证资源注册和 Pass 组装条件完全一致。
         }
 
         private static bool ShouldRegisterMainLightShadowMap( // 定义判断当前 request 是否需要注册主光阴影图的辅助函数。
@@ -176,4 +188,3 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
         }
     }
 }
-

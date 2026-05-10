@@ -141,6 +141,14 @@ namespace Burt.RenderPipeline
 
             // Inspector 改清屏模式或清屏颜色后强制同步一次，保证 Camera.clearFlags 和 Camera.backgroundColor 立即刷新。
             SyncClearSettingsToUnityCamera(forceSync: true);
+
+#if UNITY_EDITOR
+            // OnValidate 只会针对当前被修改的组件触发，所以这里直接登记当前相机作为编辑器清屏参考来源。
+            RegisterEditorClearSource();
+
+            // Inspector 修改 BurtCameraData 后主动刷新 SceneView，避免 SceneView 没重绘时还显示旧背景。
+            RequestEditorViewRepaint();
+#endif
         }
 
         // Unity 每帧调用这个函数；因为有 ExecuteAlways，编辑器非播放状态也可能调用。
@@ -151,6 +159,11 @@ namespace Burt.RenderPipeline
 
             // 每帧检查清屏配置是否变化，变化时同步到 Unity Camera；这样编辑器滑动或脚本改值都能及时反映到原生相机组件。
             SyncClearSettingsToUnityCamera(forceSync: false);
+
+#if UNITY_EDITOR
+            // 编辑器下如果当前相机正被选中，就持续登记它，避免 SceneView 渲染时 Selection 状态短暂不可读。
+            RegisterEditorClearSourceIfSelected();
+#endif
         }
 
         // 缓存 Camera 组件的辅助函数。
@@ -242,6 +255,17 @@ namespace Burt.RenderPipeline
 
             // 记录这次已经同步过的清屏颜色。
             lastSyncedClearColor = clearColor;
+
+#if UNITY_EDITOR
+            // 如果当前相机正被选中，就把它登记给 SceneView/Preview 的清屏解析逻辑。
+            RegisterEditorClearSourceIfSelected();
+
+            // 如果当前相机正被选中，就把同一套 clearFlags 和背景色直接同步给所有 SceneView 相机。
+            SyncSelectedEditorSceneViewsClearSettings(desiredClearFlags, clearColor);
+
+            // 清屏设置真正写入 Unity Camera 后主动刷新 SceneView，让编辑器相机立刻重新走 BurtRP 清屏逻辑。
+            RequestEditorViewRepaint();
+#endif
         }
 
         // 把 BurtRP 自己的清屏枚举转换为 Unity 原生 CameraClearFlags，保证 Camera 组件面板和 BurtCameraData 面板语义一致。
@@ -272,5 +296,107 @@ namespace Burt.RenderPipeline
                     return CameraClearFlags.SolidColor;
             }
         }
+
+#if UNITY_EDITOR
+        // 判断当前 BurtCameraData 是否就是编辑器里正在操作的对象。
+        private bool IsSelectedInEditor()
+        {
+            // 如果 Unity 当前选中的 GameObject 就是本组件所在对象，说明用户正在操作这台相机。
+            if (UnityEditor.Selection.activeGameObject == gameObject)
+            {
+                // 返回 true，让调用方可以把当前相机作为 SceneView/Preview 的参考相机。
+                return true;
+            }
+
+            // 如果 Unity 当前选中的对象就是这个 BurtCameraData 组件，说明 Inspector 正在直接编辑它。
+            if (UnityEditor.Selection.activeObject == this)
+            {
+                // 返回 true，让调用方可以登记当前相机数据。
+                return true;
+            }
+
+            // 确保 cachedCamera 已经准备好，后面要用它判断是否选中了 Camera 组件。
+            CacheCamera();
+
+            // 如果 Unity 当前选中的对象就是同一个 GameObject 上的 Camera 组件，也视为选中了这台 Burt 相机。
+            if (cachedCamera != null && UnityEditor.Selection.activeObject == cachedCamera)
+            {
+                // 返回 true，让组件选择和 Camera 选择都能触发 SceneView 跟随。
+                return true;
+            }
+
+            // 其他选择对象都不属于当前 BurtCameraData，避免场景里多个相机互相覆盖编辑器视图。
+            return false;
+        }
+
+        // 如果当前相机被选中，就登记成编辑器辅助相机的清屏参考来源。
+        private void RegisterEditorClearSourceIfSelected()
+        {
+            // 只有当前组件确实被用户选中时才登记，避免 ExecuteAlways Update 让未选中的相机覆盖缓存。
+            if (!IsSelectedInEditor())
+            {
+                // 当前相机不是选中对象，直接跳过登记。
+                return;
+            }
+
+            // 把当前 BurtCameraData 交给清屏工具缓存，供 SceneView/Preview 在 Selection 不稳定时兜底使用。
+            BurtCameraClearUtility.RegisterEditorClearCameraData(this);
+        }
+
+        // 直接把当前相机登记成编辑器辅助相机的清屏参考来源。
+        private void RegisterEditorClearSource()
+        {
+            // 把当前 BurtCameraData 交给清屏工具缓存，供 SceneView/Preview 在 Selection 不稳定时兜底使用。
+            BurtCameraClearUtility.RegisterEditorClearCameraData(this);
+        }
+
+        // 如果当前相机被选中，就把清屏设置同步给所有 SceneView 相机。
+        private void SyncSelectedEditorSceneViewsClearSettings(CameraClearFlags desiredClearFlags, Color desiredClearColor)
+        {
+            // 只有当前组件确实被用户选中时才同步 SceneView，避免未选中相机影响编辑器视图。
+            if (!IsSelectedInEditor())
+            {
+                // 当前相机不是选中对象，直接跳过 SceneView 同步。
+                return;
+            }
+
+            // 遍历 Unity 当前打开的所有 SceneView 窗口，让多 SceneView 布局也能同步。
+            foreach (UnityEditor.SceneView sceneView in UnityEditor.SceneView.sceneViews)
+            {
+                // 如果某个 SceneView 对象为空，就跳过它，避免编辑器窗口关闭瞬间出现空引用。
+                if (sceneView == null)
+                {
+                    // 继续处理下一个 SceneView。
+                    continue;
+                }
+
+                // 读取这个 SceneView 内部使用的 Unity Camera。
+                var sceneCamera = sceneView.camera;
+
+                // 如果 SceneView 还没有创建内部 Camera，就跳过它。
+                if (sceneCamera == null)
+                {
+                    // 继续处理下一个 SceneView。
+                    continue;
+                }
+
+                // 把选中 Burt 相机的清屏模式同步到 SceneView 的 Unity clearFlags。
+                sceneCamera.clearFlags = desiredClearFlags;
+
+                // 把选中 Burt 相机的清屏颜色同步到 SceneView 的 Unity 背景色。
+                sceneCamera.backgroundColor = desiredClearColor;
+
+                // 请求这个 SceneView 重绘，让它立即显示新的清屏结果。
+                sceneView.Repaint();
+            }
+        }
+
+        // 请求编辑器视图重绘；这个函数只在编辑器编译，避免 Player 构建引用 UnityEditor。
+        private static void RequestEditorViewRepaint()
+        {
+            // 通知所有 SceneView 下一次编辑器循环重新渲染，确保它能读取最新的 BurtCameraData 清屏配置。
+            UnityEditor.SceneView.RepaintAll();
+        }
+#endif
     }
 }

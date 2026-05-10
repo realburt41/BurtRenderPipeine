@@ -30,7 +30,7 @@ namespace Burt.RenderPipeline
             }
 
             // 预分配一个大致容量，避免多相机时 StringBuilder 频繁扩容。
-            var builder = new StringBuilder(256 + requests.Count * 160);
+            var builder = new StringBuilder(256 + requests.Count * 320);
 
             // 写入日志标题，包含 Unity 当前帧号和 request 数量，方便和其他每帧日志对齐。
             builder.Append("[BurtRP][CameraSort] Frame ").Append(Time.frameCount).Append(": ").Append(requests.Count).AppendLine(" request(s)");
@@ -69,6 +69,24 @@ namespace Burt.RenderPipeline
                 // 把 BurtCameraData 是否存在转成短文本，方便在 Console 中快速扫描。
                 var hasCameraData = cameraData != null ? "Yes" : "No";
 
+                // 用 BurtRP 清屏工具解析当前 request 的最终清屏模式，保证日志结果和真实 Clear/Skybox Pass 使用同一套规则。
+                var resolvedClearMode = BurtCameraClearUtility.ResolveClearMode(request).ToString();
+
+                // 读取清屏数据来源名称，方便判断当前模式来自 BurtCameraData、编辑器选中相机还是 Unity 原生 Camera。
+                var clearDataSource = BurtCameraClearUtility.ResolveClearDataSourceName(request);
+
+                // 解析实际用于清屏的 BurtCameraData；Preview Camera 可能会在编辑器下借用当前选中 Camera 的数据。
+                var clearCameraData = BurtCameraClearUtility.ResolveClearCameraData(request);
+
+                // 读取 Unity 原生 Camera.clearFlags；没有相机时输出占位文本，方便判断 BurtCameraData 是否同步到了 Unity Camera。
+                var unityClearFlags = camera != null ? camera.clearFlags.ToString() : "<null>";
+
+                // 读取 BurtCameraData 上配置的清屏颜色；没有 BurtCameraData 时输出占位，避免把 SceneView 误判成有 Burt 相机数据。
+                var burtClearColor = clearCameraData != null ? FormatColor(clearCameraData.ClearColor) : "<none>";
+
+                // 读取 Unity 原生 Camera.backgroundColor；没有相机时输出占位，方便诊断 GameView、SceneView 和 Camera Preview 的底色来源。
+                var unityBackgroundColor = camera != null ? FormatColor(camera.backgroundColor) : "<null>";
+
                 // 写入当前 request 的序号，序号代表实际渲染执行顺序。
                 builder.Append("  #").Append(index);
 
@@ -97,6 +115,21 @@ namespace Burt.RenderPipeline
                 // 写入 Unity 原生 Camera.depth，用来和 SortLayer 对比，判断是否由 BurtCameraData 覆盖排序。
                 builder.Append(" Camera.depth=").Append(cameraDepth);
 
+                // 写入 BurtRP 最终清屏模式，用来确认 BurtCameraData 或 SceneView/Preview clearFlags 是否被正确解析。
+                builder.Append(" BurtClearMode=").Append(resolvedClearMode);
+
+                // 写入清屏数据来源，用来判断 Preview 是否正在借用当前选中相机的 BurtCameraData。
+                builder.Append(" ClearDataSource=").Append(clearDataSource);
+
+                // 写入 Unity 原生 Camera.clearFlags，用来确认 Camera 组件当前是否已经切到 Skybox/SolidColor/DepthOnly 等模式。
+                builder.Append(" UnityClearFlags=").Append(unityClearFlags);
+
+                // 写入 BurtCameraData 清屏颜色，用来和 Unity 原生背景色对照。
+                builder.Append(" BurtClearColor=").Append(burtClearColor);
+
+                // 写入 Unity 原生背景色，用来判断实际相机组件上的背景色是否和 BurtCameraData 保持一致。
+                builder.Append(" UnityBgColor=").Append(unityBackgroundColor);
+
                 // 写入是否挂了 BurtCameraData，用来区分 SortLayer 来源是 RenderOrder 还是 Camera.depth。
                 builder.Append(" HasBurtCameraData=").Append(hasCameraData);
 
@@ -106,6 +139,25 @@ namespace Burt.RenderPipeline
 
             // 一次性输出整段排序列表，避免每个 request 单独刷一条 Console 日志。
             Debug.Log(builder.ToString());
+        }
+
+        // 把 Color 格式化为固定小数格式，避免不同系统区域设置导致逗号、小数点表现不一致。
+        private static string FormatColor(Color color)
+        {
+            // 把红色通道格式化为最多三位小数，保证日志短小且稳定。
+            var red = color.r.ToString("0.###", CultureInfo.InvariantCulture);
+
+            // 把绿色通道格式化为最多三位小数，方便和 Inspector 颜色值对照。
+            var green = color.g.ToString("0.###", CultureInfo.InvariantCulture);
+
+            // 把蓝色通道格式化为最多三位小数，避免输出过长浮点数。
+            var blue = color.b.ToString("0.###", CultureInfo.InvariantCulture);
+
+            // 把透明度通道格式化为最多三位小数，便于确认清屏色 alpha 是否正确。
+            var alpha = color.a.ToString("0.###", CultureInfo.InvariantCulture);
+
+            // 手动拼接 RGBA 四个通道，让日志保持短小且便于肉眼对比。
+            return "(" + red + "," + green + "," + blue + "," + alpha + ")";
         }
     }
 }

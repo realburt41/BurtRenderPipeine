@@ -95,6 +95,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.CameraDepthName); // 使用统一资源名声明写入 CameraDepth。
         }
 
+        public BurtRenderTargetHandle ReadPostProcessColor() // 定义声明读取 PostProcessColor 的快捷函数。
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.PostProcessColorName); // 使用统一资源名声明读取后处理中间颜色。
+        }
+
+        public BurtRenderTargetHandle WritePostProcessColor() // 定义声明写入 PostProcessColor 的快捷函数。
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.PostProcessColorName); // 使用统一资源名声明写入后处理中间颜色。
+        }
+
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.MainLightShadowMapName); // 使用统一资源名声明读取主光阴影图。

@@ -1,3 +1,4 @@
+using Sirenix.OdinInspector; // 引入 Odin Inspector 命名空间，用来给新配置提供更清晰的分组显示。
 using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Color、SerializeField、CreateAssetMenu 等 Unity 类型。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来继承 RenderPipelineAsset。
 
@@ -24,6 +25,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         [Header("PBR / Shading")] // 把 PBR 共享查找表集中显示，方便确认 BRDF 使用的全局资源。
         [SerializeField] private Texture2D preintegratedFGLut; // 保存预积分 FG LUT，默认指向 Assets/Textures/PreintegratedFG.exr。
+
+        [TitleGroup("Post Processing - 后处理")] // 使用 Odin 给后处理配置建立独立分组；这里不用斜杠，避免 Odin 把斜杠解析成父子分组路径。
+        [SerializeField, InlineProperty, HideLabel] private BurtPostProcessSettings postProcessSettings = new BurtPostProcessSettings(); // 保存 BurtRP 后处理框架设置；具体效果参数从 Global Volume 读取。
+
+        [TitleGroup("Post Processing - 后处理")] // 和后处理框架开关放在同一组，表示这是管线级 Volume 查询配置。
+        [SerializeField] private LayerMask postProcessVolumeLayerMask = ~0; // 定义后处理 Global Volume 查询层，默认所有层都能参与 BurtRP 后处理。
 
         [Header("Main Light Shadows")] // 把主光阴影配置集中显示在 Inspector，便于按项目需求统一调试。
         [SerializeField] private bool enableMainLightShadows = true; // 定义 BurtRP 是否允许渲染主方向光阴影；关闭后即使 Light 开了 Shadow 也不会申请 shadow map。
@@ -64,6 +71,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         public Texture2D PreintegratedFGLut => preintegratedFGLut; // 暴露预积分 FG LUT，RenderPipeline 会把它绑定成全局 shader 纹理。
 
+        public BurtPostProcessSettings PostProcessSettings => EnsurePostProcessSettings(); // 暴露后处理设置给 RenderGraph 和 ForwardGraph 使用，并确保旧资产缺失字段时也有安全默认值。
+
+        public LayerMask PostProcessVolumeLayerMask => postProcessVolumeLayerMask; // 暴露后处理 Volume 查询层给 VolumeManager.Update 使用。
+
         public bool EnableMainLightShadows => enableMainLightShadows; // 暴露主光阴影总开关，让阴影数据和 Pass 组装都能统一判断是否启用。
 
         public int MainLightShadowResolution => Mathf.Clamp(mainLightShadowResolution, 16, 8192); // 暴露经过保护的阴影分辨率，避免误填 0 或过大的值导致 RT 创建风险。
@@ -91,6 +102,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public bool EnableCameraSortDebugLog => enableCameraSortDebugLog; // 暴露相机排序调试开关给 BurtRenderPipeline 使用，只有打开时才会输出每帧 request 列表。
 
         public bool EnableRenderFrameDebugLog => enableRenderFrameDebugLog; // 暴露 Frame/Stack 分组调试开关给 BurtRenderPipeline 使用，只诊断分组不改变渲染结果。
+
+        private BurtPostProcessSettings EnsurePostProcessSettings() // 定义后处理设置兜底函数，避免旧资产还没有序列化新字段时返回空引用。
+        {
+            if (postProcessSettings == null) // 如果 Unity 还没有给旧资产创建后处理设置对象，就在访问时补一个默认实例。
+            {
+                postProcessSettings = new BurtPostProcessSettings(); // 创建默认后处理设置，默认关闭后处理框架以保持旧画面不变。
+            }
+
+            return postProcessSettings; // 返回可用的后处理设置对象，供外部只读访问。
+        }
+
+        private void OnValidate() // Unity 在 Inspector 修改或资源重新导入时调用，用来修复序列化字段缺失。
+        {
+            EnsurePostProcessSettings(); // 确保后处理设置对象存在，避免旧资产在 Inspector 中显示为空。
+        }
 
         protected override UnityEngine.Rendering.RenderPipeline CreatePipeline() // Unity 会调用这个函数来创建真正运行时的 RenderPipeline 实例。
         {

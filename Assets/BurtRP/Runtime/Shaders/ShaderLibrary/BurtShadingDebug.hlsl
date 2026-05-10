@@ -18,7 +18,28 @@ static const float BURT_SHADING_DEBUG_MODE_ROUGHNESS = 106.0f; // 对应 C# Burt
 static const float BURT_SHADING_DEBUG_MODE_SPECULAR_AA_ROUGHNESS = 107.0f; // 对应 C# BurtShadingDebugMode.SpecularAARoughness，用来显示直接高光实际粗糙度。
 static const float BURT_SHADING_DEBUG_MODE_SPECULAR_ENERGY_COMPENSATION = 108.0f; // 对应 C# BurtShadingDebugMode.SpecularEnergyCompensation，用来显示直接高光能量补偿强度。
 static const float BURT_SHADING_DEBUG_MODE_SPECULAR_OCCLUSION = 109.0f; // 对应 C# BurtShadingDebugMode.SpecularOcclusion，用来显示间接高光遮蔽。
-static const float BURT_SHADING_DEBUG_MODE_LIGHTING = 200.0f; // 对应 C# BurtShadingDebugMode.Lighting，用来显示不含自发光的 PBR 总光照结果。
+static const float BURT_SHADING_DEBUG_MODE_ENERGY_PRESERVATION = 110.0f; // 对应 C# BurtShadingDebugMode.EnergyPreservation，用来显示 XRender 底层 diffuse 保能比例。
+static const float BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_ENERGY_COMPENSATION = 111.0f; // 对应 C# BurtShadingDebugMode.IndirectSpecularEnergyCompensation，用来显示间接高光能量补偿强度。
+static const float BURT_SHADING_DEBUG_MODE_DIFFUSE_COLOR = 112.0f; // 对应 C# BurtShadingDebugMode.DiffuseColor，用来显示 XRender GenericData.DiffuseColor。
+static const float BURT_SHADING_DEBUG_MODE_F0 = 113.0f; // 对应 C# BurtShadingDebugMode.F0，用来显示 reflectance / metallic 还原出的 F0。
+static const float BURT_SHADING_DEBUG_MODE_F90 = 114.0f; // 对应 C# BurtShadingDebugMode.F90，用来显示 Schlick Fresnel 的掠射端点。
+static const float BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_D = 115.0f; // 对应 C# BurtShadingDebugMode.DirectBRDFD，用来显示 GGX D 项。
+static const float BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_VISIBILITY = 116.0f; // 对应 C# BurtShadingDebugMode.DirectBRDFVisibility，用来显示 Smith Joint Visibility。
+static const float BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_FRESNEL = 117.0f; // 对应 C# BurtShadingDebugMode.DirectBRDFFresnel，用来显示 Schlick Fresnel。
+static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE_LOBE = 118.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuseLobe，用来显示 Lambert / Burley diffuse lobe。
+static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE_BRDF = 119.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuseBRDF，用来显示未乘灯光的直接 diffuse BRDF。
+static const float BURT_SHADING_DEBUG_MODE_DIRECT_SPECULAR_BRDF = 120.0f; // 对应 C# BurtShadingDebugMode.DirectSpecularBRDF，用来显示未乘灯光的直接 specular BRDF。
+static const float BURT_SHADING_DEBUG_MODE_SPECULAR_AA_NORMAL_VARIANCE = 121.0f; // 对应 C# BurtShadingDebugMode.SpecularAANormalVariance，用来显示 Normal Filtering 的法线方差。
+static const float BURT_SHADING_DEBUG_MODE_SPECULAR_AA_ROUGHNESS_DELTA = 122.0f; // 对应 C# BurtShadingDebugMode.SpecularAARoughnessDelta，用来显示 Specular AA 增加的 roughness。
+static const float BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_DFG = 123.0f; // 对应 C# BurtShadingDebugMode.IndirectSpecularDFG，用来显示间接高光 DFG.xy。
+static const float BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_ENV_BRDF = 124.0f; // 对应 C# BurtShadingDebugMode.IndirectSpecularEnvBRDF，用来显示 DFG 应用到 F0/F90 后的环境 BRDF。
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_BASE_COLOR = 130.0f; // 对应 C# BurtShadingDebugMode.GBufferBaseColor，用来显示 GBuffer 解码 BaseColor。
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_NORMAL_WS = 131.0f; // 对应 C# BurtShadingDebugMode.GBufferNormalWS，用来显示 GBuffer 解码世界空间法线。
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_METALLIC = 132.0f; // 对应 C# BurtShadingDebugMode.GBufferMetallic，用来显示 GBuffer 解码 Metallic。
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_SMOOTHNESS = 133.0f; // 对应 C# BurtShadingDebugMode.GBufferSmoothness，用来显示 GBuffer 解码 Smoothness。
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_OCCLUSION = 134.0f; // 对应 C# BurtShadingDebugMode.GBufferOcclusion，用来显示 GBuffer 解码 AO。
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_REFLECTANCE = 135.0f; // 对应 C# BurtShadingDebugMode.GBufferReflectance，用来显示 GBuffer 解码 Reflectance。
+static const float BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING = 200.0f; // 对应 C# BurtShadingDebugMode.DetailLighting，用 0.18 中灰 BaseColor 显示光照细节。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_LIGHTING = 201.0f; // 对应 C# BurtShadingDebugMode.IndirectLighting，用来显示 PBR 间接光。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE = 202.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuse，用来显示直接漫反射。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_SPECULAR = 203.0f; // 对应 C# BurtShadingDebugMode.DirectSpecular，用来显示直接高光。
@@ -31,8 +52,8 @@ struct BurtShadingDebugData
     // 保存世界空间法线，用于 NormalWS 调试模式。
     float3 normalWS;
 
-    // 保存 PBR 总光照，不包含自发光。
-    float3 lightingColor;
+    // 保存 Detail Lighting 结果，不包含自发光；调用方会参考 XRender 先把 BaseColor 替换成 0.18 中灰再计算。
+    float3 detailLightingColor;
 
     // 保存直接漫反射贡献，已经包含主光颜色、NdotL 和阴影。
     float3 directDiffuseColor;
@@ -58,8 +79,71 @@ struct BurtShadingDebugData
     // 保存直接高光多次散射能量补偿，1 表示没有补偿，大于 1 表示 LUT.z 正在补回能量。
     float3 specularEnergyCompensation;
 
+    // 保存间接高光多次散射能量补偿，1 表示没有补偿，大于 1 表示反射探针高光正在补回能量。
+    float3 indirectSpecularEnergyCompensation;
+
+    // 保存 XRender EnergyPreservation，1 表示底层 diffuse 完整保留，越小表示被 specular 顶层占用越多能量。
+    float energyPreservation;
+
     // 保存间接高光遮蔽项，1 表示不遮蔽。
     float specularOcclusion;
+
+    // 保存 XRender GenericData.DiffuseColor，方便观察 metallic 是否正确扣除了 diffuse。
+    float3 diffuseColor;
+
+    // 保存由 reflectance / metallic / baseColor 还原出的 F0，注意它不是材质面板输入。
+    float3 f0;
+
+    // 保存 Schlick Fresnel 的 F90，当前默认是 1。
+    float3 f90;
+
+    // 保存直接 GGX D 项，数值可能很高，Debug View 会缩放显示。
+    float directBRDFD;
+
+    // 保存直接 Smith Joint Visibility 项。
+    float directBRDFVisibility;
+
+    // 保存直接 Schlick Fresnel 项。
+    float3 directBRDFFresnel;
+
+    // 保存直接 diffuse lobe，默认 Lambert 时约为 1 / PI。
+    float directDiffuseLobe;
+
+    // 保存未乘灯光颜色、NdotL 和阴影的直接 diffuse BRDF。
+    float3 directDiffuseBRDF;
+
+    // 保存未乘灯光颜色、NdotL 和阴影的直接 specular BRDF。
+    float3 directSpecularBRDF;
+
+    // 保存 Specular AA 使用的屏幕空间法线方差，通常很小，Debug View 会放大显示。
+    float specularAANormalVariance;
+
+    // 保存 Specular AA 额外增加的感知粗糙度。
+    float specularAARoughnessDelta;
+
+    // 保存间接高光 DFG.xy，Debug View 会显示为 R/G 两个通道。
+    float2 indirectSpecularDFG;
+
+    // 保存 DFG 应用到 F0/F90 后的环境 BRDF。
+    float3 indirectSpecularEnvBRDF;
+
+    // 保存按 BurtGBuffer 约定编码再解码后的 BaseColor，用来提前验证 Deferred 材质还原。
+    float3 gbufferBaseColor;
+
+    // 保存按 BurtGBuffer octahedron normal 编码再解码后的世界空间法线。
+    float3 gbufferNormalWS;
+
+    // 保存 GBuffer 解码后的 Metallic。
+    float gbufferMetallic;
+
+    // 保存 GBuffer 解码后的 Smoothness，Deferred 会再由它还原 Roughness。
+    float gbufferSmoothness;
+
+    // 保存 GBuffer 解码后的 Ambient Occlusion。
+    float gbufferOcclusion;
+
+    // 保存 GBuffer 解码后的 XRender Reflectance。
+    float gbufferReflectance;
 };
 
 bool BurtIsShadingDebugEnabled() // 判断当前是否启用了任意 shading debug 模式。
@@ -141,15 +225,146 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_ENERGY_COMPENSATION)) // IndirectSpecularEnergyCompensation 模式显示间接高光能量补偿。
+    {
+        debugColor = saturate((data.indirectSpecularEnergyCompensation - 1.0f) * 0.5f); // 黑色表示无补偿，越亮表示 Reflection Probe 高光补偿越强，2 倍补偿约为 0.5 灰。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ENERGY_PRESERVATION)) // EnergyPreservation 模式显示底层 diffuse 保能比例。
+    {
+        debugColor = float3(data.energyPreservation, data.energyPreservation, data.energyPreservation); // 越亮表示 diffuse 保留越多，越暗表示 specular 顶层占用能量越多。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SPECULAR_OCCLUSION)) // SpecularOcclusion 模式显示间接高光遮蔽。
     {
         debugColor = float3(data.specularOcclusion, data.specularOcclusion, data.specularOcclusion); // 越亮表示反射探针被保留越多。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
-    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_LIGHTING)) // Lighting 模式显示 PBR 总光照结果。
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIFFUSE_COLOR)) // DiffuseColor 模式显示 XRender GenericData.DiffuseColor。
     {
-        debugColor = max(data.lightingColor, float3(0.0f, 0.0f, 0.0f)); // 保留 HDR 光照强度但去掉负值，便于观察阴影、高光和间接光分布。
+        debugColor = saturate(data.diffuseColor); // 金属度越高 diffuse 越暗，方便检查 metallic 是否正确转移到 F0。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_F0)) // F0 模式显示由 reflectance / metallic / baseColor 还原出的反射率。
+    {
+        debugColor = saturate(data.f0); // 不放大显示，保留真实 F0 数值关系；非金属默认会比较暗。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_F90)) // F90 模式显示 Schlick Fresnel 的掠射端点。
+    {
+        debugColor = saturate(data.f90); // 当前 XRender DefaultLit 近似下通常为白色。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_D)) // DirectBRDFD 模式显示 GGX D 项。
+    {
+        float visibleD = saturate(data.directBRDFD * 0.05f); // D 项在极光滑时会很高，所以缩放 0.05 让普通范围更容易观察。
+        debugColor = float3(visibleD, visibleD, visibleD); // 把缩放后的 D 项复制到 RGB 形成灰度调试图。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_VISIBILITY)) // DirectBRDFVisibility 模式显示 Smith Joint Visibility。
+    {
+        float visibleVisibility = saturate(data.directBRDFVisibility); // 越亮表示几何遮蔽越少，掠射角可能接近白色。
+        debugColor = float3(visibleVisibility, visibleVisibility, visibleVisibility); // 把单通道 visibility 复制到 RGB。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_FRESNEL)) // DirectBRDFFresnel 模式显示 Schlick Fresnel。
+    {
+        debugColor = saturate(data.directBRDFFresnel); // 可以直接观察 reflectance、metallic 和视角对 F 的影响。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE_LOBE)) // DirectDiffuseLobe 模式显示 Lambert / Burley diffuse lobe。
+    {
+        float visibleDiffuseLobe = saturate(data.directDiffuseLobe); // Lambert 默认约为 0.318，切 Burley 后会随角度和 roughness 改变。
+        debugColor = float3(visibleDiffuseLobe, visibleDiffuseLobe, visibleDiffuseLobe); // 把 diffuse lobe 复制到 RGB 形成灰度调试图。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE_BRDF)) // DirectDiffuseBRDF 模式显示未乘灯光的 diffuse BRDF。
+    {
+        debugColor = saturate(data.directDiffuseBRDF); // 只看材质、diffuse lobe 和 EnergyPreservation，不含灯光颜色、NdotL 或阴影。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIRECT_SPECULAR_BRDF)) // DirectSpecularBRDF 模式显示未乘灯光的 specular BRDF。
+    {
+        debugColor = saturate(data.directSpecularBRDF); // 只看 D/V/F 和 EnergyCompensation，不含灯光颜色、NdotL 或阴影。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SPECULAR_AA_NORMAL_VARIANCE)) // SpecularAANormalVariance 模式显示 Normal Filtering 的法线方差。
+    {
+        float visibleVariance = saturate(data.specularAANormalVariance * 100.0f); // 方差通常很小，放大 100 倍后更容易看出法线贴图引起的拓宽区域。
+        debugColor = float3(visibleVariance, visibleVariance, visibleVariance); // 把放大后的法线方差复制到 RGB。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SPECULAR_AA_ROUGHNESS_DELTA)) // SpecularAARoughnessDelta 模式显示 Specular AA 增加的 roughness。
+    {
+        float visibleRoughnessDelta = saturate(data.specularAARoughnessDelta * 5.0f); // delta 最大约受 threshold 限制，放大 5 倍能让 0.2 附近接近白色。
+        debugColor = float3(visibleRoughnessDelta, visibleRoughnessDelta, visibleRoughnessDelta); // 把放大后的 roughness delta 复制到 RGB。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_DFG)) // IndirectSpecularDFG 模式显示间接高光预积分 DFG.xy。
+    {
+        debugColor = saturate(float3(data.indirectSpecularDFG.x, data.indirectSpecularDFG.y, 0.0f)); // R/G 分别显示 DFG.x/y，B 保持 0 便于区分。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_ENV_BRDF)) // IndirectSpecularEnvBRDF 模式显示 F0/F90 套用 DFG 后的环境 BRDF。
+    {
+        debugColor = saturate(data.indirectSpecularEnvBRDF); // Reflection Probe 会乘这个项，可用来确认 DFG 和 F0 是否合理。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_BASE_COLOR)) // GBufferBaseColor 模式显示编码再解码后的 BaseColor。
+    {
+        debugColor = saturate(data.gbufferBaseColor); // 观察 GBuffer0.rgb 是否能还原材质基础色。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_NORMAL_WS)) // GBufferNormalWS 模式显示编码再解码后的世界空间法线。
+    {
+        debugColor = BurtEncodeNormalWSForDebug(data.gbufferNormalWS); // 把解码法线从方向值编码成屏幕可读颜色。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_METALLIC)) // GBufferMetallic 模式显示解码后的金属度。
+    {
+        debugColor = float3(data.gbufferMetallic, data.gbufferMetallic, data.gbufferMetallic); // 把单通道 Metallic 复制到 RGB。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_SMOOTHNESS)) // GBufferSmoothness 模式显示解码后的光滑度。
+    {
+        debugColor = float3(data.gbufferSmoothness, data.gbufferSmoothness, data.gbufferSmoothness); // Smoothness 越亮表示材质越光滑。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_OCCLUSION)) // GBufferOcclusion 模式显示解码后的 AO。
+    {
+        debugColor = float3(data.gbufferOcclusion, data.gbufferOcclusion, data.gbufferOcclusion); // AO 越暗表示间接光被遮蔽越强。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_REFLECTANCE)) // GBufferReflectance 模式显示解码后的 XRender reflectance。
+    {
+        debugColor = float3(data.gbufferReflectance, data.gbufferReflectance, data.gbufferReflectance); // Reflectance 仍按 XRender 输入语义显示，不显示 F0。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING)) // DetailLighting 模式显示中灰 BaseColor 下的 PBR 光照。
+    {
+        debugColor = max(data.detailLightingColor, float3(0.0f, 0.0f, 0.0f)); // 保留 HDR 光照强度但去掉负值，便于观察阴影、高光和间接光分布。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 

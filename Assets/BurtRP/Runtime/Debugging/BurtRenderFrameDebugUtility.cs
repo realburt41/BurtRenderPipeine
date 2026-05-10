@@ -156,6 +156,16 @@ namespace Burt.RenderPipeline
             builder.Append(" SortLayer=").Append(request.SortLayer);
             // 写入 Unity Camera.depth，方便和 SortLayer 进行对照。
             builder.Append(" Camera.depth=").Append(GetCameraDepth(camera));
+            // 写入 BurtRP 最终解析出来的清屏模式，用来确认 BurtCameraData、SceneView 和 Preview 的清屏规则是否生效。
+            builder.Append(" BurtClearMode=").Append(GetResolvedClearMode(request));
+            // 写入清屏数据来源，用来确认当前清屏参数来自直接 BurtCameraData、编辑器选中相机还是 Unity 原生相机。
+            builder.Append(" ClearDataSource=").Append(GetClearDataSource(request));
+            // 写入 Unity 原生 Camera.clearFlags，用来确认 BurtCameraData 是否已经同步回 Unity 相机组件。
+            builder.Append(" UnityClearFlags=").Append(GetUnityClearFlags(camera));
+            // 写入 BurtCameraData 上配置的清屏颜色；没有 BurtCameraData 时输出占位，避免误以为 SceneView 也有 Burt 相机数据。
+            builder.Append(" BurtClearColor=").Append(GetBurtClearColor(request));
+            // 写入 Unity 原生 Camera.backgroundColor，用来诊断 Camera Preview、GameView 和 SceneView 的底色来源。
+            builder.Append(" UnityBgColor=").Append(GetUnityBackgroundColor(camera));
             // 写入 Overlay 清颜色意图，后续做栈级 RT 合成时会用它决定是否继承 Base 颜色。
             builder.Append(" OverlayClearColor=").Append(request.OverlayClearsColor);
             // 写入 Overlay 清深度意图，后续做栈级深度共享时会用它决定是否继承 Base 深度。
@@ -217,6 +227,66 @@ namespace Burt.RenderPipeline
         {
             // 相机存在时格式化 depth，否则返回空相机占位文本。
             return camera != null ? camera.depth.ToString("0.###", CultureInfo.InvariantCulture) : "<null>";
+        }
+
+        // 安全读取 BurtRP 最终清屏模式，方便把实际渲染行为和 Inspector 配置放在同一行日志里对比。
+        private static string GetResolvedClearMode(BurtRenderRequest request)
+        {
+            // 通过统一清屏工具解析模式，保证调试日志和 Clear/Skybox Pass 走同一套判断规则。
+            return BurtCameraClearUtility.ResolveClearMode(request).ToString();
+        }
+
+        // 安全读取清屏数据来源名称，方便诊断 Preview 是否借用了当前选中 Camera 的 BurtCameraData。
+        private static string GetClearDataSource(BurtRenderRequest request)
+        {
+            // 通过统一清屏工具读取来源名称，保证 Frame Debug 和 CameraSort Debug 的诊断字段一致。
+            return BurtCameraClearUtility.ResolveClearDataSourceName(request);
+        }
+
+        // 安全读取 Unity 原生 Camera.clearFlags，用来判断 BurtCameraData 是否已经把清屏模式同步给 Unity 相机组件。
+        private static string GetUnityClearFlags(Camera camera)
+        {
+            // 相机存在时返回 Unity clearFlags，否则返回空相机占位文本。
+            return camera != null ? camera.clearFlags.ToString() : "<null>";
+        }
+
+        // 安全读取 BurtCameraData 的清屏颜色；SceneView/Preview 没有 BurtCameraData 时明确输出占位。
+        private static string GetBurtClearColor(BurtRenderRequest request)
+        {
+            // 解析实际用于清屏的 BurtCameraData；Preview Camera 可能会在编辑器下借用当前选中 Camera 的数据。
+            var cameraData = BurtCameraClearUtility.ResolveClearCameraData(request);
+
+            // request 为空或者没有任何可用 BurtCameraData 时，说明这一行日志不能从 Burt 配置读取颜色。
+            if (cameraData == null)
+            {
+                // 返回占位文本，避免把 Unity 相机背景色误认为 BurtCameraData 配置。
+                return "<none>";
+            }
+
+            // 格式化 BurtCameraData.ClearColor，方便和 UnityBgColor 逐项对比。
+            return FormatColor(cameraData.ClearColor);
+        }
+
+        // 安全读取 Unity 原生 Camera.backgroundColor，用来诊断 Camera Preview、GameView 和 SceneView 的底色。
+        private static string GetUnityBackgroundColor(Camera camera)
+        {
+            // 相机存在时格式化 backgroundColor，否则返回空相机占位文本。
+            return camera != null ? FormatColor(camera.backgroundColor) : "<null>";
+        }
+
+        // 把 Color 格式化为固定小数格式，避免不同系统区域设置导致逗号、小数点表现不一致。
+        private static string FormatColor(Color color)
+        {
+            // 把红色通道格式化为最多三位小数，保证日志短小且稳定。
+            var red = color.r.ToString("0.###", CultureInfo.InvariantCulture);
+            // 把绿色通道格式化为最多三位小数，方便和 Inspector 颜色值对照。
+            var green = color.g.ToString("0.###", CultureInfo.InvariantCulture);
+            // 把蓝色通道格式化为最多三位小数，避免输出过长浮点数。
+            var blue = color.b.ToString("0.###", CultureInfo.InvariantCulture);
+            // 把透明度通道格式化为最多三位小数，便于确认清屏色 alpha 是否正确。
+            var alpha = color.a.ToString("0.###", CultureInfo.InvariantCulture);
+            // 手动拼接 RGBA 四个通道，让日志保持短小且便于肉眼对比。
+            return "(" + red + "," + green + "," + blue + "," + alpha + ")";
         }
     }
 }
