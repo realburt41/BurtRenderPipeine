@@ -48,7 +48,16 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         Emission = 208, // 光照调试：只显示自发光贡献，方便确认 GBuffer / Forward 是否正确叠加 emission。
         FinalLighting = 209, // 光照调试：显示写入 CameraColor 前的最终材质光照，包含 PBR 光照和自发光。
         CameraDepth = 300, // 全屏调试：复用 BurtRP 当前已有的 CameraDepth debug pass。
-        MainLightShadow = 301 // 全屏调试：复用 BurtRP 当前已有的 MainLightShadow debug pass。
+        MainLightShadow = 301, // 全屏调试：复用 BurtRP 当前已有的 MainLightShadow debug pass。
+        ScreenSpaceReflectionHitMask = 310, // SSR 调试：显示屏幕空间反射 raymarch 是否命中。
+        ScreenSpaceReflectionHitUV = 311, // SSR 调试：显示命中位置的屏幕 UV，方便检查方向和翻转。
+        ScreenSpaceReflectionStepCount = 312, // SSR 调试：显示 raymarch 步数，方便观察性能和提前退出。
+        ScreenSpaceReflectionColor = 313, // SSR 调试：显示命中后采样到的反射颜色。
+        TemporalAAHistory = 320, // TAA 调试：显示重投影后采样到的 history 颜色。
+        TemporalAAFeedback = 321, // TAA 调试：显示最终 history feedback 权重，白色表示 history 占比高。
+        TemporalAARejection = 322, // TAA 调试：显示 luma/clip/depth rejection 分量。
+        TemporalAAHistoryUV = 323, // TAA 调试：显示重投影 history UV 和是否在屏幕内。
+        TemporalAADifference = 324 // TAA 调试：显示当前帧和 history 的颜色差异。
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。

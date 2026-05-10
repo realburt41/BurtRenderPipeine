@@ -775,6 +775,245 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             ENDHLSL
         }
 
+
+        // Temporal AA resolve: v0 uses depth reprojection only, without per-object motion vectors.
+        Pass
+        {
+            Name "Burt Temporal AA Resolve"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+
+            sampler2D _BurtPostProcessSourceTexture;
+            sampler2D _BurtTAAHistoryTexture;
+            sampler2D _BurtCameraDepthTexture;
+            float4x4 _BurtTAAPreviousViewProjection;
+            float4x4 _BurtTAAInverseCurrentViewProjection;
+            float4 _BurtTAATexelSize;
+            float4 _BurtTAAParams;
+            float _BurtShadingDebugEnabled;
+            float _BurtShadingDebugMode;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.uv = uv;
+                return output;
+            }
+
+            float2 BurtTaaSourceUV(float2 uv)
+            {
+                // TAA resolve is an intermediate RT-to-RT pass, not FinalBlit.
+                // Keep UVs aligned with Burt Post Process Copy to avoid vertically flipping CameraColor.
+                return uv;
+            }
+
+            float3 BurtSampleCurrent(float2 uv)
+            {
+                return tex2D(_BurtPostProcessSourceTexture, uv).rgb;
+            }
+
+            float3 BurtSampleHistoryCatmullRom(float2 uv)
+            {
+                float2 textureSize = _BurtTAATexelSize.zw;
+                float2 samplePosition = uv * textureSize;
+                float2 texelCenter = floor(samplePosition - 0.5) + 0.5;
+                float2 f = samplePosition - texelCenter;
+                float2 f2 = f * f;
+                float2 f3 = f2 * f;
+
+                float2 w0 = f2 - 0.5 * (f3 + f);
+                float2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
+                float2 w2 = -1.5 * f3 + 2.0 * f2 + 0.5 * f;
+                float2 w3 = 0.5 * (f3 - f2);
+
+                float3 color = 0.0;
+                [unroll]
+                for (int y = 0; y < 4; y++)
+                {
+                    float wy = y == 0 ? w0.y : (y == 1 ? w1.y : (y == 2 ? w2.y : w3.y));
+                    [unroll]
+                    for (int x = 0; x < 4; x++)
+                    {
+                        float wx = x == 0 ? w0.x : (x == 1 ? w1.x : (x == 2 ? w2.x : w3.x));
+                        float2 tapUv = (texelCenter + float2(x - 1, y - 1)) * _BurtTAATexelSize.xy;
+                        color += tex2D(_BurtTAAHistoryTexture, saturate(tapUv)).rgb * (wx * wy);
+                    }
+                }
+
+                return max(color, 0.0);
+            }
+
+            bool BurtTaaIsCloserDepth(float candidateDepth, float currentDepth)
+            {
+                #if defined(UNITY_REVERSED_Z)
+                    return candidateDepth > currentDepth;
+                #else
+                    return candidateDepth < currentDepth;
+                #endif
+            }
+
+            float BurtTaaLuminance(float3 color)
+            {
+                return dot(color, float3(0.2126, 0.7152, 0.0722));
+            }
+
+            float3 BurtTaaClipToAabb(float3 history, float3 minimumColor, float3 maximumColor)
+            {
+                float3 boxCenter = 0.5 * (maximumColor + minimumColor);
+                float3 boxExtents = 0.5 * (maximumColor - minimumColor) + 1e-5;
+                float3 offset = history - boxCenter;
+                float3 unitOffset = abs(offset / boxExtents);
+                float maxUnit = max(max(unitOffset.x, unitOffset.y), unitOffset.z);
+                float3 clipped = maxUnit > 1.0 ? boxCenter + offset / maxUnit : history;
+                return lerp(clipped, clamp(history, minimumColor, maximumColor), 0.25);
+            }
+
+            float BurtTaaValidSurfaceWeight(float rawDepth)
+            {
+                #if defined(UNITY_REVERSED_Z)
+                    return step(1e-6, rawDepth);
+                #else
+                    return 1.0 - step(1.0 - 1e-6, rawDepth);
+                #endif
+            }
+
+            float BurtTaaDepthDisocclusionWeight(float rawDepth, float historyRawDepth)
+            {
+                float currentEyeDepth = LinearEyeDepth(rawDepth);
+                float historyEyeDepth = LinearEyeDepth(historyRawDepth);
+                float depthTolerance = max(currentEyeDepth * 0.02, 0.05);
+                return saturate(1.0 - abs(currentEyeDepth - historyEyeDepth) / depthTolerance);
+            }
+
+            float3 BurtTaaDebugColor(float3 color)
+            {
+                return color / (1.0 + max(color, 0.0));
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float2 uv = BurtTaaSourceUV(input.uv);
+                float rawDepth = tex2D(_BurtCameraDepthTexture, uv).r;
+                float3 current = BurtSampleCurrent(uv);
+                float3 neighborhoodMin = current;
+                float3 neighborhoodMax = current;
+                float3 neighborhoodSum = 0.0;
+                float3 neighborhoodSumSq = 0.0;
+                float minDepth = rawDepth;
+                float maxDepth = rawDepth;
+                float closestDepth = rawDepth;
+                float2 closestDepthUv = input.uv;
+                float2 texel = _BurtTAATexelSize.xy;
+                [unroll]
+                for (int y = -1; y <= 1; y++)
+                {
+                    [unroll]
+                    for (int x = -1; x <= 1; x++)
+                    {
+                        float2 sampleUv = saturate(uv + texel * float2(x, y));
+                        float3 sampleColor = BurtSampleCurrent(sampleUv);
+                        float sampleDepth = tex2D(_BurtCameraDepthTexture, sampleUv).r;
+                        neighborhoodMin = min(neighborhoodMin, sampleColor);
+                        neighborhoodMax = max(neighborhoodMax, sampleColor);
+                        neighborhoodSum += sampleColor;
+                        neighborhoodSumSq += sampleColor * sampleColor;
+                        minDepth = min(minDepth, sampleDepth);
+                        maxDepth = max(maxDepth, sampleDepth);
+                        if (BurtTaaIsCloserDepth(sampleDepth, closestDepth))
+                        {
+                            closestDepth = sampleDepth;
+                            closestDepthUv = sampleUv;
+                        }
+                    }
+                }
+
+                float4 clip = float4(closestDepthUv * 2.0 - 1.0, closestDepth, 1.0);
+
+                float4 world = mul(_BurtTAAInverseCurrentViewProjection, clip);
+                world.xyz /= max(abs(world.w), 1e-6);
+
+                float4 previousClip = mul(_BurtTAAPreviousViewProjection, float4(world.xyz, 1.0));
+                float2 historyUv = previousClip.xy / max(abs(previousClip.w), 1e-6) * 0.5 + 0.5;
+
+                float historyValid = _BurtTAAParams.z;
+                float inBounds = step(1e-5, previousClip.w) * step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
+                float2 safeHistoryUv = saturate(historyUv);
+                float3 rawHistory = BurtSampleHistoryCatmullRom(safeHistoryUv);
+                float3 history = rawHistory;
+                float clampStrength = max(_BurtTAAParams.y, 0.25);
+                float3 neighborhoodMean = neighborhoodSum * (1.0 / 9.0);
+                float3 neighborhoodVariance = max(neighborhoodSumSq * (1.0 / 9.0) - neighborhoodMean * neighborhoodMean, 0.0);
+                float3 neighborhoodSigma = sqrt(neighborhoodVariance);
+                float3 varianceMin = neighborhoodMean - neighborhoodSigma * clampStrength;
+                float3 varianceMax = neighborhoodMean + neighborhoodSigma * clampStrength;
+                float3 clampMin = min(max(neighborhoodMin, varianceMin), neighborhoodMean);
+                float3 clampMax = max(min(neighborhoodMax, varianceMax), neighborhoodMean);
+                float3 clippedHistory = BurtTaaClipToAabb(history, clampMin, clampMax);
+                float clipDistance = length(history - clippedHistory) / max(length(current), 0.05);
+                float clipWeight = lerp(0.35, 1.0, saturate(1.0 - clipDistance * 2.0));
+                history = clippedHistory;
+
+                float currentLuma = BurtTaaLuminance(current);
+                float rawHistoryLuma = BurtTaaLuminance(rawHistory);
+                float lumaThreshold = max(max(currentLuma, rawHistoryLuma) * 0.25, 0.08);
+                float lumaWeight = lerp(0.25, 1.0, saturate(1.0 - abs(currentLuma - rawHistoryLuma) / lumaThreshold));
+                float depthRange = maxDepth - minDepth;
+                float neighborhoodDepthWeight = lerp(0.4, 1.0, saturate(1.0 - depthRange * 500.0));
+                float historyRawDepth = tex2D(_BurtCameraDepthTexture, safeHistoryUv).r;
+                float disocclusionWeight = BurtTaaDepthDisocclusionWeight(closestDepth, historyRawDepth);
+                float2 motionPixels = (historyUv - uv) * _BurtTAATexelSize.zw;
+                float motionWeight = saturate(1.0 - max(length(motionPixels) - 32.0, 0.0) / 96.0);
+                float surfaceWeight = BurtTaaValidSurfaceWeight(rawDepth);
+                float rejectionWeight = min(min(min(lumaWeight, clipWeight), min(neighborhoodDepthWeight, disocclusionWeight)), motionWeight);
+                float feedback = saturate(_BurtTAAParams.x) * historyValid * inBounds * surfaceWeight * rejectionWeight;
+                float edgeContrast = BurtTaaLuminance(neighborhoodMax - neighborhoodMin);
+                float spatialEdgeWeight = saturate(edgeContrast * 4.0) * (1.0 - feedback) * 0.25;
+                float3 currentFiltered = lerp(current, neighborhoodMean, spatialEdgeWeight);
+
+                int debugMode = (int)round(_BurtShadingDebugMode);
+                if (_BurtShadingDebugEnabled > 0.5 && debugMode >= 320 && debugMode <= 324)
+                {
+                    if (debugMode == 320)
+                    {
+                        return float4(BurtTaaDebugColor(rawHistory), 1.0);
+                    }
+
+                    if (debugMode == 321)
+                    {
+                        return float4(feedback.xxx, 1.0);
+                    }
+
+                    if (debugMode == 322)
+                    {
+                        return float4(lumaWeight, clipWeight, min(neighborhoodDepthWeight, disocclusionWeight), 1.0);
+                    }
+
+                    if (debugMode == 323)
+                    {
+                        return float4(saturate(historyUv), inBounds, 1.0);
+                    }
+
+                    return float4(saturate(abs(current - rawHistory) * 4.0), 1.0);
+                }
+
+                float3 resolved = lerp(currentFiltered, history, feedback);
+                return float4(max(resolved, 0.0), 1.0);
+            }
+            ENDHLSL
+        }
+
     }
 
     // 禁用 fallback，避免后处理拷贝失败时悄悄走其他管线 shader。

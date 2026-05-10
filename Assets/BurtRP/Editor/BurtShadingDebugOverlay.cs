@@ -103,6 +103,24 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Camera Depth"; // 已有全屏深度调试。
                 case BurtShadingDebugMode.MainLightShadow:
                     return "Main Light Shadow"; // 已有主光阴影图调试。
+                case BurtShadingDebugMode.ScreenSpaceReflectionHitMask:
+                    return "SSR Hit Mask"; // 显示 SSR raymarch 是否命中。
+                case BurtShadingDebugMode.ScreenSpaceReflectionHitUV:
+                    return "SSR Hit UV"; // 显示 SSR 命中点屏幕 UV。
+                case BurtShadingDebugMode.ScreenSpaceReflectionStepCount:
+                    return "SSR Step Count"; // 显示 SSR raymarch 步数。
+                case BurtShadingDebugMode.ScreenSpaceReflectionColor:
+                    return "SSR Reflection Color"; // 显示 SSR 命中后采样到的反射颜色。
+                case BurtShadingDebugMode.TemporalAAHistory:
+                    return "TAA History Color"; // 显示 TAA 重投影采样到的 history。
+                case BurtShadingDebugMode.TemporalAAFeedback:
+                    return "TAA Feedback"; // 显示最终 history 混合权重。
+                case BurtShadingDebugMode.TemporalAARejection:
+                    return "TAA Rejection"; // 显示 luma / clip / depth 拒绝分量。
+                case BurtShadingDebugMode.TemporalAAHistoryUV:
+                    return "TAA History UV"; // 显示重投影后的 history UV 和屏幕内状态。
+                case BurtShadingDebugMode.TemporalAADifference:
+                    return "TAA Difference"; // 显示当前帧与 history 的颜色差异。
                 default:
                     return ObjectNames.NicifyVariableName(mode.ToString()); // 兜底美化 enum 名，避免新增模式显示为空。
             }
@@ -213,7 +231,20 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public static readonly BurtShadingDebugGroup Fullscreen = new BurtShadingDebugGroup("Fullscreen / Render Data", "Fullscreen", new[] // BurtRP 现有全屏调试入口。
         {
             BurtShadingDebugMode.CameraDepth, // CameraDepth 全屏 Debug。
-            BurtShadingDebugMode.MainLightShadow // MainLightShadow 全屏 Debug。
+            BurtShadingDebugMode.MainLightShadow, // MainLightShadow 全屏 Debug。
+            BurtShadingDebugMode.ScreenSpaceReflectionHitMask, // SSR 命中遮罩。
+            BurtShadingDebugMode.ScreenSpaceReflectionHitUV, // SSR 命中 UV。
+            BurtShadingDebugMode.ScreenSpaceReflectionStepCount, // SSR raymarch 步数。
+            BurtShadingDebugMode.ScreenSpaceReflectionColor // SSR 采样到的反射颜色。
+        });
+
+        public static readonly BurtShadingDebugGroup TemporalAA = new BurtShadingDebugGroup("Temporal AA", "TAA", new[] // TAA 独立分类，避免和通用 Fullscreen 调试混在一起。
+        {
+            BurtShadingDebugMode.TemporalAAHistory, // TAA 重投影 history 颜色。
+            BurtShadingDebugMode.TemporalAAFeedback, // TAA history feedback 权重。
+            BurtShadingDebugMode.TemporalAARejection, // TAA 拒绝分量。
+            BurtShadingDebugMode.TemporalAAHistoryUV, // TAA history UV。
+            BurtShadingDebugMode.TemporalAADifference // TAA 当前帧与 history 差异。
         });
     }
 
@@ -229,7 +260,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 BurtShadingDebugBRDFDropdown.Id,
                 BurtShadingDebugIBLDropdown.Id,
                 BurtShadingDebugLightingDropdown.Id,
-                BurtShadingDebugFullscreenDropdown.Id) // 每个 ID 对应一个 EditorToolbarElement。
+                BurtShadingDebugFullscreenDropdown.Id,
+                BurtShadingDebugTemporalAADropdown.Id) // 每个 ID 对应一个 EditorToolbarElement。
         {
         }
     }
@@ -367,6 +399,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         }
     }
 
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 TAA 分类按钮。
+    internal sealed class BurtShadingDebugTemporalAADropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/TAA"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugTemporalAADropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.TemporalAA) // 绑定 TAA 独立分类。
+        {
+        }
+    }
+
     internal sealed class BurtShadingDebugPopup : PopupWindowContent // 每个分类按钮点击后弹出的菜单内容。
     {
         private const float ScrollMaxHeight = 320f; // 单个分类仍限制最大高度，后续模式增加时不会撑出屏幕。
@@ -402,7 +445,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             EditorGUILayout.EndScrollView(); // 结束滚动区域。
             EditorGUILayout.Space(4f); // 与资产信息隔开一点距离。
 
-            EditorGUILayout.HelpBox("参考 XRender Shader Debug 的分类 Toolbar；Depth 和 Shadow 仍同步 BurtRP 现有全屏 Debug 开关。", MessageType.Info); // 说明分类来源和全屏 Debug 行为。
+            EditorGUILayout.HelpBox("参考 XRender Shader Debug 的分类 Toolbar；Depth / Shadow 同步现有全屏 Debug，SSR Debug 走 Global Volume 的 SSR 开关。", MessageType.Info); // 说明分类来源和全屏 Debug 行为。
         }
 
         private void DrawMode(BurtShadingDebugMode mode) // 绘制一个可选 Debug 模式。

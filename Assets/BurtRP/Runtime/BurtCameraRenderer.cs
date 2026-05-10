@@ -43,9 +43,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             var safeRenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // 传入空 options 时回退旧行为，避免调用方漏传导致 RT 不分配。
 
-            context.SetupCameraProperties(request.Camera); // 设置当前相机的矩阵、裁剪参数和 Unity 内置 shader 变量。
-
             BurtPostProcessUtility.UpdateVolumeStack(request, asset); // 每个 request 渲染前刷新 VolumeStack，让后处理 Pass 能读取当前 Global Volume 参数。
+
+            var originalProjectionMatrix = request.Camera.projectionMatrix;
+            var originalNonJitteredProjectionMatrix = request.Camera.nonJitteredProjectionMatrix;
+            var temporalAA = BurtTemporalAAUtility.PrepareRequest(request, asset);
+            request.SetTemporalAA(temporalAA);
+            if (temporalAA.Enabled)
+            {
+                request.Camera.nonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
+                request.Camera.projectionMatrix = temporalAA.JitteredProjectionMatrix;
+            }
+
+            context.SetupCameraProperties(request.Camera); // 设置当前相机的矩阵、裁剪参数和 Unity 内置 shader 变量。
 
             BurtShadingDebugSettings.ApplyGlobalShaderProperties(); // 每个相机渲染前刷新 Shading Debug 全局参数，避免编辑器切换或域重载后 shader 读到旧值。
 
@@ -76,6 +86,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
                 }
             }
 
+            if (temporalAA.Enabled)
+            {
+                request.Camera.projectionMatrix = originalProjectionMatrix;
+                request.Camera.nonJitteredProjectionMatrix = originalNonJitteredProjectionMatrix;
+            }
+
+            BurtTemporalAAUtility.CommitRequest(request);
             context.Submit(); // 把当前 request 累积的所有渲染命令提交给 Unity 执行。
         }
 

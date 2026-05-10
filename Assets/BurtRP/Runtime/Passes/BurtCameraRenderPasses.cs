@@ -183,6 +183,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.MainLightShadowMapId, descriptor, FilterMode.Bilinear); // 使用双线性过滤，让硬件阴影采样器能平滑比较边缘，避免点采样放大阴影条带。
 
             cmd.SetRenderTarget(shadowMapTarget.Identifier); // 把主光阴影图绑定为当前渲染目标，为后续 ShadowCaster 绘制做准备。
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
 
             cmd.ClearRenderTarget(true, false, Color.clear); // 清理阴影图深度，保证还没写入阴影 caster 时默认不会出现脏深度。
 
@@ -282,6 +283,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
             cmd.SetRenderTarget(shadowMapTarget.Identifier); // 把 MainLightShadowMap 绑定为当前渲染目标，后续 ShadowCaster 深度会写到这里。
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, shadowData.MainLightShadowResolution, shadowData.MainLightShadowResolution);
 
             cmd.ClearRenderTarget(true, false, Color.clear); // 清理阴影图深度，避免上一帧或上一个 request 的深度残留影响当前阴影。
 
@@ -700,6 +702,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var cmd = CommandBufferPool.Get(Name); // 重新绑定目标，防止前序内部预览状态影响 DrawRenderers。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 使用 BurtRP 当前 request 的颜色和深度目标。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
 
             renderContext.ExecuteCommandBuffer(cmd); // 提交绑定命令。
 
@@ -855,6 +858,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取一个以当前 Pass 命名的 CommandBuffer。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 在绘制不支持 shader 前重新绑定当前 request 的颜色和深度目标。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
 
             renderContext.ExecuteCommandBuffer(cmd); // 把渲染目标绑定命令提交给 Unity 渲染上下文。
 
@@ -959,6 +963,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier); // 只绑定 CameraColor，因为这个全屏调试 Pass 不需要写入深度。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
 
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier); // 确保 _BurtCameraDepthTexture 指向当前 request 的 CameraDepth。
 
@@ -1051,6 +1056,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             material.SetFloat(ShadowDebugYFlipId, debugYFlip); // 把解析后的 Y 翻转开关传给调试 shader，让 shader 只负责执行一次采样方向修正。
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
             cmd.SetRenderTarget(cameraColorTarget.Identifier); // 绑定 CameraColor 作为绘制目标，因为调试视图只覆盖颜色不写深度。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.MainLightShadowMapId, shadowMapTarget.Identifier); // 确保 shader 采样的是当前 request 的主光 shadow map。
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，让 shader 把 shadow map 转成灰度图。
             renderContext.ExecuteCommandBuffer(cmd); // 提交调试绘制命令给 ScriptableRenderContext。

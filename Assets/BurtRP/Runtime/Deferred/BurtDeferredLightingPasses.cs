@@ -53,6 +53,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 绑定 CameraColor 作为输出，同时保留 CameraDepth 供后续 Skybox 和透明物体继续深度测试。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier); // 把当前 request 的 GBuffer0 绑定给 Deferred Lighting shader。
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier); // 把当前 request 的 GBuffer1 绑定给 Deferred Lighting shader。
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier); // 把当前 request 的 GBuffer2 绑定给 Deferred Lighting shader。

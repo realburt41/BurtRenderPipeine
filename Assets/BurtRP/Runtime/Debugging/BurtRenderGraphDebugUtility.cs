@@ -248,7 +248,31 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" UnsupportedShaderDebug=").Append(asset.EnableUnsupportedShaderDebug); // 写入错误材质绘制开关。
 
+            builder.Append(" HiZDebugView=").Append(asset.EnableHiZDebugView);
+
+            builder.Append(" HiZDebugMip=").Append(asset.HiZDebugMip);
+
+            builder.Append(" HiZDebugScale=").Append(asset.HiZDebugScale.ToString("0.###"));
+
             builder.AppendLine(); // 结束第三行全屏调试状态。
+
+            var ssrSettings = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionSettings(request, asset);
+
+            builder.Append("  SSREnabled=").Append(ssrSettings.Enabled);
+
+            builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());
+
+            builder.Append(" SSRMaxSteps=").Append(ssrSettings.MaxSteps);
+
+            builder.Append(" SSRMaxDistance=").Append(ssrSettings.MaxDistance.ToString("0.###"));
+
+            builder.Append(" SSRThickness=").Append(ssrSettings.Thickness.ToString("0.###"));
+
+            builder.Append(" SSRIntensity=").Append(ssrSettings.Intensity.ToString("0.###"));
+
+            builder.Append(" SSRRoughnessFade=").Append(ssrSettings.RoughnessFade.ToString("0.###"));
+
+            builder.AppendLine();
 
             BurtIndirectLightingUtility.AppendDebugState(builder, request != null ? request.Camera : null); // 写入 BurtRP 全局间接光数据源状态，方便确认 Deferred 不再依赖 Forward DrawRenderers 副作用。
         }
@@ -322,6 +346,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 AppendDescriptorLine(builder, "GBuffer1", BurtRenderTargetDescriptorUtility.CreateGBuffer1Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name); // 输出 GBuffer1 格式，第一版保存 normal/metallic/smoothness。
 
                 AppendDescriptorLine(builder, "GBuffer2", BurtRenderTargetDescriptorUtility.CreateGBuffer2Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name); // 输出 GBuffer2 格式，第一版保存 emission/reflectance。
+
+                AppendDescriptorLine(builder, "HiZDepth", BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
+
+                if (BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflections(request, asset))
+                {
+                    AppendDescriptorLine(builder, "ScreenSpaceReflectionColor", BurtRenderTargetDescriptorUtility.CreateScreenSpaceReflectionColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
+                }
+                else
+                {
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
+                }
             }
             else // Forward 模式不注册 GBuffer。
             {
@@ -330,6 +365,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 AppendSkippedRenderTargetLine(builder, "GBuffer1", resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name); // 写出 GBuffer1 跳过状态。
 
                 AppendSkippedRenderTargetLine(builder, "GBuffer2", resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name); // 写出 GBuffer2 跳过状态。
+
+                AppendSkippedRenderTargetLine(builder, "HiZDepth", resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
+
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
             }
 
             builder.Append("  FinalCameraTarget Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.FinalCameraTargetName)); // 写入最终输出目标是否已注册。
@@ -366,6 +405,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var bloomMipCount = BurtPostProcessUtility.ResolveBloomMipCount(request, asset); // 解析当前 request 实际会使用的 Bloom mip 数。
 
+            var temporalAA = request != null ? request.TemporalAA : null;
+            var temporalAASettings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
+            var temporalHistory = BurtTemporalAAUtility.GetHistoryStatus(request != null ? request.Camera : null);
+
             builder.Append("  AssetEnabled=").Append(assetEnabled); // 写入后处理总开关。
 
             builder.Append(" NoOpCopy=").Append(noOpCopy); // 写入 No-op Copy 开关。
@@ -387,6 +430,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" BloomIntensity=").Append(bloomSettings.Intensity.ToString("0.###")); // 写入 Bloom 强度。
 
             builder.Append(" BloomScatter=").Append(bloomSettings.Scatter.ToString("0.###")); // 写入 Bloom 散布。
+
+            builder.Append(" TAAEnabled=").Append(temporalAA != null && temporalAA.Enabled);
+            builder.Append(" TAAHistoryValid=").Append(temporalAA != null && temporalAA.HistoryValid);
+            builder.Append(" TAAHistoryAllocated=").Append(temporalHistory.HasHistory);
+            builder.Append(" TAAHistoryMatches=").Append(temporalHistory.DescriptorMatches);
+            builder.Append(" TAAHistoryAge=").Append(temporalHistory.HistoryAge);
+            builder.Append(" TAAFrame=").Append(temporalAA != null ? temporalAA.FrameIndex.ToString() : temporalHistory.FrameIndex.ToString());
+            builder.Append(" TAAHistoryReason=").Append(temporalHistory.LastInvalidationReason);
+            builder.Append(" TAAJitter=").Append(temporalAA != null ? temporalAA.JitterPixels.ToString("F3") : "<none>");
+            builder.Append(" TAAFeedback=").Append(temporalAASettings.Feedback.ToString("0.###"));
+            builder.Append(" TAAJitterScale=").Append(temporalAASettings.JitterScale.ToString("0.###"));
+            builder.Append(" TAAClamp=").Append(temporalAASettings.ClampStrength.ToString("0.###"));
+            builder.Append(" TAADebugMode=").Append(BurtTemporalAAUtility.IsTemporalAADebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
+            builder.Append(" TAANote=CatmullRomDepthReprojectionNoMotionVectors");
 
             builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
 
@@ -412,6 +469,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" GBuffer1Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name)); // 写入 GBuffer1 是否已注册。
 
             builder.Append(" GBuffer2Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name)); // 写入 GBuffer2 是否已注册。
+
+            builder.Append(" HiZDepthRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName));
+
+            builder.Append(" SSRColorRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName));
+
+            if (isDeferred)
+            {
+                var hiZDescriptor = BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(request != null ? request.Camera : null);
+                var ssrSettings = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionSettings(request, asset);
+                builder.Append(" HiZMips=").Append(BurtRenderTargetDescriptorUtility.CalculateMipCount(hiZDescriptor.width, hiZDescriptor.height));
+                builder.Append(" HiZMode=FurthestRawDepth");
+                builder.Append(" HiZDebugView=").Append(asset != null && asset.EnableHiZDebugView);
+                builder.Append(" HiZDebugMip=").Append(asset != null ? asset.HiZDebugMip.ToString() : "<none>");
+                builder.Append(" SSREnabled=").Append(ssrSettings.Enabled);
+                builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());
+                builder.Append(" SSRMaxSteps=").Append(ssrSettings.MaxSteps);
+            }
 
             builder.Append(" GBufferDebugMode=").Append(asset != null ? BurtGBufferDebugViewUtility.ResolveGBufferDebugViewMode(asset).ToString() : "<none>"); // 写入最终 GBuffer Debug 模式。
 

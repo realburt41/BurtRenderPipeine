@@ -58,6 +58,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [ShowIf(nameof(IsDeferredRendererMode))] // 只有 Deferred 模式才显示 GBuffer 调试选项，因为 Forward 路径不会申请 GBuffer。
         [SerializeField] private BurtGBufferDebugViewMode gBufferDebugViewMode = BurtGBufferDebugViewMode.Disabled; // 定义 GBuffer 调试视图模式，默认关闭以保持正常画面。
 
+        [TitleGroup("Deferred - 延迟渲染")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, LabelText("启用 HiZ Debug View")] private bool enableHiZDebugView = false;
+
+        [TitleGroup("Deferred - 延迟渲染")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Min(0)] private int hiZDebugMip = 0;
+
+        [TitleGroup("Deferred - 延迟渲染")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Min(0.0001f)] private float hiZDebugScale = 50f;
+
         [Header("PBR / Shading")] // 把 PBR 共享查找表集中显示，方便确认 BRDF 使用的全局资源。
         [SerializeField] private Texture2D preintegratedFGLut; // 保存预积分 FG LUT，默认指向 Assets/Textures/PreintegratedFG.exr。
 
@@ -111,6 +123,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public bool EnableDeferredForwardOpaqueFallback => enableDeferredForwardOpaqueFallback; // 暴露 Deferred 的 ForwardOnly 不透明兜底开关，让组装器可以绘制不能写入 GBuffer 的专用前向物体。
 
         public BurtGBufferDebugViewMode GBufferDebugViewMode => gBufferDebugViewMode; // 暴露当前 GBuffer 调试视图模式，让 Deferred Debug Pass 知道要显示哪一种内容。
+
+        public bool EnableHiZDebugView => enableHiZDebugView;
+
+        public int HiZDebugMip => Mathf.Max(0, hiZDebugMip);
+
+        public float HiZDebugScale => Mathf.Max(0.0001f, hiZDebugScale);
 
         public Texture2D PreintegratedFGLut => preintegratedFGLut; // 暴露预积分 FG LUT，RenderPipeline 会把它绑定成全局 shader 纹理。
 

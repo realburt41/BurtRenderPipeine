@@ -111,6 +111,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 同时绑定颜色目标和 BurtRP 自己的深度目标，让后续绘制真正写入独立 CameraDepth。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
 
             renderContext.ExecuteCommandBuffer(cmd); // 把 CommandBuffer 里的设置渲染目标命令提交给 ScriptableRenderContext。
 
@@ -276,6 +277,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
             cmd.SetRenderTarget(finalCameraTarget.Identifier); // 绑定最终输出目标，后续全屏三角形会写到 request.TargetIdentifier。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
 
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraColorTextureId, cameraColorTarget.Identifier); // 确保 _BurtCameraColorTexture 指向当前 request 的中间 CameraColor。
 

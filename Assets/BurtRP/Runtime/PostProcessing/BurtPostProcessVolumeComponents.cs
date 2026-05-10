@@ -125,6 +125,47 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Volume 组�
         }
     }
 
+    [Serializable]
+    [VolumeComponentMenu("BurtRP/Post Processing/Temporal AA")]
+    public sealed class BurtTemporalAAVolumeComponent : VolumeComponent
+    {
+        [Title("BurtRP Temporal AA")]
+        [InfoBox("v0: Halton jitter + depth reprojection + disocclusion/luma rejection. No per-object motion vectors yet.")]
+        public BoolParameter enabled = new BoolParameter(false);
+        public ClampedFloatParameter feedback = new ClampedFloatParameter(0.94f, 0f, 0.98f);
+        public ClampedFloatParameter jitterScale = new ClampedFloatParameter(1.0f, 0f, 2f);
+        public ClampedFloatParameter clampStrength = new ClampedFloatParameter(1.1f, 0.25f, 4f);
+
+        public bool IsEnabled()
+        {
+            return active && enabled.value;
+        }
+    }
+
+    [Serializable]
+    [VolumeComponentMenu("BurtRP/Rendering/Screen Space Reflections")]
+    public sealed class BurtScreenSpaceReflectionVolumeComponent : VolumeComponent
+    {
+        [Title("BurtRP Screen Space Reflections")]
+        [InfoBox("Deferred SSR v0: reads GBuffer + CameraDepth + HiZ. Debug views live in the Burt Shading Debug overlay.")]
+        public BoolParameter enabled = new BoolParameter(false);
+
+        public ClampedIntParameter maxSteps = new ClampedIntParameter(48, 1, 128);
+
+        public ClampedFloatParameter maxDistance = new ClampedFloatParameter(30f, 0.01f, 200f);
+
+        public ClampedFloatParameter thickness = new ClampedFloatParameter(0.35f, 0.0001f, 5f);
+
+        public ClampedFloatParameter intensity = new ClampedFloatParameter(1f, 0f, 1f);
+
+        public ClampedFloatParameter roughnessFade = new ClampedFloatParameter(0.6f, 0f, 1f);
+
+        public bool IsEnabled()
+        {
+            return active && enabled.value && intensity.value > 0.0001f;
+        }
+    }
+
     [Serializable] // 标记这个类可以被 Unity 序列化，这样它可以保存到 Volume Profile 资产里。
     [VolumeComponentMenu("BurtRP/Post Processing/Bloom")] // 把 Bloom 组件注册到 Global Volume 的 Add Override 菜单里。
     public sealed class BurtBloomVolumeComponent : VolumeComponent // 定义 BurtRP Bloom 的 Global Volume 组件。

@@ -64,6 +64,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 resources.RegisterGBuffer0Texture(); // 注册 GBuffer0 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer1Texture(); // 注册 GBuffer1 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer2Texture(); // 注册 GBuffer2 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
+                resources.RegisterHiZDepthTexture();
+
+                if (ShouldRegisterScreenSpaceReflectionColor(request, asset))
+                {
+                    resources.RegisterScreenSpaceReflectionColorTexture();
+                }
             }
 
             if (ShouldRegisterMainLightShadowMap(request, asset)) // 如果当前 request 的主光需要阴影，就把主光阴影图纳入资源表。
@@ -111,6 +117,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             }
 
             return asset.RendererMode == BurtRendererMode.Deferred; // 只有显式选择 Deferred 时才注册 GBuffer，默认 Forward 不受影响。
+        }
+
+        private static bool ShouldRegisterScreenSpaceReflectionColor(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflections(request, asset);
         }
 
         public void AddPass(BurtRenderPass pass) // 定义添加 Pass 的函数，Assembler 会通过它把 Pass 放进图里。

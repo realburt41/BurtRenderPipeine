@@ -135,6 +135,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBuffer2Name); // 使用统一资源名声明写入 Deferred GBuffer2。
         }
 
+        public BurtRenderTargetHandle ReadHiZDepth()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.HiZDepthName);
+        }
+
+        public BurtRenderTargetHandle WriteHiZDepth()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.HiZDepthName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceReflectionColor()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceReflectionColor()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
+        }
+
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.MainLightShadowMapName); // 使用统一资源名声明读取主光阴影图。

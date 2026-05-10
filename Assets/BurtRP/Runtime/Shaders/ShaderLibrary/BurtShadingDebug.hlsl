@@ -439,7 +439,7 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
-    return false; // CameraDepth 和 MainLightShadow 属于全屏 debug pass，材质 shader 不在这里接管输出。
+    return false; // Depth、Shadow、SSR、TAA 等全屏/后处理 debug 由各自 pass 接管，材质 shader 不在这里输出。
 }
 
 #endif // BURT_SHADING_DEBUG_INCLUDED // 结束 BurtShadingDebug.hlsl 的 include guard。

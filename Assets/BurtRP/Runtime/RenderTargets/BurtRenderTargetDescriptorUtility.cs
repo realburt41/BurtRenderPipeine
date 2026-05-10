@@ -1,4 +1,5 @@
 using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Camera、Mathf、RenderTextureDescriptor 和 RenderTextureFormat。
+using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarget 描述工具和 Pass/Graph 代码保持同一模块可见性。
 {
@@ -51,6 +52,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.depthBufferBits = 0; // 后处理颜色 RT 不需要深度缓冲，深度仍由 CameraDepth 单独管理。
 
             return descriptor; // 返回后处理颜色 RT 描述，供分配 Pass 使用。
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceReflectionColorDescriptor(Camera camera)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            return descriptor;
         }
 
         public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
@@ -116,6 +127,49 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.autoGenerateMips = false; // 深度缓冲不生成 mipmap，避免 Unity 做额外工作。
 
             return descriptor; // 返回创建好的深度 RT 描述，供分配 Pass 使用。
+        }
+
+        public static RenderTextureDescriptor CreateHiZDepthDescriptor(Camera camera)
+        {
+            var cameraColorDescriptor = CreateCameraColorDescriptor(camera);
+            var descriptor = new RenderTextureDescriptor(
+                cameraColorDescriptor.width,
+                cameraColorDescriptor.height,
+                RenderTextureFormat.RFloat,
+                0);
+
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = true;
+            descriptor.autoGenerateMips = false;
+            descriptor.mipCount = CalculateMipCount(descriptor.width, descriptor.height);
+            return descriptor;
+        }
+
+        public static int CalculateMipCount(int width, int height)
+        {
+            var maxDimension = Mathf.Max(1, Mathf.Max(width, height));
+            return Mathf.FloorToInt(Mathf.Log(maxDimension, 2f)) + 1;
+        }
+
+        public static void SetCameraTargetViewport(CommandBuffer cmd, Camera camera)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            var descriptor = CreateCameraColorDescriptor(camera);
+            SetViewport(cmd, descriptor.width, descriptor.height);
+        }
+
+        public static void SetViewport(CommandBuffer cmd, int width, int height)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            cmd.SetViewport(new Rect(0f, 0f, Mathf.Max(1, width), Mathf.Max(1, height)));
         }
 
         public static RenderTextureDescriptor CreateMainLightShadowMapDescriptor(BurtShadowData shadowData) // 定义创建主光阴影图 RT 描述的函数。

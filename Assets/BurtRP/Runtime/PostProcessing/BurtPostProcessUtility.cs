@@ -46,7 +46,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return false; // 返回 false，保持 Asset 作为后处理总开关。
             }
 
-            return settings.ShouldRunNoOpCopy || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume() || HasActiveBloomVolume(); // No-op、Tonemapping、Bloom 或 Color Adjustments 任意一个需要执行，就注册资源并插入 Pass。
+            return settings.ShouldRunNoOpCopy || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume() || HasActiveBloomVolume() || HasActiveTemporalAAVolume(); // No-op、Tonemapping、Bloom、TAA 或 Color Adjustments 任意一个需要执行，就注册资源并插入 Pass。
         }
 
         public static bool ShouldUseBloom( // 定义判断当前 request 是否需要 Bloom 的统一入口。
@@ -144,19 +144,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return; // 直接返回，保持异常路径不改变全局 Volume 状态。
             }
 
-            var settings = asset.PostProcessSettings; // 读取后处理框架设置，用来判断是否需要刷新 Volume。
-
-            if (settings == null) // 如果后处理设置缺失，说明资产还没有完成兜底初始化。
-            {
-                return; // 直接返回，避免空设置导致刷新逻辑异常。
-            }
-
-            if (!settings.EnablePostProcessing) // 如果后处理框架关闭，就不需要为 BurtRP 更新后处理 Volume。
-            {
-                return; // 直接返回，减少不必要的 Volume 查询成本。
-            }
-
-            VolumeManager.instance.Update(camera.transform, asset.PostProcessVolumeLayerMask); // 按当前相机位置和资产 LayerMask 刷新 Unity VolumeStack。
+            VolumeManager.instance.Update(camera.transform, asset.PostProcessVolumeLayerMask); // 按当前相机位置和资产 LayerMask 刷新 Unity VolumeStack，SSR 等非后处理 Volume 也复用这套查询层。
         }
 
         public static bool ShouldLogPostProcessDebug(BurtRenderPipelineAsset asset) // 定义判断是否输出后处理调试日志的统一入口。
@@ -299,6 +287,37 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 bloom.maxIterations.value); // 读取最大 mip 数。
         }
 
+        public static bool ShouldUseTemporalAA(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return BurtTemporalAAUtility.ShouldUseTemporalAA(request, asset);
+        }
+
+        public static BurtTemporalAASettings ResolveTemporalAASettings(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (request == null || !request.IsValid || request.Camera == null)
+            {
+                return BurtTemporalAASettings.Default;
+            }
+
+            if (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection)
+            {
+                return BurtTemporalAASettings.Default;
+            }
+
+            if (!IsPostProcessEnabled(asset))
+            {
+                return BurtTemporalAASettings.Default;
+            }
+
+            var temporalAA = GetTemporalAAVolumeComponent();
+            if (temporalAA == null || !temporalAA.IsEnabled())
+            {
+                return BurtTemporalAASettings.Default;
+            }
+
+            return new BurtTemporalAASettings(true, temporalAA.feedback.value, temporalAA.jitterScale.value, temporalAA.clampStrength.value);
+        }
+
         public static int ResolveBloomMipCount(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 定义解析当前 request 实际 Bloom mip 数的函数。
         {
             if (!ShouldUseBloom(request, asset)) // 如果当前 request 不执行 Bloom，就不需要任何 mip。
@@ -366,7 +385,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
             var cameraName = camera != null ? camera.name : "<null>"; // 把相机名转换成安全字符串，避免日志里出现空引用。
 
-            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMul=" + postExposureMultiplier + " ColorAdjustments=" + useColorAdjustments + " Bloom=" + bloomSettings.Enabled + " BloomMips=" + bloomMipCount + " BloomThreshold=" + bloomSettings.Threshold + " BloomIntensity=" + bloomSettings.Intensity + " BloomScatter=" + bloomSettings.Scatter); // 输出后处理执行摘要，说明当前模式、曝光倍率、颜色调整和 Bloom 状态。
+            var temporalAA = request != null ? request.TemporalAA : null;
+            var temporalHistory = BurtTemporalAAUtility.GetHistoryStatus(camera);
+            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMul=" + postExposureMultiplier + " ColorAdjustments=" + useColorAdjustments + " Bloom=" + bloomSettings.Enabled + " BloomMips=" + bloomMipCount + " BloomThreshold=" + bloomSettings.Threshold + " BloomIntensity=" + bloomSettings.Intensity + " BloomScatter=" + bloomSettings.Scatter + " TAA=" + (temporalAA != null && temporalAA.Enabled) + " TAAHistoryValid=" + (temporalAA != null && temporalAA.HistoryValid) + " TAAHistoryAge=" + temporalHistory.HistoryAge + " TAAHistoryReason=" + temporalHistory.LastInvalidationReason + " TAANote=CatmullRomDepthReprojectionNoMotionVectors"); // 输出后处理执行摘要，说明当前模式、曝光倍率、颜色调整、Bloom 和 TAA 状态。
         }
 
         private static bool IsPostProcessEnabled(BurtRenderPipelineAsset asset) // 定义判断资产是否允许后处理运行的统一辅助函数。
@@ -405,6 +426,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             var bloom = GetBloomVolumeComponent(); // 从当前 VolumeStack 中读取 BurtRP Bloom 组件。
 
             return bloom != null && bloom.IsEnabled(); // 只有组件存在、激活且强度大于 0 时，才认为 Bloom 需要运行。
+        }
+
+        private static bool HasActiveTemporalAAVolume()
+        {
+            var temporalAA = GetTemporalAAVolumeComponent();
+            return temporalAA != null && temporalAA.IsEnabled();
         }
 
         private static BurtTonemappingVolumeComponent GetTonemappingVolumeComponent() // 定义从 Unity VolumeStack 读取 BurtRP Tonemapping 组件的辅助函数。
@@ -462,6 +489,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             return stack.GetComponent<BurtBloomVolumeComponent>(); // 返回 BurtRP Bloom 组件，未添加时 Unity 会返回默认组件或空值。
+        }
+
+        private static BurtTemporalAAVolumeComponent GetTemporalAAVolumeComponent()
+        {
+            var volumeManager = VolumeManager.instance;
+            if (volumeManager == null)
+            {
+                return null;
+            }
+
+            var stack = volumeManager.stack;
+            if (stack == null)
+            {
+                return null;
+            }
+
+            return stack.GetComponent<BurtTemporalAAVolumeComponent>();
         }
     }
 }

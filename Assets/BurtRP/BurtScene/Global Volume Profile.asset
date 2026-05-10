@@ -82,8 +82,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTonemappingVolumeComponent
   active: 1
   mode:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 2
   postExposure:
     m_OverrideState: 0
     m_Value: 0
@@ -156,14 +156,14 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 1
   feedback:
-    m_OverrideState: 0
-    m_Value: 0.8
+    m_OverrideState: 1
+    m_Value: 0.94
   jitterScale:
-    m_OverrideState: 0
-    m_Value: 0.6
+    m_OverrideState: 1
+    m_Value: 1
   clampStrength:
-    m_OverrideState: 0
-    m_Value: 0.7
+    m_OverrideState: 1
+    m_Value: 1.1
 --- !u!114 &-2416360988275308643
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -231,6 +231,7 @@ MonoBehaviour:
   - {fileID: -2416360988275308643}
   - {fileID: -2947183465032674900}
   - {fileID: -5208018395591463652}
+  - {fileID: 5276159407269209428}
 --- !u!114 &803268350656388874
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -259,3 +260,37 @@ MonoBehaviour:
   maxIterations:
     m_OverrideState: 0
     m_Value: 5
+--- !u!114 &5276159407269209428
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 0}
+  m_Name: BurtScreenSpaceReflectionVolumeComponent
+  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtScreenSpaceReflectionVolumeComponent
+  active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 0
+  debugMode:
+    m_OverrideState: 0
+    m_Value: 0
+  maxSteps:
+    m_OverrideState: 0
+    m_Value: 48
+  maxDistance:
+    m_OverrideState: 0
+    m_Value: 30
+  thickness:
+    m_OverrideState: 0
+    m_Value: 0.35
+  intensity:
+    m_OverrideState: 0
+    m_Value: 1
+  roughnessFade:
+    m_OverrideState: 0
+    m_Value: 0.6

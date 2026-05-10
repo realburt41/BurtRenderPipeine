@@ -171,6 +171,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
 
             BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, cameraDepthTarget); // 把 GBuffer0/1/2 作为 MRT color attachments，把 CameraDepth 作为 depth attachment。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, BurtGBufferRenderTargetPassUtility.ResolveCamera(context));
 
             context.ScriptableContext.ExecuteCommandBuffer(cmd); // 把 MRT 绑定命令提交给 Unity 渲染上下文。
 
@@ -202,10 +203,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
 
-            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer0Target, cameraDepthTarget, GBuffer0ClearColor); // 单独清理 GBuffer0，这样可以给 occlusion.a 写入 1。
-            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer1Target, cameraDepthTarget, GBuffer1ClearColor); // 单独清理 GBuffer1，这样可以给法线编码写入中性默认值。
-            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer2Target, cameraDepthTarget, GBuffer2ClearColor); // 单独清理 GBuffer2，这样可以给 reflectance.a 写入稳定默认值。
+            var camera = BurtGBufferRenderTargetPassUtility.ResolveCamera(context);
+            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer0Target, cameraDepthTarget, GBuffer0ClearColor, camera); // 单独清理 GBuffer0，这样可以给 occlusion.a 写入 1。
+            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer1Target, cameraDepthTarget, GBuffer1ClearColor, camera); // 单独清理 GBuffer1，这样可以给法线编码写入中性默认值。
+            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer2Target, cameraDepthTarget, GBuffer2ClearColor, camera); // 单独清理 GBuffer2，这样可以给 reflectance.a 写入稳定默认值。
             BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, cameraDepthTarget); // 清理完成后重新绑定 MRT，方便后续 Draw GBuffer Pass 直接绘制。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
 
             context.ScriptableContext.ExecuteCommandBuffer(cmd); // 把清理和最终 MRT 绑定命令提交给 Unity 渲染上下文。
 
@@ -253,6 +256,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
 
             BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, cameraDepthTarget); // 绘制前重新绑定 GBuffer MRT，避免前一个 Pass 改过渲染目标。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
 
             renderContext.ExecuteCommandBuffer(cmd); // 把 MRT 绑定命令提交给 Unity 渲染上下文。
 
@@ -311,9 +315,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             CommandBuffer cmd, // 接收要写入命令的 CommandBuffer。
             BurtRenderTargetHandle colorTarget, // 接收需要清理的 GBuffer 句柄。
             BurtRenderTargetHandle cameraDepthTarget, // 接收 CameraDepth 句柄，仅用于满足 SetRenderTarget 的 depth attachment。
-            Color clearColor) // 接收这张 GBuffer 对应的清理颜色。
+            Color clearColor, // 接收这张 GBuffer 对应的清理颜色。
+            Camera camera)
         {
             cmd.SetRenderTarget(colorTarget.Identifier, cameraDepthTarget.Identifier); // 先把单张 GBuffer 绑定为当前 color attachment。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
 
             cmd.ClearRenderTarget(false, true, clearColor); // 只清理颜色，不清理 CameraDepth，避免当前测试阶段改变 Forward fallback 的深度行为。
         }

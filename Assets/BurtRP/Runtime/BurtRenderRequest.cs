@@ -61,6 +61,8 @@ namespace Burt.RenderPipeline
 
 
         public BurtLightingData LightingData { get; private set; } // Stores lighting data collected for this render request, so passes do not choose lights themselves.
+
+        public BurtTemporalAARequestState TemporalAA { get; private set; } = BurtTemporalAARequestState.Disabled; // Stores TAA jitter/history state for this request.
         // 保存当前请求最终要输出到哪个渲染目标。
         public RenderTargetIdentifier TargetIdentifier { get; private set; }
 
@@ -71,6 +73,11 @@ namespace Burt.RenderPipeline
         public bool IsValid { get; private set; }
 
         public BurtRenderGraphAssembler GraphAssembler { get; private set; } // 保存当前 request 应该使用哪一个渲染图组装器。
+
+        public void SetTemporalAA(BurtTemporalAARequestState temporalAA) // 保存当前 request 的 TAA 状态；v0 是 depth reprojection，没有 per-object motion vectors。
+        {
+            TemporalAA = temporalAA ?? BurtTemporalAARequestState.Disabled;
+        }
 
         public void SetGraphAssembler(BurtRenderGraphAssembler graphAssembler) // 给当前 request 设置渲染图组装器。
         {

@@ -141,6 +141,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
             var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取一个 CommandBuffer，并用 Pass 名称作为调试标记。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier); // 绑定 CameraColor 作为输出目标，调试图只覆盖颜色不写深度。
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier); // 把当前 request 的 GBuffer0 绑定给调试 shader。
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier); // 把当前 request 的 GBuffer1 绑定给调试 shader。
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier); // 把当前 request 的 GBuffer2 绑定给调试 shader。

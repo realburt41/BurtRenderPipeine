@@ -46,6 +46,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int GBuffer2Id = Shader.PropertyToID(GBuffer2ShaderName); // 把 GBuffer2 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
 
+        public const string HiZDepthName = "HiZDepth";
+
+        public const string HiZDepthTextureShaderName = "_BurtHiZDepthTexture";
+
+        public static readonly int HiZDepthTextureId = Shader.PropertyToID(HiZDepthTextureShaderName);
+
+        public const string ScreenSpaceReflectionColorName = "ScreenSpaceReflectionColor";
+
+        public const string ScreenSpaceReflectionColorTextureShaderName = "_BurtScreenSpaceReflectionColorTexture";
+
+        public static readonly int ScreenSpaceReflectionColorTextureId = Shader.PropertyToID(ScreenSpaceReflectionColorTextureShaderName);
+
         public const string MainLightShadowMapName = "MainLightShadowMap"; // 定义主光阴影图在 RenderGraph 里的统一资源名，后续阴影绘制和光照采样都通过它建立依赖。
 
         public const string MainLightShadowMapShaderName = "_BurtMainLightShadowMap"; // 定义主光阴影图暴露给 shader 的全局纹理名称，后续 Lit shader 会用这个名字采样阴影。
@@ -219,6 +231,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetGBuffer2() // 定义读取 GBuffer2 的快捷函数。
         {
             return GetRenderTarget(GBuffer2Name); // 使用统一名称从资源表读取 GBuffer2 目标。
+        }
+
+        public BurtRenderTargetHandle RegisterHiZDepthTexture()
+        {
+            return RegisterHiZDepth(new RenderTargetIdentifier(HiZDepthTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterHiZDepth(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(HiZDepthName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetHiZDepth()
+        {
+            return GetRenderTarget(HiZDepthName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceReflectionColorTexture()
+        {
+            return RegisterScreenSpaceReflectionColor(new RenderTargetIdentifier(ScreenSpaceReflectionColorTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceReflectionColor(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceReflectionColorName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceReflectionColor()
+        {
+            return GetRenderTarget(ScreenSpaceReflectionColorName);
         }
 
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。
