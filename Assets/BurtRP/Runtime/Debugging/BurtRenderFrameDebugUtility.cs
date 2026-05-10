@@ -22,7 +22,7 @@ namespace Burt.RenderPipeline
             // 读取当前帧的栈组列表，后续日志只从这份快照取数据。
             var groups = frame.StackGroups;
             // 预估日志容量：基础头部 384 字符，每个栈和 request 额外预留一段空间。
-            var builder = BurtDebugStringBuilderPool.Get(384 + groups.Count * 256 + frame.ValidRequestCount * 192);
+            var builder = BurtDebugStringBuilderPool.Get(384 + groups.Count * 256 + frame.ValidRequestCount * 320);
             // 使用 try/finally 确保即使日志拼接中断也会归还 StringBuilder。
             try
             {
@@ -60,8 +60,10 @@ namespace Burt.RenderPipeline
                     // 遍历当前组内所有 request。
                     for (var requestIndex = 0; requestIndex < requests.Count; requestIndex++)
                     {
-                        // 把当前 request 的关键信息写成一行。
-                        AppendRequestLine(builder, requestIndex, requests[requestIndex]);
+                        // 用和真实执行路径相同的规则生成 RT 生命周期选项，保证日志和实际 Pass 组装一致。
+                        var renderOptions = group.CreateRenderOptions(requestIndex);
+                        // 把当前 request 的关键信息和 RT 生命周期决策写成一行。
+                        AppendRequestLine(builder, requestIndex, requests[requestIndex], renderOptions);
                     }
                 }
                 // 一次性输出完整 Frame dump，避免每个栈/相机各刷一条 Console。
@@ -126,7 +128,7 @@ namespace Burt.RenderPipeline
             }
         }
         // 写入组内单个 request 的调试行。
-        private static void AppendRequestLine(System.Text.StringBuilder builder, int requestIndex, BurtRenderRequest request)
+        private static void AppendRequestLine(System.Text.StringBuilder builder, int requestIndex, BurtRenderRequest request, BurtRequestRenderOptions renderOptions)
         {
             // 如果 request 为空，就输出占位并返回。
             if (request == null)
@@ -160,9 +162,44 @@ namespace Burt.RenderPipeline
             builder.Append(" OverlayClearDepth=").Append(request.OverlayClearsDepth);
             // 写入 request 的最终输出目标，帮助检查同栈相机是否指向一致目标。
             builder.Append(" Target=").Append(request.TargetIdentifier);
+            // 写入这次 request 的 RT 生命周期决策，方便直接确认 Allocate、FinalBlit 和 Release 是否只发生在栈首/栈尾。
+            AppendRenderOptionsInline(builder, renderOptions);
             // 当前 request 行结束。
             builder.AppendLine();
         }
+        // 把 RT 生命周期选项追加到 request 行尾，保持 Frame Debug 仍然是一行一个 request。
+        private static void AppendRenderOptionsInline(System.Text.StringBuilder builder, BurtRequestRenderOptions renderOptions)
+        {
+            // 如果没有执行选项，就明确写出占位，方便定位调用链是否漏传。
+            if (renderOptions == null)
+            {
+                // 写入空选项占位。
+                builder.Append(" RTOptions=<none>");
+                // 结束函数，因为没有更多字段可读。
+                return;
+            }
+            // 写入 RT 计划名称，和 Stack 摘要行的 RTPlan 对齐。
+            builder.Append(" RTPlan=").Append(renderOptions.RenderTargetPlanName);
+            // 写入 request 在相机栈中的位置，格式为 当前索引/总数量。
+            builder.Append(" RTIndex=").Append(renderOptions.RequestIndexInStack).Append('/').Append(renderOptions.RequestCountInStack);
+            // 写入是否共享栈级 RT。
+            builder.Append(" RTShared=").Append(renderOptions.UseSharedRenderTargets);
+            // 写入是否栈首，通常栈首负责 Allocate。
+            builder.Append(" RTFirst=").Append(renderOptions.IsFirstRequestInStack);
+            // 写入是否栈尾，通常栈尾负责 FinalBlit 和 Release。
+            builder.Append(" RTLast=").Append(renderOptions.IsLastRequestInStack);
+            // 写入是否申请 CameraColor。
+            builder.Append(" AllocateColor=").Append(renderOptions.ShouldAllocateCameraColor);
+            // 写入是否申请 CameraDepth。
+            builder.Append(" AllocateDepth=").Append(renderOptions.ShouldAllocateCameraDepth);
+            // 写入是否执行 FinalBlit。
+            builder.Append(" FinalBlit=").Append(renderOptions.ShouldFinalBlit);
+            // 写入是否释放 CameraColor。
+            builder.Append(" ReleaseColor=").Append(renderOptions.ShouldReleaseCameraColor);
+            // 写入是否释放 CameraDepth。
+            builder.Append(" ReleaseDepth=").Append(renderOptions.ShouldReleaseCameraDepth);
+        }
+
         // 安全读取相机名称。
         private static string GetCameraName(Camera camera)
         {

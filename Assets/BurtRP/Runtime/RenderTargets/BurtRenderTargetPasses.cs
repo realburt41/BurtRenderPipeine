@@ -180,14 +180,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var camera = request.Camera; // 从 request 中取出当前相机。
 
-            var cameraData = request.CameraData; // 从 request 中取出当前相机的 BurtCameraData。
-
-            var clearMode = BurtCameraClearMode.SolidColor; // 定义默认清屏模式，如果没有 BurtCameraData 就使用纯色清屏。
-
-            if (cameraData != null) // 如果当前相机挂了 BurtCameraData，就使用相机自己的清屏配置。
-            {
-                clearMode = cameraData.ClearMode; // 从 BurtCameraData 中读取清屏模式。
-            }
+            var clearMode = BurtCameraClearUtility.ResolveClearMode(request); // 统一解析清屏模式，让 SceneView/Preview 没有 BurtCameraData 时也能跟随 Unity clearFlags。
 
             var isOverlayRequest = request.Type == BurtRenderRequestType.OverlayCamera; // Overlay 相机使用显式清屏意图，不再直接套用 Base 的清屏模式。
 
@@ -224,21 +217,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 }
             }
 
-            var clearColor = Color.black; // 定义默认清屏颜色，避免 asset 或 cameraData 为空时没有兜底颜色。
-
-            if (cameraData != null) // 如果相机有 BurtCameraData，就优先使用相机自己的清屏颜色。
-            {
-                clearColor = cameraData.ClearColor; // 从 BurtCameraData 中读取清屏颜色。
-            }
-            else if (asset != null) // 如果没有 BurtCameraData，但是管线资产存在，就使用管线资产的默认清屏颜色。
-            {
-                clearColor = asset.ClearColor; // 从 BurtRenderPipelineAsset 中读取默认清屏颜色。
-            }
-
-            if (clearMode == BurtCameraClearMode.Skybox && camera != null) // 如果是天空盒模式，并且当前相机有效，就使用相机背景色作为天空盒前的底色。
-            {
-                clearColor = camera.backgroundColor; // 使用 Unity Camera 的 backgroundColor 作为清屏颜色。
-            }
+            var clearColor = BurtCameraClearUtility.ResolveClearColor(request, asset, clearMode); // 统一解析清屏颜色，保证 Skybox 和编辑器相机使用正确背景色。
 
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 

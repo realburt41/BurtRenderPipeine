@@ -430,29 +430,11 @@ Shader "BurtRP/Lit"
                 // Builds the current main light from BurtRP global lighting variables and this pixel's shadow value.
                 BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
 
-                // 单独计算 PBR 间接漫反射，方便 Debug View 拆分观察 SH / Light Probe 贡献。
-                float3 indirectDiffuseColor = BurtEvaluateIndirectDiffusePBR(surfaceData, normalWS);
+                // 统一调用 PBR shading 入口，让 Forward 和未来 Deferred 共享同一套光照拆分结果。
+                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS);
 
-                // 单独计算 PBR 间接高光，方便 Debug View 拆分观察 Reflection Probe 和 DFG 贡献。
-                float3 indirectSpecularColor = BurtEvaluateIndirectSpecularPBR(surfaceData, normalWS, viewDirectionWS);
-
-                // 合并间接漫反射和间接高光，得到完整 PBR 间接光。
-                float3 indirectLightingColor = indirectDiffuseColor + indirectSpecularColor;
-
-                // 计算单主光 PBR 直接光拆分结果，后续多光源也会继续复用同一套直接光 BRDF。
-                BurtDirectPBRComponents directLightingComponents = BurtEvaluateDirectPBRComponents(surfaceData, mainLight.color, mainLight.directionWS, normalWS, viewDirectionWS, mainLight.shadowAttenuation);
-
-                // 取出直接漫反射贡献，供最终光照和 Debug View 共同使用。
-                float3 directDiffuseColor = directLightingComponents.diffuse;
-
-                // 取出直接高光贡献，供最终光照和 Debug View 共同使用。
-                float3 directSpecularColor = directLightingComponents.specular;
-
-                // 合并直接漫反射和直接高光，得到完整 PBR 直接光。
-                float3 directLightingColor = directDiffuseColor + directSpecularColor;
-
-                // 合并直接光和间接光，得到不含自发光的 PBR 总光照结果。
-                float3 lightingColor = indirectLightingColor + directLightingColor;
+                // 取出不含自发光的 PBR 总光照，后续 finalColor 会在它基础上叠加 Emission。
+                float3 lightingColor = pbrComponents.lighting;
 
                 // 创建 Shading Debug 数据结构，确保 Debug View 读取的就是当前片元真实渲染使用的数据。
                 BurtShadingDebugData debugData;
@@ -461,35 +443,34 @@ Shader "BurtRP/Lit"
                 debugData.normalWS = normalWS;
 
                 // 写入总光照结果，Lighting Debug View 会显示它。
-                debugData.lightingColor = lightingColor;
+                debugData.lightingColor = pbrComponents.lighting;
 
                 // 写入直接漫反射结果，DirectDiffuse Debug View 会显示它。
-                debugData.directDiffuseColor = directDiffuseColor;
+                debugData.directDiffuseColor = pbrComponents.directDiffuse;
 
                 // 写入直接高光结果，DirectSpecular Debug View 会显示它。
-                debugData.directSpecularColor = directSpecularColor;
+                debugData.directSpecularColor = pbrComponents.directSpecular;
 
                 // 写入间接漫反射结果，IndirectDiffuse Debug View 会显示它。
-                debugData.indirectDiffuseColor = indirectDiffuseColor;
+                debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
 
                 // 写入间接高光结果，IndirectSpecular Debug View 会显示它。
-                debugData.indirectSpecularColor = indirectSpecularColor;
+                debugData.indirectSpecularColor = pbrComponents.indirectSpecular;
 
                 // 写入材质 reflectance，Reflectance Debug View 会用它检查非金属反射率输入。
                 debugData.reflectance = surfaceData.reflectance;
 
                 // 写入材质感知粗糙度，Roughness Debug View 会显示 1 - smoothness 后的结果。
-                debugData.perceptualRoughness = BurtBRDFRoughness(surfaceData);
+                debugData.perceptualRoughness = pbrComponents.perceptualRoughness;
 
                 // 写入直接高光实际粗糙度，SpecularAARoughness Debug View 会显示 AA 后的结果。
-                debugData.specularAARoughness = BurtBRDFDirectSpecularRoughness(surfaceData, normalWS);
+                debugData.specularAARoughness = pbrComponents.specularAARoughness;
 
-                // 写入直接高光能量补偿，使用和 BRDF 相同的 F0、粗糙度和 NdotV，便于检查 LUT.z 是否过亮或过暗。
-                float specularEnergyNdotV = saturate(dot(BurtSafeNormalize(normalWS), BurtSafeNormalize(viewDirectionWS)));
-                debugData.specularEnergyCompensation = BurtComputeSpecularEnergyCompensation(BurtBRDFSpecularF0(surfaceData), debugData.specularAARoughness, specularEnergyNdotV);
+                // 写入直接高光能量补偿，便于检查 LUT.z 是否过亮或过暗。
+                debugData.specularEnergyCompensation = pbrComponents.specularEnergyCompensation;
 
                 // 写入间接高光遮蔽项，保持和间接镜面反射一样的 AO、NdotV 和粗糙度输入。
-                debugData.specularOcclusion = BurtComputeIndirectSpecularOcclusion(specularEnergyNdotV, surfaceData.occlusion, debugData.perceptualRoughness);
+                debugData.specularOcclusion = pbrComponents.specularOcclusion;
 
                 // 创建一个临时调试颜色变量，只有命中材质 debug 模式时才会被真正输出。
                 float3 debugColor;

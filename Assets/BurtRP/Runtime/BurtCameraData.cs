@@ -45,7 +45,7 @@ namespace Burt.RenderPipeline
     // 要求挂 BurtCameraData 的 GameObject 必须同时有 Camera 组件。
     [RequireComponent(typeof(Camera))]
 
-    // 让这个组件在编辑器非播放状态也能执行 Unity 生命周期，方便编辑器里实时同步 Camera.depth。
+    // 让这个组件在编辑器非播放状态也能执行 Unity 生命周期，方便编辑器里实时同步 Camera.depth 和 Camera 清屏字段。
     [ExecuteAlways]
 
     // 定义 BurtRP 的相机扩展数据组件。
@@ -78,11 +78,20 @@ namespace Burt.RenderPipeline
         // 控制 SolidColor 模式下使用的清屏颜色。
         [SerializeField] private Color clearColor = new(0.02f, 0.02f, 0.025f, 1f);
 
+        // 控制是否把 BurtRP 的清屏模式和清屏颜色反向同步到 Unity 原生 Camera 组件，方便 SceneView、Camera Preview 和第三方工具看到一致配置。
+        [SerializeField] private bool syncClearSettingsToUnityCamera = true;
+
         // 缓存当前 GameObject 上的 Camera 组件，避免每帧反复 GetComponent。
         private Camera cachedCamera;
 
         // 记录上一次已经同步到 Camera.depth 的 renderOrder，用来判断是否需要重新同步。
         private int lastSyncedRenderOrder = int.MinValue;
+
+        // 记录上一次已经同步到 Unity Camera.clearFlags 的 BurtRP 清屏模式，避免每帧重复写原生 Camera 字段。
+        private BurtCameraClearMode lastSyncedClearMode = (BurtCameraClearMode)(-1);
+
+        // 记录上一次已经同步到 Unity Camera.backgroundColor 的 BurtRP 清屏颜色，避免每帧重复写原生 Camera 字段。
+        private Color lastSyncedClearColor = new(-1f, -1f, -1f, -1f);
 
         // 暴露只读属性，让渲染器可以读取 enableRender，但外部不能随意改字段。
         public bool EnableRender => enableRender;
@@ -116,6 +125,9 @@ namespace Burt.RenderPipeline
 
             // 立刻把当前 renderOrder 同步到 Camera.depth。
             SyncRenderOrderToCameraDepth(forceSync: true);
+
+            // 立刻把当前清屏模式和清屏颜色同步到 Unity Camera 组件，保证启用后 Inspector 原生字段马上对齐 BurtCameraData。
+            SyncClearSettingsToUnityCamera(forceSync: true);
         }
 
         // Unity 在 Inspector 修改字段时调用这个函数，适合让编辑器里的改动立即生效。
@@ -126,6 +138,9 @@ namespace Burt.RenderPipeline
 
             // Inspector 改值后强制同步一次，避免要等启用/禁用相机才刷新。
             SyncRenderOrderToCameraDepth(forceSync: true);
+
+            // Inspector 改清屏模式或清屏颜色后强制同步一次，保证 Camera.clearFlags 和 Camera.backgroundColor 立即刷新。
+            SyncClearSettingsToUnityCamera(forceSync: true);
         }
 
         // Unity 每帧调用这个函数；因为有 ExecuteAlways，编辑器非播放状态也可能调用。
@@ -133,6 +148,9 @@ namespace Burt.RenderPipeline
         {
             // 每帧检查 renderOrder 是否变化，变化时同步到 Camera.depth；BurtRP 排序仍然会在创建 request 时直接读取 RenderOrder。
             SyncRenderOrderToCameraDepth(forceSync: false);
+
+            // 每帧检查清屏配置是否变化，变化时同步到 Unity Camera；这样编辑器滑动或脚本改值都能及时反映到原生相机组件。
+            SyncClearSettingsToUnityCamera(forceSync: false);
         }
 
         // 缓存 Camera 组件的辅助函数。
@@ -181,6 +199,78 @@ namespace Burt.RenderPipeline
 
             // 记录这次已经同步过的 renderOrder。
             lastSyncedRenderOrder = renderOrder;
+        }
+
+        // 把 BurtRP 的 clearMode 和 clearColor 同步到 Unity 原生 Camera 组件；渲染仍以 BurtCameraData 为权威来源，这里只做编辑器和外部工具可见性对齐。
+        private void SyncClearSettingsToUnityCamera(bool forceSync)
+        {
+            // 如果用户不希望 BurtCameraData 反写 Unity Camera 组件，就直接跳过。
+            if (!syncClearSettingsToUnityCamera)
+            {
+                // 结束同步函数。
+                return;
+            }
+
+            // 确保 Camera 已经被缓存。
+            CacheCamera();
+
+            // 如果当前 GameObject 上没有 Camera，就无法同步。
+            if (cachedCamera == null)
+            {
+                // 结束同步函数。
+                return;
+            }
+
+            // 先把 BurtRP 清屏模式转换成 Unity Camera 能显示的 clearFlags，后面比较和写入都复用同一个结果。
+            var desiredClearFlags = ConvertToUnityClearFlags(clearMode);
+
+            // 如果不是强制同步，并且 BurtCameraData、Unity Camera.clearFlags、Unity Camera.backgroundColor 三者都已经一致，就不重复写 Unity Camera 字段。
+            if (!forceSync && lastSyncedClearMode == clearMode && lastSyncedClearColor == clearColor && cachedCamera.clearFlags == desiredClearFlags && cachedCamera.backgroundColor == clearColor)
+            {
+                // 结束同步函数。
+                return;
+            }
+
+            // 把 BurtRP 清屏模式写入 Unity Camera.clearFlags，保证原生 Camera 组件面板跟 BurtCameraData 对齐。
+            cachedCamera.clearFlags = desiredClearFlags;
+
+            // 把 BurtRP 清屏颜色同步到 Unity Camera 的背景色；Skybox 模式下它也会作为天空盒前的底色和异常兜底色。
+            cachedCamera.backgroundColor = clearColor;
+
+            // 记录这次已经同步过的清屏模式。
+            lastSyncedClearMode = clearMode;
+
+            // 记录这次已经同步过的清屏颜色。
+            lastSyncedClearColor = clearColor;
+        }
+
+        // 把 BurtRP 自己的清屏枚举转换为 Unity 原生 CameraClearFlags，保证 Camera 组件面板和 BurtCameraData 面板语义一致。
+        private static CameraClearFlags ConvertToUnityClearFlags(BurtCameraClearMode mode)
+        {
+            // 根据 BurtRP 清屏模式选择 Unity 原生清屏模式。
+            switch (mode)
+            {
+                // BurtRP Skybox 对应 Unity Camera 的 Skybox。
+                case BurtCameraClearMode.Skybox:
+                    // 返回 Unity Skybox 清屏模式。
+                    return CameraClearFlags.Skybox;
+
+                // BurtRP DepthOnly 对应 Unity Camera 的 Depth。
+                case BurtCameraClearMode.DepthOnly:
+                    // 返回 Unity 只清深度模式。
+                    return CameraClearFlags.Depth;
+
+                // BurtRP DontClear 对应 Unity Camera 的 Nothing。
+                case BurtCameraClearMode.DontClear:
+                    // 返回 Unity 完全不清屏模式。
+                    return CameraClearFlags.Nothing;
+
+                // BurtRP SolidColor 和未知值都按 Unity 纯色清屏处理。
+                case BurtCameraClearMode.SolidColor:
+                default:
+                    // 返回 Unity 纯色清屏模式。
+                    return CameraClearFlags.SolidColor;
+            }
         }
     }
 }

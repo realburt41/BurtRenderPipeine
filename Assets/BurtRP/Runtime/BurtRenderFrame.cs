@@ -219,6 +219,20 @@ namespace Burt.RenderPipeline
             // 把 request 按当前排序顺序追加到组内列表。
             requests.Add(request);
         }
+        // 根据当前栈的 RT 计划和指定 request 的栈内位置，生成真正执行时要使用的 RenderTarget 生命周期选项。
+        public BurtRequestRenderOptions CreateRenderOptions(int requestIndex)
+        {
+            // 读取当前栈内 request 数量，执行路径和调试路径都使用同一份数量快照。
+            var requestCount = requests.Count;
+            // 如果这个栈暂时不允许共享 RT，就让每个 request 自己申请、输出和释放，保证编辑器相机和非法栈安全。
+            if (!ShouldUseSharedRenderTargets)
+            {
+                // 创建独立 request 选项，同时保留栈内索引、StackId 和 RTPlan，方便日志定位。
+                return BurtRequestRenderOptions.CreateIsolatedRequest(requestIndex, requestCount, StackId, RenderTargetPlanName);
+            }
+            // 对满足条件的 Game 相机栈启用共享 RT：第一个 request 申请，最后一个 request FinalBlit 和释放。
+            return BurtRequestRenderOptions.CreateSharedStackRequest(requestIndex, requestCount, StackId, RenderTargetPlanName);
+        }
         // 清理这个栈组，方便 BurtRenderFrame 在下一帧复用同一个对象。
         public void Clear()
         {

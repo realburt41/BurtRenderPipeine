@@ -566,19 +566,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             var camera = request.Camera; // 从 request 中取出当前相机，用来绘制天空盒。
 
-            var cameraData = request.CameraData; // 从 request 中取出 BurtCameraData，用来判断是否需要绘制天空盒。
-
             if (camera == null) // 如果当前相机为空，就没有办法绘制天空盒。
             {
                 return; // 直接结束这个 Pass。
             }
 
-            if (cameraData == null) // 如果当前相机没有 BurtCameraData，就按当前规则不绘制天空盒。
-            {
-                return; // 直接结束这个 Pass。
-            }
+            var clearMode = BurtCameraClearUtility.ResolveClearMode(request); // 统一解析清屏模式，让 SceneView 没有 BurtCameraData 时也能识别 Unity 的 Skybox clearFlags。
 
-            if (cameraData.ClearMode != BurtCameraClearMode.Skybox) // 如果当前清屏模式不是 Skybox，就不绘制天空盒。
+            if (clearMode != BurtCameraClearMode.Skybox) // 如果当前清屏模式不是 Skybox，就不绘制天空盒。
             {
                 return; // 直接结束这个 Pass。
             }

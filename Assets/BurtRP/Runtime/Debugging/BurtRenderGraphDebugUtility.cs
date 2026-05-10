@@ -14,7 +14,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             int passCount, // 接收 RenderGraph 当前 Pass 数量，确保 dump 中的 Pass Count 和图本身一致。
             IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages) // 接收每个 Pass 的资源读写声明，由 RenderGraph 配置阶段收集。
         {
-            return BuildDump(request, passCount, resourceUsages, null, null); // 没有图级校验和资源表时，输出基础 dump。
+            return BuildDump(request, passCount, resourceUsages, null, null, null); // 没有图级校验、资源表和 RT 执行选项时，输出基础 dump。
+        }
+
+        public static string BuildDump( // 保留完整旧签名，兼容还没有接入 RT 生命周期选项的调用方。
+            BurtRenderRequest request, // 接收当前渲染请求，用来输出 Request 类型和 Camera 名称。
+            int passCount, // 接收 RenderGraph 当前 Pass 数量，确保 dump 中的 Pass Count 和图本身一致。
+            IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages, // 接收每个 Pass 的资源读写声明，由 RenderGraph 配置阶段收集。
+            IReadOnlyList<string> validationMessages, // 接收图级别校验消息，通常只在 Debug 开关开启时输出。
+            BurtRenderGraphResourceRegistry resourceRegistry) // 接收资源注册表，用来判断资源是否为外部导入。
+        {
+            return BuildDump(request, passCount, resourceUsages, validationMessages, resourceRegistry, null); // 旧调用没有 RT 执行选项时，用 <none> 表示未提供。
         }
 
         public static string BuildDump( // 构建完整 RenderGraph 调试文本，调用方仍然决定是否真正输出到 Console。
@@ -22,19 +32,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             int passCount, // 接收 RenderGraph 当前 Pass 数量，确保 dump 中的 Pass Count 和图本身一致。
             IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages, // 接收每个 Pass 的资源读写声明，由 RenderGraph 配置阶段收集。
             IReadOnlyList<string> validationMessages, // 接收图级别校验消息，通常只在 Debug 开关开启时输出。
-            BurtRenderGraphResourceRegistry resourceRegistry) // 接收资源注册表，用来判断资源是否为外部导入。
+            BurtRenderGraphResourceRegistry resourceRegistry, // 接收资源注册表，用来判断资源是否为外部导入。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RT 生命周期选项，用来输出 Allocate/FinalBlit/Release 决策。
         {
             var usageCount = resourceUsages != null ? resourceUsages.Count : 0; // 读取资源使用记录数量；列表为空时按 0 处理。
 
             var validationCount = validationMessages != null ? validationMessages.Count : 0; // 读取图级校验消息数量，帮助估算容量。
 
-            var capacity = BaseDumpCapacity + usageCount * PerPassDumpCapacity + validationCount * 96; // 根据 Pass 和校验数量估算字符串容量，减少临时扩容。
+            var renderOptionsCapacity = renderOptions != null ? 256 : 48; // RT 生命周期行较长，预留额外空间减少 StringBuilder 扩容。
+
+            var capacity = BaseDumpCapacity + renderOptionsCapacity + usageCount * PerPassDumpCapacity + validationCount * 96; // 根据 Pass、校验和 RT 选项数量估算字符串容量。
 
             var builder = BurtDebugStringBuilderPool.Get(capacity); // 从调试 StringBuilder 池租借构建器，避免每帧开启日志时频繁分配。
 
             try // 使用 try/finally 保证构建器一定归还池中。
             {
-                AppendDump(builder, request, passCount, resourceUsages, validationMessages, resourceRegistry); // 把实际排版逻辑写到构建器里，BuildDump 只负责生命周期管理。
+                AppendDump(builder, request, passCount, resourceUsages, validationMessages, resourceRegistry, renderOptions); // 把实际排版逻辑写到构建器里，BuildDump 只负责生命周期管理。
 
                 return builder.ToString(); // 返回完整 dump 字符串，后续是否 Debug.Log 仍由外层 asset 开关控制。
             }
@@ -50,7 +63,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             int passCount, // 接收当前 RenderGraph 的 Pass 数量。
             IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages) // 接收当前 RenderGraph 的资源读写记录。
         {
-            AppendDump(builder, request, passCount, resourceUsages, null, null); // 没有校验消息和资源表时输出基础信息。
+            AppendDump(builder, request, passCount, resourceUsages, null, null, null); // 没有校验消息、资源表和 RT 执行选项时输出基础信息。
+        }
+
+        public static void AppendDump( // 保留完整旧签名，兼容还没有接入 RT 生命周期选项的调用方。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            BurtRenderRequest request, // 接收当前渲染请求，用来输出任务和相机信息。
+            int passCount, // 接收当前 RenderGraph 的 Pass 数量。
+            IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages, // 接收当前 RenderGraph 的资源读写记录。
+            IReadOnlyList<string> validationMessages, // 接收图级别校验消息。
+            BurtRenderGraphResourceRegistry resourceRegistry) // 接收资源注册表，用于判断外部资源。
+        {
+            AppendDump(builder, request, passCount, resourceUsages, validationMessages, resourceRegistry, null); // 旧调用没有 RT 执行选项时，用 <none> 表示未提供。
         }
 
         public static void AppendDump( // 把 RenderGraph dump 追加到调用方提供的构建器，方便未来组合更大的诊断文本。
@@ -59,7 +83,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             int passCount, // 接收当前 RenderGraph 的 Pass 数量。
             IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages, // 接收当前 RenderGraph 的资源读写记录。
             IReadOnlyList<string> validationMessages, // 接收图级别校验消息。
-            BurtRenderGraphResourceRegistry resourceRegistry) // 接收资源注册表，用于判断外部资源。
+            BurtRenderGraphResourceRegistry resourceRegistry, // 接收资源注册表，用于判断外部资源。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RT 生命周期选项。
         {
             if (builder == null) // 如果没有构建器，就没有安全写入目标。
             {
@@ -69,6 +94,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             BurtDebugLogUtility.AppendScopedHeaderLine(builder, BurtDebugLogUtility.RenderGraphPrefix); // 写入统一标题 [BurtRP][BurtRenderGraph]，方便 Console 过滤。
 
             AppendRequestInfo(builder, request); // 写入 Request 和 Camera 基础信息，让 dump 一眼能看出来自哪次渲染请求。
+
+            AppendRenderOptions(builder, renderOptions); // 写入 RT 生命周期决策，让你不用只靠 Pass 列表反推 Allocate、FinalBlit 和 Release。
 
             BurtDebugLogUtility.AppendKeyValueLine(builder, "Pass Count", passCount); // 写入 RenderGraph 中的 Pass 数量，和实际执行列表保持一致。
 
@@ -101,6 +128,44 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var cameraName = request.Camera != null ? request.Camera.name : "null"; // 读取相机名称；相机为空时用 null 占位。
 
             BurtDebugLogUtility.AppendKeyValueLine(builder, "Camera", cameraName); // 单独写一行 Camera，比分隔在 Request 同一行更容易扫描。
+        }
+
+        private static void AppendRenderOptions( // 写入当前 request 的 RenderTarget 生命周期选项。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RT 生命周期选项，可能为空。
+        {
+            builder.AppendLine("Render Options:"); // 单独成段输出，避免和 Request/Pass 信息混在一起。
+
+            if (renderOptions == null) // 如果调用方没有传入执行选项，说明当前 dump 来自旧路径或测试代码。
+            {
+                builder.AppendLine("  <none>"); // 明确写出没有 RT 生命周期信息，避免误以为字段丢失。
+
+                return; // 没有更多字段可以输出。
+            }
+
+            builder.Append("  RTPlan=").Append(renderOptions.RenderTargetPlanName); // 写入栈级 RT 计划名称，例如 SingleBaseStackRT 或 SharedStackRT。
+
+            builder.Append(" StackId=").Append(renderOptions.StackId); // 写入逻辑相机栈编号，方便和 Frame Debug 对齐。
+
+            builder.Append(" StackIndex=").Append(renderOptions.RequestIndexInStack).Append('/').Append(renderOptions.RequestCountInStack); // 写入 request 在栈内的位置。
+
+            builder.Append(" SharedRT=").Append(renderOptions.UseSharedRenderTargets); // 写入是否复用栈级 CameraColor/CameraDepth。
+
+            builder.Append(" First=").Append(renderOptions.IsFirstRequestInStack); // 写入是否为栈内第一个 request。
+
+            builder.Append(" Last=").Append(renderOptions.IsLastRequestInStack); // 写入是否为栈内最后一个 request。
+
+            builder.Append(" AllocateColor=").Append(renderOptions.ShouldAllocateCameraColor); // 写入是否插入 CameraColor 分配 Pass。
+
+            builder.Append(" AllocateDepth=").Append(renderOptions.ShouldAllocateCameraDepth); // 写入是否插入 CameraDepth 分配 Pass。
+
+            builder.Append(" FinalBlit=").Append(renderOptions.ShouldFinalBlit); // 写入是否插入最终输出 Pass。
+
+            builder.Append(" ReleaseColor=").Append(renderOptions.ShouldReleaseCameraColor); // 写入是否插入 CameraColor 释放 Pass。
+
+            builder.Append(" ReleaseDepth=").Append(renderOptions.ShouldReleaseCameraDepth); // 写入是否插入 CameraDepth 释放 Pass。
+
+            builder.AppendLine(); // 当前 RT 生命周期行结束。
         }
 
         private static void AppendValidationMessages( // 写入 RenderGraph 校验消息。

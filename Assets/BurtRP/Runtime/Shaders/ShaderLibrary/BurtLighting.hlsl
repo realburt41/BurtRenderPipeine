@@ -102,27 +102,28 @@ float3 BurtSampleIndirectDiffuseIrradiance(float3 normalWS)
 }
 
 
-// 把感知粗糙度映射到 Unity reflection probe mip；参考 XRender 的 log2 曲线，让低 roughness 保留更多锐利反射。
-float BurtPerceptualRoughnessToReflectionMip(float perceptualRoughness)
+// 出处：XRender/Shaders/Library/ShadingIBL.hlsl::ComputeReflectionCaptureMipFromRoughness；roughness 到反射探针 mip 的 log2 曲线。
+float ComputeReflectionCaptureMipFromRoughness(float perceptualRoughness, float cubemapMaxMip)
 {
-    // Unity 内置 spec cube 常见有效 mip 近似为 0..6，先保持现有资源假设不引入额外全局参数。
-    const float maxMipLevel = 6.0f;
-
     // log2 曲线不能接受 0，所以使用 BurtRP 的最小感知粗糙度保护镜面端。
     float safeRoughness = max(saturate(perceptualRoughness), BURT_MIN_PERCEPTUAL_ROUGHNESS);
 
-    // 对齐 XRender ComputeReflectionCaptureMipFromRoughness 的启发式：粗糙端走高 mip，光滑端尽量贴近 mip0。
+    // 对齐 XRender / UE 的启发式：粗糙端走高 mip，光滑端尽量贴近 mip0。
     float levelFrom1x1 = 1.0f - 1.2f * log2(safeRoughness);
-    return clamp(maxMipLevel - 1.0f - levelFrom1x1, 0.0f, maxMipLevel);
+
+    // Unity 内置 spec cube 常见有效 mip 近似为 0..6，这里由调用方传入上限方便 Deferred 后续替换资源。
+    return clamp(cubemapMaxMip - 1.0f - levelFrom1x1, 0.0f, cubemapMaxMip);
 }
-// 采样 BurtRP 当前的间接镜面反射环境色。
-float3 BurtSampleIndirectSpecularRadiance(float3 reflectionDirectionWS, float roughness)
+
+// BurtRP 适配函数：采样 Unity 当前绑定的 reflection probe / sky reflection cubemap。
+float3 SampleIndirectSpecularRadiance(float3 reflectionDirectionWS, float roughness)
 {
     // 归一化反射方向，让 cubemap 采样方向稳定。
     float3 safeReflectionDirectionWS = BurtSafeNormalize(reflectionDirectionWS);
 
     // 使用 XRender 风格 roughness->mip 曲线，避免高 smoothness 反射被线性映射过早打糊。
-    float mipLevel = BurtPerceptualRoughnessToReflectionMip(roughness);
+    const float maxMipLevel = 6.0f;
+    float mipLevel = ComputeReflectionCaptureMipFromRoughness(roughness, maxMipLevel);
 
     // 采样 Unity 当前绑定的 reflection probe / sky reflection cubemap，恢复之前的探针反射效果。
     float4 encodedSpecular = UNITY_SAMPLE_TEXCUBE_LOD(unity_SpecCube0, safeReflectionDirectionWS, mipLevel);
@@ -141,7 +142,7 @@ float3 BurtEvaluateIndirectDiffusePBR(BurtSurfaceData surfaceData, float3 normal
     float3 diffuseIrradiance = BurtSampleIndirectDiffuseIrradiance(normalWS);
 
     // 取出 PBR 的 diffuseColor，金属材质会自动降低或移除漫反射。
-    float3 diffuseColor = BurtBRDFDiffuseColor(surfaceData);
+    float3 diffuseColor = DiffuseColorFromBaseColor(surfaceData.baseColor.rgb, surfaceData.metallic);
 
     // 把 diffuseColor、环境照度和 AO 相乘，得到间接漫反射贡献。
     return diffuseColor * diffuseIrradiance * saturate(surfaceData.occlusion);
@@ -160,45 +161,163 @@ float3 BurtEvaluateIndirectSpecularPBR(BurtSurfaceData surfaceData, float3 norma
     float3 reflectionDirectionWS = reflect(-v, n);
 
     // 从 smoothness 得到感知 roughness，同时也用于选择 reflection probe 的模糊 mip。
-    float roughness = BurtBRDFRoughness(surfaceData);
+    float roughness = GetSurfacePerceptualRoughness(surfaceData);
 
     // 采样 Unity 当前 reflection probe / sky reflection，得到已经按 roughness 预过滤过的环境高光。
-    float3 specularRadiance = BurtSampleIndirectSpecularRadiance(reflectionDirectionWS, roughness);
+    float3 specularRadiance = SampleIndirectSpecularRadiance(reflectionDirectionWS, roughness);
 
     // 计算当前材质的 F0，非金属接近 0.04，金属使用 baseColor。
-    float3 f0 = BurtBRDFSpecularF0(surfaceData);
+    float3 f0 = DielectricReflectanceToF0(surfaceData.baseColor.rgb, surfaceData.reflectance, surfaceData.metallic);
 
     // 计算当前材质的 F90，用来让环境高光和直接高光使用同一套 Fresnel 端点。
-    float3 f90 = BurtBRDFF90(f0);
+    float3 f90 = ApproximateF90(f0);
 
     // 计算 NdotV，视线越掠射 DFG 近似会给出越强的边缘反射权重。
     float nDotV = saturate(dot(n, v));
 
     // 优先从 PreintegratedFG LUT 读取 DFG.xy，未绑定时回退到解析近似。
-    float2 dfg = BurtEvaluateSpecularDFGTerms(roughness, nDotV);
+    float2 dfg = GetSpecularDFGTerms(roughness, nDotV);
 
     // 把 DFG 应用到 F0/F90 上，比单纯 Fresnel 更接近预积分环境 BRDF。
-    float3 envBRDF = BurtEvaluateSpecularDFG(f0, f90, dfg);
+    float3 envBRDF = EvalSpecularDFG(f0, f90, dfg);
 
     // 根据 AO、NdotV 和粗糙度计算间接高光遮蔽。
     // 用 Specular Occlusion 替代直接乘 AO，保留掠射角高光。
-    float specularOcclusion = BurtComputeIndirectSpecularOcclusion(nDotV, surfaceData.occlusion, roughness);
+    float specularOcclusion = GetIndirectSpecularOcclusion(nDotV, surfaceData.occlusion, roughness);
 
     // 只影响间接镜面反射，直接高光仍由阴影和 NdotL 控制。
     return specularRadiance * envBRDF * specularOcclusion;
 }
 
+// 保存 PBR 间接光拆分结果，Deferred 后续可以复用同一套 SH / Reflection Probe 评估逻辑。
+struct BurtIndirectPBRComponents
+{
+    // 保存间接漫反射贡献，数据来源是 Unity SH / Light Probe。
+    float3 diffuse;
+
+    // 保存间接镜面贡献，数据来源是 Unity Reflection Probe / Sky Reflection。
+    float3 specular;
+};
+
+// 计算 PBR 间接光拆分结果，让 Forward 和未来 Deferred 都能拿到一致的间接漫反射与间接高光。
+BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtSurfaceData surfaceData, float3 normalWS, float3 viewDirectionWS)
+{
+    // 创建输出结构体，下面分别写入 diffuse 和 specular。
+    BurtIndirectPBRComponents components;
+
+    // 计算来自 Unity SH / Light Probe 的漫反射环境光。
+    components.diffuse = BurtEvaluateIndirectDiffusePBR(surfaceData, normalWS);
+
+    // 计算来自 Unity Reflection Probe / Sky Reflection 的镜面环境光。
+    components.specular = BurtEvaluateIndirectSpecularPBR(surfaceData, normalWS, viewDirectionWS);
+
+    // 返回拆分后的间接光，Debug View 和 Deferred 光照都可以直接读取。
+    return components;
+}
+
 // 计算 PBR 间接光总和：间接漫反射 + 间接镜面反射。
 float3 BurtEvaluateIndirectPBR(BurtSurfaceData surfaceData, float3 normalWS, float3 viewDirectionWS)
 {
-    // 先计算来自 Unity SH / Light Probe 的漫反射环境光。
-    float3 indirectDiffuse = BurtEvaluateIndirectDiffusePBR(surfaceData, normalWS);
-
-    // 再计算来自 Unity Reflection Probe / Sky Reflection 的镜面环境光。
-    float3 indirectSpecular = BurtEvaluateIndirectSpecularPBR(surfaceData, normalWS, viewDirectionWS);
+    // 复用拆分版本，保证总和接口与 Debug 拆项使用完全相同的结果。
+    BurtIndirectPBRComponents components = BurtEvaluateIndirectPBRComponents(surfaceData, normalWS, viewDirectionWS);
 
     // 返回完整间接光，后续会和主光直接光相加。
-    return indirectDiffuse + indirectSpecular;
+    return components.diffuse + components.specular;
+}
+
+// 保存一次完整 PBR shading 的可复用拆分结果，Forward 只负责调用，Deferred 后续可从 GBuffer 还原输入后复用。
+struct BurtPBRShadingComponents
+{
+    // 保存直接漫反射贡献，已经包含主光颜色、NdotL 和阴影。
+    float3 directDiffuse;
+
+    // 保存直接镜面高光贡献，已经包含 GGX、Fresnel、主光颜色、NdotL 和阴影。
+    float3 directSpecular;
+
+    // 保存直接光总和，等于 directDiffuse + directSpecular。
+    float3 directLighting;
+
+    // 保存间接漫反射贡献，主要来自 Unity SH / Light Probe。
+    float3 indirectDiffuse;
+
+    // 保存间接镜面高光贡献，主要来自 Unity Reflection Probe / Sky Reflection。
+    float3 indirectSpecular;
+
+    // 保存间接光总和，等于 indirectDiffuse + indirectSpecular。
+    float3 indirectLighting;
+
+    // 保存最终 PBR 光照，等于 directLighting + indirectLighting，不包含自发光。
+    float3 lighting;
+
+    // 保存材质感知粗糙度，也就是 1 - smoothness 后并经过最小粗糙度保护的结果。
+    float perceptualRoughness;
+
+    // 保存直接高光实际使用的感知粗糙度，包含 Specular AA 对极光滑高光的拓宽。
+    float specularAARoughness;
+
+    // 保存直接高光能量补偿，方便 Debug View 和 Deferred 调试确认 LUT.z 的影响。
+    float3 specularEnergyCompensation;
+
+    // 保存间接高光遮蔽，方便 Debug View 和 Deferred 调试确认 AO 对反射探针的影响。
+    float specularOcclusion;
+};
+
+// 统一评估一次完整 PBR shading；Forward 和未来 Deferred 都应优先调用这个入口拿拆分结果。
+BurtPBRShadingComponents BurtEvaluatePBRShadingComponents(BurtSurfaceData surfaceData, BurtLight mainLight, float3 normalWS, float3 viewDirectionWS)
+{
+    // 创建输出结构体，下面逐项填充，避免调用方自己重复拼装 PBR 结果。
+    BurtPBRShadingComponents components;
+
+    // 先计算间接光拆分结果，保证 SH 和 Reflection Probe 的来源在一个入口内管理。
+    BurtIndirectPBRComponents indirectComponents = BurtEvaluateIndirectPBRComponents(surfaceData, normalWS, viewDirectionWS);
+
+    // 保存间接漫反射结果，Debug View 可以直接显示这一项。
+    components.indirectDiffuse = indirectComponents.diffuse;
+
+    // 保存间接镜面结果，Debug View 可以直接显示这一项。
+    components.indirectSpecular = indirectComponents.specular;
+
+    // 合并间接漫反射和间接镜面，得到完整间接光。
+    components.indirectLighting = components.indirectDiffuse + components.indirectSpecular;
+
+    // 计算直接光拆分结果，未来多光源或 Deferred 光照也应继续复用这个 BRDF 入口。
+    BurtDirectPBRComponents directComponents = BurtEvaluateDirectPBRComponents(surfaceData, mainLight.color, mainLight.directionWS, normalWS, viewDirectionWS, mainLight.shadowAttenuation);
+
+    // 保存直接漫反射结果，已经包含灯光颜色、NdotL 和阴影。
+    components.directDiffuse = directComponents.diffuse;
+
+    // 保存直接镜面结果，已经包含 GGX、Fresnel、能量补偿、灯光颜色、NdotL 和阴影。
+    components.directSpecular = directComponents.specular;
+
+    // 合并直接漫反射和直接镜面，得到完整直接光。
+    components.directLighting = components.directDiffuse + components.directSpecular;
+
+    // 合并直接光和间接光，得到不含自发光的 PBR 总光照。
+    components.lighting = components.directLighting + components.indirectLighting;
+
+    // 保存材质本身的感知粗糙度，Deferred 调试时可以直接验证 GBuffer 中的 smoothness 还原是否正确。
+    components.perceptualRoughness = GetSurfacePerceptualRoughness(surfaceData);
+
+    // 保存直接高光使用的 AA 后粗糙度，用来观察极光滑高光是否被屏幕空间法线变化拓宽。
+    components.specularAARoughness = GetDirectSpecularPerceptualRoughness(surfaceData, normalWS);
+
+    // 归一化法线，后续 NdotV、DFG 和遮蔽项都使用同一条安全法线。
+    float3 n = BurtSafeNormalize(normalWS);
+
+    // 归一化视线方向，确保从 Forward 插值或 Deferred 重建得到的方向都稳定。
+    float3 v = BurtSafeNormalize(viewDirectionWS);
+
+    // 计算 NdotV，供能量补偿和间接高光遮蔽复用。
+    float nDotV = saturate(dot(n, v));
+
+    // 保存直接高光能量补偿，使用和直接 BRDF 一致的 F0、AA 后粗糙度和 NdotV。
+    components.specularEnergyCompensation = GetSpecularEnergyCompensation(DielectricReflectanceToF0(surfaceData.baseColor.rgb, surfaceData.reflectance, surfaceData.metallic), components.specularAARoughness, nDotV);
+
+    // 保存间接高光遮蔽，使用材质 AO、NdotV 和未 AA 的感知粗糙度，与间接高光路径保持一致。
+    components.specularOcclusion = GetIndirectSpecularOcclusion(nDotV, surfaceData.occlusion, components.perceptualRoughness);
+
+    // 返回完整拆分结果，调用方只需要决定是否叠加自发光或进入 Debug View。
+    return components;
 }
 
 // 计算 Blinn-Phong 高光项，用来给旧 Simple Lit 路径保留第一版 specular。
@@ -220,7 +339,7 @@ float3 BurtEvaluateSpecular(BurtSurfaceData surfaceData, BurtLight light, float3
     float specularTerm = pow(specularNdotH, specularPower);
 
     // 把内部 F0、灯光颜色、受光可见性和阴影衰减相乘得到最终高光。
-    return BurtBRDFSpecularF0(surfaceData) * light.color * specularTerm * diffuseVisibility * light.shadowAttenuation;
+    return DielectricReflectanceToF0(surfaceData.baseColor.rgb, surfaceData.reflectance, surfaceData.metallic) * light.color * specularTerm * diffuseVisibility * light.shadowAttenuation;
 }
 
 // 计算 BurtRP 当前的完整简单 Lit 模型：环境光 + 一个带阴影的 Lambert 主光。
@@ -252,14 +371,11 @@ float3 BurtEvaluateSimpleLitSpecular(BurtSurfaceData surfaceData, BurtLight main
 // 计算单主光 PBR 光照：PBR 间接光 + Cook-Torrance 直接光。
 float3 BurtEvaluateSimpleLitPBR(BurtSurfaceData surfaceData, BurtLight mainLight, float3 normalWS, float3 viewDirectionWS)
 {
-    // 计算 PBR 间接光，当前使用 Unity SH 漫反射和 Unity Reflection Probe 镜面反射。
-    float3 indirectColor = BurtEvaluateIndirectPBR(surfaceData, normalWS, viewDirectionWS);
+    // 复用统一 PBR shading 入口，避免 Forward 和未来 Deferred 维护两套组合逻辑。
+    BurtPBRShadingComponents components = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS);
 
-    // 计算单主光直接光，内部包含 GGX specular、能量守恒 diffuse 和阴影衰减。
-    float3 directColor = BurtEvaluateDirectPBR(surfaceData, mainLight.color, mainLight.directionWS, normalWS, viewDirectionWS, mainLight.shadowAttenuation);
-
-    // 返回间接光和直接光相加的 PBR 结果。
-    return indirectColor + directColor;
+    // 返回不含自发光的完整 PBR 光照。
+    return components.lighting;
 }
 
 #endif // BURT_LIGHTING_INCLUDED // 结束 BurtLighting.hlsl 的 include guard。

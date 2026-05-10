@@ -216,35 +216,11 @@ namespace Burt.RenderPipeline
                 var request = stackRequests[requestIndex];
 
                 // 根据当前 request 的栈内位置生成 RT 生命周期选项，让 Assembler 决定是否插入 Allocate、FinalBlit 和 Release。
-                var renderOptions = CreateRequestRenderOptions(stackGroup, requestIndex, requestCount);
+                var renderOptions = stackGroup.CreateRenderOptions(requestIndex);
 
                 // 执行当前 request，并把栈级 RT 生命周期选项传入单 request 渲染器。
                 ExecuteRequest(context, request, renderOptions);
             }
-        }
-
-        // 根据相机栈和 request 在栈内的位置创建 RenderTarget 生命周期选项。
-        private static BurtRequestRenderOptions CreateRequestRenderOptions(
-            BurtCameraStackGroup stackGroup, // 接收当前正在执行的相机栈。
-            int requestIndex, // 接收当前 request 在相机栈里的索引。
-            int requestCount) // 接收当前相机栈里的 request 总数。
-        {
-            // 如果栈对象为空，说明调度层没有可用的栈信息，直接回退到旧单 request 生命周期。
-            if (stackGroup == null)
-            {
-                // 返回旧行为选项，保证异常输入不会导致 RT 不分配。
-                return BurtRequestRenderOptions.CreateSingleRequest();
-            }
-
-            // 如果这个栈暂时不允许共享 RT，就让每个 request 自己申请、FinalBlit 并释放，保持编辑器相机和非法栈安全。
-            if (!stackGroup.ShouldUseSharedRenderTargets)
-            {
-                // 创建独立 request 选项，保留旧渲染结果并仍然记录栈内索引用于诊断。
-                return BurtRequestRenderOptions.CreateIsolatedRequest(requestIndex, requestCount, stackGroup.StackId, stackGroup.RenderTargetPlanName);
-            }
-
-            // 对满足条件的 Game 相机栈启用共享 RT：第一个 request 申请，最后一个 request FinalBlit 和释放。
-            return BurtRequestRenderOptions.CreateSharedStackRequest(requestIndex, requestCount, stackGroup.StackId, stackGroup.RenderTargetPlanName);
         }
 
         // 执行单个 BurtRenderRequest；这里负责发出相机渲染事件，并把栈级执行选项交给 BurtCameraRenderer。

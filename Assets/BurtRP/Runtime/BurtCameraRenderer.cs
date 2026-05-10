@@ -59,7 +59,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             if (asset != null && asset.EnableRenderGraphDebug) // 如果管线资产开启了 RenderGraph 调试输出，就把当前图的资源声明打印到 Console。
             {
-                Debug.Log(renderGraph.DumpDebugInfo(request)); // 输出 RenderGraph 调试文本，包含 Pass 顺序和资源读写关系。
+                Debug.Log(renderGraph.DumpDebugInfo(request, safeRenderOptions)); // 输出 RenderGraph 调试文本，包含 Pass 顺序、资源读写关系和 RT 生命周期决策。
             }
 
             context.Submit(); // 把当前 request 累积的所有渲染命令提交给 Unity 执行。
