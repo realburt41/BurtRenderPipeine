@@ -259,6 +259,80 @@ Shader "BurtRP/UnlitColor"
             // 结束 HLSL shader 程序。
             ENDHLSL
         }
+
+        // 定义 Deferred 路径专用的前向兜底颜色 Pass。
+        Pass
+        {
+            // 给 Pass 起一个名字，方便 Frame Debugger 里区分它和普通 BurtForward Pass。
+            Name "Burt Unlit Forward Only"
+
+            // 设置 LightMode 为 BurtForwardOnly，让 Deferred 后的 ForwardOnly 兜底 Pass 精确匹配它。
+            Tags { "LightMode" = "BurtForwardOnly" }
+
+            // 开启深度写入，让这个不写 GBuffer 的不透明物体仍能更新后续透明物体看到的深度。
+            ZWrite On
+
+            // 使用小于等于深度测试，让已经通过 DepthPrepass 的像素可以在 Deferred Lighting 后重新写回颜色。
+            ZTest LEqual
+
+            // 开始 HLSL shader 程序。
+            HLSLPROGRAM
+
+            // 声明顶点 shader 函数名是 VertForwardOnly。
+            #pragma vertex VertForwardOnly
+
+            // 声明片元 shader 函数名是 FragForwardOnly。
+            #pragma fragment FragForwardOnly
+
+            // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
+            #include "UnityCG.cginc"
+
+            // 定义材质常量缓冲区，SRP Batcher 要求每材质属性放在 UnityPerMaterial 里。
+            CBUFFER_START(UnityPerMaterial)
+
+                // 声明材质颜色属性，对应 Properties 里的 _BaseColor。
+                float4 _BaseColor;
+
+            // 结束材质常量缓冲区定义。
+            CBUFFER_END
+
+            // 定义 Deferred ForwardOnly 顶点输入结构，描述从 Mesh 顶点数据里读取什么。
+            struct ForwardOnlyAttributes
+            {
+                // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
+                float4 positionOS : POSITION;
+            };
+
+            // 定义 Deferred ForwardOnly 顶点输出结构，也就是顶点 shader 传给片元 shader 的数据。
+            struct ForwardOnlyVaryings
+            {
+                // 输出裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
+                float4 positionCS : SV_POSITION;
+            };
+
+            // 定义 Deferred ForwardOnly 顶点 shader 函数，输入 Mesh 顶点数据，输出裁剪空间位置。
+            ForwardOnlyVaryings VertForwardOnly(ForwardOnlyAttributes input)
+            {
+                // 创建一个输出结构变量，用来保存顶点 shader 的输出结果。
+                ForwardOnlyVaryings output;
+
+                // 把模型空间顶点位置转换到裁剪空间，GPU 后续会用它进行屏幕投影。
+                output.positionCS = UnityObjectToClipPos(input.positionOS);
+
+                // 返回顶点 shader 输出结果。
+                return output;
+            }
+
+            // 定义 Deferred ForwardOnly 片元 shader 函数，输入插值后的顶点输出，返回屏幕像素颜色。
+            float4 FragForwardOnly(ForwardOnlyVaryings input) : SV_Target
+            {
+                // 返回材质颜色，不做光照计算，所以它适合作为不能写 GBuffer 的 Unlit 兜底路径。
+                return _BaseColor;
+            }
+
+            // 结束 HLSL shader 程序。
+            ENDHLSL
+        }
     }
 
     // 禁用 fallback，避免 BurtRP shader 出错时悄悄回退到其他管线 shader。

@@ -53,6 +53,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
         }
     }
 
+    internal readonly struct BurtColorAdjustmentsSettings // 定义 Color Adjustments 的运行时参数包，避免 Pass 直接依赖 Volume 组件字段。
+    {
+        public const float DefaultSaturation = 1f; // 定义默认饱和度，1 表示不改变颜色离灰轴的距离。
+        public const float DefaultContrast = 1f; // 定义默认对比度，1 表示不改变中间调附近的对比关系。
+        public const float DefaultGamma = 1f; // 定义默认 Gamma，1 表示不做明暗伽马调整。
+        public static readonly Color DefaultColorFilter = Color.white; // 定义默认颜色滤镜，白色表示不额外染色。
+        public static readonly BurtColorAdjustmentsSettings Default = new BurtColorAdjustmentsSettings(DefaultSaturation, DefaultContrast, DefaultGamma, DefaultColorFilter); // 提供默认参数集合，供 Volume 缺失或关闭时回退。
+
+        public float Saturation { get; } // 保存饱和度参数，后处理 shader 会用它控制颜色鲜艳程度。
+        public float Contrast { get; } // 保存对比度参数，后处理 shader 会用它控制明暗差异。
+        public float Gamma { get; } // 保存 Gamma 参数，后处理 shader 会用它控制整体明暗曲线。
+        public Color ColorFilter { get; } // 保存颜色滤镜参数，后处理 shader 会用它做通道乘法染色。
+
+        public BurtColorAdjustmentsSettings( // 定义完整参数构造函数，让调用方一次性生成不可变设置。
+            float saturation, // 接收饱和度。
+            float contrast, // 接收对比度。
+            float gamma, // 接收 Gamma。
+            Color colorFilter) // 接收颜色滤镜。
+        {
+            Saturation = saturation; // 保存饱和度。
+            Contrast = contrast; // 保存对比度。
+            Gamma = gamma; // 保存 Gamma。
+            ColorFilter = colorFilter; // 保存颜色滤镜。
+        }
+    }
+
     [Serializable] // 标记这个类可以被 Unity 序列化，这样它可以作为 BurtRenderPipelineAsset 的内嵌配置显示在 Inspector 中。
     public sealed class BurtPostProcessSettings // 定义 BurtRP 后处理框架设置；具体效果参数后续统一放到 Global Volume。
     {

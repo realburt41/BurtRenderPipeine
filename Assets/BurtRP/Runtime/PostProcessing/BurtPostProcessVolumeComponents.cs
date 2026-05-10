@@ -1,5 +1,6 @@
 using System; // 引入基础命名空间，用来给 Volume 参数类型添加 Serializable 特性。
 using Sirenix.OdinInspector; // 引入 Odin Inspector 命名空间，用来让 Volume 组件在 Inspector 中也有清晰说明。
+using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Color、Mathf 等基础类型。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来继承 VolumeComponent 和 VolumeParameter。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Volume 组件和后处理 Pass 使用同一套类型。
@@ -52,6 +53,75 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Volume 组�
             }
 
             return mode.value != BurtTonemappingMode.None; // 只有模式不是 None 时才认为 Tonemapping 生效。
+        }
+    }
+
+    [Serializable] // 标记这个类可以被 Unity 序列化，这样它可以保存到 Volume Profile 资产里。
+    [VolumeComponentMenu("BurtRP/Post Processing/Color Adjustments")] // 把 Color Adjustments 组件注册到 Global Volume 的 Add Override 菜单里。
+    public sealed class BurtColorAdjustmentsVolumeComponent : VolumeComponent // 定义 BurtRP Color Adjustments 的 Global Volume 组件。
+    {
+        private const float NeutralEpsilon = 0.0001f; // 定义中性值比较容差，避免浮点误差导致默认参数误判为启用。
+
+        [Title("BurtRP Color Adjustments")] // 使用 Odin 标题让基础颜色调整参数在 Inspector 中更容易识别。
+        [InfoBox("第一版直接合并进 Burt Post Process Pass，在 Tonemapping 之后执行；postExposure 继续沿用 Tonemapping 组件，避免重复曝光参数。")] // 说明当前实现范围，避免和 Tonemapping 的曝光参数冲突。
+        public ClampedFloatParameter saturation = new ClampedFloatParameter(BurtColorAdjustmentsSettings.DefaultSaturation, 0f, 2f); // 定义饱和度参数，1 表示不改变饱和度。
+
+        public ClampedFloatParameter contrast = new ClampedFloatParameter(BurtColorAdjustmentsSettings.DefaultContrast, 0f, 2f); // 定义对比度参数，1 表示不改变对比度。
+
+        public ClampedFloatParameter gamma = new ClampedFloatParameter(BurtColorAdjustmentsSettings.DefaultGamma, 0.01f, 5f); // 定义 Gamma 参数，1 表示不改变明暗曲线。
+
+        public ColorParameter colorFilter = new ColorParameter(BurtColorAdjustmentsSettings.DefaultColorFilter, false, false, true); // 定义颜色滤镜，默认白色表示不额外染色。
+
+        public bool IsEnabled() // 定义运行时判断函数，集中表达这个 Volume 组件是否需要执行颜色调整。
+        {
+            if (!active) // 如果 Volume 组件整体被关闭，就不应该影响后处理链路。
+            {
+                return false; // 返回 false，后处理 Pass 会把它视为关闭。
+            }
+
+            return HasAnyOverride() || HasAnyNonNeutralValue(); // 参数被显式覆盖或参数值已经偏离中性值时，才认为 Color Adjustments 生效。
+        }
+
+        private bool HasAnyOverride() // 定义检查是否有参数被 Volume Profile 显式覆盖的辅助函数。
+        {
+            return saturation.overrideState || contrast.overrideState || gamma.overrideState || colorFilter.overrideState; // 只要任意参数勾选 override，就允许 Color Adjustments 运行。
+        }
+
+        private bool HasAnyNonNeutralValue() // 定义检查参数是否偏离中性值的辅助函数。
+        {
+            if (Mathf.Abs(saturation.value - BurtColorAdjustmentsSettings.DefaultSaturation) > NeutralEpsilon) // 如果饱和度不是 1，就说明调色会改变画面。
+            {
+                return true; // 返回 true，让后处理框架执行 Color Adjustments。
+            }
+
+            if (Mathf.Abs(contrast.value - BurtColorAdjustmentsSettings.DefaultContrast) > NeutralEpsilon) // 如果对比度不是 1，就说明调色会改变画面。
+            {
+                return true; // 返回 true，让后处理框架执行 Color Adjustments。
+            }
+
+            if (Mathf.Abs(gamma.value - BurtColorAdjustmentsSettings.DefaultGamma) > NeutralEpsilon) // 如果 Gamma 不是 1，就说明调色会改变画面。
+            {
+                return true; // 返回 true，让后处理框架执行 Color Adjustments。
+            }
+
+            var filter = colorFilter.value; // 读取颜色滤镜值，方便逐通道和白色默认值比较。
+
+            if (Mathf.Abs(filter.r - BurtColorAdjustmentsSettings.DefaultColorFilter.r) > NeutralEpsilon) // 如果红色通道不是默认白色，就说明会产生染色。
+            {
+                return true; // 返回 true，让后处理框架执行 Color Adjustments。
+            }
+
+            if (Mathf.Abs(filter.g - BurtColorAdjustmentsSettings.DefaultColorFilter.g) > NeutralEpsilon) // 如果绿色通道不是默认白色，就说明会产生染色。
+            {
+                return true; // 返回 true，让后处理框架执行 Color Adjustments。
+            }
+
+            if (Mathf.Abs(filter.b - BurtColorAdjustmentsSettings.DefaultColorFilter.b) > NeutralEpsilon) // 如果蓝色通道不是默认白色，就说明会产生染色。
+            {
+                return true; // 返回 true，让后处理框架执行 Color Adjustments。
+            }
+
+            return false; // 所有参数都保持中性时，不额外启用 Color Adjustments。
         }
     }
 }

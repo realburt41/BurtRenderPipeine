@@ -264,6 +264,180 @@ Shader "BurtRP/Lit"
             ENDHLSL
         }
 
+        // 定义 Deferred 第一版使用的 GBuffer 写入 pass，只负责输出材质数据，不在这里做光照。
+        Pass
+        {
+            // 给 Frame Debugger 显示一个明确的名字，方便和 Forward/DepthOnly 区分。
+            Name "Burt Lit GBuffer"
+
+            // 主 Agent 的 Draw GBuffer Opaque 会用 ShaderTagId("BurtGBuffer") 精确匹配这个 pass。
+            Tags { "LightMode" = "BurtGBuffer" }
+
+            // 当前 Deferred 计划允许没有 Depth Prepass 时由 GBuffer pass 写深度，和已有 DepthOnly 的 LEqual 行为保持一致。
+            ZWrite On
+
+            // 如果前面已经跑过 Depth Prepass，LEqual 会让等深度片元通过；如果没跑过，也能正常建立 CameraDepth。
+            ZTest LEqual
+
+            // 开始 GBuffer pass 的 HLSL 程序。
+            HLSLPROGRAM
+
+            // 声明 GBuffer 顶点 shader 入口。
+            #pragma vertex VertGBuffer
+
+            // 声明 GBuffer 片元 shader 入口。
+            #pragma fragment FragGBuffer
+
+            // MRT 输出 SV_Target0/1/2，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
+            #pragma target 3.0
+
+            // 引入 Unity 基础变换和 normal map 解包函数。
+            #include "UnityCG.cginc"
+
+            // 引入 BurtRP 通用数学工具，例如 BurtSafeNormalize。
+            #include "ShaderLibrary/BurtCommon.hlsl"
+
+            // 引入材质贴图采样、Mask Map 合成和 alpha clip 规则，保证 GBuffer 与 Forward 的材质输入一致。
+            #include "ShaderLibrary/BurtInput.hlsl"
+
+            // 引入法线贴图工具，GBuffer 保存的 normalWS 必须和 Forward shading 使用同一条转换路径。
+            #include "ShaderLibrary/BurtNormal.hlsl"
+
+            // 引入自发光工具，GBuffer2.rgb 会保存 Forward 最终叠加前的 emission 输入。
+            #include "ShaderLibrary/BurtEmission.hlsl"
+
+            // 引入 BurtRP 三张 GBuffer 的 encode/decode 约定；出处参考 XRender SlabGBufferPass.hlsl -> GBufferPack(SlabParams) 的分层做法。
+            #include "ShaderLibrary/BurtGBuffer.hlsl"
+
+            // 引入 Lit 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
+            #include "ShaderLibrary/BurtLitProperties.hlsl"
+
+            // GBuffer pass 的 mesh 输入，字段和 Forward 保持一致，避免法线贴图或 alpha clip 取不到必要数据。
+            struct GBufferAttributes
+            {
+                // 读取模型空间位置，用来输出裁剪空间位置并写入共享深度。
+                float4 positionOS : POSITION;
+
+                // 读取模型空间法线，作为法线贴图 TBN 的 N 轴基础。
+                float3 normalOS : NORMAL;
+
+                // 读取模型空间切线，法线贴图需要切线和 handedness 重建 TBN。
+                float4 tangentOS : TANGENT;
+
+                // 读取 UV0，Base/Mask/Emission/Normal 当前都从这套 mesh UV 派生。
+                float2 uv0 : TEXCOORD0;
+            };
+
+            // 顶点到片元的数据，尽量只传 GBuffer 编码真正需要的字段。
+            struct GBufferVaryings
+            {
+                // 保存裁剪空间位置，供光栅化和深度写入使用。
+                float4 positionCS : SV_POSITION;
+
+                // 保存插值后的世界空间几何法线，片元阶段会和 normal map 合成最终 normalWS。
+                float3 normalWS : TEXCOORD0;
+
+                // 保存 Base Map UV，片元阶段用于采样 baseColor 和 alpha。
+                float2 baseMapUV : TEXCOORD1;
+
+                // 保存世界空间切线和副切线符号，片元阶段用于 normal map 转世界空间。
+                float4 tangentWS : TEXCOORD2;
+
+                // 保存 Mask Map UV，片元阶段用于采样 metallic、occlusion、smoothness。
+                float2 maskMapUV : TEXCOORD3;
+
+                // 保存 Emission Map UV，片元阶段用于采样自发光颜色。
+                float2 emissionMapUV : TEXCOORD4;
+            };
+
+            // 三张 MRT 的片元输出；出处参考 XRender SlabGBufferDefine.hlsl::FGBufferOutput 使用 SV_TargetN 显式绑定。
+            struct GBufferFragmentOutput
+            {
+                // SV_Target0 对应 _BurtGBuffer0，保存 baseColor.rgb 和 occlusion.a。
+                float4 gbuffer0 : SV_Target0;
+
+                // SV_Target1 对应 _BurtGBuffer1，保存 oct normal.rg、metallic.b 和 smoothness.a。
+                float4 gbuffer1 : SV_Target1;
+
+                // SV_Target2 对应 _BurtGBuffer2，保存 emission.rgb 和 reflectance.a。
+                float4 gbuffer2 : SV_Target2;
+            };
+
+            // 把 mesh 顶点转换成 GBuffer 片元阶段需要的数据。
+            GBufferVaryings VertGBuffer(GBufferAttributes input)
+            {
+                // 创建输出结构体，后面逐项填充，避免未初始化字段进入片元阶段。
+                GBufferVaryings output;
+
+                // 把模型空间位置转换到裁剪空间，GBuffer pass 会用它进行光栅化和深度测试。
+                output.positionCS = UnityObjectToClipPos(input.positionOS);
+
+                // 把模型空间法线转换到世界空间，并安全归一化，作为 normal map 扰动前的基础法线。
+                output.normalWS = BurtSafeNormalize(UnityObjectToWorldNormal(input.normalOS));
+
+                // 把模型空间切线转换到世界空间，并保留 handedness，保证法线贴图方向和 Forward 一致。
+                output.tangentWS = BurtObjectToWorldTangent(input.tangentOS);
+
+                // 按 Base Map 自己的 Tiling/Offset 转换 UV，保证 alpha clip 和 Forward 可见轮廓一致。
+                output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
+
+                // 按 Mask Map 自己的 Tiling/Offset 转换 UV，保证 GBuffer 中的 PBR 参数来自同一套材质规则。
+                output.maskMapUV = BurtTransformMaskMapUV(input.uv0, _MaskMap_ST);
+
+                // 按 Emission Map 自己的 Tiling/Offset 转换 UV，保证 GBuffer2.rgb 和 Forward emission 输入一致。
+                output.emissionMapUV = BurtTransformEmissionMapUV(input.uv0, _EmissionMap_ST);
+
+                // 返回准备好的插值数据。
+                return output;
+            }
+
+            // 片元阶段采样材质输入并打包到三张 GBuffer。
+            GBufferFragmentOutput FragGBuffer(GBufferVaryings input)
+            {
+                // 采样 Base Map 并乘材质颜色，GBuffer0.rgb 保存的就是这份未光照 baseColor。
+                float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
+
+                // 应用和 DepthOnly/ShadowCaster/Forward 完全相同的 alpha clip，避免 GBuffer 写入不可见镂空区域。
+                BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
+
+                // 采样 normal map 并转换成世界空间，GBuffer1.rg 会保存这条最终 shading 法线的压缩结果。
+                float3 normalWS = BurtSampleNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, _NormalScale);
+
+                // 采样 Mask Map，R/G/A 分别参与 metallic、occlusion 和 smoothness 的最终计算。
+                float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
+
+                // 构建和 Forward 一致的 surfaceData；Deferred 不存 F0，只保存 reflectance 后续重建。
+                BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
+
+                // 采样自发光输入，GBuffer2.rgb 直接保存 emission，让 Deferred Lighting 最后再叠加。
+                float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
+
+                // 把 surfaceData、最终 normalWS 和 emission 整理成语义化 GBuffer 数据。
+                BurtGBufferData gbufferData = BurtCreateGBufferData(surfaceData, normalWS, emissionColor);
+
+                // 出处参考 XRender SM_DefaultLit.GBuffer.hlsl::Pack_GBuffer_PC_High_DefaultLit，把 SlabParams 拆分写入多个 MRT；这里用 BurtEncodeGBuffer 固化 BurtRP 自己的三张 RT 布局。
+                BurtEncodedGBuffer encodedGBuffer = BurtEncodeGBuffer(gbufferData);
+
+                // 创建 MRT 输出结构，按 SV_Target0/1/2 顺序写入。
+                GBufferFragmentOutput output;
+
+                // 写入 _BurtGBuffer0：baseColor.rgb + occlusion.a。
+                output.gbuffer0 = encodedGBuffer.gbuffer0;
+
+                // 写入 _BurtGBuffer1：oct normal.rg + metallic.b + smoothness.a。
+                output.gbuffer1 = encodedGBuffer.gbuffer1;
+
+                // 写入 _BurtGBuffer2：emission.rgb + reflectance.a。
+                output.gbuffer2 = encodedGBuffer.gbuffer2;
+
+                // 返回三张 GBuffer 颜色，RenderGraph 侧绑定的 MRT 顺序必须和这里保持一致。
+                return output;
+            }
+
+            // 结束 GBuffer pass 的 HLSL 程序。
+            ENDHLSL
+        }
+
         // Defines the forward color pass used by Burt Draw Opaque and Burt Draw Transparent.
         Pass
         {

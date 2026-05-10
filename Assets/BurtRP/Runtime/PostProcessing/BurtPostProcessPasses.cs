@@ -51,7 +51,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         }
     }
 
-    internal sealed class BurtPostProcessPass : BurtRenderPass // 定义第一版正式后处理 Pass，支持 No-op Copy 和 Tonemapping。
+    internal sealed class BurtPostProcessPass : BurtRenderPass // 定义第一版正式后处理 Pass，支持 No-op Copy、Tonemapping 和 Color Adjustments。
     {
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy"; // 定义后处理 shader 的查找名称，必须和 shader 文件里的 Shader 名称一致。
 
@@ -76,6 +76,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int FilmExpandGamutId = Shader.PropertyToID("_BurtFilmExpandGamut"); // 缓存 XRender Expand Gamut 属性 ID，避免每帧通过字符串查找。
 
         private static readonly int FilmToneCurveAmountId = Shader.PropertyToID("_BurtFilmToneCurveAmount"); // 缓存 XRender Tone Curve Amount 属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int UseColorAdjustmentsId = Shader.PropertyToID("_BurtUseColorAdjustments"); // 缓存是否启用 Color Adjustments 的属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int ColorAdjustmentsSaturationId = Shader.PropertyToID("_BurtColorAdjustmentsSaturation"); // 缓存饱和度属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int ColorAdjustmentsContrastId = Shader.PropertyToID("_BurtColorAdjustmentsContrast"); // 缓存对比度属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int ColorAdjustmentsGammaId = Shader.PropertyToID("_BurtColorAdjustmentsGamma"); // 缓存 Gamma 属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int ColorAdjustmentsColorFilterId = Shader.PropertyToID("_BurtColorAdjustmentsColorFilter"); // 缓存颜色滤镜属性 ID，避免每帧通过字符串查找。
 
         private Material postProcessMaterial; // 缓存运行时后处理材质，避免每帧重复创建 Material。
 
@@ -135,6 +145,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var filmSettings = BurtPostProcessUtility.ResolveTonemappingFilmSettings(context.Asset); // 从 Global Volume 读取 UE/XRender Filmic 曲线参数，缺失时回退到默认值。
 
+            var useColorAdjustments = BurtPostProcessUtility.ShouldUseColorAdjustments(context.Request, context.Asset); // 判断当前 VolumeStack 是否需要执行基础颜色调整。
+
+            var colorAdjustmentsSettings = BurtPostProcessUtility.ResolveColorAdjustmentsSettings(context.Asset); // 从 Global Volume 读取基础颜色调整参数，缺失时回退到中性值。
+
             var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取 CommandBuffer，并用 Pass 名称命名。
 
             cmd.SetRenderTarget(postProcessColorTarget.Identifier); // 先绑定 PostProcessColor，让第一段全屏拷贝写入后处理中间目标。
@@ -161,6 +175,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             cmd.SetGlobalFloat(FilmToneCurveAmountId, filmSettings.ToneCurveAmount); // 上传 Tone Curve Amount，让 shader 支持按 XRender 的方式混合曲线强度。
 
+            cmd.SetGlobalFloat(UseColorAdjustmentsId, useColorAdjustments ? 1f : 0f); // 上传 Color Adjustments 开关，让第一段后处理按需执行颜色调整。
+
+            cmd.SetGlobalFloat(ColorAdjustmentsSaturationId, colorAdjustmentsSettings.Saturation); // 上传饱和度，1 表示不改变颜色鲜艳程度。
+
+            cmd.SetGlobalFloat(ColorAdjustmentsContrastId, colorAdjustmentsSettings.Contrast); // 上传对比度，1 表示不改变明暗差异。
+
+            cmd.SetGlobalFloat(ColorAdjustmentsGammaId, colorAdjustmentsSettings.Gamma); // 上传 Gamma，1 表示不改变整体明暗曲线。
+
+            cmd.SetGlobalColor(ColorAdjustmentsColorFilterId, colorAdjustmentsSettings.ColorFilter); // 上传颜色滤镜，白色表示不额外染色。
+
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，把 CameraColor 处理到 PostProcessColor。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier); // 再绑定回 CameraColor，让第二段拷贝把后处理结果写回主颜色目标。
@@ -171,13 +195,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             cmd.SetGlobalFloat(PostExposureId, 1f); // 第二段回写使用 1 倍曝光，保证它是纯拷贝。
 
+            cmd.SetGlobalFloat(UseColorAdjustmentsId, 0f); // 第二段只负责把 PostProcessColor 写回 CameraColor，必须关闭颜色调整，避免同一帧重复执行。
+
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 再绘制一次全屏三角形，把 PostProcessColor 原样写回 CameraColor。
 
             renderContext.ExecuteCommandBuffer(cmd); // 把两段拷贝命令一次性提交给 Unity 渲染上下文。
 
             CommandBufferPool.Release(cmd); // 释放 CommandBuffer，避免每帧产生 GC。
 
-            BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
+            BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
         }
 
         private Material GetPostProcessMaterial() // 定义获取后处理材质的内部辅助函数。

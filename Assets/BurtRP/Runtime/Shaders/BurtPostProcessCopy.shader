@@ -40,6 +40,21 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             // 声明当前后处理使用的源纹理，C# Pass 会在每次绘制前设置它。
             sampler2D _BurtPostProcessSourceTexture;
 
+            // 声明是否执行 Color Adjustments，0 表示关闭，1 表示启用。
+            float _BurtUseColorAdjustments;
+
+            // 声明 Color Adjustments 饱和度，1 表示保持原饱和度。
+            float _BurtColorAdjustmentsSaturation;
+
+            // 声明 Color Adjustments 对比度，1 表示保持原对比度。
+            float _BurtColorAdjustmentsContrast;
+
+            // 声明 Color Adjustments Gamma，1 表示保持原明暗曲线。
+            float _BurtColorAdjustmentsGamma;
+
+            // 声明 Color Adjustments 颜色滤镜，白色表示不额外染色。
+            float4 _BurtColorAdjustmentsColorFilter;
+
             // 声明 Tonemapping 模式，0 表示 None，1 表示 Neutral，2 表示 XRender / UE Filmic ACES。
             float _BurtTonemappingMode;
 
@@ -468,6 +483,41 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return BurtTonemapXRenderUE(color);
             }
 
+            // 定义 Color Adjustments 应用函数，让 Frag 中只关心执行顺序。
+            float3 BurtApplyColorAdjustments(float3 color)
+            {
+                // 如果 C# 没有启用 Color Adjustments，就保持颜色原样。
+                if (_BurtUseColorAdjustments < 0.5)
+                {
+                    // 返回未修改的颜色，保证 No-op 和纯 Tonemapping 路径不受影响。
+                    return color;
+                }
+
+                // 去掉负值，避免后面的 Gamma 曲线遇到负数输入。
+                color = max(color, 0.0);
+
+                // 使用线性 Rec.709 亮度权重计算灰度，用于饱和度调整。
+                float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
+
+                // 按饱和度参数在灰度和原色之间插值，1 表示不变。
+                color = lerp(luma.xxx, color, _BurtColorAdjustmentsSaturation);
+
+                // 按 0.5 作为 LDR 中点调整对比度，1 表示不变。
+                color = (color - 0.5) * _BurtColorAdjustmentsContrast + 0.5;
+
+                // 乘以颜色滤镜，白色滤镜表示不改变 RGB。
+                color *= _BurtColorAdjustmentsColorFilter.rgb;
+
+                // 给 Gamma 加安全下限，避免极端参数产生无穷指数。
+                float safeGamma = max(_BurtColorAdjustmentsGamma, 0.001);
+
+                // 应用 Gamma 曲线，Gamma 大于 1 时会让中间调变亮。
+                color = pow(max(color, 0.0), 1.0 / safeGamma);
+
+                // 返回非负结果，不强行截断高于 1 的 HDR 值，避免关闭 Tonemapping 时丢失高光。
+                return max(color, 0.0);
+            }
+
             // 定义顶点 shader，用三个程序化顶点生成覆盖全屏的大三角形。
             Varyings Vert(Attributes input)
             {
@@ -495,6 +545,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
                 // 对 RGB 执行 Tonemapping，Alpha 保持原样，避免破坏后续可能依赖透明度的目标。
                 color.rgb = BurtApplyTonemapping(color.rgb);
+
+                // 对 Tonemapping 后的 RGB 执行 Color Adjustments，未启用时保持原样。
+                color.rgb = BurtApplyColorAdjustments(color.rgb);
 
                 // 返回处理后的颜色，None 模式下这里就是原样返回。
                 return color;

@@ -41,7 +41,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return false; // 返回 false，保持 Asset 作为后处理总开关。
             }
 
-            return settings.ShouldRunNoOpCopy || HasActiveTonemappingVolume(); // No-op 验证或 Volume Tonemapping 任意一个需要执行，就注册资源并插入 Pass。
+            return settings.ShouldRunNoOpCopy || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume(); // No-op、Tonemapping 或 Color Adjustments 任意一个需要执行，就注册资源并插入 Pass。
+        }
+
+        public static bool ShouldUseColorAdjustments( // 定义判断当前 request 是否需要 Color Adjustments 的统一入口。
+            BurtRenderRequest request, // 接收当前渲染请求，用来确认相机任务是否有效。
+            BurtRenderPipelineAsset asset) // 接收管线资产，用来确认后处理总开关是否打开。
+        {
+            if (request == null) // 如果 request 为空，说明没有合法渲染任务。
+            {
+                return false; // 返回 false，避免异常任务执行颜色调整。
+            }
+
+            if (!request.IsValid) // 如果 request 无效，就不应该执行任何后处理子链路。
+            {
+                return false; // 返回 false，保持后处理子效果和主渲染任务一致。
+            }
+
+            if (request.Camera == null) // 如果相机为空，就没有可靠的渲染上下文可以驱动 Volume。
+            {
+                return false; // 返回 false，避免在异常相机任务里执行颜色调整。
+            }
+
+            if (!IsPostProcessEnabled(asset)) // 如果管线资产没有开启后处理框架，Volume 调色不允许改变画面。
+            {
+                return false; // 返回 false，让后处理 Pass 不上传颜色调整参数。
+            }
+
+            return HasActiveColorAdjustmentsVolume(); // 只有当前 VolumeStack 中存在有效 Color Adjustments 时，才需要执行颜色调整。
         }
 
         public static void UpdateVolumeStack( // 定义每个相机渲染前刷新 VolumeStack 的函数，保证后处理参数来自当前相机位置。
@@ -171,10 +198,37 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 tonemapping.toneCurveAmount.value); // 读取 Tone Curve Amount。
         }
 
+        public static BurtColorAdjustmentsSettings ResolveColorAdjustmentsSettings(BurtRenderPipelineAsset asset) // 定义解析 Color Adjustments 参数的函数，让 Pass 不直接访问 Volume 组件字段。
+        {
+            if (!IsPostProcessEnabled(asset)) // 如果后处理框架关闭，调色参数不应该影响任何全屏拷贝。
+            {
+                return BurtColorAdjustmentsSettings.Default; // 返回默认调色参数，保证 shader 处于稳定的中性状态。
+            }
+
+            var colorAdjustments = GetColorAdjustmentsVolumeComponent(); // 从当前 VolumeStack 读取 BurtRP Color Adjustments 组件。
+
+            if (colorAdjustments == null) // 如果当前 VolumeStack 没有 Color Adjustments 组件，就没有可覆盖的调色参数。
+            {
+                return BurtColorAdjustmentsSettings.Default; // 返回默认调色参数，让后处理保持中性。
+            }
+
+            if (!colorAdjustments.IsEnabled()) // 如果 Color Adjustments 组件没有真正启用，就不应该上传非中性调色参数。
+            {
+                return BurtColorAdjustmentsSettings.Default; // 返回默认调色参数，避免 Volume 默认值改变画面。
+            }
+
+            return new BurtColorAdjustmentsSettings( // 把当前 Volume 混合后的参数收拢成不可变设置，供后处理 Pass 一次性上传。
+                colorAdjustments.saturation.value, // 读取饱和度。
+                colorAdjustments.contrast.value, // 读取对比度。
+                colorAdjustments.gamma.value, // 读取 Gamma。
+                colorAdjustments.colorFilter.value); // 读取颜色滤镜。
+        }
+
         public static void LogPostProcessExecuted( // 定义后处理执行日志，集中格式避免 Pass 内部堆字符串逻辑。
             BurtRenderGraphContext context, // 接收当前 RenderGraph 执行上下文，用来读取相机和资产设置。
             BurtTonemappingMode tonemappingMode, // 接收本次执行使用的 Tonemapping 模式。
-            float postExposureMultiplier) // 接收本次执行使用的线性曝光倍率。
+            float postExposureMultiplier, // 接收本次执行使用的线性曝光倍率。
+            bool useColorAdjustments) // 接收本次执行是否启用了 Color Adjustments。
         {
             if (context == null) // 如果上下文为空，说明调用方状态异常。
             {
@@ -192,7 +246,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
             var cameraName = camera != null ? camera.name : "<null>"; // 把相机名转换成安全字符串，避免日志里出现空引用。
 
-            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMul=" + postExposureMultiplier); // 输出后处理执行摘要，说明当前模式和曝光倍率。
+            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMul=" + postExposureMultiplier + " ColorAdjustments=" + useColorAdjustments); // 输出后处理执行摘要，说明当前模式、曝光倍率和颜色调整状态。
         }
 
         private static bool IsPostProcessEnabled(BurtRenderPipelineAsset asset) // 定义判断资产是否允许后处理运行的统一辅助函数。
@@ -214,6 +268,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             return tonemapping != null && tonemapping.IsEnabled(); // 只有组件存在、激活且模式不是 None 时，才认为 Tonemapping 需要运行。
         }
 
+        private static bool HasActiveColorAdjustmentsVolume() // 定义判断当前 VolumeStack 是否存在有效 Color Adjustments 的辅助函数。
+        {
+            var colorAdjustments = GetColorAdjustmentsVolumeComponent(); // 从当前 VolumeStack 中读取 BurtRP Color Adjustments 组件。
+
+            return colorAdjustments != null && colorAdjustments.IsEnabled(); // 只有组件存在、激活且参数被覆盖或偏离中性值时，才认为颜色调整需要运行。
+        }
+
         private static BurtTonemappingVolumeComponent GetTonemappingVolumeComponent() // 定义从 Unity VolumeStack 读取 BurtRP Tonemapping 组件的辅助函数。
         {
             var volumeManager = VolumeManager.instance; // 取得 Unity 当前全局 VolumeManager 实例。
@@ -231,6 +292,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             return stack.GetComponent<BurtTonemappingVolumeComponent>(); // 返回 BurtRP Tonemapping 组件，未添加时 Unity 会返回默认组件或空值。
+        }
+
+        private static BurtColorAdjustmentsVolumeComponent GetColorAdjustmentsVolumeComponent() // 定义从 Unity VolumeStack 读取 BurtRP Color Adjustments 组件的辅助函数。
+        {
+            var volumeManager = VolumeManager.instance; // 取得 Unity 当前全局 VolumeManager 实例。
+
+            if (volumeManager == null) // 理论上 VolumeManager 是单例，但域重载阶段仍可能为空。
+            {
+                return null; // 返回空组件，调用方会按无 Color Adjustments 处理。
+            }
+
+            var stack = volumeManager.stack; // 读取当前已经由相机刷新过的 VolumeStack。
+
+            if (stack == null) // 如果 VolumeStack 为空，说明 Volume 系统还没有准备好。
+            {
+                return null; // 返回空组件，保证后处理回退到无颜色调整状态。
+            }
+
+            return stack.GetComponent<BurtColorAdjustmentsVolumeComponent>(); // 返回 BurtRP Color Adjustments 组件，未添加时 Unity 会返回默认组件或空值。
         }
     }
 }

@@ -33,7 +33,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages, // 接收每个 Pass 的资源读写声明，由 RenderGraph 配置阶段收集。
             IReadOnlyList<string> validationMessages, // 接收图级别校验消息，通常只在 Debug 开关开启时输出。
             BurtRenderGraphResourceRegistry resourceRegistry, // 接收资源注册表，用来判断资源是否为外部导入。
-            BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RT 生命周期选项，用来输出 Allocate/FinalBlit/Release 决策。
+            BurtRequestRenderOptions renderOptions, // 接收当前 request 的栈级 RT 生命周期选项，用来输出 Allocate/FinalBlit/Release 决策。
+            BurtRenderPipelineAsset asset = null) // 接收当前管线资产，用来输出 Renderer Mode 和 Debug View 状态；旧调用可以保持为空。
         {
             var usageCount = resourceUsages != null ? resourceUsages.Count : 0; // 读取资源使用记录数量；列表为空时按 0 处理。
 
@@ -41,13 +42,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var renderOptionsCapacity = renderOptions != null ? 256 : 48; // RT 生命周期行较长，预留额外空间减少 StringBuilder 扩容。
 
-            var capacity = BaseDumpCapacity + renderOptionsCapacity + usageCount * PerPassDumpCapacity + validationCount * 96; // 根据 Pass、校验和 RT 选项数量估算字符串容量。
+            var pipelineStateCapacity = 420; // Pipeline State 会额外打印 Renderer Mode、GBuffer Debug 来源和 Shading Debug 状态，预留固定容量。
+
+            var capacity = BaseDumpCapacity + renderOptionsCapacity + pipelineStateCapacity + usageCount * PerPassDumpCapacity + validationCount * 96; // 根据 Pass、校验、RT 选项和管线状态数量估算字符串容量。
 
             var builder = BurtDebugStringBuilderPool.Get(capacity); // 从调试 StringBuilder 池租借构建器，避免每帧开启日志时频繁分配。
 
             try // 使用 try/finally 保证构建器一定归还池中。
             {
-                AppendDump(builder, request, passCount, resourceUsages, validationMessages, resourceRegistry, renderOptions); // 把实际排版逻辑写到构建器里，BuildDump 只负责生命周期管理。
+                AppendDump(builder, request, passCount, resourceUsages, validationMessages, resourceRegistry, renderOptions, asset); // 把实际排版逻辑写到构建器里，BuildDump 只负责生命周期管理。
 
                 return builder.ToString(); // 返回完整 dump 字符串，后续是否 Debug.Log 仍由外层 asset 开关控制。
             }
@@ -84,7 +87,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages, // 接收当前 RenderGraph 的资源读写记录。
             IReadOnlyList<string> validationMessages, // 接收图级别校验消息。
             BurtRenderGraphResourceRegistry resourceRegistry, // 接收资源注册表，用于判断外部资源。
-            BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RT 生命周期选项。
+            BurtRequestRenderOptions renderOptions, // 接收当前 request 的栈级 RT 生命周期选项。
+            BurtRenderPipelineAsset asset = null) // 接收当前管线资产，用来输出 Renderer Mode 和各类 Debug View 状态。
         {
             if (builder == null) // 如果没有构建器，就没有安全写入目标。
             {
@@ -96,6 +100,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             AppendRequestInfo(builder, request); // 写入 Request 和 Camera 基础信息，让 dump 一眼能看出来自哪次渲染请求。
 
             AppendRenderOptions(builder, renderOptions); // 写入 RT 生命周期决策，让你不用只靠 Pass 列表反推 Allocate、FinalBlit 和 Release。
+
+            AppendPipelineState(builder, asset); // 写入管线和调试状态，方便对齐 Forward / Deferred 时确认当前到底由哪个开关驱动画面。
 
             BurtDebugLogUtility.AppendKeyValueLine(builder, "Pass Count", passCount); // 写入 RenderGraph 中的 Pass 数量，和实际执行列表保持一致。
 
@@ -166,6 +172,62 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" ReleaseDepth=").Append(renderOptions.ShouldReleaseCameraDepth); // 写入是否插入 CameraDepth 释放 Pass。
 
             builder.AppendLine(); // 当前 RT 生命周期行结束。
+        }
+
+        private static void AppendPipelineState( // 写入当前管线资产和调试开关状态。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            BurtRenderPipelineAsset asset) // 接收当前管线资产，可能为空。
+        {
+            builder.AppendLine("Pipeline State:"); // 单独成段输出，避免和 RT 生命周期或 Pass 列表混在一起。
+
+            if (asset == null) // 如果没有资产，说明调用方走了旧 dump 入口或资产异常。
+            {
+                builder.Append("  Asset=<none>"); // 明确写出没有资产，让后续字段缺省值的来源更清楚。
+
+                builder.Append(" ShadingDebugMode=").Append(BurtShadingDebugSettings.Mode); // 即使资产为空，也输出全局 Shading Debug 模式，方便排查 Overlay 残留状态。
+
+                builder.Append(" ShadingDebugEnabled=").Append(BurtShadingDebugSettings.IsDebugging); // 输出全局 Shading Debug 是否启用。
+
+                builder.AppendLine(); // 结束资产缺失状态行。
+
+                return; // 没有资产时无法继续读取 Renderer Mode、GBuffer 或阴影调试开关。
+            }
+
+            var resolvedGBufferMode = BurtGBufferDebugViewUtility.ResolveGBufferDebugViewMode(asset); // 解析资产面板和 Overlay 合并后的最终 GBuffer Debug 模式。
+
+            var gBufferSource = BurtGBufferDebugViewUtility.ResolveGBufferDebugViewSource(asset); // 解析 GBuffer Debug 的来源，区分资产面板和 Overlay。
+
+            builder.Append("  RendererMode=").Append(asset.RendererMode); // 写入当前渲染路径，用来确认正在看 Forward 还是 Deferred。
+
+            builder.Append(" DeferredForwardOnlyOpaqueFallback=").Append(asset.EnableDeferredForwardOpaqueFallback); // 写入 Deferred 后 ForwardOnly 不透明兜底开关，方便确认是否会绘制不能写 GBuffer 的专用前向物体。
+
+            builder.Append(" DepthPrepass=").Append(asset.EnableDepthPrepass); // 写入 Depth Prepass 开关，方便排查深度依赖和 GBuffer 绘制顺序。
+
+            builder.AppendLine(); // 结束第一行核心管线状态。
+
+            builder.Append("  ShadingDebugMode=").Append(BurtShadingDebugSettings.Mode); // 写入当前 Overlay / 运行时共享的 Shading Debug 模式。
+
+            builder.Append(" ShadingDebugEnabled=").Append(BurtShadingDebugSettings.IsDebugging); // 写入 Shading Debug 是否启用，避免只看 enum 忘记 None 表示关闭。
+
+            builder.Append(" GBufferDebugAssetMode=").Append(asset.GBufferDebugViewMode); // 写入资产面板上的 GBuffer Debug 模式。
+
+            builder.Append(" GBufferDebugResolvedMode=").Append(resolvedGBufferMode); // 写入最终生效的 GBuffer Debug 模式。
+
+            builder.Append(" GBufferDebugSource=").Append(gBufferSource); // 写入最终模式来源，方便确认是否由 Overlay 触发。
+
+            builder.AppendLine(); // 结束第二行调试状态。
+
+            builder.Append("  DepthDebugView=").Append(asset.EnableDepthDebugView); // 写入 CameraDepth 全屏调试开关。
+
+            builder.Append(" MainLightShadowDebugView=").Append(asset.EnableMainLightShadowDebugView); // 写入主光 shadow map 全屏调试开关。
+
+            builder.Append(" MainLightShadowDebugLog=").Append(asset.EnableMainLightShadowDebugLog); // 写入主光阴影结构化日志开关。
+
+            builder.Append(" UnsupportedShaderDebug=").Append(asset.EnableUnsupportedShaderDebug); // 写入错误材质绘制开关。
+
+            builder.AppendLine(); // 结束第三行全屏调试状态。
+
+            BurtIndirectLightingUtility.AppendDebugState(builder); // 写入 BurtRP 全局间接光数据源状态，方便确认 Deferred 不再依赖 Forward DrawRenderers 副作用。
         }
 
         private static void AppendValidationMessages( // 写入 RenderGraph 校验消息。

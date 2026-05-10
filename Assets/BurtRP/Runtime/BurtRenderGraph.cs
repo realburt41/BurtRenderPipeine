@@ -158,6 +158,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             return BurtRenderGraphDebugUtility.BuildDump(request, passes.Count, resourceUsages, validationMessages, resources, renderOptions); // 把 request、Pass、资源声明、校验和 RT 生命周期选项交给统一工具格式化。
         }
 
+        public string DumpDebugInfo( // 定义带管线资产状态的 RenderGraph 调试文本入口。
+            BurtRenderRequest request, // 接收当前渲染请求，用来输出 Request 和 Camera 信息。
+            BurtRenderPipelineAsset asset, // 接收当前 BurtRP 管线资产，用来输出 Renderer Mode 和 Debug View 状态。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RT 生命周期选项。
+        {
+            return BurtRenderGraphDebugUtility.BuildDump(request, passes.Count, resourceUsages, validationMessages, resources, renderOptions, asset); // 把 request、资源声明、RT 生命周期和资产调试状态交给统一工具格式化。
+        }
+
         private void ConfigurePasses(BurtRenderGraphContext context) // 定义资源声明收集函数，用来调用每个 Pass 的 Configure，并给 Builder 提供当前上下文。
         {
             resourceUsages.Clear(); // 每次执行前清空旧声明，保证 ResourceUsages 只描述当前图。

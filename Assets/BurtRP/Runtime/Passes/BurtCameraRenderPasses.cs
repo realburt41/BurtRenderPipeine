@@ -3,11 +3,15 @@ using UnityEngine.Rendering; // 引入 UnityEngine.Rendering 命名空间，用�
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 能直接访问 BurtRenderRequest、BurtCameraData 等类型。
 {
-    internal static class BurtDrawingSettingsUtility // Centralizes all ShaderTagId lists used by BurtRP drawing passes.
+    internal static class BurtDrawingSettingsUtility // 集中管理 BurtRP 所有 DrawRenderers Pass 会用到的 ShaderTagId 和 DrawingSettings 创建逻辑。
     {
-        private static readonly ShaderTagId BurtForward = new ShaderTagId("BurtForward"); // Names the BurtRP forward color pass that supported shaders must provide.
+        private static readonly ShaderTagId BurtForward = new ShaderTagId("BurtForward"); // 定义 BurtRP 前向颜色 Pass 的 LightMode 名称，受支持的 shader 必须提供它。
 
-        private static readonly ShaderTagId BurtDepthOnly = new ShaderTagId("BurtDepthOnly"); // Names the BurtRP depth-only pass used by the depth prepass.
+        private static readonly ShaderTagId BurtForwardOnly = new ShaderTagId("BurtForwardOnly"); // 定义 Deferred 后专用的前向兜底 LightMode，只给不能写 GBuffer 的不透明 shader 使用。
+
+        private static readonly ShaderTagId BurtDepthOnly = new ShaderTagId("BurtDepthOnly"); // 定义 BurtRP Depth Prepass 使用的深度专用 LightMode 名称。
+
+        private static readonly ShaderTagId BurtGBuffer = new ShaderTagId("BurtGBuffer"); // 定义 Deferred GBuffer 绘制使用的 LightMode 名称，shader 侧需要提供同名 Pass。
 
         private static readonly PerObjectData ForwardPerObjectData = // 定义前向颜色绘制需要 Unity 为每个 Renderer 绑定的内置间接光数据。
             PerObjectData.ReflectionProbes | // 请求 Unity 绑定 unity_SpecCube0 / unity_SpecCube0_HDR，让 Reflection Probe 间接高光能生效。
@@ -19,70 +23,88 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             PerObjectData.OcclusionProbeProxyVolume | // 请求 Unity 绑定 LPPV 版本的 occlusion 数据，和 LightProbeProxyVolume 配套。
             PerObjectData.ShadowMask; // 请求 Unity 绑定 shadow mask 数据，给后续 baked shadow / mixed lighting 预留。
 
-        private static readonly ShaderTagId SRPDefaultUnlit = new ShaderTagId("SRPDefaultUnlit"); // Names Unity's generic SRP unlit pass so the unsupported-shader pass can catch it.
+        private static readonly ShaderTagId SRPDefaultUnlit = new ShaderTagId("SRPDefaultUnlit"); // 定义 Unity 通用 SRP Unlit LightMode，方便 Unsupported Pass 把它抓出来显示错误材质。
 
-        private static readonly ShaderTagId ForwardBase = new ShaderTagId("ForwardBase"); // Names the Built-in pipeline forward pass so the unsupported-shader pass can catch it.
+        private static readonly ShaderTagId ForwardBase = new ShaderTagId("ForwardBase"); // 定义 Built-in 管线 ForwardBase LightMode，方便 Unsupported Pass 抓到旧管线材质。
 
-        private static readonly ShaderTagId Always = new ShaderTagId("Always"); // Names a common Built-in fallback pass so the unsupported-shader pass can catch it.
+        private static readonly ShaderTagId Always = new ShaderTagId("Always"); // 定义 Built-in 常见 Always LightMode，避免 fallback pass 被 BurtRP 静默接受。
 
-        private static readonly ShaderTagId PrepassBase = new ShaderTagId("PrepassBase"); // Names an old Built-in deferred prepass so the unsupported-shader pass can catch it.
+        private static readonly ShaderTagId PrepassBase = new ShaderTagId("PrepassBase"); // 定义旧 Built-in deferred prepass LightMode，方便 Unsupported Pass 暴露不兼容材质。
 
-        private static readonly ShaderTagId Vertex = new ShaderTagId("Vertex"); // Names an old Built-in vertex-lit pass so the unsupported-shader pass can catch it.
+        private static readonly ShaderTagId Vertex = new ShaderTagId("Vertex"); // 定义旧 Built-in 顶点光照 LightMode，方便 Unsupported Pass 暴露不兼容材质。
 
-        private static readonly ShaderTagId VertexLMRGBM = new ShaderTagId("VertexLMRGBM"); // Names an old Built-in lightmap pass so the unsupported-shader pass can catch it.
+        private static readonly ShaderTagId VertexLMRGBM = new ShaderTagId("VertexLMRGBM"); // 定义旧 Built-in lightmap RGBM LightMode，方便 Unsupported Pass 暴露不兼容材质。
 
-        private static readonly ShaderTagId VertexLM = new ShaderTagId("VertexLM"); // Names another old Built-in lightmap pass so the unsupported-shader pass can catch it.
+        private static readonly ShaderTagId VertexLM = new ShaderTagId("VertexLM"); // 定义另一个旧 Built-in lightmap LightMode，方便 Unsupported Pass 暴露不兼容材质。
 
-        private static readonly ShaderTagId UniversalForward = new ShaderTagId("UniversalForward"); // Names a URP forward pass so URP shaders do not silently render as BurtRP shaders.
+        private static readonly ShaderTagId UniversalForward = new ShaderTagId("UniversalForward"); // 定义 URP Forward LightMode，避免 URP shader 被 BurtRP 静默当作可支持材质。
 
-        private static readonly ShaderTagId UniversalForwardOnly = new ShaderTagId("UniversalForwardOnly"); // Names a URP forward-only pass so URP shaders can be reported as unsupported.
+        private static readonly ShaderTagId UniversalForwardOnly = new ShaderTagId("UniversalForwardOnly"); // 定义 URP ForwardOnly LightMode，方便 Unsupported Pass 报告 URP 专用材质。
 
-        private static readonly ShaderTagId LightweightForward = new ShaderTagId("LightweightForward"); // Names an old LWRP forward pass so legacy SRP shaders can be reported as unsupported.
+        private static readonly ShaderTagId LightweightForward = new ShaderTagId("LightweightForward"); // 定义旧 LWRP Forward LightMode，方便 Unsupported Pass 报告旧 SRP 材质。
 
-        private static readonly ShaderTagId[] UnsupportedShaderTagIds = new ShaderTagId[] // Lists LightMode names that BurtRP does not own and should render with an error material.
+        private static readonly ShaderTagId[] UnsupportedShaderTagIds = new ShaderTagId[] // 列出 BurtRP 不接管的 LightMode，这些材质会被错误材质明确显示出来。
         {
-            SRPDefaultUnlit, // Treats generic SRP unlit shaders as unsupported unless they are migrated to BurtForward.
-            ForwardBase, // Treats Built-in ForwardBase shaders as unsupported so old materials are not accepted silently.
-            Always, // Treats Built-in Always passes as unsupported so fallback-style shaders are visible as errors.
-            PrepassBase, // Treats old Built-in prepass shaders as unsupported because BurtRP does not implement that path.
-            Vertex, // Treats old Built-in vertex-lit shaders as unsupported because BurtRP does not implement vertex lighting.
-            VertexLMRGBM, // Treats old Built-in lightmap shaders as unsupported because BurtRP does not implement that path yet.
-            VertexLM, // Treats another old Built-in lightmap pass as unsupported for the same reason.
-            UniversalForward, // Treats URP forward shaders as unsupported because BurtRP should use its own LightMode names.
-            UniversalForwardOnly, // Treats URP forward-only shaders as unsupported because BurtRP does not execute URP passes.
-            LightweightForward // Treats old LWRP forward shaders as unsupported because BurtRP does not execute LWRP passes.
-        }; // Ends the unsupported LightMode list.
+            SRPDefaultUnlit, // 把通用 SRP Unlit shader 视为不支持，除非它迁移到 BurtForward。
+            ForwardBase, // 把 Built-in ForwardBase shader 视为不支持，避免旧材质静默进入 BurtRP。
+            Always, // 把 Built-in Always pass 视为不支持，让 fallback 风格 shader 明确变成错误材质。
+            PrepassBase, // 把旧 Built-in PrepassBase 视为不支持，因为 BurtRP 不实现这条路径。
+            Vertex, // 把旧 Built-in 顶点光照 pass 视为不支持，因为 BurtRP 暂不实现 vertex lighting。
+            VertexLMRGBM, // 把旧 Built-in RGBM lightmap pass 视为不支持，因为 BurtRP 暂未接入这条 lightmap 路径。
+            VertexLM, // 把另一个旧 Built-in lightmap pass 视为不支持，理由同上。
+            UniversalForward, // 把 URP Forward shader 视为不支持，因为 BurtRP 应该使用自己的 LightMode 名称。
+            UniversalForwardOnly, // 把 URP ForwardOnly shader 视为不支持，因为 BurtRP 不执行 URP 专用 pass。
+            LightweightForward // 把旧 LWRP shader 视为不支持，因为 BurtRP 不执行 LWRP 专用 pass。
+        }; // 结束不支持 LightMode 列表。
 
-        public static DrawingSettings CreateForwardDrawingSettings(SortingSettings sortingSettings) // Creates drawing settings for normal BurtRP forward color rendering.
+        public static DrawingSettings CreateForwardDrawingSettings(SortingSettings sortingSettings) // 创建 BurtRP 常规前向颜色绘制使用的 DrawingSettings。
         {
-            var drawingSettings = new DrawingSettings(BurtForward, sortingSettings); // Matches only BurtForward, making the main render path strict and BurtRP-owned.
+            var drawingSettings = new DrawingSettings(BurtForward, sortingSettings); // 只匹配 BurtForward，让主渲染路径严格由 BurtRP 自己的 shader pass 驱动。
 
             drawingSettings.perObjectData = ForwardPerObjectData; // 让 Unity 在 DrawRenderers 时真正上传 SH、Reflection Probe 等 per-object 间接光数据。
 
-            return drawingSettings; // Returns the configured forward drawing settings to the caller pass.
+            return drawingSettings; // 返回配置好的前向绘制设置，供调用方 Pass 使用。
         }
 
-        public static DrawingSettings CreateUnsupportedDrawingSettings( // Creates drawing settings for the unsupported-shader debug pass.
-            SortingSettings sortingSettings, // Receives camera sorting rules so error-material rendering is stable.
-            Material errorMaterial) // Receives the material that should override unsupported source materials.
+        public static DrawingSettings CreateForwardOnlyDrawingSettings(SortingSettings sortingSettings) // 创建 Deferred 后前向兜底绘制设置，只匹配显式声明 BurtForwardOnly 的 shader。
         {
-            var drawingSettings = new DrawingSettings(UnsupportedShaderTagIds[0], sortingSettings); // Uses the first unsupported LightMode as the primary shader pass name.
+            var drawingSettings = new DrawingSettings(BurtForwardOnly, sortingSettings); // 只匹配 BurtForwardOnly，避免 Deferred 模式把已经写入 GBuffer 的 BurtForward 物体再画一遍。
 
-            for (var shaderTagIndex = 1; shaderTagIndex < UnsupportedShaderTagIds.Length; shaderTagIndex++) // Visits every remaining unsupported LightMode.
+            drawingSettings.perObjectData = ForwardPerObjectData; // 兜底前向 shader 仍需要 SH、Reflection Probe 等 per-object 数据，保证和正常 Forward 光照能力一致。
+
+            return drawingSettings; // 返回配置好的绘制设置，供 Deferred ForwardOnly Opaque Pass 使用。
+        }
+
+        public static DrawingSettings CreateUnsupportedDrawingSettings( // 创建 Unsupported Shader Debug Pass 使用的 DrawingSettings。
+            SortingSettings sortingSettings, // 接收当前相机的排序规则，保证错误材质绘制顺序稳定。
+            Material errorMaterial) // 接收用于覆盖不支持材质的错误材质。
+        {
+            var drawingSettings = new DrawingSettings(UnsupportedShaderTagIds[0], sortingSettings); // 使用第一个不支持 LightMode 作为 DrawingSettings 的主 shader pass 名称。
+
+            for (var shaderTagIndex = 1; shaderTagIndex < UnsupportedShaderTagIds.Length; shaderTagIndex++) // 遍历剩余所有不支持的 LightMode。
             {
-                drawingSettings.SetShaderPassName(shaderTagIndex, UnsupportedShaderTagIds[shaderTagIndex]); // Registers the unsupported LightMode at the matching drawing-settings slot.
+                drawingSettings.SetShaderPassName(shaderTagIndex, UnsupportedShaderTagIds[shaderTagIndex]); // 把当前不支持 LightMode 注册到对应 DrawingSettings 槽位。
             }
 
-            drawingSettings.overrideMaterial = errorMaterial; // Forces matched unsupported shaders to render with Unity's error material.
+            drawingSettings.overrideMaterial = errorMaterial; // 强制匹配到的不支持 shader 使用 Unity 错误材质绘制。
 
-            return drawingSettings; // Returns the configured unsupported-shader drawing settings to the caller pass.
+            return drawingSettings; // 返回配置好的不支持 shader 绘制设置，供调用方 Pass 使用。
         }
 
-        public static DrawingSettings CreateDepthDrawingSettings(SortingSettings sortingSettings) // Creates drawing settings for BurtRP depth-only rendering.
+        public static DrawingSettings CreateDepthDrawingSettings(SortingSettings sortingSettings) // 创建 BurtRP 深度预写使用的 DrawingSettings。
         {
-            var drawingSettings = new DrawingSettings(BurtDepthOnly, sortingSettings); // Matches only BurtDepthOnly so the depth prepass cannot accidentally run a color pass.
+            var drawingSettings = new DrawingSettings(BurtDepthOnly, sortingSettings); // 只匹配 BurtDepthOnly，避免 Depth Prepass 意外执行颜色 pass。
 
-            return drawingSettings; // Returns the configured depth drawing settings to the caller pass.
+            return drawingSettings; // 返回配置好的深度绘制设置，供调用方 Pass 使用。
+        }
+
+        public static DrawingSettings CreateGBufferDrawingSettings(SortingSettings sortingSettings) // 创建 Deferred GBuffer 绘制设置，只匹配 BurtRP 自己的 GBuffer Pass。
+        {
+            var drawingSettings = new DrawingSettings(BurtGBuffer, sortingSettings); // 只绘制 LightMode 为 BurtGBuffer 的 shader pass，避免 Forward pass 误写入 GBuffer。
+
+            drawingSettings.perObjectData = PerObjectData.None; // GBuffer 只负责写材质属性，不再请求 SH/ReflectionProbe，避免 Deferred 间接光继续依赖 DrawRenderers 的 per-object 副作用。
+
+            return drawingSettings; // 返回配置好的 GBuffer 绘制设置，供 Draw GBuffer Opaque Pass 使用。
         }
     }
 
@@ -124,7 +146,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.MainLightShadowMapId, descriptor, FilterMode.Bilinear); // Uses bilinear filtering so the hardware shadow sampler can smooth compare edges instead of amplifying point-sample bands.
+            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.MainLightShadowMapId, descriptor, FilterMode.Bilinear); // 使用双线性过滤，让硬件阴影采样器能平滑比较边缘，避免点采样放大阴影条带。
 
             cmd.SetRenderTarget(shadowMapTarget.Identifier); // 把主光阴影图绑定为当前渲染目标，为后续 ShadowCaster 绘制做准备。
 
@@ -253,7 +275,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
 
-            var shadowDrawingSettings = new ShadowDrawingSettings(request.CullingResults, shadowData.MainLightIndex); // 创建 Unity 阴影绘制设置，让 DrawShadows 找到主光对应的 ShadowCaster。
+            var shadowDrawingSettings = new ShadowDrawingSettings(request.CullingResults, shadowData.MainLightIndex, BatchCullingProjectionType.Orthographic); // 创建 Unity 阴影绘制设置，并显式声明主方向光阴影使用正交投影，避免调用已废弃的旧构造函数。
 
             shadowDrawingSettings.splitData = splitData; // 把 Unity 计算出的阴影裁剪数据交给 DrawShadows，避免绘制不在阴影范围内的物体。
 
@@ -438,6 +460,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             cmd.SetGlobalVector(MainLightDirectionId, new Vector4(mainLightDirection.x, mainLightDirection.y, mainLightDirection.z, 0f)); // 上传归一化的主光方向，Lit shader 用它计算 Lambert 漫反射。
             cmd.SetGlobalColor(MainLightColorId, mainLightColor); // 上传主光颜色，Lit shader 会把它乘到直接光上。
             cmd.SetGlobalColor(AmbientLightColorId, ambientLightColor); // 上传环境光颜色，Lit shader 会用它保留阴影区域的基础亮度。
+            BurtIndirectLightingUtility.UploadGlobalIndirectLighting(cmd); // 上传 BurtRP 自己的全局间接光数据源，让 Deferred fullscreen pass 不依赖 Forward DrawRenderers 副作用。
             cmd.SetGlobalMatrix(MainLightWorldToShadowId, Matrix4x4.identity); // 每个 request 开始先清理阴影矩阵，真正绘制阴影成功后 ShadowCaster Pass 会覆盖它。
             cmd.SetGlobalFloat(MainLightShadowStrengthId, mainLightShadowStrength); // 上传最终阴影强度，0 表示 receiver 完全跳过 shadow map 采样。
             cmd.SetGlobalVector(MainLightShadowTexelSizeId, mainLightShadowTexelSize); // 上传 shadow map texel size，软阴影采样会根据它偏移邻域 UV。
@@ -561,6 +584,48 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         }
     }
 
+    internal sealed class BurtDrawDeferredForwardOnlyOpaquePass : BurtRenderPass // 定义 Deferred 后的前向兜底不透明 Pass，只绘制显式标记为 BurtForwardOnly 的物体。
+    {
+        public override string Name => "Burt Draw Deferred Forward Only Opaque"; // 返回这个 Pass 的名称，方便在 RenderGraph Debug 和 Frame Debugger 里确认它不是普通 Forward Opaque。
+
+        public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
+        {
+            builder.ReadCameraDepth(); // 声明前向兜底物体会读取 Deferred/GBuffer 阶段已经建立好的 CameraDepth 做深度测试。
+
+            builder.ReadLightingGlobals(); // 声明前向兜底 shader 会读取主光颜色、方向等灯光全局状态。
+
+            builder.ReadShadowGlobals(); // 声明前向兜底 shader 会读取阴影矩阵、强度和 texel size 等阴影全局状态。
+
+            if (BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset)) // 如果当前 request 真的生成主光阴影图，就声明 shadow map 输入。
+            {
+                builder.ReadMainLightShadowMap(); // 声明前向兜底 shader 会采样 MainLightShadowMap。
+            }
+
+            builder.WriteCameraColor(); // 声明前向兜底结果会写回 Deferred Lighting 已经生成的 CameraColor。
+
+            builder.WriteCameraDepth(); // 声明兜底不透明物体仍可能写入深度，保证后续 Skybox 和 Transparent 能按最终深度测试。
+        }
+
+        public override void Execute(BurtRenderGraphContext context) // 执行 Deferred 后的前向兜底不透明绘制。
+        {
+            var renderContext = context.ScriptableContext; // 从 GraphContext 取出 Unity SRP 渲染上下文。
+
+            var request = context.Request; // 从 GraphContext 取出当前渲染请求。
+
+            var camera = request.Camera; // 从 request 取出当前相机，用来创建排序设置。
+
+            var sortingSettings = new SortingSettings(camera); // 创建排序设置，Unity 会根据相机矩阵和位置计算排序参数。
+
+            sortingSettings.criteria = SortingCriteria.CommonOpaque; // 使用不透明排序，尽量保持 early-z 和稳定绘制顺序。
+
+            var drawingSettings = BurtDrawingSettingsUtility.CreateForwardOnlyDrawingSettings(sortingSettings); // 只匹配 LightMode=BurtForwardOnly 的 shader，避免重复绘制 BurtGBuffer/BurtForward 材质。
+
+            var filteringSettings = new FilteringSettings(RenderQueueRange.opaque); // 只允许不透明队列通过，透明仍交给后面的 Draw Transparent Pass。
+
+            renderContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings); // 绘制所有显式声明 BurtForwardOnly 的可见不透明物体。
+        }
+    }
+
     internal sealed class BurtDrawSkyboxPass : BurtRenderPass // 定义天空盒绘制 Pass。
     {
         public override string Name => "Burt Draw Skybox"; // 返回这个 Pass 的名称，后面可以用于调试和性能分析。
@@ -638,97 +703,97 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         }
     }
 
-    internal sealed class BurtDrawUnsupportedShadersPass : BurtRenderPass // Renders non-BurtRP shaders with an error material so unsupported materials are obvious.
+    internal sealed class BurtDrawUnsupportedShadersPass : BurtRenderPass // 用错误材质绘制非 BurtRP shader，让不支持的材质在画面中明显暴露。
     {
-        private const string ErrorShaderName = "Hidden/InternalErrorShader"; // Stores Unity's built-in error shader name.
+        private const string ErrorShaderName = "Hidden/InternalErrorShader"; // 保存 Unity 内置错误 shader 名称。
 
-        private Material errorMaterial; // Caches the runtime error material to avoid creating one every frame.
+        private Material errorMaterial; // 缓存运行时错误材质，避免每帧重复创建。
 
-        private bool hasLoggedMissingErrorShader; // Tracks whether the missing-error-shader warning has already been printed.
+        private bool hasLoggedMissingErrorShader; // 记录缺失错误 shader 的警告是否已经打印，避免 Console 刷屏。
 
-        public override string Name => "Burt Draw Unsupported Shaders"; // Names this pass for RenderGraph debug output and Frame Debugger markers.
+        public override string Name => "Burt Draw Unsupported Shaders"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 标记。
 
-        public override void Configure(BurtRenderPassBuilder builder) // Declares the resources used by this pass.
+        public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 使用的资源。
         {
-            builder.ReadCameraDepth(); // Declares that error-material rendering uses the current CameraDepth for depth testing.
+            builder.ReadCameraDepth(); // 声明错误材质绘制会读取当前 CameraDepth 做深度测试。
 
-            builder.WriteCameraColor(); // Declares that error-material rendering writes visible pixels into CameraColor.
+            builder.WriteCameraColor(); // 声明错误材质绘制会把可见像素写入 CameraColor。
         }
 
-        public override void Execute(BurtRenderGraphContext context) // Executes unsupported-shader debug rendering.
+        public override void Execute(BurtRenderGraphContext context) // 执行不支持 shader 的调试绘制。
         {
-            var renderContext = context.ScriptableContext; // Reads Unity's SRP context so this pass can submit commands and draw renderers.
+            var renderContext = context.ScriptableContext; // 读取 Unity SRP 上下文，用来提交命令并绘制 renderer。
 
-            var request = context.Request; // Reads the current render request so this pass can access culling results and the camera.
+            var request = context.Request; // 读取当前渲染请求，用来访问剔除结果和相机。
 
-            var camera = request.Camera; // Reads the current camera for sorting settings.
+            var camera = request.Camera; // 读取当前相机，用来创建排序设置。
 
-            var cameraColorTarget = context.CameraColorTarget; // Reads the CameraColor target that receives the error-material output.
+            var cameraColorTarget = context.CameraColorTarget; // 读取接收错误材质输出的 CameraColor 目标。
 
-            var cameraDepthTarget = context.CameraDepthTarget; // Reads the CameraDepth target that controls depth testing for error-material output.
+            var cameraDepthTarget = context.CameraDepthTarget; // 读取控制错误材质深度测试的 CameraDepth 目标。
 
-            if (!cameraColorTarget.IsValid) // Checks whether the graph registered a valid color target.
+            if (!cameraColorTarget.IsValid) // 检查 RenderGraph 是否注册了有效颜色目标。
             {
-                return; // Stops the pass because there is nowhere safe to draw the error material.
+                return; // 没有安全的颜色目标时直接结束，避免错误材质画到无效 RT。
             }
 
-            if (!cameraDepthTarget.IsValid) // Checks whether the graph registered a valid depth target.
+            if (!cameraDepthTarget.IsValid) // 检查 RenderGraph 是否注册了有效深度目标。
             {
-                return; // Stops the pass because error-material rendering should not run without the current depth target.
+                return; // 没有当前深度目标时直接结束，避免错误材质使用错误深度状态。
             }
 
-            var material = GetErrorMaterial(); // Gets the cached Unity error material or creates it on first use.
+            var material = GetErrorMaterial(); // 获取缓存的 Unity 错误材质，第一次使用时会创建。
 
-            if (material == null) // Checks whether error material creation failed.
+            if (material == null) // 检查错误材质是否创建失败。
             {
-                return; // Stops the pass because DrawRenderers requires a valid override material here.
+                return; // 没有有效 override material 时直接结束，避免 DrawRenderers 报错。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // Gets a pooled CommandBuffer named after this pass.
+            var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取一个以当前 Pass 命名的 CommandBuffer。
 
-            cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // Rebinds the current request color and depth targets before drawing unsupported shaders.
+            cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 在绘制不支持 shader 前重新绑定当前 request 的颜色和深度目标。
 
-            renderContext.ExecuteCommandBuffer(cmd); // Submits the render-target binding command to Unity's render context.
+            renderContext.ExecuteCommandBuffer(cmd); // 把渲染目标绑定命令提交给 Unity 渲染上下文。
 
-            CommandBufferPool.Release(cmd); // Releases the CommandBuffer back to Unity's pool to avoid per-frame allocations.
+            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回 Unity 池，避免每帧分配。
 
-            var sortingSettings = new SortingSettings(camera); // Creates sorting settings based on the current camera.
+            var sortingSettings = new SortingSettings(camera); // 基于当前相机创建排序设置。
 
-            sortingSettings.criteria = SortingCriteria.CommonOpaque; // Uses stable opaque-style sorting for the debug overlay pass.
+            sortingSettings.criteria = SortingCriteria.CommonOpaque; // 使用稳定的不透明排序，保证调试覆盖绘制顺序可预测。
 
-            var drawingSettings = BurtDrawingSettingsUtility.CreateUnsupportedDrawingSettings(sortingSettings, material); // Builds DrawingSettings that match known non-BurtRP LightMode names.
+            var drawingSettings = BurtDrawingSettingsUtility.CreateUnsupportedDrawingSettings(sortingSettings, material); // 创建会匹配已知非 BurtRP LightMode 的 DrawingSettings。
 
-            var filteringSettings = FilteringSettings.defaultValue; // Uses default filtering so unsupported shaders in any queue can be reported.
+            var filteringSettings = FilteringSettings.defaultValue; // 使用默认过滤，让任意队列中的不支持 shader 都有机会被报告。
 
-            renderContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings); // Draws visible renderers whose shader passes are not supported by BurtRP.
+            renderContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings); // 绘制所有 shader pass 不被 BurtRP 支持的可见 renderer。
         }
 
-        private Material GetErrorMaterial() // Gets or creates the material used for unsupported shader rendering.
+        private Material GetErrorMaterial() // 获取或创建用于绘制不支持 shader 的错误材质。
         {
-            if (errorMaterial != null) // Checks whether the material has already been created.
+            if (errorMaterial != null) // 检查错误材质是否已经创建。
             {
-                return errorMaterial; // Returns the cached material instance.
+                return errorMaterial; // 返回缓存的材质实例。
             }
 
-            var shader = Shader.Find(ErrorShaderName); // Looks up Unity's built-in error shader by name.
+            var shader = Shader.Find(ErrorShaderName); // 通过名称查找 Unity 内置错误 shader。
 
-            if (shader == null) // Checks whether the error shader lookup failed.
+            if (shader == null) // 检查错误 shader 查找是否失败。
             {
-                if (!hasLoggedMissingErrorShader) // Checks whether this warning has already been logged.
+                if (!hasLoggedMissingErrorShader) // 检查这个警告是否已经输出过。
                 {
-                    Debug.LogWarning("BurtRP could not find shader: " + ErrorShaderName); // Logs a single warning so the missing built-in shader can be diagnosed.
+                    Debug.LogWarning("BurtRP could not find shader: " + ErrorShaderName); // 输出一次警告，方便诊断内置错误 shader 缺失。
 
-                    hasLoggedMissingErrorShader = true; // Marks the warning as printed to avoid Console spam.
+                    hasLoggedMissingErrorShader = true; // 标记警告已经打印，避免 Console 刷屏。
                 }
 
-                return null; // Returns null so the caller can skip unsupported-shader rendering safely.
+                return null; // 返回 null，让调用方安全跳过不支持 shader 绘制。
             }
 
-            errorMaterial = new Material(shader); // Creates the runtime material from Unity's error shader.
+            errorMaterial = new Material(shader); // 使用 Unity 错误 shader 创建运行时材质。
 
-            errorMaterial.hideFlags = HideFlags.HideAndDontSave; // Hides the runtime material and prevents it from being saved into assets or scenes.
+            errorMaterial.hideFlags = HideFlags.HideAndDontSave; // 隐藏运行时材质，并防止它被保存进资源或场景。
 
-            return errorMaterial; // Returns the cached runtime error material.
+            return errorMaterial; // 返回缓存后的运行时错误材质。
         }
     }
 
@@ -834,7 +899,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
     {
         private const string DebugShadowShaderName = "Hidden/BurtRP/DebugMainLightShadowMap"; // 定义调试 shadow map shader 的查找名称，必须和 shader 文件里的名称一致。
         private static readonly int ShadowDebugExposureId = Shader.PropertyToID("_BurtMainLightShadowDebugExposure"); // 缓存调试曝光属性 ID，避免每帧字符串查找。
-        private static readonly int ShadowDebugYFlipId = Shader.PropertyToID("_BurtMainLightShadowDebugYFlip"); // Caches the debug Y pre-flip property so the pass does not search this shader name every frame.
+        private static readonly int ShadowDebugYFlipId = Shader.PropertyToID("_BurtMainLightShadowDebugYFlip"); // 缓存 shadow debug 的 Y 预翻转属性 ID，避免每帧字符串查找。
         private Material debugShadowMaterial; // 缓存运行时调试材质，避免每帧重复创建 Material。
         private bool hasLoggedMissingShader; // 记录是否已经输出过缺失 shader 警告，避免 Console 每帧刷屏。
         public override string Name => "Burt Debug Main Light Shadow Map"; // 返回这个 Pass 的名称，方便 RenderGraph Debug 和 Frame Debugger 识别。

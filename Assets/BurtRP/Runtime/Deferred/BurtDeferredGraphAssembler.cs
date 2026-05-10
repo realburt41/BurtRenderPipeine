@@ -1,80 +1,434 @@
-namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred 组装器和其他运行时代码处在同一模块。
+namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred 组装器可以直接访问运行时 Pass 和资源类型。
 {
-    public sealed class BurtDeferredGraphAssembler : BurtRenderGraphAssembler // 定义 BurtRP 的 Deferred 渲染图组装器，当前阶段先搭 GBuffer 生命周期骨架。
+    public sealed class BurtDeferredGraphAssembler : BurtRenderGraphAssembler // 定义 Deferred 渲染图组装器，当前阶段先建立可插入 GBuffer 阶段的顺序图。
     {
-        private readonly BurtRenderGraphAssembler forwardFallbackAssembler = new BurtForwardGraphAssembler(); // 临时复用 Forward 组装器，保证 Deferred 实验模式当前仍能输出稳定画面。
+        private readonly BurtRenderPass allocateCameraColorPass = new BurtAllocateCameraColorPass(); // 创建 CameraColor 分配 Pass，保证 Deferred 最终仍然有中间颜色输出。
+        private readonly BurtRenderPass allocateCameraDepthPass = new BurtAllocateCameraDepthPass(); // 创建 CameraDepth 分配 Pass，保证 GBuffer MRT 和后续 Forward fallback 都能共用深度。
+        private readonly BurtRenderPass allocateGBuffer0Pass = new BurtAllocateGBuffer0Pass(); // 创建 GBuffer0 分配 Pass，第一版用于保存 baseColor 和 occlusion。
+        private readonly BurtRenderPass allocateGBuffer1Pass = new BurtAllocateGBuffer1Pass(); // 创建 GBuffer1 分配 Pass，第一版用于保存 normal、metallic 和 smoothness。
+        private readonly BurtRenderPass allocateGBuffer2Pass = new BurtAllocateGBuffer2Pass(); // 创建 GBuffer2 分配 Pass，第一版用于保存 emission 和 reflectance。
+        private readonly BurtRenderPass setupLightingPass = new BurtSetupLightingPass(); // 创建灯光全局参数上传 Pass，让 Forward 和后续 Deferred Lighting 共享同一套 LightingGlobals。
+        private readonly BurtRenderPass allocateMainLightShadowMapPass = new BurtAllocateMainLightShadowMapPass(); // 创建主光阴影图分配 Pass，让 Deferred 路径继续复用现有主光阴影。
+        private readonly BurtRenderPass drawMainLightShadowCasterPass = new BurtDrawMainLightShadowCasterPass(); // 创建主光 ShadowCaster 绘制 Pass，把阴影深度写入 MainLightShadowMap。
+        private readonly BurtRenderPass seedOverlayCameraColorPass = new BurtSeedOverlayCameraColorPass(); // 创建 Overlay 颜色继承 Pass，保持非共享 Overlay 的旧兼容行为。
+        private readonly BurtRenderPass setGBufferRenderTargetsPass = new BurtSetGBufferRenderTargetsPass(); // 创建 GBuffer MRT 绑定 Pass，用来验证三张 GBuffer 能被同时绑定。
+        private readonly BurtRenderPass clearGBufferRenderTargetsPass = new BurtClearGBufferRenderTargetsPass(); // 创建 GBuffer 清理 Pass，用来给三张 GBuffer 写入确定的默认值。
+        private readonly BurtRenderPass drawGBufferOpaquePass = new BurtDrawGBufferOpaquePass(); // 创建 GBuffer 不透明绘制 Pass，后续由 shader 侧 BurtGBuffer pass 写入材质数据。
+        private readonly BurtRenderPass deferredLightingPass = new BurtDeferredLightingPass(); // 创建 Deferred Lighting 全屏合成 Pass，用来把 GBuffer 光照结果写回 CameraColor。
+        private readonly BurtRenderPass setRenderTargetPass = new BurtSetRenderTargetPass(); // 创建 CameraColor/CameraDepth 绑定 Pass，GBuffer 阶段前后都会用它切回正常颜色目标。
+        private readonly BurtRenderPass clearRenderTargetPass = new BurtClearRenderTargetPass(); // 创建相机清屏 Pass，保证当前 Deferred 实验模式输出仍和 Forward 一致。
+        private readonly BurtRenderPass depthPrepass = new BurtDepthPrepass(); // 创建深度预写 Pass，暂时复用 Forward 的深度建立逻辑。
+        private readonly BurtRenderPass drawDeferredForwardOnlyOpaquePass = new BurtDrawDeferredForwardOnlyOpaquePass(); // 创建 Deferred 后前向兜底 Pass，只绘制显式声明 BurtForwardOnly 的不透明物体。
+        private readonly BurtRenderPass drawSkyboxPass = new BurtDrawSkyboxPass(); // 创建天空盒绘制 Pass，让 Deferred 实验模式仍能保留原有天空盒行为。
+        private readonly BurtRenderPass drawTransparentPass = new BurtDrawTransparentPass(); // 创建透明物体绘制 Pass，未来 Deferred 第一版也会继续让透明走 Forward。
+        private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // 创建不支持 Shader 调试 Pass，让非 BurtRP 材质继续显示错误材质。
+        private readonly BurtRenderPass allocatePostProcessColorPass = new BurtAllocatePostProcessColorPass(); // 创建后处理中间 RT 分配 Pass，保持后处理尾部链路不分 Forward/Deferred。
+        private readonly BurtRenderPass postProcessPass = new BurtPostProcessPass(); // 创建后处理 Pass，让 Tonemapping 在 Deferred 实验模式下也能继续工作。
+        private readonly BurtRenderPass releasePostProcessColorPass = new BurtReleasePostProcessColorPass(); // 创建后处理中间 RT 释放 Pass，避免后处理临时资源泄漏。
+        private readonly BurtRenderPass debugCameraDepthPass = new BurtDebugCameraDepthPass(); // 创建深度调试 Pass，让 Deferred 实验模式仍能显示 CameraDepth。
+        private readonly BurtRenderPass debugMainLightShadowMapPass = new BurtDebugMainLightShadowMapPass(); // 创建主光阴影图调试 Pass，让 Deferred 实验模式仍能查看 shadow map。
+        private readonly BurtRenderPass debugGBufferPass = new BurtDebugGBufferPass(); // 创建 GBuffer 调试 Pass，让 Deferred 模式可以直接检查三张 GBuffer 的写入内容。
+        private readonly BurtRenderPass finalBlitPass = new BurtFinalBlitPass(); // 创建最终拷贝 Pass，把 CameraColor 输出到 request 指定的最终目标。
+        private readonly BurtRenderPass releaseMainLightShadowMapPass = new BurtReleaseMainLightShadowMapPass(); // 创建主光阴影图释放 Pass，结束 MainLightShadowMap 生命周期。
+        private readonly BurtRenderPass releaseGBuffer0Pass = new BurtReleaseGBuffer0Pass(); // 创建 GBuffer0 释放 Pass，结束第一张 Deferred 缓存生命周期。
+        private readonly BurtRenderPass releaseGBuffer1Pass = new BurtReleaseGBuffer1Pass(); // 创建 GBuffer1 释放 Pass，结束第二张 Deferred 缓存生命周期。
+        private readonly BurtRenderPass releaseGBuffer2Pass = new BurtReleaseGBuffer2Pass(); // 创建 GBuffer2 释放 Pass，结束第三张 Deferred 缓存生命周期。
+        private readonly BurtRenderPass releaseCameraColorPass = new BurtReleaseCameraColorPass(); // 创建 CameraColor 释放 Pass，保持和 Forward 一致的相机颜色资源生命周期。
+        private readonly BurtRenderPass releaseCameraDepthPass = new BurtReleaseCameraDepthPass(); // 创建 CameraDepth 释放 Pass，保持和 Forward 一致的相机深度资源生命周期。
 
-        private readonly BurtRenderPass allocateGBuffer0Pass = new BurtAllocateGBuffer0Pass(); // 创建 GBuffer0 分配 Pass，用来申请 Deferred 第一张材质缓存。
+        public override string Name => "Burt Deferred Graph Assembler"; // 返回当前组装器名称，方便日志和调试工具区分 Forward/Deferred。
 
-        private readonly BurtRenderPass allocateGBuffer1Pass = new BurtAllocateGBuffer1Pass(); // 创建 GBuffer1 分配 Pass，用来申请 Deferred 第二张材质缓存。
-
-        private readonly BurtRenderPass allocateGBuffer2Pass = new BurtAllocateGBuffer2Pass(); // 创建 GBuffer2 分配 Pass，用来申请 Deferred 第三张材质缓存。
-
-        private readonly BurtRenderPass releaseGBuffer0Pass = new BurtReleaseGBuffer0Pass(); // 创建 GBuffer0 释放 Pass，用来结束 Deferred 第一张材质缓存生命周期。
-
-        private readonly BurtRenderPass releaseGBuffer1Pass = new BurtReleaseGBuffer1Pass(); // 创建 GBuffer1 释放 Pass，用来结束 Deferred 第二张材质缓存生命周期。
-
-        private readonly BurtRenderPass releaseGBuffer2Pass = new BurtReleaseGBuffer2Pass(); // 创建 GBuffer2 释放 Pass，用来结束 Deferred 第三张材质缓存生命周期。
-
-        public override string Name => "Burt Deferred Graph Assembler"; // 返回当前组装器名称，方便后续调试和性能标记。
-
-        public override void Assemble( // 实现旧组装入口，保证外部未传入执行选项时仍然能组装 Deferred 实验图。
+        public override void Assemble( // 实现旧组装入口，兼容没有传入相机栈执行选项的调用方。
             BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
             BurtRenderRequest request, // 接收当前正在组装的渲染请求。
-            BurtRenderPipelineAsset asset) // 接收管线资产配置，用来决定是否启用后处理、阴影等功能。
+            BurtRenderPipelineAsset asset) // 接收管线资产配置，用来读取 Renderer Mode、阴影和后处理开关。
         {
-            Assemble(graph, request, asset, BurtRequestRenderOptions.CreateSingleRequest()); // 把旧入口转发到新入口，并使用旧行为默认选项。
+            Assemble(graph, request, asset, BurtRequestRenderOptions.CreateSingleRequest()); // 把旧入口转发到新入口，并使用单 request 生命周期作为默认行为。
         }
 
-        public override void Assemble( // 实现带栈级执行选项的组装函数。
+        public override void Assemble( // 实现带相机栈执行选项的组装入口。
             BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
             BurtRenderRequest request, // 接收当前正在组装的渲染请求。
-            BurtRenderPipelineAsset asset, // 接收管线资产配置，用来决定 Renderer Mode 和后续开关。
-            BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RenderTarget 生命周期选项。
+            BurtRenderPipelineAsset asset, // 接收管线资产配置，用来读取 Depth Prepass、Debug 和后处理开关。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的相机栈 RT 生命周期选项。
         {
-            if (graph == null) // 如果 graph 为空，说明调用方没有提供可写入的 RenderGraph。
+            if (!CanAssemble(graph, request)) // 先检查 graph、request 和 camera 是否满足组装条件。
             {
-                return; // 直接结束组装，避免空引用错误。
+                return; // 输入无效时直接结束，避免后续 Pass 访问空对象。
             }
 
-            if (request == null) // 如果 request 为空，说明调用方传入了异常数据。
+            var safeRenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // renderOptions 为空时回退到单 request 行为，避免所有生命周期标记都缺失。
+            var useLocalGBufferTargets = ShouldUseLocalGBufferTargets(safeRenderOptions); // 当前阶段让 GBuffer 生命周期跟随本 request 的 CameraColor/CameraDepth 申请。
+            var useMainLightShadow = BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 复用阴影工具判断当前 request 是否需要主光阴影图。
+            var mainLightShadowMapIsValid = graph.Resources.GetMainLightShadowMap().IsValid; // 读取资源表里的 MainLightShadowMap 句柄状态，用于结构化诊断。
+
+            BurtShadowUtility.LogMainLightShadowDiagnostics(request, asset, useMainLightShadow, mainLightShadowMapIsValid); // 输出主光阴影诊断，保持 Forward 和 Deferred 的排查方式一致。
+            AddCameraAllocationPasses(graph, safeRenderOptions); // 先申请 CameraColor 和 CameraDepth，确保 GBuffer MRT 可以使用独立深度。
+            AddGBufferAllocationPasses(graph, useLocalGBufferTargets); // 再申请三张 GBuffer，给后面的 MRT 绑定和清理阶段准备真实 RT。
+
+            graph.AddPass(setupLightingPass); // 上传灯光和默认阴影全局参数，后续 Forward fallback 与 Deferred Lighting 都会依赖它。
+            AddShadowPasses(graph, useMainLightShadow); // 如果需要主光阴影，就绘制 shadow map。
+
+            if (ShouldSeedOverlayCameraColor(request, safeRenderOptions)) // 非共享 Overlay 且不清颜色时，需要继承最终目标内容。
             {
-                return; // 直接结束组装，不添加任何 Pass。
+                graph.AddPass(seedOverlayCameraColorPass); // 把已有最终目标复制到 CameraColor，保持 Overlay 旧兼容行为。
             }
 
-            if (!request.IsValid) // 如果 request 被标记为无效，说明它不应该被渲染。
+            graph.AddPass(setRenderTargetPass); // 先绑定 CameraColor/CameraDepth，保证清屏和 Depth Prepass 写入相机自己的中间目标。
+            graph.AddPass(clearRenderTargetPass); // 按当前相机清屏配置清理 CameraColor/CameraDepth，保持实验模式画面和 Forward 一致。
+            AddDepthPrepass(graph, asset); // 根据资产开关决定是否加入深度预写。
+            AddGBufferBootstrapPasses(graph, useLocalGBufferTargets); // 在相机清屏和深度预写后插入 GBuffer MRT 绑定和清理阶段。
+            AddDrawGBufferOpaquePass(graph, useLocalGBufferTargets); // 绘制支持 BurtGBuffer pass 的不透明物体，当前 shader 侧没有时会自然为空。
+            AddReturnToCameraColorPass(graph, useLocalGBufferTargets); // GBuffer 阶段完成后重新绑定 CameraColor，避免 Forward fallback 继续画进 GBuffer。
+
+            AddDeferredLightingPass(graph, useLocalGBufferTargets); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
+            AddDeferredForwardOnlyOpaqueFallback(graph, asset); // 根据资产开关决定是否绘制不能写入 GBuffer 的前向专用不透明物体。
+            graph.AddPass(drawSkyboxPass); // 在不透明之后绘制天空盒，保持 Forward 现有顺序。
+            graph.AddPass(drawTransparentPass); // 透明物体继续走 Forward，未来 Deferred 第一版也会保持这个策略。
+            AddUnsupportedShaderDebug(graph, asset); // 根据资产开关决定是否绘制不支持 Shader 的错误材质。
+            AddPostProcessPasses(graph, request, asset, safeRenderOptions); // 根据后处理和 FinalBlit 条件决定是否插入 Tonemapping 链路。
+            AddDebugViewPasses(graph, asset, useMainLightShadow, useLocalGBufferTargets); // 根据 Debug 开关决定是否覆盖显示深度、主光阴影或 GBuffer。
+
+            if (safeRenderOptions.ShouldFinalBlit) // 只有当前 request 是最终输出点时才执行 FinalBlit。
             {
-                return; // 直接结束组装，不添加任何 Pass。
+                graph.AddPass(finalBlitPass); // 把 CameraColor 拷贝到 request.TargetIdentifier。
             }
 
-            if (request.Camera == null) // 如果 request 没有关联 Camera，当前 Deferred 实验流程无法执行。
-            {
-                return; // 直接结束组装，避免后续 Pass 访问空相机。
-            }
-
-            AddGBufferAllocatePasses(graph); // 先插入 GBuffer 分配 Pass，让资源生命周期在 RenderGraph Debug 里可见。
-
-            forwardFallbackAssembler.Assemble(graph, request, asset, renderOptions); // 当前阶段仍复用 Forward 完成真实画面输出，避免 Deferred 骨架影响现有渲染结果。
-
-            AddGBufferReleasePasses(graph); // 最后插入 GBuffer 释放 Pass，保证实验资源不会泄漏到下一帧。
+            AddShadowReleasePasses(graph, useMainLightShadow); // 释放主光阴影图，结束阴影资源生命周期。
+            AddGBufferReleasePasses(graph, useLocalGBufferTargets); // 释放本 request 内申请的 GBuffer，当前阶段不跨 request 保留它们。
+            AddCameraReleasePasses(graph, safeRenderOptions); // 最后按相机栈策略释放 CameraColor 和 CameraDepth。
         }
 
-        private void AddGBufferAllocatePasses(BurtRenderGraph graph) // 添加三张 GBuffer 的分配 Pass。
+        private static bool CanAssemble( // 判断当前输入是否允许组装 Deferred RenderGraph。
+            BurtRenderGraph graph, // 接收待检查的 RenderGraph。
+            BurtRenderRequest request) // 接收待检查的渲染请求。
         {
-            graph.AddPass(allocateGBuffer0Pass); // 添加 GBuffer0 分配 Pass，后续会保存 baseColor 和 occlusion。
+            if (graph == null) // graph 为空说明调用方没有提供可写入的图。
+            {
+                return false; // 返回 false，阻止后续组装。
+            }
 
-            graph.AddPass(allocateGBuffer1Pass); // 添加 GBuffer1 分配 Pass，后续会保存 normal、metallic 和 smoothness。
+            if (request == null) // request 为空说明没有有效渲染任务。
+            {
+                return false; // 返回 false，阻止后续组装。
+            }
 
-            graph.AddPass(allocateGBuffer2Pass); // 添加 GBuffer2 分配 Pass，后续会保存 emission 和 reflectance。
+            if (!request.IsValid) // request 标记为无效时不应该被渲染。
+            {
+                return false; // 返回 false，避免给无效 request 添加 Pass。
+            }
+
+            return request.Camera != null; // 只有 request 拥有真实 Camera 时才允许组装后续 Pass。
         }
 
-        private void AddGBufferReleasePasses(BurtRenderGraph graph) // 添加三张 GBuffer 的释放 Pass。
+        private void AddCameraAllocationPasses( // 按相机栈生命周期添加 CameraColor 和 CameraDepth 分配 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的 RT 生命周期选项。
         {
-            graph.AddPass(releaseGBuffer2Pass); // 先释放 GBuffer2，释放顺序和申请顺序相反，便于未来排查生命周期。
+            if (renderOptions.ShouldAllocateCameraColor) // 当前 request 需要负责申请 CameraColor 时才添加分配 Pass。
+            {
+                graph.AddPass(allocateCameraColorPass); // 添加 CameraColor 分配 Pass。
+            }
 
-            graph.AddPass(releaseGBuffer1Pass); // 释放 GBuffer1，结束第二张 Deferred 材质缓存生命周期。
+            if (renderOptions.ShouldAllocateCameraDepth) // 当前 request 需要负责申请 CameraDepth 时才添加分配 Pass。
+            {
+                graph.AddPass(allocateCameraDepthPass); // 添加 CameraDepth 分配 Pass。
+            }
+        }
 
-            graph.AddPass(releaseGBuffer0Pass); // 最后释放 GBuffer0，结束第一张 Deferred 材质缓存生命周期。
+        private void AddGBufferAllocationPasses( // 添加三张 GBuffer 的分配 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            bool useLocalGBufferTargets) // 接收当前 request 是否需要本地图内 GBuffer 生命周期。
+        {
+            if (!useLocalGBufferTargets) // 当前 request 不负责申请 CameraColor/CameraDepth 时，也暂时不申请 GBuffer。
+            {
+                return; // 直接返回，避免在共享栈的 Overlay request 上申请无用 GBuffer。
+            }
+
+            graph.AddPass(allocateGBuffer0Pass); // 添加 GBuffer0 分配 Pass。
+            graph.AddPass(allocateGBuffer1Pass); // 添加 GBuffer1 分配 Pass。
+            graph.AddPass(allocateGBuffer2Pass); // 添加 GBuffer2 分配 Pass。
+        }
+
+        private void AddShadowPasses( // 添加主光阴影生成 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            bool useMainLightShadow) // 接收当前 request 是否启用主光阴影。
+        {
+            if (!useMainLightShadow) // 没有主光阴影时不需要申请或绘制 shadow map。
+            {
+                return; // 直接返回，减少无意义 Pass。
+            }
+
+            graph.AddPass(allocateMainLightShadowMapPass); // 添加主光阴影图分配 Pass。
+            graph.AddPass(drawMainLightShadowCasterPass); // 添加主光 ShadowCaster 绘制 Pass。
+        }
+
+        private void AddGBufferBootstrapPasses( // 添加 GBuffer MRT 结构验证 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            bool useLocalGBufferTargets) // 接收当前 request 是否拥有本地图内 GBuffer。
+        {
+            if (!useLocalGBufferTargets) // 没有本地 GBuffer 生命周期时不能安全绑定 MRT。
+            {
+                return; // 直接返回，避免在没有申请 GBuffer 的 request 上绑定无效 RT。
+            }
+
+            graph.AddPass(setGBufferRenderTargetsPass); // 添加 MRT 绑定 Pass，验证三张 GBuffer 可以同时作为颜色目标。
+            graph.AddPass(clearGBufferRenderTargetsPass); // 添加 GBuffer 清理 Pass，给 GBuffer 写入稳定默认值。
+        }
+
+        private void AddDrawGBufferOpaquePass( // 添加不透明 GBuffer 绘制 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            bool useLocalGBufferTargets) // 接收当前 request 是否拥有本地图内 GBuffer。
+        {
+            if (!useLocalGBufferTargets) // 没有本地 GBuffer 生命周期时不能安全绘制 GBuffer。
+            {
+                return; // 直接返回，避免 DrawRenderers 绑定无效 MRT。
+            }
+
+            graph.AddPass(drawGBufferOpaquePass); // 添加 GBuffer 不透明绘制 Pass。
+        }
+
+        private void AddReturnToCameraColorPass( // 在 GBuffer 阶段后重新绑定相机颜色目标。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            bool useLocalGBufferTargets) // 接收当前 request 是否刚刚执行过 GBuffer 阶段。
+        {
+            if (!useLocalGBufferTargets) // 如果没有切换到 GBuffer MRT，就不需要额外切回 CameraColor。
+            {
+                return; // 直接返回，保持当前 CameraColor 绑定状态不变。
+            }
+
+            graph.AddPass(setRenderTargetPass); // 添加一次 CameraColor/CameraDepth 绑定 Pass，确保后续 Forward fallback 输出到正常相机颜色。
+        }
+
+        private void AddDeferredForwardOnlyOpaqueFallback( // 添加 Deferred 后的 ForwardOnly 不透明兜底绘制。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRenderPipelineAsset asset) // 接收管线资产配置，用来读取是否启用 ForwardOnly fallback。
+        {
+            if (!ShouldUseDeferredForwardOnlyOpaqueFallback(asset)) // 如果资产关闭了兜底绘制，就让画面完全依赖 Deferred Lighting 和后续透明 Forward。
+            {
+                return; // 直接返回，避免额外绘制 ForwardOnly 不透明物体。
+            }
+
+            graph.AddPass(drawDeferredForwardOnlyOpaquePass); // 添加 Deferred 后前向兜底 Pass，只会绘制 LightMode=BurtForwardOnly 的物体。
+        }
+
+        private void AddDeferredLightingPass( // 添加 Deferred Lighting 全屏合成 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            bool useLocalGBufferTargets) // 接收当前 request 是否拥有本地图内 GBuffer。
+        {
+            if (!useLocalGBufferTargets) // 没有本地 GBuffer 生命周期时不能执行 Deferred Lighting。
+            {
+                return; // 直接返回，避免 Deferred Lighting 读取无效 GBuffer。
+            }
+
+            graph.AddPass(deferredLightingPass); // 添加 Deferred Lighting Pass，把 GBuffer + Depth + LightingGlobals 合成到 CameraColor。
+        }
+
+        private void AddDepthPrepass( // 根据资产开关添加深度预写 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRenderPipelineAsset asset) // 接收管线资产配置。
+        {
+            if (!ShouldUseDepthPrepass(asset)) // 如果资产关闭 Depth Prepass，就不添加这个 Pass。
+            {
+                return; // 直接返回，保持 Inspector 开关生效。
+            }
+
+            graph.AddPass(depthPrepass); // 添加深度预写 Pass。
+        }
+
+        private void AddUnsupportedShaderDebug( // 根据资产开关添加不支持 Shader 调试 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRenderPipelineAsset asset) // 接收管线资产配置。
+        {
+            if (!ShouldUseUnsupportedShaderDebug(asset)) // 如果资产关闭错误材质调试，就不添加这个 Pass。
+            {
+                return; // 直接返回，避免额外绘制。
+            }
+
+            graph.AddPass(drawUnsupportedShadersPass); // 添加不支持 Shader 调试 Pass。
+        }
+
+        private void AddPostProcessPasses( // 根据后处理条件添加后处理链路。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRenderRequest request, // 接收当前 request。
+            BurtRenderPipelineAsset asset, // 接收管线资产配置。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的 RT 生命周期选项。
+        {
+            if (!ShouldUsePostProcessFramework(request, asset, renderOptions)) // 如果后处理不启用或当前 request 不是最终输出点，就不插入后处理。
+            {
+                return; // 直接返回，避免无意义的 PostProcessColor 分配。
+            }
+
+            graph.AddPass(allocatePostProcessColorPass); // 添加后处理中间颜色 RT 分配 Pass。
+            graph.AddPass(postProcessPass); // 添加后处理 Pass，执行 No-op Copy 或 Tonemapping。
+            graph.AddPass(releasePostProcessColorPass); // 添加后处理中间颜色 RT 释放 Pass。
+        }
+
+        private void AddDebugViewPasses( // 根据资产开关添加调试视图 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRenderPipelineAsset asset, // 接收管线资产配置。
+            bool useMainLightShadow, // 接收当前 request 是否真的生成了主光阴影。
+            bool useLocalGBufferTargets) // 接收当前 request 是否拥有可读取的本地 GBuffer。
+        {
+            if (ShouldUseDepthDebugView(asset)) // 如果开启 CameraDepth Debug View，就在 FinalBlit 前覆盖 CameraColor。
+            {
+                graph.AddPass(debugCameraDepthPass); // 添加 CameraDepth 调试 Pass。
+            }
+
+            if (ShouldUseMainLightShadowDebugView(asset, useMainLightShadow)) // 如果开启主光阴影图 Debug View 且当前 request 有 shadow map，就覆盖 CameraColor。
+            {
+                graph.AddPass(debugMainLightShadowMapPass); // 添加主光 shadow map 调试 Pass。
+            }
+
+            if (ShouldUseGBufferDebugView(asset, useLocalGBufferTargets)) // 如果 Deferred 模式开启了 GBuffer Debug 且当前 request 有 GBuffer，就覆盖 CameraColor。
+            {
+                graph.AddPass(debugGBufferPass); // 添加 GBuffer 调试 Pass，显示原始或解码后的 Deferred 缓存内容。
+            }
+        }
+
+        private void AddShadowReleasePasses( // 添加主光阴影释放 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            bool useMainLightShadow) // 接收当前 request 是否启用主光阴影。
+        {
+            if (!useMainLightShadow) // 没有申请主光阴影图时不需要释放。
+            {
+                return; // 直接返回，避免释放不存在的临时 RT。
+            }
+
+            graph.AddPass(releaseMainLightShadowMapPass); // 添加主光阴影图释放 Pass。
+        }
+
+        private void AddGBufferReleasePasses( // 添加三张 GBuffer 的释放 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            bool useLocalGBufferTargets) // 接收当前 request 是否申请过本地 GBuffer。
+        {
+            if (!useLocalGBufferTargets) // 当前 request 没有申请 GBuffer 时不需要释放。
+            {
+                return; // 直接返回，避免释放不存在的临时 RT。
+            }
+
+            graph.AddPass(releaseGBuffer2Pass); // 先释放 GBuffer2，和申请顺序相反，方便观察生命周期。
+            graph.AddPass(releaseGBuffer1Pass); // 再释放 GBuffer1。
+            graph.AddPass(releaseGBuffer0Pass); // 最后释放 GBuffer0。
+        }
+
+        private void AddCameraReleasePasses( // 按相机栈生命周期添加 CameraColor 和 CameraDepth 释放 Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRequestRenderOptions renderOptions) // 接收当前 request 的 RT 生命周期选项。
+        {
+            if (renderOptions.ShouldReleaseCameraColor) // 当前 request 需要负责释放 CameraColor 时才添加释放 Pass。
+            {
+                graph.AddPass(releaseCameraColorPass); // 添加 CameraColor 释放 Pass。
+            }
+
+            if (renderOptions.ShouldReleaseCameraDepth) // 当前 request 需要负责释放 CameraDepth 时才添加释放 Pass。
+            {
+                graph.AddPass(releaseCameraDepthPass); // 添加 CameraDepth 释放 Pass。
+            }
+        }
+
+        private static bool ShouldUseLocalGBufferTargets(BurtRequestRenderOptions renderOptions) // 判断当前 request 是否应该拥有本地图内 GBuffer 生命周期。
+        {
+            if (renderOptions == null) // renderOptions 为空时按单 request 兜底处理。
+            {
+                return true; // 返回 true，让旧入口仍然申请和释放 GBuffer。
+            }
+
+            return renderOptions.ShouldAllocateCameraColor && renderOptions.ShouldAllocateCameraDepth; // 当前阶段只在申请 CameraColor/CameraDepth 的 request 上申请 GBuffer。
+        }
+
+        private static bool ShouldSeedOverlayCameraColor( // 判断 Overlay 是否需要从最终目标继承颜色。
+            BurtRenderRequest request, // 接收当前 request，用来判断相机角色和清颜色意图。
+            BurtRequestRenderOptions renderOptions) // 接收相机栈 RT 生命周期选项，用来判断是否共享 CameraColor。
+        {
+            if (request == null) // request 为空说明输入异常。
+            {
+                return false; // 返回 false，避免异常 request 添加 Overlay 继承 Pass。
+            }
+
+            if (renderOptions != null && renderOptions.UseSharedRenderTargets) // 共享栈级 RT 时，Base 的结果已经留在 CameraColor 里。
+            {
+                return false; // 返回 false，避免从尚未 FinalBlit 的最终目标复制旧画面。
+            }
+
+            return request.Type == BurtRenderRequestType.OverlayCamera && !request.OverlayClearsColor; // 非共享 Overlay 且不清颜色时才需要复制最终目标作为底图。
+        }
+
+        private static bool ShouldUseDepthPrepass(BurtRenderPipelineAsset asset) // 判断是否启用 Depth Prepass。
+        {
+            if (asset == null) // asset 为空时没有 Inspector 配置来源。
+            {
+                return true; // 默认启用 Depth Prepass，保持教程管线的安全行为。
+            }
+
+            return asset.EnableDepthPrepass; // 使用资产上的 Depth Prepass 开关。
+        }
+
+        private static bool ShouldUseDeferredForwardOnlyOpaqueFallback(BurtRenderPipelineAsset asset) // 判断 Deferred 模式是否启用 ForwardOnly 不透明兜底。
+        {
+            if (asset == null) // asset 为空时没有 Inspector 配置来源。
+            {
+                return true; // 默认开启兜底入口，方便显式声明 BurtForwardOnly 的 shader 在异常资产路径下仍有绘制机会。
+            }
+
+            return asset.EnableDeferredForwardOpaqueFallback; // 使用资产上的 Deferred ForwardOnly 不透明兜底开关。
+        }
+
+        private static bool ShouldUseUnsupportedShaderDebug(BurtRenderPipelineAsset asset) // 判断是否插入不支持 Shader 调试 Pass。
+        {
+            if (asset == null) // asset 为空时没有 Inspector 配置来源。
+            {
+                return true; // 默认开启错误材质显示，避免不支持材质静默消失。
+            }
+
+            return asset.EnableUnsupportedShaderDebug; // 使用资产上的不支持 Shader 调试开关。
+        }
+
+        private static bool ShouldUsePostProcessFramework( // 判断是否启用后处理链路。
+            BurtRenderRequest request, // 接收当前 request。
+            BurtRenderPipelineAsset asset, // 接收管线资产配置。
+            BurtRequestRenderOptions renderOptions) // 接收相机栈 RT 生命周期选项。
+        {
+            if (renderOptions != null && !renderOptions.ShouldFinalBlit) // 当前 request 不是最终输出点时不应该执行后处理。
+            {
+                return false; // 返回 false，把后处理推迟到真正 FinalBlit 之前。
+            }
+
+            return BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 复用后处理工具逻辑，保证资源注册和 Pass 组装条件一致。
+        }
+
+        private static bool ShouldUseDepthDebugView(BurtRenderPipelineAsset asset) // 判断是否启用 CameraDepth 调试视图。
+        {
+            if (asset == null) // asset 为空时没有 Inspector 配置来源。
+            {
+                return false; // 默认关闭调试视图，避免覆盖正常画面。
+            }
+
+            return asset.EnableDepthDebugView; // 使用资产上的深度调试开关。
+        }
+
+        private static bool ShouldUseMainLightShadowDebugView( // 判断是否启用主光 shadow map 调试视图。
+            BurtRenderPipelineAsset asset, // 接收管线资产配置。
+            bool useMainLightShadow) // 接收当前 request 是否真的生成了主光阴影图。
+        {
+            if (!useMainLightShadow) // 当前 request 没有 shadow map 时没有可视化目标。
+            {
+                return false; // 返回 false，避免 debug pass 读取无效资源。
+            }
+
+            if (asset == null) // asset 为空时没有 Inspector 配置来源。
+            {
+                return false; // 默认关闭 shadow map 调试视图。
+            }
+
+            return asset.EnableMainLightShadowDebugView; // 使用资产上的主光 shadow map 调试开关。
+        }
+
+        private static bool ShouldUseGBufferDebugView( // 判断是否启用 Deferred GBuffer 调试视图。
+            BurtRenderPipelineAsset asset, // 接收管线资产配置。
+            bool useLocalGBufferTargets) // 接收当前 request 是否真的申请了 GBuffer。
+        {
+            return BurtGBufferDebugViewUtility.ShouldUseGBufferDebugView(asset, useLocalGBufferTargets); // 统一使用资产面板和 Shading Debug Overlay 的合并结果决定是否插入 GBuffer Debug Pass。
         }
     }
 }

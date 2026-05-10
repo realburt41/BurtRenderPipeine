@@ -432,6 +432,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             var serializedAsset = new SerializedObject(asset); // 通过 SerializedObject 访问私有 SerializeField，避免改运行时 API。
             SetBool(serializedAsset, "enableDepthDebugView", mode == BurtShadingDebugMode.CameraDepth); // CameraDepth 模式开启现有深度调试。
             SetBool(serializedAsset, "enableMainLightShadowDebugView", mode == BurtShadingDebugMode.MainLightShadow); // MainLightShadow 模式开启现有阴影调试。
+            SetEnum(serializedAsset, "gBufferDebugViewMode", (int)ResolveGBufferDebugViewMode(mode)); // GBuffer 分类同步到资产上的全屏 GBuffer Debug 模式，让 RenderGraph 能插入 Burt Debug GBuffer。
             serializedAsset.ApplyModifiedPropertiesWithoutUndo(); // Debug 切换不写 Undo 栈，避免污染用户操作历史。
             EditorUtility.SetDirty(asset); // 标记资产已更新，Inspector 和渲染流程能看到变化。
         }
@@ -455,6 +456,41 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             if (property != null) // 字段存在才写入，兼容后续资产字段重命名或裁剪。
             {
                 property.boolValue = value; // 设置 bool 值。
+            }
+        }
+
+        private static void SetEnum(SerializedObject serializedObject, string propertyName, int value) // 安全写入 enum SerializeField。
+        {
+            var property = serializedObject.FindProperty(propertyName); // 查找目标字段。
+
+            if (property != null) // 字段存在才写入，兼容后续资产字段重命名或裁剪。
+            {
+                property.intValue = value; // 写入枚举底层整数值，避免后续 enum 显式数值和 Inspector 索引不一致时同步错误。
+            }
+        }
+
+        private static BurtGBufferDebugViewMode ResolveGBufferDebugViewMode(BurtShadingDebugMode mode) // 把 Overlay 的 GBuffer 分类映射到 BurtRenderPipelineAsset 的全屏 GBuffer Debug 模式。
+        {
+            switch (mode) // 逐项映射，避免非 GBuffer Debug 模式误触发全屏 GBuffer Pass。
+            {
+                case BurtShadingDebugMode.GBufferBaseColor: // Overlay 选择 GBuffer Base Color。
+                    return BurtGBufferDebugViewMode.BaseColor; // 资产同步为 BaseColor。
+                case BurtShadingDebugMode.GBufferNormalWS: // Overlay 选择 GBuffer Normal WS。
+                    return BurtGBufferDebugViewMode.NormalWS; // 资产同步为 NormalWS。
+                case BurtShadingDebugMode.GBufferMetallic: // Overlay 选择 GBuffer Metallic。
+                    return BurtGBufferDebugViewMode.Metallic; // 资产同步为 Metallic。
+                case BurtShadingDebugMode.GBufferSmoothness: // Overlay 选择 GBuffer Smoothness。
+                    return BurtGBufferDebugViewMode.Smoothness; // 资产同步为 Smoothness。
+                case BurtShadingDebugMode.GBufferOcclusion: // Overlay 选择 GBuffer Occlusion。
+                    return BurtGBufferDebugViewMode.Occlusion; // 资产同步为 Occlusion。
+                case BurtShadingDebugMode.GBufferReflectance: // Overlay 选择 GBuffer Reflectance。
+                    return BurtGBufferDebugViewMode.Reflectance; // 资产同步为 Reflectance。
+                case BurtShadingDebugMode.GBufferRoughness: // Overlay 选择 GBuffer Roughness。
+                    return BurtGBufferDebugViewMode.Roughness; // 资产同步为 Roughness。
+                case BurtShadingDebugMode.GBufferDiffuseColor: // Overlay 选择 GBuffer Diffuse Color。
+                    return BurtGBufferDebugViewMode.DiffuseColor; // 资产同步为 DiffuseColor。
+                default: // 其他 Overlay 模式不应该显示真实 GBuffer。
+                    return BurtGBufferDebugViewMode.Disabled; // 资产同步为 Disabled，避免切换到 Lighting/Material 后 GBuffer Debug 残留。
             }
         }
     }

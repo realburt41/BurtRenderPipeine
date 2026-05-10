@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2eea437df4f8f694bbd78bcae9747146, type: 3}
   m_Name: BurtRenderPipelineAsset
   m_EditorClassIdentifier: 
+  rendererMode: 0
   clearColor: {r: 0, g: 0, b: 0, a: 1}
   enableDepthPrepass: 1
   enableDepthDebugView: 0

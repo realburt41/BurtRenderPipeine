@@ -1,10 +1,11 @@
-// BurtRP 的基础光照工具库，当前提供 Simple Lit、单主光 PBR 直接光，以及基于 Unity SH / Reflection Probe 的 PBR 间接光。
+// BurtRP 的基础光照工具库，当前提供 Simple Lit、单主光 PBR 直接光，以及 BurtRP 自有全局 SH / Sky Reflection 的 PBR 间接光。
 #ifndef BURT_LIGHTING_INCLUDED // 开始 include guard，防止同一个 shader 编译单元里重复定义光照函数。
 #define BURT_LIGHTING_INCLUDED // 标记 BurtLighting.hlsl 已经被包含过，后续重复 include 会被跳过。
 
 #include "BurtCommon.hlsl" // 引入安全数学函数，例如 BurtSafeNormalize。
 #include "BurtInput.hlsl" // 引入 BurtSurfaceData，用来读取材质基础色、金属度、光滑度和环境遮蔽。
 #include "BurtBRDF.hlsl" // 引入 PBR BRDF 函数，当前单主光和临时间接高光都会复用这里的 Fresnel/粗糙度工具。
+#include "BurtGBuffer.hlsl" // 引入 shader-only GBuffer 编解码和 PBRData 桥接函数；这里不采样真实 RT，也不触碰 RenderTarget 生命周期。
 
 // 保存从当前着色点指向主方向光的世界空间方向，由 Burt Setup Lighting Pass 上传。
 float4 _BurtMainLightDirection;
@@ -12,8 +13,47 @@ float4 _BurtMainLightDirection;
 // 保存主方向光颜色，由 Burt Setup Lighting Pass 从 Unity 可见光数据中上传。
 float4 _BurtMainLightColor;
 
-// 保存 BurtRP 当前 Simple Lit 路径使用的环境光颜色，PBR 间接光会改用 Unity 内置 SH 和 Reflection Probe。
+// 保存 BurtRP 当前环境光颜色，Simple Lit 会直接使用它，PBR 间接光会把它作为 SH / Sky Reflection 兜底。
 float4 _BurtAmbientLightColor;
+
+// 保存 BurtRP 自己上传的 ambient probe SH R 通道 L0/L1 常量，Deferred 全屏 Pass 会优先使用它。
+float4 _BurtAmbientSHAr;
+
+// 保存 BurtRP 自己上传的 ambient probe SH G 通道 L0/L1 常量，Deferred 全屏 Pass 会优先使用它。
+float4 _BurtAmbientSHAg;
+
+// 保存 BurtRP 自己上传的 ambient probe SH B 通道 L0/L1 常量，Deferred 全屏 Pass 会优先使用它。
+float4 _BurtAmbientSHAb;
+
+// 保存 BurtRP 自己上传的 ambient probe SH R 通道 L2 常量，匹配 UnityCG ShadeSH9 打包方式。
+float4 _BurtAmbientSHBr;
+
+// 保存 BurtRP 自己上传的 ambient probe SH G 通道 L2 常量，匹配 UnityCG ShadeSH9 打包方式。
+float4 _BurtAmbientSHBg;
+
+// 保存 BurtRP 自己上传的 ambient probe SH B 通道 L2 常量，匹配 UnityCG ShadeSH9 打包方式。
+float4 _BurtAmbientSHBb;
+
+// 保存 BurtRP 自己上传的 ambient probe SH C 项常量，匹配 UnityCG ShadeSH9 打包方式。
+float4 _BurtAmbientSHC;
+
+// 标记 BurtRP 自己的 ambient SH 是否已经上传，1 表示可用，0 表示回退到 Unity 内置 ShadeSH9。
+float _BurtAmbientSHEnabled;
+
+// 保存 BurtRP 全局天空反射 cubemap；UNITY_DECLARE_TEXCUBE 会同时声明纹理和 sampler_BurtSkyReflectionTexture，匹配 UNITY_SAMPLE_TEXCUBE_LOD 的宏展开。
+UNITY_DECLARE_TEXCUBE(_BurtSkyReflectionTexture);
+
+// 保存 BurtRP 全局天空反射 HDR 解码参数，当前第一版默认按原始 RGB 使用。
+float4 _BurtSkyReflectionHDR;
+
+// 保存 BurtRP 全局天空反射强度，对应 Unity Lighting 面板的 Reflection Intensity。
+float _BurtSkyReflectionIntensity;
+
+// 标记 BurtRP 全局天空反射 cubemap 是否可用，0 表示回退到环境光颜色。
+float _BurtSkyReflectionEnabled;
+
+// 保存 BurtRP 全局天空反射 cubemap 的最大 mip 索引，避免所有 cubemap 都写死按 0..6 采样。
+float _BurtSkyReflectionMaxMip;
 
 // 保存 BurtRP 当前光照函数需要的一盏灯的数据。
 struct BurtLight
@@ -54,6 +94,55 @@ float3 BurtGetAmbientLightColor()
     return max(_BurtAmbientLightColor.rgb, float3(0.0f, 0.0f, 0.0f));
 }
 
+float BurtLuminanceForIndirectFallback(float3 color) // 计算一个很轻量的亮度值，用来判断 Unity 内置间接光变量是否明显为黑。
+{
+    return dot(max(color, float3(0.0f, 0.0f, 0.0f)), float3(0.2126f, 0.7152f, 0.0722f)); // 使用 Rec.709 亮度权重，先去掉负值避免 SH 过冲影响判断。
+}
+
+float3 BurtSelectIndirectFallbackIfBlack(float3 sampledColor, float3 fallbackColor) // 当 Unity 内置 SH 或 Reflection Probe 没绑定时，回退到 BurtRP 上传的环境光。
+{
+    float sampledLuminance = BurtLuminanceForIndirectFallback(sampledColor); // 计算采样结果亮度，后续用它判断是否接近全黑。
+
+    float useSampledColor = step(0.0001f, sampledLuminance); // 亮度大于阈值时认为 Unity 内置间接光有效，否则走 fallback。
+
+    return lerp(max(fallbackColor, float3(0.0f, 0.0f, 0.0f)), max(sampledColor, float3(0.0f, 0.0f, 0.0f)), useSampledColor); // 在黑色采样时使用环境色兜底，非黑时保留真实 SH/Probe 结果。
+}
+
+float3 BurtEvaluateAmbientSH9(float3 normalWS) // 使用 BurtRP 自己上传的 SH 常量评估环境漫反射照度。
+{
+    float3 safeNormalWS = BurtSafeNormalize(normalWS); // 先安全归一化世界空间法线，避免异常法线放大 SH 结果。
+
+    float4 shNormal = float4(safeNormalWS, 1.0f); // 组装 UnityCG ShadeSH9 所需的 normal.xyzw，其中 w 是常数项。
+
+    float3 linearL0L1; // 创建 L0/L1 输出变量，下面逐通道 dot SH 常量。
+
+    linearL0L1.r = dot(_BurtAmbientSHAr, shNormal); // 计算 R 通道 L0/L1 环境照度。
+
+    linearL0L1.g = dot(_BurtAmbientSHAg, shNormal); // 计算 G 通道 L0/L1 环境照度。
+
+    linearL0L1.b = dot(_BurtAmbientSHAb, shNormal); // 计算 B 通道 L0/L1 环境照度。
+
+    float4 vB = shNormal.xyzz * shNormal.yzzx; // 组装 UnityCG 二阶 SH 使用的 xy、yz、zz、zx 项。
+
+    float3 linearL2; // 创建 L2 输出变量，下面逐通道 dot SHB 常量。
+
+    linearL2.r = dot(_BurtAmbientSHBr, vB); // 计算 R 通道二阶 SH 中的 B 项。
+
+    linearL2.g = dot(_BurtAmbientSHBg, vB); // 计算 G 通道二阶 SH 中的 B 项。
+
+    linearL2.b = dot(_BurtAmbientSHBb, vB); // 计算 B 通道二阶 SH 中的 B 项。
+
+    float vC = safeNormalWS.x * safeNormalWS.x - safeNormalWS.y * safeNormalWS.y; // 计算 UnityCG 二阶 SH 的 C 项输入。
+
+    float3 shIrradiance = linearL0L1 + linearL2 + _BurtAmbientSHC.rgb * vC; // 合成完整 L0/L1/L2 环境照度。
+
+#ifdef UNITY_COLORSPACE_GAMMA // 如果项目运行在 Gamma 色彩空间，需要对齐 Unity Core SampleSH9 的 Gamma 输出语义。
+    shIrradiance = pow(max(shIrradiance, float3(0.0f, 0.0f, 0.0f)), 1.0f / 2.2f); // 把线性 SH 结果近似转换到 Gamma 空间，避免自有 SH 和 ShadeSH9 fallback 明显不一致。
+#endif // 结束 Gamma 色彩空间下的 SH 输出转换。
+
+    return max(shIrradiance, float3(0.0f, 0.0f, 0.0f)); // 去掉 SH 过冲产生的负值，保持间接光非负。
+}
+
 // 计算经典 Lambert 漫反射项。
 float BurtLambert(float3 normalWS, float3 lightDirectionWS)
 {
@@ -88,17 +177,19 @@ float3 BurtEvaluateAmbient(float3 baseColor, float3 ambientColor)
 // 采样 BurtRP 当前的间接漫反射环境照度。
 float3 BurtSampleIndirectDiffuseIrradiance(float3 normalWS)
 {
-    // 归一化世界空间法线，让 Unity SH 查询使用稳定方向。
-    float3 safeNormalWS = BurtSafeNormalize(normalWS);
+    if (_BurtAmbientSHEnabled > 0.5f) // 如果 C# 已经上传 BurtRP 自己的 ambient probe SH。
+    {
+        return BurtEvaluateAmbientSH9(normalWS); // 直接使用稳定的 BurtRP 全局 SH 数据源，避免 Deferred fullscreen pass 依赖 per-object 状态。
+    }
 
-    // 把 normal 扩展成 float4，因为 Unity 的 ShadeSH9 约定 xyz 是方向，w 是常数项。
-    float4 shNormal = float4(safeNormalWS, 1.0f);
+    float3 safeNormalWS = BurtSafeNormalize(normalWS); // 归一化世界空间法线，让 Unity SH 查询使用稳定方向。
 
-    // 直接读取 Unity 内置 spherical harmonics，也就是 Lighting/Light Probe 写入的环境漫反射。
-    float3 shIrradiance = ShadeSH9(shNormal);
+    float4 shNormal = float4(safeNormalWS, 1.0f); // 把 normal 扩展成 float4，因为 Unity 的 ShadeSH9 约定 xyz 是方向，w 是常数项。
 
-    // 返回非负环境照度，避免 SH 过冲时产生负光。
-    return max(shIrradiance, float3(0.0f, 0.0f, 0.0f));
+    float3 shIrradiance = ShadeSH9(shNormal); // 兼容旧路径：直接读取 Unity 内置 spherical harmonics。
+
+    // 当 Unity 内置 SH 没有被 DrawRenderers 刷新时，用 _BurtAmbientLightColor 兜底，避免间接漫反射全黑。
+    return BurtSelectIndirectFallbackIfBlack(shIrradiance, BurtGetAmbientLightColor());
 }
 
 
@@ -115,24 +206,37 @@ float ComputeReflectionCaptureMipFromRoughness(float perceptualRoughness, float 
     return clamp(cubemapMaxMip - 1.0f - levelFrom1x1, 0.0f, cubemapMaxMip);
 }
 
-// BurtRP 适配函数：采样 Unity 当前绑定的 reflection probe / sky reflection cubemap。
+// BurtRP 适配函数：采样 BurtRP 全局天空反射 cubemap，旧路径才回退 Unity 当前绑定的 reflection probe。
 float3 SampleIndirectSpecularRadiance(float3 reflectionDirectionWS, float roughness)
 {
     // 归一化反射方向，让 cubemap 采样方向稳定。
     float3 safeReflectionDirectionWS = BurtSafeNormalize(reflectionDirectionWS);
 
-    // 使用 XRender 风格 roughness->mip 曲线，避免高 smoothness 反射被线性映射过早打糊。
-    const float maxMipLevel = 6.0f;
-    float mipLevel = ComputeReflectionCaptureMipFromRoughness(roughness, maxMipLevel);
+    if (_BurtSkyReflectionEnabled > 0.5f) // 如果 C# 已经上传 BurtRP 全局天空反射 cubemap。
+    {
+        float skyReflectionMaxMip = max(_BurtSkyReflectionMaxMip, 0.0f); // 使用 C# 上传的实际 mip 上限，避免不同尺寸 cubemap 都套用固定 6。
 
-    // 采样 Unity 当前绑定的 reflection probe / sky reflection cubemap，恢复之前的探针反射效果。
-    float4 encodedSpecular = UNITY_SAMPLE_TEXCUBE_LOD(unity_SpecCube0, safeReflectionDirectionWS, mipLevel);
+        float skyReflectionMipLevel = ComputeReflectionCaptureMipFromRoughness(roughness, skyReflectionMaxMip); // 使用 XRender 风格 roughness->mip 曲线计算全局天空反射 LOD。
+
+        float4 encodedSkyReflection = UNITY_SAMPLE_TEXCUBE_LOD(_BurtSkyReflectionTexture, safeReflectionDirectionWS, skyReflectionMipLevel); // 按 roughness mip 采样全局天空反射。
+
+        float3 skyReflectionRadiance = DecodeHDR(encodedSkyReflection, _BurtSkyReflectionHDR) * max(0.0f, _BurtSkyReflectionIntensity); // 解码 HDR 并乘 Lighting 面板的反射强度。
+
+        return max(skyReflectionRadiance, float3(0.0f, 0.0f, 0.0f)); // 显式 sky reflection 数据源启用后尊重 cubemap 本身颜色，不再把黑色 custom reflection 误判成需要环境色兜底。
+    }
+
+    const float legacyUnitySpecCubeMaxMip = 6.0f; // Unity 内置 reflection probe legacy 路径暂时保留 0..6 的常见 mip 上限，后续有专用数据源后再替换。
+
+    float legacyUnitySpecCubeMipLevel = ComputeReflectionCaptureMipFromRoughness(roughness, legacyUnitySpecCubeMaxMip); // 为 legacy unity_SpecCube0 路径单独计算 mip，避免误用全局 sky 的 mip 上限。
+
+    // 兼容旧路径：采样 Unity 当前绑定的 reflection probe / sky reflection cubemap。
+    float4 encodedSpecular = UNITY_SAMPLE_TEXCUBE_LOD(unity_SpecCube0, safeReflectionDirectionWS, legacyUnitySpecCubeMipLevel);
 
     // 使用 Unity 提供的 HDR 解码参数把 RGBM/编码反射颜色还原为线性 HDR 颜色。
     float3 specularRadiance = DecodeHDR(encodedSpecular, unity_SpecCube0_HDR);
 
-    // 返回非负环境镜面颜色，避免异常编码产生负光。
-    return max(specularRadiance, float3(0.0f, 0.0f, 0.0f));
+    // 当 Deferred 全屏 Pass 没有 Renderer per-object Reflection Probe 时，用环境色做低频镜面兜底。
+    return BurtSelectIndirectFallbackIfBlack(specularRadiance, BurtGetAmbientLightColor());
 }
 
 // 计算 PBR 间接漫反射：环境 irradiance 乘以 XRender EnergyPreservation 后的 diffuseColor。
@@ -358,6 +462,29 @@ BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtSurfaceData surfaceData
     return BurtPreparePBRShadingCoreData(materialData, geometryData);
 }
 
+// Prepare 阶段的 GBufferData 入口：Deferred Lighting 先解码 GBuffer，再从这里进入和 Forward 相同的 shading core。
+BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtGBufferData gbufferData, float3 viewDirectionWS)
+{
+    // 从 GBuffer 还原材质数据；出处：XRender SlabGbuffers/SlabGbufferUnpack.hlsl 会先 Unpack 成 SlabParams，再进入 SlabParamsContext。
+    BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
+
+    // 从 GBuffer normal 和屏幕空间重建出的 viewDirectionWS 准备几何数据，保证 NdotV / reflection direction 和 Forward 使用同一套函数。
+    BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(gbufferData, viewDirectionWS);
+
+    // 复用主 Prepare 入口，Deferred 不维护第二套 Specular AA、Energy Terms 或 BRDF 输入。
+    return BurtPreparePBRShadingCoreData(materialData, geometryData);
+}
+
+// Prepare 阶段的 EncodedGBuffer 入口：Deferred Pass 从三张 RT 采样得到 float4 后，可先填成 BurtEncodedGBuffer 再调用这里。
+BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtEncodedGBuffer encodedGBuffer, float3 viewDirectionWS)
+{
+    // 只做 shader 侧解码，不绑定 _BurtGBuffer0/1/2 的采样方式，避免和主 agent 的 Deferred Pass 接入工作冲突。
+    BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
+
+    // 解码后继续走 GBufferData 入口，保证所有 Deferred 输入最终收敛到同一条 prepare 路径。
+    return BurtPreparePBRShadingCoreData(gbufferData, viewDirectionWS);
+}
+
 // 保存一次完整 PBR shading 的可复用拆分结果，Forward 只负责调用，Deferred 后续可从 GBuffer 还原输入后复用。
 struct BurtPBRShadingComponents
 {
@@ -579,6 +706,32 @@ BurtPBRShadingComponents BurtEvaluatePBRShadingComponents(BurtSurfaceData surfac
 
     // Compose：统一合成最终 shading components，避免 SurfaceData 入口和 Deferred 入口维护两套拼装逻辑。
     return BurtComposePBRShadingComponents(coreData, directComponents, indirectComponents);
+}
+
+// GBufferData 入口：Deferred Lighting 从已经解码好的 GBuffer 直接评估 PBR 拆分结果。
+BurtPBRShadingComponents BurtEvaluatePBRShadingComponentsFromGBuffer(BurtGBufferData gbufferData, BurtLight mainLight, float3 viewDirectionWS)
+{
+    // Prepare：把 GBuffer 材质/法线还原成 PBRMaterialData + PBRGeometryData，并进入统一 shading core。
+    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(gbufferData, viewDirectionWS);
+
+    // Direct：复用和 Forward 相同的主光直接光评估，避免 Deferred 第一版出现另一套 D/V/F/能量项。
+    BurtDirectPBRComponents directComponents = BurtEvaluatePBRDirectFromCore(coreData, mainLight);
+
+    // Indirect：复用和 Forward 相同的 SH / Reflection Probe 评估，后续主 agent 可在 Deferred Pass 中替换数据来源。
+    BurtIndirectPBRComponents indirectComponents = BurtEvaluatePBRIndirectFromCore(coreData);
+
+    // Compose：输出 Forward 与 Deferred 共用的 BurtPBRShadingComponents，调用方再决定是否叠加 gbufferData.emission。
+    return BurtComposePBRShadingComponents(coreData, directComponents, indirectComponents);
+}
+
+// EncodedGBuffer 入口：Deferred Lighting Pass 从三张 RT 采样后可直接把采样值打包进 BurtEncodedGBuffer 调用。
+BurtPBRShadingComponents BurtEvaluatePBRShadingComponentsFromGBuffer(BurtEncodedGBuffer encodedGBuffer, BurtLight mainLight, float3 viewDirectionWS)
+{
+    // 解码 GBuffer0/1/2 的逻辑仍集中在 BurtGBuffer.hlsl，保证 Debug roundtrip 和真实 Deferred Pass 使用同一套布局。
+    BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
+
+    // 复用 GBufferData 入口，避免 Encoded 和 Decoded 两套路径在能量项或粗糙度处理上分叉。
+    return BurtEvaluatePBRShadingComponentsFromGBuffer(gbufferData, mainLight, viewDirectionWS);
 }
 
 // 计算 Blinn-Phong 高光项，用来给旧 Simple Lit 路径保留第一版 specular。
