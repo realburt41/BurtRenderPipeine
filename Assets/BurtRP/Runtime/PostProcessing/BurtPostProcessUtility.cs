@@ -141,6 +141,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             return Mathf.Pow(2f, tonemapping.postExposure.value); // 把 Volume 里的 EV 曝光转成线性倍率，+1 EV 等于乘以 2。
         }
 
+        public static BurtTonemappingFilmSettings ResolveTonemappingFilmSettings(BurtRenderPipelineAsset asset) // 定义解析 UE/XRender Filmic 参数的函数，让 Pass 不直接访问 Volume 组件字段。
+        {
+            if (!IsPostProcessEnabled(asset)) // 如果后处理框架关闭，Film 参数不应该影响任何全屏拷贝。
+            {
+                return BurtTonemappingFilmSettings.Default; // 返回默认参数，保证 shader 即使被调用也处于稳定状态。
+            }
+
+            var tonemapping = GetTonemappingVolumeComponent(); // 从当前 VolumeStack 读取 BurtRP Tonemapping 组件。
+
+            if (tonemapping == null) // 如果当前 VolumeStack 没有 Tonemapping 组件，就没有可覆盖的 Film 参数。
+            {
+                return BurtTonemappingFilmSettings.Default; // 返回默认参数，对齐 XRender/UE 的基础外观。
+            }
+
+            if (!tonemapping.IsEnabled()) // 如果 Tonemapping 组件未启用，Film 参数不应该参与 No-op Copy。
+            {
+                return BurtTonemappingFilmSettings.Default; // 返回默认参数，避免关闭模式下上传无意义的自定义值。
+            }
+
+            return new BurtTonemappingFilmSettings( // 把当前 Volume 混合后的参数收拢成不可变设置，供 Pass 一次性上传给 shader。
+                tonemapping.filmSlope.value, // 读取 Film Slope。
+                tonemapping.filmToe.value, // 读取 Film Toe。
+                tonemapping.filmShoulder.value, // 读取 Film Shoulder。
+                tonemapping.filmBlackClip.value, // 读取 Film Black Clip。
+                tonemapping.filmWhiteClip.value, // 读取 Film White Clip。
+                tonemapping.blueCorrection.value, // 读取 Blue Correction。
+                tonemapping.expandGamut.value, // 读取 Expand Gamut。
+                tonemapping.toneCurveAmount.value); // 读取 Tone Curve Amount。
+        }
+
         public static void LogPostProcessExecuted( // 定义后处理执行日志，集中格式避免 Pass 内部堆字符串逻辑。
             BurtRenderGraphContext context, // 接收当前 RenderGraph 执行上下文，用来读取相机和资产设置。
             BurtTonemappingMode tonemappingMode, // 接收本次执行使用的 Tonemapping 模式。

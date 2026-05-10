@@ -53,6 +53,40 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor; // 返回后处理颜色 RT 描述，供分配 Pass 使用。
         }
 
+        public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
+        {
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32); // GBuffer0 第一版保存 baseColor.rgb 和 occlusion.a，普通 8 位通道足够起步。
+        }
+
+        public static RenderTextureDescriptor CreateGBuffer1Descriptor(Camera camera) // 定义创建 Deferred GBuffer1 RT 描述的函数。
+        {
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32); // GBuffer1 第一版保存 oct normal.rg、metallic.b、smoothness.a，普通 8 位通道先满足最小闭环。
+        }
+
+        public static RenderTextureDescriptor CreateGBuffer2Descriptor(Camera camera) // 定义创建 Deferred GBuffer2 RT 描述的函数。
+        {
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.DefaultHDR); // GBuffer2 第一版保存 emission.rgb 和 reflectance.a，使用 HDR 避免自发光过早被截断。
+        }
+
+        private static RenderTextureDescriptor CreateGBufferDescriptor( // 定义创建 GBuffer RT 描述的共用函数，保证三张 GBuffer 尺寸和采样设置一致。
+            Camera camera, // 接收当前相机，用来匹配渲染尺寸和 targetTexture 尺寸。
+            RenderTextureFormat format) // 接收当前 GBuffer 需要使用的颜色格式。
+        {
+            var descriptor = CreateCameraColorDescriptor(camera); // 先复用 CameraColor 的尺寸、targetTexture 尺寸和基础采样设置。
+
+            descriptor.colorFormat = format; // 覆盖颜色格式，因为 GBuffer 布局由 Deferred 自己决定，不跟随相机 HDR 开关。
+
+            descriptor.depthBufferBits = 0; // GBuffer 颜色目标不持有深度缓冲，Deferred 会复用独立 CameraDepth。
+
+            descriptor.msaaSamples = 1; // Deferred 第一版不支持 MSAA GBuffer，先固定为 1 避免 MRT 采样数不一致。
+
+            descriptor.useMipMap = false; // GBuffer 不需要 mipmap，关闭后减少显存和生成成本。
+
+            descriptor.autoGenerateMips = false; // GBuffer 不自动生成 mipmap，避免 Unity 做无意义的后处理。
+
+            return descriptor; // 返回创建好的 GBuffer RT 描述，供后续 Allocate GBuffer Pass 使用。
+        }
+
         public static RenderTextureDescriptor CreateCameraDepthDescriptor(Camera camera) // 定义创建相机深度 RT 描述的函数。
         {
             var width = 1; // 定义默认宽度为 1，避免相机尺寸异常时创建 0 宽 RT。

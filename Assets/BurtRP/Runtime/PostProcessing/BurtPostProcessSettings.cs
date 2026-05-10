@@ -4,11 +4,53 @@ using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 SerializeFi
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设置可以被管线资产和 Pass 直接访问。
 {
-    public enum BurtTonemappingMode // 定义 BurtRP 第一版 Tonemapping 模式，后续可以继续追加 Filmic、自定义曲线等模式。
+    public enum BurtTonemappingMode // 定义 BurtRP 的 Tonemapping 模式，数值会被 Volume Profile 序列化，所以新增模式时要保持旧数值稳定。
     {
         None = 0, // 不执行 Tonemapping，只做 No-op Copy 或完全跳过后处理。
         Neutral = 1, // 使用简单中性压缩曲线，适合先验证 HDR 到 LDR 的基础链路。
-        ACES = 2 // 使用常见 ACES 近似曲线，适合作为第一版默认电影感色调映射候选。
+        [InspectorName("XRender / UE Filmic (ACES)")] ACES = 2 // 使用 XRender 当前对齐 UE Filmic/ACES 的曲线，名称保留 ACES 是为了不破坏旧 Volume 序列化值。
+    }
+
+    internal readonly struct BurtTonemappingFilmSettings // 定义一组 UE/XRender Filmic Tonemapping 参数，方便 C# 和 Shader 用同一套默认值。
+    {
+        public const float DefaultSlope = 0.88f; // 定义默认 Film Slope，对齐 XRender TonemappingComponent 和 UE Film 默认值。
+        public const float DefaultToe = 0.55f; // 定义默认 Film Toe，对齐 XRender TonemappingComponent 和 UE Film 默认值。
+        public const float DefaultShoulder = 0.26f; // 定义默认 Film Shoulder，对齐 XRender TonemappingComponent 和 UE Film 默认值。
+        public const float DefaultBlackClip = 0.0f; // 定义默认 Film Black Clip，对齐 XRender TonemappingComponent 和 UE Film 默认值。
+        public const float DefaultWhiteClip = 0.04f; // 定义默认 Film White Clip，对齐 XRender TonemappingComponent 和 UE Film 默认值。
+        public const float DefaultBlueCorrection = 0.6f; // 定义默认 Blue Correction，对齐 XRender ColorGradingComponent 中参与 Tonemapping LUT 的默认值。
+        public const float DefaultExpandGamut = 1.0f; // 定义默认 Expand Gamut，对齐 XRender ColorGradingComponent 中参与 Tonemapping LUT 的默认值。
+        public const float DefaultToneCurveAmount = 1.0f; // 定义默认 Tone Curve Amount，对齐 XRender ColorGradingComponent 中 Tonemapping 曲线全量生效的默认值。
+        public static readonly BurtTonemappingFilmSettings Default = new BurtTonemappingFilmSettings(DefaultSlope, DefaultToe, DefaultShoulder, DefaultBlackClip, DefaultWhiteClip, DefaultBlueCorrection, DefaultExpandGamut, DefaultToneCurveAmount); // 提供默认参数集合，供 Volume 缺失或关闭时安全回退。
+
+        public float Slope { get; } // 保存 Film Slope，控制 Tonemapping 中间直线段的斜率。
+        public float Toe { get; } // 保存 Film Toe，控制暗部压缩和黑位过渡。
+        public float Shoulder { get; } // 保存 Film Shoulder，控制高光肩部压缩。
+        public float BlackClip { get; } // 保存 Film Black Clip，控制暗部裁切位置。
+        public float WhiteClip { get; } // 保存 Film White Clip，控制高光白位裁切位置。
+        public float BlueCorrection { get; } // 保存 Blue Correction，控制 UE/XRender 的蓝色修正矩阵混合强度。
+        public float ExpandGamut { get; } // 保存 Expand Gamut，控制 XRender 在 AP1 空间扩展高饱和颜色的强度。
+        public float ToneCurveAmount { get; } // 保存 Tone Curve Amount，控制原始 AP1 颜色和 FilmToneMap 结果的混合比例。
+
+        public BurtTonemappingFilmSettings( // 定义完整参数构造函数，避免调用方分散维护默认值。
+            float slope, // 接收 Film Slope。
+            float toe, // 接收 Film Toe。
+            float shoulder, // 接收 Film Shoulder。
+            float blackClip, // 接收 Film Black Clip。
+            float whiteClip, // 接收 Film White Clip。
+            float blueCorrection, // 接收 Blue Correction。
+            float expandGamut, // 接收 Expand Gamut。
+            float toneCurveAmount) // 接收 Tone Curve Amount。
+        {
+            Slope = slope; // 保存 Film Slope。
+            Toe = toe; // 保存 Film Toe。
+            Shoulder = shoulder; // 保存 Film Shoulder。
+            BlackClip = blackClip; // 保存 Film Black Clip。
+            WhiteClip = whiteClip; // 保存 Film White Clip。
+            BlueCorrection = blueCorrection; // 保存 Blue Correction。
+            ExpandGamut = expandGamut; // 保存 Expand Gamut。
+            ToneCurveAmount = toneCurveAmount; // 保存 Tone Curve Amount。
+        }
     }
 
     [Serializable] // 标记这个类可以被 Unity 序列化，这样它可以作为 BurtRenderPipelineAsset 的内嵌配置显示在 Inspector 中。

@@ -105,6 +105,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.PostProcessColorName); // 使用统一资源名声明写入后处理中间颜色。
         }
 
+        public BurtRenderTargetHandle ReadGBuffer0() // 定义声明读取 GBuffer0 的快捷函数。
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.GBuffer0Name); // 使用统一资源名声明读取 Deferred GBuffer0。
+        }
+
+        public BurtRenderTargetHandle WriteGBuffer0() // 定义声明写入 GBuffer0 的快捷函数。
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBuffer0Name); // 使用统一资源名声明写入 Deferred GBuffer0。
+        }
+
+        public BurtRenderTargetHandle ReadGBuffer1() // 定义声明读取 GBuffer1 的快捷函数。
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.GBuffer1Name); // 使用统一资源名声明读取 Deferred GBuffer1。
+        }
+
+        public BurtRenderTargetHandle WriteGBuffer1() // 定义声明写入 GBuffer1 的快捷函数。
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBuffer1Name); // 使用统一资源名声明写入 Deferred GBuffer1。
+        }
+
+        public BurtRenderTargetHandle ReadGBuffer2() // 定义声明读取 GBuffer2 的快捷函数。
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.GBuffer2Name); // 使用统一资源名声明读取 Deferred GBuffer2。
+        }
+
+        public BurtRenderTargetHandle WriteGBuffer2() // 定义声明写入 GBuffer2 的快捷函数。
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBuffer2Name); // 使用统一资源名声明写入 Deferred GBuffer2。
+        }
+
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.MainLightShadowMapName); // 使用统一资源名声明读取主光阴影图。
@@ -113,6 +143,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteMainLightShadowMap() // 定义声明写入 MainLightShadowMap 的快捷函数。
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.MainLightShadowMapName); // 使用统一资源名声明写入主光阴影图。
+        }
+
+        public void ReadGlobalResource(string resourceName) // 定义声明读取逻辑全局资源的通用函数。
+        {
+            Usage.AddReadGlobalResource(resourceName); // 把逻辑全局资源读取关系记录到当前 Pass 的资源使用信息里。
+        }
+
+        public void WriteGlobalResource(string resourceName) // 定义声明写入逻辑全局资源的通用函数。
+        {
+            Usage.AddWriteGlobalResource(resourceName); // 把逻辑全局资源写入关系记录到当前 Pass 的资源使用信息里。
+        }
+
+        public void ReadLightingGlobals() // 定义声明读取灯光全局状态的快捷函数。
+        {
+            ReadGlobalResource(BurtRenderGraphResourceRegistry.LightingGlobalsName); // 使用统一逻辑资源名声明读取 LightingGlobals。
+        }
+
+        public void WriteLightingGlobals() // 定义声明写入灯光全局状态的快捷函数。
+        {
+            WriteGlobalResource(BurtRenderGraphResourceRegistry.LightingGlobalsName); // 使用统一逻辑资源名声明写入 LightingGlobals。
+        }
+
+        public void ReadShadowGlobals() // 定义声明读取阴影全局状态的快捷函数。
+        {
+            ReadGlobalResource(BurtRenderGraphResourceRegistry.ShadowGlobalsName); // 使用统一逻辑资源名声明读取 ShadowGlobals。
+        }
+
+        public void WriteShadowGlobals() // 定义声明写入阴影全局状态的快捷函数。
+        {
+            WriteGlobalResource(BurtRenderGraphResourceRegistry.ShadowGlobalsName); // 使用统一逻辑资源名声明写入 ShadowGlobals。
         }
 
         private BurtRenderTargetHandle GetRenderTarget(string name) // 定义从资源表读取渲染目标的内部辅助函数。

@@ -59,6 +59,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 resources.RegisterPostProcessColorTexture(); // 注册 PostProcessColor 临时 RT，让分配、No-op Copy 和释放 Pass 使用同一个资源句柄。
             }
 
+            if (ShouldRegisterGBufferTargets(request, asset)) // 如果当前 request 走 Deferred 实验路径，就把三张 GBuffer 纳入资源表。
+            {
+                resources.RegisterGBuffer0Texture(); // 注册 GBuffer0 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
+                resources.RegisterGBuffer1Texture(); // 注册 GBuffer1 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
+                resources.RegisterGBuffer2Texture(); // 注册 GBuffer2 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
+            }
+
             if (ShouldRegisterMainLightShadowMap(request, asset)) // 如果当前 request 的主光需要阴影，就把主光阴影图纳入资源表。
             {
                 resources.RegisterMainLightShadowMapTexture(); // 注册主光阴影图临时 RT，让后续分配、绘制和释放 Pass 使用同一个资源句柄。
@@ -77,6 +84,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderPipelineAsset asset) // 接收当前管线资产，用来让资源注册尊重主光阴影总开关和默认配置。
         {
             return BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 复用阴影工具的判定逻辑，保证资源注册和 Pass 组装使用同一套条件。
+        }
+
+        private static bool ShouldRegisterGBufferTargets( // 定义判断当前 request 是否需要注册 Deferred GBuffer 资源的辅助函数。
+            BurtRenderRequest request, // 接收当前渲染请求，用来确认 request 是否有效。
+            BurtRenderPipelineAsset asset) // 接收当前管线资产，用来读取 Renderer Mode。
+        {
+            if (request == null) // 如果 request 为空，说明没有合法渲染任务。
+            {
+                return false; // 返回 false，避免为异常任务注册 GBuffer 资源。
+            }
+
+            if (!request.IsValid) // 如果 request 无效，就不应该提供可执行的 GBuffer 资源。
+            {
+                return false; // 返回 false，保持资源注册和渲染执行条件一致。
+            }
+
+            if (asset == null) // 如果资产为空，就没有 Renderer Mode 配置来源。
+            {
+                return false; // 返回 false，默认保持 Forward 行为。
+            }
+
+            return asset.RendererMode == BurtRendererMode.Deferred; // 只有显式选择 Deferred 时才注册 GBuffer，默认 Forward 不受影响。
         }
 
         public void AddPass(BurtRenderPass pass) // 定义添加 Pass 的函数，Assembler 会通过它把 Pass 放进图里。

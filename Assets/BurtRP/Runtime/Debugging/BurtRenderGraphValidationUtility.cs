@@ -36,7 +36,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让诊断工具
 
                 ValidateUsageDeclarations(usage); // 检查单个 Pass 是否完全没有声明资源，或声明了明显无效的句柄。
                 ValidateReadResources(usage, state); // 检查读资源是否来自外部导入或前序写入。
+                ValidateReadGlobalResources(usage, state); // 检查逻辑全局资源是否来自前序写入。
                 ValidateWriteResources(usage, state); // 记录写资源生产者，并检查外部目标写入等需要关注的行为。
+                ValidateWriteGlobalResources(usage, state); // 记录逻辑全局资源生产者，便于后续 Pass 声明读取依赖。
             }
 
             ValidateFinalState(state, graphLog); // 扫描结束后补充跨 Pass 结论，例如写了但无人消费的内部资源。
@@ -142,6 +144,49 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让诊断工具
                 }
 
                 state.AddProducer(resourceName); // 记录资源已经被当前或前序 Pass 写入，供后续读取校验。
+            }
+        }
+
+        private static void ValidateReadGlobalResources( // 检查单个 Pass 的逻辑全局资源读取是否已经有前序生产者。
+            BurtRenderPassResourceUsage usage, // 接收当前 Pass 的资源使用记录。
+            ResourceValidationState state) // 接收跨 Pass 的资源状态。
+        {
+            var reads = usage.ReadGlobalResources; // 缓存逻辑全局资源读取列表，减少属性访问并提升可读性。
+
+            for (var readIndex = 0; readIndex < reads.Count; readIndex++) // 遍历当前 Pass 声明读取的所有全局资源。
+            {
+                var resourceName = reads[readIndex]; // 取出当前逻辑全局资源名。
+
+                if (string.IsNullOrEmpty(resourceName)) // 空名问题已经在 Usage 记录，这里避免重复刷屏。
+                {
+                    continue; // 跳过不可追踪资源。
+                }
+
+                state.AddConsumer(resourceName); // 记录消费者，用于最终资源摘要和孤立写入检查。
+
+                if (!state.HasProducer(resourceName)) // 逻辑全局资源没有外部生产者，必须由前序 Pass 写入。
+                {
+                    usage.AddValidationMessage("Read-before-Write Global: " + resourceName + " 在读取前没有前序生产者。"); // 记录全局状态顺序问题但不改变执行顺序。
+                }
+            }
+        }
+
+        private static void ValidateWriteGlobalResources( // 记录单个 Pass 的逻辑全局资源写入。
+            BurtRenderPassResourceUsage usage, // 接收当前 Pass 的资源使用记录。
+            ResourceValidationState state) // 接收跨 Pass 的资源状态。
+        {
+            var writes = usage.WriteGlobalResources; // 缓存逻辑全局资源写入列表，减少属性访问并提升可读性。
+
+            for (var writeIndex = 0; writeIndex < writes.Count; writeIndex++) // 遍历当前 Pass 声明写入的所有全局资源。
+            {
+                var resourceName = writes[writeIndex]; // 取出当前逻辑全局资源名。
+
+                if (string.IsNullOrEmpty(resourceName)) // 空名问题已经在 Usage 记录，这里避免重复刷屏。
+                {
+                    continue; // 跳过不可追踪资源。
+                }
+
+                state.AddProducer(resourceName); // 记录全局资源已经被当前或前序 Pass 写入，供后续读取校验。
             }
         }
 

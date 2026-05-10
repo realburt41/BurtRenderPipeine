@@ -458,6 +458,9 @@ Shader "BurtRP/Lit"
                 // 从逻辑 GBuffer 解码回语义数据，Debug View 读取的是这份解码结果。
                 BurtGBufferData debugDecodedGBufferData = BurtDecodeGBuffer(debugEncodedGBuffer);
 
+                // 把解码后的 GBuffer 数据转成 PBRMaterialData，提前验证 Deferred shading 前的材质重建口径。
+                BurtPBRMaterialData debugGBufferMaterialData = BurtPreparePBRMaterialData(debugDecodedGBufferData);
+
                 // 创建 Shading Debug 数据结构，确保 Debug View 读取的就是当前片元真实渲染使用的数据。
                 BurtShadingDebugData debugData;
 
@@ -502,12 +505,6 @@ Shader "BurtRP/Lit"
 
                 // 写入 XRender DiffuseColor，DiffuseColor Debug View 会显示 metallic 扣除后的漫反射颜色。
                 debugData.diffuseColor = pbrComponents.diffuseColor;
-
-                // 写入 reflectance / metallic / baseColor 还原出的 F0，F0 Debug View 只读这个中间结果，不暴露面板参数。
-                debugData.f0 = pbrComponents.f0;
-
-                // 写入 Schlick Fresnel 的 F90，当前默认对齐 XRender DefaultLit 的 1。
-                debugData.f90 = pbrComponents.f90;
 
                 // 写入直接 GGX D 项，DirectBRDFD Debug View 会缩放显示高 smoothness 下的 NDF 峰值。
                 debugData.directBRDFD = pbrComponents.directBRDFD;
@@ -556,6 +553,12 @@ Shader "BurtRP/Lit"
 
                 // 写入 GBuffer 解码后的 Reflectance，用来检查 GBuffer2.a 的 XRender reflectance 输入。
                 debugData.gbufferReflectance = debugDecodedGBufferData.reflectance;
+
+                // 写入从 GBuffer Smoothness 还原出的感知粗糙度，用来和 Forward Roughness 对照。
+                debugData.gbufferRoughness = debugGBufferMaterialData.perceptualRoughness;
+
+                // 写入从 GBuffer 重建出的 DiffuseColor，用来检查 metallic 对 diffuse 的扣除是否和 Forward 一致。
+                debugData.gbufferDiffuseColor = debugGBufferMaterialData.diffuseColor;
 
                 // 创建一个临时调试颜色变量，只有命中材质 debug 模式时才会被真正输出。
                 float3 debugColor;

@@ -8,6 +8,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
     internal sealed class BurtRenderPipelineAssetEditor : UnityEditor.Editor // 继承 UnityEditor.Editor 来绘制自定义资源面板。
     {
         private SerializedProperty clearColor; // 缓存默认清屏颜色字段，General 分组使用。
+        private SerializedProperty rendererMode; // 缓存渲染路径模式字段，用来在 Inspector 中切换 Forward / Deferred。
 
         private SerializedProperty enableDepthPrepass; // 缓存 Depth Prepass 开关字段。
         private SerializedProperty enableDepthDebugView; // 缓存 Depth Debug 覆盖 CameraColor 的开关字段。
@@ -36,6 +37,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private SerializedProperty enableRenderFrameDebugLog; // 缓存 Frame/Stack 分组调试日志字段。
 
         private static readonly GUIContent ClearColorLabel = new("Clear Color", "默认清屏颜色，供 BurtRP 清屏 Pass 使用。"); // 定义 General 分组显示文本。
+        private static readonly GUIContent RendererModeLabel = new("Renderer Mode", "选择 BurtRP 主渲染路径；Deferred 当前仍是实验路径，默认保持 Forward。"); // 定义渲染路径模式显示文本。
         private static readonly GUIContent DepthPrepassLabel = new("Depth Prepass", "开启后先写入 CameraDepth，便于后续深度相关 Pass 使用。"); // 定义 Depth Prepass 显示文本。
         private static readonly GUIContent DepthDebugLabel = new("Depth Debug View", "开启后把 CameraDepth 可视化到 CameraColor。"); // 定义 Depth Debug 显示文本。
         private static readonly GUIContent DepthScaleLabel = new("Depth Debug Scale", "调整深度可视化亮度缩放，数值越大近处深度越明显。"); // 定义 Depth Debug 缩放显示文本。
@@ -60,6 +62,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private void OnEnable() // Unity 选中资源或脚本重载后调用，用于绑定所有序列化字段。
         {
             clearColor = FindProperty(nameof(clearColor)); // 绑定 clearColor 私有字段，不改字段名以保持现有同步逻辑稳定。
+            rendererMode = FindProperty(nameof(rendererMode)); // 绑定 Renderer Mode 字段，让用户可以在资产上选择 Forward 或 Deferred。
 
             enableDepthPrepass = FindProperty(nameof(enableDepthPrepass)); // 绑定深度预写开关。
             enableDepthDebugView = FindProperty(nameof(enableDepthDebugView)); // 绑定深度调试视图开关。
@@ -106,7 +109,9 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private void DrawGeneralGroup() // 绘制常规渲染设置，当前只包含默认清屏颜色。
         {
             DrawSectionHeader("General / 通用"); // 显示中英文分组标题。
+            DrawProperty(rendererMode, RendererModeLabel); // 绘制渲染路径选择，默认 Forward，Deferred 用于后续实验验证。
             DrawProperty(clearColor, ClearColorLabel); // 绘制默认清屏颜色字段。
+            EditorGUILayout.HelpBox("Deferred 目前只接入 GBuffer 资源生命周期，画面仍临时复用 Forward 输出。", MessageType.Info); // 提示 Deferred 当前阶段不会立刻变成正式延迟渲染。
         }
 
         private void DrawPBRGroup() // 绘制 PBR 设置。

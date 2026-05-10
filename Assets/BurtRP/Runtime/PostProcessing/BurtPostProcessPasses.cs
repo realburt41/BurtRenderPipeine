@@ -61,6 +61,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static readonly int PostExposureId = Shader.PropertyToID("_BurtPostExposure"); // 缓存后处理曝光倍率属性 ID，避免每帧通过字符串查找。
 
+        private static readonly int FilmSlopeId = Shader.PropertyToID("_BurtFilmSlope"); // 缓存 UE/XRender Film Slope 属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int FilmToeId = Shader.PropertyToID("_BurtFilmToe"); // 缓存 UE/XRender Film Toe 属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int FilmShoulderId = Shader.PropertyToID("_BurtFilmShoulder"); // 缓存 UE/XRender Film Shoulder 属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int FilmBlackClipId = Shader.PropertyToID("_BurtFilmBlackClip"); // 缓存 UE/XRender Film Black Clip 属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int FilmWhiteClipId = Shader.PropertyToID("_BurtFilmWhiteClip"); // 缓存 UE/XRender Film White Clip 属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int FilmBlueCorrectionId = Shader.PropertyToID("_BurtFilmBlueCorrection"); // 缓存 XRender Blue Correction 属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int FilmExpandGamutId = Shader.PropertyToID("_BurtFilmExpandGamut"); // 缓存 XRender Expand Gamut 属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int FilmToneCurveAmountId = Shader.PropertyToID("_BurtFilmToneCurveAmount"); // 缓存 XRender Tone Curve Amount 属性 ID，避免每帧通过字符串查找。
+
         private Material postProcessMaterial; // 缓存运行时后处理材质，避免每帧重复创建 Material。
 
         private bool hasLoggedMissingShader; // 记录缺失 shader 警告是否已经输出，避免 Console 每帧刷屏。
@@ -117,6 +133,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var postExposureMultiplier = BurtPostProcessUtility.ResolvePostExposureMultiplier(context.Asset); // 把 Global Volume 中的 EV 曝光转换成本次 shader 使用的线性倍率。
 
+            var filmSettings = BurtPostProcessUtility.ResolveTonemappingFilmSettings(context.Asset); // 从 Global Volume 读取 UE/XRender Filmic 曲线参数，缺失时回退到默认值。
+
             var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取 CommandBuffer，并用 Pass 名称命名。
 
             cmd.SetRenderTarget(postProcessColorTarget.Identifier); // 先绑定 PostProcessColor，让第一段全屏拷贝写入后处理中间目标。
@@ -126,6 +144,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalFloat(TonemappingModeId, (float)tonemappingMode); // 上传 Tonemapping 模式，None 会让 shader 原样输出，其他模式会执行对应曲线。
 
             cmd.SetGlobalFloat(PostExposureId, postExposureMultiplier); // 上传线性曝光倍率，让 Tonemapping 前可以整体调整 HDR 亮度。
+
+            cmd.SetGlobalFloat(FilmSlopeId, filmSettings.Slope); // 上传 Film Slope，让 shader 的 UE/XRender 曲线和 Volume 参数一致。
+
+            cmd.SetGlobalFloat(FilmToeId, filmSettings.Toe); // 上传 Film Toe，让 shader 控制暗部过渡。
+
+            cmd.SetGlobalFloat(FilmShoulderId, filmSettings.Shoulder); // 上传 Film Shoulder，让 shader 控制高光压缩。
+
+            cmd.SetGlobalFloat(FilmBlackClipId, filmSettings.BlackClip); // 上传 Film Black Clip，让 shader 控制黑位裁切。
+
+            cmd.SetGlobalFloat(FilmWhiteClipId, filmSettings.WhiteClip); // 上传 Film White Clip，让 shader 控制白位裁切。
+
+            cmd.SetGlobalFloat(FilmBlueCorrectionId, filmSettings.BlueCorrection); // 上传 Blue Correction，让 shader 对齐 XRender CombineLUT 中的蓝色修正。
+
+            cmd.SetGlobalFloat(FilmExpandGamutId, filmSettings.ExpandGamut); // 上传 Expand Gamut，让 shader 对齐 XRender CombineLUT 中的高饱和颜色扩展。
+
+            cmd.SetGlobalFloat(FilmToneCurveAmountId, filmSettings.ToneCurveAmount); // 上传 Tone Curve Amount，让 shader 支持按 XRender 的方式混合曲线强度。
 
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，把 CameraColor 处理到 PostProcessColor。
 

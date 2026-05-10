@@ -77,6 +77,45 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle GBuffer0Target // 定义读取 GBuffer0 的快捷属性，方便 Deferred Pass 不直接操作资源名。
+        {
+            get // 定义属性 getter，每次访问时从资源注册表读取最新的 GBuffer0。
+            {
+                if (ResourceRegistry == null) // 如果资源注册表为空，说明当前上下文没有可用资源表。
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer0Name); // 返回无效 GBuffer0 句柄，避免 Deferred Pass 绑定错误目标。
+                }
+
+                return ResourceRegistry.GetGBuffer0(); // 从资源注册表读取 GBuffer0 句柄。
+            }
+        }
+
+        public BurtRenderTargetHandle GBuffer1Target // 定义读取 GBuffer1 的快捷属性，方便 Deferred Pass 不直接操作资源名。
+        {
+            get // 定义属性 getter，每次访问时从资源注册表读取最新的 GBuffer1。
+            {
+                if (ResourceRegistry == null) // 如果资源注册表为空，说明当前上下文没有可用资源表。
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name); // 返回无效 GBuffer1 句柄，避免 Deferred Pass 绑定错误目标。
+                }
+
+                return ResourceRegistry.GetGBuffer1(); // 从资源注册表读取 GBuffer1 句柄。
+            }
+        }
+
+        public BurtRenderTargetHandle GBuffer2Target // 定义读取 GBuffer2 的快捷属性，方便 Deferred Pass 不直接操作资源名。
+        {
+            get // 定义属性 getter，每次访问时从资源注册表读取最新的 GBuffer2。
+            {
+                if (ResourceRegistry == null) // 如果资源注册表为空，说明当前上下文没有可用资源表。
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name); // 返回无效 GBuffer2 句柄，避免 Deferred Pass 绑定错误目标。
+                }
+
+                return ResourceRegistry.GetGBuffer2(); // 从资源注册表读取 GBuffer2 句柄。
+            }
+        }
+
         public BurtRequestRenderOptions RenderOptions { get; } // 保存当前 request 的栈级执行选项，Pass 可以通过它判断 RT 生命周期策略。
 
         public BurtRenderGraphContext( // 保留旧构造函数，让没有显式传入执行选项的调用方继续走单 request 生命周期。

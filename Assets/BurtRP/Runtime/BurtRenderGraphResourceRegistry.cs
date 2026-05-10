@@ -28,11 +28,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int PostProcessColorTextureId = Shader.PropertyToID(PostProcessColorTextureShaderName); // 把后处理中间颜色名称转换成整数 ID，申请、绑定和释放都会复用它。
 
+        public const string GBuffer0Name = "GBuffer0"; // 定义 Deferred 第一张 GBuffer 的统一资源名，第一版用于保存 baseColor 和 occlusion。
+
+        public const string GBuffer0ShaderName = "_BurtGBuffer0"; // 定义 GBuffer0 暴露给 shader 的全局纹理名称，Deferred Lighting 会采样它。
+
+        public static readonly int GBuffer0Id = Shader.PropertyToID(GBuffer0ShaderName); // 把 GBuffer0 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
+
+        public const string GBuffer1Name = "GBuffer1"; // 定义 Deferred 第二张 GBuffer 的统一资源名，第一版用于保存法线、金属度和光滑度。
+
+        public const string GBuffer1ShaderName = "_BurtGBuffer1"; // 定义 GBuffer1 暴露给 shader 的全局纹理名称，Deferred Lighting 会采样它。
+
+        public static readonly int GBuffer1Id = Shader.PropertyToID(GBuffer1ShaderName); // 把 GBuffer1 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
+
+        public const string GBuffer2Name = "GBuffer2"; // 定义 Deferred 第三张 GBuffer 的统一资源名，第一版用于保存 emission 和 reflectance。
+
+        public const string GBuffer2ShaderName = "_BurtGBuffer2"; // 定义 GBuffer2 暴露给 shader 的全局纹理名称，Deferred Lighting 会采样它。
+
+        public static readonly int GBuffer2Id = Shader.PropertyToID(GBuffer2ShaderName); // 把 GBuffer2 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
+
         public const string MainLightShadowMapName = "MainLightShadowMap"; // 定义主光阴影图在 RenderGraph 里的统一资源名，后续阴影绘制和光照采样都通过它建立依赖。
 
         public const string MainLightShadowMapShaderName = "_BurtMainLightShadowMap"; // 定义主光阴影图暴露给 shader 的全局纹理名称，后续 Lit shader 会用这个名字采样阴影。
 
         public static readonly int MainLightShadowMapId = Shader.PropertyToID(MainLightShadowMapShaderName); // 把主光阴影图 shader 名称转换成整数 ID，让 CommandBuffer 申请、释放和绑定同一个临时 RT。
+
+        public const string LightingGlobalsName = "LightingGlobals"; // 定义灯光全局状态的逻辑资源名，用来让 Setup Lighting 和 Shading Pass 建立依赖。
+
+        public const string ShadowGlobalsName = "ShadowGlobals"; // 定义阴影全局状态的逻辑资源名，用来描述 shadow matrix、shadow strength 等 shader 全局变量。
 
         private const string UnnamedRenderTargetName = "UnnamedRenderTarget"; // 定义空资源名的兜底名称，避免 Dictionary 接收 null 或空字符串。
 
@@ -152,6 +174,51 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetPostProcessColor() // 定义读取 PostProcessColor 的快捷函数。
         {
             return GetRenderTarget(PostProcessColorName); // 使用统一名称从资源表读取后处理中间颜色目标。
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer0Texture() // 定义注册 Deferred GBuffer0 临时 RT 的快捷函数。
+        {
+            return RegisterGBuffer0(new RenderTargetIdentifier(GBuffer0Id)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 GBuffer0。
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer0(RenderTargetIdentifier identifier) // 定义注册 GBuffer0 的快捷函数。
+        {
+            return RegisterRenderTarget(GBuffer0Name, identifier); // 使用统一名称把 GBuffer0 注册进资源表。
+        }
+
+        public BurtRenderTargetHandle GetGBuffer0() // 定义读取 GBuffer0 的快捷函数。
+        {
+            return GetRenderTarget(GBuffer0Name); // 使用统一名称从资源表读取 GBuffer0 目标。
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer1Texture() // 定义注册 Deferred GBuffer1 临时 RT 的快捷函数。
+        {
+            return RegisterGBuffer1(new RenderTargetIdentifier(GBuffer1Id)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 GBuffer1。
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer1(RenderTargetIdentifier identifier) // 定义注册 GBuffer1 的快捷函数。
+        {
+            return RegisterRenderTarget(GBuffer1Name, identifier); // 使用统一名称把 GBuffer1 注册进资源表。
+        }
+
+        public BurtRenderTargetHandle GetGBuffer1() // 定义读取 GBuffer1 的快捷函数。
+        {
+            return GetRenderTarget(GBuffer1Name); // 使用统一名称从资源表读取 GBuffer1 目标。
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer2Texture() // 定义注册 Deferred GBuffer2 临时 RT 的快捷函数。
+        {
+            return RegisterGBuffer2(new RenderTargetIdentifier(GBuffer2Id)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 GBuffer2。
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer2(RenderTargetIdentifier identifier) // 定义注册 GBuffer2 的快捷函数。
+        {
+            return RegisterRenderTarget(GBuffer2Name, identifier); // 使用统一名称把 GBuffer2 注册进资源表。
+        }
+
+        public BurtRenderTargetHandle GetGBuffer2() // 定义读取 GBuffer2 的快捷函数。
+        {
+            return GetRenderTarget(GBuffer2Name); // 使用统一名称从资源表读取 GBuffer2 目标。
         }
 
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。

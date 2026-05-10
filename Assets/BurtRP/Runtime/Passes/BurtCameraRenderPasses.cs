@@ -170,6 +170,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
 
             builder.WriteMainLightShadowMap(); // 声明这个 Pass 会把 ShadowCaster 深度写入 MainLightShadowMap。
+
+            builder.WriteShadowGlobals(); // 声明这个 Pass 会覆盖 shadow matrix、shadow strength、texel size 等阴影全局状态。
         }
 
         public override void Execute(BurtRenderGraphContext context) // 实现主光阴影投射 Pass 的执行函数。
@@ -413,7 +415,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
         {
-        } // 这个 Pass 只上传全局 shader 常量，不读取或写入 RenderGraph 渲染目标。
+            builder.WriteLightingGlobals(); // 声明这个 Pass 会上传主光方向、主光颜色和环境光等灯光全局状态。
+
+            builder.WriteShadowGlobals(); // 声明这个 Pass 会上传默认阴影接收端全局状态，避免上一帧或上一相机残留。
+        }
 
         public override void Execute(BurtRenderGraphContext context) // 执行灯光和阴影接收端参数上传。
         {
@@ -522,6 +527,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 builder.ReadCameraDepth(); // 声明这个 Pass 会读取 Depth Prepass 写好的 CameraDepth。
             }
 
+            builder.ReadLightingGlobals(); // 声明不透明前向着色会读取 Setup Lighting 上传的灯光全局状态。
+
+            builder.ReadShadowGlobals(); // 声明不透明前向着色会读取阴影矩阵、强度、texel size 等阴影全局状态。
+
+            if (BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset)) // 如果当前 request 真的生成主光阴影图，就把 shadow map 声明为着色输入。
+            {
+                builder.ReadMainLightShadowMap(); // 声明不透明前向着色会采样 MainLightShadowMap。
+            }
+
             builder.WriteCameraColor(); // 声明这个 Pass 会把不透明物体颜色写入 CameraColor。
 
             builder.WriteCameraDepth(); // 声明这个 Pass 当前仍可能通过 ZWrite 更新 CameraDepth。
@@ -591,6 +605,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             builder.ReadCameraColor(); // 声明透明物体需要读取已有 CameraColor 作为混合背景。
 
             builder.ReadCameraDepth(); // 声明透明物体需要读取当前 CameraDepth 参与深度测试。
+
+            builder.ReadLightingGlobals(); // 声明透明前向着色会读取 Setup Lighting 上传的灯光全局状态。
+
+            builder.ReadShadowGlobals(); // 声明透明前向着色会读取阴影矩阵、强度、texel size 等阴影全局状态。
+
+            if (BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset)) // 如果当前 request 真的生成主光阴影图，就把 shadow map 声明为透明着色输入。
+            {
+                builder.ReadMainLightShadowMap(); // 声明透明前向着色会采样 MainLightShadowMap。
+            }
 
             builder.WriteCameraColor(); // 声明透明混合结果会写回 CameraColor。
         }

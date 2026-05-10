@@ -1,382 +1,491 @@
-using Burt.RenderPipeline; // 引入 BurtRP 运行时命名空间，Editor Overlay 需要读写 BurtShadingDebugSettings。
-using UnityEditor; // 引入 UnityEditor，下面需要使用 EditorWindow、MenuItem、SerializedObject 等编辑器 API。
-using UnityEditor.Overlays; // 引入 Overlay API，用来把 Shading Debug 挂到 SceneView Overlay。
-using UnityEditor.Toolbars; // 引入 Toolbar API，用来创建 Overlay 上的下拉按钮。
-using UnityEngine; // 引入 UnityEngine，下面需要使用 Vector2、Rect、ObjectNames 等 Unity 类型。
-using UnityEngine.Rendering; // 引入渲染命名空间，下面需要读取 GraphicsSettings.currentRenderPipeline。
-using UnityEngine.UIElements; // 引入 UIElements，EditorToolbarDropdownToggle 继承自 VisualElement。
+using System.Collections.Generic; // 使用 List 保存当前 SceneView 中已经创建的分类 Dropdown，切换 Debug 时统一刷新显示状态。
+using Burt.RenderPipeline; // 读取 BurtShadingDebugSettings，并把 Overlay 选择同步给运行时 Shader 全局参数。
+using UnityEditor; // 使用 EditorWindow、MenuItem、SerializedObject、EditorGUILayout 等编辑器 API。
+using UnityEditor.Overlays; // 使用 SceneView Overlay API，参考 XRender Editor/XShaderDebug/XShaderDebugUI.cs。
+using UnityEditor.Toolbars; // 使用 EditorToolbarDropdownToggle，和 XRender 的多工具栏 Dropdown 组织方式一致。
+using UnityEngine; // 使用 Vector2、Rect、Mathf、ObjectNames 等 Unity 类型。
+using UnityEngine.Rendering; // 使用 GraphicsSettings / QualitySettings 获取当前 BurtRenderPipelineAsset。
+using UnityEngine.UIElements; // 使用 AttachToPanelEvent / DetachFromPanelEvent 管理 Dropdown 生命周期。
 
-namespace Burt.RenderPipeline.Editor // 使用 BurtRP Editor 命名空间，把编辑器扩展和运行时代码分开。
+namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命名空间，避免污染运行时命名空间。
 {
-    internal static class BurtShadingDebugDisplayNames // 集中管理 Debug 菜单显示名，避免 Editor UI 直接暴露 enum 的工程命名。
+    internal static class BurtShadingDebugDisplayNames // 集中管理 Debug 显示名，避免 UI 直接暴露 enum 工程名。
     {
-        public static string GetDisplayName(BurtShadingDebugMode mode) // 返回对用户更友好的显示名，参考 XRender DebugDefine.hlsl 的 [Display: xxx] 机制。
+        public static string GetDisplayName(BurtShadingDebugMode mode) // 返回面向美术/调试使用的菜单名，参考 XRender DebugDefine.hlsl 的 Display 名。
         {
-            switch (mode) // 按模式逐项映射，方便后续新增 Debug 时明确给出菜单名。
+            switch (mode) // 按 enum 明确映射，新增 Debug 时可以在这里补友好名字。
             {
                 case BurtShadingDebugMode.None:
-                    return "None"; // 正常渲染，不启用任何 Shading Debug。
+                    return "None"; // 关闭 Shading Debug，返回正常渲染。
                 case BurtShadingDebugMode.Albedo:
-                    return "Base Color"; // 对齐 XRender Material Debug 里的 Base Color 命名。
+                    return "Base Color"; // 对齐 XRender Material Debug 的 Base Color 语义。
                 case BurtShadingDebugMode.NormalWS:
-                    return "Normal World Space"; // 对齐 XRender 的 Normal World Space。
+                    return "Normal World Space"; // 显示法线贴图影响后的世界空间法线。
                 case BurtShadingDebugMode.Smoothness:
-                    return "Smoothness"; // BurtRP 面板仍使用 Smoothness，所以保留这个显示名。
+                    return "Smoothness"; // 显示材质面板语义下的光滑度。
                 case BurtShadingDebugMode.Metallic:
-                    return "Metallic"; // 金属度输入。
+                    return "Metallic"; // 显示最终金属度。
                 case BurtShadingDebugMode.Occlusion:
-                    return "Ambient Occlusion"; // 对齐 XRender GenericData.AmbientOcclusion 语义。
+                    return "Ambient Occlusion"; // 显示材质 AO 输入。
                 case BurtShadingDebugMode.Reflectance:
-                    return "Reflectance"; // XRender Specular.Reflectance 输入。
+                    return "Reflectance"; // XRender 风格介质 reflectance 输入，不暴露 F0 面板参数。
                 case BurtShadingDebugMode.Roughness:
-                    return "Roughness"; // 内部 XRender Base.Roughness 语义。
+                    return "Roughness"; // 显示由 smoothness 还原的感知粗糙度。
                 case BurtShadingDebugMode.SpecularAARoughness:
-                    return "Specular AA Roughness"; // 直接高光实际使用的过滤后 roughness。
+                    return "Specular AA Roughness"; // 显示高光 AA 后真正进入 GGX 的 roughness。
                 case BurtShadingDebugMode.SpecularEnergyCompensation:
-                    return "Specular Energy Compensation"; // 直接高光能量补偿。
+                    return "Specular Energy Compensation"; // 显示直接高光多次散射补能。
                 case BurtShadingDebugMode.SpecularOcclusion:
-                    return "Specular Occlusion"; // 间接高光遮蔽。
+                    return "Specular Occlusion"; // 显示间接高光遮蔽。
                 case BurtShadingDebugMode.EnergyPreservation:
-                    return "Energy Preservation"; // XRender EnergyPreservation。
+                    return "Energy Preservation"; // 显示 XRender diffuse 底层保能比例。
                 case BurtShadingDebugMode.IndirectSpecularEnergyCompensation:
-                    return "Indirect Specular Energy Compensation"; // Reflection Probe / Sky Specular 补能。
+                    return "Indirect Specular Energy Compensation"; // 显示环境高光补能。
                 case BurtShadingDebugMode.DiffuseColor:
-                    return "Diffuse Color"; // XRender GenericData.DiffuseColor。
-                case BurtShadingDebugMode.F0:
-                    return "F0"; // reflectance / metallic / baseColor 还原出的 F0。
-                case BurtShadingDebugMode.F90:
-                    return "F90"; // Schlick Fresnel 的掠射端点。
+                    return "Diffuse Color"; // 显示 metallic 扣除后的漫反射颜色。
                 case BurtShadingDebugMode.DirectBRDFD:
-                    return "Direct BRDF D (GGX)"; // 直接光 GGX NDF D 项。
+                    return "Direct BRDF D (GGX)"; // 显示 GGX NDF D 项。
                 case BurtShadingDebugMode.DirectBRDFVisibility:
-                    return "Direct BRDF Visibility"; // 直接光 Smith Joint Visibility。
+                    return "Direct BRDF Visibility"; // 显示 Smith Joint Visibility 项。
                 case BurtShadingDebugMode.DirectBRDFFresnel:
-                    return "Direct BRDF Fresnel"; // 直接光 Schlick Fresnel。
+                    return "Direct BRDF Fresnel"; // 显示 Schlick Fresnel 项。
                 case BurtShadingDebugMode.DirectDiffuseLobe:
-                    return "Direct Diffuse Lobe"; // Lambert / Burley diffuse lobe。
+                    return "Direct Diffuse Lobe"; // 显示 diffuse lobe。
                 case BurtShadingDebugMode.DirectDiffuseBRDF:
-                    return "Direct Diffuse BRDF"; // 未乘灯光可见性的 diffuse BRDF。
+                    return "Direct Diffuse BRDF"; // 显示未乘 NdotL / LightColor 的 diffuse BRDF。
                 case BurtShadingDebugMode.DirectSpecularBRDF:
-                    return "Direct Specular BRDF"; // 未乘灯光可见性的 specular BRDF。
+                    return "Direct Specular BRDF"; // 显示未乘 NdotL / LightColor 的 specular BRDF。
                 case BurtShadingDebugMode.SpecularAANormalVariance:
-                    return "Specular AA Normal Variance"; // XRender GeometricNormalVariance。
+                    return "Specular AA Normal Variance"; // 显示 Normal Filtering 估算的法线方差。
                 case BurtShadingDebugMode.SpecularAARoughnessDelta:
-                    return "Specular AA Roughness Delta"; // Specular AA 额外增加的 roughness。
+                    return "Specular AA Roughness Delta"; // 显示 Specular AA 增加的 roughness。
                 case BurtShadingDebugMode.IndirectSpecularDFG:
-                    return "Indirect Specular DFG"; // PreIntegratedFG 的 DFG.xy。
+                    return "Indirect Specular DFG"; // 显示 PreIntegratedFG 采样得到的 DFG.xy。
                 case BurtShadingDebugMode.IndirectSpecularEnvBRDF:
-                    return "Indirect Specular Env BRDF"; // DFG 应用到 F0/F90 后的环境 BRDF。
+                    return "Indirect Specular Env BRDF"; // 显示 DFG 作用到 F0/F90 后的环境 BRDF。
                 case BurtShadingDebugMode.GBufferBaseColor:
-                    return "GBuffer Base Color"; // GBuffer0.rgb 解码后的基础色。
+                    return "GBuffer Base Color"; // 显示 GBuffer0.rgb 解码后的 BaseColor。
                 case BurtShadingDebugMode.GBufferNormalWS:
-                    return "GBuffer Normal WS"; // GBuffer1.rg octahedron normal 解码后的世界空间法线。
+                    return "GBuffer Normal WS"; // 显示 oct normal 解码后的世界空间法线。
                 case BurtShadingDebugMode.GBufferMetallic:
-                    return "GBuffer Metallic"; // GBuffer1.b 解码后的金属度。
+                    return "GBuffer Metallic"; // 显示 GBuffer1.b 解码后的 Metallic。
                 case BurtShadingDebugMode.GBufferSmoothness:
-                    return "GBuffer Smoothness"; // GBuffer1.a 解码后的光滑度。
+                    return "GBuffer Smoothness"; // 显示 GBuffer1.a 解码后的 Smoothness。
                 case BurtShadingDebugMode.GBufferOcclusion:
-                    return "GBuffer Occlusion"; // GBuffer0.a 解码后的 AO。
+                    return "GBuffer Occlusion"; // 显示 GBuffer0.a 解码后的 AO。
                 case BurtShadingDebugMode.GBufferReflectance:
-                    return "GBuffer Reflectance"; // GBuffer2.a 解码后的 XRender reflectance。
+                    return "GBuffer Reflectance"; // 显示 GBuffer2.a 解码后的 Reflectance。
+                case BurtShadingDebugMode.GBufferRoughness:
+                    return "GBuffer Roughness"; // 显示 GBuffer -> PBRMaterialData 后的 roughness。
+                case BurtShadingDebugMode.GBufferDiffuseColor:
+                    return "GBuffer Diffuse Color"; // 显示 GBuffer -> PBRMaterialData 后的 DiffuseColor。
                 case BurtShadingDebugMode.DetailLighting:
-                    return "Detail Lighting"; // 对齐 XRender DEBUGID_LIGHTING_DETAIL_LIGHTING 的 Display 名。
+                    return "Detail Lighting"; // 对齐 XRender DEBUGID_LIGHTING_DETAIL_LIGHTING。
                 case BurtShadingDebugMode.IndirectLighting:
-                    return "Indirect Lighting Total"; // 对齐 XRender Indirect Lighting Total 语义。
+                    return "Indirect Lighting Total"; // 显示 SH diffuse + reflection probe specular。
                 case BurtShadingDebugMode.DirectDiffuse:
-                    return "Direct Diffuse"; // 直接漫反射最终贡献。
+                    return "Direct Diffuse"; // 显示直接漫反射最终贡献。
                 case BurtShadingDebugMode.DirectSpecular:
-                    return "Direct Specular"; // 直接高光最终贡献。
+                    return "Direct Specular"; // 显示直接高光最终贡献。
                 case BurtShadingDebugMode.IndirectDiffuse:
-                    return "Indirect Diffuse"; // SH / Light Probe 漫反射。
+                    return "Indirect Diffuse"; // 显示 SH / Light Probe 漫反射。
                 case BurtShadingDebugMode.IndirectSpecular:
-                    return "Indirect Specular"; // Reflection Probe / Sky Specular。
+                    return "Indirect Specular"; // 显示 Reflection Probe / Sky 高光。
                 case BurtShadingDebugMode.CameraDepth:
                     return "Camera Depth"; // 已有全屏深度调试。
                 case BurtShadingDebugMode.MainLightShadow:
                     return "Main Light Shadow"; // 已有主光阴影图调试。
                 default:
-                    return ObjectNames.NicifyVariableName(mode.ToString()); // 兜底使用 Unity 的枚举名美化，避免新增模式显示为空。
+                    return ObjectNames.NicifyVariableName(mode.ToString()); // 兜底美化 enum 名，避免新增模式显示为空。
             }
         }
     }
 
-    [Overlay(typeof(SceneView), "Burt Shading Debug")] // 把这个 Overlay 注册到 SceneView，名字显示为 Burt Shading Debug。
-    internal sealed class BurtShadingDebugOverlay : ToolbarOverlay // 继承 ToolbarOverlay，让 Overlay 内部可以组合 ToolbarElement。
+    internal sealed class BurtShadingDebugGroup // 一个 Toolbar Dropdown 对应一个 Debug 分类，参考 XRender Groups 目录里的 Material / Lighting / Deferred 分组。
     {
-        public BurtShadingDebugOverlay() // 定义 Overlay 构造函数，Unity 创建 Overlay 时会调用。
-            : base(BurtShadingDebugDropdown.Id) // 把下拉按钮的 ToolbarElement ID 注册到这个 Overlay 里。
+        public BurtShadingDebugGroup(string title, string buttonText, BurtShadingDebugMode[] modes) // 保存分类标题、按钮短名和该分类下的模式列表。
+        {
+            Title = title; // 弹窗顶部显示的完整分类名。
+            ButtonText = buttonText; // Toolbar 收起状态下显示的短名。
+            Modes = modes; // 该分类包含的 Debug 模式。
+        }
+
+        public string Title { get; } // 分类标题，例如 Material / GBuffer / Lighting。
+
+        public string ButtonText { get; } // Toolbar 按钮默认短名。
+
+        public BurtShadingDebugMode[] Modes { get; } // 当前分类的 Debug 模式列表。
+
+        public bool Contains(BurtShadingDebugMode mode) // 判断当前模式是否属于这个分类，用来高亮对应 Dropdown。
+        {
+            foreach (var candidate in Modes) // 遍历数组，保持 Unity 旧版本兼容，不依赖 LINQ。
+            {
+                if (candidate == mode) // 命中当前模式。
+                {
+                    return true; // 该 Dropdown 应该显示为选中。
+                }
+            }
+
+            return false; // 当前模式不属于该分类。
+        }
+    }
+
+    internal static class BurtShadingDebugGroups // BurtRP 的分类表，结构参考 XRender Editor/XShaderDebug/Groups 的多 Dropdown 注册方式。
+    {
+        public static readonly BurtShadingDebugGroup General = new BurtShadingDebugGroup("General", "Off", new[] // 通用开关分类，用来快速关闭 Debug。
+        {
+            BurtShadingDebugMode.None // 正常渲染模式。
+        });
+
+        public static readonly BurtShadingDebugGroup Material = new BurtShadingDebugGroup("Material / Generic Data", "Material", new[] // 材质输入和 XRender GenericData 派生值。
+        {
+            BurtShadingDebugMode.Albedo, // BaseMap 与 BaseColor 合成后的基础色。
+            BurtShadingDebugMode.DiffuseColor, // metallic 扣除后的 diffuse 颜色。
+            BurtShadingDebugMode.NormalWS, // 最终世界空间法线。
+            BurtShadingDebugMode.Smoothness, // 面板语义下的光滑度。
+            BurtShadingDebugMode.Roughness, // shader 内部使用的感知粗糙度。
+            BurtShadingDebugMode.Metallic, // 最终金属度。
+            BurtShadingDebugMode.Occlusion, // 最终 AO。
+            BurtShadingDebugMode.Reflectance // XRender reflectance 输入。
+        });
+
+        public static readonly BurtShadingDebugGroup GBuffer = new BurtShadingDebugGroup("GBuffer / Deferred Data", "GBuffer", new[] // Deferred 前置检查：验证 GBuffer 编解码和 PBRData 重建。
+        {
+            BurtShadingDebugMode.GBufferBaseColor, // GBuffer0.rgb 解码结果。
+            BurtShadingDebugMode.GBufferNormalWS, // GBuffer1.rg oct normal 解码结果。
+            BurtShadingDebugMode.GBufferMetallic, // GBuffer1.b 解码结果。
+            BurtShadingDebugMode.GBufferSmoothness, // GBuffer1.a 解码结果。
+            BurtShadingDebugMode.GBufferOcclusion, // GBuffer0.a 解码结果。
+            BurtShadingDebugMode.GBufferReflectance, // GBuffer2.a 解码结果。
+            BurtShadingDebugMode.GBufferRoughness, // GBuffer -> PBRMaterialData 的 roughness。
+            BurtShadingDebugMode.GBufferDiffuseColor // GBuffer -> PBRMaterialData 的 DiffuseColor。
+        });
+
+        public static readonly BurtShadingDebugGroup SpecularAA = new BurtShadingDebugGroup("Specular AA / Normal Filtering", "Spec AA", new[] // 对应 XRender Normal Filtering / Anti Aliasing 方向。
+        {
+            BurtShadingDebugMode.SpecularAARoughness, // 高光实际使用 roughness。
+            BurtShadingDebugMode.SpecularAANormalVariance, // 屏幕空间法线方差。
+            BurtShadingDebugMode.SpecularAARoughnessDelta // Specular AA 增加量。
+        });
+
+        public static readonly BurtShadingDebugGroup DirectBRDF = new BurtShadingDebugGroup("Direct BRDF", "BRDF", new[] // 对应 XRender SlabLobes 的 D / V / F / diffuse lobe 拆分。
+        {
+            BurtShadingDebugMode.DirectBRDFD, // GGX D 项。
+            BurtShadingDebugMode.DirectBRDFVisibility, // Smith Joint Visibility。
+            BurtShadingDebugMode.DirectBRDFFresnel, // Schlick Fresnel。
+            BurtShadingDebugMode.DirectDiffuseLobe, // diffuse lobe。
+            BurtShadingDebugMode.DirectDiffuseBRDF, // 直接 diffuse BRDF。
+            BurtShadingDebugMode.DirectSpecularBRDF // 直接 specular BRDF。
+        });
+
+        public static readonly BurtShadingDebugGroup IBL = new BurtShadingDebugGroup("IBL / Energy / Occlusion", "IBL", new[] // 归档环境光、能量守恒和 specular occlusion 相关调试。
+        {
+            BurtShadingDebugMode.IndirectSpecularDFG, // PreIntegratedFG DFG.xy。
+            BurtShadingDebugMode.IndirectSpecularEnvBRDF, // DFG 应用到 F0/F90 后的环境 BRDF。
+            BurtShadingDebugMode.SpecularEnergyCompensation, // 直接高光补能。
+            BurtShadingDebugMode.IndirectSpecularEnergyCompensation, // 间接高光补能。
+            BurtShadingDebugMode.EnergyPreservation, // diffuse 底层保能比例。
+            BurtShadingDebugMode.SpecularOcclusion // 环境高光遮蔽。
+        });
+
+        public static readonly BurtShadingDebugGroup Lighting = new BurtShadingDebugGroup("Lighting", "Lighting", new[] // 对应 XRender Lighting Debug，保留 Detail Lighting 入口。
+        {
+            BurtShadingDebugMode.DetailLighting, // 中灰 BaseColor 下重新观察光照细节。
+            BurtShadingDebugMode.DirectDiffuse, // 直接漫反射最终贡献。
+            BurtShadingDebugMode.DirectSpecular, // 直接高光最终贡献。
+            BurtShadingDebugMode.IndirectLighting, // 间接光总和。
+            BurtShadingDebugMode.IndirectDiffuse, // 间接漫反射。
+            BurtShadingDebugMode.IndirectSpecular // 间接高光。
+        });
+
+        public static readonly BurtShadingDebugGroup Fullscreen = new BurtShadingDebugGroup("Fullscreen / Render Data", "Fullscreen", new[] // BurtRP 现有全屏调试入口。
+        {
+            BurtShadingDebugMode.CameraDepth, // CameraDepth 全屏 Debug。
+            BurtShadingDebugMode.MainLightShadow // MainLightShadow 全屏 Debug。
+        });
+    }
+
+    [Overlay(typeof(SceneView), "Burt Shading Debug")] // 在 SceneView 注册 BurtRP Shading Debug Overlay。
+    internal sealed class BurtShadingDebugOverlay : ToolbarOverlay // 组合多个分类 Dropdown，参考 XRender XShaderDebugOverlay 的多按钮结构。
+    {
+        public BurtShadingDebugOverlay() // Unity 创建 Overlay 时会调用这个构造函数。
+            : base(
+                BurtShadingDebugOffDropdown.Id,
+                BurtShadingDebugMaterialDropdown.Id,
+                BurtShadingDebugGBufferDropdown.Id,
+                BurtShadingDebugSpecularAADropdown.Id,
+                BurtShadingDebugBRDFDropdown.Id,
+                BurtShadingDebugIBLDropdown.Id,
+                BurtShadingDebugLightingDropdown.Id,
+                BurtShadingDebugFullscreenDropdown.Id) // 每个 ID 对应一个 EditorToolbarElement。
         {
         }
     }
 
-    [EditorToolbarElement(Id, typeof(SceneView))] // 把下拉按钮注册成 SceneView 可用的 ToolbarElement。
-    internal sealed class BurtShadingDebugDropdown : EditorToolbarDropdownToggle, IAccessContainerWindow // 继承下拉 Toggle，并允许拿到宿主窗口。
+    internal abstract class BurtShadingDebugGroupDropdown : EditorToolbarDropdownToggle, IAccessContainerWindow // 所有分类 Dropdown 的公共基类。
     {
-        public const string Id = "BurtRP/Shading Debug"; // 定义 ToolbarElement 唯一 ID，Overlay 会通过这个 ID 引用按钮。
+        private static readonly List<BurtShadingDebugGroupDropdown> Instances = new List<BurtShadingDebugGroupDropdown>(); // 记录已挂载的按钮，便于切换模式后一起刷新。
 
-        public EditorWindow containerWindow { get; set; } // 保存宿主窗口引用，IAccessContainerWindow 接口要求提供这个属性。
+        private readonly BurtShadingDebugGroup group; // 当前 Dropdown 对应的 Debug 分类。
 
-        public BurtShadingDebugDropdown() // 定义下拉按钮构造函数，Unity 创建工具栏元素时调用。
+        public EditorWindow containerWindow { get; set; } // IAccessContainerWindow 要求暴露宿主窗口引用。
+
+        protected BurtShadingDebugGroupDropdown(BurtShadingDebugGroup group) // 子类只需要传入对应分类。
         {
-            tooltip = "BurtRP Shading Debug"; // 设置鼠标悬停提示，方便识别这个按钮的用途。
-            UpdateVisualState(); // 初始化按钮文字和选中状态，让 UI 反映当前 debug 模式。
-            dropdownClicked += () => UnityEditor.PopupWindow.Show(worldBound, new BurtShadingDebugPopup(this)); // 明确使用 UnityEditor.PopupWindow，避免和 UIElements.PopupWindow 同名冲突。
-            RegisterCallback<AttachToPanelEvent>(_ => UpdateVisualState()); // 按钮挂到面板时刷新一次，避免域重载后文字过期。
+            this.group = group; // 保存分类数据，后续弹窗和高亮都用它。
+            tooltip = "BurtRP " + group.Title + " Debug"; // 鼠标悬停时显示完整分类说明。
+            UpdateVisualState(); // 初始化按钮文字和 Toggle 状态。
+            dropdownClicked += () => UnityEditor.PopupWindow.Show(worldBound, new BurtShadingDebugPopup(group)); // 打开只包含该分类的弹窗。
+            RegisterCallback<AttachToPanelEvent>(_ => RegisterInstance()); // 挂载到 SceneView 时登记实例。
+            RegisterCallback<DetachFromPanelEvent>(_ => Instances.Remove(this)); // 从 SceneView 移除时解除登记，避免保留失效引用。
         }
 
-        public void UpdateVisualState() // 根据当前 debug 模式刷新按钮显示。
+        public void UpdateVisualState() // 根据全局 Debug 模式刷新按钮显示。
         {
-            var mode = BurtShadingDebugSettings.Mode; // 读取当前 runtime debug 模式。
-            value = mode != BurtShadingDebugMode.None; // 非 None 时让 Toggle 处于开启状态。
-            text = mode == BurtShadingDebugMode.None ? "Shading" : BurtShadingDebugDisplayNames.GetDisplayName(mode); // None 时显示通用标题，否则显示友好的 Debug 名。
+            var mode = BurtShadingDebugSettings.Mode; // 读取当前选中的 Debug 模式。
+            bool isActiveGroup = group.Contains(mode); // 当前模式属于该分类时高亮该 Dropdown，None 会高亮 Off。
+            value = isActiveGroup; // 让 Toolbar Toggle 视觉上反映当前分类。
+            text = isActiveGroup && mode != BurtShadingDebugMode.None ? BurtShadingDebugDisplayNames.GetDisplayName(mode) : group.ButtonText; // 激活分类显示具体模式，Off 保持短名。
+        }
+
+        public static void UpdateAllVisualStates() // 外部切换模式后调用，刷新所有已创建的 Dropdown。
+        {
+            foreach (var instance in Instances) // 遍历 SceneView 中的所有 BurtRP Shading Debug 按钮。
+            {
+                instance.UpdateVisualState(); // 同步按钮状态和文字。
+            }
+        }
+
+        private void RegisterInstance() // 记录当前 Dropdown 实例。
+        {
+            if (!Instances.Contains(this)) // Unity 面板重挂载时可能重复回调，需要去重。
+            {
+                Instances.Add(this); // 保存实例供全局刷新使用。
+            }
+
+            UpdateVisualState(); // 挂载后再刷新一次，处理域重载后的状态恢复。
         }
     }
 
-    internal sealed class BurtShadingDebugPopup : PopupWindowContent // 定义 Overlay 下拉后显示的弹窗内容。
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Off 分类按钮。
+    internal sealed class BurtShadingDebugOffDropdown : BurtShadingDebugGroupDropdown
     {
-        private const float ScrollMaxHeight = 440f; // 限制弹窗列表最大高度，Debug 模式继续增加时不会把 SceneView 菜单撑出屏幕。
+        public const string Id = "BurtRP/Shading Debug/Off"; // ToolbarOverlay 引用的唯一 ID。
 
-        private readonly BurtShadingDebugDropdown owner; // 保存创建这个弹窗的下拉按钮，用来在切换模式后刷新按钮文字。
-
-        private Vector2 scrollPosition; // 保存列表滚动位置，让分类后的长菜单可以在同一个弹窗里浏览。
-
-        private sealed class BurtShadingDebugGroup // 定义一个菜单分类，对齐 XRender 按 Material / Lighting 等组拆分 Debug Overlay 的思路。
+        public BurtShadingDebugOffDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.General) // 绑定 General / None 分类。
         {
-            public BurtShadingDebugGroup(string title, BurtShadingDebugMode[] modes) // 构造一个带标题和模式列表的分类。
-            {
-                Title = title; // 保存显示在菜单里的分类标题。
-                Modes = modes; // 保存这个分类下的所有 Debug 模式。
-            }
+        }
+    }
 
-            public string Title { get; } // 分类标题，例如 Material / Lighting。
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Material 分类按钮。
+    internal sealed class BurtShadingDebugMaterialDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Material"; // ToolbarOverlay 引用的唯一 ID。
 
-            public BurtShadingDebugMode[] Modes { get; } // 分类下的 Debug 模式顺序。
+        public BurtShadingDebugMaterialDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.Material) // 绑定 Material / Generic Data 分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 GBuffer 分类按钮。
+    internal sealed class BurtShadingDebugGBufferDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/GBuffer"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugGBufferDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.GBuffer) // 绑定 GBuffer / Deferred Data 分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Specular AA 分类按钮。
+    internal sealed class BurtShadingDebugSpecularAADropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/SpecularAA"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugSpecularAADropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.SpecularAA) // 绑定 Specular AA 分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Direct BRDF 分类按钮。
+    internal sealed class BurtShadingDebugBRDFDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/BRDF"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugBRDFDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.DirectBRDF) // 绑定 Direct BRDF 分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 IBL 分类按钮。
+    internal sealed class BurtShadingDebugIBLDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/IBL"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugIBLDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.IBL) // 绑定 IBL / Energy / Occlusion 分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Lighting 分类按钮。
+    internal sealed class BurtShadingDebugLightingDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Lighting"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugLightingDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.Lighting) // 绑定 Lighting 分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Fullscreen 分类按钮。
+    internal sealed class BurtShadingDebugFullscreenDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Fullscreen"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugFullscreenDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.Fullscreen) // 绑定 Fullscreen / Render Data 分类。
+        {
+        }
+    }
+
+    internal sealed class BurtShadingDebugPopup : PopupWindowContent // 每个分类按钮点击后弹出的菜单内容。
+    {
+        private const float ScrollMaxHeight = 320f; // 单个分类仍限制最大高度，后续模式增加时不会撑出屏幕。
+
+        private readonly BurtShadingDebugGroup group; // 当前弹窗展示的分类。
+
+        private Vector2 scrollPosition; // 保存滚动位置，长分类可滚动浏览。
+
+        public BurtShadingDebugPopup(BurtShadingDebugGroup group) // 弹窗构造函数。
+        {
+            this.group = group; // 保存分类数据供绘制使用。
         }
 
-        private static readonly BurtShadingDebugGroup[] Groups = // 参考 XRender Editor/XShaderDebug/Groups：按 Material、Lighting、Deferred/Visualizer 等大类拆菜单。
+        public override Vector2 GetWindowSize() // 返回 Popup 尺寸。
         {
-            new BurtShadingDebugGroup("General", new[] // 通用开关分类，用来快速回到正常渲染。
-            {
-                BurtShadingDebugMode.None // 正常渲染模式。
-            }),
-
-            new BurtShadingDebugGroup("Material / Generic Data", new[] // 对齐 XRender Material Debug：材质输入和 GenericData 派生值。
-            {
-                BurtShadingDebugMode.Albedo, // 材质基础色调试模式，会显示 BaseMap 和 BaseColor 合成后的 albedo。
-                BurtShadingDebugMode.DiffuseColor, // XRender DiffuseColor 调试模式，用来检查 metallic 对 diffuse 的扣除。
-                BurtShadingDebugMode.NormalWS, // 世界空间法线调试模式，会显示法线贴图影响后的最终 normalWS。
-                BurtShadingDebugMode.Smoothness, // 光滑度调试模式，会显示标量和 Mask Map A 通道合成后的最终 smoothness。
-                BurtShadingDebugMode.Roughness, // 粗糙度调试模式，用来检查 smoothness 到 perceptual roughness 的转换。
-                BurtShadingDebugMode.Metallic, // 金属度调试模式，会显示标量和 Mask Map R 通道合成后的最终 metallic。
-                BurtShadingDebugMode.Occlusion, // 环境遮蔽调试模式，用来检查 Mask Map G 通道和 Occlusion Strength。
-                BurtShadingDebugMode.Reflectance, // Reflectance 调试模式，用来检查 XRender 风格反射率输入。
-                BurtShadingDebugMode.F0, // F0 调试模式，用来检查 reflectance / metallic / baseColor 的还原结果。
-                BurtShadingDebugMode.F90 // F90 调试模式，用来检查 Schlick Fresnel 的掠射端点。
-            }),
-
-            new BurtShadingDebugGroup("GBuffer / Deferred Data", new[] // Deferred 前置调试：只验证 BurtGBuffer 编解码，不写入真实 RenderTarget。
-            {
-                BurtShadingDebugMode.GBufferBaseColor, // GBuffer0.rgb 解码后的基础色。
-                BurtShadingDebugMode.GBufferNormalWS, // GBuffer1.rg 解码后的世界空间法线。
-                BurtShadingDebugMode.GBufferMetallic, // GBuffer1.b 解码后的 Metallic。
-                BurtShadingDebugMode.GBufferSmoothness, // GBuffer1.a 解码后的 Smoothness。
-                BurtShadingDebugMode.GBufferOcclusion, // GBuffer0.a 解码后的 AO。
-                BurtShadingDebugMode.GBufferReflectance // GBuffer2.a 解码后的 XRender reflectance。
-            }),
-
-            new BurtShadingDebugGroup("Specular AA / Normal Filtering", new[] // 对齐 XRender CommonMaterial 的 NormalFiltering 调试链路。
-            {
-                BurtShadingDebugMode.SpecularAARoughness, // 高光 AA 粗糙度调试模式，用来观察高光是否被像素法线变化拓宽。
-                BurtShadingDebugMode.SpecularAANormalVariance, // 高光 AA 法线方差调试模式，用来观察 Normal Filtering 输入。
-                BurtShadingDebugMode.SpecularAARoughnessDelta // 高光 AA 粗糙度增量调试模式，用来观察 Specular AA 的实际影响。
-            }),
-
-            new BurtShadingDebugGroup("Direct BRDF", new[] // 对齐 XRender SlabLobes：把直接光 D / V / F / diffuse lobe 拆开。
-            {
-                BurtShadingDebugMode.DirectBRDFD, // 直接光 GGX D 项调试模式，用来检查高 smoothness 下的 NDF 峰值。
-                BurtShadingDebugMode.DirectBRDFVisibility, // 直接光 Visibility 调试模式，用来检查 Smith Joint 几何遮蔽。
-                BurtShadingDebugMode.DirectBRDFFresnel, // 直接光 Fresnel 调试模式，用来检查 F0 与视角项。
-                BurtShadingDebugMode.DirectDiffuseLobe, // 直接光 diffuse lobe 调试模式，当前默认 Lambert，后续可切 Burley。
-                BurtShadingDebugMode.DirectDiffuseBRDF, // 直接光 diffuse BRDF 调试模式，不含灯光颜色、NdotL 和阴影。
-                BurtShadingDebugMode.DirectSpecularBRDF // 直接光 specular BRDF 调试模式，不含灯光颜色、NdotL 和阴影。
-            }),
-
-            new BurtShadingDebugGroup("IBL / Energy / Occlusion", new[] // 对齐 XRender Sky/EnvProbe Specular、EnergyCompensation 和 SpecularOcclusion。
-            {
-                BurtShadingDebugMode.IndirectSpecularDFG, // 间接高光 DFG 调试模式，用来检查 PreIntegratedFG。
-                BurtShadingDebugMode.IndirectSpecularEnvBRDF, // 间接高光 EnvBRDF 调试模式，用来检查 DFG 应用到 F0/F90 后的结果。
-                BurtShadingDebugMode.SpecularEnergyCompensation, // 高光能量补偿调试模式。
-                BurtShadingDebugMode.IndirectSpecularEnergyCompensation, // 间接高光能量补偿调试模式。
-                BurtShadingDebugMode.EnergyPreservation, // XRender 底层 diffuse 保能比例调试模式。
-                BurtShadingDebugMode.SpecularOcclusion // 间接高光遮蔽调试模式。
-            }),
-
-            new BurtShadingDebugGroup("Lighting", new[] // 对齐 XRender Lighting Debug：最终 direct / indirect / total lighting 拆分。
-            {
-                BurtShadingDebugMode.DetailLighting, // Detail Lighting 调试模式，参考 XRender 用 0.18 中灰 BaseColor 观察光照细节。
-                BurtShadingDebugMode.DirectDiffuse, // 直接漫反射调试模式，只显示主光 diffuse 贡献。
-                BurtShadingDebugMode.DirectSpecular, // 直接高光调试模式，只显示主光 specular 贡献。
-                BurtShadingDebugMode.IndirectLighting, // 间接光调试模式，只显示 SH 漫反射和 Reflection Probe 镜面反射。
-                BurtShadingDebugMode.IndirectDiffuse, // 间接漫反射调试模式，只显示 SH / Light Probe diffuse 贡献。
-                BurtShadingDebugMode.IndirectSpecular // 间接高光调试模式，只显示 Reflection Probe specular 贡献。
-            }),
-
-            new BurtShadingDebugGroup("Fullscreen / Render Data", new[] // BurtRP 现有全屏调试入口，类似 XRender 独立模块 Debug。
-            {
-                BurtShadingDebugMode.CameraDepth, // 复用已有 CameraDepth 全屏 debug pass。
-                BurtShadingDebugMode.MainLightShadow // 复用已有 MainLightShadow 全屏 debug pass。
-            })
-        };
-
-        public BurtShadingDebugPopup(BurtShadingDebugDropdown owner) // 定义弹窗构造函数。
-        {
-            this.owner = owner; // 保存下拉按钮引用，允许切换模式后刷新按钮文字。
+            float listHeight = group.Modes.Length * EditorGUIUtility.singleLineHeight + 8f; // 根据模式数量估算列表高度。
+            float contentHeight = 30f + Mathf.Min(listHeight, ScrollMaxHeight) + 48f; // 预留标题和说明区域，不再显示资产信息行。
+            return new Vector2(320f, contentHeight); // 固定宽度，避免不同分类宽度跳变太大。
         }
 
-        public override Vector2 GetWindowSize() // 返回弹窗窗口大小。
+        public override void OnGUI(Rect rect) // 绘制分类菜单。
         {
-            float contentHeight = 30f + GetModeCount() * EditorGUIUtility.singleLineHeight + Groups.Length * 24f + 78f; // 根据模式和分类标题估算完整高度。
-            return new Vector2(310f, Mathf.Min(contentHeight, ScrollMaxHeight + 108f)); // 列表过长时固定高度并启用滚动。
-        }
+            EditorGUILayout.LabelField(group.Title, EditorStyles.boldLabel); // 显示分类标题。
 
-        public override void OnGUI(Rect rect) // 绘制弹窗 GUI。
-        {
-            EditorGUILayout.LabelField("BurtRP Shading Debug", EditorStyles.boldLabel); // 绘制标题，说明这是 BurtRP 的调试菜单。
-
-            float scrollHeight = Mathf.Min(ScrollMaxHeight, GetModeCount() * EditorGUIUtility.singleLineHeight + Groups.Length * 24f + 8f); // 计算列表可视高度。
-            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition, GUILayout.Height(scrollHeight)); // 用滚动列表承载分类后的 Debug 选项。
-
-            foreach (var group in Groups) // 遍历所有 Debug 分类。
-            {
-                DrawGroup(group); // 绘制当前分类标题和它下面的模式。
-            }
-
-            EditorGUILayout.EndScrollView(); // 结束滚动区域，下面继续显示资产信息和说明。
-            EditorGUILayout.Space(4f); // 加一点间距，让菜单项和资产信息分开。
-
-            using (new EditorGUI.DisabledScope(true)) // 禁用下面的 ObjectField，只用于显示当前资产，不允许在这里拖拽修改。
-            {
-                var asset = BurtShadingDebugOverlayUtility.GetActiveBurtAsset(); // 通过公共工具方法查找当前正在使用的 BurtRenderPipelineAsset，避免在弹窗类里调用不存在的本地方法。
-                EditorGUILayout.ObjectField("Active Asset", asset, typeof(BurtRenderPipelineAsset), false); // 显示当前管线资产，方便确认 Overlay 正在操作哪个 asset。
-            }
-
-            EditorGUILayout.HelpBox("材质/光照模式先写入全局 shader 参数；Depth 和 Shadow 会同步驱动现有 BurtRP 调试视图。", MessageType.Info); // 说明当前最小版本的行为边界。
-        }
-
-        private static int GetModeCount() // 统计所有分类中的 Debug 模式数量。
-        {
-            int count = 0; // 从 0 开始累计。
-
-            foreach (var group in Groups) // 遍历每个分类。
-            {
-                count += group.Modes.Length; // 加上当前分类里的模式数量。
-            }
-
-            return count; // 返回总模式数量，用来估算弹窗高度。
-        }
-
-        private void DrawGroup(BurtShadingDebugGroup group) // 绘制一个 Debug 分类。
-        {
-            EditorGUILayout.Space(3f); // 分类之间留一点空隙，避免菜单看起来像一整串无分组列表。
-            EditorGUILayout.LabelField(group.Title, EditorStyles.miniBoldLabel); // 使用小号粗体标题，接近 XRender 多个 Debug Dropdown 的分组感。
+            float listHeight = Mathf.Min(ScrollMaxHeight, group.Modes.Length * EditorGUIUtility.singleLineHeight + 8f); // 限制滚动区域高度。
+            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition, GUILayout.Height(listHeight)); // 开始绘制可滚动模式列表。
 
             foreach (var mode in group.Modes) // 遍历当前分类下的所有模式。
             {
-                DrawMode(mode); // 为当前模式绘制一行可点击菜单项。
+                DrawMode(mode); // 绘制单个模式项。
+            }
+
+            EditorGUILayout.EndScrollView(); // 结束滚动区域。
+            EditorGUILayout.Space(4f); // 与资产信息隔开一点距离。
+
+            EditorGUILayout.HelpBox("参考 XRender Shader Debug 的分类 Toolbar；Depth 和 Shadow 仍同步 BurtRP 现有全屏 Debug 开关。", MessageType.Info); // 说明分类来源和全屏 Debug 行为。
+        }
+
+        private void DrawMode(BurtShadingDebugMode mode) // 绘制一个可选 Debug 模式。
+        {
+            var isCurrent = BurtShadingDebugSettings.Mode == mode; // 判断该模式是否是当前模式。
+
+            if (!GUILayout.Toggle(isCurrent, BurtShadingDebugDisplayNames.GetDisplayName(mode), "MenuItem")) // 使用 MenuItem 样式获得类似 Unity 菜单的勾选效果。
+            {
+                return; // 未点击或点击当前项取消时不做任何改变。
+            }
+
+            if (!isCurrent) // 只在切换到新模式时更新状态。
+            {
+                SetMode(mode); // 写入全局 Debug 模式。
+                editorWindow.Close(); // 选择后关闭弹窗，和常规 Dropdown 菜单行为一致。
             }
         }
 
-        private void DrawMode(BurtShadingDebugMode mode) // 绘制一个模式菜单项。
+        private void SetMode(BurtShadingDebugMode mode) // 设置 shading debug 模式并同步相关状态。
         {
-            var isCurrent = BurtShadingDebugSettings.Mode == mode; // 判断这一行是否是当前模式。
-
-            if (!GUILayout.Toggle(isCurrent, BurtShadingDebugDisplayNames.GetDisplayName(mode), "MenuItem")) // 用菜单样式绘制 Toggle 行，并判断是否被点击。
-            {
-                return; // 没有点击时直接返回，不改变模式。
-            }
-
-            if (!isCurrent) // 只有点击了非当前模式时才执行切换。
-            {
-                SetMode(mode); // 写入新模式并同步已有 debug view。
-                editorWindow.Close(); // 切换后关闭弹窗，行为和普通菜单一致。
-            }
-        }
-
-        private void SetMode(BurtShadingDebugMode mode) // 设置新的 shading debug 模式。
-        {
-            BurtShadingDebugSettings.Mode = mode; // 写入 runtime 静态状态，并上传 shader 全局参数。
-            BurtShadingDebugOverlayUtility.SyncExistingDebugViews(mode); // 同步 BurtRP asset 上已有的 Depth/Shadow 调试开关。
-            owner?.UpdateVisualState(); // 如果弹窗来自 Overlay 按钮，就刷新按钮文字和选中状态。
-            SceneView.RepaintAll(); // 重绘所有 SceneView，让 debug view 切换尽快可见。
+            BurtShadingDebugSettings.Mode = mode; // 写入运行时静态状态，并上传 shader 全局参数。
+            BurtShadingDebugOverlayUtility.SyncExistingDebugViews(mode); // 同步 BurtRP Asset 上已有的 Depth / Shadow 全屏调试开关。
+            BurtShadingDebugGroupDropdown.UpdateAllVisualStates(); // 刷新所有分类按钮的高亮和文本。
+            SceneView.RepaintAll(); // 立即刷新 SceneView，避免等待下一次交互才看到结果。
         }
     }
 
-    internal static class BurtShadingDebugOverlayUtility // 定义 Overlay 和 fallback window 共用的小工具。
+    internal static class BurtShadingDebugOverlayUtility // Overlay 和 fallback window 共用的小工具。
     {
-        public static void SyncExistingDebugViews(BurtShadingDebugMode mode) // 根据当前模式同步 BurtRP 已有全屏 debug view 开关。
+        public static void SyncExistingDebugViews(BurtShadingDebugMode mode) // 把 enum 模式同步到 BurtRP 既有全屏 Debug bool。
         {
-            var asset = GetActiveBurtAsset(); // 查找当前渲染管线资产。
+            var asset = GetActiveBurtAsset(); // 获取当前生效的 BurtRP Asset。
 
-            if (asset == null) // 如果当前项目没有使用 BurtRP asset，就没有可同步的目标。
+            if (asset == null) // 非 BurtRP 或未绑定资产时无法同步。
             {
-                return; // 直接返回，避免 SerializedObject 接收空对象。
+                return; // 直接返回，Shading Debug 的 shader 全局参数仍然有效。
             }
 
-            var serializedAsset = new SerializedObject(asset); // 用 SerializedObject 修改私有 SerializeField，避免给 asset 增加额外公开 setter。
-            SetBool(serializedAsset, "enableDepthDebugView", mode == BurtShadingDebugMode.CameraDepth); // CameraDepth 模式开启已有深度调试 pass，其它模式关闭。
-            SetBool(serializedAsset, "enableMainLightShadowDebugView", mode == BurtShadingDebugMode.MainLightShadow); // MainLightShadow 模式开启已有阴影图调试 pass，其它模式关闭。
-            serializedAsset.ApplyModifiedPropertiesWithoutUndo(); // 应用修改但不压入 Undo，避免每次切 debug 都污染撤销栈。
-            EditorUtility.SetDirty(asset); // 标记 asset 已修改，确保 Inspector 和序列化状态能刷新。
+            var serializedAsset = new SerializedObject(asset); // 通过 SerializedObject 访问私有 SerializeField，避免改运行时 API。
+            SetBool(serializedAsset, "enableDepthDebugView", mode == BurtShadingDebugMode.CameraDepth); // CameraDepth 模式开启现有深度调试。
+            SetBool(serializedAsset, "enableMainLightShadowDebugView", mode == BurtShadingDebugMode.MainLightShadow); // MainLightShadow 模式开启现有阴影调试。
+            serializedAsset.ApplyModifiedPropertiesWithoutUndo(); // Debug 切换不写 Undo 栈，避免污染用户操作历史。
+            EditorUtility.SetDirty(asset); // 标记资产已更新，Inspector 和渲染流程能看到变化。
         }
 
-        public static BurtRenderPipelineAsset GetActiveBurtAsset() // 查找当前真正生效的 BurtRenderPipelineAsset。
+        public static BurtRenderPipelineAsset GetActiveBurtAsset() // 获取当前 Unity 设置中的 BurtRP Asset。
         {
-            var asset = GraphicsSettings.currentRenderPipeline as BurtRenderPipelineAsset; // 优先读取 GraphicsSettings 当前管线资产。
+            var asset = GraphicsSettings.currentRenderPipeline as BurtRenderPipelineAsset; // 优先读取 GraphicsSettings 当前管线。
 
-            if (asset != null) // 如果 GraphicsSettings 已经返回 BurtRP asset，就直接使用它。
+            if (asset != null) // 如果项目级设置里已经是 BurtRP，直接返回。
             {
-                return asset; // 返回当前 GraphicsSettings 资产。
+                return asset; // 返回当前 BurtRP Asset。
             }
 
-            return QualitySettings.renderPipeline as BurtRenderPipelineAsset; // 如果 GraphicsSettings 没有，就尝试读取当前 Quality 级别覆盖的管线资产。
+            return QualitySettings.renderPipeline as BurtRenderPipelineAsset; // 否则尝试 QualitySettings 覆盖的渲染管线。
         }
 
-        private static void SetBool(SerializedObject serializedObject, string propertyName, bool value) // 设置 SerializedObject 上的 bool 字段。
+        private static void SetBool(SerializedObject serializedObject, string propertyName, bool value) // 安全写入 bool SerializeField。
         {
-            var property = serializedObject.FindProperty(propertyName); // 按字段名查找私有 SerializeField。
+            var property = serializedObject.FindProperty(propertyName); // 查找目标字段。
 
-            if (property != null) // 找到字段时才写入，避免字段改名后直接抛异常。
+            if (property != null) // 字段存在才写入，兼容后续资产字段重命名或裁剪。
             {
-                property.boolValue = value; // 写入新的 bool 值。
+                property.boolValue = value; // 设置 bool 值。
             }
         }
     }
 
-    internal sealed class BurtShadingDebugWindow : EditorWindow // 定义 fallback 编辑器窗口，Overlay API 不显示时还能操作同一套状态。
+    internal sealed class BurtShadingDebugWindow : EditorWindow // Overlay 不可用时保留一个菜单窗口作为 fallback。
     {
-        [MenuItem("Window/Rendering/BurtRP/Shading Debug")] // 注册菜单入口，路径放在 Rendering/BurtRP 下。
+        [MenuItem("Window/Rendering/BurtRP/Shading Debug")] // 提供 Window 菜单入口，方便没有打开 Overlay 的情况下切换。
         private static void Open() // 打开 fallback 窗口。
         {
-            GetWindow<BurtShadingDebugWindow>("Burt Shading Debug"); // 获取或创建窗口，并设置标题。
+            GetWindow<BurtShadingDebugWindow>("Burt Shading Debug"); // 创建或聚焦窗口。
         }
 
         private void OnGUI() // 绘制 fallback 窗口内容。
         {
-            EditorGUILayout.LabelField("Overlay Fallback", EditorStyles.boldLabel); // 绘制窗口标题。
-            EditorGUILayout.HelpBox("如果 SceneView Overlay 菜单没有显示，可先用这个窗口确认同一套调试状态。", MessageType.Info); // 说明这个窗口是 Overlay 的备选入口。
+            EditorGUILayout.LabelField("Overlay Fallback", EditorStyles.boldLabel); // 标题提示这是备用入口。
+            EditorGUILayout.HelpBox("SceneView Overlay 会显示分类 Dropdown；这里保留完整 EnumPopup 作为备用入口。", MessageType.Info); // 说明推荐使用 Overlay。
 
-            EditorGUI.BeginChangeCheck(); // 开始监听 EnumPopup 是否发生变化。
-            var mode = (BurtShadingDebugMode)EditorGUILayout.EnumPopup("Mode", BurtShadingDebugSettings.Mode); // 绘制模式枚举选择框。
+            EditorGUI.BeginChangeCheck(); // 开始监听 enum 修改。
+            var mode = (BurtShadingDebugMode)EditorGUILayout.EnumPopup("Mode", BurtShadingDebugSettings.Mode); // 备用入口仍显示完整 enum。
 
-            if (EditorGUI.EndChangeCheck()) // 如果用户切换了模式，就同步状态。
+            if (EditorGUI.EndChangeCheck()) // 用户切换了模式。
             {
-                BurtShadingDebugSettings.Mode = mode; // 写入 runtime 静态状态，并上传 shader 全局参数。
-                BurtShadingDebugOverlayUtility.SyncExistingDebugViews(mode); // 同步已有 Depth/Shadow 全屏调试开关。
-                SceneView.RepaintAll(); // 重绘 SceneView，让切换结果尽快显示。
+                BurtShadingDebugSettings.Mode = mode; // 写入全局 shader debug 状态。
+                BurtShadingDebugOverlayUtility.SyncExistingDebugViews(mode); // 同步 Depth/Shadow 全屏 Debug 开关。
+                BurtShadingDebugGroupDropdown.UpdateAllVisualStates(); // 刷新 Overlay 上的分类按钮。
+                SceneView.RepaintAll(); // 刷新 SceneView。
             }
 
-            EditorGUILayout.LabelField("Shader Mode", BurtShadingDebugSettings.ModeShaderName); // 显示 shader 模式属性名，方便后续接 shader 时核对。
-            EditorGUILayout.LabelField("Shader Enabled", BurtShadingDebugSettings.EnabledShaderName); // 显示 shader 开关属性名，方便后续接 shader 时核对。
+            EditorGUILayout.LabelField("Display", BurtShadingDebugDisplayNames.GetDisplayName(BurtShadingDebugSettings.Mode)); // 显示友好名，方便和 Overlay 对照。
+            EditorGUILayout.LabelField("Shader Mode", BurtShadingDebugSettings.ModeShaderName); // 显示 shader mode 全局变量名。
+            EditorGUILayout.LabelField("Shader Enabled", BurtShadingDebugSettings.EnabledShaderName); // 显示 shader enabled 全局变量名。
         }
     }
 }

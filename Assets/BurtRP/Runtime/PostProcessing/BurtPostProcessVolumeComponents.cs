@@ -25,6 +25,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Volume 组�
 
         public ClampedFloatParameter postExposure = new ClampedFloatParameter(0f, -8f, 8f); // 定义 Tonemapping 前的 EV 曝光补偿，0 表示不改变亮度。
 
+        [Title("UE / XRender Filmic 参数")] // 用 Odin 标题把 UE/XRender Filmic 曲线参数和基础开关分开显示。
+        [InfoBox("默认值对齐 XRender TonemappingComponent，也就是 UE Filmic Tonemapper 的常用 Film 参数。")] // 说明这组参数的来源，避免把它误认为 BurtRP 自定义曲线。
+        public ClampedFloatParameter filmSlope = new ClampedFloatParameter(BurtTonemappingFilmSettings.DefaultSlope, 0f, 1f); // 定义 Film Slope，数值越高，中间调对比越强。
+
+        public ClampedFloatParameter filmToe = new ClampedFloatParameter(BurtTonemappingFilmSettings.DefaultToe, 0f, 1f); // 定义 Film Toe，数值越高，暗部过渡越明显。
+
+        public ClampedFloatParameter filmShoulder = new ClampedFloatParameter(BurtTonemappingFilmSettings.DefaultShoulder, 0f, 1f); // 定义 Film Shoulder，数值越高，高光压缩越明显。
+
+        public ClampedFloatParameter filmBlackClip = new ClampedFloatParameter(BurtTonemappingFilmSettings.DefaultBlackClip, 0f, 1f); // 定义 Film Black Clip，控制黑位裁切。
+
+        public ClampedFloatParameter filmWhiteClip = new ClampedFloatParameter(BurtTonemappingFilmSettings.DefaultWhiteClip, 0f, 1f); // 定义 Film White Clip，控制白位裁切。
+
+        [Title("XRender LUT 兼容参数")] // 用 Odin 标题把 XRender CombineLUT 中的 Tonemapping 兼容参数单独分组。
+        public ClampedFloatParameter blueCorrection = new ClampedFloatParameter(BurtTonemappingFilmSettings.DefaultBlueCorrection, 0f, 1f); // 定义 Blue Correction，模拟 XRender 在 FilmToneMap 前后的蓝色修正矩阵混合。
+
+        public ClampedFloatParameter expandGamut = new ClampedFloatParameter(BurtTonemappingFilmSettings.DefaultExpandGamut, 0f, 1f); // 定义 Expand Gamut，模拟 XRender 在 FilmToneMap 前对高饱和颜色做的 AP1 扩展。
+
+        public ClampedFloatParameter toneCurveAmount = new ClampedFloatParameter(BurtTonemappingFilmSettings.DefaultToneCurveAmount, 0f, 1f); // 定义 Tone Curve Amount，0 表示不套曲线，1 表示完全使用 UE/XRender FilmToneMap。
+
         public bool IsEnabled() // 定义运行时判断函数，集中表达这个 Volume 组件是否真的需要执行。
         {
             if (!active) // 如果 Volume 组件自身被禁用，就不应该影响画面。

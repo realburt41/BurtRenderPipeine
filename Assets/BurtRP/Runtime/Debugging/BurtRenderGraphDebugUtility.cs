@@ -271,6 +271,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             AppendRenderTargetList(builder, "    Read", usage.ReadRenderTargets); // 写入当前 Pass 声明读取的 RenderTarget 列表。
 
             AppendRenderTargetList(builder, "    Write", usage.WriteRenderTargets); // 写入当前 Pass 声明写入的 RenderTarget 列表。
+
+            AppendOptionalStringList(builder, "    Read Global", usage.ReadGlobalResources); // 只在非空时写入当前 Pass 声明读取的逻辑全局资源列表。
+
+            AppendOptionalStringList(builder, "    Write Global", usage.WriteGlobalResources); // 只在非空时写入当前 Pass 声明写入的逻辑全局资源列表。
         }
 
         private static void AppendRenderTargetList( // 写入一个方向的渲染目标列表，例如 Read 或 Write。
@@ -370,6 +374,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 AddResourceAccesses(summaries, usage.ReadRenderTargets, FormatPassLabel(usageIndex, usage), false, resourceRegistry); // 记录消费者。
 
                 AddResourceAccesses(summaries, usage.WriteRenderTargets, FormatPassLabel(usageIndex, usage), true, resourceRegistry); // 记录生产者。
+
+                AddGlobalResourceAccesses(summaries, usage.ReadGlobalResources, FormatPassLabel(usageIndex, usage), false); // 记录逻辑全局资源消费者。
+
+                AddGlobalResourceAccesses(summaries, usage.WriteGlobalResources, FormatPassLabel(usageIndex, usage), true); // 记录逻辑全局资源生产者。
             }
 
             return summaries; // 返回完整资源摘要。
@@ -421,6 +429,39 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             }
         }
 
+        private static void AddGlobalResourceAccesses( // 把一组逻辑全局资源访问写入摘要表。
+            Dictionary<string, ResourceSummary> summaries, // 接收资源摘要表。
+            IReadOnlyList<string> resourceNames, // 接收某个方向的逻辑全局资源名列表。
+            string passLabel, // 接收当前 Pass 标签。
+            bool isProducer) // 标记当前访问是否为写入生产者。
+        {
+            if (resourceNames == null) // 资源列表为空时没有可记录内容。
+            {
+                return; // 直接返回。
+            }
+
+            for (var resourceIndex = 0; resourceIndex < resourceNames.Count; resourceIndex++) // 遍历逻辑全局资源名列表。
+            {
+                var resourceName = FormatResourceName(resourceNames[resourceIndex]); // 统一资源名显示，空名使用占位符。
+
+                if (!summaries.TryGetValue(resourceName, out var summary)) // 如果还没有该资源的摘要，就创建一个。
+                {
+                    summary = new ResourceSummary(resourceName); // 创建资源摘要对象。
+
+                    summaries.Add(resourceName, summary); // 加入摘要表。
+                }
+
+                if (isProducer) // 写入逻辑全局资源对应生产者。
+                {
+                    AddUnique(summary.Producers, passLabel); // 记录生产者 Pass。
+                }
+                else // 读取逻辑全局资源对应消费者。
+                {
+                    AddUnique(summary.Consumers, passLabel); // 记录消费者 Pass。
+                }
+            }
+        }
+
         private static void AppendStringList( // 写入字符串列表。
             StringBuilder builder, // 接收要写入的字符串构建器。
             string label, // 接收列表标签。
@@ -448,6 +489,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             }
 
             builder.AppendLine(); // 当前列表结束后换行。
+        }
+
+        private static void AppendOptionalStringList( // 按需写入字符串列表，避免每个 Pass 都打印空的全局资源行。
+            StringBuilder builder, // 接收要写入的字符串构建器。
+            string label, // 接收列表标签。
+            IReadOnlyList<string> values) // 接收要写入的值列表。
+        {
+            if (values == null || values.Count == 0) // 如果列表为空，说明这个 Pass 没有声明对应逻辑全局资源。
+            {
+                return; // 直接跳过，保持 RenderGraph Debug 输出紧凑。
+            }
+
+            AppendStringList(builder, label, values); // 列表非空时复用普通字符串列表输出函数。
         }
 
         private static void AppendRenderTarget( // 写入单个渲染目标句柄的可读文本。

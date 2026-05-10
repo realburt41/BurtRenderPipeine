@@ -21,8 +21,6 @@ static const float BURT_SHADING_DEBUG_MODE_SPECULAR_OCCLUSION = 109.0f; // 对�
 static const float BURT_SHADING_DEBUG_MODE_ENERGY_PRESERVATION = 110.0f; // 对应 C# BurtShadingDebugMode.EnergyPreservation，用来显示 XRender 底层 diffuse 保能比例。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_ENERGY_COMPENSATION = 111.0f; // 对应 C# BurtShadingDebugMode.IndirectSpecularEnergyCompensation，用来显示间接高光能量补偿强度。
 static const float BURT_SHADING_DEBUG_MODE_DIFFUSE_COLOR = 112.0f; // 对应 C# BurtShadingDebugMode.DiffuseColor，用来显示 XRender GenericData.DiffuseColor。
-static const float BURT_SHADING_DEBUG_MODE_F0 = 113.0f; // 对应 C# BurtShadingDebugMode.F0，用来显示 reflectance / metallic 还原出的 F0。
-static const float BURT_SHADING_DEBUG_MODE_F90 = 114.0f; // 对应 C# BurtShadingDebugMode.F90，用来显示 Schlick Fresnel 的掠射端点。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_D = 115.0f; // 对应 C# BurtShadingDebugMode.DirectBRDFD，用来显示 GGX D 项。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_VISIBILITY = 116.0f; // 对应 C# BurtShadingDebugMode.DirectBRDFVisibility，用来显示 Smith Joint Visibility。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_FRESNEL = 117.0f; // 对应 C# BurtShadingDebugMode.DirectBRDFFresnel，用来显示 Schlick Fresnel。
@@ -39,6 +37,8 @@ static const float BURT_SHADING_DEBUG_MODE_GBUFFER_METALLIC = 132.0f; // 对应 
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_SMOOTHNESS = 133.0f; // 对应 C# BurtShadingDebugMode.GBufferSmoothness，用来显示 GBuffer 解码 Smoothness。
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_OCCLUSION = 134.0f; // 对应 C# BurtShadingDebugMode.GBufferOcclusion，用来显示 GBuffer 解码 AO。
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_REFLECTANCE = 135.0f; // 对应 C# BurtShadingDebugMode.GBufferReflectance，用来显示 GBuffer 解码 Reflectance。
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_ROUGHNESS = 136.0f; // 对应 C# BurtShadingDebugMode.GBufferRoughness，用来显示 GBuffer 还原的 Base.Roughness。
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_DIFFUSE_COLOR = 137.0f; // 对应 C# BurtShadingDebugMode.GBufferDiffuseColor，用来显示 GBuffer 还原的 DiffuseColor。
 static const float BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING = 200.0f; // 对应 C# BurtShadingDebugMode.DetailLighting，用 0.18 中灰 BaseColor 显示光照细节。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_LIGHTING = 201.0f; // 对应 C# BurtShadingDebugMode.IndirectLighting，用来显示 PBR 间接光。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE = 202.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuse，用来显示直接漫反射。
@@ -91,12 +91,6 @@ struct BurtShadingDebugData
     // 保存 XRender GenericData.DiffuseColor，方便观察 metallic 是否正确扣除了 diffuse。
     float3 diffuseColor;
 
-    // 保存由 reflectance / metallic / baseColor 还原出的 F0，注意它不是材质面板输入。
-    float3 f0;
-
-    // 保存 Schlick Fresnel 的 F90，当前默认是 1。
-    float3 f90;
-
     // 保存直接 GGX D 项，数值可能很高，Debug View 会缩放显示。
     float directBRDFD;
 
@@ -144,6 +138,13 @@ struct BurtShadingDebugData
 
     // 保存 GBuffer 解码后的 XRender Reflectance。
     float gbufferReflectance;
+
+    // 保存从 GBuffer Smoothness 还原出的 XRender Base.Roughness。
+    float gbufferRoughness;
+
+    // 保存从 GBuffer 转成 PBRMaterialData 后的 DiffuseColor。
+    float3 gbufferDiffuseColor;
+
 };
 
 bool BurtIsShadingDebugEnabled() // 判断当前是否启用了任意 shading debug 模式。
@@ -249,18 +250,6 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
-    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_F0)) // F0 模式显示由 reflectance / metallic / baseColor 还原出的反射率。
-    {
-        debugColor = saturate(data.f0); // 不放大显示，保留真实 F0 数值关系；非金属默认会比较暗。
-        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
-    }
-
-    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_F90)) // F90 模式显示 Schlick Fresnel 的掠射端点。
-    {
-        debugColor = saturate(data.f90); // 当前 XRender DefaultLit 近似下通常为白色。
-        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
-    }
-
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_D)) // DirectBRDFD 模式显示 GGX D 项。
     {
         float visibleD = saturate(data.directBRDFD * 0.05f); // D 项在极光滑时会很高，所以缩放 0.05 让普通范围更容易观察。
@@ -359,6 +348,18 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_REFLECTANCE)) // GBufferReflectance 模式显示解码后的 XRender reflectance。
     {
         debugColor = float3(data.gbufferReflectance, data.gbufferReflectance, data.gbufferReflectance); // Reflectance 仍按 XRender 输入语义显示，不显示 F0。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_ROUGHNESS)) // GBufferRoughness 模式显示解码后还原出的 XRender Base.Roughness。
+    {
+        debugColor = float3(data.gbufferRoughness, data.gbufferRoughness, data.gbufferRoughness); // Roughness 越黑表示越光滑，口径和 Forward Roughness 一致。
+        return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_DIFFUSE_COLOR)) // GBufferDiffuseColor 模式显示 GBuffer 还原后的 DiffuseColor。
+    {
+        debugColor = saturate(data.gbufferDiffuseColor); // 观察 metallic 扣除 diffuse 后是否和 Forward DiffuseColor 一致。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 

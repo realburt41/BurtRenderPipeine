@@ -8,6 +8,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
 
         private readonly List<BurtRenderTargetHandle> writeRenderTargets = new List<BurtRenderTargetHandle>(); // 保存这个 Pass 声明写入的所有渲染目标句柄。
 
+        private readonly List<string> readGlobalResources = new List<string>(); // 保存这个 Pass 声明读取的逻辑全局资源，例如 LightingGlobals。
+
+        private readonly List<string> writeGlobalResources = new List<string>(); // 保存这个 Pass 声明写入的逻辑全局资源，例如 ShadowGlobals。
+
         private readonly List<string> validationMessages = new List<string>(); // 保存配置阶段发现的本 Pass 资源声明问题，只用于 Debug/Validation 输出。
 
         public int PassIndex { get; } // 保存这个资源使用记录对应的 Pass 顺序，方便日志和实际执行顺序对齐。
@@ -18,9 +22,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
 
         public IReadOnlyList<BurtRenderTargetHandle> WriteRenderTargets => writeRenderTargets; // 暴露只读的写入资源列表，避免外部直接修改内部 List。
 
+        public IReadOnlyList<string> ReadGlobalResources => readGlobalResources; // 暴露只读的逻辑全局资源读取列表，供 RenderGraph Debug 和 Validation 使用。
+
+        public IReadOnlyList<string> WriteGlobalResources => writeGlobalResources; // 暴露只读的逻辑全局资源写入列表，供 RenderGraph Debug 和 Validation 使用。
+
         public IReadOnlyList<string> ValidationMessages => validationMessages; // 暴露只读校验消息，让 RenderGraph dump 可以集中展示问题。
 
-        public bool HasResourceDeclarations => readRenderTargets.Count > 0 || writeRenderTargets.Count > 0; // 标记这个 Pass 是否声明了任意资源依赖。
+        public bool HasResourceDeclarations => readRenderTargets.Count > 0 || writeRenderTargets.Count > 0 || readGlobalResources.Count > 0 || writeGlobalResources.Count > 0; // 标记这个 Pass 是否声明了任意渲染目标或逻辑全局资源依赖。
 
         public BurtRenderPassResourceUsage(string passName) // 保留旧构造函数，避免已有调用方因为新增 PassIndex 而失效。
             : this(-1, passName)
@@ -58,6 +66,40 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             }
 
             writeRenderTargets.Add(handle); // 把传入的渲染目标句柄加入写入列表，保留原始声明顺序便于排查。
+        }
+
+        public void AddReadGlobalResource(string resourceName) // 定义记录读取逻辑全局资源的函数。
+        {
+            var safeName = ValidateGlobalResourceName(resourceName, "Read Global"); // 校验并归一化全局资源名，避免空名进入依赖图。
+
+            if (string.IsNullOrEmpty(safeName)) // 如果资源名无效，说明已经记录过校验消息。
+            {
+                return; // 直接返回，避免把空资源写入列表污染 Debug 输出。
+            }
+
+            if (readGlobalResources.Contains(safeName)) // 如果同一 Pass 重复声明读取同一个全局资源，就记录诊断信息。
+            {
+                AddValidationMessage("重复 Read Global 声明: " + safeName); // 重复声明不阻断渲染，只在 Debug 中提示。
+            }
+
+            readGlobalResources.Add(safeName); // 把全局资源名加入读取列表，保留原始声明顺序便于排查。
+        }
+
+        public void AddWriteGlobalResource(string resourceName) // 定义记录写入逻辑全局资源的函数。
+        {
+            var safeName = ValidateGlobalResourceName(resourceName, "Write Global"); // 校验并归一化全局资源名，避免空名进入依赖图。
+
+            if (string.IsNullOrEmpty(safeName)) // 如果资源名无效，说明已经记录过校验消息。
+            {
+                return; // 直接返回，避免把空资源写入列表污染 Debug 输出。
+            }
+
+            if (writeGlobalResources.Contains(safeName)) // 如果同一 Pass 重复声明写入同一个全局资源，就记录诊断信息。
+            {
+                AddValidationMessage("重复 Write Global 声明: " + safeName); // 重复声明不阻断渲染，只在 Debug 中提示。
+            }
+
+            writeGlobalResources.Add(safeName); // 把全局资源名加入写入列表，保留原始声明顺序便于排查。
         }
 
         public void AddValidationMessage(string message) // 定义追加校验消息的函数，供 Builder 和 RenderGraph 写入配置异常。
@@ -108,6 +150,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
         private static string FormatResourceName(string resourceName) // 把资源名转换成适合日志显示的文本。
         {
             return string.IsNullOrEmpty(resourceName) ? "<empty>" : resourceName; // 空资源名使用醒目的占位符。
+        }
+
+        private string ValidateGlobalResourceName( // 校验逻辑全局资源名，并返回可用于列表记录的安全名称。
+            string resourceName, // 接收调用方声明的逻辑全局资源名。
+            string accessType) // 接收访问类型，例如 Read Global 或 Write Global。
+        {
+            if (string.IsNullOrEmpty(resourceName)) // 如果资源名为空，依赖图无法追踪这个全局状态。
+            {
+                AddValidationMessage(accessType + " 声明使用空全局资源名。"); // 记录空资源名问题，提示调用方补齐名称。
+
+                return string.Empty; // 返回空字符串，让调用方跳过列表写入。
+            }
+
+            return resourceName; // 返回原始资源名，保持 Debug 输出和调用方声明一致。
         }
     }
 }

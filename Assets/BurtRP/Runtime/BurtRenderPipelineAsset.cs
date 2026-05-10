@@ -4,6 +4,12 @@ using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来继承 R
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产和其他 BurtRP 代码处在同一个模块里。
 {
+    public enum BurtRendererMode // 定义 BurtRP 当前使用哪一种主渲染路径。
+    {
+        Forward = 0, // 使用当前已经验证稳定的前向渲染路径，这是默认模式。
+        Deferred = 1 // 使用 Deferred 实验路径，当前阶段只接入 GBuffer 资源生命周期并临时复用 Forward 输出。
+    }
+
     public enum BurtShadowDebugYFlipMode // 定义主光 shadow map 调试图的 Y 翻转模式，避免在不同窗口和平台之间继续硬猜方向。
     {
         MatchFinalBlit = 0, // 使用和 Depth Debug 一样的 FinalBlit 预翻转规则，作为默认调试方向。
@@ -15,6 +21,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
     [CreateAssetMenu(menuName = "Rendering/Burt Render Pipeline Asset", fileName = "BurtRenderPipelineAsset")] // 让 Unity 可以通过 Create 菜单创建 BurtRenderPipelineAsset。
     public sealed class BurtRenderPipelineAsset : RenderPipelineAsset // 定义 BurtRP 的管线资产，Unity Graphics Settings 会引用它来创建管线实例。
     {
+        [TitleGroup("Pipeline - 管线")] // 使用 Odin 给管线级配置建立独立分组，方便后续继续放 Renderer Mode、MSAA 等核心开关。
+        [SerializeField] private BurtRendererMode rendererMode = BurtRendererMode.Forward; // 定义当前管线使用的渲染路径，默认 Forward，避免新增 Deferred 代码后改变现有画面。
+
         [SerializeField] private Color clearColor = new Color(0.02f, 0.02f, 0.025f, 1f); // 定义默认清屏颜色，并暴露到 Inspector 供你调整。
 
         [SerializeField] private bool enableDepthPrepass = true; // 定义是否启用 Depth Prepass，默认开启，方便当前阶段观察深度预写流程。
@@ -62,6 +71,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [SerializeField] private bool enableRenderFrameDebugLog = false; // 定义是否输出 Frame/Stack 分组日志，默认关闭，避免每帧打印相机栈诊断。
 
         public Color ClearColor => clearColor; // 暴露默认清屏颜色给渲染 Pass 使用。
+
+        public BurtRendererMode RendererMode => rendererMode; // 暴露当前渲染路径给 BurtRenderPipeline 和 RenderGraph 资源注册逻辑使用。
 
         public bool EnableDepthPrepass => enableDepthPrepass; // 暴露 Depth Prepass 开关给 Graph Assembler 使用。
 

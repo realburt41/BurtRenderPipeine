@@ -1,7 +1,7 @@
 // 定义 Shader 在 Unity 内部查找时使用的隐藏路径。
 Shader "Hidden/BurtRP/PostProcessCopy"
 {
-    // 定义 SubShader，当前后处理框架只需要一个无效果全屏拷贝 SubShader。
+    // 定义 SubShader，当前后处理框架使用一个全屏后处理 SubShader 承载 No-op Copy 和 Tonemapping。
     SubShader
     {
         // 给 SubShader 打标签，标记这是 BurtRP 专用 shader。
@@ -40,11 +40,89 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             // 声明当前后处理使用的源纹理，C# Pass 会在每次绘制前设置它。
             sampler2D _BurtPostProcessSourceTexture;
 
-            // 声明 Tonemapping 模式，0 表示 None，1 表示 Neutral，2 表示 ACES。
+            // 声明 Tonemapping 模式，0 表示 None，1 表示 Neutral，2 表示 XRender / UE Filmic ACES。
             float _BurtTonemappingMode;
 
             // 声明 Tonemapping 前使用的线性曝光倍率，1 表示不改变亮度。
             float _BurtPostExposure;
+
+            // 声明 UE/XRender Film Slope，默认 0.88，对齐 XRender TonemappingComponent。
+            float _BurtFilmSlope;
+
+            // 声明 UE/XRender Film Toe，默认 0.55，对齐 XRender TonemappingComponent。
+            float _BurtFilmToe;
+
+            // 声明 UE/XRender Film Shoulder，默认 0.26，对齐 XRender TonemappingComponent。
+            float _BurtFilmShoulder;
+
+            // 声明 UE/XRender Film Black Clip，默认 0.0，对齐 XRender TonemappingComponent。
+            float _BurtFilmBlackClip;
+
+            // 声明 UE/XRender Film White Clip，默认 0.04，对齐 XRender TonemappingComponent。
+            float _BurtFilmWhiteClip;
+
+            // 声明 XRender CombineLUT 使用的 Blue Correction 强度，默认 0.6。
+            float _BurtFilmBlueCorrection;
+
+            // 声明 XRender CombineLUT 使用的 Expand Gamut 强度，默认 1.0。
+            float _BurtFilmExpandGamut;
+
+            // 声明 XRender CombineLUT 使用的 Tone Curve Amount，默认 1.0。
+            float _BurtFilmToneCurveAmount;
+
+            // 定义圆周率常量，用于把 atan2 得到的弧度转换成角度。
+            static const float BURT_PI = 3.14159265358979323846;
+
+            // 定义 AP0 到 AP1 的转换矩阵，来源和 XRender Shaders/Library/ACES.hlsl 保持一致。
+            static const float3x3 BURT_AP0_TO_AP1 = float3x3(
+                1.4514393161, -0.2365107469, -0.2149285693,
+                -0.0765537734, 1.1762296998, -0.0996759264,
+                0.0083161484, -0.0060324498, 0.9977163014);
+
+            // 定义 AP1 到 AP0 的转换矩阵，UE/XRender 的 RRT Glow 和 Red Modifier 在 AP0 中执行。
+            static const float3x3 BURT_AP1_TO_AP0 = float3x3(
+                0.6954522414, 0.1406786965, 0.1638690622,
+                0.0447945634, 0.8596711185, 0.0955343182,
+                -0.0055258826, 0.0040252103, 1.0015006723);
+
+            // 定义线性 sRGB 到 ACEScg/AP1 的转换矩阵，直接使用 XRender ACES.hlsl 中已经合并白点适配后的版本。
+            static const float3x3 BURT_SRGB_TO_AP1 = float3x3(
+                0.6130974290, 0.3395231370, 0.0473794527,
+                0.0701937228, 0.9163538810, 0.0134523986,
+                0.0206155926, 0.1095697730, 0.8698146340);
+
+            // 定义 ACEScg/AP1 到线性 sRGB 的转换矩阵，直接使用 XRender ACES.hlsl 中已经合并白点适配后的版本。
+            static const float3x3 BURT_AP1_TO_SRGB = float3x3(
+                1.7050509500, -0.6217920180, -0.0832588672,
+                -0.1302564140, 1.1408046500, -0.0105483187,
+                -0.0240033530, -0.1289689690, 1.1529723400);
+
+            // 定义 AP1 的亮度权重，XRender FilmToneMap 的预去饱和和后去饱和使用这组权重。
+            static const float3 BURT_AP1_RGB_TO_Y = float3(0.2722287168, 0.6740817658, 0.0536895174);
+
+            // 定义 XRender CombineLUT 使用的 Blue Correction 矩阵，用于修正高亮蓝色偏紫的问题。
+            static const float3x3 BURT_BLUE_CORRECT = float3x3(
+                0.9404372683, -0.0183068787, 0.0778696104,
+                0.0083786969, 0.8286599939, 0.1629613092,
+                0.0005471261, -0.0008833746, 1.0003362486);
+
+            // 定义 XRender CombineLUT 使用的 Blue Correction 逆矩阵，用于 Tonemapping 后恢复白点。
+            static const float3x3 BURT_BLUE_CORRECT_INV = float3x3(
+                1.0631800000, 0.0233956000, -0.0865726000,
+                -0.0106337000, 1.2063200000, -0.1956900000,
+                -0.0005908870, 0.0010524800, 0.9995380000);
+
+            // 定义 XRender CombineLUT 使用的 Wide Gamut 到 XYZ 矩阵，用于扩展高饱和颜色。
+            static const float3x3 BURT_WIDE_TO_XYZ = float3x3(
+                0.5441691000, 0.2395926000, 0.1666943000,
+                0.2394656000, 0.7021530000, 0.0583814000,
+                -0.0023439000, 0.0361834000, 1.0552183000);
+
+            // 定义 XYZ 到 AP1 的转换矩阵，和上方 Wide Gamut 扩展矩阵配合使用。
+            static const float3x3 BURT_XYZ_TO_AP1 = float3x3(
+                1.6410233797, -0.3248032942, -0.2364246952,
+                -0.6636628587, 1.6153315917, 0.0167563477,
+                0.0117218943, -0.0082844420, 0.9883948585);
 
             // 定义顶点输入结构，全屏三角形只需要系统顶点 ID。
             struct Attributes
@@ -63,6 +141,105 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float2 uv : TEXCOORD0;
             };
 
+            // 定义把 RGB 转成饱和度的函数，UE/XRender 的 RRT Glow 和 Red Modifier 会使用它。
+            float BurtRgbToSaturation(float3 rgb)
+            {
+                // 取三个通道的最小值，用于估算颜色离灰轴的距离。
+                float minRgb = min(min(rgb.r, rgb.g), rgb.b);
+
+                // 取三个通道的最大值，用于估算颜色离灰轴的距离。
+                float maxRgb = max(max(rgb.r, rgb.g), rgb.b);
+
+                // 按 ACES/UE 的写法归一化饱和度，并用很小的下限避免除零。
+                return (max(maxRgb, 1e-10) - max(minRgb, 1e-10)) / max(maxRgb, 1e-2);
+            }
+
+            // 定义 ACES 的 YC 亮度代理函数，UE/XRender 的 Glow 模块用它判断高亮范围。
+            float BurtRgbToYc(float3 rgb)
+            {
+                // 读取红色通道，保持公式和 ACES 参考实现一致。
+                float r = rgb.r;
+
+                // 读取绿色通道，保持公式和 ACES 参考实现一致。
+                float g = rgb.g;
+
+                // 读取蓝色通道，保持公式和 ACES 参考实现一致。
+                float b = rgb.b;
+
+                // 计算色度项，max 用来避免负数精度误差进入 sqrt。
+                float chroma = sqrt(max(b * (b - g) + g * (g - r) + r * (r - b), 0.0));
+
+                // 返回 ACES YC 亮度代理值，1.75 是 XRender/UE 默认的 chroma 权重。
+                return (b + g + r + 1.75 * chroma) / 3.0;
+            }
+
+            // 定义 Sigmoid 形状函数，UE/XRender 用它让 Glow 只在指定饱和度附近过渡。
+            float BurtSigmoidShaper(float value)
+            {
+                // 把输入压到 -2..2 附近的柔和过渡范围。
+                float t = max(1.0 - abs(0.5 * value), 0.0);
+
+                // 输出 0..1 的 S 形曲线结果。
+                return 0.5 * (1.0 + sign(value) * (1.0 - t * t));
+            }
+
+            // 定义 Glow 前向函数，UE/XRender 的 RRT Glow 会用它给特定亮度和饱和度添加轻微光晕感。
+            float BurtGlowForward(float ycIn, float glowGainIn, float glowMid)
+            {
+                // 如果亮度代理值低于中点的三分之二，就使用完整 Glow 增益。
+                if (ycIn <= 2.0 / 3.0 * glowMid)
+                {
+                    // 返回完整增益，让低亮区域的 Glow 行为和 XRender 一致。
+                    return glowGainIn;
+                }
+
+                // 如果亮度代理值高于两倍中点，就不再增加 Glow。
+                if (ycIn >= 2.0 * glowMid)
+                {
+                    // 返回 0，避免高亮区域过度发光。
+                    return 0.0;
+                }
+
+                // 在中间区域按 ACES/UE 公式平滑衰减 Glow 增益。
+                return glowGainIn * (glowMid / ycIn - 0.5);
+            }
+
+            // 定义 RGB 到 Hue 角度的函数，UE/XRender 的红色修正模块会使用它。
+            float BurtRgbToHue(float3 rgb)
+            {
+                // 如果三个通道完全相等，Hue 没有意义，这里按 XRender 做法返回 0。
+                if (rgb.r == rgb.g && rgb.g == rgb.b)
+                {
+                    // 返回 0，避免中性色产生 NaN。
+                    return 0.0;
+                }
+
+                // 按 ACES 几何 Hue 公式计算角度，输出单位是度。
+                float hue = (180.0 / BURT_PI) * atan2(sqrt(3.0) * (rgb.g - rgb.b), 2.0 * rgb.r - rgb.g - rgb.b);
+
+                // 如果角度为负，就加 360 变成 0..360 范围。
+                hue = hue < 0.0 ? hue + 360.0 : hue;
+
+                // 把结果限制到合法角度范围，避免极端输入造成异常。
+                return clamp(hue, 0.0, 360.0);
+            }
+
+            // 定义 Hue 重新居中的函数，UE/XRender 红色修正会围绕目标 Hue 计算权重。
+            float BurtCenterHue(float hue, float centerHue)
+            {
+                // 先把 Hue 平移到以目标 Hue 为中心的坐标。
+                float centeredHue = hue - centerHue;
+
+                // 如果角度小于 -180，就加 360 回到最近的等价角。
+                centeredHue = centeredHue < -180.0 ? centeredHue + 360.0 : centeredHue;
+
+                // 如果角度大于 180，就减 360 回到最近的等价角。
+                centeredHue = centeredHue > 180.0 ? centeredHue - 360.0 : centeredHue;
+
+                // 返回重新居中后的 Hue。
+                return centeredHue;
+            }
+
             // 定义中性 Tonemapping 曲线，用简单压缩把 HDR 颜色映射到 0..1 附近。
             float3 BurtTonemapNeutral(float3 color)
             {
@@ -73,29 +250,198 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return color / (color + 1.0);
             }
 
-            // 定义 ACES 近似 Tonemapping 曲线，作为第一版更接近电影感的压缩选项。
-            float3 BurtTonemapACES(float3 color)
+            // 定义 UE/XRender 的 FilmToneMap 核心曲线，输入和输出都在 ACEScg/AP1 空间。
+            float3 BurtFilmToneMapAP1(float3 colorAP1)
             {
-                // 保证进入曲线的颜色不会是负值，避免负 HDR 值在有理函数里产生异常颜色。
+                // 给 Film Slope 加安全下限，避免用户把 Volume 参数拖到 0 时出现除零。
+                float filmSlope = max(_BurtFilmSlope, 1e-5);
+
+                // 把 AP1 转到 AP0，因为 UE/XRender 的 Glow 和红色修正模块在 AP0 中执行。
+                float3 colorAP0 = mul(BURT_AP1_TO_AP0, colorAP1);
+
+                // 计算 AP0 饱和度，后面 Glow 和红色修正都需要它。
+                float saturation = BurtRgbToSaturation(colorAP0);
+
+                // 计算 ACES YC 亮度代理值，用于 Glow 强度衰减。
+                float ycIn = BurtRgbToYc(colorAP0);
+
+                // 根据饱和度计算 Glow 权重，0.4 和 0.2 对齐 XRender TonemapCommon.hlsl。
+                float glowWeight = BurtSigmoidShaper((saturation - 0.4) / 0.2);
+
+                // 计算最终 Glow 倍率，0.05 和 0.08 对齐 XRender/UE 的 RRT Glow 常量。
+                float addedGlow = 1.0 + BurtGlowForward(ycIn, 0.05 * glowWeight, 0.08);
+
+                // 把 Glow 倍率应用到 AP0 颜色上。
+                colorAP0 *= addedGlow;
+
+                // 计算当前颜色的 Hue，用于定位红色修正范围。
+                float hue = BurtRgbToHue(colorAP0);
+
+                // 把 Hue 以红色中心点重新居中，XRender 当前红色中心为 0 度。
+                float centeredHue = BurtCenterHue(hue, 0.0);
+
+                // 计算红色修正权重，平方的 smoothstep 形式对齐 XRender 当前实现。
+                float hueWeight = smoothstep(0.0, 1.0, 1.0 - abs(2.0 * centeredHue / 135.0));
+
+                // 再乘一次自身，得到 XRender 注释里提到的 UE Square 权重。
+                hueWeight *= hueWeight;
+
+                // 对红色通道做 ACES RRT Red Modifier，让高饱和红色更接近 UE/XRender 外观。
+                colorAP0.r += hueWeight * saturation * (0.03 - colorAP0.r) * (1.0 - 0.82);
+
+                // 把修正后的 AP0 转回 AP1，进入 Film 曲线计算。
+                float3 workingColor = mul(BURT_AP0_TO_AP1, colorAP0);
+
+                // 保证曲线输入非负，避免 log10 处理负数。
+                workingColor = max(workingColor, 0.0);
+
+                // 计算 AP1 亮度，用于预去饱和。
+                float workingLuma = dot(workingColor, BURT_AP1_RGB_TO_Y);
+
+                // 执行 XRender/UE 的预去饱和，0.96 是 TonemapCommon.hlsl 中的默认值。
+                workingColor = lerp(workingLuma.xxx, workingColor, 0.96);
+
+                // 计算 Toe 段缩放，并加安全下限，避免极端参数导致除零。
+                float toeScale = max(1.0 + _BurtFilmBlackClip - _BurtFilmToe, 1e-5);
+
+                // 计算 Shoulder 段缩放，并加安全下限，避免极端参数导致除零。
+                float shoulderScale = max(1.0 + _BurtFilmWhiteClip - _BurtFilmShoulder, 1e-5);
+
+                // 定义 UE/XRender 用来匹配中灰输入的亮度值。
+                const float inMatch = 0.18;
+
+                // 定义 UE/XRender 用来匹配中灰输出的亮度值。
+                const float outMatch = 0.18;
+
+                // 声明 ToeMatch，后续根据 Toe 参数选择不同求解方式。
+                float toeMatch;
+
+                // 如果 Toe 很大，中灰落在直线段，用直线公式求 ToeMatch。
+                if (_BurtFilmToe > 0.8)
+                {
+                    // 按 XRender/UE 的直线段公式求 ToeMatch。
+                    toeMatch = (1.0 - _BurtFilmToe - outMatch) / filmSlope + log10(inMatch);
+                }
+                else
+                {
+                    // 计算 Toe 段的辅助变量，用于让 0.18 输入匹配 0.18 输出。
+                    float bt = (outMatch + _BurtFilmBlackClip) / toeScale - 1.0;
+
+                    // 把 bt 限制在安全范围，避免极端参数让 log 出现无穷大。
+                    bt = clamp(bt, -0.999999, 0.999999);
+
+                    // 按 XRender/UE 的 Toe 段公式求 ToeMatch。
+                    toeMatch = log10(inMatch) - 0.5 * log((1.0 + bt) / (1.0 - bt)) * (toeScale / filmSlope);
+                }
+
+                // 计算直线段匹配点，决定中间段在 log 空间中的位置。
+                float straightMatch = (1.0 - _BurtFilmToe) / filmSlope - toeMatch;
+
+                // 计算 Shoulder 匹配点，决定高光肩部开始位置。
+                float shoulderMatch = _BurtFilmShoulder / filmSlope - straightMatch;
+
+                // 对工作颜色取 log10，使用 1e-6 下限避免黑色像素产生 -inf。
+                float3 logColor = log10(max(workingColor, 1e-6));
+
+                // 计算中间直线段输出。
+                float3 straightColor = filmSlope * (logColor + straightMatch);
+
+                // 计算 Toe 曲线输出，也就是暗部压缩段。
+                float3 toeColor = -_BurtFilmBlackClip + (2.0 * toeScale) / (1.0 + exp((-2.0 * filmSlope / toeScale) * (logColor - toeMatch)));
+
+                // 计算 Shoulder 曲线输出，也就是高光压缩段。
+                float3 shoulderColor = (1.0 + _BurtFilmWhiteClip) - (2.0 * shoulderScale) / (1.0 + exp((2.0 * filmSlope / shoulderScale) * (logColor - shoulderMatch)));
+
+                // 生成 Toe 选择权重，logColor 小于 ToeMatch 时为 1。
+                float3 toeSelector = 1.0 - step(toeMatch, logColor);
+
+                // 在非 Toe 区域使用直线段，在 Toe 区域使用 Toe 曲线。
+                toeColor = lerp(straightColor, toeColor, toeSelector);
+
+                // 生成 Shoulder 选择权重，logColor 大于 ShoulderMatch 时为 1。
+                float3 shoulderSelector = step(shoulderMatch, logColor);
+
+                // 在非 Shoulder 区域使用直线段，在 Shoulder 区域使用 Shoulder 曲线。
+                shoulderColor = lerp(straightColor, shoulderColor, shoulderSelector);
+
+                // 计算 Toe 到 Shoulder 之间的平滑混合参数。
+                float3 blendT = saturate((logColor - toeMatch) / (shoulderMatch - toeMatch));
+
+                // 如果 ShoulderMatch 小于 ToeMatch，就反转混合方向，保持极端参数稳定。
+                blendT = shoulderMatch < toeMatch ? 1.0 - blendT : blendT;
+
+                // 使用 smoothstep 等价多项式，让曲线段之间过渡更平滑。
+                blendT = (3.0 - 2.0 * blendT) * blendT * blendT;
+
+                // 在 Toe 和 Shoulder 结果之间混合得到最终 Film 曲线输出。
+                float3 toneColor = lerp(toeColor, shoulderColor, blendT);
+
+                // 计算 Tonemapping 后的 AP1 亮度，用于后去饱和。
+                float toneLuma = dot(toneColor, BURT_AP1_RGB_TO_Y);
+
+                // 执行 XRender/UE 的后去饱和，0.93 是 TonemapCommon.hlsl 中的默认值。
+                toneColor = lerp(toneLuma.xxx, toneColor, 0.93);
+
+                // 返回非负 AP1 颜色，避免后续转回 sRGB 时出现负输出。
+                return max(toneColor, 0.0);
+            }
+
+            // 定义 XRender CombineLUT 风格的 UE Filmic Tonemapping，输入和输出都使用线性 sRGB。
+            float3 BurtTonemapXRenderUE(float3 color)
+            {
+                // 保证进入曲线的颜色不会是负值，避免矩阵和 log 过程产生异常。
                 color = max(color, 0.0);
 
-                // 定义 ACES 拟合曲线参数 a，用来控制高光肩部形状。
-                const float a = 2.51;
+                // 把线性 sRGB 转到 AP1，和 XRender CombineLUT 的 FilmToneMap 输入空间一致。
+                float3 colorAP1 = mul(BURT_SRGB_TO_AP1, color);
 
-                // 定义 ACES 拟合曲线参数 b，用来控制暗部进入曲线的偏移。
-                const float b = 0.03;
+                // 计算 AP1 亮度，用于 XRender 的 Expand Gamut 权重。
+                float lumaAP1 = max(dot(colorAP1, BURT_AP1_RGB_TO_Y), 1e-5);
 
-                // 定义 ACES 拟合曲线参数 c，用来控制高光压缩强度。
-                const float c = 2.43;
+                // 计算色度离灰轴的距离，用于决定高饱和颜色扩展强度。
+                float3 chromaAP1 = colorAP1 / lumaAP1;
 
-                // 定义 ACES 拟合曲线参数 d，用来控制中间调斜率。
-                const float d = 0.59;
+                // 计算色度距离平方，和 XRender CombineLUT 保持同一形态。
+                float chromaDistSqr = dot(chromaAP1 - 1.0, chromaAP1 - 1.0);
 
-                // 定义 ACES 拟合曲线参数 e，用来控制整体黑位和白位稳定性。
-                const float e = 0.14;
+                // 计算扩展强度，_BurtFilmExpandGamut 默认 1，对齐 XRender ColorGrading 默认值。
+                float expandAmount = (1.0 - exp2(-4.0 * chromaDistSqr)) * (1.0 - exp2(-4.0 * _BurtFilmExpandGamut * lumaAP1 * lumaAP1));
 
-                // 执行常见的 ACES fitted 近似曲线，并用 saturate 把结果限制到显示范围。
-                return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
+                // 把 Wide Gamut 矩阵转换到 AP1 空间，用来模拟 XRender 的 ExpandMat。
+                float3x3 wideToAP1 = mul(BURT_XYZ_TO_AP1, BURT_WIDE_TO_XYZ);
+
+                // 把 AP1 到 sRGB 的矩阵接到后面，得到 XRender CombineLUT 中的 ExpandMat。
+                float3x3 expandMat = mul(wideToAP1, BURT_AP1_TO_SRGB);
+
+                // 计算扩展后的 AP1 颜色。
+                float3 colorExpand = mul(expandMat, colorAP1);
+
+                // 按扩展强度混合原 AP1 和扩展 AP1。
+                colorAP1 = lerp(colorAP1, colorExpand, expandAmount);
+
+                // 把 Blue Correction 矩阵转换到 AP1 空间，和 XRender CombineLUT 的 BlueCorrectAP1 一致。
+                float3x3 blueCorrectAP1 = mul(BURT_AP0_TO_AP1, mul(BURT_BLUE_CORRECT, BURT_AP1_TO_AP0));
+
+                // 把 Blue Correction 逆矩阵转换到 AP1 空间，和 XRender CombineLUT 的 BlueCorrectInvAP1 一致。
+                float3x3 blueCorrectInvAP1 = mul(BURT_AP0_TO_AP1, mul(BURT_BLUE_CORRECT_INV, BURT_AP1_TO_AP0));
+
+                // 在 FilmToneMap 前应用蓝色修正，默认强度 0.6 对齐 XRender。
+                colorAP1 = lerp(colorAP1, mul(blueCorrectAP1, colorAP1), _BurtFilmBlueCorrection);
+
+                // 执行 UE/XRender FilmToneMap，输出仍然在 AP1 空间。
+                float3 tonemappedAP1 = BurtFilmToneMapAP1(colorAP1);
+
+                // 按 Tone Curve Amount 混合原始 AP1 和曲线结果，默认 1 表示完全使用曲线。
+                colorAP1 = lerp(colorAP1, tonemappedAP1, _BurtFilmToneCurveAmount);
+
+                // 在 FilmToneMap 后应用蓝色修正逆矩阵，用来保持白点。
+                colorAP1 = lerp(colorAP1, mul(blueCorrectInvAP1, colorAP1), _BurtFilmBlueCorrection);
+
+                // 把 AP1 转回线性 sRGB，并裁掉负值。
+                float3 filmColor = max(0.0, mul(BURT_AP1_TO_SRGB, colorAP1));
+
+                // 返回线性 LDR 颜色；BurtRP 的最终输出仍交给 FinalBlit 和 Unity 目标格式处理。
+                return filmColor;
             }
 
             // 根据 C# 上传的模式选择具体 Tonemapping 曲线。
@@ -118,8 +464,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     return BurtTonemapNeutral(color);
                 }
 
-                // 其他当前已知模式走 ACES 近似曲线，后续新增模式时可以继续扩展分支。
-                return BurtTonemapACES(color);
+                // 其他当前已知模式走 XRender / UE Filmic ACES 曲线。
+                return BurtTonemapXRenderUE(color);
             }
 
             // 定义顶点 shader，用三个程序化顶点生成覆盖全屏的大三角形。
@@ -150,7 +496,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 // 对 RGB 执行 Tonemapping，Alpha 保持原样，避免破坏后续可能依赖透明度的目标。
                 color.rgb = BurtApplyTonemapping(color.rgb);
 
-                // 返回处理后的颜色；None 模式下这里就是原样返回。
+                // 返回处理后的颜色，None 模式下这里就是原样返回。
                 return color;
             }
 

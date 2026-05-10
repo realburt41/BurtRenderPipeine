@@ -19,8 +19,6 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         EnergyPreservation = 110, // 材质调试：显示 XRender EnergyPreservation，也就是底层 diffuse 保能比例。
         IndirectSpecularEnergyCompensation = 111, // 材质调试：显示间接高光能量补偿，也就是 Reflection Probe 高光补回的多次散射能量。
         DiffuseColor = 112, // 材质调试：显示 XRender GenericData.DiffuseColor，方便检查 metallic 是否正确扣除 diffuse。
-        F0 = 113, // 材质调试：显示由 reflectance / metallic / baseColor 还原出的 F0，注意它不暴露到材质面板。
-        F90 = 114, // 材质调试：显示 Schlick Fresnel 的掠射端点，当前默认对齐 XRender 的 1。
         DirectBRDFD = 115, // 材质调试：显示直接光 GGX D 项，用来检查高 smoothness 时的 NDF 峰值。
         DirectBRDFVisibility = 116, // 材质调试：显示直接光 Smith Joint Visibility，用来排查几何遮蔽是否压暗高光。
         DirectBRDFFresnel = 117, // 材质调试：显示直接光 Schlick Fresnel，用来检查 F0 和视角输入。
@@ -37,6 +35,8 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         GBufferSmoothness = 133, // GBuffer 调试：显示 GBuffer 解码后的 Smoothness，后续 Deferred 再从它还原 Roughness。
         GBufferOcclusion = 134, // GBuffer 调试：显示 GBuffer 解码后的 Ambient Occlusion。
         GBufferReflectance = 135, // GBuffer 调试：显示 GBuffer 解码后的 XRender Reflectance。
+        GBufferRoughness = 136, // GBuffer 调试：显示从 GBuffer Smoothness 还原出的 XRender Base.Roughness。
+        GBufferDiffuseColor = 137, // GBuffer 调试：显示从 GBuffer 还原 PBRMaterialData 后的 DiffuseColor。
         DetailLighting = 200, // 光照调试：参考 XRender Detail Lighting，用 0.18 中灰 BaseColor 重新计算光照，方便只看明暗细节。
         IndirectLighting = 201, // 光照调试：只显示 PBR 间接光，方便检查 SH 漫反射和 Reflection Probe 镜面反射。
         DirectDiffuse = 202, // 光照调试：只显示直接漫反射，方便检查 NdotL、阴影和 1/PI。

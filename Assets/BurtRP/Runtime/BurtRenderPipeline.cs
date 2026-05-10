@@ -22,7 +22,9 @@ namespace Burt.RenderPipeline
         // 创建单相机渲染器。
         private readonly BurtCameraRenderer cameraRenderer = new();
 
-        private readonly BurtRenderGraphAssembler defaultGraphAssembler = new BurtForwardGraphAssembler(); // 创建默认 Forward 组装器，当前阶段所有普通 request 都先使用它。
+        private readonly BurtRenderGraphAssembler forwardGraphAssembler = new BurtForwardGraphAssembler(); // 创建 Forward 组装器，默认模式和稳定画面都使用它。
+
+        private readonly BurtRenderGraphAssembler deferredGraphAssembler = new BurtDeferredGraphAssembler(); // 创建 Deferred 组装器，当前实验模式只接入 GBuffer 生命周期并临时复用 Forward 输出。
 
         private readonly List<BurtRenderRequest> requests = new(); // 缓存当前帧创建出的所有有效 request，后续先排序再执行。
 
@@ -77,7 +79,7 @@ namespace Burt.RenderPipeline
                     continue;
                 }
 
-                request.SetGraphAssembler(defaultGraphAssembler); // 给当前 request 指定默认的 Forward 渲染图组装器。
+                request.SetGraphAssembler(ResolveGraphAssembler()); // 根据管线资产的 Renderer Mode 给当前 request 指定对应渲染图组装器。
 
                 // 把有效 request 加入列表。
                 requests.Add(request);
@@ -106,7 +108,7 @@ namespace Burt.RenderPipeline
                     continue;
                 }
 
-                request.SetGraphAssembler(defaultGraphAssembler); // 给当前 request 指定默认的 Forward 渲染图组装器。
+                request.SetGraphAssembler(ResolveGraphAssembler()); // 根据管线资产的 Renderer Mode 给当前 request 指定对应渲染图组装器。
 
                 // 把有效 request 加入列表。
                 requests.Add(request);
@@ -123,6 +125,21 @@ namespace Burt.RenderPipeline
             Texture2D lut = asset != null ? asset.PreintegratedFGLut : null;
             Shader.SetGlobalTexture(PreIntegratedFGTextureId, lut != null ? lut : Texture2D.whiteTexture);
             Shader.SetGlobalFloat(PreIntegratedFGEnabledId, lut != null ? 1.0f : 0.0f);
+        }
+
+        private BurtRenderGraphAssembler ResolveGraphAssembler() // 根据当前管线资产选择本次 request 使用的 RenderGraph 组装器。
+        {
+            if (asset == null) // 如果资产为空，说明没有 Renderer Mode 配置来源。
+            {
+                return forwardGraphAssembler; // 返回 Forward 组装器，保持最安全的默认行为。
+            }
+
+            if (asset.RendererMode == BurtRendererMode.Deferred) // 如果用户在资产上选择 Deferred，就进入实验 Deferred 组装器。
+            {
+                return deferredGraphAssembler; // 返回 Deferred 组装器；当前阶段它会额外申请 GBuffer 并复用 Forward 输出。
+            }
+
+            return forwardGraphAssembler; // 其他情况使用 Forward，保证新增 Deferred 代码不改变默认画面。
         }
 
         // 排序、构建 Frame 快照，并按 Frame/Stack/Request 三层调度执行所有 BurtRenderRequest。
