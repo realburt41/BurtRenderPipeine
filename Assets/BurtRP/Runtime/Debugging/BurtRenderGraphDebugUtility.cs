@@ -360,6 +360,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var useColorAdjustments = BurtPostProcessUtility.ShouldUseColorAdjustments(request, asset); // 判断当前 Volume 是否启用基础颜色调整。
 
+            var bloomSettings = BurtPostProcessUtility.ResolveBloomSettings(asset); // 解析当前 Volume 中真正生效的 Bloom 参数。
+
+            var bloomEnabled = BurtPostProcessUtility.ShouldUseBloom(request, asset); // 判断当前 request 是否启用 Bloom。
+
+            var bloomMipCount = BurtPostProcessUtility.ResolveBloomMipCount(request, asset); // 解析当前 request 实际会使用的 Bloom mip 数。
+
             builder.Append("  AssetEnabled=").Append(assetEnabled); // 写入后处理总开关。
 
             builder.Append(" NoOpCopy=").Append(noOpCopy); // 写入 No-op Copy 开关。
@@ -371,6 +377,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" PostExposureMul=").Append(postExposureMultiplier.ToString("0.###")); // 写入 EV 转换后的线性曝光倍率。
 
             builder.Append(" ColorAdjustments=").Append(useColorAdjustments); // 写入是否启用颜色调整。
+
+            builder.Append(" BloomEnabled=").Append(bloomEnabled); // 写入是否启用 Bloom。
+
+            builder.Append(" BloomMips=").Append(bloomMipCount); // 写入当前 request 实际使用的 Bloom mip 数。
+
+            builder.Append(" BloomThreshold=").Append(bloomSettings.Threshold.ToString("0.###")); // 写入 Bloom 阈值。
+
+            builder.Append(" BloomIntensity=").Append(bloomSettings.Intensity.ToString("0.###")); // 写入 Bloom 强度。
+
+            builder.Append(" BloomScatter=").Append(bloomSettings.Scatter.ToString("0.###")); // 写入 Bloom 散布。
 
             builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
 

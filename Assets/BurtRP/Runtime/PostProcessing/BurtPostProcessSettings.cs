@@ -79,6 +79,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
         }
     }
 
+    internal readonly struct BurtBloomSettings // 定义 Bloom 的运行时参数包，让 Pass 不直接依赖 Volume 组件字段。
+    {
+        public const float DefaultThreshold = 1.0f; // 默认只让 HDR 高光进入 Bloom。
+        public const float DefaultIntensity = 0.6f; // 默认强度保持可见但不过曝，便于第一版诊断。
+        public const float DefaultScatter = 0.65f; // 默认散布控制上采样叠加权重。
+        public const int DefaultMaxMipCount = 5; // 第一版最多 5 级，避免低端分辨率上申请过多临时 RT。
+        public const float DefaultSoftKnee = 0.5f; // 默认软阈值让高光进入 Bloom 时更平滑。
+        public static readonly BurtBloomSettings Default = new BurtBloomSettings(false, DefaultThreshold, DefaultSoftKnee, DefaultIntensity, DefaultScatter, DefaultMaxMipCount); // 关闭 Bloom 的安全默认值。
+
+        public bool Enabled { get; } // 保存 Bloom 是否启用。
+        public float Threshold { get; } // 保存亮度阈值。
+        public float SoftKnee { get; } // 保存软阈值。
+        public float Intensity { get; } // 保存合成强度。
+        public float Scatter { get; } // 保存上采样散布强度。
+        public int MaxMipCount { get; } // 保存最大 mip 数。
+
+        public BurtBloomSettings(bool enabled, float threshold, float softKnee, float intensity, float scatter, int maxMipCount) // 收拢 Bloom 参数。
+        {
+            Enabled = enabled; // 保存启用状态。
+            Threshold = threshold; // 保存阈值。
+            SoftKnee = softKnee; // 保存软阈值。
+            Intensity = intensity; // 保存强度。
+            Scatter = scatter; // 保存散布。
+            MaxMipCount = maxMipCount; // 保存最大 mip 数。
+        }
+    }
+
     [Serializable] // 标记这个类可以被 Unity 序列化，这样它可以作为 BurtRenderPipelineAsset 的内嵌配置显示在 Inspector 中。
     public sealed class BurtPostProcessSettings // 定义 BurtRP 后处理框架设置；具体效果参数后续统一放到 Global Volume。
     {

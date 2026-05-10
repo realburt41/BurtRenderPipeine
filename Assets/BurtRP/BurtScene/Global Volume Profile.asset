@@ -43,6 +43,34 @@ MonoBehaviour:
   toneCurveAmount:
     m_OverrideState: 0
     m_Value: 1
+--- !u!114 &-4442304625444803703
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 0}
+  m_Name: BurtBloomVolumeComponent
+  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtBloomVolumeComponent
+  active: 1
+  threshold:
+    m_OverrideState: 0
+    m_Value: 1
+  softKnee:
+    m_OverrideState: 0
+    m_Value: 0.5
+  intensity:
+    m_OverrideState: 0
+    m_Value: 0
+  scatter:
+    m_OverrideState: 0
+    m_Value: 0.65
+  maxIterations:
+    m_OverrideState: 0
+    m_Value: 5
 --- !u!114 &-2132932211082115016
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -83,3 +111,4 @@ MonoBehaviour:
   components:
   - {fileID: -7133158639898991922}
   - {fileID: -2132932211082115016}
+  - {fileID: -4442304625444803703}

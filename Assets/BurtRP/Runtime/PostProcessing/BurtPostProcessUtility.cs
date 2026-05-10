@@ -46,7 +46,39 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return false; // 返回 false，保持 Asset 作为后处理总开关。
             }
 
-            return settings.ShouldRunNoOpCopy || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume(); // No-op、Tonemapping 或 Color Adjustments 任意一个需要执行，就注册资源并插入 Pass。
+            return settings.ShouldRunNoOpCopy || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume() || HasActiveBloomVolume(); // No-op、Tonemapping、Bloom 或 Color Adjustments 任意一个需要执行，就注册资源并插入 Pass。
+        }
+
+        public static bool ShouldUseBloom( // 定义判断当前 request 是否需要 Bloom 的统一入口。
+            BurtRenderRequest request, // 接收当前渲染请求，用来确认相机任务是否有效。
+            BurtRenderPipelineAsset asset) // 接收管线资产，用来确认后处理总开关是否打开。
+        {
+            if (request == null) // 如果 request 为空，说明没有合法渲染任务。
+            {
+                return false; // 返回 false，避免异常任务执行 Bloom。
+            }
+
+            if (!request.IsValid) // 如果 request 无效，就不应该执行任何后处理子链路。
+            {
+                return false; // 返回 false，保持 Bloom 和主渲染任务一致。
+            }
+
+            if (request.Camera == null) // 如果相机为空，就没有可靠的渲染尺寸。
+            {
+                return false; // 返回 false，避免申请尺寸不明确的 Bloom mip。
+            }
+
+            if (IsPreviewOrReflectionRequest(request)) // Preview / Reflection 不使用项目 Volume Bloom，避免资产预览被场景后处理污染。
+            {
+                return false; // 返回 false，让后处理 Pass 不申请 Bloom 临时 RT。
+            }
+
+            if (!IsPostProcessEnabled(asset)) // 如果管线资产没有开启后处理框架，Volume Bloom 不允许改变画面。
+            {
+                return false; // 返回 false，让后处理 Pass 跳过 Bloom。
+            }
+
+            return HasActiveBloomVolume(); // 只有当前 VolumeStack 中存在有效 Bloom 时，才需要执行 Bloom。
         }
 
         public static bool ShouldUseColorAdjustments( // 定义判断当前 request 是否需要 Color Adjustments 的统一入口。
@@ -239,11 +271,84 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 colorAdjustments.colorFilter.value); // 读取颜色滤镜。
         }
 
+        public static BurtBloomSettings ResolveBloomSettings(BurtRenderPipelineAsset asset) // 定义解析 Bloom 参数的函数，让 Pass 不直接访问 Volume 组件字段。
+        {
+            if (!IsPostProcessEnabled(asset)) // 如果后处理框架关闭，Bloom 参数不应该影响画面。
+            {
+                return BurtBloomSettings.Default; // 返回关闭状态的默认参数。
+            }
+
+            var bloom = GetBloomVolumeComponent(); // 从当前 VolumeStack 读取 BurtRP Bloom 组件。
+
+            if (bloom == null) // 如果当前 VolumeStack 没有 Bloom 组件，就没有 Bloom 效果。
+            {
+                return BurtBloomSettings.Default; // 返回关闭状态的默认参数。
+            }
+
+            if (!bloom.IsEnabled()) // 如果 Bloom 组件未激活或强度为 0，就不执行 Bloom。
+            {
+                return BurtBloomSettings.Default; // 返回关闭状态的默认参数。
+            }
+
+            return new BurtBloomSettings( // 把当前 Volume 混合后的参数收拢成不可变设置，供 Pass 一次性使用。
+                true, // 标记 Bloom 已启用。
+                bloom.threshold.value, // 读取阈值。
+                bloom.softKnee.value, // 读取软阈值。
+                bloom.intensity.value, // 读取合成强度。
+                bloom.scatter.value, // 读取散布权重。
+                bloom.maxIterations.value); // 读取最大 mip 数。
+        }
+
+        public static int ResolveBloomMipCount(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 定义解析当前 request 实际 Bloom mip 数的函数。
+        {
+            if (!ShouldUseBloom(request, asset)) // 如果当前 request 不执行 Bloom，就不需要任何 mip。
+            {
+                return 0; // 返回 0 表示跳过 Bloom 链。
+            }
+
+            return CalculateBloomMipCount(request.Camera, ResolveBloomSettings(asset)); // 按相机尺寸和 Volume 参数计算实际 mip 数。
+        }
+
+        public static int CalculateBloomMipCount(Camera camera, BurtBloomSettings settings) // 根据相机尺寸和设置计算实际 Bloom mip 数。
+        {
+            if (!settings.Enabled) // Bloom 未启用时不申请任何临时 RT。
+            {
+                return 0; // 返回 0 表示跳过 Bloom 链。
+            }
+
+            if (camera == null) // 没有相机时无法确定尺寸。
+            {
+                return 0; // 返回 0，保持安全跳过。
+            }
+
+            var width = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth) / 2; // Bloom mip0 使用半分辨率。
+            var height = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight) / 2; // Bloom mip0 使用半分辨率。
+            var maxMipCount = Mathf.Clamp(settings.MaxMipCount, 1, 8); // 把 Volume 上限限制在第一版实现支持范围内。
+            var count = 0; // 记录实际可用 mip 数。
+
+            while (count < maxMipCount && width >= 1 && height >= 1) // 按分辨率逐级停止，避免申请 0 尺寸 RT。
+            {
+                count++; // 当前尺寸可用，纳入 mip 链。
+
+                if (width == 1 && height == 1) // 已经到 1x1 时不能继续下降。
+                {
+                    break; // 停止 mip 计算。
+                }
+
+                width = Mathf.Max(1, width / 2); // 下一层宽度减半，并保持最小 1。
+                height = Mathf.Max(1, height / 2); // 下一层高度减半，并保持最小 1。
+            }
+
+            return count; // 返回实际 mip 数。
+        }
+
         public static void LogPostProcessExecuted( // 定义后处理执行日志，集中格式避免 Pass 内部堆字符串逻辑。
             BurtRenderGraphContext context, // 接收当前 RenderGraph 执行上下文，用来读取相机和资产设置。
             BurtTonemappingMode tonemappingMode, // 接收本次执行使用的 Tonemapping 模式。
             float postExposureMultiplier, // 接收本次执行使用的线性曝光倍率。
-            bool useColorAdjustments) // 接收本次执行是否启用了 Color Adjustments。
+            bool useColorAdjustments, // 接收本次执行是否启用了 Color Adjustments。
+            BurtBloomSettings bloomSettings, // 接收本次执行使用的 Bloom 参数。
+            int bloomMipCount) // 接收本次实际使用的 Bloom mip 数。
         {
             if (context == null) // 如果上下文为空，说明调用方状态异常。
             {
@@ -261,7 +366,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
             var cameraName = camera != null ? camera.name : "<null>"; // 把相机名转换成安全字符串，避免日志里出现空引用。
 
-            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMul=" + postExposureMultiplier + " ColorAdjustments=" + useColorAdjustments); // 输出后处理执行摘要，说明当前模式、曝光倍率和颜色调整状态。
+            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMul=" + postExposureMultiplier + " ColorAdjustments=" + useColorAdjustments + " Bloom=" + bloomSettings.Enabled + " BloomMips=" + bloomMipCount + " BloomThreshold=" + bloomSettings.Threshold + " BloomIntensity=" + bloomSettings.Intensity + " BloomScatter=" + bloomSettings.Scatter); // 输出后处理执行摘要，说明当前模式、曝光倍率、颜色调整和 Bloom 状态。
         }
 
         private static bool IsPostProcessEnabled(BurtRenderPipelineAsset asset) // 定义判断资产是否允许后处理运行的统一辅助函数。
@@ -293,6 +398,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             var colorAdjustments = GetColorAdjustmentsVolumeComponent(); // 从当前 VolumeStack 中读取 BurtRP Color Adjustments 组件。
 
             return colorAdjustments != null && colorAdjustments.IsEnabled(); // 只有组件存在、激活且参数被覆盖或偏离中性值时，才认为颜色调整需要运行。
+        }
+
+        private static bool HasActiveBloomVolume() // 定义判断当前 VolumeStack 是否存在有效 Bloom 的辅助函数。
+        {
+            var bloom = GetBloomVolumeComponent(); // 从当前 VolumeStack 中读取 BurtRP Bloom 组件。
+
+            return bloom != null && bloom.IsEnabled(); // 只有组件存在、激活且强度大于 0 时，才认为 Bloom 需要运行。
         }
 
         private static BurtTonemappingVolumeComponent GetTonemappingVolumeComponent() // 定义从 Unity VolumeStack 读取 BurtRP Tonemapping 组件的辅助函数。
@@ -331,6 +443,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             return stack.GetComponent<BurtColorAdjustmentsVolumeComponent>(); // 返回 BurtRP Color Adjustments 组件，未添加时 Unity 会返回默认组件或空值。
+        }
+
+        private static BurtBloomVolumeComponent GetBloomVolumeComponent() // 定义从 Unity VolumeStack 读取 BurtRP Bloom 组件的辅助函数。
+        {
+            var volumeManager = VolumeManager.instance; // 取得 Unity 当前全局 VolumeManager 实例。
+
+            if (volumeManager == null) // 理论上 VolumeManager 是单例，但域重载阶段仍可能为空。
+            {
+                return null; // 返回空组件，调用方会按无 Bloom 处理。
+            }
+
+            var stack = volumeManager.stack; // 读取当前已经由相机刷新过的 VolumeStack。
+
+            if (stack == null) // 如果 VolumeStack 为空，说明 Volume 系统还没有准备好。
+            {
+                return null; // 返回空组件，保证后处理回退到无 Bloom 状态。
+            }
+
+            return stack.GetComponent<BurtBloomVolumeComponent>(); // 返回 BurtRP Bloom 组件，未添加时 Unity 会返回默认组件或空值。
         }
     }
 }

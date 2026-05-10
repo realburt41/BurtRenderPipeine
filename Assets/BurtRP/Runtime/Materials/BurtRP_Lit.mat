@@ -44,10 +44,10 @@ Material:
     - _AlphaClip: 0
     - _Cutoff: 0.5
     - _Metallic: 1
-    - _NormalScale: 0.17
+    - _NormalScale: 0
     - _OcclusionStrength: 1
     - _Reflectance: 0.5
-    - _Smoothness: 0.537
+    - _Smoothness: 1
     m_Colors:
     - _BaseColor: {r: 0.9150943, g: 0.75667745, b: 0.21150766, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}

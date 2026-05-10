@@ -40,6 +40,15 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             // 声明当前后处理使用的源纹理，C# Pass 会在每次绘制前设置它。
             sampler2D _BurtPostProcessSourceTexture;
 
+            // 声明 Bloom 合成纹理，C# Pass 会在最终 Tonemapping 前绑定 mip0。
+            sampler2D _BurtBloomTexture;
+
+            // 声明是否在最终合成中启用 Bloom。
+            float _BurtUseBloom;
+
+            // 声明 Bloom 合成强度。
+            float _BurtBloomIntensity;
+
             // 声明是否执行 Color Adjustments，0 表示关闭，1 表示启用。
             float _BurtUseColorAdjustments;
 
@@ -543,6 +552,12 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 // 从当前源纹理采样颜色。
                 float4 color = tex2D(_BurtPostProcessSourceTexture, input.uv);
 
+                // Bloom 在 Tonemapping 前合回 HDR 颜色，保证现有 Tonemapping 继续处理最终高光。
+                if (_BurtUseBloom > 0.5)
+                {
+                    color.rgb += tex2D(_BurtBloomTexture, input.uv).rgb * _BurtBloomIntensity;
+                }
+
                 // 对 RGB 执行 Tonemapping，Alpha 保持原样，避免破坏后续可能依赖透明度的目标。
                 color.rgb = BurtApplyTonemapping(color.rgb);
 
@@ -556,6 +571,174 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             // 结束 HLSL 程序。
             ENDHLSL
         }
+
+        // Bloom Prefilter: writes thresholded HDR highlights into mip0.
+        Pass
+        {
+            Name "Burt Bloom Prefilter"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+
+            sampler2D _BurtPostProcessSourceTexture;
+            float _BurtBloomThreshold;
+            float _BurtBloomSoftKnee;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.uv = uv;
+                return output;
+            }
+
+            float2 GetBloomSourceUV(float2 uv)
+            {
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
+
+                return uv;
+            }
+
+            float3 ApplyBloomThreshold(float3 color)
+            {
+                float brightness = max(max(color.r, color.g), color.b);
+                float knee = max(_BurtBloomThreshold * _BurtBloomSoftKnee, 0.0001);
+                float soft = brightness - _BurtBloomThreshold + knee;
+                soft = saturate(soft / (2.0 * knee)) * soft;
+                float contribution = max(soft, brightness - _BurtBloomThreshold);
+                contribution /= max(brightness, 0.0001);
+                return color * saturate(contribution);
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float3 color = tex2D(_BurtPostProcessSourceTexture, GetBloomSourceUV(input.uv)).rgb;
+                return float4(ApplyBloomThreshold(max(color, 0.0)), 1.0);
+            }
+            ENDHLSL
+        }
+
+        // Bloom Downsample: filters a larger mip into the next smaller mip.
+        Pass
+        {
+            Name "Burt Bloom Downsample"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+
+            sampler2D _BurtPostProcessSourceTexture;
+            float4 _BurtBloomTexelSize;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.uv = uv;
+                return output;
+            }
+
+            float2 GetBloomSourceUV(float2 uv)
+            {
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
+
+                return uv;
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float2 texel = _BurtBloomTexelSize.xy;
+                float2 sourceUv = GetBloomSourceUV(input.uv);
+                float3 color = tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, -1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 1.0)).rgb;
+                return float4(max(color * 0.25, 0.0), 1.0);
+            }
+            ENDHLSL
+        }
+
+        // Bloom Upsample: additively blends a smaller mip into the larger mip target.
+        Pass
+        {
+            Name "Burt Bloom Upsample"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+            Blend One One
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+
+            sampler2D _BurtPostProcessSourceTexture;
+            float4 _BurtBloomTexelSize;
+            float _BurtBloomScatter;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.uv = uv;
+                return output;
+            }
+
+            float2 GetBloomSourceUV(float2 uv)
+            {
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
+
+                return uv;
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float2 texel = _BurtBloomTexelSize.xy;
+                float2 sourceUv = GetBloomSourceUV(input.uv);
+                float3 color = tex2D(_BurtPostProcessSourceTexture, sourceUv).rgb * 4.0;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 0.0)).rgb * 2.0;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 0.0)).rgb * 2.0;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(0.0, 1.0)).rgb * 2.0;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(0.0, -1.0)).rgb * 2.0;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, -1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)).rgb;
+                return float4(max(color * (1.0 / 16.0) * _BurtBloomScatter, 0.0), 1.0);
+            }
+            ENDHLSL
+        }
+
     }
 
     // 禁用 fallback，避免后处理拷贝失败时悄悄走其他管线 shader。

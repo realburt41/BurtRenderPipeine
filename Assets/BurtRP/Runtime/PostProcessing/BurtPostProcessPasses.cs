@@ -55,7 +55,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
     {
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy"; // 定义后处理 shader 的查找名称，必须和 shader 文件里的 Shader 名称一致。
 
+        private const int MaxBloomMipCount = 8; // 第一版 Bloom 最多申请 8 级临时 RT，避免动态 RenderGraph 资源注册过重。
+
         private static readonly int SourceTextureId = Shader.PropertyToID("_BurtPostProcessSourceTexture"); // 缓存源纹理属性 ID，避免每帧通过字符串查找。
+
+        private static readonly int BloomTextureId = Shader.PropertyToID("_BurtBloomTexture"); // 缓存 Bloom 合成纹理属性 ID，最终合成时采样 mip0。
+
+        private static readonly int UseBloomId = Shader.PropertyToID("_BurtUseBloom"); // 缓存 Bloom 合成开关属性 ID。
+
+        private static readonly int BloomIntensityId = Shader.PropertyToID("_BurtBloomIntensity"); // 缓存 Bloom 合成强度属性 ID。
+
+        private static readonly int BloomThresholdId = Shader.PropertyToID("_BurtBloomThreshold"); // 缓存 Bloom 预过滤阈值属性 ID。
+
+        private static readonly int BloomSoftKneeId = Shader.PropertyToID("_BurtBloomSoftKnee"); // 缓存 Bloom 软阈值属性 ID。
+
+        private static readonly int BloomTexelSizeId = Shader.PropertyToID("_BurtBloomTexelSize"); // 缓存 Bloom 当前源纹理 texel size 属性 ID。
+
+        private static readonly int BloomScatterId = Shader.PropertyToID("_BurtBloomScatter"); // 缓存 Bloom 上采样散布属性 ID。
+
+        private static readonly int[] BloomMipTextureIds = CreateBloomMipTextureIds(); // 缓存 Bloom mip 临时 RT 的属性 ID。
 
         private static readonly int TonemappingModeId = Shader.PropertyToID("_BurtTonemappingMode"); // 缓存 Tonemapping 模式属性 ID，避免每帧通过字符串查找。
 
@@ -149,11 +167,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var colorAdjustmentsSettings = BurtPostProcessUtility.ResolveColorAdjustmentsSettings(context.Asset); // 从 Global Volume 读取基础颜色调整参数，缺失时回退到中性值。
 
+            var bloomSettings = BurtPostProcessUtility.ResolveBloomSettings(context.Asset); // 从 Global Volume 读取 Bloom 参数，未启用时回退到关闭状态。
+
+            var bloomMipCount = BurtPostProcessUtility.CalculateBloomMipCount(context.Request.Camera, bloomSettings); // 按当前相机尺寸和 Volume 上限计算实际 mip 数。
+
             var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取 CommandBuffer，并用 Pass 名称命名。
+
+            if (bloomMipCount > 0) // 如果 Bloom 启用，就在同一个 Pass 内部管理临时 mip 链。
+            {
+                ExecuteBloom(cmd, context.Request.Camera, cameraColorTarget, material, bloomSettings, bloomMipCount); // 先对 HDR CameraColor 做 prefilter/downsample/upsample。
+            }
 
             cmd.SetRenderTarget(postProcessColorTarget.Identifier); // 先绑定 PostProcessColor，让第一段全屏拷贝写入后处理中间目标。
 
             cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier); // 把 CameraColor 设置为当前拷贝 shader 的源纹理。
+
+            cmd.SetGlobalTexture(BloomTextureId, bloomMipCount > 0 ? new RenderTargetIdentifier(BloomMipTextureIds[0]) : cameraColorTarget.Identifier); // Bloom 启用时把 mip0 交给最终合成，否则绑定一个有效兜底纹理。
+
+            cmd.SetGlobalFloat(UseBloomId, bloomMipCount > 0 ? 1f : 0f); // 上传 Bloom 合成开关，确保默认不改变画面。
+
+            cmd.SetGlobalFloat(BloomIntensityId, bloomMipCount > 0 ? bloomSettings.Intensity : 0f); // 上传 Bloom 强度，最终合成发生在 Tonemapping 前。
 
             cmd.SetGlobalFloat(TonemappingModeId, (float)tonemappingMode); // 上传 Tonemapping 模式，None 会让 shader 原样输出，其他模式会执行对应曲线。
 
@@ -195,15 +228,126 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             cmd.SetGlobalFloat(PostExposureId, 1f); // 第二段回写使用 1 倍曝光，保证它是纯拷贝。
 
+            cmd.SetGlobalFloat(UseBloomId, 0f); // 第二段只负责纯拷贝，必须关闭 Bloom 合成。
+
             cmd.SetGlobalFloat(UseColorAdjustmentsId, 0f); // 第二段只负责把 PostProcessColor 写回 CameraColor，必须关闭颜色调整，避免同一帧重复执行。
 
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 再绘制一次全屏三角形，把 PostProcessColor 原样写回 CameraColor。
+
+            ReleaseBloom(cmd, bloomMipCount); // 释放 Bloom 临时 mip，命令会随同一个 CommandBuffer 一起提交。
 
             renderContext.ExecuteCommandBuffer(cmd); // 把两段拷贝命令一次性提交给 Unity 渲染上下文。
 
             CommandBufferPool.Release(cmd); // 释放 CommandBuffer，避免每帧产生 GC。
 
-            BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
+            BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments, bloomSettings, bloomMipCount); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
+        }
+
+        private static int[] CreateBloomMipTextureIds() // 创建 Bloom mip 临时 RT 的属性 ID 数组。
+        {
+            var ids = new int[MaxBloomMipCount]; // 固定上限，避免每帧分配数组。
+
+            for (var i = 0; i < ids.Length; i++) // 遍历所有可能的 Bloom mip。
+            {
+                ids[i] = Shader.PropertyToID("_BurtBloomMip" + i); // 为每级 mip 生成稳定的全局纹理 ID。
+            }
+
+            return ids; // 返回缓存数组。
+        }
+
+        private static void ExecuteBloom( // 在单个后处理 Pass 内部执行 Bloom mip 链。
+            CommandBuffer cmd, // 接收当前后处理 CommandBuffer。
+            Camera camera, // 接收当前相机，用来创建匹配尺寸的临时 RT。
+            BurtRenderTargetHandle cameraColorTarget, // 接收 HDR CameraColor，作为 Bloom prefilter 源。
+            Material material, // 接收后处理材质，复用其中的 Bloom 子 Pass。
+            BurtBloomSettings settings, // 接收当前 Bloom 参数。
+            int mipCount) // 接收本帧实际使用的 mip 数。
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera); // Bloom mip 使用后处理颜色格式，保证 HDR 高光不被截断。
+            descriptor.width = Mathf.Max(1, descriptor.width / 2); // mip0 固定为半分辨率。
+            descriptor.height = Mathf.Max(1, descriptor.height / 2); // mip0 固定为半分辨率。
+
+            for (var i = 0; i < mipCount; i++) // 逐级申请 Bloom 临时 RT。
+            {
+                cmd.GetTemporaryRT(BloomMipTextureIds[i], descriptor, FilterMode.Bilinear); // 申请当前 mip，使用双线性过滤配合上采样。
+
+                descriptor.width = Mathf.Max(1, descriptor.width / 2); // 准备下一层宽度。
+                descriptor.height = Mathf.Max(1, descriptor.height / 2); // 准备下一层高度。
+            }
+
+            cmd.SetGlobalFloat(BloomThresholdId, settings.Threshold); // 上传 Bloom 阈值。
+            cmd.SetGlobalFloat(BloomSoftKneeId, settings.SoftKnee); // 上传 Bloom 软阈值。
+            cmd.SetGlobalFloat(BloomScatterId, settings.Scatter); // 上传 Bloom 散布参数。
+
+            cmd.SetRenderTarget(new RenderTargetIdentifier(BloomMipTextureIds[0])); // prefilter 写入 mip0。
+            SetBloomSource(cmd, cameraColorTarget.Identifier, camera); // CameraColor 是 prefilter 源。
+            cmd.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1); // 执行高光预过滤。
+
+            for (var i = 1; i < mipCount; i++) // 从 mip0 开始逐级下采样。
+            {
+                var sourceId = BloomMipTextureIds[i - 1]; // 上一层作为当前下采样源。
+                var targetId = BloomMipTextureIds[i]; // 当前层作为下采样目标。
+
+                cmd.SetRenderTarget(new RenderTargetIdentifier(targetId)); // 绑定当前 mip 作为写入目标。
+                SetBloomSource(cmd, new RenderTargetIdentifier(sourceId), GetBloomMipWidth(camera, i - 1), GetBloomMipHeight(camera, i - 1)); // 设置上一层源纹理和 texel size。
+                cmd.DrawProcedural(Matrix4x4.identity, material, 2, MeshTopology.Triangles, 3, 1); // 执行 4 tap 下采样。
+            }
+
+            for (var i = mipCount - 1; i > 0; i--) // 从最小 mip 向上采样回 mip0。
+            {
+                var sourceId = BloomMipTextureIds[i]; // 较小 mip 作为上采样源。
+                var targetId = BloomMipTextureIds[i - 1]; // 较大 mip 保留原有内容并叠加上采样结果。
+
+                cmd.SetRenderTarget(new RenderTargetIdentifier(targetId)); // 绑定较大 mip。
+                SetBloomSource(cmd, new RenderTargetIdentifier(sourceId), GetBloomMipWidth(camera, i), GetBloomMipHeight(camera, i)); // 设置较小 mip 源纹理和 texel size。
+                cmd.DrawProcedural(Matrix4x4.identity, material, 3, MeshTopology.Triangles, 3, 1); // 使用 additive blend 把上采样结果加回较大 mip。
+            }
+        }
+
+        private static void ReleaseBloom(CommandBuffer cmd, int mipCount) // 释放本帧申请的 Bloom 临时 RT。
+        {
+            for (var i = 0; i < mipCount; i++) // 只释放实际申请过的 mip。
+            {
+                cmd.ReleaseTemporaryRT(BloomMipTextureIds[i]); // 释放当前 Bloom mip。
+            }
+        }
+
+        private static void SetBloomSource(CommandBuffer cmd, RenderTargetIdentifier source, Camera camera) // 用相机尺寸设置 Bloom 源纹理。
+        {
+            var width = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth); // 读取源宽度。
+            var height = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight); // 读取源高度。
+
+            SetBloomSource(cmd, source, width, height); // 转到统一上传函数。
+        }
+
+        private static void SetBloomSource(CommandBuffer cmd, RenderTargetIdentifier source, int width, int height) // 上传 Bloom 源纹理和 texel size。
+        {
+            cmd.SetGlobalTexture(SourceTextureId, source); // 复用后处理源纹理属性，供 Bloom 子 Pass 采样。
+            cmd.SetGlobalVector(BloomTexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height)); // 上传 texel size，便于 shader 做邻域采样。
+        }
+
+        private static int GetBloomMipWidth(Camera camera, int mipIndex) // 计算指定 Bloom mip 的宽度。
+        {
+            var width = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth) / 2; // mip0 半分辨率。
+
+            for (var i = 0; i < mipIndex; i++) // 按 mipIndex 继续减半。
+            {
+                width = Mathf.Max(1, width / 2); // 保持最小 1。
+            }
+
+            return Mathf.Max(1, width); // 返回安全宽度。
+        }
+
+        private static int GetBloomMipHeight(Camera camera, int mipIndex) // 计算指定 Bloom mip 的高度。
+        {
+            var height = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight) / 2; // mip0 半分辨率。
+
+            for (var i = 0; i < mipIndex; i++) // 按 mipIndex 继续减半。
+            {
+                height = Mathf.Max(1, height / 2); // 保持最小 1。
+            }
+
+            return Mathf.Max(1, height); // 返回安全高度。
         }
 
         private Material GetPostProcessMaterial() // 定义获取后处理材质的内部辅助函数。

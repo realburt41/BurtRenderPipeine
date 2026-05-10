@@ -124,4 +124,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Volume 组�
             return false; // 所有参数都保持中性时，不额外启用 Color Adjustments。
         }
     }
+
+    [Serializable] // 标记这个类可以被 Unity 序列化，这样它可以保存到 Volume Profile 资产里。
+    [VolumeComponentMenu("BurtRP/Post Processing/Bloom")] // 把 Bloom 组件注册到 Global Volume 的 Add Override 菜单里。
+    public sealed class BurtBloomVolumeComponent : VolumeComponent // 定义 BurtRP Bloom 的 Global Volume 组件。
+    {
+        private const float IntensityEpsilon = 0.0001f; // 定义强度阈值，避免默认或近零强度误触发 Bloom。
+
+        [Title("BurtRP Bloom")] // 使用 Odin 标题让 Bloom 参数在 Inspector 中更容易识别。
+        [InfoBox("第一版在 Burt Post Process Pass 内部申请临时 mip 链，并在 Tonemapping 前把 Bloom 合回 HDR CameraColor。")] // 说明当前实现范围。
+        public ClampedFloatParameter threshold = new ClampedFloatParameter(BurtBloomSettings.DefaultThreshold, 0f, 10f); // 定义亮度阈值，超过阈值的 HDR 高光会进入 Bloom。
+
+        public ClampedFloatParameter softKnee = new ClampedFloatParameter(BurtBloomSettings.DefaultSoftKnee, 0f, 1f); // 定义软阈值范围，让高光进入 Bloom 时更平滑。
+
+        public ClampedFloatParameter intensity = new ClampedFloatParameter(0f, 0f, 10f); // 定义 Bloom 合成强度，默认 0 保证不改变画面。
+
+        public ClampedFloatParameter scatter = new ClampedFloatParameter(BurtBloomSettings.DefaultScatter, 0f, 1f); // 定义上采样叠加强度，数值越高光晕越扩散。
+
+        public ClampedIntParameter maxIterations = new ClampedIntParameter(BurtBloomSettings.DefaultMaxMipCount, 1, 8); // 定义最多使用的 mip 数，第一版限制到 8 级。
+
+        public bool IsEnabled() // 定义运行时判断函数，集中表达这个 Volume 组件是否需要执行 Bloom。
+        {
+            if (!active) // 如果 Volume 组件整体被关闭，就不应该影响后处理链路。
+            {
+                return false; // 返回 false，后处理 Pass 会把它视为关闭。
+            }
+
+            return intensity.value > IntensityEpsilon; // 只有强度大于阈值时才启用，默认 Volume 不改变画面。
+        }
+    }
 }

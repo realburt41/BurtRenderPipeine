@@ -49,8 +49,14 @@ float4 _BurtSkyReflectionHDR;
 // 保存 BurtRP 全局天空反射强度，对应 Unity Lighting 面板的 Reflection Intensity。
 float _BurtSkyReflectionIntensity;
 
+// Optional tint supplied by BurtSkyLight; legacy RenderSettings path uploads white.
+float4 _BurtSkyReflectionTint;
+
 // 标记 BurtRP 全局天空反射 cubemap 是否可用，0 表示回退到环境光颜色。
 float _BurtSkyReflectionEnabled;
+
+// 标记 SkyLight 是否显式接管 specular；启用时无 cubemap/零强度应返回黑色，而不是回退 unity_SpecCube0。
+float _BurtSkyReflectionOverride;
 
 // 保存 BurtRP 全局天空反射 cubemap 的最大 mip 索引，避免所有 cubemap 都写死按 0..6 采样。
 float _BurtSkyReflectionMaxMip;
@@ -193,14 +199,14 @@ float3 BurtSampleIndirectDiffuseIrradiance(float3 normalWS)
 }
 
 
-// XRender / Unity reflection capture 的有效预过滤 LOD 范围通常按 0..6 设计，不等同于 cubemap 真实 mip 链长度。
-static const float BURT_REFLECTION_CAPTURE_SPECULAR_MIP_MAX = 6.0f;
+// XRender SkyLight 以 256 cubemap 的 9 个 mip 为基准；这里使用 max mip index 8 作为有效输入上限。
+static const float BURT_REFLECTION_CAPTURE_SPECULAR_MIP_MAX_INDEX = 8.0f;
 
 // 出处：XRender/Shaders/Library/ShadingIBL.hlsl::ComputeReflectionCaptureMipFromRoughness；roughness 到反射探针 mip 的 log2 曲线。
-float ComputeReflectionCaptureMipFromRoughness(float perceptualRoughness, float cubemapMaxMip)
+float ComputeReflectionCaptureMipFromRoughness(float perceptualRoughness, float cubemapMaxMipIndex)
 {
-    // C# 传入的是纹理真实 mip 上限，例如 512 probe 会是 9；XRender 公式需要的是反射预过滤有效 LOD 上限，所以这里限制到 0..6。
-    float specularMipMax = min(max(cubemapMaxMip, 0.0f), BURT_REFLECTION_CAPTURE_SPECULAR_MIP_MAX);
+    // C# 上传的是真实最大 mip 索引；XRender 原函数输入 mip count 后会先减 1，所以这里直接使用 max index。
+    float specularMipMaxIndex = min(max(cubemapMaxMipIndex, 0.0f), BURT_REFLECTION_CAPTURE_SPECULAR_MIP_MAX_INDEX);
 
     // log2 曲线不能接受 0，所以使用 BurtRP 的最小感知粗糙度保护镜面端。
     float safeRoughness = max(saturate(perceptualRoughness), BURT_MIN_PERCEPTUAL_ROUGHNESS);
@@ -208,8 +214,8 @@ float ComputeReflectionCaptureMipFromRoughness(float perceptualRoughness, float 
     // 对齐 XRender / UE 的启发式：粗糙端走高 mip，光滑端尽量贴近 mip0。
     float levelFrom1x1 = 1.0f - 1.2f * log2(safeRoughness);
 
-    // 用有效预过滤范围算 LOD，避免高分辨率 probe 的真实 mip 数把满光滑材质推到模糊 mip。
-    return clamp(specularMipMax - 1.0f - levelFrom1x1, 0.0f, specularMipMax);
+    // 对齐 XRender：256 sky 的 max index 为 8，roughness=1 会落到 mip6，而不是之前错误的 mip4。
+    return clamp(specularMipMaxIndex - 1.0f - levelFrom1x1, 0.0f, specularMipMaxIndex);
 }
 
 // BurtRP 适配函数：采样 BurtRP 全局天空反射 cubemap，旧路径才回退 Unity 当前绑定的 reflection probe。
@@ -226,9 +232,14 @@ float3 SampleIndirectSpecularRadiance(float3 reflectionDirectionWS, float roughn
 
         float4 encodedSkyReflection = UNITY_SAMPLE_TEXCUBE_LOD(_BurtSkyReflectionTexture, safeReflectionDirectionWS, skyReflectionMipLevel); // 按 roughness mip 采样全局天空反射。
 
-        float3 skyReflectionRadiance = DecodeHDR(encodedSkyReflection, _BurtSkyReflectionHDR) * max(0.0f, _BurtSkyReflectionIntensity); // 解码 HDR 并乘 Lighting 面板的反射强度。
+        float3 skyReflectionRadiance = DecodeHDR(encodedSkyReflection, _BurtSkyReflectionHDR) * max(_BurtSkyReflectionTint.rgb, float3(0.0f, 0.0f, 0.0f)) * max(0.0f, _BurtSkyReflectionIntensity); // 解码 HDR 并乘 Lighting 面板的反射强度。
 
         return max(skyReflectionRadiance, float3(0.0f, 0.0f, 0.0f)); // 显式 sky reflection 数据源启用后尊重 cubemap 本身颜色，不再把黑色 custom reflection 误判成需要环境色兜底。
+    }
+
+    if (_BurtSkyReflectionOverride > 0.5f)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
     }
 
     const float legacyUnitySpecCubeMaxMip = 6.0f; // Unity 内置 reflection probe legacy 路径暂时保留 0..6 的常见 mip 上限，后续有专用数据源后再替换。

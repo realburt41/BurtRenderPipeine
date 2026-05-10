@@ -15,10 +15,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
         private static readonly int AmbientSHBbId = Shader.PropertyToID("_BurtAmbientSHBb"); // 缓存 BurtRP 自有 SH B 通道 L2 常量属性 ID。
         private static readonly int AmbientSHCId = Shader.PropertyToID("_BurtAmbientSHC"); // 缓存 BurtRP 自有 SH C 项常量属性 ID。
         private static readonly int AmbientSHEnabledId = Shader.PropertyToID("_BurtAmbientSHEnabled"); // 缓存 BurtRP 自有 SH 是否有效的开关属性 ID。
+        private static readonly int AmbientLightColorId = Shader.PropertyToID("_BurtAmbientLightColor"); // 缓存 SimpleLit 和 SH fallback 使用的环境光颜色属性 ID。
         private static readonly int SkyReflectionTextureId = Shader.PropertyToID("_BurtSkyReflectionTexture"); // 缓存 BurtRP 全局天空反射 cubemap 属性 ID。
         private static readonly int SkyReflectionHDRId = Shader.PropertyToID("_BurtSkyReflectionHDR"); // 缓存 BurtRP 天空反射 HDR 解码参数属性 ID。
         private static readonly int SkyReflectionIntensityId = Shader.PropertyToID("_BurtSkyReflectionIntensity"); // 缓存 BurtRP 天空反射强度属性 ID。
+        private static readonly int SkyReflectionTintId = Shader.PropertyToID("_BurtSkyReflectionTint");
         private static readonly int SkyReflectionEnabledId = Shader.PropertyToID("_BurtSkyReflectionEnabled"); // 缓存 BurtRP 天空反射是否有效的开关属性 ID。
+        private static readonly int SkyReflectionOverrideId = Shader.PropertyToID("_BurtSkyReflectionOverride"); // 标记 SkyLight 是否显式接管 specular，避免关闭时回落到 Unity legacy probe。
         private static readonly int SkyReflectionMaxMipId = Shader.PropertyToID("_BurtSkyReflectionMaxMip"); // 缓存 BurtRP 全局天空反射真实最大 mip 属性 ID，shader 会再限制到反射预过滤有效范围。
         private static readonly int UnitySHArId = Shader.PropertyToID("unity_SHAr"); // 缓存 Unity 内置 SH R 通道 L0/L1 属性 ID，保留给仍调用 ShadeSH9 的 shader 兼容。
         private static readonly int UnitySHAgId = Shader.PropertyToID("unity_SHAg"); // 缓存 Unity 内置 SH G 通道 L0/L1 属性 ID，保留给仍调用 ShadeSH9 的 shader 兼容。
@@ -27,7 +30,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
         private static readonly int UnitySHBgId = Shader.PropertyToID("unity_SHBg"); // 缓存 Unity 内置 SH G 通道 L2 属性 ID，保留给仍调用 ShadeSH9 的 shader 兼容。
         private static readonly int UnitySHBbId = Shader.PropertyToID("unity_SHBb"); // 缓存 Unity 内置 SH B 通道 L2 属性 ID，保留给仍调用 ShadeSH9 的 shader 兼容。
         private static readonly int UnitySHCId = Shader.PropertyToID("unity_SHC"); // 缓存 Unity 内置 SH C 项属性 ID，保留给仍调用 ShadeSH9 的 shader 兼容。
-        private const float ReflectionCaptureSpecularMipMax = 6f; // 和 shader 里的有效反射预过滤 LOD 上限保持一致，避免把真实 mip 数误当成高光模糊级数。
+        private const float ReflectionCaptureSpecularMipMax = 8f; // 和 shader 里的 XRender mip 输入上限保持一致，256 sky 的 mip count 9 对应 max index 8。
         private static readonly Vector4 DefaultSkyReflectionHDR = new Vector4(1f, 1f, 0f, 0f); // 定义默认 HDR 解码参数，表示按原始 cubemap RGB 直接使用。
 
         private struct ResolvedSkyReflection // 保存一次全局反射源解析结果，避免纹理、HDR 解码和 Debug 来源三套逻辑互相漂移。
@@ -36,6 +39,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             public Vector4 HDRDecodeValues; // 当前 cubemap 对应的 HDR 解码参数，ReflectionProbe 纹理必须使用它还原亮度。
             public float IntensityMultiplier; // 反射源自身强度，Scene ReflectionProbe 会把 probe.intensity 合并进最终强度。
             public string Source; // Debug 中显示的数据源名称，方便判断使用的是自定义、场景 Probe 还是默认天空反射。
+            public Color Tint;
+            public bool ForceOverride; // true 表示 SkyLight 已显式接管 specular，即使无纹理也不回退 unity_SpecCube0。
         }
 
         public static void UploadGlobalIndirectLighting(CommandBuffer cmd) // 保留旧入口，旧调用没有相机上下文时只能解析全局自定义/默认反射。
@@ -50,13 +55,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 return; // 直接返回，避免工具影响渲染主流程。
             }
 
-            var ambientProbe = RenderSettings.ambientProbe; // 读取 Unity Lighting 设置里的全局 ambient probe SH。
-            var skyReflection = ResolveSkyReflection(camera); // 解析当前可用的自定义反射、场景 ReflectionProbe 或默认天空反射。
-            var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity); // Preview 不跟随场景 Lighting 面板的 Reflection Intensity。
-            var skyReflectionIntensity = renderSettingsReflectionIntensity * Mathf.Max(0f, skyReflection.IntensityMultiplier); // 合并 Lighting 面板强度和 Probe 自身强度。
+            var skyLightActive = TryResolveActiveSkyLight(camera, out var skyLight);
+            var ambientProbe = skyLightActive ? ResolveSkyLightAmbientProbe(skyLight) : RenderSettings.ambientProbe;
+            var skyReflection = skyLightActive ? ResolveSkyLightReflection(camera, skyLight) : ResolveSkyReflection(camera);
+            var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity);
+            var skyReflectionIntensity = skyLightActive ? skyReflection.IntensityMultiplier : renderSettingsReflectionIntensity * Mathf.Max(0f, skyReflection.IntensityMultiplier);
 
-            UploadAmbientProbe(cmd, ambientProbe); // 把 ambient probe 上传到 BurtRP 自有 SH 常量和 Unity 兼容 SH 常量。
-            UploadSkyReflection(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflectionIntensity); // 把天空/场景反射 cubemap 和强度上传给 BurtRP 自有 IBL 入口。
+            UploadAmbientProbe(cmd, ambientProbe);
+            if (skyLightActive)
+            {
+                cmd.SetGlobalColor(AmbientLightColorId, ResolveSkyLightAmbientColor(skyLight));
+            }
+
+            UploadSkyReflection(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflectionIntensity, skyReflection.Tint, skyReflection.ForceOverride);
         }
 
         public static void AppendDebugState(StringBuilder builder) // 保留旧入口，旧调用没有相机上下文时只输出全局自定义/默认反射。
@@ -71,16 +82,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 return; // 直接返回，保持 Debug 工具空值安全。
             }
 
-            var skyReflection = ResolveSkyReflection(camera); // 使用和上传路径一致的解析逻辑，保证日志和 GPU 状态对齐。
-            var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity); // Preview 固定使用 1，避免场景 Lighting 设置影响资产预览。
+            var skyLightActive = TryResolveActiveSkyLight(camera, out var skyLight);
+            var skyReflection = skyLightActive ? ResolveSkyLightReflection(camera, skyLight) : ResolveSkyReflection(camera);
+            var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity);
+            var effectiveDiffuseIntensity = skyLightActive && skyLight.affectDiffuse ? skyLight.EffectiveDiffuseIntensity : 1f;
+            var effectiveSpecularIntensity = skyLightActive && skyLight.affectSpecular ? skyLight.EffectiveSpecularIntensity : Mathf.Max(0f, skyReflection.IntensityMultiplier);
 
-            builder.Append("  IndirectDiffuseSource=RenderSettings.ambientProbe"); // 写入当前间接漫反射数据源，当前第一版使用全局 ambient probe。
-            builder.Append(" IndirectSpecularSource=").Append(skyReflection.Source); // 写入当前间接高光数据源，方便判断是否有 cubemap 或只走环境色兜底。
-            builder.Append(" ReflectionIntensity=").Append(renderSettingsReflectionIntensity.ToString("0.###")); // 写入反射强度，便于排查间接高光过强或过弱。
-            builder.Append(" SourceIntensity=").Append(Mathf.Max(0f, skyReflection.IntensityMultiplier).ToString("0.###")); // 写入反射源自身强度，Scene Probe 会受 probe.intensity 影响。
-            builder.Append(" SkyReflectionMaxMip=").Append(CalculateSkyReflectionMaxMip(skyReflection.Texture).ToString("0.###")); // 写入当前反射 cubemap 的 mip 上限，方便排查 roughness 到 mip 的映射是否过糊或过锐。
-            builder.Append(" SpecularMipMax=").Append(CalculateSkyReflectionSpecularMipMax(skyReflection.Texture).ToString("0.###")); // 写入 shader 实际用于 roughness->mip 的有效上限；真实 mip 更多时不会让镜面端变糊。
-            builder.AppendLine(); // 当前间接光状态行结束。
+            builder.Append("  SkyLightActive=").Append(skyLightActive);
+            builder.Append(" Source=").Append(skyLightActive ? skyLight.sourceType.ToString() : "LegacyRenderSettings");
+            builder.Append(" Name=").Append(skyLightActive ? skyLight.name : "<none>");
+            builder.Append(" Priority=").Append(skyLightActive ? skyLight.priority.ToString() : "<none>");
+            builder.Append(" DiffuseIntensity=").Append(effectiveDiffuseIntensity.ToString("0.###"));
+            builder.Append(" SpecularIntensity=").Append(effectiveSpecularIntensity.ToString("0.###"));
+            builder.Append(" Cubemap=").Append(skyReflection.Texture != null ? skyReflection.Texture.name : "<none>");
+            builder.Append(" MaxMip=").Append(CalculateSkyReflectionMaxMip(skyReflection.Texture).ToString("0.###"));
+            builder.Append(" SpecularOverride=").Append(skyReflection.ForceOverride);
+            builder.AppendLine();
+
+            builder.Append("  IndirectDiffuseSource=").Append(skyLightActive ? ResolveSkyLightDiffuseSource(skyLight) : "RenderSettings.ambientProbe");
+            builder.Append(" IndirectSpecularSource=").Append(skyReflection.Source);
+            builder.Append(" ReflectionIntensity=").Append((skyLightActive ? 1f : renderSettingsReflectionIntensity).ToString("0.###"));
+            builder.Append(" SourceIntensity=").Append(Mathf.Max(0f, skyReflection.IntensityMultiplier).ToString("0.###"));
+            builder.Append(" SkyReflectionMaxMip=").Append(CalculateSkyReflectionMaxMip(skyReflection.Texture).ToString("0.###"));
+            builder.Append(" SpecularMipMax=").Append(CalculateSkyReflectionSpecularMipMax(skyReflection.Texture).ToString("0.###"));
+            builder.AppendLine();
         }
 
         private static void UploadAmbientProbe(CommandBuffer cmd, SphericalHarmonicsL2 ambientProbe) // 上传 ambient probe 的 SH 常量。
@@ -110,7 +135,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             cmd.SetGlobalVector(UnitySHCId, shC); // 同步 Unity 兼容 SH C 项。
         }
 
-        private static void UploadSkyReflection(CommandBuffer cmd, Texture skyReflection, Vector4 skyReflectionHDR, float intensity) // 上传全局天空/场景反射纹理。
+        private static void UploadSkyReflection(CommandBuffer cmd, Texture skyReflection, Vector4 skyReflectionHDR, float intensity, Color tint, bool forceOverride) // 上传全局天空/场景反射纹理。
         {
             if (skyReflection == null) // 如果项目没有可用的天空反射纹理。
             {
@@ -118,6 +143,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 cmd.SetGlobalFloat(SkyReflectionIntensityId, 0f); // 清零强度，避免 shader 误用上一帧状态。
                 cmd.SetGlobalFloat(SkyReflectionMaxMipId, 0f); // 清零 mip 上限，避免 shader 在无 cubemap 时沿用上一帧的 mip 数。
                 cmd.SetGlobalVector(SkyReflectionHDRId, DefaultSkyReflectionHDR); // 仍上传默认解码参数，保持 shader 变量稳定。
+                cmd.SetGlobalVector(SkyReflectionTintId, Color.white);
+                cmd.SetGlobalFloat(SkyReflectionOverrideId, forceOverride ? 1f : 0f);
                 return; // 没有纹理时不绑定 samplerCUBE，避免 2D fallback 误绑定到 cube 采样器。
             }
 
@@ -126,8 +153,136 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             cmd.SetGlobalTexture(SkyReflectionTextureId, skyReflection); // 绑定当前全局 sky/custom/scene probe reflection cubemap。
             cmd.SetGlobalVector(SkyReflectionHDRId, skyReflectionHDR); // 上传 HDR 解码参数，ReflectionProbe 纹理需要用它还原真实亮度。
             cmd.SetGlobalFloat(SkyReflectionIntensityId, intensity); // 上传反射强度，让 Lighting 面板的 Reflection Intensity 影响 Deferred IBL。
+            cmd.SetGlobalVector(SkyReflectionTintId, SanitizeTint(tint));
             cmd.SetGlobalFloat(SkyReflectionEnabledId, intensity > 0f ? 1f : 0f); // 只有有 cubemap 且强度大于 0 时才启用天空反射采样。
+            cmd.SetGlobalFloat(SkyReflectionOverrideId, forceOverride ? 1f : 0f);
             cmd.SetGlobalFloat(SkyReflectionMaxMipId, skyReflectionMaxMip); // 上传真实 mip 上限；shader 内部会限制到 reflection capture 的有效预过滤 LOD，避免镜面端变糊。
+        }
+
+
+        private static bool TryResolveActiveSkyLight(Camera camera, out BurtSkyLight skyLight)
+        {
+            skyLight = null;
+            if (IsPreviewCamera(camera))
+            {
+                return false;
+            }
+
+            return BurtSkyLight.TryGetActive(out skyLight);
+        }
+
+        private static string ResolveSkyLightDiffuseSource(BurtSkyLight skyLight)
+        {
+            if (skyLight == null || !skyLight.affectDiffuse)
+            {
+                return "SkyLight.DiffuseDisabled";
+            }
+
+            return skyLight.sourceType == BurtSkyLightSourceType.ConstantColor ? "SkyLight.constantColor" : "RenderSettings.ambientProbe";
+        }
+
+        private static SphericalHarmonicsL2 ResolveSkyLightAmbientProbe(BurtSkyLight skyLight)
+        {
+            if (skyLight == null || !skyLight.affectDiffuse)
+            {
+                return default;
+            }
+
+            if (skyLight.sourceType == BurtSkyLightSourceType.ConstantColor)
+            {
+                var sh = new SphericalHarmonicsL2();
+                sh.AddAmbientLight(MultiplyColor(skyLight.constantColor, skyLight.SafeTint, skyLight.EffectiveDiffuseIntensity));
+                return sh;
+            }
+
+            return ScaleSphericalHarmonics(RenderSettings.ambientProbe, skyLight.SafeTint, skyLight.EffectiveDiffuseIntensity);
+        }
+
+        private static Color ResolveSkyLightAmbientColor(BurtSkyLight skyLight)
+        {
+            if (skyLight == null || !skyLight.affectDiffuse)
+            {
+                return Color.black;
+            }
+
+            var sourceColor = skyLight.sourceType == BurtSkyLightSourceType.ConstantColor ? skyLight.constantColor : RenderSettings.ambientLight;
+            return MultiplyColor(sourceColor, skyLight.SafeTint, skyLight.EffectiveDiffuseIntensity);
+        }
+
+        private static ResolvedSkyReflection ResolveSkyLightReflection(Camera camera, BurtSkyLight skyLight)
+        {
+            if (skyLight == null || !skyLight.affectSpecular)
+            {
+                return CreateDisabledSkyReflection(skyLight, "SkyLight.SpecularDisabled");
+            }
+
+            switch (skyLight.sourceType)
+            {
+                case BurtSkyLightSourceType.SpecifiedCubemap:
+                    return new ResolvedSkyReflection
+                    {
+                        Texture = skyLight.cubemap,
+                        HDRDecodeValues = DefaultSkyReflectionHDR,
+                        IntensityMultiplier = skyLight.cubemap != null ? skyLight.EffectiveSpecularIntensity : 0f,
+                        Source = skyLight.cubemap != null ? "SkyLight.SpecifiedCubemap" : "SkyLight.SpecifiedCubemapMissing",
+                        Tint = skyLight.SafeTint,
+                        ForceOverride = true
+                    };
+                case BurtSkyLightSourceType.ConstantColor:
+                    return CreateDisabledSkyReflection(skyLight, "SkyLight.ConstantColorSpecularDisabled");
+                case BurtSkyLightSourceType.CapturedScene:
+                    var capturedFallback = ResolveSkyReflection(camera);
+                    capturedFallback.Source = "SkyLight.CapturedSceneUnimplemented->" + capturedFallback.Source;
+                    capturedFallback.IntensityMultiplier *= skyLight.EffectiveSpecularIntensity;
+                    capturedFallback.Tint = skyLight.SafeTint;
+                    capturedFallback.ForceOverride = true;
+                    return capturedFallback;
+                default:
+                    var renderSettingsReflection = ResolveSkyReflection(camera);
+                    renderSettingsReflection.Source = "SkyLight.RenderSettings->" + renderSettingsReflection.Source;
+                    renderSettingsReflection.IntensityMultiplier *= skyLight.EffectiveSpecularIntensity;
+                    renderSettingsReflection.Tint = skyLight.SafeTint;
+                    renderSettingsReflection.ForceOverride = true;
+                    return renderSettingsReflection;
+            }
+        }
+
+        private static ResolvedSkyReflection CreateDisabledSkyReflection(BurtSkyLight skyLight, string source)
+        {
+            return new ResolvedSkyReflection
+            {
+                Texture = null,
+                HDRDecodeValues = DefaultSkyReflectionHDR,
+                IntensityMultiplier = 0f,
+                Source = source,
+                Tint = skyLight != null ? skyLight.SafeTint : Color.white,
+                ForceOverride = true
+            };
+        }
+
+        private static Color MultiplyColor(Color color, Color tint, float intensity)
+        {
+            return new Color(Mathf.Max(0f, color.r * tint.r * intensity), Mathf.Max(0f, color.g * tint.g * intensity), Mathf.Max(0f, color.b * tint.b * intensity), 1f);
+        }
+
+        private static Vector4 SanitizeTint(Color tint)
+        {
+            return new Vector4(Mathf.Max(0f, tint.r), Mathf.Max(0f, tint.g), Mathf.Max(0f, tint.b), 1f);
+        }
+
+        private static SphericalHarmonicsL2 ScaleSphericalHarmonics(SphericalHarmonicsL2 source, Color tint, float intensity)
+        {
+            var result = new SphericalHarmonicsL2();
+            var scales = new[] { Mathf.Max(0f, tint.r * intensity), Mathf.Max(0f, tint.g * intensity), Mathf.Max(0f, tint.b * intensity) };
+            for (var channel = 0; channel < 3; channel++)
+            {
+                for (var coefficient = 0; coefficient < 9; coefficient++)
+                {
+                    result[channel, coefficient] = source[channel, coefficient] * scales[channel];
+                }
+            }
+
+            return result;
         }
 
         private static ResolvedSkyReflection ResolveSkyReflection(Camera camera) // 解析当前 BurtRP 全局反射纹理和 HDR 解码参数。
@@ -144,6 +299,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                     Texture = sceneReflectionTexture,
                     HDRDecodeValues = sceneProbe.textureHDRDecodeValues,
                     IntensityMultiplier = Mathf.Max(0f, sceneProbe.intensity),
+                    Tint = Color.white,
                     Source = "SceneReflectionProbe(" + sceneProbe.name + ")"
                 };
             }
@@ -155,6 +311,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                     Texture = customReflection,
                     HDRDecodeValues = DefaultSkyReflectionHDR,
                     IntensityMultiplier = 1f,
+                    Tint = Color.white,
                     Source = "RenderSettings.customReflection"
                 };
             }
@@ -166,6 +323,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                     Texture = ReflectionProbe.defaultTexture,
                     HDRDecodeValues = ReflectionProbe.defaultTextureHDRDecodeValues,
                     IntensityMultiplier = 1f,
+                    Tint = Color.white,
                     Source = RenderSettings.defaultReflectionMode == DefaultReflectionMode.Custom ? "InvalidCustomReflectionFallback->ReflectionProbe.defaultTexture" : "ReflectionProbe.defaultTexture"
                 }; // 没有自定义或场景 Probe 时使用 Unity 公开的默认反射纹理，避免访问当前版本不存在的 RenderSettings 默认反射属性。
             }
@@ -175,6 +333,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 Texture = null,
                 HDRDecodeValues = DefaultSkyReflectionHDR,
                 IntensityMultiplier = 0f,
+                Tint = Color.white,
                 Source = RenderSettings.defaultReflectionMode == DefaultReflectionMode.Custom ? "InvalidCustomReflectionFallback->AmbientColorFallback" : "AmbientColorFallback"
             }; // 没有 cubemap 时写出环境色兜底来源。
         }
@@ -193,6 +352,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                     Texture = ReflectionProbe.defaultTexture,
                     HDRDecodeValues = ReflectionProbe.defaultTextureHDRDecodeValues,
                     IntensityMultiplier = 1f,
+                    Tint = Color.white,
                     Source = "PreviewFallback->ReflectionProbe.defaultTexture"
                 };
             }
@@ -202,6 +362,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 Texture = null,
                 HDRDecodeValues = DefaultSkyReflectionHDR,
                 IntensityMultiplier = 0f,
+                Tint = Color.white,
                 Source = "PreviewFallback->AmbientColorFallback"
             }; // 没有默认反射纹理时，预览窗口退回环境色，至少不采样场景 Probe。
         }
@@ -294,7 +455,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
 
         private static float CalculateSkyReflectionSpecularMipMax(Texture skyReflection) // 根据纹理真实 mip 链推导 shader 实际使用的反射高光 LOD 上限。
         {
-            return Mathf.Min(CalculateSkyReflectionMaxMip(skyReflection), ReflectionCaptureSpecularMipMax); // XRender/Unity reflection capture 的预过滤范围按 0..6 处理，不直接使用 512/1024 cubemap 的全部 mip。
+            return Mathf.Min(CalculateSkyReflectionMaxMip(skyReflection), ReflectionCaptureSpecularMipMax); // XRender/Unity reflection capture 的预过滤范围按 0..8 处理，不直接使用 512/1024 cubemap 的全部 mip。
         }
 
         private static Vector4 CreateUnitySHA(SphericalHarmonicsL2 sh, int channel) // 创建 UnityCG.cginc 中 unity_SHA* 的打包结果。
