@@ -61,6 +61,14 @@ float _BurtSkyReflectionOverride;
 // 保存 BurtRP 全局天空反射 cubemap 的最大 mip 索引，避免所有 cubemap 都写死按 0..6 采样。
 float _BurtSkyReflectionMaxMip;
 
+// 保存 SkyLight 指定 cubemap 的水平旋转参数，xy 分别是 cos/sin。
+float4 _BurtSkyReflectionRotation;
+
+// 保存 SkyLight 下半球覆盖参数；diffuse/specular 分开预乘各自强度，alpha 是覆盖混合权重。
+float _BurtSkyLowerHemisphereEnabled;
+float4 _BurtSkyLowerHemisphereDiffuseColor;
+float4 _BurtSkyLowerHemisphereSpecularColor;
+
 // 保存 BurtRP 当前光照函数需要的一盏灯的数据。
 struct BurtLight
 {
@@ -114,6 +122,22 @@ float3 BurtSelectIndirectFallbackIfBlack(float3 sampledColor, float3 fallbackCol
     return lerp(max(fallbackColor, float3(0.0f, 0.0f, 0.0f)), max(sampledColor, float3(0.0f, 0.0f, 0.0f)), useSampledColor); // 在黑色采样时使用环境色兜底，非黑时保留真实 SH/Probe 结果。
 }
 
+float3 BurtApplySkyLowerHemisphere(float3 sourceColor, float3 directionWS, float4 lowerHemisphereColor)
+{
+    float lowerBlend = (_BurtSkyLowerHemisphereEnabled > 0.5f && BurtSafeNormalize(directionWS).y < 0.0f) ? saturate(lowerHemisphereColor.a) : 0.0f;
+    return lerp(max(sourceColor, float3(0.0f, 0.0f, 0.0f)), max(lowerHemisphereColor.rgb, float3(0.0f, 0.0f, 0.0f)), lowerBlend);
+}
+
+float3 BurtRotateSkyReflectionDirection(float3 directionWS)
+{
+    float3 safeDirectionWS = BurtSafeNormalize(directionWS);
+    float cosPhi = _BurtSkyReflectionRotation.x;
+    float sinPhi = _BurtSkyReflectionRotation.y;
+    float3 rotDirX = float3(cosPhi, 0.0f, -sinPhi);
+    float3 rotDirZ = float3(sinPhi, 0.0f, cosPhi);
+    return BurtSafeNormalize(float3(dot(rotDirX, safeDirectionWS), safeDirectionWS.y, dot(rotDirZ, safeDirectionWS)));
+}
+
 float3 BurtEvaluateAmbientSH9(float3 normalWS) // 使用 BurtRP 自己上传的 SH 常量评估环境漫反射照度。
 {
     float3 safeNormalWS = BurtSafeNormalize(normalWS); // 先安全归一化世界空间法线，避免异常法线放大 SH 结果。
@@ -141,6 +165,7 @@ float3 BurtEvaluateAmbientSH9(float3 normalWS) // 使用 BurtRP 自己上传的 
     float vC = safeNormalWS.x * safeNormalWS.x - safeNormalWS.y * safeNormalWS.y; // 计算 UnityCG 二阶 SH 的 C 项输入。
 
     float3 shIrradiance = linearL0L1 + linearL2 + _BurtAmbientSHC.rgb * vC; // 合成完整 L0/L1/L2 环境照度。
+    shIrradiance = BurtApplySkyLowerHemisphere(shIrradiance, safeNormalWS, _BurtSkyLowerHemisphereDiffuseColor); // SkyLight 要求下半球固定颜色时，在当前方向覆盖 diffuse irradiance。
 
 #ifdef UNITY_COLORSPACE_GAMMA // 如果项目运行在 Gamma 色彩空间，需要对齐 Unity Core SampleSH9 的 Gamma 输出语义。
     shIrradiance = pow(max(shIrradiance, float3(0.0f, 0.0f, 0.0f)), 1.0f / 2.2f); // 把线性 SH 结果近似转换到 Gamma 空间，避免自有 SH 和 ShadeSH9 fallback 明显不一致。
@@ -193,6 +218,7 @@ float3 BurtSampleIndirectDiffuseIrradiance(float3 normalWS)
     float4 shNormal = float4(safeNormalWS, 1.0f); // 把 normal 扩展成 float4，因为 Unity 的 ShadeSH9 约定 xyz 是方向，w 是常数项。
 
     float3 shIrradiance = ShadeSH9(shNormal); // 兼容旧路径：直接读取 Unity 内置 spherical harmonics。
+    shIrradiance = BurtApplySkyLowerHemisphere(shIrradiance, safeNormalWS, _BurtSkyLowerHemisphereDiffuseColor); // 让 legacy SH fallback 也遵守 SkyLight 下半球设置。
 
     // 当 Unity 内置 SH 没有被 DrawRenderers 刷新时，用 _BurtAmbientLightColor 兜底，避免间接漫反射全黑。
     return BurtSelectIndirectFallbackIfBlack(shIrradiance, BurtGetAmbientLightColor());
@@ -226,20 +252,23 @@ float3 SampleIndirectSpecularRadiance(float3 reflectionDirectionWS, float roughn
 
     if (_BurtSkyReflectionEnabled > 0.5f) // 如果 C# 已经上传 BurtRP 全局天空反射 cubemap。
     {
+        float3 skySampleDirectionWS = BurtRotateSkyReflectionDirection(safeReflectionDirectionWS); // 对指定 cubemap 应用 XRender 风格水平旋转；默认参数为 identity。
+
         float skyReflectionMaxMip = max(_BurtSkyReflectionMaxMip, 0.0f); // 使用 C# 上传的实际 mip 上限，避免不同尺寸 cubemap 都套用固定 6。
 
         float skyReflectionMipLevel = ComputeReflectionCaptureMipFromRoughness(roughness, skyReflectionMaxMip); // 使用 XRender 风格 roughness->mip 曲线计算全局天空反射 LOD。
 
-        float4 encodedSkyReflection = UNITY_SAMPLE_TEXCUBE_LOD(_BurtSkyReflectionTexture, safeReflectionDirectionWS, skyReflectionMipLevel); // 按 roughness mip 采样全局天空反射。
+        float4 encodedSkyReflection = UNITY_SAMPLE_TEXCUBE_LOD(_BurtSkyReflectionTexture, skySampleDirectionWS, skyReflectionMipLevel); // 按 roughness mip 采样全局天空反射。
 
         float3 skyReflectionRadiance = DecodeHDR(encodedSkyReflection, _BurtSkyReflectionHDR) * max(_BurtSkyReflectionTint.rgb, float3(0.0f, 0.0f, 0.0f)) * max(0.0f, _BurtSkyReflectionIntensity); // 解码 HDR 并乘 Lighting 面板的反射强度。
+        skyReflectionRadiance = BurtApplySkyLowerHemisphere(skyReflectionRadiance, safeReflectionDirectionWS, _BurtSkyLowerHemisphereSpecularColor); // 没有离线 convolve 时，用方向覆盖近似 XRender 的 lower hemisphere 输入处理。
 
         return max(skyReflectionRadiance, float3(0.0f, 0.0f, 0.0f)); // 显式 sky reflection 数据源启用后尊重 cubemap 本身颜色，不再把黑色 custom reflection 误判成需要环境色兜底。
     }
 
     if (_BurtSkyReflectionOverride > 0.5f)
     {
-        return float3(0.0f, 0.0f, 0.0f);
+        return BurtApplySkyLowerHemisphere(float3(0.0f, 0.0f, 0.0f), safeReflectionDirectionWS, _BurtSkyLowerHemisphereSpecularColor);
     }
 
     const float legacyUnitySpecCubeMaxMip = 6.0f; // Unity 内置 reflection probe legacy 路径暂时保留 0..6 的常见 mip 上限，后续有专用数据源后再替换。

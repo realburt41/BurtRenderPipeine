@@ -57,6 +57,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private const int MaxBloomMipCount = 8; // 第一版 Bloom 最多申请 8 级临时 RT，避免动态 RenderGraph 资源注册过重。
 
+        private const int MaxBloomGaussianSamples = 64; // Match XRender PC GaussianBlur sample cap.
+
         private static readonly int SourceTextureId = Shader.PropertyToID("_BurtPostProcessSourceTexture"); // 缓存源纹理属性 ID，避免每帧通过字符串查找。
 
         private static readonly int BloomTextureId = Shader.PropertyToID("_BurtBloomTexture"); // 缓存 Bloom 合成纹理属性 ID，最终合成时采样 mip0。
@@ -67,13 +69,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static readonly int BloomThresholdId = Shader.PropertyToID("_BurtBloomThreshold"); // 缓存 Bloom 预过滤阈值属性 ID。
 
-        private static readonly int BloomSoftKneeId = Shader.PropertyToID("_BurtBloomSoftKnee"); // 缓存 Bloom 软阈值属性 ID。
-
         private static readonly int BloomTexelSizeId = Shader.PropertyToID("_BurtBloomTexelSize"); // 缓存 Bloom 当前源纹理 texel size 属性 ID。
 
-        private static readonly int BloomScatterId = Shader.PropertyToID("_BurtBloomScatter"); // 缓存 Bloom 上采样散布属性 ID。
+        private static readonly int BloomBlurDirectionId = Shader.PropertyToID("_BurtBloomBlurDirection"); // 缓存 PC Bloom 高斯模糊方向和半径。
+
+        private static readonly int BloomAdditiveTextureId = Shader.PropertyToID("_BurtBloomAdditiveTexture"); // 缓存 PC Bloom 高斯阶段的加法合成纹理。
+
+        private static readonly int UseBloomAdditiveId = Shader.PropertyToID("_BurtUseBloomAdditive"); // 缓存 PC Bloom 是否启用加法合成。
+
+        private static readonly int BloomSampleCountId = Shader.PropertyToID("_BurtBloomSampleCount"); // Cached PC Bloom Gaussian sample count.
+
+        private static readonly int BloomSampleWeightsId = Shader.PropertyToID("_BurtBloomSampleWeights"); // Cached PC Bloom Gaussian weights.
+
+        private static readonly int BloomSampleOffsetsId = Shader.PropertyToID("_BurtBloomSampleOffsets"); // Cached PC Bloom Gaussian offsets.
 
         private static readonly int[] BloomMipTextureIds = CreateBloomMipTextureIds(); // 缓存 Bloom mip 临时 RT 的属性 ID。
+
+        private static readonly int BloomBlurTextureId = Shader.PropertyToID("_BurtBloomBlurTemp"); // 缓存 PC Bloom 高斯横向模糊临时 RT 的属性 ID。
+
+        private static readonly float[] XRenderPcBloomKernelSizePercents = { 64f, 30f, 10f, 2f, 1f, 0.3f }; // XRender PC Bloom default Filter6..Filter1 sizes.
+
+        private static readonly Vector4[] BloomGaussianWeights = new Vector4[MaxBloomGaussianSamples]; // Reused upload buffer for Gaussian weights.
+
+        private static readonly Vector4[] BloomGaussianOffsets = new Vector4[MaxBloomGaussianSamples]; // Reused upload buffer for Gaussian offsets.
 
         private static readonly int TonemappingModeId = Shader.PropertyToID("_BurtTonemappingMode"); // 缓存 Tonemapping 模式属性 ID，避免每帧通过字符串查找。
 
@@ -276,9 +294,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             }
 
             cmd.SetGlobalFloat(BloomThresholdId, settings.Threshold); // 上传 Bloom 阈值。
-            cmd.SetGlobalFloat(BloomSoftKneeId, settings.SoftKnee); // 上传 Bloom 软阈值。
-            cmd.SetGlobalFloat(BloomScatterId, settings.Scatter); // 上传 Bloom 散布参数。
-
             cmd.SetRenderTarget(new RenderTargetIdentifier(BloomMipTextureIds[0])); // prefilter 写入 mip0。
             SetBloomSource(cmd, cameraColorTarget.Identifier, camera); // CameraColor 是 prefilter 源。
             cmd.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1); // 执行高光预过滤。
@@ -293,15 +308,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 cmd.DrawProcedural(Matrix4x4.identity, material, 2, MeshTopology.Triangles, 3, 1); // 执行 4 tap 下采样。
             }
 
-            for (var i = mipCount - 1; i > 0; i--) // 从最小 mip 向上采样回 mip0。
+            for (var i = mipCount - 1; i >= 0; i--) // 按 XRender PC Bloom 的思路，从小 mip 到大 mip 做高斯并叠加。
             {
-                var sourceId = BloomMipTextureIds[i]; // 较小 mip 作为上采样源。
-                var targetId = BloomMipTextureIds[i - 1]; // 较大 mip 保留原有内容并叠加上采样结果。
+                var width = GetBloomMipWidth(camera, i); // 计算当前 mip 宽度。
+                var height = GetBloomMipHeight(camera, i); // 计算当前 mip 高度。
+                var blurRadius = CalculatePcBloomBlurRadius(settings, width, mipCount - 1 - i); // 用 scatter 和 XRender Filter6..Filter1 百分比计算高斯半径。
+                var blurDescriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera); // 创建横向模糊临时 RT 描述。
+                blurDescriptor.width = width; // 横向模糊临时 RT 只需要当前 mip 尺寸。
+                blurDescriptor.height = height; // 横向模糊临时 RT 只需要当前 mip 尺寸。
 
-                cmd.SetRenderTarget(new RenderTargetIdentifier(targetId)); // 绑定较大 mip。
-                SetBloomSource(cmd, new RenderTargetIdentifier(sourceId), GetBloomMipWidth(camera, i), GetBloomMipHeight(camera, i)); // 设置较小 mip 源纹理和 texel size。
-                cmd.DrawProcedural(Matrix4x4.identity, material, 3, MeshTopology.Triangles, 3, 1); // 使用 additive blend 把上采样结果加回较大 mip。
+                cmd.GetTemporaryRT(BloomBlurTextureId, blurDescriptor, FilterMode.Bilinear); // 每级只临时申请一张横向高斯 RT，用完立即释放。
+                cmd.SetRenderTarget(new RenderTargetIdentifier(BloomBlurTextureId)); // 横向高斯写入同尺寸临时 RT。
+                SetBloomSource(cmd, new RenderTargetIdentifier(BloomMipTextureIds[i]), width, height); // 当前 downsample mip 作为横向模糊源。
+                SetBloomGaussianKernel(cmd, blurRadius, width, height, true); // 按 XRender PC 的双线性合并采样方式上传横向高斯核。
+                cmd.SetGlobalVector(BloomBlurDirectionId, new Vector4(1f, 0f, blurRadius, 0f)); // 横向模糊轴和半径，shader 内按 XRender PC 高斯公式计算权重。
+                cmd.SetGlobalFloat(UseBloomAdditiveId, 0f); // 横向阶段不做加法合成。
+                cmd.DrawProcedural(Matrix4x4.identity, material, 3, MeshTopology.Triangles, 3, 1); // 执行 PC Bloom 横向高斯。
+
+                cmd.SetRenderTarget(new RenderTargetIdentifier(BloomMipTextureIds[i])); // 纵向高斯写回当前 mip，后续更大 mip 会把它作为 additive 输入。
+                SetBloomSource(cmd, new RenderTargetIdentifier(BloomBlurTextureId), width, height); // 横向模糊结果作为纵向源。
+                SetBloomGaussianKernel(cmd, blurRadius, width, height, false); // 按 XRender PC 的双线性合并采样方式上传纵向高斯核。
+                cmd.SetGlobalVector(BloomBlurDirectionId, new Vector4(0f, 1f, blurRadius, 0f)); // 纵向模糊轴和半径，shader 内按 XRender PC 高斯公式计算权重。
+                cmd.SetGlobalTexture(BloomAdditiveTextureId, i + 1 < mipCount ? new RenderTargetIdentifier(BloomMipTextureIds[i + 1]) : new RenderTargetIdentifier(BloomBlurTextureId)); // 更小一级的已累积结果作为 additive，最小 mip 绑定兜底纹理。
+                cmd.SetGlobalFloat(UseBloomAdditiveId, i + 1 < mipCount ? 1f : 0f); // 最小 mip 没有 additive，其他 mip 叠加上一轮结果。
+                cmd.DrawProcedural(Matrix4x4.identity, material, 3, MeshTopology.Triangles, 3, 1); // 执行 PC Bloom 纵向高斯并合成。
+                cmd.ReleaseTemporaryRT(BloomBlurTextureId); // 当前 mip 的横向高斯 RT 已不再需要，立即释放以降低峰值显存。
             }
+
+            cmd.SetGlobalFloat(UseBloomAdditiveId, 0f); // Bloom 链结束后关闭加法合成，避免影响后续全屏 pass。
         }
 
         private static void ReleaseBloom(CommandBuffer cmd, int mipCount) // 释放本帧申请的 Bloom 临时 RT。
@@ -310,6 +344,67 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             {
                 cmd.ReleaseTemporaryRT(BloomMipTextureIds[i]); // 释放当前 Bloom mip。
             }
+        }
+
+        private static float CalculatePcBloomBlurRadius(BurtBloomSettings settings, int sourceWidth, int stageIndexFromSmallest) // Approximate XRender PC Bloom per-stage kernel size.
+        {
+            var scatter = Mathf.Clamp01(settings.Scatter); // Use scatter as the first BurtRP size-scale control.
+            var stageIndex = Mathf.Clamp(stageIndexFromSmallest, 0, XRenderPcBloomKernelSizePercents.Length - 1); // XRender Bloom processes Filter6 toward Filter1.
+            var kernelSizePercent = XRenderPcBloomKernelSizePercents[stageIndex] * Mathf.Lerp(0.5f, 4f, scatter); // Map scatter to an XRender-like SizeScale.
+
+            return Mathf.Clamp(sourceWidth * kernelSizePercent * 0.01f * 0.5f, 0.00001f, MaxBloomGaussianSamples - 1); // XRender GetBlurRadius: width * percent * 0.01 * 0.5.
+        }
+
+        private static void SetBloomGaussianKernel(CommandBuffer cmd, float radius, int width, int height, bool horizontal) // Upload XRender PC-style bilinear-merged Gaussian kernel.
+        {
+            var sampleCount = ComputeBloomGaussianKernel(radius, width, height, horizontal); // Compute offsets and weights for this mip and axis.
+
+            cmd.SetGlobalFloat(BloomSampleCountId, sampleCount); // Shader reads the active count from fixed-size arrays.
+            cmd.SetGlobalVectorArray(BloomSampleWeightsId, BloomGaussianWeights); // Upload normalized weights.
+            cmd.SetGlobalVectorArray(BloomSampleOffsetsId, BloomGaussianOffsets); // Upload UV-space offsets.
+        }
+
+        private static int ComputeBloomGaussianKernel(float radius, int width, int height, bool horizontal) // Mirrors XRender Compute1DGaussianFilterKernel.
+        {
+            var clampedRadius = Mathf.Clamp(radius, 0.00001f, MaxBloomGaussianSamples - 1); // Avoid divide-by-zero and cap sample count.
+            var integerRadius = Mathf.Min(Mathf.CeilToInt(clampedRadius), MaxBloomGaussianSamples - 1); // XRender uses ceil(radius) as integer radius.
+            var sampleCount = 0; // Count bilinear-merged samples.
+            var weightSum = 0f; // Used to normalize weights.
+
+            for (var sampleIndex = -integerRadius; sampleIndex <= integerRadius && sampleCount < MaxBloomGaussianSamples; sampleIndex += 2)
+            {
+                var weight0 = NormalDistributionUnscaled(sampleIndex, clampedRadius); // Current tap weight.
+                var weight1 = sampleIndex != integerRadius ? NormalDistributionUnscaled(sampleIndex + 1, clampedRadius) : 0f; // Next tap weight.
+                var totalWeight = weight0 + weight1; // Merged bilinear sample weight.
+                var sampleOffset = sampleIndex + weight1 / Mathf.Max(totalWeight, 0.00001f); // XRender bilinear offset merge formula.
+                var uvOffset = horizontal ? new Vector4(sampleOffset / Mathf.Max(1, width), 0f, 0f, 0f) : new Vector4(0f, sampleOffset / Mathf.Max(1, height), 0f, 0f); // Convert to UV-space offset.
+
+                BloomGaussianWeights[sampleCount] = new Vector4(totalWeight, totalWeight, totalWeight, totalWeight);
+                BloomGaussianOffsets[sampleCount] = uvOffset;
+                weightSum += totalWeight;
+                sampleCount++;
+            }
+
+            var weightSumInverse = 1f / Mathf.Max(weightSum, 0.00001f); // Normalize to preserve brightness.
+            for (var i = 0; i < sampleCount; i++)
+            {
+                BloomGaussianWeights[i] *= weightSumInverse;
+            }
+
+            for (var i = sampleCount; i < MaxBloomGaussianSamples; i++)
+            {
+                BloomGaussianWeights[i] = Vector4.zero;
+                BloomGaussianOffsets[i] = Vector4.zero;
+            }
+
+            return sampleCount;
+        }
+
+        private static float NormalDistributionUnscaled(float x, float sigma) // XRender PC Bloom legacy Gaussian.
+        {
+            var normalized = Mathf.Abs(x) / sigma; // Normalize distance by radius.
+
+            return Mathf.Exp(-16.7f * normalized * normalized); // XRender legacyCompatibilityConstant = -16.7.
         }
 
         private static void SetBloomSource(CommandBuffer cmd, RenderTargetIdentifier source, Camera camera) // 用相机尺寸设置 Bloom 源纹理。

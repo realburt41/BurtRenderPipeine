@@ -587,8 +587,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             #include "UnityCG.cginc"
 
             sampler2D _BurtPostProcessSourceTexture;
+            float4 _BurtBloomTexelSize;
             float _BurtBloomThreshold;
-            float _BurtBloomSoftKnee;
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -602,7 +602,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return output;
             }
 
-            float2 GetBloomSourceUV(float2 uv)
+            float2 BurtBloomSourceUV(float2 uv)
             {
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0 - uv.y;
@@ -611,20 +611,27 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return uv;
             }
 
+            float BurtBloomPerceivedLuminance(float3 color)
+            {
+                return dot(color, float3(0.299, 0.587, 0.114));
+            }
+
             float3 ApplyBloomThreshold(float3 color)
             {
-                float brightness = max(max(color.r, color.g), color.b);
-                float knee = max(_BurtBloomThreshold * _BurtBloomSoftKnee, 0.0001);
-                float soft = brightness - _BurtBloomThreshold + knee;
-                soft = saturate(soft / (2.0 * knee)) * soft;
-                float contribution = max(soft, brightness - _BurtBloomThreshold);
-                contribution /= max(brightness, 0.0001);
-                return color * saturate(contribution);
+                float bloomLuminance = BurtBloomPerceivedLuminance(color) - _BurtBloomThreshold;
+                float bloomAmount = saturate(bloomLuminance * 0.5);
+                return color * bloomAmount;
             }
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float3 color = tex2D(_BurtPostProcessSourceTexture, GetBloomSourceUV(input.uv)).rgb;
+                float2 texel = _BurtBloomTexelSize.xy;
+                float2 sourceUv = BurtBloomSourceUV(input.uv);
+                float3 color = tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, -1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)).rgb;
+                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 1.0)).rgb;
+                color *= 0.25;
                 return float4(ApplyBloomThreshold(max(color, 0.0)), 1.0);
             }
             ENDHLSL
@@ -659,7 +666,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return output;
             }
 
-            float2 GetBloomSourceUV(float2 uv)
+            float2 BurtBloomSourceUV(float2 uv)
             {
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0 - uv.y;
@@ -671,7 +678,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float4 Frag(Varyings input) : SV_Target
             {
                 float2 texel = _BurtBloomTexelSize.xy;
-                float2 sourceUv = GetBloomSourceUV(input.uv);
+                float2 sourceUv = BurtBloomSourceUV(input.uv);
                 float3 color = tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)).rgb;
                 color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, -1.0)).rgb;
                 color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)).rgb;
@@ -681,14 +688,13 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             ENDHLSL
         }
 
-        // Bloom Upsample: additively blends a smaller mip into the larger mip target.
+        // Bloom Gaussian: PC path uses a separable Gaussian pass and optionally adds the previous smaller stage.
         Pass
         {
-            Name "Burt Bloom Upsample"
+            Name "Burt Bloom Gaussian"
             Cull Off
             ZWrite Off
             ZTest Always
-            Blend One One
 
             HLSLPROGRAM
             #pragma target 3.5
@@ -697,8 +703,13 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             #include "UnityCG.cginc"
 
             sampler2D _BurtPostProcessSourceTexture;
+            sampler2D _BurtBloomAdditiveTexture;
             float4 _BurtBloomTexelSize;
-            float _BurtBloomScatter;
+            float4 _BurtBloomBlurDirection;
+            float _BurtUseBloomAdditive;
+            float _BurtBloomSampleCount;
+            float4 _BurtBloomSampleWeights[64];
+            float4 _BurtBloomSampleOffsets[64];
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -712,7 +723,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return output;
             }
 
-            float2 GetBloomSourceUV(float2 uv)
+            float2 BurtBloomSourceUV(float2 uv)
             {
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0 - uv.y;
@@ -723,18 +734,24 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float2 texel = _BurtBloomTexelSize.xy;
-                float2 sourceUv = GetBloomSourceUV(input.uv);
-                float3 color = tex2D(_BurtPostProcessSourceTexture, sourceUv).rgb * 4.0;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 0.0)).rgb * 2.0;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 0.0)).rgb * 2.0;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(0.0, 1.0)).rgb * 2.0;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(0.0, -1.0)).rgb * 2.0;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 1.0)).rgb;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)).rgb;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, -1.0)).rgb;
-                color += tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)).rgb;
-                return float4(max(color * (1.0 / 16.0) * _BurtBloomScatter, 0.0), 1.0);
+                float2 sourceUv = BurtBloomSourceUV(input.uv);
+                float3 color = 0.0;
+                int sampleCount = min(64, max(0, (int)_BurtBloomSampleCount));
+
+                for (int sampleIndex = 0; sampleIndex < 64; sampleIndex++)
+                {
+                    if (sampleIndex < sampleCount)
+                    {
+                        color += tex2D(_BurtPostProcessSourceTexture, sourceUv + _BurtBloomSampleOffsets[sampleIndex].xy).rgb * _BurtBloomSampleWeights[sampleIndex].rgb;
+                    }
+                }
+
+                if (_BurtUseBloomAdditive > 0.5)
+                {
+                    color += tex2D(_BurtBloomAdditiveTexture, sourceUv).rgb;
+                }
+
+                return float4(max(color, 0.0), 1.0);
             }
             ENDHLSL
         }

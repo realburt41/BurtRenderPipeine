@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Burt.RenderPipeline
@@ -34,6 +35,8 @@ namespace Burt.RenderPipeline
         public Color tint = Color.white;
         [Tooltip("Used only by SpecifiedCubemap source. The cubemap must already contain suitable mip/prefilter data; BurtRP will not convolve it at runtime.")]
         public Cubemap cubemap;
+        [Tooltip("Yaw rotation in degrees for SpecifiedCubemap sampling, matching XRender's source cubemap angle.")]
+        [Range(0f, 360f)] public float cubemapAngle;
         [Tooltip("When multiple active BurtSkyLight components exist, the highest priority wins.")]
         public int priority;
         [Tooltip("Controls whether this SkyLight writes BurtRP ambient SH and simple ambient color.")]
@@ -42,31 +45,44 @@ namespace Burt.RenderPipeline
         public bool affectSpecular = true;
         [Tooltip("Used only by ConstantColor source. This is a low-risk diffuse fallback; specular remains disabled.")]
         public Color constantColor = Color.black;
-        [Tooltip("Reserved for a later SH lower-hemisphere policy; not applied in this first version.")]
+        [Tooltip("Controls how BurtRP treats lower hemisphere directions for diffuse SH and sky specular fallback.")]
         public BurtSkyLightLowerHemisphereMode lowerHemisphereMode = BurtSkyLightLowerHemisphereMode.Preserve;
-        [Tooltip("Reserved for a later SH lower-hemisphere policy; not applied in this first version.")]
+        [Tooltip("Color used by SolidColor lower hemisphere mode. Alpha blends between the original sky and this color.")]
         public Color lowerHemisphereColor = Color.black;
+
+        private static readonly List<BurtSkyLight> ActiveSkyLights = new List<BurtSkyLight>();
 
         internal float EffectiveDiffuseIntensity => Mathf.Max(0f, intensity) * Mathf.Max(0f, diffuseIntensity);
         internal float EffectiveSpecularIntensity => Mathf.Max(0f, intensity) * Mathf.Max(0f, specularIntensity);
         internal Color SafeTint => new Color(Mathf.Max(0f, tint.r), Mathf.Max(0f, tint.g), Mathf.Max(0f, tint.b), 1f);
 
+        private void OnEnable()
+        {
+            Register(this);
+        }
+
+        private void OnDisable()
+        {
+            Unregister(this);
+        }
+
+        private void OnDestroy()
+        {
+            Unregister(this);
+        }
+
         internal static bool TryGetActive(out BurtSkyLight skyLight)
         {
             skyLight = null;
-            var candidates = Object.FindObjectsByType<BurtSkyLight>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            if (candidates == null || candidates.Length == 0)
-            {
-                return false;
-            }
 
             var bestPriority = int.MinValue;
             var bestInstanceId = int.MinValue;
-            for (var i = 0; i < candidates.Length; i++)
+            for (var i = ActiveSkyLights.Count - 1; i >= 0; i--)
             {
-                var candidate = candidates[i];
+                var candidate = ActiveSkyLights[i];
                 if (candidate == null || !candidate.isActiveAndEnabled || candidate.gameObject == null || !candidate.gameObject.activeInHierarchy)
                 {
+                    ActiveSkyLights.RemoveAt(i);
                     continue;
                 }
 
@@ -82,6 +98,26 @@ namespace Burt.RenderPipeline
             }
 
             return skyLight != null;
+        }
+
+        private static void Register(BurtSkyLight skyLight)
+        {
+            if (skyLight == null || ActiveSkyLights.Contains(skyLight))
+            {
+                return;
+            }
+
+            ActiveSkyLights.Add(skyLight);
+        }
+
+        private static void Unregister(BurtSkyLight skyLight)
+        {
+            if (skyLight == null)
+            {
+                return;
+            }
+
+            ActiveSkyLights.Remove(skyLight);
         }
     }
 }
