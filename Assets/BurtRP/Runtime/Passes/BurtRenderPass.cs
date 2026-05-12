@@ -1,8 +1,92 @@
 ﻿namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个 Pass 基类和其他 BurtRP 代码处在同一个模块里。
 {
+    public enum BurtRenderPassKind // Coarse pass category for debug output and future culling analysis.
+    {
+        Generic,
+        Allocate,
+        Release,
+        SetRenderTarget,
+        Clear,
+        DrawRenderers,
+        FullScreen,
+        PostProcess,
+        Debug,
+        GlobalState,
+        Copy,
+    }
+
+    internal static class BurtRenderPassKindUtility // Keeps fallback name-based pass classification in one place.
+    {
+        public static BurtRenderPassKind InferKind(string passName)
+        {
+            if (Contains(passName, "Allocate"))
+            {
+                return BurtRenderPassKind.Allocate;
+            }
+
+            if (Contains(passName, "Release"))
+            {
+                return BurtRenderPassKind.Release;
+            }
+
+            if (Contains(passName, "Debug"))
+            {
+                return BurtRenderPassKind.Debug;
+            }
+
+            if (Contains(passName, "Set Render Target") || Contains(passName, "Set GBuffer Render Targets"))
+            {
+                return BurtRenderPassKind.SetRenderTarget;
+            }
+
+            if (Contains(passName, "Clear"))
+            {
+                return BurtRenderPassKind.Clear;
+            }
+
+            if (Contains(passName, "Setup Lighting"))
+            {
+                return BurtRenderPassKind.GlobalState;
+            }
+
+            if (Contains(passName, "Final Blit") || Contains(passName, "Seed Overlay") || Contains(passName, "Copy"))
+            {
+                return BurtRenderPassKind.Copy;
+            }
+
+            if (Contains(passName, "Post Process"))
+            {
+                return BurtRenderPassKind.PostProcess;
+            }
+
+            if (Contains(passName, "Deferred Lighting") || Contains(passName, "HiZ") || Contains(passName, "Screen Space Reflections"))
+            {
+                return BurtRenderPassKind.FullScreen;
+            }
+
+            if (Contains(passName, "Draw") || Contains(passName, "Depth Prepass"))
+            {
+                return BurtRenderPassKind.DrawRenderers;
+            }
+
+            return BurtRenderPassKind.Generic;
+        }
+
+        private static bool Contains(string passName, string token)
+        {
+            return !string.IsNullOrEmpty(passName) && passName.IndexOf(token, System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+    }
+
     public abstract class BurtRenderPass // 定义 BurtRP 的渲染 Pass 基类，所有具体渲染步骤都继承它。
     {
         public abstract string Name { get; } // 定义 Pass 名称，后面用于 Frame Debugger、Profiler 或日志显示。
+
+        public virtual BurtRenderPassKind Kind => BurtRenderPassKindUtility.InferKind(Name); // Default to conservative name-based classification.
+
+        public virtual bool HasSideEffects => true; // Keep all existing passes conservative until real culling is implemented.
+
+        public virtual bool AllowCulling => false; // Metadata only for now; execution order and pass count stay unchanged.
 
         public virtual void Configure(BurtRenderPassBuilder builder) // 定义 Pass 配置阶段入口，用来声明资源读写关系。
         {

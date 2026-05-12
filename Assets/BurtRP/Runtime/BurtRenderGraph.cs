@@ -1,5 +1,6 @@
 using System; // 引入基础命名空间，用来捕获 Configure 阶段异常并写入诊断信息。
-using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 List 保存 Pass、资源声明和校验消息。
+using System.Collections.Generic; // Uses List for passes, resource declarations, and validation messages.
+using UnityEngine.Rendering; // Uses CommandBufferPool for graph-level pass samples.
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和其他 BurtRP 代码处在同一个模块里。
 {
@@ -64,11 +65,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 resources.RegisterGBuffer0Texture(); // 注册 GBuffer0 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer1Texture(); // 注册 GBuffer1 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer2Texture(); // 注册 GBuffer2 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
-                resources.RegisterHiZDepthTexture();
+                if (ShouldRegisterHiZDepth(request, asset))
+                {
+                    resources.RegisterHiZDepthTexture();
+                }
 
                 if (ShouldRegisterScreenSpaceReflectionColor(request, asset))
                 {
                     resources.RegisterScreenSpaceReflectionColorTexture();
+                    resources.RegisterScreenSpaceReflectionDenoisedColorTexture();
+                    resources.RegisterScreenSpaceReflectionTemporalColorTexture();
                 }
             }
 
@@ -119,6 +125,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             return asset.RendererMode == BurtRendererMode.Deferred; // 只有显式选择 Deferred 时才注册 GBuffer，默认 Forward 不受影响。
         }
 
+        private static bool ShouldRegisterHiZDepth(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) && BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
+        }
+
         private static bool ShouldRegisterScreenSpaceReflectionColor(
             BurtRenderRequest request,
             BurtRenderPipelineAsset asset)
@@ -160,7 +173,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     continue; // 跳过这个空 Pass，继续执行后面的 Pass。
                 }
 
-                pass.Execute(context); // 执行当前 Pass，并把 RenderGraphContext 传给它。
+                BeginPassSample(context, pass); // Add an outer sample so Frame Debugger shows graph-level pass boundaries.
+
+                try
+                {
+                    pass.Execute(context); // Execute the current pass without changing its internal command buffer behavior.
+                }
+                finally
+                {
+                    EndPassSample(context, pass); // Always close the sample even if a pass throws.
+                }
             }
         }
 
@@ -215,6 +237,42 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
                 resourceUsages.Add(builder.Usage); // 把当前 Pass 的资源使用记录保存到 RenderGraph。
             }
+        }
+
+        private static void BeginPassSample(BurtRenderGraphContext context, BurtRenderPass pass) // Emits a profiling sample before a pass executes.
+        {
+            ExecutePassSampleCommand(context, pass, true);
+        }
+
+        private static void EndPassSample(BurtRenderGraphContext context, BurtRenderPass pass) // Emits a profiling sample after a pass executes.
+        {
+            ExecutePassSampleCommand(context, pass, false);
+        }
+
+        private static void ExecutePassSampleCommand( // Keeps graph-level sample command buffer plumbing out of the main loop.
+            BurtRenderGraphContext context,
+            BurtRenderPass pass,
+            bool beginSample)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            var sampleName = GetPassName(pass);
+            var cmd = CommandBufferPool.Get("Burt RenderGraph Pass Sample");
+
+            if (beginSample)
+            {
+                cmd.BeginSample(sampleName);
+            }
+            else
+            {
+                cmd.EndSample(sampleName);
+            }
+
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
         }
 
         private void ValidateConfiguredGraph() // 对已收集的资源声明做轻量校验，当前阶段只产生日志，不改变实际渲染行为。

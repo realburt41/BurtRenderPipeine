@@ -15,7 +15,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass setGBufferRenderTargetsPass = new BurtSetGBufferRenderTargetsPass(); // 创建 GBuffer MRT 绑定 Pass，用来验证三张 GBuffer 能被同时绑定。
         private readonly BurtRenderPass clearGBufferRenderTargetsPass = new BurtClearGBufferRenderTargetsPass(); // 创建 GBuffer 清理 Pass，用来给三张 GBuffer 写入确定的默认值。
         private readonly BurtRenderPass drawGBufferOpaquePass = new BurtDrawGBufferOpaquePass(); // 创建 GBuffer 不透明绘制 Pass，后续由 shader 侧 BurtGBuffer pass 写入材质数据。
-        private readonly BurtRenderPass deferredLightingPass = new BurtDeferredLightingPass(); // 创建 Deferred Lighting 全屏合成 Pass，用来把 GBuffer 光照结果写回 CameraColor。
+        private readonly BurtRenderPass clearDeferredLightingTargetPass = new BurtClearDeferredLightingTargetPass(); // 创建 Deferred Lighting 黑场清理 Pass，配合 stencil 分 pass 防止跳过像素保留相机 clear color。
+        private readonly BurtRenderPass deferredLitLightingPass = new BurtDeferredLitLightingPass(); // 创建 Default Lit Deferred Lighting Pass，只处理非 Hair GBuffer 像素。
+        private readonly BurtRenderPass deferredHairLightingPass = new BurtDeferredHairLightingPass(); // 创建 Hair Deferred Lighting Pass，只处理 Hair GBuffer 像素。
         private readonly BurtRenderPass setRenderTargetPass = new BurtSetRenderTargetPass(); // 创建 CameraColor/CameraDepth 绑定 Pass，GBuffer 阶段前后都会用它切回正常颜色目标。
         private readonly BurtRenderPass clearRenderTargetPass = new BurtClearRenderTargetPass(); // 创建相机清屏 Pass，保证当前 Deferred 实验模式输出仍和 Forward 一致。
         private readonly BurtRenderPass depthPrepass = new BurtDepthPrepass(); // 创建深度预写 Pass，暂时复用 Forward 的深度建立逻辑。
@@ -23,10 +25,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass buildHiZDepthPass = new BurtBuildHiZDepthPass();
         private readonly BurtRenderPass drawSkyboxPass = new BurtDrawSkyboxPass(); // 创建天空盒绘制 Pass，让 Deferred 实验模式仍能保留原有天空盒行为。
         private readonly BurtRenderPass allocateScreenSpaceReflectionColorPass = new BurtAllocateScreenSpaceReflectionColorPass();
-        private readonly BurtRenderPass screenSpaceReflectionPass = new BurtScreenSpaceReflectionPass();
+        private readonly BurtRenderPass allocateScreenSpaceReflectionDenoisedColorPass = new BurtAllocateScreenSpaceReflectionDenoisedColorPass();
+        private readonly BurtRenderPass allocateScreenSpaceReflectionTemporalColorPass = new BurtAllocateScreenSpaceReflectionTemporalColorPass();
+        private readonly BurtRenderPass screenSpaceReflectionTracePass = new BurtScreenSpaceReflectionTracePass();
+        private readonly BurtRenderPass screenSpaceReflectionDenoisePass = new BurtScreenSpaceReflectionDenoisePass();
+        private readonly BurtRenderPass screenSpaceReflectionTemporalPass = new BurtScreenSpaceReflectionTemporalPass();
+        private readonly BurtRenderPass screenSpaceReflectionCompositePass = new BurtScreenSpaceReflectionCompositePass();
         private readonly BurtRenderPass releaseScreenSpaceReflectionColorPass = new BurtReleaseScreenSpaceReflectionColorPass();
+        private readonly BurtRenderPass releaseScreenSpaceReflectionDenoisedColorPass = new BurtReleaseScreenSpaceReflectionDenoisedColorPass();
+        private readonly BurtRenderPass releaseScreenSpaceReflectionTemporalColorPass = new BurtReleaseScreenSpaceReflectionTemporalColorPass();
         private readonly BurtRenderPass drawTransparentPass = new BurtDrawTransparentPass(); // 创建透明物体绘制 Pass，未来 Deferred 第一版也会继续让透明走 Forward。
         private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // 创建不支持 Shader 调试 Pass，让非 BurtRP 材质继续显示错误材质。
+        private readonly BurtRenderPass drawPreImageEffectsGizmosPass = new BurtDrawPreImageEffectsGizmosPass(); // 创建编辑器 Gizmos 绘制 Pass，恢复 SRP Scene/Game View 的 Gizmos 显示。
+        private readonly BurtRenderPass drawPostImageEffectsGizmosPass = new BurtDrawPostImageEffectsGizmosPass(); // 创建后处理后的编辑器 Gizmos Pass，避免直接画到外部最终目标。
         private readonly BurtRenderPass allocatePostProcessColorPass = new BurtAllocatePostProcessColorPass(); // 创建后处理中间 RT 分配 Pass，保持后处理尾部链路不分 Forward/Deferred。
         private readonly BurtRenderPass postProcessPass = new BurtPostProcessPass(); // 创建后处理 Pass，让 Tonemapping 在 Deferred 实验模式下也能继续工作。
         private readonly BurtRenderPass releasePostProcessColorPass = new BurtReleasePostProcessColorPass(); // 创建后处理中间 RT 释放 Pass，避免后处理临时资源泄漏。
@@ -66,13 +77,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
             var safeRenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // renderOptions 为空时回退到单 request 行为，避免所有生命周期标记都缺失。
             var useLocalGBufferTargets = ShouldUseLocalGBufferTargets(safeRenderOptions); // 当前阶段让 GBuffer 生命周期跟随本 request 的 CameraColor/CameraDepth 申请。
+            var useHiZDepth = ShouldUseHiZDepth(request, asset, useLocalGBufferTargets); // Only allocate and build HiZ when SSR or HiZ debug needs it.
             var useMainLightShadow = BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 复用阴影工具判断当前 request 是否需要主光阴影图。
             var mainLightShadowMapIsValid = graph.Resources.GetMainLightShadowMap().IsValid; // 读取资源表里的 MainLightShadowMap 句柄状态，用于结构化诊断。
 
             BurtShadowUtility.LogMainLightShadowDiagnostics(request, asset, useMainLightShadow, mainLightShadowMapIsValid); // 输出主光阴影诊断，保持 Forward 和 Deferred 的排查方式一致。
             AddCameraAllocationPasses(graph, safeRenderOptions); // 先申请 CameraColor 和 CameraDepth，确保 GBuffer MRT 可以使用独立深度。
             AddGBufferAllocationPasses(graph, useLocalGBufferTargets); // 再申请三张 GBuffer，给后面的 MRT 绑定和清理阶段准备真实 RT。
-            AddHiZAllocationPass(graph, useLocalGBufferTargets);
+            AddHiZAllocationPass(graph, useHiZDepth);
 
             graph.AddPass(setupLightingPass); // 上传灯光和默认阴影全局参数，后续 Forward fallback 与 Deferred Lighting 都会依赖它。
             AddShadowPasses(graph, useMainLightShadow); // 如果需要主光阴影，就绘制 shadow map。
@@ -91,13 +103,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
             AddDeferredLightingPass(graph, useLocalGBufferTargets); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
             AddDeferredForwardOnlyOpaqueFallback(graph, asset); // 根据资产开关决定是否绘制不能写入 GBuffer 的前向专用不透明物体。
-            AddHiZBuildPass(graph, useLocalGBufferTargets);
+            AddHiZBuildPass(graph, useHiZDepth);
             graph.AddPass(drawSkyboxPass); // 在不透明之后绘制天空盒，保持 Forward 现有顺序。
             AddScreenSpaceReflectionPasses(graph, request, asset, useLocalGBufferTargets);
             graph.AddPass(drawTransparentPass); // 透明物体继续走 Forward，未来 Deferred 第一版也会保持这个策略。
             AddUnsupportedShaderDebug(graph, asset); // 根据资产开关决定是否绘制不支持 Shader 的错误材质。
+            AddPreImageEffectsGizmosPass(graph, request); // 编辑器里在后处理前恢复 PreImageEffects Gizmos。
             AddPostProcessPasses(graph, request, asset, safeRenderOptions); // 根据后处理和 FinalBlit 条件决定是否插入 Tonemapping 链路。
             AddDebugViewPasses(graph, asset, useMainLightShadow, useLocalGBufferTargets); // 根据 Debug 开关决定是否覆盖显示深度、主光阴影或 GBuffer。
+            AddPostImageEffectsGizmosPass(graph, request); // 后处理和 Debug 覆盖之后，把 PostImageEffects Gizmos 画回 CameraColor。
 
             if (safeRenderOptions.ShouldFinalBlit) // 只有当前 request 是最终输出点时才执行 FinalBlit。
             {
@@ -105,7 +119,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             AddShadowReleasePasses(graph, useMainLightShadow); // 释放主光阴影图，结束阴影资源生命周期。
-            AddHiZReleasePass(graph, useLocalGBufferTargets);
+            AddHiZReleasePass(graph, useHiZDepth);
             AddGBufferReleasePasses(graph, useLocalGBufferTargets); // 释放本 request 内申请的 GBuffer，当前阶段不跨 request 保留它们。
             AddCameraReleasePasses(graph, safeRenderOptions); // 最后按相机栈策略释放 CameraColor 和 CameraDepth。
         }
@@ -163,9 +177,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
         private void AddHiZAllocationPass(
             BurtRenderGraph graph,
-            bool useLocalGBufferTargets)
+            bool useHiZDepth)
         {
-            if (!useLocalGBufferTargets)
+            if (!useHiZDepth)
             {
                 return;
             }
@@ -237,9 +251,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
         private void AddHiZBuildPass(
             BurtRenderGraph graph,
-            bool useLocalGBufferTargets)
+            bool useHiZDepth)
         {
-            if (!useLocalGBufferTargets)
+            if (!useHiZDepth)
             {
                 return;
             }
@@ -259,7 +273,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(allocateScreenSpaceReflectionColorPass);
-            graph.AddPass(screenSpaceReflectionPass);
+            graph.AddPass(allocateScreenSpaceReflectionDenoisedColorPass);
+            graph.AddPass(allocateScreenSpaceReflectionTemporalColorPass);
+            graph.AddPass(screenSpaceReflectionTracePass);
+            graph.AddPass(screenSpaceReflectionDenoisePass);
+            graph.AddPass(screenSpaceReflectionTemporalPass);
+            graph.AddPass(screenSpaceReflectionCompositePass);
+            graph.AddPass(releaseScreenSpaceReflectionTemporalColorPass);
+            graph.AddPass(releaseScreenSpaceReflectionDenoisedColorPass);
             graph.AddPass(releaseScreenSpaceReflectionColorPass);
         }
 
@@ -272,7 +293,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return; // 直接返回，避免 Deferred Lighting 读取无效 GBuffer。
             }
 
-            graph.AddPass(deferredLightingPass); // 添加 Deferred Lighting Pass，把 GBuffer + Depth + LightingGlobals 合成到 CameraColor。
+            graph.AddPass(clearDeferredLightingTargetPass); // 先把 lighting target 清黑；后续 stencil pass 跳过的像素不会继承相机 clear color。
+            graph.AddPass(deferredLitLightingPass); // 先写入 Default Lit 像素；shader 会跳过 Hair，给后续 Hair pass 留出独立 lighting 入口。
+            graph.AddPass(deferredHairLightingPass); // 再叠加 Hair 像素；当前用 GBuffer shading model 分支过滤，后续可替换成 stencil/mask 优化。
         }
 
         private void AddDepthPrepass( // 根据资产开关添加深度预写 Pass。
@@ -297,6 +320,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(drawUnsupportedShadersPass); // 添加不支持 Shader 调试 Pass。
+        }
+
+        private void AddPreImageEffectsGizmosPass( // 根据编辑器 Gizmos 开关添加 PreImageEffects Gizmos Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRenderRequest request) // 接收当前 request，用来过滤 Preview/Reflection 和 Gizmos 开关。
+        {
+            if (!BurtEditorGizmoUtility.ShouldRenderGizmos(request)) // 非编辑器、Preview/Reflection 或关闭 Gizmos 时不添加这个 Pass。
+            {
+                return; // 直接返回，避免运行时和无 Gizmos 场景出现空 Pass。
+            }
+
+            graph.AddPass(drawPreImageEffectsGizmosPass); // 添加 PreImageEffects Gizmos Pass。
+        }
+
+        private void AddPostImageEffectsGizmosPass( // 根据编辑器 Gizmos 开关添加 PostImageEffects Gizmos Pass。
+            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRenderRequest request) // 接收当前 request，用来过滤 Preview/Reflection 和 Gizmos 开关。
+        {
+            if (!BurtEditorGizmoUtility.ShouldRenderGizmos(request)) // 非编辑器、Preview/Reflection 或关闭 Gizmos 时不添加这个 Pass。
+            {
+                return; // 直接返回，避免运行时和无 Gizmos 场景出现空 Pass。
+            }
+
+            graph.AddPass(drawPostImageEffectsGizmosPass); // 添加 PostImageEffects Gizmos Pass。
         }
 
         private void AddPostProcessPasses( // 根据后处理条件添加后处理链路。
@@ -356,9 +403,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
         private void AddHiZReleasePass(
             BurtRenderGraph graph,
-            bool useLocalGBufferTargets)
+            bool useHiZDepth)
         {
-            if (!useLocalGBufferTargets)
+            if (!useHiZDepth)
             {
                 return;
             }
@@ -403,6 +450,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             return renderOptions.ShouldAllocateCameraColor && renderOptions.ShouldAllocateCameraDepth; // 当前阶段只在申请 CameraColor/CameraDepth 的 request 上申请 GBuffer。
+        }
+
+        private static bool ShouldUseHiZDepth(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            return useLocalGBufferTargets && BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
         }
 
         private static bool ShouldSeedOverlayCameraColor( // 判断 Overlay 是否需要从最终目标继承颜色。

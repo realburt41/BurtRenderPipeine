@@ -2,11 +2,52 @@ using System.Collections.Generic; // 引入泛型集合命名空间，用来保�
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用信息和其他 BurtRP 代码处在同一个模块里。
 {
+    public enum BurtRenderResourceAccessType // Typed resource access used by RenderGraph debug output.
+    {
+        Read,
+        Write,
+        Allocate,
+        Bind,
+        Clear,
+        Release,
+        Copy,
+    }
+
+    public readonly struct BurtRenderTargetResourceAccess // Stores one typed render-target access declaration.
+    {
+        public BurtRenderTargetResourceAccess(BurtRenderTargetHandle handle, BurtRenderResourceAccessType accessType)
+        {
+            Handle = handle;
+            AccessType = accessType;
+        }
+
+        public BurtRenderTargetHandle Handle { get; }
+
+        public BurtRenderResourceAccessType AccessType { get; }
+    }
+
+    public readonly struct BurtGlobalResourceAccess // Stores one typed logical global-resource access declaration.
+    {
+        public BurtGlobalResourceAccess(string resourceName, BurtRenderResourceAccessType accessType)
+        {
+            ResourceName = string.IsNullOrEmpty(resourceName) ? string.Empty : resourceName;
+            AccessType = accessType;
+        }
+
+        public string ResourceName { get; }
+
+        public BurtRenderResourceAccessType AccessType { get; }
+    }
+
     public sealed class BurtRenderPassResourceUsage // 定义单个 RenderPass 的资源使用记录，用来描述这个 Pass 读写了哪些资源。
     {
         private readonly List<BurtRenderTargetHandle> readRenderTargets = new List<BurtRenderTargetHandle>(); // 保存这个 Pass 声明读取的所有渲染目标句柄。
 
         private readonly List<BurtRenderTargetHandle> writeRenderTargets = new List<BurtRenderTargetHandle>(); // 保存这个 Pass 声明写入的所有渲染目标句柄。
+
+        private readonly List<BurtRenderTargetResourceAccess> renderTargetAccesses = new List<BurtRenderTargetResourceAccess>(); // Typed RT accesses for debug and future culling.
+
+        private readonly List<BurtGlobalResourceAccess> globalResourceAccesses = new List<BurtGlobalResourceAccess>(); // Typed global-resource accesses for debug.
 
         private readonly List<string> readGlobalResources = new List<string>(); // 保存这个 Pass 声明读取的逻辑全局资源，例如 LightingGlobals。
 
@@ -18,9 +59,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
 
         public string PassName { get; } // 保存这个资源使用记录对应的 Pass 名称，方便调试和日志输出。
 
+        public BurtRenderPassKind PassKind { get; } // Pass category for debug output and future scheduling analysis.
+
+        public bool HasSideEffects { get; } // Conservative side-effect marker; not used for culling yet.
+
+        public bool AllowCulling { get; } // Metadata only for now; the graph still executes every pass.
+
         public IReadOnlyList<BurtRenderTargetHandle> ReadRenderTargets => readRenderTargets; // 暴露只读的读取资源列表，避免外部直接修改内部 List。
 
         public IReadOnlyList<BurtRenderTargetHandle> WriteRenderTargets => writeRenderTargets; // 暴露只读的写入资源列表，避免外部直接修改内部 List。
+
+        public IReadOnlyList<BurtRenderTargetResourceAccess> RenderTargetAccesses => renderTargetAccesses; // Typed RT access list for RenderGraph debug output.
+
+        public IReadOnlyList<BurtGlobalResourceAccess> GlobalResourceAccesses => globalResourceAccesses; // Typed global-resource access list for RenderGraph debug output.
 
         public IReadOnlyList<string> ReadGlobalResources => readGlobalResources; // 暴露只读的逻辑全局资源读取列表，供 RenderGraph Debug 和 Validation 使用。
 
@@ -30,18 +81,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
 
         public bool HasResourceDeclarations => readRenderTargets.Count > 0 || writeRenderTargets.Count > 0 || readGlobalResources.Count > 0 || writeGlobalResources.Count > 0; // 标记这个 Pass 是否声明了任意渲染目标或逻辑全局资源依赖。
 
-        public BurtRenderPassResourceUsage(string passName) // 保留旧构造函数，避免已有调用方因为新增 PassIndex 而失效。
-            : this(-1, passName)
+        public BurtRenderPassResourceUsage(string passName) // Backward-compatible constructor for older callers.
+            : this(-1, passName, BurtRenderPassKindUtility.InferKind(passName), true, false)
         {
         }
 
-        public BurtRenderPassResourceUsage( // 定义构造函数，用来创建一个 Pass 的资源使用记录。
-            int passIndex, // 接收 Pass 在 RenderGraph 中的顺序索引。
-            string passName) // 接收 Pass 名称，可能为空。
+        public BurtRenderPassResourceUsage( // Creates a pass resource usage record with conservative metadata defaults.
+            int passIndex,
+            string passName)
+            : this(passIndex, passName, BurtRenderPassKindUtility.InferKind(passName), true, false)
         {
-            PassIndex = passIndex; // 保存 Pass 索引，Debug 输出可直接定位顺序问题。
+        }
 
-            PassName = string.IsNullOrEmpty(passName) ? "UnnamedPass" : passName; // 如果 Pass 名称为空，就使用兜底名称，避免调试信息缺失。
+        public BurtRenderPassResourceUsage( // Creates a pass resource usage record with explicit metadata.
+            int passIndex,
+            string passName,
+            BurtRenderPassKind passKind,
+            bool hasSideEffects,
+            bool allowCulling)
+        {
+            PassIndex = passIndex; // Store the graph order for stable debug labels.
+
+            PassName = string.IsNullOrEmpty(passName) ? "UnnamedPass" : passName; // Keep debug output readable when a pass name is missing.
+
+            PassKind = passKind; // Store pass category for debug output.
+
+            HasSideEffects = hasSideEffects; // Store conservative side-effect metadata.
+
+            AllowCulling = allowCulling; // Store culling intent without changing scheduling behavior.
         }
 
         public void AddReadRenderTarget(BurtRenderTargetHandle handle) // 定义记录读取渲染目标的函数。
@@ -54,6 +121,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             }
 
             readRenderTargets.Add(handle); // 把传入的渲染目标句柄加入读取列表，保留原始声明顺序便于排查。
+
+            renderTargetAccesses.Add(new BurtRenderTargetResourceAccess(handle, ResolveReadAccessType())); // Preserve Read list while recording Release semantics for release passes.
         }
 
         public void AddWriteRenderTarget(BurtRenderTargetHandle handle) // 定义记录写入渲染目标的函数。
@@ -66,6 +135,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             }
 
             writeRenderTargets.Add(handle); // 把传入的渲染目标句柄加入写入列表，保留原始声明顺序便于排查。
+
+            renderTargetAccesses.Add(new BurtRenderTargetResourceAccess(handle, ResolveWriteAccessType())); // Preserve Write list while recording Allocate/Bind/Clear/Copy semantics.
         }
 
         public void AddReadGlobalResource(string resourceName) // 定义记录读取逻辑全局资源的函数。
@@ -83,6 +154,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             }
 
             readGlobalResources.Add(safeName); // 把全局资源名加入读取列表，保留原始声明顺序便于排查。
+
+            globalResourceAccesses.Add(new BurtGlobalResourceAccess(safeName, BurtRenderResourceAccessType.Read)); // Record typed global read access.
         }
 
         public void AddWriteGlobalResource(string resourceName) // 定义记录写入逻辑全局资源的函数。
@@ -100,6 +173,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             }
 
             writeGlobalResources.Add(safeName); // 把全局资源名加入写入列表，保留原始声明顺序便于排查。
+
+            globalResourceAccesses.Add(new BurtGlobalResourceAccess(safeName, BurtRenderResourceAccessType.Write)); // Record typed global write access.
         }
 
         public void AddValidationMessage(string message) // 定义追加校验消息的函数，供 Builder 和 RenderGraph 写入配置异常。
@@ -115,6 +190,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             }
 
             validationMessages.Add(message); // 保存诊断消息，后续由 DebugUtility 统一输出。
+        }
+
+        private BurtRenderResourceAccessType ResolveReadAccessType() // Maps legacy Read declarations to typed resource semantics.
+        {
+            return PassKind == BurtRenderPassKind.Release ? BurtRenderResourceAccessType.Release : BurtRenderResourceAccessType.Read;
+        }
+
+        private BurtRenderResourceAccessType ResolveWriteAccessType() // Maps legacy Write declarations to typed resource semantics.
+        {
+            switch (PassKind)
+            {
+                case BurtRenderPassKind.Allocate:
+                    return BurtRenderResourceAccessType.Allocate;
+                case BurtRenderPassKind.Release:
+                    return BurtRenderResourceAccessType.Release;
+                case BurtRenderPassKind.SetRenderTarget:
+                    return BurtRenderResourceAccessType.Bind;
+                case BurtRenderPassKind.Clear:
+                    return BurtRenderResourceAccessType.Clear;
+                case BurtRenderPassKind.Copy:
+                    return BurtRenderResourceAccessType.Copy;
+                default:
+                    return BurtRenderResourceAccessType.Write;
+            }
         }
 
         private void ValidateRenderTargetHandle( // 校验单个资源句柄的基础可读性。

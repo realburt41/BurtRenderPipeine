@@ -34,7 +34,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
 
             var passName = pass != null ? pass.Name : "NullPass"; // 如果 Pass 存在就读取它的名称，否则使用空 Pass 兜底名称。
 
-            Usage = new BurtRenderPassResourceUsage(passIndex, passName); // 为当前 Pass 创建一份带顺序索引的资源使用记录。
+            var passKind = pass != null ? pass.Kind : BurtRenderPassKindUtility.InferKind(passName); // Read pass metadata once so debug records match execution.
+
+            var hasSideEffects = pass == null || pass.HasSideEffects; // Null pass records stay conservative.
+
+            var allowCulling = pass != null && pass.AllowCulling; // Culling remains disabled unless a pass explicitly opts in.
+
+            Usage = new BurtRenderPassResourceUsage(passIndex, passName, passKind, hasSideEffects, allowCulling); // 为当前 Pass 创建一份带顺序索引的资源使用记录。
         }
 
         public BurtRenderTargetHandle ReadRenderTarget(string name) // 定义声明读取某个渲染目标资源的函数。
@@ -153,6 +159,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteScreenSpaceReflectionColor()
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceReflectionDenoisedColor()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceReflectionDenoisedColor()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceReflectionTemporalColor()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceReflectionTemporalColor()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
         }
 
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。

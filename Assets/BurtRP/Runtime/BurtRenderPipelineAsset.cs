@@ -14,18 +14,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
     {
         Disabled = 0, // 关闭 GBuffer 调试视图，保持正常渲染结果。
         GBuffer0 = 1, // 直接显示 GBuffer0 原始内容，用来检查 baseColor 和 occlusion 是否写入。
-        GBuffer1 = 2, // 直接显示 GBuffer1 原始内容，用来检查 oct normal、metallic 和 smoothness 是否写入。
+        GBuffer1 = 2, // 直接显示 GBuffer1 原始内容，用来检查 oct normal、packed shadingModel/material 和 smoothness 是否写入。
         GBuffer2 = 3, // 直接显示 GBuffer2 原始内容，用来检查 emission 和 reflectance 是否写入。
         BaseColor = 4, // 解码后只显示材质基础色，方便和 Forward Lit 的颜色输入对齐。
-        NormalWS = 5, // 解码后显示世界空间法线，方便检查法线编码和切线空间转换方向。
-        Metallic = 6, // 解码后显示金属度灰度图，方便检查 MaskMap 的 metallic 通道。
+        NormalWS = 5, // 解码后显示 GBuffer 向量槽；Default Lit=normalWS，Hair=strandDirectionWS。
+        Metallic = 6, // 解码后显示 GBuffer 材质通道；Default Lit=metallic，Hair=scatter。
         Smoothness = 7, // 解码后显示光滑度灰度图，方便检查 smoothness 在 GBuffer 中是否反向或丢失。
         Occlusion = 8, // 解码后显示环境遮蔽灰度图，方便检查 occlusion 通道是否正确。
         Emission = 9, // 解码后显示自发光颜色，方便检查 HDR emission 是否写入 GBuffer2。
         Reflectance = 10, // 解码后显示 XRender 风格 reflectance 灰度图，方便检查非金属 F0 来源。
         RawDepth = 11, // 显示当前 CameraDepth 原始深度，方便把 GBuffer 和深度重建问题放在同一入口排查。
         Roughness = 12, // 解码后显示从 smoothness 还原的感知粗糙度，方便和 PBR BRDF 输入对齐。
-        DiffuseColor = 13 // 解码后显示 GBuffer 重建出的 diffuseColor，方便检查 metallic 扣除后的漫反射颜色。
+        DiffuseColor = 13, // 解码后显示 GBuffer 重建出的 diffuseColor，方便检查 metallic 扣除后的漫反射颜色。
+        ShadingModel = 14, // 解码后显示 shading model，黑色=Default Lit，洋红=Hair，方便验证材质是否进入 Hair 分支。
+        HairStrandDirection = 15, // Hair 专用：显示 GBuffer1.rg 解码后的 strand direction，非 Hair 像素显示黑色。
+        HairScatter = 16 // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 scatter，非 Hair 像素显示黑色。
     }
 
     public enum BurtShadowDebugYFlipMode // 定义主光 shadow map 调试图的 Y 翻转模式，避免在不同窗口和平台之间继续硬猜方向。

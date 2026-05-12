@@ -19,6 +19,9 @@ MonoBehaviour:
   depthDebugScale: 50
   enableDeferredForwardOpaqueFallback: 1
   gBufferDebugViewMode: 0
+  enableHiZDebugView: 0
+  hiZDebugMip: 0
+  hiZDebugScale: 50
   preintegratedFGLut: {fileID: 2800000, guid: 7bc59e552e7f6e74f893b90c1f15fc48, type: 3}
   postProcessSettings:
     enablePostProcessing: 1
@@ -31,8 +34,8 @@ MonoBehaviour:
   mainLightShadowResolution: 2048
   mainLightShadowDistance: 50
   mainLightShadowDepthBias: 0.05
-  mainLightShadowNormalBias: 0.001
-  mainLightShadowSampleBias: 0.005
+  mainLightShadowNormalBias: 0.4
+  mainLightShadowSampleBias: 0.001
   enableMainLightShadowDebugView: 0
   mainLightShadowDebugExposure: 1
   mainLightShadowDebugYFlipMode: 0

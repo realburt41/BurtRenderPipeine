@@ -7,6 +7,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Rende
     internal static class BurtDeferredMaterialDebugUtility // 定义 Deferred 材质分类调试工具，用来解释一个材质在 Deferred 路径里会走哪条绘制通道。
     {
         private const int OpaqueRenderQueueMax = 2500; // 定义 Unity 不透明队列上限，等价于 RenderQueueRange.opaque 的常用边界。
+        private const string HairShaderName = "BurtRP/Hair"; // Hair 已从 BurtRP/Lit 拆成独立 shader，调试统计按 shader 名识别。
         private static readonly ShaderTagId LightModeTag = new ShaderTagId("LightMode"); // 定义 shader pass 标签名，Unity 用它标记一个 pass 属于哪种渲染路径。
         private static readonly ShaderTagId BurtGBufferLightMode = new ShaderTagId("BurtGBuffer"); // 定义 BurtRP Deferred GBuffer pass 的 LightMode。
         private static readonly ShaderTagId BurtForwardOnlyLightMode = new ShaderTagId("BurtForwardOnly"); // 定义 Deferred Lighting 后前向兜底 pass 的 LightMode。
@@ -59,6 +60,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Rende
 
             builder.Append("  OpaqueSlots=").Append(summary.OpaqueSlotCount); // 写入不透明材质槽总数。
             builder.Append(" GBuffer=").Append(summary.OpaqueGBufferSlotCount); // 写入拥有 BurtGBuffer pass 的不透明材质槽数。
+            builder.Append(" Hair=").Append(summary.OpaqueHairGBufferSlotCount); // 写入会进 GBuffer 且选择 Hair shading model 的材质槽数。
             builder.Append(" ForwardOnly=").Append(summary.OpaqueForwardOnlySlotCount); // 写入拥有 BurtForwardOnly pass 的不透明材质槽数。
             builder.Append(" MissingDeferredPath=").Append(summary.OpaqueMissingDeferredPathSlotCount); // 写入 Deferred 下既不进 GBuffer 也不进 ForwardOnly 的不透明材质槽数。
             builder.AppendLine(); // 结束不透明分类行。
@@ -263,6 +265,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Rende
             {
                 summary.OpaqueGBufferSlotCount++; // 累加 GBuffer 路径数量。
 
+                if (IsHairMaterial(material)) // Hair 仍走 GBuffer，但只能由独立 BurtRP/Hair shader 写入 Hair shading model。
+                {
+                    summary.OpaqueHairGBufferSlotCount++; // 累加 Hair 材质数量，方便确认材质 UI 选择是否被扫描到。
+                }
+
                 return; // GBuffer 优先级最高，结束分类。
             }
 
@@ -317,6 +324,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Rende
             return !queueTag.StartsWith("Transparent") && !queueTag.StartsWith("Overlay"); // 不是透明或 Overlay 的队列就按不透明处理。
         }
 
+        private static bool IsHairMaterial(Material material) // 判断材质是否使用独立的 BurtRP/Hair shader。
+        {
+            if (material == null || material.shader == null) // 没有 shader 的材质继续按非 Hair 处理。
+            {
+                return false; // 返回 false，避免扫描异常材质时报空引用。
+            }
+
+            return material.shader.name == HairShaderName; // 不再读取 Lit 的 _ShadingModel，避免 Hair 和 Lit 混用。
+        }
+
         private static bool ShaderHasLightMode( // 判断 shader 是否包含某个 LightMode pass。
             Shader shader, // 接收要检查的 shader。
             ShaderTagId expectedLightMode) // 接收期望的 LightMode 值。
@@ -347,6 +364,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Rende
             public int MaterialSlotCount; // 保存参与扫描的材质槽总数。
             public int OpaqueSlotCount; // 保存不透明材质槽数量。
             public int OpaqueGBufferSlotCount; // 保存会写入 GBuffer 的不透明材质槽数量。
+            public int OpaqueHairGBufferSlotCount; // 保存 GBuffer 路径中选择 Hair shading model 的材质槽数量。
             public int OpaqueForwardOnlySlotCount; // 保存会在 Deferred Lighting 后前向兜底绘制的不透明材质槽数量。
             public int OpaqueMissingDeferredPathSlotCount; // 保存 Deferred 下缺少绘制路径的不透明材质槽数量。
             public int TransparentSlotCount; // 保存透明材质槽数量。

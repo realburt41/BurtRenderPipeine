@@ -58,6 +58,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceReflectionColorTextureId = Shader.PropertyToID(ScreenSpaceReflectionColorTextureShaderName);
 
+        public const string ScreenSpaceReflectionDenoisedColorName = "ScreenSpaceReflectionDenoisedColor";
+
+        public const string ScreenSpaceReflectionDenoisedColorTextureShaderName = "_BurtScreenSpaceReflectionDenoisedColorTexture";
+
+        public static readonly int ScreenSpaceReflectionDenoisedColorTextureId = Shader.PropertyToID(ScreenSpaceReflectionDenoisedColorTextureShaderName);
+
+        public const string ScreenSpaceReflectionTemporalColorName = "ScreenSpaceReflectionTemporalColor";
+
+        public const string ScreenSpaceReflectionTemporalColorTextureShaderName = "_BurtScreenSpaceReflectionTemporalColorTexture";
+
+        public static readonly int ScreenSpaceReflectionTemporalColorTextureId = Shader.PropertyToID(ScreenSpaceReflectionTemporalColorTextureShaderName);
+
         public const string MainLightShadowMapName = "MainLightShadowMap"; // 定义主光阴影图在 RenderGraph 里的统一资源名，后续阴影绘制和光照采样都通过它建立依赖。
 
         public const string MainLightShadowMapShaderName = "_BurtMainLightShadowMap"; // 定义主光阴影图暴露给 shader 的全局纹理名称，后续 Lit shader 会用这个名字采样阴影。
@@ -261,6 +273,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetScreenSpaceReflectionColor()
         {
             return GetRenderTarget(ScreenSpaceReflectionColorName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceReflectionDenoisedColorTexture()
+        {
+            return RegisterScreenSpaceReflectionDenoisedColor(new RenderTargetIdentifier(ScreenSpaceReflectionDenoisedColorTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceReflectionDenoisedColor(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceReflectionDenoisedColorName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceReflectionDenoisedColor()
+        {
+            return GetRenderTarget(ScreenSpaceReflectionDenoisedColorName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceReflectionTemporalColorTexture()
+        {
+            return RegisterScreenSpaceReflectionTemporalColor(new RenderTargetIdentifier(ScreenSpaceReflectionTemporalColorTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceReflectionTemporalColor(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceReflectionTemporalColorName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceReflectionTemporalColor()
+        {
+            return GetRenderTarget(ScreenSpaceReflectionTemporalColorName);
         }
 
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。

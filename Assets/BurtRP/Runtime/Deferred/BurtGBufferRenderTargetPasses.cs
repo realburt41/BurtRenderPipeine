@@ -182,7 +182,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
     internal sealed class BurtClearGBufferRenderTargetsPass : BurtRenderPass // 定义 Deferred GBuffer 清理 Pass，负责给三张 GBuffer 写入可预测的默认值。
     {
         private static readonly Color GBuffer0ClearColor = new Color(0f, 0f, 0f, 1f); // 定义 GBuffer0 默认值：baseColor 为黑色，occlusion 默认为 1。
-        private static readonly Color GBuffer1ClearColor = new Color(0.5f, 0.5f, 0f, 0f); // 定义 GBuffer1 默认值：oct 法线中心为 0.5/0.5，metallic 和 smoothness 默认为 0。
+        private static readonly Color GBuffer1ClearColor = new Color(0.5f, 0.5f, 0f, 0f); // 定义 GBuffer1 默认值：oct 法线中心为 0.5/0.5，DefaultLit+metallic/scatter 和 smoothness 默认为 0。
         private static readonly Color GBuffer2ClearColor = new Color(0f, 0f, 0f, 0.5f); // 定义 GBuffer2 默认值：emission 为黑色，reflectance 使用非金属常用中间值。
 
         public override string Name => "Burt Clear GBuffer Render Targets"; // 返回 Pass 名称，方便 RenderGraph Debug 和 Frame Debugger 识别清理阶段。

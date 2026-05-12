@@ -1,4 +1,5 @@
 using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Camera、Mathf、RenderTextureDescriptor 和 RenderTextureFormat。
+using UnityEngine.Experimental.Rendering; // 引入 GraphicsFormat，用来显式申请带 stencil 的 depth/stencil RT。
 using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarget 描述工具和 Pass/Graph 代码保持同一模块可见性。
@@ -64,6 +65,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateScreenSpaceReflectionDenoisedColorDescriptor(Camera camera)
+        {
+            return CreateScreenSpaceReflectionColorDescriptor(camera);
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceReflectionTemporalColorDescriptor(Camera camera)
+        {
+            var descriptor = CreateScreenSpaceReflectionColorDescriptor(camera);
+            descriptor.useMipMap = true;
+            descriptor.autoGenerateMips = false;
+            descriptor.mipCount = CalculateMipCount(descriptor.width, descriptor.height);
+            return descriptor;
+        }
+
         public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
         {
             return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32); // GBuffer0 第一版保存 baseColor.rgb 和 occlusion.a，普通 8 位通道足够起步。
@@ -118,7 +133,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 }
             }
 
-            var descriptor = new RenderTextureDescriptor(width, height, RenderTextureFormat.Depth, 32); // 创建深度专用 RT 描述，32 位深度让深度测试更稳定。
+            var descriptor = new RenderTextureDescriptor(width, height, RenderTextureFormat.Depth, 24); // 创建 depth/stencil RT 描述；24 位深度换取 8 位 stencil，供 Deferred lighting pass 过滤 shading model。
+            descriptor.depthStencilFormat = SelectCameraDepthStencilFormat(); // 明确请求 stencil attachment，让 GBuffer 写入、Deferred Lighting 硬件测试使用同一份 CameraDepth。
 
             descriptor.msaaSamples = 1; // 当前阶段先关闭 MSAA，避免深度 RT 和相机颜色目标采样数不匹配。
 
@@ -127,6 +143,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.autoGenerateMips = false; // 深度缓冲不生成 mipmap，避免 Unity 做额外工作。
 
             return descriptor; // 返回创建好的深度 RT 描述，供分配 Pass 使用。
+        }
+
+        private static GraphicsFormat SelectCameraDepthStencilFormat()
+        {
+            // Prefer D24S8 because it is broadly supported and still provides enough precision for the current deferred path.
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.D24_UNorm_S8_UInt, FormatUsage.Render))
+            {
+                return GraphicsFormat.D24_UNorm_S8_UInt;
+            }
+
+            // Fallback for platforms that expose only 32-bit float depth with stencil.
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.D32_SFloat_S8_UInt, FormatUsage.Render))
+            {
+                return GraphicsFormat.D32_SFloat_S8_UInt;
+            }
+
+            return GraphicsFormat.D24_UNorm_S8_UInt;
         }
 
         public static RenderTextureDescriptor CreateHiZDepthDescriptor(Camera camera)
@@ -181,7 +214,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 resolution = Mathf.Max(1, shadowData.MainLightShadowResolution); // 读取主光阴影分辨率，并强制最小为 1。
             }
 
-            var descriptor = new RenderTextureDescriptor(resolution, resolution, RenderTextureFormat.Shadowmap, 32); // 创建 Shadowmap 格式的深度纹理描述，供主光阴影 Pass 写入深度。
+            var depthFormat = GraphicsFormatUtility.GetDepthStencilFormat(32, 0);
+            var descriptor = new RenderTextureDescriptor(resolution, resolution, GraphicsFormat.None, depthFormat);
+            descriptor.shadowSamplingMode = SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES2 ? ShadowSamplingMode.CompareDepths : ShadowSamplingMode.None; // 创建 Shadowmap 格式的深度纹理描述，供主光阴影 Pass 写入深度。
 
             descriptor.msaaSamples = 1; // 阴影图不使用 MSAA，保证后续深度采样和比较逻辑简单稳定。
 

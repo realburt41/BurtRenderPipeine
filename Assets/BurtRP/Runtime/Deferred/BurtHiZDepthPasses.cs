@@ -280,5 +280,25 @@ namespace Burt.RenderPipeline
             var request = context != null ? context.Request : null;
             return request != null ? request.Camera : null;
         }
+
+        public static bool ShouldUseHiZDepth(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (request == null || !request.IsValid || asset == null)
+            {
+                return false;
+            }
+
+            if (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection)
+            {
+                return false;
+            }
+
+            if (asset.RendererMode != BurtRendererMode.Deferred)
+            {
+                return false;
+            }
+
+            return BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflections(request, asset) || BurtDebugHiZDepthPass.ShouldUseHiZDebugView(asset);
+        }
     }
 }

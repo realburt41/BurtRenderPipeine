@@ -127,7 +127,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
 
         public bool EnableFrameworkDebugLog => enableFrameworkDebugLog; // 暴露日志开关，Pass 执行时会先检查它再打印诊断信息。
 
-        public bool ShouldRunNoOpCopy => enablePostProcessing && enableNoOpCopy; // Asset 只决定是否允许无效果验证链路，正式效果是否运行由 Volume 决定。
+        public bool ShouldRunNoOpCopy => enablePostProcessing && enableNoOpCopy; // ??? No-op Copy ?????? No-op ????????????
 
         public BurtPostProcessSettings() // 定义 Unity 序列化需要的默认构造函数。
         {

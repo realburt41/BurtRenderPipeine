@@ -64,10 +64,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
             {
                 case BurtShadingDebugMode.GBufferBaseColor: // Overlay 选择 GBuffer Base Color 时。
                     return BurtGBufferDebugViewMode.BaseColor; // 显示真实 GBuffer0 解码后的 baseColor。
-                case BurtShadingDebugMode.GBufferNormalWS: // Overlay 选择 GBuffer Normal WS 时。
-                    return BurtGBufferDebugViewMode.NormalWS; // 显示真实 GBuffer1 解码后的世界空间法线。
-                case BurtShadingDebugMode.GBufferMetallic: // Overlay 选择 GBuffer Metallic 时。
-                    return BurtGBufferDebugViewMode.Metallic; // 显示真实 GBuffer1.b 的金属度。
+                case BurtShadingDebugMode.GBufferNormalWS: // Overlay 选择 GBuffer Direction WS 时。
+                    return BurtGBufferDebugViewMode.NormalWS; // 显示真实 GBuffer1 解码后的向量槽。
+                case BurtShadingDebugMode.GBufferMetallic: // Overlay 选择 GBuffer Material Channel 时。
+                    return BurtGBufferDebugViewMode.Metallic; // 显示真实 GBuffer1.b 的材质通道。
                 case BurtShadingDebugMode.GBufferSmoothness: // Overlay 选择 GBuffer Smoothness 时。
                     return BurtGBufferDebugViewMode.Smoothness; // 显示真实 GBuffer1.a 的光滑度。
                 case BurtShadingDebugMode.GBufferOcclusion: // Overlay 选择 GBuffer Occlusion 时。
@@ -78,6 +78,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                     return BurtGBufferDebugViewMode.Roughness; // 显示从真实 GBuffer smoothness 还原出的 perceptual roughness。
                 case BurtShadingDebugMode.GBufferDiffuseColor: // Overlay 选择 GBuffer Diffuse Color 时。
                     return BurtGBufferDebugViewMode.DiffuseColor; // 显示从真实 GBuffer 重建 PBRMaterialData 后的 diffuseColor。
+                case BurtShadingDebugMode.GBufferHairStrandDirection: // Overlay 选择 Hair strand direction 时。
+                    return BurtGBufferDebugViewMode.HairStrandDirection; // 显示 Hair 复用 GBuffer1.rg 存储的 strand direction。
+                case BurtShadingDebugMode.GBufferHairScatter: // Overlay 选择 Hair scatter 时。
+                    return BurtGBufferDebugViewMode.HairScatter; // 显示 Hair 复用 GBuffer1.b material channel 存储的 scatter。
                 default: // 其他 Shading Debug 模式不是全屏 GBuffer 数据源。
                     return BurtGBufferDebugViewMode.Disabled; // 返回 Disabled，让 Deferred 正常渲染或交给其他 Debug Pass。
             }

@@ -45,51 +45,54 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             BurtPostProcessUtility.UpdateVolumeStack(request, asset); // 每个 request 渲染前刷新 VolumeStack，让后处理 Pass 能读取当前 Global Volume 参数。
 
-            var originalProjectionMatrix = request.Camera.projectionMatrix;
-            var originalNonJitteredProjectionMatrix = request.Camera.nonJitteredProjectionMatrix;
             var temporalAA = BurtTemporalAAUtility.PrepareRequest(request, asset);
             request.SetTemporalAA(temporalAA);
-            if (temporalAA.Enabled)
+
+            try
             {
-                request.Camera.nonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
-                request.Camera.projectionMatrix = temporalAA.JitteredProjectionMatrix;
-            }
-
-            context.SetupCameraProperties(request.Camera); // 设置当前相机的矩阵、裁剪参数和 Unity 内置 shader 变量。
-
-            BurtShadingDebugSettings.ApplyGlobalShaderProperties(); // 每个相机渲染前刷新 Shading Debug 全局参数，避免编辑器切换或域重载后 shader 读到旧值。
-
-            renderGraph.Clear(); // 清空上一次 request 留下的 Pass 和资源，准备组装当前 request 的图。
-
-            renderGraph.ImportRequestResources(request, asset); // 把 request 的基础渲染目标导入 RenderGraph 资源表，并让资源注册使用当前管线资产配置。
-
-            request.GraphAssembler.Assemble(renderGraph, request, asset, safeRenderOptions); // 让当前 request 指定的 Assembler 按栈级 RT 选项把 Pass 添加到 RenderGraph。
-
-            var graphContext = new BurtRenderGraphContext(context, request, asset, renderGraph.Resources, safeRenderOptions); // 创建 RenderGraph 执行上下文，并把资源表与执行选项传给每个 Pass。
-
-            renderGraph.Execute(graphContext); // 执行 RenderGraph 里已经组装好的所有 Pass。
-
-            if (ShouldCaptureRenderGraphDebug(request, asset)) // 如果资产开启了常驻捕获，或用户点击了匹配当前 request 的下一帧复制按钮，就生成一份 RenderGraph Debug 文本。
-            {
-                var renderGraphDebugDump = renderGraph.DumpDebugInfo(request, asset, safeRenderOptions); // 生成完整 RenderGraph Debug 文本，包含 Pass 顺序、资源读写关系、RT 生命周期和当前管线调试状态。
-
-                BurtRenderGraphDebugClipboardUtility.StoreLatestDump(request, renderGraphDebugDump); // 缓存最近一次 dump，Inspector 按钮可以直接复制到剪切板。
-
-                if (BurtRenderGraphDebugClipboardUtility.ConsumeCopyNextDumpRequest(request)) // 如果用户点击过“下一帧复制”且当前 request 命中过滤条件，就在本次 dump 生成后立刻消费请求。
+                if (temporalAA.Enabled)
                 {
-                    BurtRenderGraphDebugClipboardUtility.CopyLatestDumpToClipboardAndLog(request.Type); // 把刚生成的目标类型 dump 写进剪切板，并输出一条短确认日志。
+                    request.Camera.nonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
+                    request.Camera.projectionMatrix = temporalAA.JitteredProjectionMatrix;
                 }
 
-                if (asset != null && asset.EnableRenderGraphDebugConsoleLog) // 只有显式打开 Console Log 时，才继续把完整长文本打印到 Console。
+                context.SetupCameraProperties(request.Camera); // 设置当前相机的矩阵、裁剪参数和 Unity 内置 shader 变量。
+
+                BurtShadingDebugSettings.ApplyGlobalShaderProperties(); // 每个相机渲染前刷新 Shading Debug 全局参数，避免编辑器切换或域重载后 shader 读到旧值。
+
+                renderGraph.Clear(); // 清空上一次 request 留下的 Pass 和资源，准备组装当前 request 的图。
+
+                renderGraph.ImportRequestResources(request, asset); // 把 request 的基础渲染目标导入 RenderGraph 资源表，并让资源注册使用当前管线资产配置。
+
+                request.GraphAssembler.Assemble(renderGraph, request, asset, safeRenderOptions); // 让当前 request 指定的 Assembler 按栈级 RT 选项把 Pass 添加到 RenderGraph。
+
+                var graphContext = new BurtRenderGraphContext(context, request, asset, renderGraph.Resources, safeRenderOptions); // 创建 RenderGraph 执行上下文，并把资源表与执行选项传给每个 Pass。
+
+                renderGraph.Execute(graphContext); // 执行 RenderGraph 里已经组装好的所有 Pass。
+
+                if (ShouldCaptureRenderGraphDebug(request, asset)) // 如果资产开启了常驻捕获，或用户点击了匹配当前 request 的下一帧复制按钮，就生成一份 RenderGraph Debug 文本。
                 {
-                    Debug.Log(renderGraphDebugDump); // 输出完整 RenderGraph Debug 文本；默认关闭，避免每帧刷屏。
+                    var renderGraphDebugDump = renderGraph.DumpDebugInfo(request, asset, safeRenderOptions); // 生成完整 RenderGraph Debug 文本，包含 Pass 顺序、资源读写关系、RT 生命周期和当前管线调试状态。
+
+                    BurtRenderGraphDebugClipboardUtility.StoreLatestDump(request, renderGraphDebugDump); // 缓存最近一次 dump，Inspector 按钮可以直接复制到剪切板。
+
+                    if (BurtRenderGraphDebugClipboardUtility.ConsumeCopyNextDumpRequest(request)) // 如果用户点击过“下一帧复制”且当前 request 命中过滤条件，就在本次 dump 生成后立刻消费请求。
+                    {
+                        BurtRenderGraphDebugClipboardUtility.CopyLatestDumpToClipboardAndLog(request.Type); // 把刚生成的目标类型 dump 写进剪切板，并输出一条短确认日志。
+                    }
+
+                    if (asset != null && asset.EnableRenderGraphDebugConsoleLog) // 只有显式打开 Console Log 时，才继续把完整长文本打印到 Console。
+                    {
+                        Debug.Log(renderGraphDebugDump); // 输出完整 RenderGraph Debug 文本；默认关闭，避免每帧刷屏。
+                    }
                 }
             }
-
-            if (temporalAA.Enabled)
+            finally
             {
-                request.Camera.projectionMatrix = originalProjectionMatrix;
-                request.Camera.nonJitteredProjectionMatrix = originalNonJitteredProjectionMatrix;
+                if (temporalAA.Enabled)
+                {
+                    BurtTemporalAAUtility.RestoreCameraProjectionAfterJitter(request.Camera);
+                }
             }
 
             BurtTemporalAAUtility.CommitRequest(request);

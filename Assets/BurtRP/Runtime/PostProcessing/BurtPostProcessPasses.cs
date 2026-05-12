@@ -54,6 +54,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
     internal sealed class BurtPostProcessPass : BurtRenderPass // 定义第一版正式后处理 Pass，支持 No-op Copy、Tonemapping 和 Color Adjustments。
     {
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy"; // 定义后处理 shader 的查找名称，必须和 shader 文件里的 Shader 名称一致。
+        private const string TemporalAAMotionVectorShaderName = "Hidden/BurtRP/TemporalAAMotionVectors";
 
         private const int MaxBloomMipCount = 8; // 第一版 Bloom 最多申请 8 级临时 RT，避免动态 RenderGraph 资源注册过重。
 
@@ -64,11 +65,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int BloomTextureId = Shader.PropertyToID("_BurtBloomTexture"); // 缓存 Bloom 合成纹理属性 ID，最终合成时采样 mip0。
 
         private static readonly int TemporalAAHistoryTextureId = Shader.PropertyToID("_BurtTAAHistoryTexture");
+        private static readonly int TemporalAADepthHistoryTextureId = Shader.PropertyToID("_BurtTAADepthHistoryTexture");
+        private static readonly int TemporalAAHistoryConfidenceTextureId = Shader.PropertyToID("_BurtTAAHistoryConfidenceTexture");
+        private static readonly int TemporalAAAntiFlickerHistoryTextureId = Shader.PropertyToID("_BurtTAAAntiFlickerHistoryTexture");
+        private static readonly int TemporalAACurrentDepthTextureId = Shader.PropertyToID("_BurtTAACurrentDepthTexture");
+        private static readonly int TemporalAARawVelocityTextureId = Shader.PropertyToID("_BurtTAARawVelocityTexture");
+        private static readonly int TemporalAAVelocityTextureId = Shader.PropertyToID("_BurtTAAVelocityTexture");
+        private static readonly int TemporalAADilatedVelocityTextureId = Shader.PropertyToID("_BurtTAADilatedVelocityTexture");
+        private static readonly int TemporalAAParallaxRejectionTextureId = Shader.PropertyToID("_BurtTAAParallaxRejectionTexture");
+        private static readonly int TemporalAAConfidenceTextureId = Shader.PropertyToID("_BurtTAAConfidenceTexture");
+        private static readonly int TemporalAAAntiFlickerTextureId = Shader.PropertyToID("_BurtTAAAntiFlickerTexture");
+        private static readonly int TemporalAADebugTextureId = Shader.PropertyToID("_BurtTAADebugTexture");
         private static readonly int TemporalAAPreviousViewProjectionId = Shader.PropertyToID("_BurtTAAPreviousViewProjection");
+        private static readonly int TemporalAAPreviousNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAAPreviousNonJitteredViewProjection");
+        private static readonly int TemporalAACurrentViewProjectionId = Shader.PropertyToID("_BurtTAACurrentViewProjection");
+        private static readonly int TemporalAACurrentNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAACurrentNonJitteredViewProjection");
         private static readonly int TemporalAAInverseCurrentViewProjectionId = Shader.PropertyToID("_BurtTAAInverseCurrentViewProjection");
         private static readonly int TemporalAATexelSizeId = Shader.PropertyToID("_BurtTAATexelSize");
         private static readonly int TemporalAAParamsId = Shader.PropertyToID("_BurtTAAParams");
+        private static readonly int TemporalAAParams2Id = Shader.PropertyToID("_BurtTAAParams2");
+        private static readonly int TemporalAARejectionParamsId = Shader.PropertyToID("_BurtTAARejectionParams");
+        private static readonly int TemporalAAFeedbackParamsId = Shader.PropertyToID("_BurtTAAFeedbackParams");
+        private static readonly int TemporalAAXRenderParamsId = Shader.PropertyToID("_BurtTAAXRenderParams");
+        private static readonly int TemporalAAResponsiveParamsId = Shader.PropertyToID("_BurtTAAResponsiveParams");
+        private static readonly int TemporalAAEdgeParamsId = Shader.PropertyToID("_BurtTAAEdgeParams");
+        private static readonly int TemporalAACurrentSampleWeights0Id = Shader.PropertyToID("_BurtTAACurrentSampleWeights0");
+        private static readonly int TemporalAACurrentSampleWeights1Id = Shader.PropertyToID("_BurtTAACurrentSampleWeights1");
+        private static readonly int TemporalAACurrentSampleWeights2Id = Shader.PropertyToID("_BurtTAACurrentSampleWeights2");
+        private static readonly int TemporalAAHasGBufferId = Shader.PropertyToID("_BurtTAAHasGBuffer");
         private static readonly int ShadingDebugEnabledId = Shader.PropertyToID(BurtShadingDebugSettings.EnabledShaderName);
+        private static readonly Color TemporalAADebugUnavailableColor = new Color(0.65f, 0.05f, 0.9f, 1f);
 
         private static readonly int UseBloomId = Shader.PropertyToID("_BurtUseBloom"); // 缓存 Bloom 合成开关属性 ID。
 
@@ -102,6 +128,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static readonly Vector4[] BloomGaussianOffsets = new Vector4[MaxBloomGaussianSamples]; // Reused upload buffer for Gaussian offsets.
 
+        private static readonly Vector2Int[] TemporalAACurrentSampleOffsets =
+        {
+            new Vector2Int(0, 0),
+            new Vector2Int(0, 1),
+            new Vector2Int(1, 0),
+            new Vector2Int(-1, 0),
+            new Vector2Int(0, -1),
+            new Vector2Int(-1, 1),
+            new Vector2Int(1, -1),
+            new Vector2Int(1, 1),
+            new Vector2Int(-1, -1)
+        };
+
+        private static readonly float[] TemporalAACurrentSampleWeights = new float[9];
+
         private static readonly int TonemappingModeId = Shader.PropertyToID("_BurtTonemappingMode"); // 缓存 Tonemapping 模式属性 ID，避免每帧通过字符串查找。
 
         private static readonly int PostExposureId = Shader.PropertyToID("_BurtPostExposure"); // 缓存后处理曝光倍率属性 ID，避免每帧通过字符串查找。
@@ -132,7 +173,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static readonly int ColorAdjustmentsColorFilterId = Shader.PropertyToID("_BurtColorAdjustmentsColorFilter"); // 缓存颜色滤镜属性 ID，避免每帧通过字符串查找。
 
-        private Material postProcessMaterial; // 缓存运行时后处理材质，避免每帧重复创建 Material。
+        private Material postProcessMaterial;
+        private Material temporalAAMotionVectorMaterial; // 缓存运行时后处理材质，避免每帧重复创建 Material。
 
         private bool hasLoggedMissingShader; // 记录缺失 shader 警告是否已经输出，避免 Console 每帧刷屏。
 
@@ -147,6 +189,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             builder.ReadCameraColor(); // 声明先读取场景渲染完成后的 CameraColor。
             builder.ReadCameraDepth(); // TAA resolve reads depth when enabled; non-TAA paths ignore it.
+            if (BurtPostProcessUtility.ShouldUseTemporalAA(builder.Request, builder.Asset) &&
+                builder.ResourceRegistry != null &&
+                builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.GBuffer1Name))
+            {
+                builder.ReadGBuffer1();
+            }
 
             builder.WritePostProcessColor(); // 声明第一段拷贝会写入 PostProcessColor。
 
@@ -196,18 +244,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var colorAdjustmentsSettings = BurtPostProcessUtility.ResolveColorAdjustmentsSettings(context.Asset); // 从 Global Volume 读取基础颜色调整参数，缺失时回退到中性值。
 
             var temporalAA = context.Request.TemporalAA ?? BurtTemporalAARequestState.Disabled;
+            var temporalAADebugRequested = BurtPostProcessUtility.IsTemporalAADebugRequested();
             var useTemporalAA = temporalAA.Enabled;
-            var useTemporalAADebug = useTemporalAA && BurtTemporalAAUtility.IsTemporalAADebugMode(BurtShadingDebugSettings.Mode);
+            var useTemporalAADebug = useTemporalAA && temporalAADebugRequested;
 
             var bloomSettings = BurtPostProcessUtility.ResolveBloomSettings(context.Asset); // 从 Global Volume 读取 Bloom 参数，未启用时回退到关闭状态。
 
             var bloomMipCount = BurtPostProcessUtility.CalculateBloomMipCount(context.Request.Camera, bloomSettings); // 按当前相机尺寸和 Volume 上限计算实际 mip 数。
 
             var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取 CommandBuffer，并用 Pass 名称命名。
+            if (temporalAADebugRequested && !useTemporalAA)
+            {
+                ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
+                renderContext.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+                BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments, bloomSettings, 0);
+                return;
+            }
+
 
             if (useTemporalAA)
             {
-                ExecuteTemporalAA(cmd, context.Request.Camera, cameraColorTarget, context.CameraDepthTarget, postProcessColorTarget, material, temporalAA, useTemporalAADebug);
+                ExecuteTemporalAA(context, cmd, context.Request.Camera, cameraColorTarget, context.CameraDepthTarget, postProcessColorTarget, material, GetTemporalAAMotionVectorMaterial(), temporalAA, useTemporalAADebug);
             }
 
             if (useTemporalAADebug)
@@ -290,76 +348,281 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments, bloomSettings, bloomMipCount); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
         }
 
+        private static void ExecuteTemporalAADebugUnavailable(CommandBuffer cmd, Camera camera, BurtRenderTargetHandle cameraColorTarget)
+        {
+            if (cmd == null || camera == null || !cameraColorTarget.IsValid)
+            {
+                return;
+            }
+
+            cmd.SetRenderTarget(cameraColorTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.ClearRenderTarget(false, true, TemporalAADebugUnavailableColor);
+        }
+
         private static void ExecuteTemporalAA(
+            BurtRenderGraphContext context,
             CommandBuffer cmd,
             Camera camera,
             BurtRenderTargetHandle cameraColorTarget,
             BurtRenderTargetHandle cameraDepthTarget,
             BurtRenderTargetHandle postProcessColorTarget,
             Material material,
+            Material motionVectorMaterial,
             BurtTemporalAARequestState temporalAA,
             bool useTemporalAADebug)
         {
-            if (camera == null || !cameraDepthTarget.IsValid || temporalAA == null || !temporalAA.Enabled)
+            if (context == null || camera == null || !cameraDepthTarget.IsValid || temporalAA == null || !temporalAA.Enabled)
             {
                 BurtTemporalAAUtility.InvalidateHistory(camera);
                 return;
             }
 
-            var history = BurtTemporalAAUtility.EnsureHistoryTexture(camera, out var historyValid);
+            var histories = BurtTemporalAAUtility.EnsureHistoryTextures(camera, out var historyValid);
             temporalAA.HistoryValid = historyValid;
-            if (history == null)
+            if (histories.Color == null || histories.Depth == null || histories.Confidence == null || histories.AntiFlicker == null)
             {
                 return;
             }
 
-            var width = Mathf.Max(1, history.width);
-            var height = Mathf.Max(1, history.height);
-            cmd.SetRenderTarget(postProcessColorTarget.Identifier);
-            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier);
-            cmd.SetGlobalTexture(TemporalAAHistoryTextureId, historyValid ? history : cameraColorTarget.Identifier);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
-            cmd.SetGlobalMatrix(TemporalAAPreviousViewProjectionId, temporalAA.PreviousViewProjectionMatrix);
-            cmd.SetGlobalMatrix(TemporalAAInverseCurrentViewProjectionId, temporalAA.InverseCurrentViewProjectionMatrix);
-            cmd.SetGlobalVector(TemporalAATexelSizeId, new Vector4(1f / width, 1f / height, width, height));
-            cmd.SetGlobalVector(TemporalAAParamsId, new Vector4(temporalAA.Settings.Feedback, temporalAA.Settings.ClampStrength, historyValid ? 1f : 0f, 0f));
+            var width = Mathf.Max(1, histories.Color.width);
+            var height = Mathf.Max(1, histories.Color.height);
+            var colorDescriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            colorDescriptor.depthBufferBits = 0;
+            colorDescriptor.msaaSamples = 1;
+            colorDescriptor.useMipMap = false;
+            colorDescriptor.autoGenerateMips = false;
+
+            var scalarDescriptor = colorDescriptor;
+            scalarDescriptor.colorFormat = RenderTextureFormat.RFloat;
+            scalarDescriptor.sRGB = false;
+
+            var velocityDescriptor = colorDescriptor;
+            velocityDescriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            velocityDescriptor.sRGB = false;
+
+            var antiFlickerDescriptor = colorDescriptor;
+            antiFlickerDescriptor.colorFormat = RenderTextureFormat.RGHalf;
+            antiFlickerDescriptor.sRGB = false;
+
+            cmd.GetTemporaryRT(TemporalAACurrentDepthTextureId, scalarDescriptor, FilterMode.Point);
+            cmd.GetTemporaryRT(TemporalAAVelocityTextureId, velocityDescriptor, FilterMode.Point);
+            cmd.GetTemporaryRT(TemporalAADilatedVelocityTextureId, velocityDescriptor, FilterMode.Point);
+            cmd.GetTemporaryRT(TemporalAAParallaxRejectionTextureId, scalarDescriptor, FilterMode.Bilinear);
+            cmd.GetTemporaryRT(TemporalAAConfidenceTextureId, scalarDescriptor, FilterMode.Bilinear);
+            cmd.GetTemporaryRT(TemporalAAAntiFlickerTextureId, antiFlickerDescriptor, FilterMode.Point);
             if (useTemporalAADebug)
             {
+                cmd.GetTemporaryRT(TemporalAADebugTextureId, colorDescriptor, FilterMode.Bilinear);
+            }
+
+            var currentDepth = new RenderTargetIdentifier(TemporalAACurrentDepthTextureId);
+            var velocity = new RenderTargetIdentifier(TemporalAAVelocityTextureId);
+            var dilatedVelocity = new RenderTargetIdentifier(TemporalAADilatedVelocityTextureId);
+            var parallaxRejection = new RenderTargetIdentifier(TemporalAAParallaxRejectionTextureId);
+            var confidence = new RenderTargetIdentifier(TemporalAAConfidenceTextureId);
+            var antiFlicker = new RenderTargetIdentifier(TemporalAAAntiFlickerTextureId);
+            var debugTarget = new RenderTargetIdentifier(TemporalAADebugTextureId);
+
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
+            SetTemporalAAGlobals(cmd, temporalAA, width, height, historyValid);
+
+            cmd.SetRenderTarget(currentDepth);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 5, MeshTopology.Triangles, 3, 1);
+
+            cmd.SetRenderTarget(velocity);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 6, MeshTopology.Triangles, 3, 1);
+
+            var drewObjectMotionVectors = DrawTemporalAAObjectMotionVectors(context, cmd, camera, velocity, cameraDepthTarget, motionVectorMaterial);
+            temporalAA.ObjectMotionVectorPassDrawn = drewObjectMotionVectors;
+            temporalAA.VelocityMode = drewObjectMotionVectors ? BurtTemporalAAVelocityMode.CameraAndObject : BurtTemporalAAVelocityMode.CameraOnly;
+
+            cmd.SetRenderTarget(dilatedVelocity);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.SetGlobalTexture(TemporalAAVelocityTextureId, velocity);
+            cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 7, MeshTopology.Triangles, 3, 1);
+
+            var blackTexture = new RenderTargetIdentifier(Texture2D.blackTexture);
+            cmd.SetRenderTarget(parallaxRejection);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
+            cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
+            cmd.SetGlobalTexture(TemporalAADepthHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth);
+            cmd.SetGlobalTexture(TemporalAAHistoryConfidenceTextureId, historyValid ? new RenderTargetIdentifier(histories.Confidence) : blackTexture);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 8, MeshTopology.Triangles, 3, 1);
+
+            var hasGBuffer1 = context.GBuffer1Target.IsValid;
+            cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier);
+            cmd.SetGlobalTexture(TemporalAAHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.Color) : cameraColorTarget.Identifier);
+            cmd.SetGlobalTexture(TemporalAADepthHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth);
+            cmd.SetGlobalTexture(TemporalAAHistoryConfidenceTextureId, historyValid ? new RenderTargetIdentifier(histories.Confidence) : blackTexture);
+            cmd.SetGlobalTexture(TemporalAAAntiFlickerHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.AntiFlicker) : blackTexture);
+            cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
+            cmd.SetGlobalTexture(TemporalAARawVelocityTextureId, velocity);
+            cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
+            cmd.SetGlobalTexture(TemporalAAParallaxRejectionTextureId, parallaxRejection);
+            cmd.SetGlobalFloat(TemporalAAHasGBufferId, hasGBuffer1 ? 1f : 0f);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.GBuffer1Id, hasGBuffer1 ? context.GBuffer1Target.Identifier : blackTexture);
+            cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
+
+            cmd.SetRenderTarget(postProcessColorTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 4, MeshTopology.Triangles, 3, 1);
+
+            cmd.SetRenderTarget(confidence);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 9, MeshTopology.Triangles, 3, 1);
+            cmd.SetGlobalTexture(TemporalAAConfidenceTextureId, confidence);
+
+            cmd.SetRenderTarget(antiFlicker);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 10, MeshTopology.Triangles, 3, 1);
+            cmd.SetGlobalTexture(TemporalAAAntiFlickerTextureId, antiFlicker);
+
+            if (useTemporalAADebug)
+            {
+                cmd.SetRenderTarget(debugTarget);
+                BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+                cmd.SetGlobalFloat(ShadingDebugEnabledId, 1f);
+                cmd.DrawProcedural(Matrix4x4.identity, material, 4, MeshTopology.Triangles, 3, 1);
                 cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
             }
 
-            cmd.DrawProcedural(Matrix4x4.identity, material, 4, MeshTopology.Triangles, 3, 1);
-
-            cmd.SetRenderTarget(history);
-            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             DisablePostProcessEffects(cmd);
+            cmd.SetRenderTarget(histories.Confidence);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
+            cmd.SetGlobalTexture(SourceTextureId, confidence);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
+
+            cmd.SetRenderTarget(histories.Depth);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
+            cmd.SetGlobalTexture(SourceTextureId, currentDepth);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
+
+            cmd.SetRenderTarget(histories.AntiFlicker);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
+            cmd.SetGlobalTexture(SourceTextureId, antiFlicker);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
+
+            cmd.SetRenderTarget(histories.Color);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.SetGlobalTexture(SourceTextureId, postProcessColorTarget.Identifier);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
             BurtTemporalAAUtility.MarkHistoryValid(camera);
-
-            if (useTemporalAADebug)
-            {
-                cmd.SetRenderTarget(postProcessColorTarget.Identifier);
-                BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-                cmd.SetGlobalFloat(ShadingDebugEnabledId, 1f);
-                cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier);
-                cmd.DrawProcedural(Matrix4x4.identity, material, 4, MeshTopology.Triangles, 3, 1);
-
-                cmd.SetRenderTarget(cameraColorTarget.Identifier);
-                BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-                DisablePostProcessEffects(cmd);
-                cmd.SetGlobalTexture(SourceTextureId, postProcessColorTarget.Identifier);
-                cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
-                cmd.SetGlobalFloat(ShadingDebugEnabledId, BurtShadingDebugSettings.IsDebugging ? 1f : 0f);
-                return;
-            }
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             DisablePostProcessEffects(cmd);
-            cmd.SetGlobalTexture(SourceTextureId, postProcessColorTarget.Identifier);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
+            cmd.SetGlobalTexture(SourceTextureId, useTemporalAADebug ? debugTarget : postProcessColorTarget.Identifier);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
+            cmd.SetGlobalFloat(ShadingDebugEnabledId, BurtShadingDebugSettings.IsDebugging ? 1f : 0f);
+
+            if (useTemporalAADebug)
+            {
+                cmd.ReleaseTemporaryRT(TemporalAADebugTextureId);
+            }
+
+            cmd.ReleaseTemporaryRT(TemporalAAConfidenceTextureId);
+            cmd.ReleaseTemporaryRT(TemporalAAAntiFlickerTextureId);
+            cmd.ReleaseTemporaryRT(TemporalAAParallaxRejectionTextureId);
+            cmd.ReleaseTemporaryRT(TemporalAADilatedVelocityTextureId);
+            cmd.ReleaseTemporaryRT(TemporalAAVelocityTextureId);
+            cmd.ReleaseTemporaryRT(TemporalAACurrentDepthTextureId);
+        }
+
+        private static void SetTemporalAAGlobals(CommandBuffer cmd, BurtTemporalAARequestState temporalAA, int width, int height, bool historyValid)
+        {
+            cmd.SetGlobalMatrix(TemporalAAPreviousViewProjectionId, temporalAA.PreviousViewProjectionMatrix);
+            cmd.SetGlobalMatrix(TemporalAAPreviousNonJitteredViewProjectionId, temporalAA.PreviousNonJitteredViewProjectionMatrix);
+            cmd.SetGlobalMatrix(TemporalAACurrentViewProjectionId, temporalAA.CurrentViewProjectionMatrix);
+            cmd.SetGlobalMatrix(TemporalAACurrentNonJitteredViewProjectionId, temporalAA.CurrentNonJitteredViewProjectionMatrix);
+            cmd.SetGlobalMatrix(TemporalAAInverseCurrentViewProjectionId, temporalAA.InverseCurrentViewProjectionMatrix);
+            cmd.SetGlobalVector(TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
+            cmd.SetGlobalVector(TemporalAAParamsId, new Vector4(temporalAA.Settings.Feedback, temporalAA.Settings.ClampStrength, historyValid ? 1f : 0f, temporalAA.FrameIndex));
+            cmd.SetGlobalVector(TemporalAAParams2Id, new Vector4(temporalAA.Settings.Sharpness, temporalAA.Settings.JitterScale, temporalAA.Settings.StaticEdgeRelaxation, temporalAA.Settings.BaseBlendFactor));
+            cmd.SetGlobalVector(TemporalAARejectionParamsId, new Vector4(temporalAA.Settings.LumaRejectionStrength, temporalAA.Settings.ClipRejectionStrength, temporalAA.Settings.DepthRejectionStrength, temporalAA.Settings.MotionRejectionStart));
+            cmd.SetGlobalVector(TemporalAAFeedbackParamsId, new Vector4(temporalAA.Settings.MotionRejectionRange, temporalAA.Settings.HistoryConfidenceWeight, temporalAA.Settings.HistoryConfidenceBoost, temporalAA.Settings.ConfidenceGrowth));
+            cmd.SetGlobalVector(TemporalAAResponsiveParamsId, new Vector4(temporalAA.Settings.ResponsiveRejectionStrength, temporalAA.Settings.UntrustedMotionFeedbackScale, temporalAA.Settings.DisocclusionFeedbackScale, 0f));
+            cmd.SetGlobalVector(TemporalAAEdgeParamsId, new Vector4(temporalAA.Settings.MotionEdgeResponsiveStrength, temporalAA.Settings.DepthEdgeResponsiveStrength, temporalAA.Settings.HistoryClampTightness, temporalAA.Settings.DepthWeightedFilterFloor));
+            SetTemporalAAXRenderGlobals(cmd, temporalAA);
+        }
+
+        private static void SetTemporalAAXRenderGlobals(CommandBuffer cmd, BurtTemporalAARequestState temporalAA)
+        {
+            var antiFlicker = Mathf.Lerp(0f, 3.5f, Mathf.Clamp01(temporalAA.Settings.AntiFlickering));
+            var contrastLimit = 0.7f - Mathf.Lerp(0f, 0.3f, Mathf.SmoothStep(0.5f, 1f, temporalAA.Settings.AntiFlickering));
+            var historyContrastBlend = Mathf.Clamp01((temporalAA.Settings.AntiFlickering - 0.51f) / (1f - 0.51f));
+            var motionRejection = Mathf.Clamp01(temporalAA.Settings.MotionVectorRejection);
+            var motionRejectionMultiplier = Mathf.Lerp(0f, 250.5f, motionRejection * motionRejection * motionRejection);
+            cmd.SetGlobalVector(TemporalAAXRenderParamsId, new Vector4(antiFlicker, contrastLimit, historyContrastBlend, motionRejectionMultiplier));
+
+            ComputeTemporalAACurrentSampleWeights(temporalAA.JitterPixels, out var weights0, out var weights1, out var weights2);
+            cmd.SetGlobalVector(TemporalAACurrentSampleWeights0Id, weights0);
+            cmd.SetGlobalVector(TemporalAACurrentSampleWeights1Id, weights1);
+            cmd.SetGlobalVector(TemporalAACurrentSampleWeights2Id, weights2);
+        }
+
+        private static void ComputeTemporalAACurrentSampleWeights(Vector2 jitterPixels, out Vector4 weights0, out Vector4 weights1, out Vector4 weights2)
+        {
+            var totalWeight = 0f;
+            for (var i = 0; i < TemporalAACurrentSampleWeights.Length; i++)
+            {
+                var x = TemporalAACurrentSampleOffsets[i].x + jitterPixels.x;
+                var y = TemporalAACurrentSampleOffsets[i].y + jitterPixels.y;
+                var weight = Mathf.Exp((-0.5f / 0.22f) * (x * x + y * y));
+                TemporalAACurrentSampleWeights[i] = weight;
+                totalWeight += weight;
+            }
+
+            var inverseTotalWeight = 1f / Mathf.Max(totalWeight, 0.00001f);
+            for (var i = 0; i < TemporalAACurrentSampleWeights.Length; i++)
+            {
+                TemporalAACurrentSampleWeights[i] *= inverseTotalWeight;
+            }
+
+            weights0 = new Vector4(TemporalAACurrentSampleWeights[0], TemporalAACurrentSampleWeights[1], TemporalAACurrentSampleWeights[2], TemporalAACurrentSampleWeights[3]);
+            weights1 = new Vector4(TemporalAACurrentSampleWeights[4], TemporalAACurrentSampleWeights[5], TemporalAACurrentSampleWeights[6], TemporalAACurrentSampleWeights[7]);
+            weights2 = new Vector4(TemporalAACurrentSampleWeights[8], 0f, 0f, 0f);
+        }
+
+        private static bool DrawTemporalAAObjectMotionVectors(
+            BurtRenderGraphContext context,
+            CommandBuffer cmd,
+            Camera camera,
+            RenderTargetIdentifier velocityTarget,
+            BurtRenderTargetHandle cameraDepthTarget,
+            Material motionVectorMaterial)
+        {
+            if (context == null || context.Request == null || camera == null || motionVectorMaterial == null || !cameraDepthTarget.IsValid)
+            {
+                return false;
+            }
+
+            cmd.SetRenderTarget(velocityTarget, cameraDepthTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            cmd.Clear();
+
+            var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
+            var drawingSettings = new DrawingSettings(new ShaderTagId("BurtGBuffer"), sortingSettings)
+            {
+                overrideMaterial = motionVectorMaterial,
+                overrideMaterialPassIndex = 0,
+                perObjectData = PerObjectData.MotionVectors,
+                enableDynamicBatching = false,
+                enableInstancing = false
+            };
+            drawingSettings.SetShaderPassName(1, new ShaderTagId("BurtForward"));
+            drawingSettings.SetShaderPassName(2, new ShaderTagId("BurtForwardOnly"));
+            drawingSettings.SetShaderPassName(3, new ShaderTagId("SRPDefaultUnlit"));
+
+            var filteringSettings = new FilteringSettings(RenderQueueRange.opaque, camera.cullingMask);
+            context.ScriptableContext.DrawRenderers(context.Request.CullingResults, ref drawingSettings, ref filteringSettings);
+            return true;
         }
 
         private static void DisablePostProcessEffects(CommandBuffer cmd)
@@ -586,6 +849,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             return postProcessMaterial; // 返回创建好的材质。
         }
+        private Material GetTemporalAAMotionVectorMaterial()
+        {
+            if (temporalAAMotionVectorMaterial != null)
+            {
+                return temporalAAMotionVectorMaterial;
+            }
+
+            var shader = Shader.Find(TemporalAAMotionVectorShaderName);
+            if (shader == null)
+            {
+                return null;
+            }
+
+            temporalAAMotionVectorMaterial = new Material(shader)
+            {
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            return temporalAAMotionVectorMaterial;
+        }
+
     }
 
     internal sealed class BurtReleasePostProcessColorPass : BurtRenderPass // 定义后处理中间颜色释放 Pass，负责释放 PostProcessColor 临时 RT。

@@ -32,6 +32,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
         private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // 创建不支持 Shader 的调试 Pass，让非 BurtRP 材质显示为明显的错误材质。
 
+        private readonly BurtRenderPass drawPreImageEffectsGizmosPass = new BurtDrawPreImageEffectsGizmosPass(); // 创建编辑器 Gizmos 绘制 Pass，恢复 SRP Scene/Game View 的 Gizmos 显示。
+
+        private readonly BurtRenderPass drawPostImageEffectsGizmosPass = new BurtDrawPostImageEffectsGizmosPass(); // 创建后处理后的编辑器 Gizmos Pass，避免直接画到外部最终目标。
+
         private readonly BurtRenderPass allocatePostProcessColorPass = new BurtAllocatePostProcessColorPass(); // 创建后处理颜色分配 Pass，用来申请 PostProcessColor 中间 RT。
 
         private readonly BurtRenderPass postProcessPass = new BurtPostProcessPass(); // 创建第一版后处理 Pass，用来执行 No-op Copy 或 Tonemapping。
@@ -145,6 +149,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 }
             }
 
+            if (BurtEditorGizmoUtility.ShouldRenderGizmos(request)) // 编辑器里 Scene/Game View 打开 Gizmos 时，在后处理前绘制 PreImageEffects Gizmos。
+            {
+                graph.AddPass(drawPreImageEffectsGizmosPass); // 添加 PreImageEffects Gizmos Pass，让 Gizmos 参与常规 CameraColor 输出链路。
+            }
+
             if (ShouldUsePostProcessFramework(request, asset, safeRenderOptions)) // 如果后处理框架启用且当前 request 会 FinalBlit，就插入全屏后处理链路。
             {
                 graph.AddPass(allocatePostProcessColorPass); // 申请后处理中间颜色 RT，避免 CameraColor 自读自写导致平台不稳定。
@@ -160,6 +169,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             if (!IsPreviewOrReflectionRequest(request) && ShouldUseMainLightShadowDebugView(asset, useMainLightShadow)) // Preview/Reflection 不叠加场景阴影调试视图，避免辅助渲染被覆盖。
             {
                 graph.AddPass(debugMainLightShadowMapPass); // 把主光 shadow map 调试 Pass 添加到 RenderGraph，方便直接检查阴影图内容。
+            }
+
+            if (BurtEditorGizmoUtility.ShouldRenderGizmos(request)) // 后处理和 Debug 覆盖之后，把 PostImageEffects Gizmos 画回 CameraColor。
+            {
+                graph.AddPass(drawPostImageEffectsGizmosPass); // 让最终 FinalBlit 统一输出 Gizmos，避免 RenderDoc 下直接写外部目标不稳定。
             }
 
             if (safeRenderOptions.ShouldFinalBlit) // 只有独立 request 或共享栈的最后一个 request 才输出到最终相机目标。

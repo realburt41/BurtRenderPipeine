@@ -131,6 +131,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             AppendPassUsages(builder, resourceUsages); // 写入每个 Pass 的 Read/Write 资源列表，帮助定位资源声明缺失或顺序问题。
 
+            builder.AppendLine("Resource Lifetimes:"); // Show first and last access for every declared graph resource.
+
+            AppendResourceLifetimes(builder, resourceUsages, resourceRegistry); // Writes resource lifetime spans without changing scheduling.
+
             builder.AppendLine("Resources:"); // 写入资源视角标题，方便从资源名反查生产者和消费者。
 
             AppendResourceSummary(builder, resourceUsages, resourceRegistry); // 写入资源生产者、消费者和缺失资源提示。
@@ -257,8 +261,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.AppendLine(); // 结束第三行全屏调试状态。
 
             var ssrSettings = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionSettings(request, asset);
+            var ssrSuppressedByShadingDebug = BurtScreenSpaceReflectionPassUtility.IsScreenSpaceReflectionSuppressedByShadingDebug();
+            var ssrHistory = BurtScreenSpaceReflectionHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
 
             builder.Append("  SSREnabled=").Append(ssrSettings.Enabled);
+
+            builder.Append(" SSRSuppressedByShadingDebug=").Append(ssrSuppressedByShadingDebug);
 
             builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());
 
@@ -271,6 +279,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" SSRIntensity=").Append(ssrSettings.Intensity.ToString("0.###"));
 
             builder.Append(" SSRRoughnessFade=").Append(ssrSettings.RoughnessFade.ToString("0.###"));
+
+            builder.Append(" SSRTemporal=").Append(ssrSettings.TemporalAccumulation);
+
+            builder.Append(" SSRTemporalFeedback=").Append(ssrSettings.TemporalFeedback.ToString("0.###"));
+
+            builder.Append(" SSRHistoryValid=").Append(ssrHistory.HasHistory);
+
+            builder.Append(" SSRHistoryAllocated=").Append(ssrHistory.HasHistory || ssrHistory.HasDepthHistory);
+
+            builder.Append(" SSRHistoryMatches=").Append(ssrHistory.DescriptorMatches);
+
+            builder.Append(" SSRDepthHistoryAllocated=").Append(ssrHistory.HasDepthHistory);
+
+            builder.Append(" SSRDepthHistoryMatches=").Append(ssrHistory.DepthDescriptorMatches);
+
+            builder.Append(" SSRHistoryAge=").Append(ssrHistory.HistoryAge);
+
+            builder.Append(" SSRFrame=").Append(ssrHistory.FrameIndex);
+
+            builder.Append(" SSRHistoryReason=").Append(ssrHistory.LastInvalidationReason);
 
             builder.AppendLine();
 
@@ -343,19 +371,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             {
                 AppendDescriptorLine(builder, "GBuffer0", BurtRenderTargetDescriptorUtility.CreateGBuffer0Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer0Name); // 输出 GBuffer0 格式，第一版保存 baseColor/occlusion。
 
-                AppendDescriptorLine(builder, "GBuffer1", BurtRenderTargetDescriptorUtility.CreateGBuffer1Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name); // 输出 GBuffer1 格式，第一版保存 normal/metallic/smoothness。
+                AppendDescriptorLine(builder, "GBuffer1", BurtRenderTargetDescriptorUtility.CreateGBuffer1Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name); // 输出 GBuffer1 格式，当前保存 direction/material-channel/smoothness。
 
                 AppendDescriptorLine(builder, "GBuffer2", BurtRenderTargetDescriptorUtility.CreateGBuffer2Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name); // 输出 GBuffer2 格式，第一版保存 emission/reflectance。
 
-                AppendDescriptorLine(builder, "HiZDepth", BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
+                if (BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset))
+                {
+                    AppendDescriptorLine(builder, "HiZDepth", BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
+                }
+                else
+                {
+                    AppendSkippedRenderTargetLine(builder, "HiZDepth", resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
+                }
 
                 if (BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflections(request, asset))
                 {
                     AppendDescriptorLine(builder, "ScreenSpaceReflectionColor", BurtRenderTargetDescriptorUtility.CreateScreenSpaceReflectionColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
+                    AppendDescriptorLine(builder, "ScreenSpaceReflectionDenoisedColor", BurtRenderTargetDescriptorUtility.CreateScreenSpaceReflectionDenoisedColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName);
+                    AppendDescriptorLine(builder, "ScreenSpaceReflectionTemporalColor", BurtRenderTargetDescriptorUtility.CreateScreenSpaceReflectionTemporalColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
                 }
                 else
                 {
                     AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionDenoisedColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionTemporalColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
                 }
             }
             else // Forward 模式不注册 GBuffer。
@@ -369,6 +408,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 AppendSkippedRenderTargetLine(builder, "HiZDepth", resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
 
                 AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
+
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionDenoisedColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName);
+
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionTemporalColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
             }
 
             builder.Append("  FinalCameraTarget Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.FinalCameraTargetName)); // 写入最终输出目标是否已注册。
@@ -393,6 +436,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var shouldRunFramework = BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 解析当前 request 最终是否会插入后处理链。
 
+            var suppressedByShadingDebug = BurtPostProcessUtility.IsPostProcessSuppressedByShadingDebug();
+
             var tonemappingMode = BurtPostProcessUtility.ResolveTonemappingMode(asset); // 解析当前 Volume 中真正生效的 Tonemapping 模式。
 
             var postExposureMultiplier = BurtPostProcessUtility.ResolvePostExposureMultiplier(asset); // 解析当前 Volume 中 Tonemapping 前曝光倍率。
@@ -415,6 +460,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" ShouldRunFramework=").Append(shouldRunFramework); // 写入当前 request 是否真正执行后处理链。
 
+            builder.Append(" SuppressedByShadingDebug=").Append(suppressedByShadingDebug);
+
             builder.Append(" Tonemapping=").Append(tonemappingMode); // 写入 Volume 解析后的 Tonemapping 模式。
 
             builder.Append(" PostExposureMul=").Append(postExposureMultiplier.ToString("0.###")); // 写入 EV 转换后的线性曝光倍率。
@@ -435,6 +482,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAAHistoryValid=").Append(temporalAA != null && temporalAA.HistoryValid);
             builder.Append(" TAAHistoryAllocated=").Append(temporalHistory.HasHistory);
             builder.Append(" TAAHistoryMatches=").Append(temporalHistory.DescriptorMatches);
+            builder.Append(" TAADepthHistoryAllocated=").Append(temporalHistory.HasDepthHistory);
+            builder.Append(" TAADepthHistoryMatches=").Append(temporalHistory.DepthDescriptorMatches);
+            builder.Append(" TAAConfidenceHistoryAllocated=").Append(temporalHistory.HasConfidenceHistory);
+            builder.Append(" TAAConfidenceHistoryMatches=").Append(temporalHistory.ConfidenceDescriptorMatches);
+            builder.Append(" TAAAntiFlickerHistoryAllocated=").Append(temporalHistory.HasAntiFlickerHistory);
+            builder.Append(" TAAAntiFlickerHistoryMatches=").Append(temporalHistory.AntiFlickerDescriptorMatches);
             builder.Append(" TAAHistoryAge=").Append(temporalHistory.HistoryAge);
             builder.Append(" TAAFrame=").Append(temporalAA != null ? temporalAA.FrameIndex.ToString() : temporalHistory.FrameIndex.ToString());
             builder.Append(" TAAHistoryReason=").Append(temporalHistory.LastInvalidationReason);
@@ -442,8 +495,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAAFeedback=").Append(temporalAASettings.Feedback.ToString("0.###"));
             builder.Append(" TAAJitterScale=").Append(temporalAASettings.JitterScale.ToString("0.###"));
             builder.Append(" TAAClamp=").Append(temporalAASettings.ClampStrength.ToString("0.###"));
+            builder.Append(" TAASharpness=").Append(temporalAASettings.Sharpness.ToString("0.###"));
+            builder.Append(" TAAStaticRelax=").Append(temporalAASettings.StaticEdgeRelaxation.ToString("0.###"));
+            builder.Append(" TAAAntiFlicker=").Append(temporalAASettings.AntiFlickering.ToString("0.###"));
+            builder.Append(" TAAMVReject=").Append(temporalAASettings.MotionVectorRejection.ToString("0.###"));
+            builder.Append(" TAABaseBlend=").Append(temporalAASettings.BaseBlendFactor.ToString("0.###"));
+            builder.Append(" TAAMotionEdge=").Append(temporalAASettings.MotionEdgeResponsiveStrength.ToString("0.###"));
+            builder.Append(" TAADepthEdge=").Append(temporalAASettings.DepthEdgeResponsiveStrength.ToString("0.###"));
+            builder.Append(" TAAClampTight=").Append(temporalAASettings.HistoryClampTightness.ToString("0.###"));
+            builder.Append(" TAADepthFilterFloor=").Append(temporalAASettings.DepthWeightedFilterFloor.ToString("0.###"));
+            builder.Append(" TAAVelocity=").Append(temporalAA != null ? temporalAA.VelocityMode.ToString() : BurtTemporalAAVelocityMode.Disabled.ToString());
+            builder.Append(" TAAObjectMVPass=").Append(temporalAA != null && temporalAA.ObjectMotionVectorPassDrawn);
             builder.Append(" TAADebugMode=").Append(BurtTemporalAAUtility.IsTemporalAADebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
-            builder.Append(" TAANote=CatmullRomDepthReprojectionNoMotionVectors");
+            builder.Append(" TAANote=XRenderTSRStyleVelocityDepthClampV7");
 
             builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
 
@@ -474,19 +538,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" SSRColorRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName));
 
+            builder.Append(" SSRDenoisedColorRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName));
+
+            builder.Append(" SSRTemporalColorRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName));
+
             if (isDeferred)
             {
-                var hiZDescriptor = BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(request != null ? request.Camera : null);
                 var ssrSettings = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionSettings(request, asset);
-                builder.Append(" HiZMips=").Append(BurtRenderTargetDescriptorUtility.CalculateMipCount(hiZDescriptor.width, hiZDescriptor.height));
-                builder.Append(" HiZMode=FurthestRawDepth");
+                var ssrSuppressedByShadingDebug = BurtScreenSpaceReflectionPassUtility.IsScreenSpaceReflectionSuppressedByShadingDebug();
+                var ssrHistory = BurtScreenSpaceReflectionHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
+                var shouldUseHiZDepth = BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
+                builder.Append(" HiZNeeded=").Append(shouldUseHiZDepth);
+
+                if (shouldUseHiZDepth)
+                {
+                    var hiZDescriptor = BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(request != null ? request.Camera : null);
+                    builder.Append(" HiZMips=").Append(BurtRenderTargetDescriptorUtility.CalculateMipCount(hiZDescriptor.width, hiZDescriptor.height));
+                    builder.Append(" HiZMode=FurthestRawDepth");
+                }
+
                 builder.Append(" HiZDebugView=").Append(asset != null && asset.EnableHiZDebugView);
                 builder.Append(" HiZDebugMip=").Append(asset != null ? asset.HiZDebugMip.ToString() : "<none>");
                 builder.Append(" SSREnabled=").Append(ssrSettings.Enabled);
+                builder.Append(" SSRSuppressedByShadingDebug=").Append(ssrSuppressedByShadingDebug);
                 builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());
                 builder.Append(" SSRMaxSteps=").Append(ssrSettings.MaxSteps);
+                builder.Append(" SSRTemporal=").Append(ssrSettings.TemporalAccumulation);
+                builder.Append(" SSRHistoryValid=").Append(ssrHistory.HasHistory);
+                builder.Append(" SSRHistoryAge=").Append(ssrHistory.HistoryAge);
+                builder.Append(" SSRHistoryReason=").Append(ssrHistory.LastInvalidationReason);
             }
-
             builder.Append(" GBufferDebugMode=").Append(asset != null ? BurtGBufferDebugViewUtility.ResolveGBufferDebugViewMode(asset).ToString() : "<none>"); // 写入最终 GBuffer Debug 模式。
 
             builder.Append(" GBufferDebugSource=").Append(asset != null ? BurtGBufferDebugViewUtility.ResolveGBufferDebugViewSource(asset).ToString() : "<none>"); // 写入 GBuffer Debug 来源。
@@ -708,6 +789,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.AppendLine(); // Pass 标题独占一行，读写列表更容易扫描。
 
+            AppendPassMetadata(builder, usage); // Show pass classification and future culling metadata next to the pass boundary.
+
+            AppendRenderTargetAccessList(builder, "    Access", usage.RenderTargetAccesses); // Writes typed RT accesses, separating Allocate/Bind/Clear/Write/Release.
+
+            AppendGlobalResourceAccessList(builder, "    Global Access", usage.GlobalResourceAccesses); // Writes typed global resource accesses.
+
             AppendRenderTargetList(builder, "    Read", usage.ReadRenderTargets); // 写入当前 Pass 声明读取的 RenderTarget 列表。
 
             AppendRenderTargetList(builder, "    Write", usage.WriteRenderTargets); // 写入当前 Pass 声明写入的 RenderTarget 列表。
@@ -715,6 +802,82 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             AppendOptionalStringList(builder, "    Read Global", usage.ReadGlobalResources); // 只在非空时写入当前 Pass 声明读取的逻辑全局资源列表。
 
             AppendOptionalStringList(builder, "    Write Global", usage.WriteGlobalResources); // 只在非空时写入当前 Pass 声明写入的逻辑全局资源列表。
+        }
+
+        private static void AppendPassMetadata(StringBuilder builder, BurtRenderPassResourceUsage usage) // Writes lightweight scheduling metadata for one pass.
+        {
+            if (usage == null)
+            {
+                return;
+            }
+
+            builder.Append("    Kind=");
+            builder.Append(usage.PassKind);
+            builder.Append(" HasSideEffects=");
+            builder.Append(usage.HasSideEffects);
+            builder.Append(" AllowCulling=");
+            builder.AppendLine(usage.AllowCulling.ToString());
+        }
+
+        private static void AppendRenderTargetAccessList( // Writes typed render target accesses for one pass.
+            StringBuilder builder,
+            string label,
+            IReadOnlyList<BurtRenderTargetResourceAccess> accesses)
+        {
+            builder.Append(label);
+            builder.Append(": ");
+
+            if (accesses == null || accesses.Count == 0)
+            {
+                builder.AppendLine("<none>");
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                if (accessIndex > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                var access = accesses[accessIndex];
+                AppendRenderTarget(builder, access.Handle);
+                builder.Append("(");
+                builder.Append(access.AccessType);
+                builder.Append(")");
+            }
+
+            builder.AppendLine();
+        }
+
+        private static void AppendGlobalResourceAccessList( // Writes typed global resource accesses for one pass.
+            StringBuilder builder,
+            string label,
+            IReadOnlyList<BurtGlobalResourceAccess> accesses)
+        {
+            if (accesses == null || accesses.Count == 0)
+            {
+                return;
+            }
+
+            builder.Append(label);
+            builder.Append(": ");
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                if (accessIndex > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                var access = accesses[accessIndex];
+                builder.Append(FormatResourceName(access.ResourceName));
+                builder.Append("(");
+                builder.Append(access.AccessType);
+                builder.Append(")");
+            }
+
+            builder.AppendLine();
         }
 
         private static void AppendRenderTargetList( // 写入一个方向的渲染目标列表，例如 Read 或 Write。
@@ -744,6 +907,178 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             }
 
             builder.AppendLine(); // 当前资源方向写完后换行，下一行输出另一个方向或下一个 Pass。
+        }
+
+        private static void AppendResourceLifetimes( // Writes first/last resource access ranges for the configured graph.
+            StringBuilder builder,
+            IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages,
+            BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            var lifetimes = BuildResourceLifetimes(resourceUsages, resourceRegistry);
+
+            if (lifetimes.Count == 0)
+            {
+                builder.AppendLine("  <none>");
+
+                return;
+            }
+
+            foreach (var pair in lifetimes)
+            {
+                var lifetime = pair.Value;
+
+                builder.Append("  ");
+                builder.Append(lifetime.Name);
+
+                if (lifetime.IsExternal)
+                {
+                    builder.Append(" (External)");
+                }
+
+                if (lifetime.HasMissingDeclaration)
+                {
+                    builder.Append(" (Missing)");
+                }
+
+                builder.Append(": First=#");
+                builder.Append(lifetime.FirstPassIndex);
+                builder.Append(" Last=#");
+                builder.Append(lifetime.LastPassIndex);
+                builder.Append(" Span=");
+                builder.Append(lifetime.LastPassIndex - lifetime.FirstPassIndex);
+                AppendLifetimeAccessCounts(builder, lifetime);
+            }
+        }
+
+        private static Dictionary<string, ResourceLifetime> BuildResourceLifetimes( // Builds resource lifetime records from pass read/write declarations.
+            IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages,
+            BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            var lifetimes = new Dictionary<string, ResourceLifetime>();
+
+            if (resourceUsages == null)
+            {
+                return lifetimes;
+            }
+
+            for (var usageIndex = 0; usageIndex < resourceUsages.Count; usageIndex++)
+            {
+                var usage = resourceUsages[usageIndex];
+
+                if (usage == null)
+                {
+                    continue;
+                }
+
+                var passIndex = GetEffectivePassIndex(usageIndex, usage);
+
+                AddRenderTargetLifetimeAccesses(lifetimes, usage.RenderTargetAccesses, passIndex, resourceRegistry);
+                AddGlobalResourceLifetimeAccesses(lifetimes, usage.GlobalResourceAccesses, passIndex);
+            }
+
+            return lifetimes;
+        }
+
+        private static void AddRenderTargetLifetimeAccesses( // Adds typed render target accesses into resource lifetime records.
+            Dictionary<string, ResourceLifetime> lifetimes,
+            IReadOnlyList<BurtRenderTargetResourceAccess> accesses,
+            int passIndex,
+            BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                var handle = access.Handle;
+                var lifetime = GetOrCreateLifetime(lifetimes, FormatResourceName(handle.Name));
+
+                lifetime.RecordAccess(passIndex, access.AccessType);
+
+                if (resourceRegistry != null && resourceRegistry.IsExternalRenderTarget(handle.Name))
+                {
+                    lifetime.IsExternal = true;
+                }
+
+                if (!handle.IsValid)
+                {
+                    lifetime.HasMissingDeclaration = true;
+                }
+            }
+        }
+
+        private static void AddGlobalResourceLifetimeAccesses( // Adds typed global resource accesses into lifetime records.
+            Dictionary<string, ResourceLifetime> lifetimes,
+            IReadOnlyList<BurtGlobalResourceAccess> accesses,
+            int passIndex)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                var lifetime = GetOrCreateLifetime(lifetimes, FormatResourceName(access.ResourceName));
+
+                lifetime.RecordAccess(passIndex, access.AccessType);
+            }
+        }
+
+        private static void AppendLifetimeAccessCounts(StringBuilder builder, ResourceLifetime lifetime) // Appends compact typed access counters for a lifetime line.
+        {
+            builder.Append(" Accesses=");
+
+            var hasAny = false;
+            AppendAccessCount(builder, "Allocate", lifetime.AllocateCount, ref hasAny);
+            AppendAccessCount(builder, "Bind", lifetime.BindCount, ref hasAny);
+            AppendAccessCount(builder, "Clear", lifetime.ClearCount, ref hasAny);
+            AppendAccessCount(builder, "Write", lifetime.WriteCount, ref hasAny);
+            AppendAccessCount(builder, "Copy", lifetime.CopyCount, ref hasAny);
+            AppendAccessCount(builder, "Read", lifetime.ReadCount, ref hasAny);
+            AppendAccessCount(builder, "Release", lifetime.ReleaseCount, ref hasAny);
+
+            if (!hasAny)
+            {
+                builder.Append("<none>");
+            }
+
+            builder.AppendLine();
+        }
+
+        private static void AppendAccessCount(StringBuilder builder, string label, int count, ref bool hasAny)
+        {
+            if (count <= 0)
+            {
+                return;
+            }
+
+            if (hasAny)
+            {
+                builder.Append(" ");
+            }
+
+            builder.Append(label);
+            builder.Append(":");
+            builder.Append(count);
+            hasAny = true;
+        }
+
+        private static ResourceLifetime GetOrCreateLifetime( // Fetches or creates a lifetime record by resource name.
+            Dictionary<string, ResourceLifetime> lifetimes,
+            string resourceName)
+        {
+            if (!lifetimes.TryGetValue(resourceName, out var lifetime))
+            {
+                lifetime = new ResourceLifetime(resourceName);
+                lifetimes.Add(resourceName, lifetime);
+            }
+
+            return lifetime;
         }
 
         private static void AppendResourceSummary( // 从资源视角写入生产者、消费者和缺失提示。
@@ -780,9 +1115,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
                 builder.AppendLine(); // 结束资源标题行。
 
-                AppendStringList(builder, "    Producers", summary.Producers); // 写入生产者列表。
+                AppendOptionalStringList(builder, "    Allocate", summary.Allocators);
 
-                AppendStringList(builder, "    Consumers", summary.Consumers); // 写入消费者列表。
+                AppendOptionalStringList(builder, "    Bind", summary.Binders);
+
+                AppendOptionalStringList(builder, "    Clear", summary.Clearers);
+
+                AppendOptionalStringList(builder, "    Write", summary.Writers);
+
+                AppendOptionalStringList(builder, "    Copy", summary.Copiers);
+
+                AppendOptionalStringList(builder, "    Read", summary.Readers);
+
+                AppendOptionalStringList(builder, "    Release", summary.Releasers);
 
                 if (summary.HasMissingDeclaration) // 缺失资源给出额外提示。
                 {
@@ -811,94 +1156,100 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     continue; // 跳过空记录。
                 }
 
-                AddResourceAccesses(summaries, usage.ReadRenderTargets, FormatPassLabel(usageIndex, usage), false, resourceRegistry); // 记录消费者。
+                AddResourceAccesses(summaries, usage.RenderTargetAccesses, FormatPassLabel(usageIndex, usage), resourceRegistry); // Records typed RT accesses.
 
-                AddResourceAccesses(summaries, usage.WriteRenderTargets, FormatPassLabel(usageIndex, usage), true, resourceRegistry); // 记录生产者。
-
-                AddGlobalResourceAccesses(summaries, usage.ReadGlobalResources, FormatPassLabel(usageIndex, usage), false); // 记录逻辑全局资源消费者。
-
-                AddGlobalResourceAccesses(summaries, usage.WriteGlobalResources, FormatPassLabel(usageIndex, usage), true); // 记录逻辑全局资源生产者。
+                AddGlobalResourceAccesses(summaries, usage.GlobalResourceAccesses, FormatPassLabel(usageIndex, usage)); // Records typed global resource accesses.
             }
 
             return summaries; // 返回完整资源摘要。
         }
 
-        private static void AddResourceAccesses( // 把一组资源访问写入摘要表。
-            Dictionary<string, ResourceSummary> summaries, // 接收资源摘要表。
-            IReadOnlyList<BurtRenderTargetHandle> handles, // 接收某个方向的资源句柄列表。
-            string passLabel, // 接收当前 Pass 标签。
-            bool isProducer, // 标记当前访问是否为写入生产者。
-            BurtRenderGraphResourceRegistry resourceRegistry) // 接收资源注册表，用于标记外部资源。
+        private static void AddResourceAccesses( // Adds typed render target accesses to resource summaries.
+            Dictionary<string, ResourceSummary> summaries,
+            IReadOnlyList<BurtRenderTargetResourceAccess> accesses,
+            string passLabel,
+            BurtRenderGraphResourceRegistry resourceRegistry)
         {
-            if (handles == null) // 资源列表为空时没有可记录内容。
+            if (accesses == null)
             {
-                return; // 直接返回。
+                return;
             }
 
-            for (var handleIndex = 0; handleIndex < handles.Count; handleIndex++) // 遍历资源句柄列表。
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
             {
-                var handle = handles[handleIndex]; // 取出当前句柄。
+                var access = accesses[accessIndex];
+                var handle = access.Handle;
+                var summary = GetOrCreateSummary(summaries, FormatResourceName(handle.Name));
 
-                var resourceName = FormatResourceName(handle.Name); // 统一资源名显示，空名使用占位符。
-
-                if (!summaries.TryGetValue(resourceName, out var summary)) // 如果还没有该资源的摘要，就创建一个。
+                if (resourceRegistry != null && resourceRegistry.IsExternalRenderTarget(handle.Name))
                 {
-                    summary = new ResourceSummary(resourceName); // 创建资源摘要对象。
-
-                    summaries.Add(resourceName, summary); // 加入摘要表。
+                    summary.IsExternal = true;
                 }
 
-                if (resourceRegistry != null && resourceRegistry.IsExternalRenderTarget(handle.Name)) // 判断该资源是否为外部导入。
+                if (!handle.IsValid)
                 {
-                    summary.IsExternal = true; // 标记外部资源。
+                    summary.HasMissingDeclaration = true;
                 }
 
-                if (!handle.IsValid) // 无效句柄表示声明了缺失资源。
-                {
-                    summary.HasMissingDeclaration = true; // 在摘要中标记缺失。
-                }
-
-                if (isProducer) // 写入资源对应生产者。
-                {
-                    AddUnique(summary.Producers, passLabel); // 记录生产者 Pass。
-                }
-                else // 读取资源对应消费者。
-                {
-                    AddUnique(summary.Consumers, passLabel); // 记录消费者 Pass。
-                }
+                AddTypedAccess(summary, passLabel, access.AccessType);
             }
         }
 
-        private static void AddGlobalResourceAccesses( // 把一组逻辑全局资源访问写入摘要表。
-            Dictionary<string, ResourceSummary> summaries, // 接收资源摘要表。
-            IReadOnlyList<string> resourceNames, // 接收某个方向的逻辑全局资源名列表。
-            string passLabel, // 接收当前 Pass 标签。
-            bool isProducer) // 标记当前访问是否为写入生产者。
+        private static void AddGlobalResourceAccesses( // Adds typed global resource accesses to resource summaries.
+            Dictionary<string, ResourceSummary> summaries,
+            IReadOnlyList<BurtGlobalResourceAccess> accesses,
+            string passLabel)
         {
-            if (resourceNames == null) // 资源列表为空时没有可记录内容。
+            if (accesses == null)
             {
-                return; // 直接返回。
+                return;
             }
 
-            for (var resourceIndex = 0; resourceIndex < resourceNames.Count; resourceIndex++) // 遍历逻辑全局资源名列表。
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
             {
-                var resourceName = FormatResourceName(resourceNames[resourceIndex]); // 统一资源名显示，空名使用占位符。
+                var access = accesses[accessIndex];
+                var summary = GetOrCreateSummary(summaries, FormatResourceName(access.ResourceName));
 
-                if (!summaries.TryGetValue(resourceName, out var summary)) // 如果还没有该资源的摘要，就创建一个。
-                {
-                    summary = new ResourceSummary(resourceName); // 创建资源摘要对象。
+                AddTypedAccess(summary, passLabel, access.AccessType);
+            }
+        }
 
-                    summaries.Add(resourceName, summary); // 加入摘要表。
-                }
+        private static ResourceSummary GetOrCreateSummary(Dictionary<string, ResourceSummary> summaries, string resourceName)
+        {
+            if (!summaries.TryGetValue(resourceName, out var summary))
+            {
+                summary = new ResourceSummary(resourceName);
+                summaries.Add(resourceName, summary);
+            }
 
-                if (isProducer) // 写入逻辑全局资源对应生产者。
-                {
-                    AddUnique(summary.Producers, passLabel); // 记录生产者 Pass。
-                }
-                else // 读取逻辑全局资源对应消费者。
-                {
-                    AddUnique(summary.Consumers, passLabel); // 记录消费者 Pass。
-                }
+            return summary;
+        }
+
+        private static void AddTypedAccess(ResourceSummary summary, string passLabel, BurtRenderResourceAccessType accessType)
+        {
+            switch (accessType)
+            {
+                case BurtRenderResourceAccessType.Allocate:
+                    AddUnique(summary.Allocators, passLabel);
+                    break;
+                case BurtRenderResourceAccessType.Bind:
+                    AddUnique(summary.Binders, passLabel);
+                    break;
+                case BurtRenderResourceAccessType.Clear:
+                    AddUnique(summary.Clearers, passLabel);
+                    break;
+                case BurtRenderResourceAccessType.Copy:
+                    AddUnique(summary.Copiers, passLabel);
+                    break;
+                case BurtRenderResourceAccessType.Read:
+                    AddUnique(summary.Readers, passLabel);
+                    break;
+                case BurtRenderResourceAccessType.Release:
+                    AddUnique(summary.Releasers, passLabel);
+                    break;
+                default:
+                    AddUnique(summary.Writers, passLabel);
+                    break;
             }
         }
 
@@ -956,11 +1307,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             }
         }
 
+        private static int GetEffectivePassIndex(int usageIndex, BurtRenderPassResourceUsage usage) // Returns the real graph pass index when available.
+        {
+            return usage != null && usage.PassIndex >= 0 ? usage.PassIndex : usageIndex;
+        }
+
         private static string FormatPassLabel( // 生成统一 Pass 标签。
             int usageIndex, // 接收列表索引，作为缺省 Pass Index。
             BurtRenderPassResourceUsage usage) // 接收资源使用记录，可能为空。
         {
-            var passIndex = usage != null && usage.PassIndex >= 0 ? usage.PassIndex : usageIndex; // 优先使用 RenderGraph 传入的真实 PassIndex。
+            var passIndex = GetEffectivePassIndex(usageIndex, usage); // Prefer the real RenderGraph pass index when available.
 
             var passName = usage != null && !string.IsNullOrEmpty(usage.PassName) ? usage.PassName : "<unnamed pass>"; // 读取 Pass 名称，缺失时用占位符。
 
@@ -984,13 +1340,93 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             values.Add(value); // 追加新值。
         }
 
+        private sealed class ResourceLifetime // Resource lifetime span used by debug dump only.
+        {
+            public readonly string Name;
+
+            public int FirstPassIndex = int.MaxValue;
+
+            public int LastPassIndex = int.MinValue;
+
+            public int AllocateCount;
+
+            public int BindCount;
+
+            public int ClearCount;
+
+            public int ReadCount;
+
+            public int WriteCount;
+
+            public int CopyCount;
+
+            public int ReleaseCount;
+
+            public bool HasMissingDeclaration;
+
+            public bool IsExternal;
+
+            public ResourceLifetime(string name)
+            {
+                Name = name;
+            }
+
+            public void RecordAccess(int passIndex, BurtRenderResourceAccessType accessType)
+            {
+                if (passIndex < FirstPassIndex)
+                {
+                    FirstPassIndex = passIndex;
+                }
+
+                if (passIndex > LastPassIndex)
+                {
+                    LastPassIndex = passIndex;
+                }
+
+                switch (accessType)
+                {
+                    case BurtRenderResourceAccessType.Allocate:
+                        AllocateCount++;
+                        break;
+                    case BurtRenderResourceAccessType.Bind:
+                        BindCount++;
+                        break;
+                    case BurtRenderResourceAccessType.Clear:
+                        ClearCount++;
+                        break;
+                    case BurtRenderResourceAccessType.Copy:
+                        CopyCount++;
+                        break;
+                    case BurtRenderResourceAccessType.Read:
+                        ReadCount++;
+                        break;
+                    case BurtRenderResourceAccessType.Release:
+                        ReleaseCount++;
+                        break;
+                    default:
+                        WriteCount++;
+                        break;
+                }
+            }
+        }
+
         private sealed class ResourceSummary // 定义资源视角的调试摘要，只在 DebugUtility 内部使用。
         {
             public readonly string Name; // 保存资源名。
 
-            public readonly List<string> Producers = new List<string>(); // 保存写入该资源的 Pass 列表。
+            public readonly List<string> Allocators = new List<string>(); // Passes that allocate this resource.
 
-            public readonly List<string> Consumers = new List<string>(); // 保存读取该资源的 Pass 列表。
+            public readonly List<string> Binders = new List<string>(); // Passes that bind this resource as a target only.
+
+            public readonly List<string> Clearers = new List<string>(); // Passes that clear this resource.
+
+            public readonly List<string> Writers = new List<string>(); // Passes that write this resource content.
+
+            public readonly List<string> Copiers = new List<string>(); // Passes that copy into this resource.
+
+            public readonly List<string> Readers = new List<string>(); // Passes that read this resource.
+
+            public readonly List<string> Releasers = new List<string>(); // Passes that release this resource.
 
             public bool HasMissingDeclaration; // 标记是否有无效句柄引用该资源。
 

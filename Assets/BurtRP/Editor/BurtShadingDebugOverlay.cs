@@ -66,9 +66,9 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 case BurtShadingDebugMode.GBufferBaseColor:
                     return "GBuffer Base Color"; // 显示 GBuffer0.rgb 解码后的 BaseColor。
                 case BurtShadingDebugMode.GBufferNormalWS:
-                    return "GBuffer Normal WS"; // 显示 oct normal 解码后的世界空间法线。
+                    return "GBuffer Direction WS"; // 显示 GBuffer1.rg 解码后的向量槽。
                 case BurtShadingDebugMode.GBufferMetallic:
-                    return "GBuffer Metallic"; // 显示 GBuffer1.b 解码后的 Metallic。
+                    return "GBuffer Material Channel"; // 显示 GBuffer1.b 解码后的材质通道。
                 case BurtShadingDebugMode.GBufferSmoothness:
                     return "GBuffer Smoothness"; // 显示 GBuffer1.a 解码后的 Smoothness。
                 case BurtShadingDebugMode.GBufferOcclusion:
@@ -79,6 +79,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "GBuffer Roughness"; // 显示 GBuffer -> PBRMaterialData 后的 roughness。
                 case BurtShadingDebugMode.GBufferDiffuseColor:
                     return "GBuffer Diffuse Color"; // 显示 GBuffer -> PBRMaterialData 后的 DiffuseColor。
+                case BurtShadingDebugMode.GBufferHairStrandDirection:
+                    return "GBuffer Hair Strand"; // 显示 Hair 复用 GBuffer1.rg 存储的 strand direction。
+                case BurtShadingDebugMode.GBufferHairScatter:
+                    return "GBuffer Hair Scatter"; // 显示 Hair 复用 GBuffer1.b 存储的 scatter。
                 case BurtShadingDebugMode.DetailLighting:
                     return "Detail Lighting"; // 对齐 XRender DEBUGID_LIGHTING_DETAIL_LIGHTING。
                 case BurtShadingDebugMode.IndirectLighting:
@@ -99,18 +103,56 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Emission"; // 显示自发光贡献。
                 case BurtShadingDebugMode.FinalLighting:
                     return "Final Lighting"; // 显示写入 CameraColor 前的最终材质颜色。
+                case BurtShadingDebugMode.HairPrimaryLobe:
+                    return "Hair Primary Lobe"; // 显示 Hair R/Primary 高光 lobe。
+                case BurtShadingDebugMode.HairSecondaryLobe:
+                    return "Hair Secondary Lobe"; // 显示 Hair TT/Secondary 彩色高光 lobe。
+                case BurtShadingDebugMode.HairTransmissionLobe:
+                    return "Hair Transmission Lobe"; // 显示 Hair 近似背光透射 lobe。
+                case BurtShadingDebugMode.HairScatter:
+                    return "Hair Scatter Lighting"; // 显示参与 Hair lighting 的 scatter。
                 case BurtShadingDebugMode.CameraDepth:
                     return "Camera Depth"; // 已有全屏深度调试。
                 case BurtShadingDebugMode.MainLightShadow:
                     return "Main Light Shadow"; // 已有主光阴影图调试。
+                case BurtShadingDebugMode.ScreenSpaceReflectionRawHitMask:
+                    return "SSR Raw Hit Mask";
                 case BurtShadingDebugMode.ScreenSpaceReflectionHitMask:
-                    return "SSR Hit Mask"; // 显示 SSR raymarch 是否命中。
+                    return "SSR Hit Mask"; // 显示最终参与 composite 的 SSR 遮罩。
                 case BurtShadingDebugMode.ScreenSpaceReflectionHitUV:
                     return "SSR Hit UV"; // 显示 SSR 命中点屏幕 UV。
                 case BurtShadingDebugMode.ScreenSpaceReflectionStepCount:
                     return "SSR Step Count"; // 显示 SSR raymarch 步数。
                 case BurtShadingDebugMode.ScreenSpaceReflectionColor:
                     return "SSR Reflection Color"; // 显示 SSR 命中后采样到的反射颜色。
+                case BurtShadingDebugMode.ScreenSpaceReflectionConfidence:
+                    return "SSR Confidence";
+                case BurtShadingDebugMode.ScreenSpaceReflectionDepthDelta:
+                    return "SSR Depth Delta";
+                case BurtShadingDebugMode.ScreenSpaceReflectionWorldError:
+                    return "SSR World Error";
+                case BurtShadingDebugMode.ScreenSpaceReflectionDenoisedColor:
+                    return "SSR Denoised Color";
+                case BurtShadingDebugMode.ScreenSpaceReflectionTemporalColor:
+                    return "SSR Temporal Color";
+                case BurtShadingDebugMode.ScreenSpaceReflectionResolveAlpha:
+                    return "SSR Resolve Alpha";
+                case BurtShadingDebugMode.ScreenSpaceReflectionVisibilityAlpha:
+                    return "SSR Visibility Alpha";
+                case BurtShadingDebugMode.ScreenSpaceReflectionMaterialWeight:
+                    return "SSR Material Weight";
+                case BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMip:
+                    return "SSR Roughness Mip";
+                case BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor:
+                    return "SSR Resolved Color";
+                case BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality:
+                    return "SSR Depth Quality";
+                case BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality:
+                    return "SSR World Quality";
+                case BurtShadingDebugMode.ScreenSpaceReflectionResolveQuality:
+                    return "SSR Resolve Quality";
+                case BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport:
+                    return "SSR Surface Support";
                 case BurtShadingDebugMode.TemporalAAHistory:
                     return "TAA History Color"; // 显示 TAA 重投影采样到的 history。
                 case BurtShadingDebugMode.TemporalAAFeedback:
@@ -121,6 +163,50 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "TAA History UV"; // 显示重投影后的 history UV 和屏幕内状态。
                 case BurtShadingDebugMode.TemporalAADifference:
                     return "TAA Difference"; // 显示当前帧与 history 的颜色差异。
+                case BurtShadingDebugMode.TemporalAAVelocity:
+                    return "TAA Velocity";
+                case BurtShadingDebugMode.TemporalAAConfidence:
+                    return "TAA Confidence";
+                case BurtShadingDebugMode.TemporalAACurrentDepth:
+                    return "TAA Current Depth";
+                case BurtShadingDebugMode.TemporalAADepthHistory:
+                    return "TAA Depth History";
+                case BurtShadingDebugMode.TemporalAADepthDelta:
+                    return "TAA Depth Delta";
+                case BurtShadingDebugMode.TemporalAACurrentColor:
+                    return "TAA Current Color";
+                case BurtShadingDebugMode.TemporalAAResolvedColor:
+                    return "TAA Resolved Color";
+                case BurtShadingDebugMode.TemporalAARawVelocity:
+                    return "TAA Raw Velocity";
+                case BurtShadingDebugMode.TemporalAAUpdatedConfidence:
+                    return "TAA Updated Confidence";
+                case BurtShadingDebugMode.TemporalAAStaticRelax:
+                    return "TAA Static Relax";
+                case BurtShadingDebugMode.TemporalAALumaRejection:
+                    return "TAA Luma Reject";
+                case BurtShadingDebugMode.TemporalAAClipRejection:
+                    return "TAA Clip Reject";
+                case BurtShadingDebugMode.TemporalAADepthRejection:
+                    return "TAA Depth Reject";
+                case BurtShadingDebugMode.TemporalAANormalRejection:
+                    return "TAA Normal Reject";
+                case BurtShadingDebugMode.TemporalAAMotionRejection:
+                    return "TAA Motion Reject";
+                case BurtShadingDebugMode.TemporalAAConfidenceGate:
+                    return "TAA Confidence Gate";
+                case BurtShadingDebugMode.TemporalAAVelocitySource:
+                    return "TAA Velocity Source";
+                case BurtShadingDebugMode.TemporalAAGBufferNormal:
+                    return "TAA GBuffer Normal";
+                case BurtShadingDebugMode.TemporalAAParallaxRejection:
+                    return "TAA Parallax Validity";
+                case BurtShadingDebugMode.TemporalAAAntiFlicker:
+                    return "TAA Anti Flicker";
+                case BurtShadingDebugMode.TemporalAAVelocityCoverage:
+                    return "TAA Velocity Coverage";
+                case BurtShadingDebugMode.TemporalAAResponsiveMask:
+                    return "TAA Responsive Mask";
                 default:
                     return ObjectNames.NicifyVariableName(mode.ToString()); // 兜底美化 enum 名，避免新增模式显示为空。
             }
@@ -178,13 +264,15 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public static readonly BurtShadingDebugGroup GBuffer = new BurtShadingDebugGroup("GBuffer / Deferred Data", "GBuffer", new[] // Deferred 前置检查：验证 GBuffer 编解码和 PBRData 重建。
         {
             BurtShadingDebugMode.GBufferBaseColor, // GBuffer0.rgb 解码结果。
-            BurtShadingDebugMode.GBufferNormalWS, // GBuffer1.rg oct normal 解码结果。
-            BurtShadingDebugMode.GBufferMetallic, // GBuffer1.b 解码结果。
+            BurtShadingDebugMode.GBufferNormalWS, // GBuffer1.rg oct direction 解码结果。
+            BurtShadingDebugMode.GBufferMetallic, // GBuffer1.b material channel 解码结果。
             BurtShadingDebugMode.GBufferSmoothness, // GBuffer1.a 解码结果。
             BurtShadingDebugMode.GBufferOcclusion, // GBuffer0.a 解码结果。
             BurtShadingDebugMode.GBufferReflectance, // GBuffer2.a 解码结果。
             BurtShadingDebugMode.GBufferRoughness, // GBuffer -> PBRMaterialData 的 roughness。
-            BurtShadingDebugMode.GBufferDiffuseColor // GBuffer -> PBRMaterialData 的 DiffuseColor。
+            BurtShadingDebugMode.GBufferDiffuseColor, // GBuffer -> PBRMaterialData 的 DiffuseColor。
+            BurtShadingDebugMode.GBufferHairStrandDirection, // Hair 专用：GBuffer1.rg 解码后的 strand direction。
+            BurtShadingDebugMode.GBufferHairScatter // Hair 专用：GBuffer1.b material channel 解码后的 scatter。
         });
 
         public static readonly BurtShadingDebugGroup SpecularAA = new BurtShadingDebugGroup("Specular AA / Normal Filtering", "Spec AA", new[] // 对应 XRender Normal Filtering / Anti Aliasing 方向。
@@ -202,6 +290,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.DirectDiffuseLobe, // diffuse lobe。
             BurtShadingDebugMode.DirectDiffuseBRDF, // 直接 diffuse BRDF。
             BurtShadingDebugMode.DirectSpecularBRDF // 直接 specular BRDF。
+        });
+
+        public static readonly BurtShadingDebugGroup Hair = new BurtShadingDebugGroup("Hair Lobes", "Hair", new[] // Hair 专用拆项，方便调 primary/secondary/transmission 近似。
+        {
+            BurtShadingDebugMode.HairPrimaryLobe, // Hair R/Primary 高光 lobe。
+            BurtShadingDebugMode.HairSecondaryLobe, // Hair TT/Secondary 彩色高光 lobe。
+            BurtShadingDebugMode.HairTransmissionLobe, // Hair 背光透射近似 lobe。
+            BurtShadingDebugMode.HairScatter // Hair 当前参与 lighting 的 scatter。
         });
 
         public static readonly BurtShadingDebugGroup IBL = new BurtShadingDebugGroup("IBL / Energy / Occlusion", "IBL", new[] // 归档环境光、能量守恒和 specular occlusion 相关调试。
@@ -231,20 +327,61 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public static readonly BurtShadingDebugGroup Fullscreen = new BurtShadingDebugGroup("Fullscreen / Render Data", "Fullscreen", new[] // BurtRP 现有全屏调试入口。
         {
             BurtShadingDebugMode.CameraDepth, // CameraDepth 全屏 Debug。
-            BurtShadingDebugMode.MainLightShadow, // MainLightShadow 全屏 Debug。
-            BurtShadingDebugMode.ScreenSpaceReflectionHitMask, // SSR 命中遮罩。
+            BurtShadingDebugMode.MainLightShadow // MainLightShadow 全屏 Debug。
+        });
+
+        public static readonly BurtShadingDebugGroup ScreenSpaceReflections = new BurtShadingDebugGroup("Screen Space Reflections", "SSR", new[] // SSR 独立分类，避免挤在通用 Fullscreen 调试里。
+        {
+            BurtShadingDebugMode.ScreenSpaceReflectionRawHitMask,
+            BurtShadingDebugMode.ScreenSpaceReflectionHitMask, // SSR 最终遮罩。
             BurtShadingDebugMode.ScreenSpaceReflectionHitUV, // SSR 命中 UV。
             BurtShadingDebugMode.ScreenSpaceReflectionStepCount, // SSR raymarch 步数。
-            BurtShadingDebugMode.ScreenSpaceReflectionColor // SSR 采样到的反射颜色。
+            BurtShadingDebugMode.ScreenSpaceReflectionColor, // SSR 采样到的反射颜色。
+            BurtShadingDebugMode.ScreenSpaceReflectionConfidence,
+            BurtShadingDebugMode.ScreenSpaceReflectionDepthDelta,
+            BurtShadingDebugMode.ScreenSpaceReflectionWorldError,
+            BurtShadingDebugMode.ScreenSpaceReflectionDenoisedColor,
+            BurtShadingDebugMode.ScreenSpaceReflectionTemporalColor,
+            BurtShadingDebugMode.ScreenSpaceReflectionResolveAlpha,
+            BurtShadingDebugMode.ScreenSpaceReflectionVisibilityAlpha,
+            BurtShadingDebugMode.ScreenSpaceReflectionMaterialWeight,
+            BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMip,
+            BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor,
+            BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality,
+            BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality,
+            BurtShadingDebugMode.ScreenSpaceReflectionResolveQuality,
+            BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport
         });
 
         public static readonly BurtShadingDebugGroup TemporalAA = new BurtShadingDebugGroup("Temporal AA", "TAA", new[] // TAA 独立分类，避免和通用 Fullscreen 调试混在一起。
         {
-            BurtShadingDebugMode.TemporalAAHistory, // TAA 重投影 history 颜色。
-            BurtShadingDebugMode.TemporalAAFeedback, // TAA history feedback 权重。
-            BurtShadingDebugMode.TemporalAARejection, // TAA 拒绝分量。
-            BurtShadingDebugMode.TemporalAAHistoryUV, // TAA history UV。
-            BurtShadingDebugMode.TemporalAADifference // TAA 当前帧与 history 差异。
+            BurtShadingDebugMode.TemporalAAHistory,
+            BurtShadingDebugMode.TemporalAAFeedback,
+            BurtShadingDebugMode.TemporalAARejection,
+            BurtShadingDebugMode.TemporalAAHistoryUV,
+            BurtShadingDebugMode.TemporalAADifference,
+            BurtShadingDebugMode.TemporalAAVelocity,
+            BurtShadingDebugMode.TemporalAAConfidence,
+            BurtShadingDebugMode.TemporalAACurrentDepth,
+            BurtShadingDebugMode.TemporalAADepthHistory,
+            BurtShadingDebugMode.TemporalAADepthDelta,
+            BurtShadingDebugMode.TemporalAACurrentColor,
+            BurtShadingDebugMode.TemporalAAResolvedColor,
+            BurtShadingDebugMode.TemporalAARawVelocity,
+            BurtShadingDebugMode.TemporalAAUpdatedConfidence,
+            BurtShadingDebugMode.TemporalAAStaticRelax,
+            BurtShadingDebugMode.TemporalAALumaRejection,
+            BurtShadingDebugMode.TemporalAAClipRejection,
+            BurtShadingDebugMode.TemporalAADepthRejection,
+            BurtShadingDebugMode.TemporalAANormalRejection,
+            BurtShadingDebugMode.TemporalAAMotionRejection,
+            BurtShadingDebugMode.TemporalAAConfidenceGate,
+            BurtShadingDebugMode.TemporalAAVelocitySource,
+            BurtShadingDebugMode.TemporalAAGBufferNormal,
+            BurtShadingDebugMode.TemporalAAParallaxRejection,
+            BurtShadingDebugMode.TemporalAAAntiFlicker,
+            BurtShadingDebugMode.TemporalAAVelocityCoverage,
+            BurtShadingDebugMode.TemporalAAResponsiveMask
         });
     }
 
@@ -258,9 +395,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 BurtShadingDebugGBufferDropdown.Id,
                 BurtShadingDebugSpecularAADropdown.Id,
                 BurtShadingDebugBRDFDropdown.Id,
+                BurtShadingDebugHairDropdown.Id,
                 BurtShadingDebugIBLDropdown.Id,
                 BurtShadingDebugLightingDropdown.Id,
                 BurtShadingDebugFullscreenDropdown.Id,
+                BurtShadingDebugSSRDropdown.Id,
                 BurtShadingDebugTemporalAADropdown.Id) // 每个 ID 对应一个 EditorToolbarElement。
         {
         }
@@ -366,6 +505,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         }
     }
 
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Hair 分类按钮。
+    internal sealed class BurtShadingDebugHairDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Hair"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugHairDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.Hair) // 绑定 Hair lobes 分类。
+        {
+        }
+    }
+
     [EditorToolbarElement(Id, typeof(SceneView))] // 注册 IBL 分类按钮。
     internal sealed class BurtShadingDebugIBLDropdown : BurtShadingDebugGroupDropdown
     {
@@ -395,6 +545,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public BurtShadingDebugFullscreenDropdown() // Unity 通过无参构造创建 ToolbarElement。
             : base(BurtShadingDebugGroups.Fullscreen) // 绑定 Fullscreen / Render Data 分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 SSR 分类按钮。
+    internal sealed class BurtShadingDebugSSRDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/SSR"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugSSRDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.ScreenSpaceReflections) // 绑定 SSR 独立分类。
         {
         }
     }
@@ -445,7 +606,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             EditorGUILayout.EndScrollView(); // 结束滚动区域。
             EditorGUILayout.Space(4f); // 与资产信息隔开一点距离。
 
-            EditorGUILayout.HelpBox("参考 XRender Shader Debug 的分类 Toolbar；Depth / Shadow 同步现有全屏 Debug，SSR Debug 走 Global Volume 的 SSR 开关。", MessageType.Info); // 说明分类来源和全屏 Debug 行为。
+            EditorGUILayout.HelpBox("参考 XRender Shader Debug 的分类 Toolbar；Depth / Shadow 同步现有全屏 Debug，SSR / TAA 使用独立分类入口。", MessageType.Info); // 说明分类来源和全屏 Debug 行为。
         }
 
         private void DrawMode(BurtShadingDebugMode mode) // 绘制一个可选 Debug 模式。
@@ -530,9 +691,9 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             {
                 case BurtShadingDebugMode.GBufferBaseColor: // Overlay 选择 GBuffer Base Color。
                     return BurtGBufferDebugViewMode.BaseColor; // 资产同步为 BaseColor。
-                case BurtShadingDebugMode.GBufferNormalWS: // Overlay 选择 GBuffer Normal WS。
+                case BurtShadingDebugMode.GBufferNormalWS: // Overlay 选择 GBuffer Direction WS。
                     return BurtGBufferDebugViewMode.NormalWS; // 资产同步为 NormalWS。
-                case BurtShadingDebugMode.GBufferMetallic: // Overlay 选择 GBuffer Metallic。
+                case BurtShadingDebugMode.GBufferMetallic: // Overlay 选择 GBuffer Material Channel。
                     return BurtGBufferDebugViewMode.Metallic; // 资产同步为 Metallic。
                 case BurtShadingDebugMode.GBufferSmoothness: // Overlay 选择 GBuffer Smoothness。
                     return BurtGBufferDebugViewMode.Smoothness; // 资产同步为 Smoothness。
@@ -544,6 +705,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return BurtGBufferDebugViewMode.Roughness; // 资产同步为 Roughness。
                 case BurtShadingDebugMode.GBufferDiffuseColor: // Overlay 选择 GBuffer Diffuse Color。
                     return BurtGBufferDebugViewMode.DiffuseColor; // 资产同步为 DiffuseColor。
+                case BurtShadingDebugMode.GBufferHairStrandDirection: // Overlay 选择 Hair strand direction。
+                    return BurtGBufferDebugViewMode.HairStrandDirection; // 资产同步为 HairStrandDirection。
+                case BurtShadingDebugMode.GBufferHairScatter: // Overlay 选择 Hair scatter。
+                    return BurtGBufferDebugViewMode.HairScatter; // 资产同步为 HairScatter。
                 default: // 其他 Overlay 模式不应该显示真实 GBuffer。
                     return BurtGBufferDebugViewMode.Disabled; // 资产同步为 Disabled，避免切换到 Lighting/Material 后 GBuffer Debug 残留。
             }

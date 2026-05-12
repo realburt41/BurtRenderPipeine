@@ -130,11 +130,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Volume 组�
     public sealed class BurtTemporalAAVolumeComponent : VolumeComponent
     {
         [Title("BurtRP Temporal AA")]
-        [InfoBox("v0: Halton jitter + depth reprojection + disocclusion/luma rejection. No per-object motion vectors yet.")]
+        [InfoBox("v1.3: Halton jitter + depth/color/confidence history, explicit invalidation reasons, tunable rejection/feedback, and debug RT views.")]
         public BoolParameter enabled = new BoolParameter(false);
-        public ClampedFloatParameter feedback = new ClampedFloatParameter(0.94f, 0f, 0.98f);
+        public ClampedFloatParameter feedback = new ClampedFloatParameter(0.93f, 0f, 0.99f);
         public ClampedFloatParameter jitterScale = new ClampedFloatParameter(1.0f, 0f, 2f);
-        public ClampedFloatParameter clampStrength = new ClampedFloatParameter(1.1f, 0.25f, 4f);
+        public ClampedFloatParameter clampStrength = new ClampedFloatParameter(0.95f, 0.25f, 4f);
+        public ClampedFloatParameter sharpness = new ClampedFloatParameter(0.04f, 0f, 0.3f);
+        public ClampedFloatParameter staticEdgeRelaxation = new ClampedFloatParameter(0.28f, 0f, 1f);
+        public ClampedFloatParameter lumaRejectionStrength = new ClampedFloatParameter(1.15f, 0f, 4f);
+        public ClampedFloatParameter clipRejectionStrength = new ClampedFloatParameter(1.25f, 0f, 4f);
+        public ClampedFloatParameter depthRejectionStrength = new ClampedFloatParameter(1.35f, 0f, 4f);
+        public ClampedFloatParameter motionRejectionStart = new ClampedFloatParameter(16f, 0f, 128f);
+        public ClampedFloatParameter motionRejectionRange = new ClampedFloatParameter(56f, 1f, 256f);
+        public ClampedFloatParameter historyConfidenceWeight = new ClampedFloatParameter(0.22f, 0f, 1f);
+        public ClampedFloatParameter historyConfidenceBoost = new ClampedFloatParameter(0.96f, 0.5f, 1.1f);
+        public ClampedFloatParameter confidenceGrowth = new ClampedFloatParameter(0.06f, 0f, 0.25f);
+        [Title("XRender TSR")]
+        public ClampedFloatParameter antiFlickering = new ClampedFloatParameter(0.5f, 0f, 1f);
+        public ClampedFloatParameter motionVectorRejection = new ClampedFloatParameter(0f, 0f, 1f);
+        public ClampedFloatParameter baseBlendFactor = new ClampedFloatParameter(0.875f, 0f, 0.99f);
+        public ClampedFloatParameter responsiveRejectionStrength = new ClampedFloatParameter(0.65f, 0f, 1f);
+        public ClampedFloatParameter untrustedMotionFeedbackScale = new ClampedFloatParameter(0.35f, 0f, 1f);
+        public ClampedFloatParameter disocclusionFeedbackScale = new ClampedFloatParameter(0.18f, 0f, 1f);
+        [Title("Edge Rejection")]
+        public ClampedFloatParameter motionEdgeResponsiveStrength = new ClampedFloatParameter(1.2f, 0f, 3f);
+        public ClampedFloatParameter depthEdgeResponsiveStrength = new ClampedFloatParameter(1.1f, 0f, 3f);
+        public ClampedFloatParameter historyClampTightness = new ClampedFloatParameter(1.15f, 0f, 2f);
+        public ClampedFloatParameter depthWeightedFilterFloor = new ClampedFloatParameter(0.12f, 0f, 0.5f);
 
         public bool IsEnabled()
         {
@@ -150,7 +172,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Volume 组�
         [InfoBox("Deferred SSR v0: reads GBuffer + CameraDepth + HiZ. Debug views live in the Burt Shading Debug overlay.")]
         public BoolParameter enabled = new BoolParameter(false);
 
-        public ClampedIntParameter maxSteps = new ClampedIntParameter(48, 1, 128);
+        public ClampedIntParameter maxSteps = new ClampedIntParameter(48, 1, 512);
 
         public ClampedFloatParameter maxDistance = new ClampedFloatParameter(30f, 0.01f, 200f);
 
@@ -159,6 +181,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Volume 组�
         public ClampedFloatParameter intensity = new ClampedFloatParameter(1f, 0f, 1f);
 
         public ClampedFloatParameter roughnessFade = new ClampedFloatParameter(0.6f, 0f, 1f);
+
+        [Title("Temporal Denoise")]
+        public BoolParameter temporalAccumulation = new BoolParameter(true);
+
+        public ClampedFloatParameter temporalFeedback = new ClampedFloatParameter(0.86f, 0f, 0.98f);
+
+        public ClampedFloatParameter temporalDepthRejection = new ClampedFloatParameter(0.02f, 0.001f, 0.2f);
+
+        public ClampedFloatParameter temporalClamp = new ClampedFloatParameter(1f, 0.25f, 4f);
 
         public bool IsEnabled()
         {
