@@ -82,6 +82,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                     return BurtGBufferDebugViewMode.HairStrandDirection; // 显示 Hair 复用 GBuffer1.rg 存储的 strand direction。
                 case BurtShadingDebugMode.GBufferHairScatter: // Overlay 选择 Hair scatter 时。
                     return BurtGBufferDebugViewMode.HairScatter; // 显示 Hair 复用 GBuffer1.b material channel 存储的 scatter。
+                case BurtShadingDebugMode.GBufferHairShift: // Overlay 选择 Hair longitudinal shift scale 时。
+                    return BurtGBufferDebugViewMode.HairShift; // 显示 Hair 复用 GBuffer1.b material channel 存储的 shift scale。
                 default: // 其他 Shading Debug 模式不是全屏 GBuffer 数据源。
                     return BurtGBufferDebugViewMode.Disabled; // 返回 Disabled，让 Deferred 正常渲染或交给其他 Debug Pass。
             }

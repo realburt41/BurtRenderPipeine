@@ -71,6 +71,126 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return handle; // 返回这个句柄，方便 Pass 后续需要时继续使用。
         }
 
+        public BurtRenderBufferHandle ReadBuffer(string name) // Declares that the pass reads a logical buffer resource.
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                Usage.AddValidationMessage("ReadBuffer 收到空资源名。");
+            }
+
+            var handle = GetBuffer(name);
+
+            Usage.AddReadBuffer(handle);
+
+            return handle;
+        }
+
+        public BurtRenderBufferHandle WriteBuffer(string name) // Declares that the pass writes a logical buffer resource.
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                Usage.AddValidationMessage("WriteBuffer 收到空资源名。");
+            }
+
+            var handle = GetBuffer(name);
+
+            Usage.AddWriteBuffer(handle);
+
+            return handle;
+        }
+
+        public void AllowUnconsumedWrite(string resourceName) // Marks a written resource as an intentional terminal side effect.
+        {
+            Usage.AllowUnconsumedWriteResource(resourceName);
+        }
+
+        public void AllowUnconsumedRenderTargetWrite(string name) // Marks a render target write that intentionally has no later consumer.
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                Usage.AddValidationMessage("AllowUnconsumedRenderTargetWrite 收到空资源名。");
+            }
+
+            var handle = GetRenderTarget(name);
+            if (!handle.IsValid)
+            {
+                Usage.AddValidationMessage("AllowUnconsumedRenderTargetWrite 引用缺失资源: " + (string.IsNullOrEmpty(handle.Name) ? "<empty>" : handle.Name));
+            }
+
+            Usage.AllowUnconsumedWriteResource(handle.Name);
+        }
+
+        public void AllowUnconsumedBufferWrite(string name) // Marks a logical buffer write that intentionally has no later consumer.
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                Usage.AddValidationMessage("AllowUnconsumedBufferWrite 收到空资源名。");
+            }
+
+            var handle = GetBuffer(name);
+            if (!handle.IsValid)
+            {
+                Usage.AddValidationMessage("AllowUnconsumedBufferWrite 引用缺失 Buffer: " + (string.IsNullOrEmpty(handle.Name) ? "<empty>" : handle.Name));
+            }
+
+            Usage.AllowUnconsumedWriteResource(handle.Name);
+        }
+
+        public void AllowUnconsumedGlobalWrite(string resourceName) // Marks a logical global write that intentionally has no later consumer.
+        {
+            Usage.AllowUnconsumedWriteResource(resourceName);
+        }
+
+        public BurtRenderBufferHandle ReadAdditionalLightBuffer()
+        {
+            return ReadBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName);
+        }
+
+        public BurtRenderBufferHandle WriteAdditionalLightBuffer()
+        {
+            return WriteBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName);
+        }
+
+        public BurtRenderBufferHandle ReadTileLightCountBuffer()
+        {
+            return ReadBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
+        }
+
+        public BurtRenderBufferHandle WriteTileLightCountBuffer()
+        {
+            return WriteBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
+        }
+
+        public BurtRenderBufferHandle ReadTileLightListBuffer()
+        {
+            return ReadBuffer(BurtRenderGraphResourceRegistry.TileLightListBufferName);
+        }
+
+        public BurtRenderBufferHandle WriteTileLightListBuffer()
+        {
+            return WriteBuffer(BurtRenderGraphResourceRegistry.TileLightListBufferName);
+        }
+
+        public BurtRenderBufferHandle ReadTileLightOffsetBuffer()
+        {
+            return ReadBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+        }
+
+        public BurtRenderBufferHandle WriteTileLightOffsetBuffer()
+        {
+            return WriteBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+        }
+
+        public BurtRenderBufferHandle ReadClusterLightListBuffer()
+        {
+            return ReadBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName);
+        }
+
+        public BurtRenderBufferHandle WriteClusterLightListBuffer()
+        {
+            return WriteBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName);
+        }
+
         public BurtRenderTargetHandle ReadCameraColor() // 定义声明读取 CameraColor 的快捷函数。
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.CameraColorName); // 使用统一资源名声明读取 CameraColor。
@@ -181,6 +301,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
         }
 
+        public BurtRenderTargetHandle ReadScreenSpaceAmbientOcclusionRaw()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceAmbientOcclusionRaw()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceAmbientOcclusion()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceAmbientOcclusion()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
+        }
+
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.MainLightShadowMapName); // 使用统一资源名声明读取主光阴影图。
@@ -204,16 +344,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public void ReadLightingGlobals() // 定义声明读取灯光全局状态的快捷函数。
         {
             ReadGlobalResource(BurtRenderGraphResourceRegistry.LightingGlobalsName); // 使用统一逻辑资源名声明读取 LightingGlobals。
+            ReadAdditionalLightBuffer();
         }
 
         public void WriteLightingGlobals() // 定义声明写入灯光全局状态的快捷函数。
         {
             WriteGlobalResource(BurtRenderGraphResourceRegistry.LightingGlobalsName); // 使用统一逻辑资源名声明写入 LightingGlobals。
+            WriteAdditionalLightBuffer();
         }
 
         public void ReadShadowGlobals() // 定义声明读取阴影全局状态的快捷函数。
         {
             ReadGlobalResource(BurtRenderGraphResourceRegistry.ShadowGlobalsName); // 使用统一逻辑资源名声明读取 ShadowGlobals。
+            if (BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(Request))
+            {
+                ReadAdditionalLightShadowAtlas();
+            }
         }
 
         public void WriteShadowGlobals() // 定义声明写入阴影全局状态的快捷函数。
@@ -231,6 +377,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             }
 
             return ResourceRegistry.GetRenderTarget(name); // 从资源注册表读取指定名称的渲染目标句柄。
+        }
+
+        public BurtRenderTargetHandle ReadAdditionalLightShadowAtlas()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.AdditionalLightShadowAtlasName);
+        }
+
+        public BurtRenderTargetHandle WriteAdditionalLightShadowAtlas()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.AdditionalLightShadowAtlasName);
+        }
+
+        private BurtRenderBufferHandle GetBuffer(string name) // Reads a logical buffer from the registry while preserving invalid handles for diagnostics.
+        {
+            if (ResourceRegistry == null)
+            {
+                Usage.AddValidationMessage("资源注册表为空，无法解析 Buffer: " + (string.IsNullOrEmpty(name) ? "<empty>" : name));
+
+                return BurtRenderBufferHandle.Invalid(name);
+            }
+
+            return ResourceRegistry.GetBuffer(name);
         }
     }
 }

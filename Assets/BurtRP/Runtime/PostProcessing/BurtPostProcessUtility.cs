@@ -1,4 +1,4 @@
-﻿using UnityEngine; // 引入 UnityEngine 命名空间，用来访问 Camera、LayerMask、Mathf 和 Debug。
+using UnityEngine; // 引入 UnityEngine 命名空间，用来访问 Camera、LayerMask、Mathf 和 Debug。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来访问 VolumeManager 和 VolumeStack。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工具可以被 RenderGraph 和 Pass 共享。
@@ -162,7 +162,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return; // 直接返回，保持异常路径不改变全局 Volume 状态。
             }
 
-            VolumeManager.instance.Update(camera.transform, asset.PostProcessVolumeLayerMask); // 按当前相机位置和资产 LayerMask 刷新 Unity VolumeStack，SSR 等非后处理 Volume 也复用这套查询层。
+            UpdateVolumeStack(camera, asset); // 按当前相机位置和资产 LayerMask 刷新 Unity VolumeStack，SSR/Shadow 等非后处理 Volume 也复用这套查询层。
+        }
+
+        public static void UpdateVolumeStack(Camera camera, BurtRenderPipelineAsset asset) // 在 request 创建前也可刷新 VolumeStack，让阴影 culling 距离能读取 Global Volume。
+        {
+            if (camera == null || asset == null) // 没有相机或资产时不能安全查询场景 Volume。
+            {
+                return; // 直接返回，调用方继续使用资产默认值。
+            }
+
+            if (camera.cameraType == CameraType.Preview || camera.cameraType == CameraType.Reflection) // Preview/Reflection 不继承场景 Volume，避免资产预览和探针捕获被场景设置污染。
+            {
+                return; // 跳过刷新，保持当前 VolumeStack 不被辅助相机改写。
+            }
+
+            VolumeManager.instance.Update(camera.transform, asset.PostProcessVolumeLayerMask); // 使用同一套 Volume LayerMask 查询后处理、SSR、TAA 和阴影覆盖。
         }
 
         public static bool ShouldLogPostProcessDebug(BurtRenderPipelineAsset asset) // 定义判断是否输出后处理调试日志的统一入口。

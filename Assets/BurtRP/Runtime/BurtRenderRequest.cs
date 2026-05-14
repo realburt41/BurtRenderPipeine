@@ -72,19 +72,40 @@ namespace Burt.RenderPipeline
         // 保存当前请求是否有效，避免后续执行无效 request。
         public bool IsValid { get; private set; }
 
-        public BurtRenderGraphAssembler GraphAssembler { get; private set; } // 保存当前 request 应该使用哪一个渲染图组装器。
+        public BurtRenderGraphAssembler GraphAssembler { get; private set; } // ???? request ??????????????
+        internal BurtMainLightShadowCascadeCache MainLightShadowCascadeCache { get; } = new BurtMainLightShadowCascadeCache(); // Cache per-request cascade data so every pass consumes one identical shadow layout.
+        private BurtRenderPipelineAsset cachedResolvedMainLightShadowAsset; // Remembers which asset the merged shadow settings belong to.
+        private BurtShadowData cachedResolvedMainLightShadowData; // Reuses the merged shadow settings across setup/shadow/deferred passes.
 
-        public void SetTemporalAA(BurtTemporalAARequestState temporalAA) // 保存当前 request 的 TAA 状态；v1 是 camera/object velocity + depth/color/confidence history。
+        public void SetTemporalAA(BurtTemporalAARequestState temporalAA) // ???? request ? TAA ???v1 ? camera/object velocity + depth/color/confidence history?
         {
             TemporalAA = temporalAA ?? BurtTemporalAARequestState.Disabled;
         }
 
-        public void SetGraphAssembler(BurtRenderGraphAssembler graphAssembler) // 给当前 request 设置渲染图组装器。
+        public void SetGraphAssembler(BurtRenderGraphAssembler graphAssembler) // ??? request ?????????
         {
-            GraphAssembler = graphAssembler; // 保存传入的组装器引用，后面 BurtCameraRenderer 会通过它拿到 Pass 列表。
+            GraphAssembler = graphAssembler; // ????????????? BurtCameraRenderer ?????? Pass ???
         }
 
-        // 创建一个无效请求，作为失败时的返回值。
+        internal bool TryGetCachedResolvedMainLightShadowData(BurtRenderPipelineAsset asset, out BurtShadowData shadowData) // Lets later passes reuse the already merged shadow settings for this request.
+        {
+            if (cachedResolvedMainLightShadowData != null && cachedResolvedMainLightShadowAsset == asset)
+            {
+                shadowData = cachedResolvedMainLightShadowData;
+                return true;
+            }
+
+            shadowData = null;
+            return false;
+        }
+
+        internal void CacheResolvedMainLightShadowData(BurtRenderPipelineAsset asset, BurtShadowData shadowData) // Updates the request-local merged shadow settings cache.
+        {
+            cachedResolvedMainLightShadowAsset = asset;
+            cachedResolvedMainLightShadowData = shadowData;
+        }
+
+        // ???????????????????
         public static BurtRenderRequest Invalid()
         {
             // 创建一个新的请求对象。
@@ -130,6 +151,7 @@ namespace Burt.RenderPipeline
 
             BurtEditorGizmoUtility.EmitWorldGeometryForSceneView(camera); // SceneView 剔除前注入编辑器世界几何，恢复 SRP Gizmos/辅助绘制数据。
             BurtTemporalAAUtility.RecoverCameraProjectionForCulling(camera); // 剔除前把 TAA/异常留下的 custom projection 交还给 Unity，避免 GameView 只剩天空盒。
+            BurtPostProcessUtility.UpdateVolumeStack(camera, asset); // Cull 前刷新 VolumeStack，让 Global Volume 里的阴影距离参与 shadow caster 剔除。
 
             // 尝试从相机获取剔除参数。
             if (!camera.TryGetCullingParameters(out var cullingParameters))
@@ -197,12 +219,7 @@ namespace Burt.RenderPipeline
             Camera camera, // 接收当前相机，用来限制阴影距离不能超过相机远裁剪面。
             BurtRenderPipelineAsset asset) // 接收当前管线资产，用来读取主光阴影距离和总开关。
         {
-            var shadowDistance = BurtShadowData.DefaultMainLightShadowDistance; // 先使用 BurtRP 默认阴影距离，保证 asset 缺失时也能收集基础阴影 caster。
-
-            if (asset != null) // 如果当前有管线资产，就优先使用资产上的阴影设置。
-            {
-                shadowDistance = asset.EnableMainLightShadows ? asset.MainLightShadowDistance : 0f; // 资产关闭主光阴影时把 shadowDistance 清零，避免 Unity 做无意义阴影剔除。
-            }
+            var shadowDistance = BurtShadowUtility.ResolveMainLightShadowDistance(asset); // 统一解析资产和 Global Volume 覆盖后的阴影距离。
 
             if (camera != null) // 如果相机有效，就用相机远裁剪面限制阴影距离。
             {
@@ -233,4 +250,87 @@ namespace Burt.RenderPipeline
         }
 
     }
+    internal sealed class BurtMainLightShadowCascadeCache // Stores the request-local cascade layout so every main-light shadow consumer reads one consistent result.
+    {
+        private const int MaxCascadeCount = BurtShadowData.MaxMainLightShadowCascadeCount;
+
+        public Matrix4x4[] ViewMatrices { get; } = new Matrix4x4[MaxCascadeCount];
+        public Matrix4x4[] ProjectionMatrices { get; } = new Matrix4x4[MaxCascadeCount];
+        public Matrix4x4[] WorldToShadowMatrices { get; } = new Matrix4x4[MaxCascadeCount];
+        public ShadowSplitData[] SplitDatas { get; } = new ShadowSplitData[MaxCascadeCount];
+        public Vector4[] CascadeSpheres { get; } = new Vector4[MaxCascadeCount];
+        public Vector4[] CascadeAtlasRects { get; } = new Vector4[MaxCascadeCount];
+        public bool IsValid { get; private set; }
+        public int CascadeCount { get; private set; }
+        public int TileResolution { get; private set; }
+        public int AtlasResolution { get; private set; }
+
+        private int cachedMainLightIndex = -1;
+        private float cachedNearPlane;
+        private int cachedShadowResolution;
+        private int cachedCascadeCountSetting;
+        private float cachedCascadeSplit1;
+        private float cachedCascadeSplit2;
+        private float cachedCascadeSplit3;
+
+        public BurtMainLightShadowCascadeCache()
+        {
+            Clear();
+        }
+
+        public bool Matches(BurtShadowData shadowData) // Validates whether the current cache still matches the resolved request shadow settings.
+        {
+            return IsValid
+                && shadowData != null
+                && shadowData.HasMainLightShadow
+                && cachedMainLightIndex == shadowData.MainLightIndex
+                && cachedShadowResolution == shadowData.MainLightShadowResolution
+                && cachedCascadeCountSetting == shadowData.MainLightShadowCascadeCount
+                && Mathf.Approximately(cachedNearPlane, shadowData.MainLightShadowNearPlane)
+                && Mathf.Approximately(cachedCascadeSplit1, shadowData.MainLightShadowCascadeSplit1)
+                && Mathf.Approximately(cachedCascadeSplit2, shadowData.MainLightShadowCascadeSplit2)
+                && Mathf.Approximately(cachedCascadeSplit3, shadowData.MainLightShadowCascadeSplit3);
+        }
+
+        public void Store(BurtShadowData shadowData, int cascadeCount, int tileResolution, int atlasResolution) // Captures the shadow-layout key and computed output sizes for later pass reuse.
+        {
+            cachedMainLightIndex = shadowData != null ? shadowData.MainLightIndex : -1;
+            cachedNearPlane = shadowData != null ? shadowData.MainLightShadowNearPlane : 0f;
+            cachedShadowResolution = shadowData != null ? shadowData.MainLightShadowResolution : 0;
+            cachedCascadeCountSetting = shadowData != null ? shadowData.MainLightShadowCascadeCount : 0;
+            cachedCascadeSplit1 = shadowData != null ? shadowData.MainLightShadowCascadeSplit1 : 0f;
+            cachedCascadeSplit2 = shadowData != null ? shadowData.MainLightShadowCascadeSplit2 : 0f;
+            cachedCascadeSplit3 = shadowData != null ? shadowData.MainLightShadowCascadeSplit3 : 0f;
+            CascadeCount = cascadeCount;
+            TileResolution = tileResolution;
+            AtlasResolution = atlasResolution;
+            IsValid = cascadeCount > 0 && tileResolution > 0 && atlasResolution > 0;
+        }
+
+        public void Clear() // Resets the cache to the same disabled shadow defaults expected by the runtime globals.
+        {
+            IsValid = false;
+            CascadeCount = 0;
+            TileResolution = 0;
+            AtlasResolution = 0;
+            cachedMainLightIndex = -1;
+            cachedNearPlane = 0f;
+            cachedShadowResolution = 0;
+            cachedCascadeCountSetting = 0;
+            cachedCascadeSplit1 = 0f;
+            cachedCascadeSplit2 = 0f;
+            cachedCascadeSplit3 = 0f;
+
+            for (var cascadeIndex = 0; cascadeIndex < MaxCascadeCount; cascadeIndex++)
+            {
+                ViewMatrices[cascadeIndex] = Matrix4x4.identity;
+                ProjectionMatrices[cascadeIndex] = Matrix4x4.identity;
+                WorldToShadowMatrices[cascadeIndex] = Matrix4x4.identity;
+                SplitDatas[cascadeIndex] = default;
+                CascadeSpheres[cascadeIndex] = new Vector4(0f, 0f, 0f, -1f);
+                CascadeAtlasRects[cascadeIndex] = new Vector4(0f, 0f, 1f, 1f);
+            }
+        }
+    }
+
 }

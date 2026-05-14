@@ -47,7 +47,7 @@ Shader "Hidden/BurtRP/HiZDepthPyramid"
 
         Pass
         {
-            Name "Burt HiZ Reduce Furthest"
+            Name "Burt HiZ Reduce Closest"
             Cull Off
             ZWrite Off
             ZTest Always
@@ -55,7 +55,7 @@ Shader "Hidden/BurtRP/HiZDepthPyramid"
             HLSLPROGRAM
             #pragma target 3.5
             #pragma vertex Vert
-            #pragma fragment FragReduceFurthest
+            #pragma fragment FragReduceClosest
 
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtDeferred.hlsl"
@@ -89,16 +89,16 @@ Shader "Hidden/BurtRP/HiZDepthPyramid"
                 return tex2D(_BurtHiZSourceTexture, clampedPixel * _BurtHiZSourceTexelSize.xy).r;
             }
 
-            float ReduceFurthestRawDepth(float4 depth)
+            float ReduceClosestRawDepth(float4 depth)
             {
                 #if defined(UNITY_REVERSED_Z)
-                    return min(min(depth.x, depth.y), min(depth.z, depth.w));
-                #else
                     return max(max(depth.x, depth.y), max(depth.z, depth.w));
+                #else
+                    return min(min(depth.x, depth.y), min(depth.z, depth.w));
                 #endif
             }
 
-            float FragReduceFurthest(Varyings input) : SV_Target
+            float FragReduceClosest(Varyings input) : SV_Target
             {
                 float2 sourceBasePixel = input.positionCS.xy * 2.0 - 0.5;
                 float4 sourceDepth;
@@ -106,7 +106,7 @@ Shader "Hidden/BurtRP/HiZDepthPyramid"
                 sourceDepth.y = SampleSourcePixel(sourceBasePixel + float2(1.0, 0.0));
                 sourceDepth.z = SampleSourcePixel(sourceBasePixel + float2(0.0, 1.0));
                 sourceDepth.w = SampleSourcePixel(sourceBasePixel + float2(1.0, 1.0));
-                return ReduceFurthestRawDepth(sourceDepth);
+                return ReduceClosestRawDepth(sourceDepth);
             }
             ENDHLSL
         }

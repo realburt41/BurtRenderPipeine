@@ -10,35 +10,38 @@ Shader "BurtRP/Hair"
         // Defines the surface tint multiplied by the sampled Base Map before lighting.
         _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
 
-        // Defines the Hair mask map: R=scatter modulation, G=occlusion, B=reserved, A=smoothness.
-        _MaskMap ("Mask Map (R Scatter, G Occlusion, A Smoothness)", 2D) = "white" {}
+        // Defines the Hair mask map: R=scatter modulation, G=occlusion, B=longitudinal lobe shift scale, A=smoothness.
+        _MaskMap ("Mask Map (R Scatter, G Occlusion, B Shift, A Smoothness)", 2D) = "white" {}
 
         // 定义切线空间法线贴图，Forward 光照会用它改变每个片元的世界空间法线。
         [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
 
         // 定义法线贴图强度，0 表示退回几何法线，1 表示使用贴图原始强度。
-        _NormalScale ("Normal Scale", Range(0, 2)) = 1
+        _NormalScale ("Normal Scale", Range(0, 2)) = 0
 
         // 定义 XRender / Frostbite 风格的介质反射率，0.5 会映射到常见非金属 F0=0.04。
         _Reflectance ("Reflectance", Range(0, 1)) = 0.5
 
         // Hair scatter strength. Mask Map R can further modulate this per pixel.
-        _HairScatter ("Hair Scatter", Range(0, 1)) = 0.5
+        _HairScatter ("Hair Scatter", Range(0, 1)) = 0.25
 
         // Extra scatter packed into the existing Hair scatter channel; does not allocate a new GBuffer target.
         _HairScatterBoost ("Hair Scatter Boost", Range(0, 1)) = 0
 
         // Multiplies Reflectance before GBuffer write, so Deferred Hair can keep a per-material specular scale.
-        _HairSpecularScale ("Hair Specular Scale", Range(0, 2)) = 1
+        _HairSpecularScale ("Hair Specular Scale", Range(0, 2)) = 0.85
+
+        // Scales Mask Map B before packing the longitudinal lobe shift into the Hair GBuffer material channel.
+        _HairShiftScale ("Hair Shift Scale", Range(0, 1)) = 1
 
         // Positive values make hair rougher by lowering the final smoothness after Mask Map A is applied.
-        _HairRoughnessOffset ("Hair Roughness Offset", Range(-0.5, 0.5)) = 0
+        _HairRoughnessOffset ("Hair Roughness Offset", Range(0, 0.35)) = 0.05
 
         // Flips the mesh tangent before it is stored as Hair strand direction in the GBuffer.
         [Toggle] _HairTangentFlip ("Flip Strand Direction", Float) = 0
 
         // 定义材质光滑度，数值越高高光越小越锐利。
-        _Smoothness ("Smoothness", Range(0, 1)) = 0.5
+        _Smoothness ("Smoothness", Range(0, 1)) = 0.85
 
         // 定义环境遮蔽强度，0 表示忽略 Mask Map 的 G 通道，1 表示完全使用 G 通道。
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
@@ -380,7 +383,7 @@ Shader "BurtRP/Hair"
                 // 保存世界空间切线和副切线符号，片元阶段用于 normal map 转世界空间。
                 float4 tangentWS : TEXCOORD2;
 
-                // 保存 Mask Map UV，片元阶段用于采样 scatter、occlusion、smoothness。
+                // 保存 Mask Map UV，片元阶段用于采样 scatter、occlusion、shift 和 smoothness。
                 float2 maskMapUV : TEXCOORD3;
 
                 // 保存 Emission Map UV，片元阶段用于采样自发光颜色。
@@ -441,14 +444,15 @@ Shader "BurtRP/Hair"
                 float strandDirectionSign = lerp(1.0f, -1.0f, saturate(_HairTangentFlip));
                 float3 strandDirectionWS = BurtSafeNormalize(input.tangentWS.xyz * strandDirectionSign);
 
-                // 采样 Mask Map，R/G/A 分别参与 scatter、occlusion 和 smoothness 的最终计算。
+                // 采样 Mask Map，R/G/B/A 分别参与 scatter、occlusion、hair lobe shift 和 smoothness 的最终计算。
                 float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
 
                 // Hair shader is a separate material model: reflectance/smoothness/scatter are folded into existing GBuffer channels.
                 float hairReflectance = saturate(_Reflectance * _HairSpecularScale);
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, hairReflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
                 surfaceData.smoothness = saturate(surfaceData.smoothness - _HairRoughnessOffset);
-                surfaceData = BurtApplyHairGBufferSurfaceSemantics(surfaceData, (_HairScatter + _HairScatterBoost) * maskMap.r);
+                float hairShiftScale = saturate(_HairShiftScale * maskMap.b);
+                surfaceData = BurtApplyHairGBufferSurfaceSemantics(surfaceData, (_HairScatter + _HairScatterBoost) * maskMap.r, hairShiftScale);
 
                 // 采样自发光输入，GBuffer2.rgb 直接保存 emission，让 Deferred Lighting 最后再叠加。
                 float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
@@ -563,9 +567,6 @@ Shader "BurtRP/Hair"
                 // Stores world-space normal for diffuse lighting.
                 float3 normalWS : TEXCOORD0;
 
-                // Stores the projected main-light shadow coordinate for this vertex.
-                float4 shadowCoord : TEXCOORD1;
-
                 // Stores Base Map UVs after applying material tiling and offset from _BaseMap_ST.
                 float2 baseMapUV : TEXCOORD2;
 
@@ -578,7 +579,7 @@ Shader "BurtRP/Hair"
                 // 保存自发光贴图 UV，片元阶段会用它采样 Emission Map。
                 float2 emissionMapUV : TEXCOORD5;
 
-                // 保存 Mask Map UV，片元阶段会用它采样 scatter、occlusion 和 smoothness。
+                // 保存 Mask Map UV，片元阶段会用它采样 scatter、occlusion、shift 和 smoothness。
                 float2 maskMapUV : TEXCOORD6;
             };
 
@@ -596,9 +597,6 @@ Shader "BurtRP/Hair"
 
                 // 保存世界空间位置，后续 fragment 会用它计算 view direction。
                 output.positionWS = positionWS.xyz;
-
-                // Transforms the world-space position into main-light shadow-map coordinate space through the shared shadow helper.
-                output.shadowCoord = BurtTransformWorldToMainLightShadow(positionWS);
 
                 // Transforms the object-space normal into world space and normalizes it.
                 output.normalWS = normalize(UnityObjectToWorldNormal(input.normalOS));
@@ -640,17 +638,18 @@ Shader "BurtRP/Hair"
                 // 计算从当前片元指向相机的世界空间方向，Specular 高光需要知道观察方向。
                 float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
 
-                // 采样 Mask Map，R/G/A 分别参与 scatter、occlusion 和 smoothness 的最终计算。
+                // 采样 Mask Map，R/G/B/A 分别参与 scatter、occlusion、hair lobe shift 和 smoothness 的最终计算。
                 float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
 
                 // Hair shader is a separate material model: reflectance/smoothness/scatter are folded into existing GBuffer channels.
                 float hairReflectance = saturate(_Reflectance * _HairSpecularScale);
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, hairReflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
                 surfaceData.smoothness = saturate(surfaceData.smoothness - _HairRoughnessOffset);
-                surfaceData = BurtApplyHairGBufferSurfaceSemantics(surfaceData, (_HairScatter + _HairScatterBoost) * maskMap.r);
+                float hairShiftScale = saturate(_HairShiftScale * maskMap.b);
+                surfaceData = BurtApplyHairGBufferSurfaceSemantics(surfaceData, (_HairScatter + _HairScatterBoost) * maskMap.r, hairShiftScale);
 
                 // Samples the main-light shadow attenuation using the shared shadow receiver helper.
-                float shadowAttenuation = BurtSampleMainLightShadow(input.shadowCoord);
+                float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
 
                 // Builds the current main light from BurtRP global lighting variables and this pixel's shadow value.
                 BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
@@ -666,7 +665,7 @@ Shader "BurtRP/Hair"
                 }
 
                 // Hair uses the shared shading-model dispatch with strand direction passed through the normalWS parameter slot.
-                BurtPBRShadingComponents pbrComponents = BurtEvaluateShadingModelComponents(shadingSurfaceData, mainLight, strandDirectionWS, viewDirectionWS);
+                BurtPBRShadingComponents pbrComponents = BurtEvaluateShadingModelComponents(shadingSurfaceData, mainLight, strandDirectionWS, viewDirectionWS, input.positionWS);
 
                 // 取出不含自发光的 PBR 总光照，后续 finalColor 会在它基础上叠加 Emission。
                 float3 lightingColor = pbrComponents.lighting;
@@ -704,6 +703,10 @@ Shader "BurtRP/Hair"
                 // 写入直接高光结果，DirectSpecular Debug View 会显示它。
                 debugData.directSpecularColor = pbrComponents.directSpecular;
 
+                // 写入追加光直接光拆分，Additional Light Debug View 会显示它。
+                debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
+                debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
+
                 // 写入间接漫反射结果，IndirectDiffuse Debug View 会显示它。
                 debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
 
@@ -712,6 +715,16 @@ Shader "BurtRP/Hair"
 
                 // 写入主光阴影衰减，ShadowAttenuation Debug View 用它确认当前像素的阴影接收结果。
                 debugData.shadowAttenuation = shadowAttenuation;
+
+                BurtFillMainLightShadowShadingDebugData(
+                    input.positionWS,
+                    debugData.normalWS,
+                    debugData.shadowCascadeColor,
+                    debugData.shadowCascadeBlend,
+                    debugData.shadowDistanceFade,
+                    debugData.shadowPCSSRadius,
+                    debugData.shadowReceiverDepthDelta,
+                    debugData.shadowPCSSBlockerFraction);
 
                 // 写入参与间接光遮蔽的 AO，AmbientOcclusion Debug View 用它确认 Mask Map G 和强度混合结果。
                 debugData.ambientOcclusion = surfaceData.occlusion;

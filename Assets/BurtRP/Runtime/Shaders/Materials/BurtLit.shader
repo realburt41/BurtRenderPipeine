@@ -564,9 +564,6 @@ Shader "BurtRP/Lit"
                 // Stores world-space normal for diffuse lighting.
                 float3 normalWS : TEXCOORD0;
 
-                // Stores the projected main-light shadow coordinate for this vertex.
-                float4 shadowCoord : TEXCOORD1;
-
                 // Stores Base Map UVs after applying material tiling and offset from _BaseMap_ST.
                 float2 baseMapUV : TEXCOORD2;
 
@@ -597,9 +594,6 @@ Shader "BurtRP/Lit"
 
                 // 保存世界空间位置，后续 fragment 会用它计算 view direction。
                 output.positionWS = positionWS.xyz;
-
-                // Transforms the world-space position into main-light shadow-map coordinate space through the shared shadow helper.
-                output.shadowCoord = BurtTransformWorldToMainLightShadow(positionWS);
 
                 // Transforms the object-space normal into world space and normalizes it.
                 output.normalWS = normalize(UnityObjectToWorldNormal(input.normalOS));
@@ -644,7 +638,7 @@ Shader "BurtRP/Lit"
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
 
                 // Samples the main-light shadow attenuation using the shared shadow receiver helper.
-                float shadowAttenuation = BurtSampleMainLightShadow(input.shadowCoord);
+                float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
 
                 // Builds the current main light from BurtRP global lighting variables and this pixel's shadow value.
                 BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
@@ -660,7 +654,7 @@ Shader "BurtRP/Lit"
                 }
 
                 // Lit shader always uses Default Lit PBR; Hair uses the standalone BurtRP/Hair shader.
-                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(shadingSurfaceData, mainLight, normalWS, viewDirectionWS);
+                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(shadingSurfaceData, mainLight, normalWS, viewDirectionWS, input.positionWS);
 
                 // 取出不含自发光的 PBR 总光照，后续 finalColor 会在它基础上叠加 Emission。
                 float3 lightingColor = pbrComponents.lighting;
@@ -698,6 +692,10 @@ Shader "BurtRP/Lit"
                 // 写入直接高光结果，DirectSpecular Debug View 会显示它。
                 debugData.directSpecularColor = pbrComponents.directSpecular;
 
+                // 写入追加光直接光拆分，Additional Light Debug View 会显示它。
+                debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
+                debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
+
                 // 写入间接漫反射结果，IndirectDiffuse Debug View 会显示它。
                 debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
 
@@ -706,6 +704,16 @@ Shader "BurtRP/Lit"
 
                 // 写入主光阴影衰减，ShadowAttenuation Debug View 用它确认当前像素的阴影接收结果。
                 debugData.shadowAttenuation = shadowAttenuation;
+
+                BurtFillMainLightShadowShadingDebugData(
+                    input.positionWS,
+                    debugData.normalWS,
+                    debugData.shadowCascadeColor,
+                    debugData.shadowCascadeBlend,
+                    debugData.shadowDistanceFade,
+                    debugData.shadowPCSSRadius,
+                    debugData.shadowReceiverDepthDelta,
+                    debugData.shadowPCSSBlockerFraction);
 
                 // 写入参与间接光遮蔽的 AO，AmbientOcclusion Debug View 用它确认 Mask Map G 和强度混合结果。
                 debugData.ambientOcclusion = surfaceData.occlusion;

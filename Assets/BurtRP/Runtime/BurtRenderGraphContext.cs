@@ -168,6 +168,65 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle ScreenSpaceAmbientOcclusionRawTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceAmbientOcclusionRaw();
+            }
+        }
+
+        public BurtRenderTargetHandle ScreenSpaceAmbientOcclusionTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceAmbientOcclusion();
+            }
+        }
+
+        public BurtRenderBufferHandle GetBuffer(string name)
+        {
+            if (ResourceRegistry == null)
+            {
+                return BurtRenderBufferHandle.Invalid(name);
+            }
+
+            return ResourceRegistry.GetBuffer(name);
+        }
+
+        public BurtRenderTargetHandle AdditionalLightShadowAtlasTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.AdditionalLightShadowAtlasName);
+                }
+
+                return ResourceRegistry.GetAdditionalLightShadowAtlas();
+            }
+        }
+
+        public BurtRenderBufferHandle AdditionalLightBuffer => GetBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName);
+
+        public BurtRenderBufferHandle TileLightCountBuffer => GetBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
+
+        public BurtRenderBufferHandle TileLightListBuffer => GetBuffer(BurtRenderGraphResourceRegistry.TileLightListBufferName);
+
+        public BurtRenderBufferHandle TileLightOffsetBuffer => GetBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+
+        public BurtRenderBufferHandle ClusterLightListBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName);
+
         public BurtRequestRenderOptions RenderOptions { get; } // 保存当前 request 的栈级执行选项，Pass 可以通过它判断 RT 生命周期策略。
 
         public BurtRenderGraphContext( // 保留旧构造函数，让没有显式传入执行选项的调用方继续走单 request 生命周期。

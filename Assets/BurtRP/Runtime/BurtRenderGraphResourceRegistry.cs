@@ -1,4 +1,4 @@
-using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 Dictionary 和 HashSet 保存资源表与外部导入标记。
+﻿using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 Dictionary 和 HashSet 保存资源表与外部导入标记。
 using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Shader.PropertyToID 生成临时 RT 的整数 ID。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 RenderTargetIdentifier。
 
@@ -70,27 +70,83 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceReflectionTemporalColorTextureId = Shader.PropertyToID(ScreenSpaceReflectionTemporalColorTextureShaderName);
 
+        public const string ScreenSpaceAmbientOcclusionRawName = "ScreenSpaceAmbientOcclusionRaw";
+
+        public const string ScreenSpaceAmbientOcclusionRawTextureShaderName = "_BurtScreenSpaceAmbientOcclusionRawTexture";
+
+        public static readonly int ScreenSpaceAmbientOcclusionRawTextureId = Shader.PropertyToID(ScreenSpaceAmbientOcclusionRawTextureShaderName);
+
+        public const string ScreenSpaceAmbientOcclusionName = "ScreenSpaceAmbientOcclusion";
+
+        public const string ScreenSpaceAmbientOcclusionTextureShaderName = "_BurtScreenSpaceAmbientOcclusionTexture";
+
+        public static readonly int ScreenSpaceAmbientOcclusionTextureId = Shader.PropertyToID(ScreenSpaceAmbientOcclusionTextureShaderName);
+
         public const string MainLightShadowMapName = "MainLightShadowMap"; // 定义主光阴影图在 RenderGraph 里的统一资源名，后续阴影绘制和光照采样都通过它建立依赖。
 
         public const string MainLightShadowMapShaderName = "_BurtMainLightShadowMap"; // 定义主光阴影图暴露给 shader 的全局纹理名称，后续 Lit shader 会用这个名字采样阴影。
 
         public static readonly int MainLightShadowMapId = Shader.PropertyToID(MainLightShadowMapShaderName); // 把主光阴影图 shader 名称转换成整数 ID，让 CommandBuffer 申请、释放和绑定同一个临时 RT。
 
+        public const string AdditionalLightShadowAtlasName = "AdditionalLightShadowAtlas";
+
+        public const string AdditionalLightShadowAtlasShaderName = "_BurtAdditionalLightShadowAtlas";
+
+        public static readonly int AdditionalLightShadowAtlasId = Shader.PropertyToID(AdditionalLightShadowAtlasShaderName);
+
         public const string LightingGlobalsName = "LightingGlobals"; // 定义灯光全局状态的逻辑资源名，用来让 Setup Lighting 和 Shading Pass 建立依赖。
 
         public const string ShadowGlobalsName = "ShadowGlobals"; // 定义阴影全局状态的逻辑资源名，用来描述 shadow matrix、shadow strength 等 shader 全局变量。
 
+        public const string AdditionalLightBufferName = "AdditionalLightBuffer"; // Future structured buffer for multi-light data when tiled/cluster lighting replaces global arrays.
+
+        public const string TileLightCountBufferName = "TileLightCountBuffer"; // Per-tile debug light count buffer used by the tiled-lighting skeleton.
+
+        public const string TileLightListBufferName = "TileLightListBuffer"; // Future per-tile light index list buffer used by tiled lighting.
+
+        public const string TileLightOffsetBufferName = "TileLightOffsetBuffer"; // Future per-tile offset/count buffer used by tiled lighting.
+
+        public const string ClusterLightListBufferName = "ClusterLightListBuffer"; // Future per-cluster light index list buffer used by clustered lighting.
+
         private const string UnnamedRenderTargetName = "UnnamedRenderTarget"; // 定义空资源名的兜底名称，避免 Dictionary 接收 null 或空字符串。
+
+        private const string UnnamedBufferName = "UnnamedBuffer"; // Fallback logical buffer name used when a declaration passes null or empty.
 
         private readonly Dictionary<string, BurtRenderTargetHandle> renderTargets = new Dictionary<string, BurtRenderTargetHandle>(); // 创建渲染目标字典，用资源名映射到渲染目标句柄。
 
         private readonly HashSet<string> externalRenderTargets = new HashSet<string>(); // 记录由相机或外部系统提供的资源，Read-before-Write 校验会把它们视为已有生产者。
 
-        public void Clear() // 定义清空函数，每次重新组装 RenderGraph 前调用。
-        {
-            renderTargets.Clear(); // 清空上一轮 request 注册的所有渲染目标，避免资源残留到下一轮渲染。
+        private readonly Dictionary<string, BurtRenderBufferHandle> buffers = new Dictionary<string, BurtRenderBufferHandle>(); // Logical buffer registry for future tiled/cluster resources.
 
-            externalRenderTargets.Clear(); // 清空外部导入标记，避免跨相机误判资源生产者。
+        private readonly Dictionary<string, BurtRenderBufferDescriptor> bufferDescriptors = new Dictionary<string, BurtRenderBufferDescriptor>(); // Allocation descriptors for graph-owned GPU buffers.
+
+        private readonly HashSet<string> externalBuffers = new HashSet<string>(); // Buffers imported from outside the graph are valid read sources.
+
+        private readonly List<GraphicsBuffer> deferredBufferReleases = new List<GraphicsBuffer>(); // Buffers queued by release passes until ScriptableRenderContext.Submit has consumed draw commands.
+
+        public IEnumerable<string> RenderTargetNames => renderTargets.Keys; // Exposes registered RT names for debug dumps without exposing the dictionary.
+
+        public IEnumerable<string> ExternalRenderTargetNames => externalRenderTargets; // Exposes external RT names for debug dumps.
+
+        public IEnumerable<string> BufferNames => buffers.Keys; // Exposes registered logical buffer names for debug dumps.
+
+        public IEnumerable<string> ExternalBufferNames => externalBuffers; // Exposes external buffer names for debug dumps.
+
+        public void Clear() // Clears graph resources before assembling the next RenderGraph request.
+        {
+            FlushDeferredBufferReleases(); // Complete releases queued by the previous submitted request before reusing the registry.
+
+            ReleaseAllInternalBuffers(); // Dispose any graph-owned buffers that survived because execution ended early.
+
+            renderTargets.Clear(); // Clear render targets registered by the previous request.
+
+            externalRenderTargets.Clear(); // Clear external render target markers for the next request.
+
+            buffers.Clear(); // Clear logical buffer registrations alongside render targets.
+
+            bufferDescriptors.Clear(); // Clear GPU buffer allocation descriptors.
+
+            externalBuffers.Clear(); // Clear imported buffer markers for the next request.
         }
 
         public BurtRenderTargetHandle RegisterRenderTarget( // 定义注册渲染目标的函数，外部通过它把 RenderTargetIdentifier 放进资源表。
@@ -143,6 +199,150 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public bool IsExternalRenderTarget(string name) // 判断某个资源是否来自 RenderGraph 外部。
         {
             return externalRenderTargets.Contains(NormalizeResourceName(name)); // 外部资源可被读取而不需要图内写入生产者。
+        }
+
+        public BurtRenderBufferHandle RegisterBuffer(string name) // Registers a logical buffer resource without allocating a GPU buffer yet.
+        {
+            return RegisterBuffer(name, default, false, null);
+        }
+
+        public BurtRenderBufferHandle RegisterBuffer(string name, bool isExternal) // Registers a logical buffer and optional external import marker.
+        {
+            return RegisterBuffer(name, default, isExternal, null);
+        }
+
+        public BurtRenderBufferHandle RegisterBuffer(string name, BurtRenderBufferDescriptor descriptor) // Registers a graph-owned GPU buffer descriptor.
+        {
+            return RegisterBuffer(name, descriptor, false, null);
+        }
+
+        public BurtRenderBufferHandle RegisterExternalBuffer(string name, GraphicsBuffer buffer) // Imports a GPU buffer owned by code outside this graph.
+        {
+            return RegisterBuffer(name, default, true, buffer);
+        }
+
+        private BurtRenderBufferHandle RegisterBuffer(
+            string name,
+            BurtRenderBufferDescriptor descriptor,
+            bool isExternal,
+            GraphicsBuffer externalBuffer)
+        {
+            var safeName = NormalizeBufferName(name);
+            ReleaseInternalBufferIfNeeded(safeName);
+
+            var handle = new BurtRenderBufferHandle(safeName, externalBuffer);
+            buffers[safeName] = handle;
+
+            if (descriptor.IsValid)
+            {
+                bufferDescriptors[safeName] = descriptor;
+            }
+            else
+            {
+                bufferDescriptors.Remove(safeName);
+            }
+
+            if (isExternal)
+            {
+                externalBuffers.Add(safeName);
+            }
+            else
+            {
+                externalBuffers.Remove(safeName);
+            }
+
+            return handle;
+        }
+
+        public BurtRenderBufferHandle GetBuffer(string name) // Reads a logical buffer handle from the registry.
+        {
+            var safeName = NormalizeBufferName(name);
+
+            if (buffers.TryGetValue(safeName, out var handle))
+            {
+                return handle;
+            }
+
+            return BurtRenderBufferHandle.Invalid(safeName);
+        }
+
+        public bool TryGetBufferDescriptor(string name, out BurtRenderBufferDescriptor descriptor) // Reads a registered GPU buffer descriptor.
+        {
+            return bufferDescriptors.TryGetValue(NormalizeBufferName(name), out descriptor);
+        }
+
+        public bool HasValidBufferDescriptor(string name) // Checks whether a graph-owned buffer can be allocated.
+        {
+            return bufferDescriptors.TryGetValue(NormalizeBufferName(name), out var descriptor) && descriptor.IsValid;
+        }
+
+        public bool IsBufferAllocated(string name) // Checks whether the registry currently holds a live GPU buffer object.
+        {
+            return buffers.TryGetValue(NormalizeBufferName(name), out var handle) && handle.HasBuffer;
+        }
+
+        public BurtRenderBufferHandle AllocateBuffer(string name) // Allocates or reuses a graph-owned GPU buffer from its descriptor.
+        {
+            var safeName = NormalizeBufferName(name);
+
+            if (!bufferDescriptors.TryGetValue(safeName, out var descriptor) || !descriptor.IsValid)
+            {
+                return GetBuffer(safeName);
+            }
+
+            if (buffers.TryGetValue(safeName, out var currentHandle) && currentHandle.HasBuffer && IsBufferCompatible(currentHandle.Buffer, descriptor))
+            {
+                return currentHandle;
+            }
+
+            ReleaseInternalBufferIfNeeded(safeName);
+
+            var buffer = new GraphicsBuffer(descriptor.Target, descriptor.Count, descriptor.Stride)
+            {
+                name = string.IsNullOrEmpty(descriptor.DebugName) ? safeName : descriptor.DebugName
+            };
+
+            var handle = new BurtRenderBufferHandle(safeName, buffer);
+            buffers[safeName] = handle;
+            externalBuffers.Remove(safeName);
+
+            return handle;
+        }
+
+        public void ReleaseBuffer(string name) // Releases a graph-owned GPU buffer while keeping the logical registration visible for debug output.
+        {
+            var safeName = NormalizeBufferName(name);
+            if (externalBuffers.Contains(safeName))
+            {
+                return;
+            }
+
+            QueueInternalBufferReleaseIfNeeded(safeName);
+
+            if (buffers.ContainsKey(safeName))
+            {
+                buffers[safeName] = new BurtRenderBufferHandle(safeName);
+            }
+        }
+
+        public void FlushDeferredBufferReleases()
+        {
+            for (var bufferIndex = 0; bufferIndex < deferredBufferReleases.Count; bufferIndex++)
+            {
+                ReleaseBufferObject(deferredBufferReleases[bufferIndex]);
+            }
+
+            deferredBufferReleases.Clear();
+        }
+
+        public bool ContainsBuffer(string name) // Checks whether a logical buffer is registered in the current graph.
+        {
+            return buffers.ContainsKey(NormalizeBufferName(name));
+        }
+
+        public bool IsExternalBuffer(string name) // Checks whether a logical buffer is imported from outside the graph.
+        {
+            return externalBuffers.Contains(NormalizeBufferName(name));
         }
 
         public BurtRenderTargetHandle RegisterCameraColor(RenderTargetIdentifier identifier) // 定义注册 CameraColor 的快捷函数。
@@ -305,6 +505,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(ScreenSpaceReflectionTemporalColorName);
         }
 
+        public BurtRenderTargetHandle RegisterScreenSpaceAmbientOcclusionRawTexture()
+        {
+            return RegisterScreenSpaceAmbientOcclusionRaw(new RenderTargetIdentifier(ScreenSpaceAmbientOcclusionRawTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceAmbientOcclusionRaw(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceAmbientOcclusionRawName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceAmbientOcclusionRaw()
+        {
+            return GetRenderTarget(ScreenSpaceAmbientOcclusionRawName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceAmbientOcclusionTexture()
+        {
+            return RegisterScreenSpaceAmbientOcclusion(new RenderTargetIdentifier(ScreenSpaceAmbientOcclusionTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceAmbientOcclusion(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceAmbientOcclusionName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceAmbientOcclusion()
+        {
+            return GetRenderTarget(ScreenSpaceAmbientOcclusionName);
+        }
+
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。
         {
             return RegisterMainLightShadowMap(new RenderTargetIdentifier(MainLightShadowMapId)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 MainLightShadowMap。
@@ -320,9 +550,93 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(MainLightShadowMapName); // 使用统一名称从资源表读取主光阴影图目标。
         }
 
+        public BurtRenderTargetHandle RegisterAdditionalLightShadowAtlasTexture()
+        {
+            return RegisterAdditionalLightShadowAtlas(new RenderTargetIdentifier(AdditionalLightShadowAtlasId));
+        }
+
+        public BurtRenderTargetHandle RegisterAdditionalLightShadowAtlas(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(AdditionalLightShadowAtlasName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetAdditionalLightShadowAtlas()
+        {
+            return GetRenderTarget(AdditionalLightShadowAtlasName);
+        }
+
+        private void ReleaseAllInternalBuffers() // Releases graph-owned buffers before the registry is reset.
+        {
+            foreach (var pair in buffers)
+            {
+                if (externalBuffers.Contains(pair.Key))
+                {
+                    continue;
+                }
+
+                ReleaseBufferObject(pair.Value.Buffer);
+            }
+        }
+
+        private void ReleaseInternalBufferIfNeeded(string safeName) // Releases one graph-owned buffer if it is currently allocated.
+        {
+            if (externalBuffers.Contains(safeName))
+            {
+                return;
+            }
+
+            if (buffers.TryGetValue(safeName, out var handle))
+            {
+                ReleaseBufferObject(handle.Buffer);
+            }
+        }
+
+        private void QueueInternalBufferReleaseIfNeeded(string safeName) // Defers release-pass buffers until after the context submit.
+        {
+            if (externalBuffers.Contains(safeName))
+            {
+                return;
+            }
+
+            if (buffers.TryGetValue(safeName, out var handle))
+            {
+                QueueBufferReleaseObject(handle.Buffer);
+            }
+        }
+
+        private void QueueBufferReleaseObject(GraphicsBuffer buffer)
+        {
+            if (buffer == null)
+            {
+                return;
+            }
+
+            deferredBufferReleases.Add(buffer);
+        }
+
+        private static void ReleaseBufferObject(GraphicsBuffer buffer) // Keeps GraphicsBuffer disposal guarded and centralized.
+        {
+            if (buffer == null)
+            {
+                return;
+            }
+
+            buffer.Release();
+        }
+
+        private static bool IsBufferCompatible(GraphicsBuffer buffer, BurtRenderBufferDescriptor descriptor) // Avoids reallocating when a reused buffer still matches the descriptor.
+        {
+            return buffer != null && buffer.count == descriptor.Count && buffer.stride == descriptor.Stride;
+        }
+
         private static string NormalizeResourceName(string name) // 归一化资源名，避免 null 或空字符串破坏资源表和依赖校验。
         {
             return string.IsNullOrEmpty(name) ? UnnamedRenderTargetName : name; // 空名统一映射到兜底名称，Debug 中仍会看到异常资源名。
+        }
+
+        private static string NormalizeBufferName(string name) // Normalizes logical buffer names independently from render target names.
+        {
+            return string.IsNullOrEmpty(name) ? UnnamedBufferName : name;
         }
     }
 }

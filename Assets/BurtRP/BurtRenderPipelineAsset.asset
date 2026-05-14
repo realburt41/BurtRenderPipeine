@@ -30,16 +30,6 @@ MonoBehaviour:
   postProcessVolumeLayerMask:
     serializedVersion: 2
     m_Bits: 4294967295
-  enableMainLightShadows: 1
-  mainLightShadowResolution: 2048
-  mainLightShadowDistance: 50
-  mainLightShadowDepthBias: 0.05
-  mainLightShadowNormalBias: 0.4
-  mainLightShadowSampleBias: 0.001
-  enableMainLightShadowDebugView: 0
-  mainLightShadowDebugExposure: 1
-  mainLightShadowDebugYFlipMode: 0
-  enableMainLightShadowDebugLog: 0
   enableUnsupportedShaderDebug: 1
   enableRenderGraphDebug: 0
   enableRenderGraphDebugConsoleLog: 0

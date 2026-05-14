@@ -13,11 +13,14 @@ Shader "Hidden/BurtRP/DeferredLighting"
             // 引入 BurtRP Deferred 公共工具；出处参考 XRender SlabDeferredLightingPass + SlabGbufferUnpack。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtDeferred.hlsl"
 
+            // 引入 BurtRP PBR lighting；FromGBuffer 入口复用 Forward 的 BRDF、SH 和 Reflection Probe 逻辑。
+
+            #define BURT_USE_ADDITIONAL_LIGHT_BUFFER 1
+            #define BURT_USE_TILED_LIGHTING 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
+
             // 引入 BurtRP 主光阴影采样；Deferred 中会用重建 positionWS 生成 shadowCoord。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
-
-            // 引入 BurtRP PBR lighting；FromGBuffer 入口复用 Forward 的 BRDF、SH 和 Reflection Probe 逻辑。
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 
             // 引入 BurtRP Shading Debug；Deferred Lighting 要复用 Forward 的材质、BRDF 和光照拆项显示逻辑。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
@@ -42,11 +45,46 @@ Shader "Hidden/BurtRP/DeferredLighting"
             // Deferred Lighting is split into two fullscreen passes; filtering is still driven by the packed GBuffer shading model.
             static const float BURT_DEFERRED_LIGHTING_FILTER_DEFAULT_LIT = 0.0f;
             static const float BURT_DEFERRED_LIGHTING_FILTER_HAIR = 1.0f;
+            sampler2D _BurtScreenSpaceAmbientOcclusionTexture;
+            float _BurtScreenSpaceAmbientOcclusionEnabled;
 
             bool BurtDeferredLightingPassAcceptsShadingModel(float shadingModelID, float shadingModelFilter)
             {
                 bool isHair = BurtIsHairShadingModel(shadingModelID);
                 return shadingModelFilter == BURT_DEFERRED_LIGHTING_FILTER_HAIR ? isHair : !isHair;
+            }
+
+            float BurtSampleDeferredScreenSpaceAmbientOcclusion(float2 screenUV)
+            {
+                if (_BurtScreenSpaceAmbientOcclusionEnabled < 0.5f)
+                {
+                    return 1.0f;
+                }
+
+                float ao = tex2D(_BurtScreenSpaceAmbientOcclusionTexture, screenUV).r;
+                return saturate(ao);
+            }
+
+            float BurtResolveDeferredScreenSpaceSpecularOcclusionScale(
+                BurtPBRShadingComponents components,
+                float noV,
+                float screenSpaceAO)
+            {
+                return GetIndirectSpecularOcclusion(noV, saturate(screenSpaceAO), components.perceptualRoughness);
+            }
+
+            void BurtApplyDeferredScreenSpaceAmbientOcclusion(
+                inout BurtPBRShadingComponents components,
+                float noV,
+                float screenSpaceAO)
+            {
+                float ao = saturate(screenSpaceAO);
+                float specularAO = BurtResolveDeferredScreenSpaceSpecularOcclusionScale(components, noV, ao);
+                components.indirectDiffuse *= ao;
+                components.indirectSpecular *= specularAO;
+                components.specularOcclusion *= specularAO;
+                components.indirectLighting = components.indirectDiffuse + components.indirectSpecular;
+                components.lighting = components.directLighting + components.indirectLighting;
             }
 
             // 出处：XRender/Shaders/SlabShaderPass/SlabDeferredLightingPass.hlsl::Vert，通过 vertexID 生成全屏三角形。
@@ -90,11 +128,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 float3 viewDirectionWS;
                 BurtPrepareDeferredViewData(screenUV, rawDepth, positionWS, viewDirectionWS);
 
-                // Use the same reconstructed world position for lighting and shadow lookup so GBuffer/depth UV conventions stay in sync.
-                float4 shadowCoord = BurtTransformWorldToMainLightShadow(float4(positionWS, 1.0f));
-
                 // 采样主光阴影；当 C# 没有启用阴影时，BurtShadows.hlsl 会安全返回 1。
-                float shadowAttenuation = BurtSampleMainLightShadow(shadowCoord);
+                float shadowAttenuation = BurtSampleMainLightShadow(positionWS);
 
 
                 // 从 BurtRP 全局主光参数创建一盏方向光，阴影衰减已经写入 light 数据。
@@ -111,7 +146,17 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 }
 
                 // 从 GBuffer 进入 shading-model dispatch；Default Lit 走 PBR，Hair 走独立的最小 Hair lighting 分支。
-                BurtPBRShadingComponents pbrComponents = BurtEvaluateShadingModelComponentsFromGBuffer(shadingGBufferData, mainLight, viewDirectionWS);
+                BurtPBRShadingComponents pbrComponents = BurtEvaluateShadingModelComponentsFromGBuffer(shadingGBufferData, mainLight, viewDirectionWS, positionWS, screenUV);
+                float screenSpaceAmbientOcclusion = BurtSampleDeferredScreenSpaceAmbientOcclusion(screenUV);
+                float3 deferredAONormalWS = BurtSafeNormalize(BurtGetGBufferDirectionWS(shadingGBufferData));
+                float3 deferredAOViewDirectionWS = BurtSafeNormalize(viewDirectionWS);
+                if (BurtIsHairShadingModel(shadingGBufferData.shadingModelID))
+                {
+                    deferredAONormalWS = BurtHairCreateViewFacingNormalWS(deferredAONormalWS, deferredAOViewDirectionWS);
+                }
+
+                float deferredNoV = saturate(dot(deferredAONormalWS, deferredAOViewDirectionWS));
+                BurtApplyDeferredScreenSpaceAmbientOcclusion(pbrComponents, deferredNoV, screenSpaceAmbientOcclusion);
 
                 // 先合成最终材质颜色，后续 Shading Debug 可以直接观察写入 CameraColor 前的最终结果。
                 float3 finalColor = pbrComponents.lighting + gbufferData.emission;
@@ -158,6 +203,10 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 // 写入直接高光结果，DirectSpecular Debug View 会显示它。
                 debugData.directSpecularColor = pbrComponents.directSpecular;
 
+                // 写入追加光直接光拆分，Additional Light Debug View 会显示它。
+                debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
+                debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
+
                 // 写入间接漫反射结果，IndirectDiffuse Debug View 会显示 Unity SH / Light Probe 贡献。
                 debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
 
@@ -167,8 +216,18 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 // 写入主光阴影衰减，ShadowAttenuation Debug View 用它确认 Deferred 接收阴影是否和 Forward 一致。
                 debugData.shadowAttenuation = shadowAttenuation;
 
+                BurtFillMainLightShadowShadingDebugData(
+                    positionWS,
+                    debugData.normalWS,
+                    debugData.shadowCascadeColor,
+                    debugData.shadowCascadeBlend,
+                    debugData.shadowDistanceFade,
+                    debugData.shadowPCSSRadius,
+                    debugData.shadowReceiverDepthDelta,
+                    debugData.shadowPCSSBlockerFraction);
+
                 // 写入参与间接光计算的 AO，AmbientOcclusion Debug View 用它确认 GBuffer0.a 是否进入 lighting。
-                debugData.ambientOcclusion = gbufferData.occlusion;
+                debugData.ambientOcclusion = saturate(gbufferData.occlusion * screenSpaceAmbientOcclusion);
 
                 // 写入 GBuffer 保存的自发光贡献，Emission Debug View 用它确认 GBuffer2.rgb 是否被最终叠加。
                 debugData.emissionColor = gbufferData.emission;
@@ -305,7 +364,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
             Blend Off
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragDeferredLit
             ENDHLSL
@@ -329,7 +388,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
             Blend One One
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragDeferredHair
             ENDHLSL

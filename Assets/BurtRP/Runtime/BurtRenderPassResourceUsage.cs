@@ -26,6 +26,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
         public BurtRenderResourceAccessType AccessType { get; }
     }
 
+    public readonly struct BurtRenderBufferResourceAccess // Stores one typed logical-buffer access declaration.
+    {
+        public BurtRenderBufferResourceAccess(BurtRenderBufferHandle handle, BurtRenderResourceAccessType accessType)
+        {
+            Handle = handle;
+            AccessType = accessType;
+        }
+
+        public BurtRenderBufferHandle Handle { get; }
+
+        public BurtRenderResourceAccessType AccessType { get; }
+    }
+
     public readonly struct BurtGlobalResourceAccess // Stores one typed logical global-resource access declaration.
     {
         public BurtGlobalResourceAccess(string resourceName, BurtRenderResourceAccessType accessType)
@@ -47,6 +60,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
 
         private readonly List<BurtRenderTargetResourceAccess> renderTargetAccesses = new List<BurtRenderTargetResourceAccess>(); // Typed RT accesses for debug and future culling.
 
+        private readonly List<BurtRenderBufferHandle> readBuffers = new List<BurtRenderBufferHandle>(); // Logical buffers read by this pass.
+
+        private readonly List<BurtRenderBufferHandle> writeBuffers = new List<BurtRenderBufferHandle>(); // Logical buffers written by this pass.
+
+        private readonly List<BurtRenderBufferResourceAccess> bufferAccesses = new List<BurtRenderBufferResourceAccess>(); // Typed buffer accesses for debug and future tiled/cluster passes.
+
         private readonly List<BurtGlobalResourceAccess> globalResourceAccesses = new List<BurtGlobalResourceAccess>(); // Typed global-resource accesses for debug.
 
         private readonly List<string> readGlobalResources = new List<string>(); // 保存这个 Pass 声明读取的逻辑全局资源，例如 LightingGlobals。
@@ -54,6 +73,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
         private readonly List<string> writeGlobalResources = new List<string>(); // 保存这个 Pass 声明写入的逻辑全局资源，例如 ShadowGlobals。
 
         private readonly List<string> validationMessages = new List<string>(); // 保存配置阶段发现的本 Pass 资源声明问题，只用于 Debug/Validation 输出。
+
+        private readonly List<string> allowUnconsumedWriteResources = new List<string>(); // Resources that are intentionally terminal side-effect writes.
 
         public int PassIndex { get; } // 保存这个资源使用记录对应的 Pass 顺序，方便日志和实际执行顺序对齐。
 
@@ -71,15 +92,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
 
         public IReadOnlyList<BurtRenderTargetResourceAccess> RenderTargetAccesses => renderTargetAccesses; // Typed RT access list for RenderGraph debug output.
 
+        public IReadOnlyList<BurtRenderBufferHandle> ReadBuffers => readBuffers; // Logical buffer read declarations.
+
+        public IReadOnlyList<BurtRenderBufferHandle> WriteBuffers => writeBuffers; // Logical buffer write declarations.
+
+        public IReadOnlyList<BurtRenderBufferResourceAccess> BufferAccesses => bufferAccesses; // Typed buffer access list for RenderGraph debug output.
+
         public IReadOnlyList<BurtGlobalResourceAccess> GlobalResourceAccesses => globalResourceAccesses; // Typed global-resource access list for RenderGraph debug output.
 
         public IReadOnlyList<string> ReadGlobalResources => readGlobalResources; // 暴露只读的逻辑全局资源读取列表，供 RenderGraph Debug 和 Validation 使用。
 
         public IReadOnlyList<string> WriteGlobalResources => writeGlobalResources; // 暴露只读的逻辑全局资源写入列表，供 RenderGraph Debug 和 Validation 使用。
 
+        public IReadOnlyList<string> AllowUnconsumedWriteResources => allowUnconsumedWriteResources; // Exposes terminal-write exceptions for validation/debug only.
+
         public IReadOnlyList<string> ValidationMessages => validationMessages; // 暴露只读校验消息，让 RenderGraph dump 可以集中展示问题。
 
-        public bool HasResourceDeclarations => readRenderTargets.Count > 0 || writeRenderTargets.Count > 0 || readGlobalResources.Count > 0 || writeGlobalResources.Count > 0; // 标记这个 Pass 是否声明了任意渲染目标或逻辑全局资源依赖。
+        public bool HasResourceDeclarations => readRenderTargets.Count > 0 || writeRenderTargets.Count > 0 || readBuffers.Count > 0 || writeBuffers.Count > 0 || readGlobalResources.Count > 0 || writeGlobalResources.Count > 0; // 标记这个 Pass 是否声明了任意渲染目标、Buffer 或逻辑全局资源依赖。
 
         public BurtRenderPassResourceUsage(string passName) // Backward-compatible constructor for older callers.
             : this(-1, passName, BurtRenderPassKindUtility.InferKind(passName), true, false)
@@ -139,6 +168,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             renderTargetAccesses.Add(new BurtRenderTargetResourceAccess(handle, ResolveWriteAccessType())); // Preserve Write list while recording Allocate/Bind/Clear/Copy semantics.
         }
 
+        public void AddReadBuffer(BurtRenderBufferHandle handle) // Records a logical buffer read declaration.
+        {
+            ValidateBufferHandle(handle, "Read Buffer");
+
+            if (ContainsBuffer(readBuffers, handle.Name))
+            {
+                AddValidationMessage("重复 Read Buffer 声明: " + FormatResourceName(handle.Name));
+            }
+
+            readBuffers.Add(handle);
+
+            bufferAccesses.Add(new BurtRenderBufferResourceAccess(handle, ResolveReadAccessType()));
+        }
+
+        public void AddWriteBuffer(BurtRenderBufferHandle handle) // Records a logical buffer write declaration.
+        {
+            ValidateBufferHandle(handle, "Write Buffer");
+
+            if (ContainsBuffer(writeBuffers, handle.Name))
+            {
+                AddValidationMessage("重复 Write Buffer 声明: " + FormatResourceName(handle.Name));
+            }
+
+            writeBuffers.Add(handle);
+
+            bufferAccesses.Add(new BurtRenderBufferResourceAccess(handle, ResolveWriteAccessType()));
+        }
+
         public void AddReadGlobalResource(string resourceName) // 定义记录读取逻辑全局资源的函数。
         {
             var safeName = ValidateGlobalResourceName(resourceName, "Read Global"); // 校验并归一化全局资源名，避免空名进入依赖图。
@@ -175,6 +232,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             writeGlobalResources.Add(safeName); // 把全局资源名加入写入列表，保留原始声明顺序便于排查。
 
             globalResourceAccesses.Add(new BurtGlobalResourceAccess(safeName, BurtRenderResourceAccessType.Write)); // Record typed global write access.
+        }
+
+        public void AllowUnconsumedWriteResource(string resourceName) // Marks a declared write as an intentional terminal side effect.
+        {
+            var safeName = ValidateTerminalWriteResourceName(resourceName); // Normalize and validate before storing debug metadata.
+            if (string.IsNullOrEmpty(safeName))
+            {
+                return;
+            }
+
+            if (allowUnconsumedWriteResources.Contains(safeName))
+            {
+                AddValidationMessage("重复 AllowUnconsumedWrite 标记: " + safeName);
+                return;
+            }
+
+            allowUnconsumedWriteResources.Add(safeName);
         }
 
         public void AddValidationMessage(string message) // 定义追加校验消息的函数，供 Builder 和 RenderGraph 写入配置异常。
@@ -231,6 +305,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             }
         }
 
+        private void ValidateBufferHandle(BurtRenderBufferHandle handle, string accessType) // Validates a logical buffer handle for dependency tracking.
+        {
+            if (string.IsNullOrEmpty(handle.Name))
+            {
+                AddValidationMessage(accessType + " 声明使用空 Buffer 资源名。");
+            }
+
+            if (!handle.IsValid)
+            {
+                AddValidationMessage(accessType + " 声明引用缺失 Buffer: " + FormatResourceName(handle.Name));
+            }
+        }
+
         private static bool ContainsRenderTarget( // 判断列表里是否已经声明过同名资源。
             IReadOnlyList<BurtRenderTargetHandle> handles, // 接收待扫描的资源句柄列表。
             string resourceName) // 接收要查找的资源名。
@@ -244,6 +331,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             }
 
             return false; // 没有找到同名资源。
+        }
+
+        private static bool ContainsBuffer(IReadOnlyList<BurtRenderBufferHandle> handles, string resourceName) // Checks whether a buffer list already contains the same logical name.
+        {
+            for (var handleIndex = 0; handleIndex < handles.Count; handleIndex++)
+            {
+                if (handles[handleIndex].Name == resourceName)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string FormatResourceName(string resourceName) // 把资源名转换成适合日志显示的文本。
@@ -263,6 +363,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             }
 
             return resourceName; // 返回原始资源名，保持 Debug 输出和调用方声明一致。
+        }
+
+        private string ValidateTerminalWriteResourceName(string resourceName) // Validates an intentional terminal-write marker name.
+        {
+            if (string.IsNullOrEmpty(resourceName))
+            {
+                AddValidationMessage("AllowUnconsumedWrite 标记使用空资源名。");
+
+                return string.Empty;
+            }
+
+            return resourceName;
         }
     }
 }

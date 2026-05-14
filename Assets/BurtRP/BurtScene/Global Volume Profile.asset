@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-8996221535073517011
+--- !u!114 &-5432317182717837885
 MonoBehaviour:
   m_ObjectHideFlags: 3
   m_CorrespondingSourceObject: {fileID: 0}
@@ -9,251 +9,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtScreenSpaceReflectionVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtScreenSpaceReflectionVolumeComponent
-  active: 1
-  enabled:
-    m_OverrideState: 1
-    m_Value: 1
-  maxSteps:
-    m_OverrideState: 0
-    m_Value: 48
-  maxDistance:
-    m_OverrideState: 0
-    m_Value: 30
-  thickness:
-    m_OverrideState: 0
-    m_Value: 0.35
-  intensity:
-    m_OverrideState: 0
-    m_Value: 1
-  roughnessFade:
-    m_OverrideState: 0
-    m_Value: 0.6
-  temporalAccumulation:
-    m_OverrideState: 0
-    m_Value: 1
-  temporalFeedback:
-    m_OverrideState: 0
-    m_Value: 0.86
-  temporalDepthRejection:
-    m_OverrideState: 0
-    m_Value: 0.02
-  temporalClamp:
-    m_OverrideState: 0
-    m_Value: 1
---- !u!114 &-7145624077720506678
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtTemporalAAVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTemporalAAVolumeComponent
-  active: 1
-  enabled:
-    m_OverrideState: 1
-    m_Value: 1
-  feedback:
-    m_OverrideState: 1
-    m_Value: 0.9
-  jitterScale:
-    m_OverrideState: 1
-    m_Value: 1
-  clampStrength:
-    m_OverrideState: 1
-    m_Value: 1
-  sharpness:
-    m_OverrideState: 0
-    m_Value: 0.05
-  staticEdgeRelaxation:
-    m_OverrideState: 0
-    m_Value: 0.35
-  lumaRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.15
-  clipRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.25
-  depthRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.35
-  motionRejectionStart:
-    m_OverrideState: 0
-    m_Value: 16
-  motionRejectionRange:
-    m_OverrideState: 0
-    m_Value: 56
-  historyConfidenceWeight:
-    m_OverrideState: 0
-    m_Value: 0.22
-  historyConfidenceBoost:
-    m_OverrideState: 0
-    m_Value: 0.96
-  confidenceGrowth:
-    m_OverrideState: 0
-    m_Value: 0.06
-  antiFlickering:
-    m_OverrideState: 0
-    m_Value: 0.5
-  motionVectorRejection:
-    m_OverrideState: 0
-    m_Value: 0
-  baseBlendFactor:
-    m_OverrideState: 0
-    m_Value: 0.875
-  responsiveRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 0.65
-  untrustedMotionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.35
-  disocclusionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.18
-  motionEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.2
-  depthEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.1
-  historyClampTightness:
-    m_OverrideState: 0
-    m_Value: 1.15
-  depthWeightedFilterFloor:
-    m_OverrideState: 0
-    m_Value: 0.12
---- !u!114 &-7133158639898991922
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtTonemappingVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTonemappingVolumeComponent
-  active: 1
-  mode:
-    m_OverrideState: 1
-    m_Value: 2
-  postExposure:
-    m_OverrideState: 1
-    m_Value: 0
-  filmSlope:
-    m_OverrideState: 0
-    m_Value: 0.88
-  filmToe:
-    m_OverrideState: 0
-    m_Value: 0.55
-  filmShoulder:
-    m_OverrideState: 0
-    m_Value: 0.26
-  filmBlackClip:
-    m_OverrideState: 0
-    m_Value: 0
-  filmWhiteClip:
-    m_OverrideState: 0
-    m_Value: 0.04
-  blueCorrection:
-    m_OverrideState: 0
-    m_Value: 0.6
-  expandGamut:
-    m_OverrideState: 0
-    m_Value: 1
-  toneCurveAmount:
-    m_OverrideState: 0
-    m_Value: 1
---- !u!114 &-6323993435230168711
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
+  m_Script: {fileID: 11500000, guid: 1b13c43dd38c439087e7c3a48a1c209b, type: 3}
   m_Name: BurtBloomVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtBloomVolumeComponent
-  active: 1
-  threshold:
-    m_OverrideState: 1
-    m_Value: 1
-  softKnee:
-    m_OverrideState: 0
-    m_Value: 0.5
-  intensity:
-    m_OverrideState: 1
-    m_Value: 1
-  scatter:
-    m_OverrideState: 0
-    m_Value: 0.65
-  maxIterations:
-    m_OverrideState: 0
-    m_Value: 5
---- !u!114 &-5208018395591463652
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtTonemappingVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTonemappingVolumeComponent
-  active: 1
-  mode:
-    m_OverrideState: 1
-    m_Value: 2
-  postExposure:
-    m_OverrideState: 0
-    m_Value: 0
-  filmSlope:
-    m_OverrideState: 0
-    m_Value: 0.88
-  filmToe:
-    m_OverrideState: 0
-    m_Value: 0.55
-  filmShoulder:
-    m_OverrideState: 0
-    m_Value: 0.26
-  filmBlackClip:
-    m_OverrideState: 0
-    m_Value: 0
-  filmWhiteClip:
-    m_OverrideState: 0
-    m_Value: 0.04
-  blueCorrection:
-    m_OverrideState: 0
-    m_Value: 0.6
-  expandGamut:
-    m_OverrideState: 0
-    m_Value: 1
-  toneCurveAmount:
-    m_OverrideState: 0
-    m_Value: 1
---- !u!114 &-4553172998439634485
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtBloomVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtBloomVolumeComponent
+  m_EditorClassIdentifier: 
   active: 1
   threshold:
     m_OverrideState: 0
@@ -263,14 +21,14 @@ MonoBehaviour:
     m_Value: 0.5
   intensity:
     m_OverrideState: 1
-    m_Value: 1
+    m_Value: 0.2
   scatter:
     m_OverrideState: 0
     m_Value: 0.65
   maxIterations:
     m_OverrideState: 0
     m_Value: 5
---- !u!114 &-4442304625444803703
+--- !u!114 &-4438491104656152674
 MonoBehaviour:
   m_ObjectHideFlags: 3
   m_CorrespondingSourceObject: {fileID: 0}
@@ -279,466 +37,58 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtBloomVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtBloomVolumeComponent
+  m_Script: {fileID: 11500000, guid: 321d677b8bf4460faa234d4179e042a8, type: 3}
+  m_Name: BurtMainLightShadowVolumeComponent
+  m_EditorClassIdentifier: 
   active: 1
-  threshold:
+  enabled:
     m_OverrideState: 1
-    m_Value: 0.85
-  softKnee:
+    m_Value: 1
+  resolution:
     m_OverrideState: 1
-    m_Value: 0.372
-  intensity:
+    m_Value: 512
+  distance:
     m_OverrideState: 1
-    m_Value: 0.69
-  scatter:
+    m_Value: 50
+  cascadeCount:
     m_OverrideState: 1
-    m_Value: 0.65
-  maxIterations:
+    m_Value: 4
+  cascadeSplit1:
+    m_OverrideState: 1
+    m_Value: 0.1
+  cascadeSplit2:
+    m_OverrideState: 1
+    m_Value: 0.25
+  cascadeSplit3:
+    m_OverrideState: 1
+    m_Value: 0.5
+  cascadeBlendDistance:
+    m_OverrideState: 1
+    m_Value: 0.05
+  shadowFadeDistance:
     m_OverrideState: 1
     m_Value: 5
---- !u!114 &-4284349152609476098
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtTonemappingVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTonemappingVolumeComponent
-  active: 1
-  mode:
-    m_OverrideState: 1
-    m_Value: 2
-  postExposure:
-    m_OverrideState: 0
-    m_Value: 0
-  filmSlope:
-    m_OverrideState: 0
-    m_Value: 0.88
-  filmToe:
-    m_OverrideState: 0
-    m_Value: 0.55
-  filmShoulder:
-    m_OverrideState: 0
-    m_Value: 0.26
-  filmBlackClip:
-    m_OverrideState: 0
-    m_Value: 0
-  filmWhiteClip:
-    m_OverrideState: 0
-    m_Value: 0.04
-  blueCorrection:
-    m_OverrideState: 0
-    m_Value: 0.6
-  expandGamut:
-    m_OverrideState: 0
-    m_Value: 1
-  toneCurveAmount:
-    m_OverrideState: 0
-    m_Value: 1
---- !u!114 &-4147529122555926637
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtTemporalAAVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTemporalAAVolumeComponent
-  active: 1
-  enabled:
-    m_OverrideState: 1
-    m_Value: 1
-  feedback:
-    m_OverrideState: 1
-    m_Value: 0.927
-  jitterScale:
-    m_OverrideState: 1
-    m_Value: 1
-  clampStrength:
-    m_OverrideState: 0
-    m_Value: 1.1
-  sharpness:
-    m_OverrideState: 0
-    m_Value: 0.07
-  staticEdgeRelaxation:
-    m_OverrideState: 0
-    m_Value: 0.55
-  lumaRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.15
-  clipRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.25
-  depthRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.35
-  motionRejectionStart:
-    m_OverrideState: 0
-    m_Value: 16
-  motionRejectionRange:
-    m_OverrideState: 0
-    m_Value: 56
-  historyConfidenceWeight:
-    m_OverrideState: 0
-    m_Value: 0.22
-  historyConfidenceBoost:
-    m_OverrideState: 0
-    m_Value: 0.96
-  confidenceGrowth:
-    m_OverrideState: 0
-    m_Value: 0.06
-  antiFlickering:
-    m_OverrideState: 0
-    m_Value: 0.5
-  motionVectorRejection:
-    m_OverrideState: 0
-    m_Value: 0
-  baseBlendFactor:
-    m_OverrideState: 0
-    m_Value: 0.875
-  responsiveRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 0.65
-  untrustedMotionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.35
-  disocclusionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.18
-  motionEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.2
-  depthEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.1
-  historyClampTightness:
-    m_OverrideState: 0
-    m_Value: 1.15
-  depthWeightedFilterFloor:
-    m_OverrideState: 0
-    m_Value: 0.12
---- !u!114 &-3166682747990188681
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtTemporalAAVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTemporalAAVolumeComponent
-  active: 1
-  enabled:
-    m_OverrideState: 1
-    m_Value: 1
-  feedback:
-    m_OverrideState: 0
-    m_Value: 0.94
-  jitterScale:
-    m_OverrideState: 0
-    m_Value: 1
-  clampStrength:
-    m_OverrideState: 0
-    m_Value: 1.1
-  sharpness:
+  depthBias:
     m_OverrideState: 0
     m_Value: 0.05
-  staticEdgeRelaxation:
+  normalBias:
     m_OverrideState: 0
-    m_Value: 0.35
-  lumaRejectionStrength:
+    m_Value: 0.4
+  sampleBias:
     m_OverrideState: 0
-    m_Value: 1.15
-  clipRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.25
-  depthRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.35
-  motionRejectionStart:
-    m_OverrideState: 0
-    m_Value: 16
-  motionRejectionRange:
-    m_OverrideState: 0
-    m_Value: 56
-  historyConfidenceWeight:
-    m_OverrideState: 0
-    m_Value: 0.22
-  historyConfidenceBoost:
-    m_OverrideState: 0
-    m_Value: 0.96
-  confidenceGrowth:
-    m_OverrideState: 0
-    m_Value: 0.06
-  antiFlickering:
-    m_OverrideState: 0
-    m_Value: 0.5
-  motionVectorRejection:
-    m_OverrideState: 0
-    m_Value: 0
-  baseBlendFactor:
-    m_OverrideState: 0
-    m_Value: 0.875
-  responsiveRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 0.65
-  untrustedMotionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.35
-  disocclusionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.18
-  motionEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.2
-  depthEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.1
-  historyClampTightness:
-    m_OverrideState: 0
-    m_Value: 1.15
-  depthWeightedFilterFloor:
-    m_OverrideState: 0
-    m_Value: 0.12
---- !u!114 &-2947183465032674900
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtTemporalAAVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTemporalAAVolumeComponent
-  active: 1
-  enabled:
+    m_Value: 0.001
+  pcssEnabled:
     m_OverrideState: 1
     m_Value: 1
-  feedback:
+  pcssLightSize:
     m_OverrideState: 1
-    m_Value: 0.94
-  jitterScale:
+    m_Value: 6
+  pcssBlockerSearchRadius:
     m_OverrideState: 1
-    m_Value: 1
-  clampStrength:
+    m_Value: 8
+  pcssMaxFilterRadius:
     m_OverrideState: 1
-    m_Value: 1.1
-  sharpness:
-    m_OverrideState: 0
-    m_Value: 0.05
-  staticEdgeRelaxation:
-    m_OverrideState: 0
-    m_Value: 0.35
-  lumaRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.15
-  clipRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.25
-  depthRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.35
-  motionRejectionStart:
-    m_OverrideState: 0
-    m_Value: 16
-  motionRejectionRange:
-    m_OverrideState: 0
-    m_Value: 56
-  historyConfidenceWeight:
-    m_OverrideState: 0
-    m_Value: 0.22
-  historyConfidenceBoost:
-    m_OverrideState: 0
-    m_Value: 0.96
-  confidenceGrowth:
-    m_OverrideState: 0
-    m_Value: 0.06
-  antiFlickering:
-    m_OverrideState: 0
-    m_Value: 0.5
-  motionVectorRejection:
-    m_OverrideState: 0
-    m_Value: 0
-  baseBlendFactor:
-    m_OverrideState: 0
-    m_Value: 0.875
-  responsiveRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 0.65
-  untrustedMotionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.35
-  disocclusionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.18
-  motionEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.2
-  depthEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.1
-  historyClampTightness:
-    m_OverrideState: 0
-    m_Value: 1.15
-  depthWeightedFilterFloor:
-    m_OverrideState: 0
-    m_Value: 0.12
---- !u!114 &-2416360988275308643
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtColorAdjustmentsVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtColorAdjustmentsVolumeComponent
-  active: 1
-  saturation:
-    m_OverrideState: 0
-    m_Value: 1
-  contrast:
-    m_OverrideState: 0
-    m_Value: 1
-  gamma:
-    m_OverrideState: 0
-    m_Value: 1
-  colorFilter:
-    m_OverrideState: 0
-    m_Value: {r: 1, g: 1, b: 1, a: 1}
---- !u!114 &-2132932211082115016
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtColorAdjustmentsVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtColorAdjustmentsVolumeComponent
-  active: 1
-  saturation:
-    m_OverrideState: 1
-    m_Value: 1
-  contrast:
-    m_OverrideState: 1
-    m_Value: 1
-  gamma:
-    m_OverrideState: 1
-    m_Value: 1
-  colorFilter:
-    m_OverrideState: 0
-    m_Value: {r: 1, g: 1, b: 1, a: 1}
---- !u!114 &-1263377936134426483
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtColorAdjustmentsVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtColorAdjustmentsVolumeComponent
-  active: 1
-  saturation:
-    m_OverrideState: 0
-    m_Value: 1
-  contrast:
-    m_OverrideState: 0
-    m_Value: 1
-  gamma:
-    m_OverrideState: 0
-    m_Value: 1
-  colorFilter:
-    m_OverrideState: 0
-    m_Value: {r: 1, g: 1, b: 1, a: 1}
---- !u!114 &-583098568864178500
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtTonemappingVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTonemappingVolumeComponent
-  active: 1
-  mode:
-    m_OverrideState: 1
-    m_Value: 2
-  postExposure:
-    m_OverrideState: 0
-    m_Value: 0
-  filmSlope:
-    m_OverrideState: 0
-    m_Value: 0.88
-  filmToe:
-    m_OverrideState: 0
-    m_Value: 0.55
-  filmShoulder:
-    m_OverrideState: 0
-    m_Value: 0.26
-  filmBlackClip:
-    m_OverrideState: 0
-    m_Value: 0
-  filmWhiteClip:
-    m_OverrideState: 0
-    m_Value: 0.04
-  blueCorrection:
-    m_OverrideState: 0
-    m_Value: 0.6
-  expandGamut:
-    m_OverrideState: 0
-    m_Value: 1
-  toneCurveAmount:
-    m_OverrideState: 0
-    m_Value: 1
---- !u!114 &-175572758860678545
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtColorAdjustmentsVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtColorAdjustmentsVolumeComponent
-  active: 1
-  saturation:
-    m_OverrideState: 0
-    m_Value: 1
-  contrast:
-    m_OverrideState: 0
-    m_Value: 1
-  gamma:
-    m_OverrideState: 0
-    m_Value: 1
-  colorFilter:
-    m_OverrideState: 0
-    m_Value: {r: 1, g: 1, b: 1, a: 1}
+    m_Value: 24
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -752,12 +102,14 @@ MonoBehaviour:
   m_Name: Global Volume Profile
   m_EditorClassIdentifier: 
   components:
-  - {fileID: -4553172998439634485}
-  - {fileID: 5644838975320729527}
-  - {fileID: 1938999333031734696}
-  - {fileID: 4126905209862838068}
-  - {fileID: 7283092202124070898}
---- !u!114 &803268350656388874
+  - {fileID: -5432317182717837885}
+  - {fileID: 8629201300352807944}
+  - {fileID: 9113136322530897853}
+  - {fileID: 3971589225541114367}
+  - {fileID: 1724650135256992785}
+  - {fileID: -4438491104656152674}
+  - {fileID: 1128726436058786600}
+--- !u!114 &1128726436058786600
 MonoBehaviour:
   m_ObjectHideFlags: 3
   m_CorrespondingSourceObject: {fileID: 0}
@@ -766,26 +118,41 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtBloomVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtBloomVolumeComponent
+  m_Script: {fileID: 11500000, guid: 0f607f2a19cd4af2a56106dfd5df65e4, type: 3}
+  m_Name: BurtScreenSpaceAmbientOcclusionVolumeComponent
+  m_EditorClassIdentifier: 
   active: 1
-  threshold:
-    m_OverrideState: 1
-    m_Value: 1
-  softKnee:
-    m_OverrideState: 1
-    m_Value: 0.5
+  enabled:
+    m_OverrideState: 0
+    m_Value: 0
   intensity:
-    m_OverrideState: 1
-    m_Value: 0.92
-  scatter:
     m_OverrideState: 0
-    m_Value: 0.65
-  maxIterations:
+    m_Value: 2
+  radius:
     m_OverrideState: 0
-    m_Value: 5
---- !u!114 &1938999333031734696
+    m_Value: 1
+  sampleCount:
+    m_OverrideState: 0
+    m_Value: 16
+  bias:
+    m_OverrideState: 0
+    m_Value: 0.02
+  power:
+    m_OverrideState: 0
+    m_Value: 1
+  blur:
+    m_OverrideState: 0
+    m_Value: 1
+  thickness:
+    m_OverrideState: 0
+    m_Value: 0.5
+  fadeRadius:
+    m_OverrideState: 0
+    m_Value: 50
+  fadeDistance:
+    m_OverrideState: 0
+    m_Value: 80
+--- !u!114 &1724650135256992785
 MonoBehaviour:
   m_ObjectHideFlags: 3
   m_CorrespondingSourceObject: {fileID: 0}
@@ -794,66 +161,44 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtColorAdjustmentsVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtColorAdjustmentsVolumeComponent
-  active: 1
-  saturation:
-    m_OverrideState: 0
-    m_Value: 1
-  contrast:
-    m_OverrideState: 0
-    m_Value: 1
-  gamma:
-    m_OverrideState: 0
-    m_Value: 1
-  colorFilter:
-    m_OverrideState: 0
-    m_Value: {r: 1, g: 1, b: 1, a: 1}
---- !u!114 &2774744212465370513
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
+  m_Script: {fileID: 11500000, guid: 9eefaf3404c841038b2c13b49590b66e, type: 3}
   m_Name: BurtScreenSpaceReflectionVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtScreenSpaceReflectionVolumeComponent
+  m_EditorClassIdentifier: 
   active: 1
   enabled:
     m_OverrideState: 1
     m_Value: 1
   maxSteps:
-    m_OverrideState: 1
+    m_OverrideState: 0
     m_Value: 48
   maxDistance:
-    m_OverrideState: 1
+    m_OverrideState: 0
     m_Value: 30
   thickness:
-    m_OverrideState: 1
+    m_OverrideState: 0
     m_Value: 0.35
   intensity:
-    m_OverrideState: 1
+    m_OverrideState: 0
     m_Value: 1
   roughnessFade:
-    m_OverrideState: 1
+    m_OverrideState: 0
     m_Value: 0.6
-  temporalAccumulation:
+  experimentalHiZTrace:
     m_OverrideState: 1
     m_Value: 1
+  temporalAccumulation:
+    m_OverrideState: 0
+    m_Value: 1
   temporalFeedback:
-    m_OverrideState: 1
+    m_OverrideState: 0
     m_Value: 0.86
   temporalDepthRejection:
-    m_OverrideState: 1
+    m_OverrideState: 0
     m_Value: 0.02
   temporalClamp:
     m_OverrideState: 0
     m_Value: 1
---- !u!114 &4126905209862838068
+--- !u!114 &3971589225541114367
 MonoBehaviour:
   m_ObjectHideFlags: 3
   m_CorrespondingSourceObject: {fileID: 0}
@@ -862,9 +207,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
+  m_Script: {fileID: 11500000, guid: 576bc2491bbe4abdb511f07518512ba9, type: 3}
   m_Name: BurtTonemappingVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTonemappingVolumeComponent
+  m_EditorClassIdentifier: 
   active: 1
   mode:
     m_OverrideState: 1
@@ -896,7 +241,7 @@ MonoBehaviour:
   toneCurveAmount:
     m_OverrideState: 0
     m_Value: 1
---- !u!114 &5276159407269209428
+--- !u!114 &8629201300352807944
 MonoBehaviour:
   m_ObjectHideFlags: 3
   m_CorrespondingSourceObject: {fileID: 0}
@@ -905,41 +250,23 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtScreenSpaceReflectionVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtScreenSpaceReflectionVolumeComponent
+  m_Script: {fileID: 11500000, guid: 9e99cdea3ba647f3ba7346377364c620, type: 3}
+  m_Name: BurtColorAdjustmentsVolumeComponent
+  m_EditorClassIdentifier: 
   active: 1
-  enabled:
-    m_OverrideState: 0
-    m_Value: 0
-  maxSteps:
-    m_OverrideState: 0
-    m_Value: 48
-  maxDistance:
-    m_OverrideState: 0
-    m_Value: 30
-  thickness:
-    m_OverrideState: 0
-    m_Value: 0.35
-  intensity:
+  saturation:
     m_OverrideState: 0
     m_Value: 1
-  roughnessFade:
-    m_OverrideState: 0
-    m_Value: 0.6
-  temporalAccumulation:
+  contrast:
     m_OverrideState: 0
     m_Value: 1
-  temporalFeedback:
-    m_OverrideState: 0
-    m_Value: 0.86
-  temporalDepthRejection:
-    m_OverrideState: 0
-    m_Value: 0.02
-  temporalClamp:
+  gamma:
     m_OverrideState: 0
     m_Value: 1
---- !u!114 &5644838975320729527
+  colorFilter:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+--- !u!114 &9113136322530897853
 MonoBehaviour:
   m_ObjectHideFlags: 3
   m_CorrespondingSourceObject: {fileID: 0}
@@ -948,9 +275,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
+  m_Script: {fileID: 11500000, guid: 7f906b805af14d648c49ee048ad5b0f6, type: 3}
   m_Name: BurtTemporalAAVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtTemporalAAVolumeComponent
+  m_EditorClassIdentifier: 
   active: 1
   enabled:
     m_OverrideState: 1
@@ -1024,74 +351,3 @@ MonoBehaviour:
   depthWeightedFilterFloor:
     m_OverrideState: 0
     m_Value: 0.12
---- !u!114 &5677488614549191731
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtBloomVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtBloomVolumeComponent
-  active: 1
-  threshold:
-    m_OverrideState: 1
-    m_Value: 1
-  softKnee:
-    m_OverrideState: 0
-    m_Value: 0.5
-  intensity:
-    m_OverrideState: 1
-    m_Value: 1
-  scatter:
-    m_OverrideState: 0
-    m_Value: 0.65
-  maxIterations:
-    m_OverrideState: 0
-    m_Value: 5
---- !u!114 &7283092202124070898
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
-  m_Name: BurtScreenSpaceReflectionVolumeComponent
-  m_EditorClassIdentifier: Assembly-CSharp:Burt.RenderPipeline:BurtScreenSpaceReflectionVolumeComponent
-  active: 1
-  enabled:
-    m_OverrideState: 1
-    m_Value: 1
-  maxSteps:
-    m_OverrideState: 1
-    m_Value: 48
-  maxDistance:
-    m_OverrideState: 1
-    m_Value: 30
-  thickness:
-    m_OverrideState: 1
-    m_Value: 0.35
-  intensity:
-    m_OverrideState: 1
-    m_Value: 1
-  roughnessFade:
-    m_OverrideState: 1
-    m_Value: 0.6
-  temporalAccumulation:
-    m_OverrideState: 1
-    m_Value: 1
-  temporalFeedback:
-    m_OverrideState: 1
-    m_Value: 0.86
-  temporalDepthRejection:
-    m_OverrideState: 0
-    m_Value: 0.02
-  temporalClamp:
-    m_OverrideState: 0
-    m_Value: 1

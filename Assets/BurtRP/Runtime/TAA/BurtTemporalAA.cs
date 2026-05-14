@@ -247,6 +247,7 @@ namespace Burt.RenderPipeline
         private const float ProjectionChangeEpsilon = 0.0001f;
         private const int HaltonSequenceLength = 1024;
         private const int CameraStatePruneInterval = 128;
+        private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
 
         private sealed class CameraState
         {
@@ -331,13 +332,19 @@ namespace Burt.RenderPipeline
 
         public static BurtTemporalAARequestState PrepareRequest(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
+            return PrepareRequest(request, asset, null);
+        }
+
+        public static BurtTemporalAARequestState PrepareRequest(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions)
+        {
             var camera = request != null ? request.Camera : null;
             var viewMatrix = camera != null ? camera.worldToCameraMatrix : Matrix4x4.identity;
             var projectionMatrix = camera != null ? camera.projectionMatrix : Matrix4x4.identity;
 
-            if (!ShouldUseTemporalAA(request, asset))
+            var disabledReason = ResolveTemporalAADisabledReason(request, asset, renderOptions);
+            if (!string.IsNullOrEmpty(disabledReason))
             {
-                InvalidateHistory(camera);
+                InvalidateHistory(camera, disabledReason);
                 return BurtTemporalAARequestState.CreateDisabled(viewMatrix, projectionMatrix);
             }
 
@@ -440,22 +447,60 @@ namespace Burt.RenderPipeline
 
         public static bool ShouldUseTemporalAA(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
+            return ShouldUseTemporalAA(request, asset, null);
+        }
+
+        public static bool ShouldUseTemporalAA(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions)
+        {
+            return string.IsNullOrEmpty(ResolveTemporalAADisabledReason(request, asset, renderOptions));
+        }
+
+        private static string ResolveTemporalAADisabledReason(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions)
+        {
             if (request == null || !request.IsValid || request.Camera == null)
             {
-                return false;
+                return "InvalidRequest";
             }
 
             if (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection)
             {
-                return false;
+                return "AuxiliaryCamera";
             }
 
-            return BurtPostProcessUtility.ResolveTemporalAASettings(request, asset).Enabled;
+            if (BurtPostProcessUtility.IsPostProcessSuppressedByShadingDebug())
+            {
+                return "PostProcessSuppressedByShadingDebug";
+            }
+
+            var settings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
+            if (!settings.Enabled)
+            {
+                return "DisabledByVolumeOrAsset";
+            }
+
+            if (renderOptions != null && renderOptions.UseSharedRenderTargets && renderOptions.RequestCountInStack > 1)
+            {
+                return "SharedCameraStackUnsupported";
+            }
+
+            if (renderOptions != null && !renderOptions.ShouldFinalBlit)
+            {
+                return "PostProcessNotFinalBlitRequest";
+            }
+
+            if (!BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset))
+            {
+                return "PostProcessFrameworkUnavailable";
+            }
+
+            return Shader.Find(PostProcessShaderName) != null ? null : "PostProcessShaderMissing";
         }
 
         public static bool IsTemporalAADebugMode(BurtShadingDebugMode mode)
         {
-            return mode >= BurtShadingDebugMode.TemporalAAHistory && mode <= BurtShadingDebugMode.TemporalAAResponsiveMask;
+            return (mode >= BurtShadingDebugMode.TemporalAAHistory && mode <= BurtShadingDebugMode.TemporalAAResponsiveMask)
+                || mode == BurtShadingDebugMode.TemporalAARejectionReasons
+                || mode == BurtShadingDebugMode.TemporalAAFeedbackWeight;
         }
 
         public static BurtTemporalAAHistoryTextures EnsureHistoryTextures(Camera camera, out bool historyValid)
@@ -540,6 +585,11 @@ namespace Burt.RenderPipeline
 
         public static void InvalidateHistory(Camera camera)
         {
+            InvalidateHistory(camera, "DisabledOrManual");
+        }
+
+        public static void InvalidateHistory(Camera camera, string reason)
+        {
             if (camera == null)
             {
                 return;
@@ -549,7 +599,7 @@ namespace Burt.RenderPipeline
             {
                 state.HasValidHistory = false;
                 state.FirstValidFrameIndex = 0;
-                state.LastInvalidationReason = "DisabledOrManual";
+                state.LastInvalidationReason = NormalizeInvalidationReason(reason, "DisabledOrManual");
             }
         }
 
@@ -775,7 +825,12 @@ namespace Burt.RenderPipeline
 
             state.HasValidHistory = false;
             state.FirstValidFrameIndex = 0;
-            state.LastInvalidationReason = string.IsNullOrEmpty(reason) ? "Unknown" : reason;
+            state.LastInvalidationReason = NormalizeInvalidationReason(reason, "Unknown");
+        }
+
+        private static string NormalizeInvalidationReason(string reason, string fallback)
+        {
+            return string.IsNullOrEmpty(reason) ? fallback : reason;
         }
 
         private static void SetAllocationInvalidationReason(CameraState state, string reason)
@@ -875,6 +930,8 @@ namespace Burt.RenderPipeline
             state.DepthHistory = null;
             state.ConfidenceHistory = null;
             state.AntiFlickerHistory = null;
+            state.HasValidHistory = false;
+            state.FirstValidFrameIndex = 0;
         }
 
         private static void ReleaseTexture(RenderTexture texture)

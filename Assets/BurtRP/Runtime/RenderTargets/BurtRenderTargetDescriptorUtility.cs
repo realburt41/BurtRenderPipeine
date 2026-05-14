@@ -79,6 +79,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateScreenSpaceAmbientOcclusionDescriptor(Camera camera)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.R8;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            return descriptor;
+        }
+
         public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
         {
             return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32); // GBuffer0 第一版保存 baseColor.rgb 和 occlusion.a，普通 8 位通道足够起步。
@@ -211,7 +222,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             if (shadowData != null) // 如果当前 request 提供了阴影数据，就优先使用灯光解析出来的分辨率。
             {
-                resolution = Mathf.Max(1, shadowData.MainLightShadowResolution); // 读取主光阴影分辨率，并强制最小为 1。
+                resolution = BurtShadowUtility.ResolveMainLightShadowAtlasResolution(shadowData); // 读取主光阴影分辨率，并强制最小为 1。
             }
 
             var depthFormat = GraphicsFormatUtility.GetDepthStencilFormat(32, 0);
@@ -225,6 +236,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.autoGenerateMips = false; // 关闭自动 mipmap 生成，防止 Unity 对深度纹理做无意义的额外处理。
 
             return descriptor; // 返回创建好的主光阴影图描述，供分配 Pass 使用。
+        }
+
+        public static RenderTextureDescriptor CreateAdditionalLightShadowAtlasDescriptor(BurtLightingData lightingData)
+        {
+            var tileResolution = lightingData != null && lightingData.AdditionalLightShadowTileResolution > 0
+                ? lightingData.AdditionalLightShadowTileResolution
+                : BurtLightingData.DefaultAdditionalLightShadowTileResolution;
+            var atlasResolution = lightingData != null && lightingData.AdditionalLightShadowAtlasResolution > 0
+                ? lightingData.AdditionalLightShadowAtlasResolution
+                : tileResolution * 2;
+            atlasResolution = Mathf.Max(1, atlasResolution);
+
+            var depthFormat = GraphicsFormatUtility.GetDepthStencilFormat(32, 0);
+            var descriptor = new RenderTextureDescriptor(atlasResolution, atlasResolution, GraphicsFormat.None, depthFormat);
+            descriptor.shadowSamplingMode = SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES2 ? ShadowSamplingMode.CompareDepths : ShadowSamplingMode.None;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            return descriptor;
         }
     }
 }

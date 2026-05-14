@@ -18,18 +18,6 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
 
         private SerializedProperty postProcessSettings; // 缓存后处理框架设置字段，具体效果参数会从 Global Volume 读取。
         private SerializedProperty postProcessVolumeLayerMask; // 缓存后处理 Volume 查询层字段，Global Volume 需要通过它参与后处理。
-
-        private SerializedProperty enableMainLightShadows; // 缓存主光阴影总开关字段。
-        private SerializedProperty mainLightShadowResolution; // 缓存主光阴影图分辨率字段。
-        private SerializedProperty mainLightShadowDistance; // 缓存主光阴影距离字段。
-        private SerializedProperty mainLightShadowDepthBias; // 缓存主光阴影深度偏移字段。
-        private SerializedProperty mainLightShadowNormalBias; // 缓存主光阴影法线偏移字段。
-        private SerializedProperty mainLightShadowSampleBias; // 缓存主光阴影采样偏移字段。
-        private SerializedProperty enableMainLightShadowDebugView; // 缓存 Shadow Debug 覆盖 CameraColor 的开关字段。
-        private SerializedProperty mainLightShadowDebugExposure; // 缓存 Shadow Debug 曝光字段。
-        private SerializedProperty mainLightShadowDebugYFlipMode; // 缓存 Shadow Debug Y 翻转模式字段。
-        private SerializedProperty enableMainLightShadowDebugLog; // 缓存 Shadow Debug 日志字段。
-
         private SerializedProperty enableUnsupportedShaderDebug; // 缓存不支持 Shader 可视化调试字段。
         private SerializedProperty enableRenderGraphDebug; // 缓存 RenderGraph 调试日志字段。
         private SerializedProperty enableRenderGraphDebugConsoleLog; // 缓存 RenderGraph 长日志 Console 输出字段。
@@ -45,16 +33,6 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private static readonly GUIContent PreintegratedFGLutLabel = new("Preintegrated FG LUT", "用于 IBL 间接高光的 DFG/GGX 预积分查找表。"); // 定义 PBR 预积分 LUT 显示文本。
         private static readonly GUIContent PostProcessSettingsLabel = new("Post Process Settings", "后处理框架设置，具体效果参数从 Global Volume 读取。"); // 定义后处理设置显示文本。
         private static readonly GUIContent PostProcessVolumeLayerMaskLabel = new("Post Process Volume Layer Mask", "后处理 Global Volume 查询层，Tonemapping 等效果参数从匹配的 Volume Profile 读取。"); // 定义后处理 Volume 层显示文本。
-        private static readonly GUIContent MainLightShadowLabel = new("Enable Shadows", "允许 BurtRP 为主方向光渲染 shadow map。"); // 定义主光阴影总开关显示文本。
-        private static readonly GUIContent ShadowResolutionLabel = new("Resolution", "主光阴影图默认分辨率。"); // 定义阴影分辨率显示文本。
-        private static readonly GUIContent ShadowDistanceLabel = new("Distance", "主光阴影最大剔除距离。"); // 定义阴影距离显示文本。
-        private static readonly GUIContent ShadowDepthBiasLabel = new("Depth Bias", "写入 shadow map 时使用的常量深度偏移。"); // 定义深度偏移显示文本。
-        private static readonly GUIContent ShadowNormalBiasLabel = new("Normal Bias", "写入 shadow map 时沿法线方向施加的偏移。"); // 定义法线偏移显示文本。
-        private static readonly GUIContent ShadowSampleBiasLabel = new("Sample Bias", "接收端采样 shadow map 前减去的深度偏移。"); // 定义采样偏移显示文本。
-        private static readonly GUIContent ShadowDebugViewLabel = new("Shadow Debug View", "开启后把主光 shadow map 直接绘制到 CameraColor。"); // 定义 Shadow Debug 显示文本。
-        private static readonly GUIContent ShadowDebugExposureLabel = new("Shadow Debug Exposure", "调节 shadow map 调试图亮度。"); // 定义 Shadow Debug 曝光显示文本。
-        private static readonly GUIContent ShadowDebugYFlipLabel = new("Shadow Debug Y Flip", "调节 shadow map 调试图的 Y 翻转策略。"); // 定义 Y 翻转显示文本。
-        private static readonly GUIContent ShadowDebugLogLabel = new("Shadow Debug Log", "输出主光阴影诊断日志，排查阴影数据时再开启。"); // 定义 Shadow Debug 日志显示文本。
         private static readonly GUIContent UnsupportedShaderDebugLabel = new("Unsupported Shader Debug", "用 Unity 错误材质标记非 BurtRP Shader，方便发现错误材质。"); // 定义不支持 Shader 调试显示文本。
         private static readonly GUIContent RenderGraphDebugLabel = new("RenderGraph Debug Capture", "缓存最近一次 RenderGraph 调试信息，供下方按钮复制到剪切板。"); // 定义 RenderGraph 捕获显示文本。
         private static readonly GUIContent RenderGraphDebugConsoleLogLabel = new("RenderGraph Console Log", "把捕获到的完整 RenderGraph Debug 继续输出到 Console；默认关闭以避免刷屏。"); // 定义 RenderGraph Console 输出显示文本。
@@ -74,18 +52,6 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
 
             postProcessSettings = FindProperty(nameof(postProcessSettings)); // 绑定后处理设置，让现有自定义 Inspector 也能显示新配置。
             postProcessVolumeLayerMask = FindProperty(nameof(postProcessVolumeLayerMask)); // 绑定后处理 Volume 查询层，让 Global Volume 可以按 LayerMask 过滤。
-
-            enableMainLightShadows = FindProperty(nameof(enableMainLightShadows)); // 绑定主光阴影总开关。
-            mainLightShadowResolution = FindProperty(nameof(mainLightShadowResolution)); // 绑定主光阴影分辨率。
-            mainLightShadowDistance = FindProperty(nameof(mainLightShadowDistance)); // 绑定主光阴影距离。
-            mainLightShadowDepthBias = FindProperty(nameof(mainLightShadowDepthBias)); // 绑定主光阴影深度偏移。
-            mainLightShadowNormalBias = FindProperty(nameof(mainLightShadowNormalBias)); // 绑定主光阴影法线偏移。
-            mainLightShadowSampleBias = FindProperty(nameof(mainLightShadowSampleBias)); // 绑定主光阴影采样偏移。
-            enableMainLightShadowDebugView = FindProperty(nameof(enableMainLightShadowDebugView)); // 绑定阴影调试视图开关。
-            mainLightShadowDebugExposure = FindProperty(nameof(mainLightShadowDebugExposure)); // 绑定阴影调试曝光。
-            mainLightShadowDebugYFlipMode = FindProperty(nameof(mainLightShadowDebugYFlipMode)); // 绑定阴影调试 Y 翻转模式。
-            enableMainLightShadowDebugLog = FindProperty(nameof(enableMainLightShadowDebugLog)); // 绑定阴影调试日志开关。
-
             enableUnsupportedShaderDebug = FindProperty(nameof(enableUnsupportedShaderDebug)); // 绑定不支持 Shader 调试开关。
             enableRenderGraphDebug = FindProperty(nameof(enableRenderGraphDebug)); // 绑定 RenderGraph 调试开关。
             enableRenderGraphDebugConsoleLog = FindProperty(nameof(enableRenderGraphDebugConsoleLog)); // 绑定 RenderGraph Console 输出开关。
@@ -102,7 +68,6 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             DrawDepthGroup(); // 绘制 Depth 分组。
             DrawPBRGroup(); // 绘制 PBR 分组。
             DrawPostProcessGroup(); // 绘制 Post Processing 分组。
-            DrawMainLightShadowGroup(); // 绘制 Main Light Shadows 分组。
             DrawDebugGroup(); // 绘制 Debug 分组。
             DrawCameraDebugGroup(); // 绘制 Camera Debug 分组。
 
@@ -139,26 +104,6 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             DrawProperty(enableDepthDebugView, DepthDebugLabel); // 绘制 Depth Debug 开关。
             DrawProperty(depthDebugScale, DepthScaleLabel); // 绘制 Depth Debug 缩放。
             EditorGUILayout.HelpBox("Depth Debug 会把 CameraDepth 可视化并覆盖 CameraColor，开启后正常画面会被调试图替代。", MessageType.Info); // 提示 Depth Debug 覆盖最终颜色。
-        }
-
-        private void DrawMainLightShadowGroup() // 绘制主光阴影设置和 Shadow Debug 提示。
-        {
-            DrawSectionHeader("Main Light Shadows / 主光阴影"); // 显示主光阴影分组标题。
-            DrawProperty(enableMainLightShadows, MainLightShadowLabel); // 绘制主光阴影总开关。
-            using (new EditorGUI.DisabledScope(enableMainLightShadows != null && !enableMainLightShadows.boolValue)) // 关闭主光阴影时禁用具体参数，避免误以为仍会生效。
-            {
-                DrawProperty(mainLightShadowResolution, ShadowResolutionLabel); // 绘制阴影图分辨率。
-                DrawProperty(mainLightShadowDistance, ShadowDistanceLabel); // 绘制阴影距离。
-                DrawProperty(mainLightShadowDepthBias, ShadowDepthBiasLabel); // 绘制写入端深度偏移。
-                DrawProperty(mainLightShadowNormalBias, ShadowNormalBiasLabel); // 绘制写入端法线偏移。
-                DrawProperty(mainLightShadowSampleBias, ShadowSampleBiasLabel); // 绘制采样端深度偏移。
-                DrawProperty(enableMainLightShadowDebugView, ShadowDebugViewLabel); // 绘制 Shadow Debug 开关。
-                DrawProperty(mainLightShadowDebugExposure, ShadowDebugExposureLabel); // 绘制 Shadow Debug 曝光。
-                DrawProperty(mainLightShadowDebugYFlipMode, ShadowDebugYFlipLabel); // 绘制 Shadow Debug Y 翻转模式。
-                DrawProperty(enableMainLightShadowDebugLog, ShadowDebugLogLabel); // 绘制 Shadow Debug 日志开关。
-            }
-
-            EditorGUILayout.HelpBox("Shadow Debug 会把主光 shadow map 绘制到 CameraColor，开启后正常画面会被调试图替代。", MessageType.Info); // 提示 Shadow Debug 覆盖最终颜色。
         }
 
         private void DrawDebugGroup() // 绘制和全局调试相关的开关。

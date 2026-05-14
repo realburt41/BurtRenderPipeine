@@ -26,7 +26,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             float4x4 _BurtSSRViewProjectionMatrix;
             float4 _BurtSSRParams0; // x=maxDistance, y=thickness, z=intensity, w=roughnessFade
             float4 _BurtSSRParams1; // x=maxSteps, y=maxMip, z=debugMode, w=edgeFadeWidth
-            float4 _BurtSSRParams2; // x=frameIndexMod8, y=temporalAccumulation
+            float4 _BurtSSRParams2; // x=frameIndexMod8, y=temporalAccumulation, z=experimentalHiZTrace, w=hiZTextureUsable
 
             struct Attributes
             {
@@ -42,24 +42,38 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             struct BurtSSRHit
             {
                 float hit;
+                float rawHit;
                 float2 uv;
                 float steps;
                 float depthDelta;
                 float distance;
                 float worldError;
                 float surfaceSupport;
+                float hiZSkipCandidate;
+                float hiZMipLevel;
+                float hiZDivergence;
+                float hiZSkipUsed;
+                float hiZProbeBlocked;
+                float workCost;
             };
 
             BurtSSRHit BurtSSRCreateEmptyHit()
             {
                 BurtSSRHit result;
                 result.hit = 0.0;
+                result.rawHit = 0.0;
                 result.uv = 0.0;
                 result.steps = 0.0;
                 result.depthDelta = 0.0;
                 result.distance = 0.0;
                 result.worldError = 0.0;
                 result.surfaceSupport = 0.0;
+                result.hiZSkipCandidate = 0.0;
+                result.hiZMipLevel = 0.0;
+                result.hiZDivergence = 0.0;
+                result.hiZSkipUsed = 0.0;
+                result.hiZProbeBlocked = 0.0;
+                result.workCost = 0.0;
                 return result;
             }
 
@@ -192,9 +206,9 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
             float BurtSSRSelectHiZMip(float2 previousUV, float2 currentUV)
             {
-                // Until the marcher can skip across HiZ cells hierarchically, resolve against mip0 depth.
-                // Sampling reduced mips as if they were exact depth over-accepts large blocks and smears hits.
-                return 0.0;
+                float2 pixelDelta = abs((currentUV - previousUV) * _BurtSSRSourceTexelSize.zw);
+                float pixelSpan = max(max(pixelDelta.x, pixelDelta.y), 1.0);
+                return clamp(floor(log2(pixelSpan)) - 1.0, 0.0, min(_BurtSSRParams1.y, 6.0));
             }
 
             float BurtSSRAdaptiveThickness(float rayLinearDepth, float travelDistance)
@@ -207,7 +221,10 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
             bool BurtSSRTrySampleDepthDelta(float3 rayPositionWS, float2 rayUV, float hiZMip, out float depthDelta)
             {
-                float sceneRawDepth = tex2Dlod(_BurtHiZDepthTexture, float4(rayUV, 0.0, hiZMip)).r;
+                bool canSampleHiZMip = _BurtSSRParams2.w > 0.5 && hiZMip > 0.5;
+                float sceneRawDepth = canSampleHiZMip ?
+                    tex2Dlod(_BurtHiZDepthTexture, float4(rayUV, 0.0, hiZMip)).r :
+                    BurtSampleDeferredRawDepth(rayUV);
                 if (BurtSSRIsSkyDepth(sceneRawDepth))
                 {
                     depthDelta = 0.0;
@@ -346,13 +363,265 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 return saturate(rayScale);
             }
 
+            float BurtSSRComputeCellExitTime(float2 startUV, float2 deltaUV, float currentTime, float mipLevel)
+            {
+                float2 screenSize = _BurtSSRSourceTexelSize.zw;
+                float2 startPixel = startUV * screenSize;
+                float2 deltaPixel = deltaUV * screenSize;
+                float2 currentPixel = startPixel + deltaPixel * currentTime;
+                float cellSize = exp2(mipLevel);
+                float2 directionSign = float2(deltaPixel.x >= 0.0 ? 1.0 : -1.0, deltaPixel.y >= 0.0 ? 1.0 : -1.0);
+                float2 biasedPixel = currentPixel + directionSign * 0.001;
+                float2 cellCoord = floor(biasedPixel / cellSize);
+                float2 nextBoundary = float2(
+                    deltaPixel.x >= 0.0 ? (cellCoord.x + 1.0) * cellSize : cellCoord.x * cellSize,
+                    deltaPixel.y >= 0.0 ? (cellCoord.y + 1.0) * cellSize : cellCoord.y * cellSize);
+                float2 boundaryTime = 999999.0;
+
+                if (abs(deltaPixel.x) > 0.00001)
+                {
+                    boundaryTime.x = (nextBoundary.x - startPixel.x) / deltaPixel.x;
+                }
+
+                if (abs(deltaPixel.y) > 0.00001)
+                {
+                    boundaryTime.y = (nextBoundary.y - startPixel.y) / deltaPixel.y;
+                }
+
+                return clamp(min(boundaryTime.x, boundaryTime.y), currentTime, 1.0);
+            }
+
+            float BurtSSRAdvanceTime(float currentTime, float nextTime, float minTimeStep)
+            {
+                return min(1.0, max(nextTime, currentTime + minTimeStep));
+            }
+
+            float2 BurtSSRComputeCellCenterUV(float2 startUV, float2 deltaUV, float sampleTime, float mipLevel)
+            {
+                float2 screenSize = _BurtSSRSourceTexelSize.zw;
+                float2 samplePixel = (startUV + deltaUV * sampleTime) * screenSize;
+                float cellSize = exp2(mipLevel);
+                float2 cellCenterPixel = (floor(samplePixel / cellSize) + 0.5) * cellSize;
+                return saturate(cellCenterPixel / screenSize);
+            }
+
             bool BurtSSRTrySampleSceneRawDepth(float2 rayUV, float hiZMip, out float sceneRawDepth)
             {
-                sceneRawDepth = hiZMip <= 0.5 ?
+                bool canSampleHiZMip = _BurtSSRParams2.w > 0.5 && hiZMip > 0.5;
+                sceneRawDepth = !canSampleHiZMip ?
                     BurtSampleDeferredRawDepth(rayUV) :
                     tex2Dlod(_BurtHiZDepthTexture, float4(rayUV, 0.0, hiZMip)).r;
 
                 return !BurtSSRIsSkyDepth(sceneRawDepth);
+            }
+
+            float BurtSSRClosestRawDepth(float rawDepthA, float rawDepthB)
+            {
+                #if defined(UNITY_REVERSED_Z)
+                    return max(rawDepthA, rawDepthB);
+                #else
+                    return min(rawDepthA, rawDepthB);
+                #endif
+            }
+
+            bool BurtSSRTrySampleHiZNeighborhoodClosestRawDepth(float2 sampleUV, float mipLevel, out float sceneRawDepth)
+            {
+                if (mipLevel <= 0.5)
+                {
+                    return BurtSSRTrySampleSceneRawDepth(sampleUV, 0.0, sceneRawDepth);
+                }
+
+                sceneRawDepth = 0.0;
+                bool foundDepth = false;
+                float2 mipTexelUV = _BurtSSRSourceTexelSize.xy * exp2(mipLevel);
+
+                [unroll]
+                for (int sampleIndex = 0; sampleIndex < 9; sampleIndex++)
+                {
+                    float2 offset = sampleIndex == 0 ? float2(0.0, 0.0) :
+                        sampleIndex == 1 ? float2(1.0, 0.0) :
+                        sampleIndex == 2 ? float2(-1.0, 0.0) :
+                        sampleIndex == 3 ? float2(0.0, 1.0) :
+                        sampleIndex == 4 ? float2(0.0, -1.0) :
+                        sampleIndex == 5 ? float2(1.0, 1.0) :
+                        sampleIndex == 6 ? float2(-1.0, 1.0) :
+                        sampleIndex == 7 ? float2(1.0, -1.0) :
+                        float2(-1.0, -1.0);
+                    float2 neighborUV = sampleUV + offset * mipTexelUV;
+                    if (!BurtSSRIsValidHitUV(neighborUV))
+                    {
+                        continue;
+                    }
+
+                    float neighborRawDepth;
+                    if (!BurtSSRTrySampleSceneRawDepth(neighborUV, mipLevel, neighborRawDepth))
+                    {
+                        continue;
+                    }
+
+                    sceneRawDepth = foundDepth ? BurtSSRClosestRawDepth(sceneRawDepth, neighborRawDepth) : neighborRawDepth;
+                    foundDepth = true;
+                }
+
+                return foundDepth;
+            }
+
+            bool BurtSSRIsMip0FrontMiss(
+                float2 startUV,
+                float2 deltaUV,
+                float3 weightedStartWS,
+                float3 weightedEndWS,
+                float inverseWStart,
+                float inverseWEnd,
+                float rayTime)
+            {
+                float2 rayUV = startUV + deltaUV * rayTime;
+                if (!all(rayUV >= 0.0) || !all(rayUV <= 1.0))
+                {
+                    return true;
+                }
+
+                float3 rayPositionWS = BurtSSRInterpolateProjectedRayPosition(rayTime, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
+                float rayLinearDepth = BurtSSRLinearEyeDepthWS(rayPositionWS);
+                float frontTolerance = max(max(rayLinearDepth * 0.002, _BurtSSRParams0.y * 0.25), 0.04);
+                float2 rayPixels = deltaUV * _BurtSSRSourceTexelSize.zw;
+                float rayPixelLength = length(rayPixels);
+                float2 alongUV = rayPixelLength > 0.0001 ? deltaUV / rayPixelLength : float2(_BurtSSRSourceTexelSize.x, 0.0);
+                float2 sideUV = float2(-alongUV.y, alongUV.x);
+
+                [unroll]
+                for (int sampleIndex = 0; sampleIndex < 9; sampleIndex++)
+                {
+                    float2 offset = sampleIndex == 0 ? float2(0.0, 0.0) :
+                        sampleIndex == 1 ? sideUV :
+                        sampleIndex == 2 ? -sideUV :
+                        sampleIndex == 3 ? alongUV :
+                        sampleIndex == 4 ? -alongUV :
+                        sampleIndex == 5 ? sideUV * 2.0 :
+                        sampleIndex == 6 ? -sideUV * 2.0 :
+                        sampleIndex == 7 ? alongUV + sideUV :
+                        alongUV - sideUV;
+                    float2 sampleUV = rayUV + offset;
+                    if (!BurtSSRIsValidHitUV(sampleUV))
+                    {
+                        continue;
+                    }
+
+                    float sceneRawDepth;
+                    if (!BurtSSRTrySampleSceneRawDepth(sampleUV, 0.0, sceneRawDepth))
+                    {
+                        continue;
+                    }
+
+                    float sceneLinearDepth = LinearEyeDepth(sceneRawDepth);
+                    if (rayLinearDepth >= sceneLinearDepth - frontTolerance)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            bool BurtSSRIsMip0SegmentFrontMiss(
+                float2 startUV,
+                float2 deltaUV,
+                float3 weightedStartWS,
+                float3 weightedEndWS,
+                float inverseWStart,
+                float inverseWEnd,
+                float currentTime,
+                float nextTime)
+            {
+                [unroll]
+                for (int sampleIndex = 0; sampleIndex < 5; sampleIndex++)
+                {
+                    float sampleT = (float)sampleIndex * 0.25;
+                    float rayTime = lerp(currentTime, nextTime, sampleT);
+                    if (!BurtSSRIsMip0FrontMiss(startUV, deltaUV, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd, rayTime))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            bool BurtSSRCanSkipHiZCell(
+                float2 startUV,
+                float2 deltaUV,
+                float3 weightedStartWS,
+                float3 weightedEndWS,
+                float inverseWStart,
+                float inverseWEnd,
+                float currentTime,
+                float nextTime,
+                float mipLevel)
+            {
+                float sampleTime = saturate((currentTime + nextTime) * 0.5);
+                float2 sampleUV = BurtSSRComputeCellCenterUV(startUV, deltaUV, sampleTime, mipLevel);
+                if (!all(sampleUV >= 0.0) || !all(sampleUV <= 1.0))
+                {
+                    return true;
+                }
+
+                float sceneRawDepth;
+                if (!BurtSSRTrySampleHiZNeighborhoodClosestRawDepth(sampleUV, mipLevel, sceneRawDepth))
+                {
+                    return true;
+                }
+
+                float3 rayStartWS = BurtSSRInterpolateProjectedRayPosition(currentTime, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
+                float3 rayMidWS = BurtSSRInterpolateProjectedRayPosition(sampleTime, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
+                float3 rayEndWS = BurtSSRInterpolateProjectedRayPosition(nextTime, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
+                float rayFarthestLinearDepth = max(max(BurtSSRLinearEyeDepthWS(rayStartWS), BurtSSRLinearEyeDepthWS(rayMidWS)), BurtSSRLinearEyeDepthWS(rayEndWS));
+                float sceneClosestLinearDepth = LinearEyeDepth(sceneRawDepth);
+                float frontTolerance = max(max(rayFarthestLinearDepth * 0.003, _BurtSSRParams0.y * 0.35), 0.05);
+                if (rayFarthestLinearDepth >= sceneClosestLinearDepth - frontTolerance)
+                {
+                    return false;
+                }
+
+                // The caller performs the mip0 proof pass and reuses any hit it finds.
+                return true;
+            }
+
+            void BurtSSREvaluateHiZDebugSegment(
+                float2 startUV,
+                float2 deltaUV,
+                float3 weightedStartWS,
+                float3 weightedEndWS,
+                float inverseWStart,
+                float inverseWEnd,
+                float currentTime,
+                float nextTime,
+                float mipLevel,
+                out float rawSkipCandidate,
+                out float mip0Divergence)
+            {
+                rawSkipCandidate = 0.0;
+                mip0Divergence = 0.0;
+
+                float sampleTime = saturate((currentTime + nextTime) * 0.5);
+                float2 sampleUV = BurtSSRComputeCellCenterUV(startUV, deltaUV, sampleTime, mipLevel);
+                float sceneRawDepth;
+                bool hiZHasDepth = BurtSSRTrySampleHiZNeighborhoodClosestRawDepth(sampleUV, mipLevel, sceneRawDepth);
+                if (!hiZHasDepth)
+                {
+                    rawSkipCandidate = 1.0;
+                    return;
+                }
+
+                float3 rayStartWS = BurtSSRInterpolateProjectedRayPosition(currentTime, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
+                float3 rayMidWS = BurtSSRInterpolateProjectedRayPosition(sampleTime, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
+                float3 rayEndWS = BurtSSRInterpolateProjectedRayPosition(nextTime, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
+                float rayFarthestLinearDepth = max(max(BurtSSRLinearEyeDepthWS(rayStartWS), BurtSSRLinearEyeDepthWS(rayMidWS)), BurtSSRLinearEyeDepthWS(rayEndWS));
+                float sceneClosestLinearDepth = LinearEyeDepth(sceneRawDepth);
+                float frontTolerance = max(max(rayFarthestLinearDepth * 0.003, _BurtSSRParams0.y * 0.35), 0.05);
+                rawSkipCandidate = rayFarthestLinearDepth < sceneClosestLinearDepth - frontTolerance ? 1.0 : 0.0;
+
+                bool mip0Safe = BurtSSRIsMip0SegmentFrontMiss(startUV, deltaUV, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd, currentTime, nextTime);
+                mip0Divergence = rawSkipCandidate * (mip0Safe ? 0.0 : 1.0);
             }
 
             bool BurtSSRTrySampleRayMarchDepth(
@@ -427,6 +696,121 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 sceneRawDepth = centerRawDepth;
                 return centerValid;
+            }
+
+            bool BurtSSRSegmentContainsMip0RawHit(
+                float2 startUV,
+                float2 deltaUV,
+                float3 weightedStartWS,
+                float3 weightedEndWS,
+                float inverseWStart,
+                float inverseWEnd,
+                float3 originWS,
+                float currentTime,
+                float nextTime,
+                float minTimeStep,
+                float previousTime,
+                float previousDepthDelta,
+                bool hasPreviousDepthDelta,
+                float minTraceDistance,
+                out float probeWorkCost,
+                out float descendTime,
+                out float descendPreviousTime,
+                out float descendPreviousDepthDelta,
+                out float descendHasPreviousDepthDelta,
+                out float proofRayTime,
+                out float2 proofRayUV,
+                out float proofDepthDelta,
+                out float proofNearSurface,
+                out float proofCrossedSurface)
+            {
+                probeWorkCost = 0.0;
+                descendTime = currentTime;
+                descendPreviousTime = previousTime;
+                descendPreviousDepthDelta = previousDepthDelta;
+                descendHasPreviousDepthDelta = hasPreviousDepthDelta ? 1.0 : 0.0;
+                proofRayTime = currentTime;
+                proofRayUV = startUV + deltaUV * currentTime;
+                proofDepthDelta = 0.0;
+                proofNearSurface = 0.0;
+                proofCrossedSurface = 0.0;
+                float localTime = currentTime;
+                float localPreviousTime = previousTime;
+                float localPreviousDepthDelta = previousDepthDelta;
+                bool localHasPreviousDepthDelta = hasPreviousDepthDelta;
+
+                [loop]
+                for (int segmentStep = 0; segmentStep < 16; segmentStep++)
+                {
+                    if (localTime >= nextTime - 0.000001)
+                    {
+                        break;
+                    }
+
+                    float childNextTime = BurtSSRComputeCellExitTime(startUV, deltaUV, localTime, 0.0);
+                    childNextTime = min(nextTime, BurtSSRAdvanceTime(localTime, childNextTime, minTimeStep));
+                    if (childNextTime <= localTime + 0.000001)
+                    {
+                        break;
+                    }
+
+                    float rayTime = saturate((localTime + childNextTime) * 0.5);
+                    float2 rayUV = startUV + deltaUV * rayTime;
+                    float3 rayPositionWS = BurtSSRInterpolateProjectedRayPosition(rayTime, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
+                    float rayLinearDepth = BurtSSRLinearEyeDepthWS(rayPositionWS);
+                    if (!all(rayUV >= 0.0) || !all(rayUV <= 1.0) || rayLinearDepth <= 0.0)
+                    {
+                        return false;
+                    }
+
+                    float travelDistance = length(rayPositionWS - originWS);
+                    float thickness = BurtSSRAdaptiveThickness(rayLinearDepth, travelDistance);
+                    float frontTolerance = max(rayLinearDepth * 0.001, 0.02);
+                    float sceneRawDepth;
+                    probeWorkCost += 9.0;
+                    if (!BurtSSRTrySampleRayMarchDepth(rayUV, deltaUV, rayLinearDepth, thickness, frontTolerance, sceneRawDepth))
+                    {
+                        localPreviousTime = rayTime;
+                        localHasPreviousDepthDelta = false;
+                        localTime = childNextTime;
+                        continue;
+                    }
+
+                    float depthDelta = rayLinearDepth - LinearEyeDepth(sceneRawDepth);
+                    bool farEnoughFromOrigin = travelDistance >= minTraceDistance;
+                    if (!farEnoughFromOrigin)
+                    {
+                        localPreviousTime = rayTime;
+                        localPreviousDepthDelta = -max(thickness, 0.0001);
+                        localHasPreviousDepthDelta = true;
+                        localTime = childNextTime;
+                        continue;
+                    }
+
+                    bool nearSurface = depthDelta >= -frontTolerance && depthDelta <= thickness + frontTolerance;
+                    bool crossedFromKnownMiss = localHasPreviousDepthDelta && localPreviousDepthDelta < -frontTolerance && depthDelta >= -frontTolerance;
+                    bool crossedFromSkyOrOffscreen = !localHasPreviousDepthDelta && depthDelta >= -frontTolerance;
+                    if (nearSurface || crossedFromKnownMiss || crossedFromSkyOrOffscreen)
+                    {
+                        descendTime = localTime;
+                        descendPreviousTime = localPreviousTime;
+                        descendPreviousDepthDelta = localPreviousDepthDelta;
+                        descendHasPreviousDepthDelta = localHasPreviousDepthDelta ? 1.0 : 0.0;
+                        proofRayTime = rayTime;
+                        proofRayUV = rayUV;
+                        proofDepthDelta = depthDelta;
+                        proofNearSurface = nearSurface ? 1.0 : 0.0;
+                        proofCrossedSurface = (crossedFromKnownMiss || crossedFromSkyOrOffscreen) ? 1.0 : 0.0;
+                        return true;
+                    }
+
+                    localPreviousTime = rayTime;
+                    localPreviousDepthDelta = depthDelta;
+                    localHasPreviousDepthDelta = true;
+                    localTime = childNextTime;
+                }
+
+                return false;
             }
 
             float2 BurtSSRPushHitUVInsideSilhouette(float2 hitUV, float2 rayDeltaUV)
@@ -711,12 +1095,12 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 return foundCrossing;
             }
 
-            BurtSSRHit BurtSSRMarch(float3 originWS, float3 reflectionDirectionWS)
+            BurtSSRHit BurtSSRMarchInternal(float3 originWS, float3 reflectionDirectionWS, int forcedMaxTraceMip, bool collectHiZDiagnostics)
             {
                 BurtSSRHit result = BurtSSRCreateEmptyHit();
 
                 const int traceStepLimit = 512;
-                int maxSteps = min(max((int)_BurtSSRParams1.x, 1), traceStepLimit);
+                int requestedSteps = min(max((int)_BurtSSRParams1.x, 1), traceStepLimit);
                 float maxDistance = BurtSSRClipDistanceBeforeCamera(originWS, reflectionDirectionWS, max(_BurtSSRParams0.x, 0.01));
                 float2 startUV;
                 float startRawDepth;
@@ -755,25 +1139,201 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float3 clippedEndWS = BurtSSRInterpolateProjectedRayPosition(1.0, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
                 float clippedDistance = max(length(clippedEndWS - originWS), 0.01);
                 float minTraceDistance = min(max(_BurtSSRParams0.y * 0.2, 0.025), clippedDistance * 0.25);
-                float screenPixelSpan = length(deltaUV * _BurtSSRSourceTexelSize.zw);
-                maxSteps = min(traceStepLimit, max(maxSteps, (int)ceil(screenPixelSpan)));
+                float2 screenDelta = deltaUV * _BurtSSRSourceTexelSize.zw;
+                float screenMajorSpan = max(abs(screenDelta.x), abs(screenDelta.y));
+                int iterationLimit = min(traceStepLimit, max(requestedSteps * 4, (int)ceil(max(screenMajorSpan, 1.0))));
+                float minTimeStep = 0.25 / max(screenMajorSpan, 1.0);
+                bool useHiZTrace = _BurtSSRParams2.z > 0.5 && _BurtSSRParams2.w > 0.5 && forcedMaxTraceMip > 0;
+                int maxTraceMip = useHiZTrace ? min(max(forcedMaxTraceMip, 1), (int)min(_BurtSSRParams1.y, 3.0)) : 0;
+                int currentMip = 0;
+                int debugMode = (int)_BurtSSRParams1.z;
+                bool collectHiZDebug = false;
+                float debugHiZMip = min(_BurtSSRParams1.y, 1.0);
 
-                float stepTime = 1.0 / max((float)maxSteps, 1.0);
-                float noise = BurtSSRInterleavedGradientNoise(startUV * _BurtSSRSourceTexelSize.zw, _BurtSSRParams2.x);
-                float stepJitter = _BurtSSRParams2.y > 0.5 ? lerp(0.15, 0.95, noise) : 1.0;
+                float currentTime = 0.0;
                 float previousTime = 0.0;
                 float previousDepthDelta = -max(_BurtSSRParams0.y, 0.0001);
                 bool hasPreviousDepthDelta = true;
 
                 [loop]
-                for (int stepIndex = 1; stepIndex <= traceStepLimit; stepIndex++)
+                for (int iterationIndex = 1; iterationIndex <= traceStepLimit; iterationIndex++)
                 {
-                    if (stepIndex > maxSteps)
+                    if (iterationIndex > iterationLimit || currentTime >= 1.0)
                     {
                         break;
                     }
 
-                    float rayTime = stepIndex == maxSteps ? 1.0 : stepTime * ((float)stepIndex - 1.0 + stepJitter);
+                    result.workCost += 1.0;
+                    float mipLevel = (float)currentMip;
+                    float nextTime = BurtSSRComputeCellExitTime(startUV, deltaUV, currentTime, mipLevel);
+                    nextTime = BurtSSRAdvanceTime(currentTime, nextTime, minTimeStep);
+
+                    if (collectHiZDebug && debugHiZMip >= 1.0)
+                    {
+                        float debugSkipMissThreshold = max(_BurtSSRParams0.y * 0.35, 0.05);
+                        bool debugCanAttemptHiZSkip = previousTime > 0.0 && hasPreviousDepthDelta && previousDepthDelta < -debugSkipMissThreshold;
+                        if (debugCanAttemptHiZSkip)
+                        {
+                            float rawSkipCandidate;
+                            float mip0Divergence;
+                            float debugNextTime = BurtSSRComputeCellExitTime(startUV, deltaUV, currentTime, debugHiZMip);
+                            debugNextTime = BurtSSRAdvanceTime(currentTime, debugNextTime, minTimeStep);
+                            BurtSSREvaluateHiZDebugSegment(
+                                startUV,
+                                deltaUV,
+                                weightedStartWS,
+                                weightedEndWS,
+                                inverseWStart,
+                                inverseWEnd,
+                                currentTime,
+                                debugNextTime,
+                                debugHiZMip,
+                                rawSkipCandidate,
+                                mip0Divergence);
+                            result.hiZSkipCandidate = max(result.hiZSkipCandidate, rawSkipCandidate);
+                            result.hiZDivergence = max(result.hiZDivergence, mip0Divergence);
+                            result.hiZMipLevel = max(result.hiZMipLevel, rawSkipCandidate * debugHiZMip / max(min(_BurtSSRParams1.y, 3.0), 1.0));
+                        }
+                    }
+
+                    if (useHiZTrace && currentMip > 0)
+                    {
+                        float skipMissThreshold = max(_BurtSSRParams0.y * 0.35, 0.05);
+                        bool canAttemptHiZSkip = previousTime > 0.0 && hasPreviousDepthDelta && previousDepthDelta < -skipMissThreshold;
+                        if (canAttemptHiZSkip)
+                        {
+                            result.workCost += 9.0;
+                        }
+
+                        bool hiZCellLooksSkippable = canAttemptHiZSkip &&
+                            BurtSSRCanSkipHiZCell(startUV, deltaUV, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd, currentTime, nextTime, mipLevel);
+                        float segmentProbeWork = 0.0;
+                        float descendTime = currentTime;
+                        float descendPreviousTime = previousTime;
+                        float descendPreviousDepthDelta = previousDepthDelta;
+                        float descendHasPreviousDepthDelta = hasPreviousDepthDelta ? 1.0 : 0.0;
+                        float proofRayTime = currentTime;
+                        float2 proofRayUV = startUV + deltaUV * currentTime;
+                        float proofDepthDelta = 0.0;
+                        float proofNearSurface = 0.0;
+                        float proofCrossedSurface = 0.0;
+                        bool segmentHasMip0RawHit = false;
+                        if (hiZCellLooksSkippable)
+                        {
+                            segmentHasMip0RawHit = BurtSSRSegmentContainsMip0RawHit(
+                                startUV,
+                                deltaUV,
+                                weightedStartWS,
+                                weightedEndWS,
+                                inverseWStart,
+                                inverseWEnd,
+                                originWS,
+                                currentTime,
+                                nextTime,
+                                minTimeStep,
+                                previousTime,
+                                previousDepthDelta,
+                                hasPreviousDepthDelta,
+                                minTraceDistance,
+                                segmentProbeWork,
+                                descendTime,
+                                descendPreviousTime,
+                                descendPreviousDepthDelta,
+                                descendHasPreviousDepthDelta,
+                                proofRayTime,
+                                proofRayUV,
+                                proofDepthDelta,
+                                proofNearSurface,
+                                proofCrossedSurface);
+                        }
+
+                        result.workCost += segmentProbeWork;
+                        result.hiZProbeBlocked = max(result.hiZProbeBlocked, segmentHasMip0RawHit ? 1.0 : 0.0);
+                        bool canSkipHiZCell = hiZCellLooksSkippable && !segmentHasMip0RawHit;
+                        if (canSkipHiZCell)
+                        {
+                            result.hiZSkipUsed = 1.0;
+                            previousTime = nextTime;
+                            previousDepthDelta = -max(_BurtSSRParams0.y, 0.0001);
+                            hasPreviousDepthDelta = true;
+                            currentTime = nextTime;
+                            currentMip = min(maxTraceMip, currentMip + 1);
+                            continue;
+                        }
+
+                        if (segmentHasMip0RawHit)
+                        {
+                            float2 resolvedRawUV = proofRayUV;
+                            float resolvedDepthDelta = proofDepthDelta;
+                            bool shouldResolveProofHit = true;
+                            bool proofIsNearSurface = proofNearSurface > 0.5;
+                            bool proofIsCrossing = proofCrossedSurface > 0.5;
+
+                            if (proofIsCrossing)
+                            {
+                                float refinedTime;
+                                float2 refinedUV;
+                                float refinedDepthDelta;
+                                bool refined = BurtSSRRefineScreenHit(
+                                    startUV,
+                                    deltaUV,
+                                    weightedStartWS,
+                                    weightedEndWS,
+                                    inverseWStart,
+                                    inverseWEnd,
+                                    descendPreviousTime,
+                                    proofRayTime,
+                                    refinedTime,
+                                    refinedUV,
+                                    refinedDepthDelta);
+                                bool proofCrossedFromSkyOrOffscreen = descendHasPreviousDepthDelta <= 0.5;
+                                shouldResolveProofHit = !proofCrossedFromSkyOrOffscreen || refined || proofIsNearSurface;
+                                resolvedRawUV = refined ? refinedUV : proofRayUV;
+                                resolvedDepthDelta = refined ? refinedDepthDelta : proofDepthDelta;
+                            }
+
+                            if (shouldResolveProofHit)
+                            {
+                                if (result.rawHit <= 0.0)
+                                {
+                                    result.rawHit = 1.0;
+                                    result.uv = resolvedRawUV;
+                                    result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                                    result.depthDelta = resolvedDepthDelta;
+                                }
+
+                                float2 baseCandidateUV = BurtSSRPushHitUVInsideSilhouette(resolvedRawUV, deltaUV);
+                                float2 candidateUV;
+                                float candidateDistance;
+                                float candidateWorldError;
+                                float candidateSurfaceSupport;
+                                if (BurtSSRFindBestResolvedHitCandidate(baseCandidateUV, deltaUV, originWS, reflectionDirectionWS, minTraceDistance, clippedDistance, candidateUV, candidateDistance, candidateWorldError, candidateSurfaceSupport))
+                                {
+                                    result.hit = 1.0;
+                                    result.rawHit = 1.0;
+                                    result.uv = candidateUV;
+                                    result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                                    result.depthDelta = resolvedDepthDelta;
+                                    result.distance = candidateDistance;
+                                    result.worldError = candidateWorldError;
+                                    result.surfaceSupport = candidateSurfaceSupport;
+                                    break;
+                                }
+                            }
+
+                            currentTime = descendTime;
+                            previousTime = descendPreviousTime;
+                            previousDepthDelta = descendPreviousDepthDelta;
+                            hasPreviousDepthDelta = descendHasPreviousDepthDelta > 0.5;
+                        }
+
+                        currentMip = 0;
+                        mipLevel = 0.0;
+                        nextTime = BurtSSRComputeCellExitTime(startUV, deltaUV, currentTime, mipLevel);
+                        nextTime = BurtSSRAdvanceTime(currentTime, nextTime, minTimeStep);
+                    }
+
+                    float rayTime = saturate((currentTime + nextTime) * 0.5);
                     float2 rayUV = startUV + deltaUV * rayTime;
                     float3 rayPositionWS = BurtSSRInterpolateProjectedRayPosition(rayTime, weightedStartWS, weightedEndWS, inverseWStart, inverseWEnd);
                     float rayLinearDepth = BurtSSRLinearEyeDepthWS(rayPositionWS);
@@ -786,16 +1346,29 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                     float thickness = BurtSSRAdaptiveThickness(rayLinearDepth, travelDistance);
                     float frontTolerance = max(rayLinearDepth * 0.001, 0.02);
                     float sceneRawDepth;
+                    result.workCost += 9.0;
                     if (!BurtSSRTrySampleRayMarchDepth(rayUV, deltaUV, rayLinearDepth, thickness, frontTolerance, sceneRawDepth))
                     {
                         previousTime = rayTime;
                         hasPreviousDepthDelta = false;
+                        currentTime = nextTime;
+                        currentMip = min(maxTraceMip, 1);
                         continue;
                     }
 
                     float depthDelta;
                     depthDelta = rayLinearDepth - LinearEyeDepth(sceneRawDepth);
                     bool farEnoughFromOrigin = travelDistance >= minTraceDistance;
+                    if (!farEnoughFromOrigin)
+                    {
+                        previousTime = rayTime;
+                        previousDepthDelta = -max(thickness, 0.0001);
+                        hasPreviousDepthDelta = true;
+                        currentTime = nextTime;
+                        currentMip = min(maxTraceMip, 1);
+                        continue;
+                    }
+
                     bool nearSurface = farEnoughFromOrigin && depthDelta >= -frontTolerance && depthDelta <= thickness + frontTolerance;
 
                     bool crossedFromKnownMiss = hasPreviousDepthDelta && previousDepthDelta < -frontTolerance && depthDelta >= -frontTolerance;
@@ -812,7 +1385,17 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                             previousTime = rayTime;
                             previousDepthDelta = depthDelta;
                             hasPreviousDepthDelta = true;
+                            currentTime = nextTime;
+                            currentMip = min(maxTraceMip, 1);
                             continue;
+                        }
+
+                        if (result.rawHit <= 0.0)
+                        {
+                            result.rawHit = 1.0;
+                            result.uv = refined ? refinedUV : rayUV;
+                            result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                            result.depthDelta = refined ? refinedDepthDelta : depthDelta;
                         }
 
                         float2 baseCandidateUV = BurtSSRPushHitUVInsideSilhouette(refined ? refinedUV : rayUV, deltaUV);
@@ -825,12 +1408,15 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                             previousTime = rayTime;
                             previousDepthDelta = -max(_BurtSSRParams0.y, 0.0001);
                             hasPreviousDepthDelta = true;
+                            currentTime = nextTime;
+                            currentMip = min(maxTraceMip, 1);
                             continue;
                         }
 
                         result.hit = 1.0;
+                        result.rawHit = 1.0;
                         result.uv = candidateUV;
-                        result.steps = (float)stepIndex / max((float)maxSteps, 1.0);
+                        result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
                         result.depthDelta = refined ? refinedDepthDelta : depthDelta;
                         result.distance = candidateDistance;
                         result.worldError = candidateWorldError;
@@ -840,6 +1426,14 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                     if (nearSurface)
                     {
+                        if (result.rawHit <= 0.0)
+                        {
+                            result.rawHit = 1.0;
+                            result.uv = rayUV;
+                            result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                            result.depthDelta = depthDelta;
+                        }
+
                         float candidateDistance;
                         float candidateWorldError;
                         float2 baseCandidateUV = BurtSSRPushHitUVInsideSilhouette(rayUV, deltaUV);
@@ -850,12 +1444,15 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                             previousTime = rayTime;
                             previousDepthDelta = -max(_BurtSSRParams0.y, 0.0001);
                             hasPreviousDepthDelta = true;
+                            currentTime = nextTime;
+                            currentMip = min(maxTraceMip, 1);
                             continue;
                         }
 
                         result.hit = 1.0;
+                        result.rawHit = 1.0;
                         result.uv = candidateUV;
-                        result.steps = (float)stepIndex / max((float)maxSteps, 1.0);
+                        result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
                         result.depthDelta = depthDelta;
                         result.distance = candidateDistance;
                         result.worldError = candidateWorldError;
@@ -866,9 +1463,22 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                     previousTime = rayTime;
                     previousDepthDelta = depthDelta;
                     hasPreviousDepthDelta = true;
+                    currentTime = nextTime;
+                    currentMip = min(maxTraceMip, currentMip + 1);
                 }
 
                 return result;
+            }
+
+            BurtSSRHit BurtSSRMarch(float3 originWS, float3 reflectionDirectionWS)
+            {
+                bool useHiZTrace = _BurtSSRParams2.z > 0.5 && _BurtSSRParams2.w > 0.5;
+                return BurtSSRMarchInternal(originWS, reflectionDirectionWS, useHiZTrace ? 3 : 0, true);
+            }
+
+            BurtSSRHit BurtSSRMarchHiZCandidate(float3 originWS, float3 reflectionDirectionWS)
+            {
+                return BurtSSRMarchInternal(originWS, reflectionDirectionWS, 1, false);
             }
 
             float BurtSSREdgeFade(float2 uv)
@@ -876,6 +1486,28 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float2 edgeDistance = min(uv, 1.0 - uv);
                 float edgeFadeWidth = max(_BurtSSRParams1.w, 0.0001);
                 return saturate(min(edgeDistance.x, edgeDistance.y) / edgeFadeWidth);
+            }
+
+            float BurtSSRComputeTraceVisibility(BurtSSRHit hit, float3 reflectionDirectionWS, float nDotV, float thickness)
+            {
+                if (hit.hit <= 0.0)
+                {
+                    return 0.0;
+                }
+
+                float edgeFade = BurtSSREdgeFade(hit.uv);
+                float hitNormalWeight = BurtSSRHitNormalWeight(hit.uv, reflectionDirectionWS);
+                float3 reflectionDirectionVS = BurtSafeNormalize(mul(_BurtSSRViewMatrix, float4(reflectionDirectionWS, 0.0)).xyz);
+                float screenParallelWeight = lerp(0.35, 1.0, smoothstep(0.005, 0.08, abs(reflectionDirectionVS.z)));
+                float grazingWeight = smoothstep(0.01, 0.06, nDotV);
+                float distanceFade = saturate(1.0 - hit.distance / max(_BurtSSRParams0.x, 0.01));
+                distanceFade *= distanceFade;
+                float depthError = abs(hit.depthDelta) / max(thickness * 1.25, 0.0001);
+                float depthQuality = 1.0 - smoothstep(0.85, 1.35, depthError);
+                float worldQuality = 1.0 - smoothstep(0.8, 1.6, hit.worldError);
+                float surfaceSupportWeight = lerp(0.45, 1.0, smoothstep(0.15, 0.85, hit.surfaceSupport));
+                float validHit = saturate(hit.hit * hitNormalWeight * screenParallelWeight * grazingWeight * distanceFade * depthQuality * worldQuality * surfaceSupportWeight);
+                return saturate(validHit * edgeFade);
             }
 
             float4 FragSSR(Varyings input) : SV_Target
@@ -925,7 +1557,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 if (debugMode == 1)
                 {
-                    float rawHitMask = saturate(hit.hit);
+                    float rawHitMask = saturate(max(hit.rawHit, hit.hit));
                     return float4(rawHitMask, rawHitMask, rawHitMask, 1.0);
                 }
 
@@ -936,7 +1568,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 if (debugMode == 3)
                 {
-                    float visibleSteps = hit.steps * hit.hit;
+                    float visibleSteps = hit.steps * saturate(max(hit.rawHit, hit.hit));
                     return float4(visibleSteps, visibleSteps, visibleSteps, 1.0);
                 }
 
@@ -990,6 +1622,35 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 if (debugMode == 19)
                 {
                     return float4(hit.surfaceSupport, hit.surfaceSupport, hit.surfaceSupport, 1.0);
+                }
+
+                if (debugMode >= 20 && debugMode <= 30)
+                {
+                    // HiZ diagnostics stay isolated in the debug shader; this production pass only exposes its final visibility.
+                    return float4(0.0, visibilityWeight, 0.0, 1.0);
+                }
+
+                if (debugMode == 31)
+                {
+                    if (roughnessFade * _BurtSSRParams0.z <= 0.0001)
+                    {
+                        return float4(0.0, 0.0, 0.0, 1.0);
+                    }
+
+                    BurtSSRHit stableHit = BurtSSRMarchInternal(originWS, reflectionDirectionWS, 0, false);
+                    BurtSSRHit hiZHit = hit;
+                    float stableVisible = saturate(stableHit.hit);
+                    float hiZVisible = saturate(hiZHit.hit);
+                    float commonVisible = stableVisible * hiZVisible;
+                    float minStep = 1.0 / max(_BurtSSRParams1.x, 1.0);
+                    float stableSteps = max(stableHit.steps, minStep);
+                    float hiZSteps = max(hiZHit.steps, minStep);
+                    float stepDenominator = max(stableSteps, minStep);
+                    float savedSteps = saturate((stableSteps - hiZSteps) / stepDenominator) * commonVisible;
+                    float extraSteps = saturate((hiZSteps - stableSteps) / stepDenominator) * commonVisible;
+                    float lostHit = stableVisible * (1.0 - hiZVisible);
+                    float gainedHit = hiZVisible * (1.0 - stableVisible);
+                    return float4(max(extraSteps, lostHit), savedSteps * (1.0 - lostHit), max(gainedHit, commonVisible * 0.25), 1.0);
                 }
 
                 return float4(reflectionColor * hit.hit, visibilityWeight);
@@ -1059,7 +1720,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float3 centerNormal = BurtSafeNormalize(centerGBuffer.normalWS);
 
                 int debugMode = (int)_BurtSSRParams1.z;
-                if ((debugMode > 0 && debugMode <= 7) || (debugMode >= 16 && debugMode <= 19))
+                if ((debugMode > 0 && debugMode <= 7) || (debugMode >= 16 && debugMode <= 31))
                 {
                     return centerSSR;
                 }
@@ -1612,7 +2273,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float2 screenUV = input.screenUV;
                 float4 currentSSR = tex2D(_BurtScreenSpaceReflectionDenoisedColorTexture, screenUV);
                 int debugMode = (int)_BurtSSRParams1.z;
-                if ((debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 19))
+                if ((debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 31))
                 {
                     return currentSSR;
                 }

@@ -245,6 +245,14 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                     return float4(scatter, scatter, scatter, 1.0f);
                 }
 
+                // 模式 17：Hair 专用 longitudinal shift scale；和 scatter 一起打包在 GBuffer1.b material channel。
+                if (debugMode == 17)
+                {
+                    float isHair = BurtIsHairShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float shiftScale = BurtGetHairLongitudinalShiftScale(gbufferData) * isHair;
+                    return float4(shiftScale, shiftScale, shiftScale, 1.0f);
+                }
+
                 // 默认分支显示解码后的 baseColor，避免异常模式导致黑屏。
                 return float4(saturate(gbufferData.baseColor), 1.0f);
             }

@@ -7,10 +7,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
         private readonly BurtRenderPass allocateCameraColorPass = new BurtAllocateCameraColorPass(); // 创建 CameraColor 分配 Pass，用来为当前相机或当前相机栈申请中间颜色 RT。
 
         private readonly BurtRenderPass allocateCameraDepthPass = new BurtAllocateCameraDepthPass(); // 创建 CameraDepth 分配 Pass，用来为当前相机或当前相机栈申请独立深度 RT。
+        private readonly BurtRenderPass allocateAdditionalLightBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.AdditionalLightBufferName); // Allocate the graph-owned additional light buffer before lighting globals upload.
 
         private readonly BurtRenderPass allocateMainLightShadowMapPass = new BurtAllocateMainLightShadowMapPass(); // 创建主光阴影图分配 Pass，用来为开启阴影的主光申请 shadow map。
 
         private readonly BurtRenderPass drawMainLightShadowCasterPass = new BurtDrawMainLightShadowCasterPass(); // 创建主光阴影投射 Pass，用来把 ShadowCaster 物体写入主光 shadow map。
+        private readonly BurtRenderPass allocateAdditionalLightShadowAtlasPass = new BurtAllocateAdditionalLightShadowAtlasPass();
+        private readonly BurtRenderPass drawAdditionalLightShadowCasterPass = new BurtDrawAdditionalLightShadowCasterPass();
 
         private readonly BurtRenderPass setRenderTargetPass = new BurtSetRenderTargetPass(); // 创建设置渲染目标 Pass，并在整个管线生命周期内复用它。
 
@@ -49,6 +52,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
         private readonly BurtRenderPass finalBlitPass = new BurtFinalBlitPass(); // 创建最终拷贝 Pass，用来把中间 CameraColor 输出到 request 指定的最终目标。
 
         private readonly BurtRenderPass releaseMainLightShadowMapPass = new BurtReleaseMainLightShadowMapPass(); // 创建主光阴影图释放 Pass，用来在当前 request 渲染结束后释放 shadow map 临时 RT。
+        private readonly BurtRenderPass releaseAdditionalLightShadowAtlasPass = new BurtReleaseAdditionalLightShadowAtlasPass();
+        private readonly BurtRenderPass releaseAdditionalLightBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.AdditionalLightBufferName); // Release the per-request additional light buffer after all lighting consumers.
 
         private readonly BurtRenderPass releaseCameraColorPass = new BurtReleaseCameraColorPass(); // 创建 CameraColor 释放 Pass，用来在 FinalBlit 完成后释放临时颜色 RT。
 
@@ -93,10 +98,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             var safeRenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // options 为空时使用旧行为，避免 RT 生命周期决策全部为 false。
 
             var useMainLightShadow = BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 合并 Light 与 PipelineAsset 设置后判断本相机是否需要主光阴影。
-
-            var mainLightShadowMapIsValid = graph.Resources.GetMainLightShadowMap().IsValid; // 读取 RenderGraph 中 MainLightShadowMap 句柄是否有效，诊断资源注册是否符合阴影决策。
-
-            BurtShadowUtility.LogMainLightShadowDiagnostics(request, asset, useMainLightShadow, mainLightShadowMapIsValid); // 在阴影启用决策完成后输出一次受资产开关控制的结构化诊断日志。
+            var useAdditionalLightShadow = BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(request);
 
             if (safeRenderOptions.ShouldAllocateCameraColor) // 只有独立 request 或共享栈的第一个 request 才申请 CameraColor。
             {
@@ -108,7 +110,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 graph.AddPass(allocateCameraDepthPass); // 把 CameraDepth 分配 Pass 添加到 RenderGraph，保证后续绑定深度目标时 RT 已经存在。
             }
 
+            graph.AddPass(allocateAdditionalLightBufferPass); // Allocate the additional light GPU buffer before Setup Lighting uploads packed rows.
             graph.AddPass(setupLightingPass); // 在阴影 Pass 前上传灯光和阴影默认全局参数，避免上一帧或上一相机的阴影状态残留。
+            if (useAdditionalLightShadow)
+            {
+                graph.AddPass(allocateAdditionalLightShadowAtlasPass);
+                graph.AddPass(drawAdditionalLightShadowCasterPass);
+            }
 
             if (useMainLightShadow) // 如果当前 request 的主光需要阴影，就把 shadow map 生命周期加入图里。
             {
@@ -116,6 +124,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
                 graph.AddPass(drawMainLightShadowCasterPass); // 立刻绘制主光 ShadowCaster，把阴影深度写进刚申请的 MainLightShadowMap。
             }
+
+            var mainLightShadowMapIsValid = graph.Resources.GetMainLightShadowMap().IsValid; // 在阴影 Pass 注册之后再读取句柄状态，让诊断反映最终组装结果。
+            BurtShadowUtility.LogMainLightShadowDiagnostics(request, asset, useMainLightShadow, mainLightShadowMapIsValid); // 在阴影资源生命周期确定后输出诊断，避免把预组装阶段的无效句柄误认为丢资源。
 
             if (ShouldSeedOverlayCameraColor(request, safeRenderOptions)) // 非共享 RT 的 Overlay 不清颜色时，才需要从最终目标复制一份底图。
             {
@@ -185,6 +196,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             {
                 graph.AddPass(releaseMainLightShadowMapPass); // 释放主光阴影图临时 RT，确保阴影资源生命周期被 RenderGraph 明确管理。
             }
+
+            if (useAdditionalLightShadow)
+            {
+                graph.AddPass(releaseAdditionalLightShadowAtlasPass);
+            }
+
+            graph.AddPass(releaseAdditionalLightBufferPass); // Release after opaque, transparent, gizmo, debug, and final blit consumers are done.
 
             if (safeRenderOptions.ShouldReleaseCameraColor) // 只有独立 request 或共享栈的最后一个 request 才释放 CameraColor。
             {
@@ -286,7 +304,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 return false; // 默认关闭 shadow map 调试，避免覆盖正常画面。
             }
 
-            return asset.EnableMainLightShadowDebugView; // 使用资产上的主光 shadow map 调试开关。
+            return BurtShadingDebugSettings.Mode == BurtShadingDebugMode.MainLightShadow; // Controlled by Shading Debug Overlay instead of Pipeline Asset.
         }
     }
 }

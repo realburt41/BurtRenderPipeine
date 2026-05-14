@@ -13,7 +13,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent EmissionLabel = new GUIContent("Emission");
 
         private static readonly GUIContent BaseMapLabel = new GUIContent("Base Map", "Hair tint RGB and alpha for card cutout.");
-        private static readonly GUIContent MaskMapLabel = new GUIContent("Hair Mask Map", "R Scatter, G Occlusion, B Reserved, A Smoothness.");
+        private static readonly GUIContent MaskMapLabel = new GUIContent("Hair Mask Map", "R Scatter, G Occlusion, B Longitudinal lobe shift scale, A Smoothness.");
         private static readonly GUIContent NormalMapLabel = new GUIContent("Normal Map", "Currently used for forward material debug; deferred Hair stores strand direction in the GBuffer vector slot.");
         private static readonly GUIContent EmissionMapLabel = new GUIContent("Emission Map");
         private static readonly GUIContent ShadingModelLabel = new GUIContent("Shading Model");
@@ -50,6 +50,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty hairScatter;
         private MaterialProperty hairScatterBoost;
         private MaterialProperty hairSpecularScale;
+        private MaterialProperty hairShiftScale;
         private MaterialProperty hairRoughnessOffset;
         private MaterialProperty hairTangentFlip;
 
@@ -103,6 +104,7 @@ namespace Burt.RenderPipeline.Editor
             hairScatter = Find("_HairScatter");
             hairScatterBoost = Find("_HairScatterBoost");
             hairSpecularScale = Find("_HairSpecularScale");
+            hairShiftScale = Find("_HairShiftScale");
             hairRoughnessOffset = Find("_HairRoughnessOffset");
             hairTangentFlip = Find("_HairTangentFlip");
         }
@@ -223,13 +225,14 @@ namespace Burt.RenderPipeline.Editor
             DrawTexture(MaskMapLabel, maskMap);
             if (maskMap != null)
             {
-                BurtShaderGUIUtility.DrawChannelHint("Channels: R Scatter | G Occlusion | B Reserved | A Smoothness");
+                BurtShaderGUIUtility.DrawChannelHint("Channels: R Scatter | G Occlusion | B Shift Scale | A Smoothness");
             }
 
             BurtShaderGUIUtility.DrawSubHeader("Hair");
             DrawProperty(hairScatter);
             DrawProperty(hairScatterBoost);
             DrawProperty(hairSpecularScale);
+            DrawProperty(hairShiftScale);
             DrawProperty(hairRoughnessOffset);
             DrawProperty(hairTangentFlip);
             BurtShaderGUIUtility.DrawSubHeader("Shared");

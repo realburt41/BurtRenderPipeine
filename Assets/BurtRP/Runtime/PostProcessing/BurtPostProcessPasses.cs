@@ -189,7 +189,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             builder.ReadCameraColor(); // 声明先读取场景渲染完成后的 CameraColor。
             builder.ReadCameraDepth(); // TAA resolve reads depth when enabled; non-TAA paths ignore it.
-            if (BurtPostProcessUtility.ShouldUseTemporalAA(builder.Request, builder.Asset) &&
+            var temporalAA = builder.Request != null ? builder.Request.TemporalAA : null;
+            if (temporalAA != null &&
+                temporalAA.Enabled &&
                 builder.ResourceRegistry != null &&
                 builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.GBuffer1Name))
             {
@@ -218,11 +220,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             if (!cameraColorTarget.IsValid) // 如果 CameraColor 无效，说明场景颜色还没有可采样的源。
             {
+                InvalidateTemporalAAIfEnabled(context, "ResolveMissingCameraColor");
                 return; // 直接跳过，避免采样无效纹理。
             }
 
             if (!postProcessColorTarget.IsValid) // 如果 PostProcessColor 无效，说明分配 Pass 或资源注册没有生效。
             {
+                InvalidateTemporalAAIfEnabled(context, "ResolveMissingPostProcessColor");
                 return; // 直接跳过，避免写入无效目标。
             }
 
@@ -230,6 +234,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             if (material == null) // 如果材质为空，说明 shader 没找到或创建失败。
             {
+                InvalidateTemporalAAIfEnabled(context, "PostProcessShaderMissing");
                 return; // 直接跳过，避免提交无效绘制。
             }
 
@@ -265,7 +270,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             if (useTemporalAA)
             {
-                ExecuteTemporalAA(context, cmd, context.Request.Camera, cameraColorTarget, context.CameraDepthTarget, postProcessColorTarget, material, GetTemporalAAMotionVectorMaterial(), temporalAA, useTemporalAADebug);
+                useTemporalAA = ExecuteTemporalAA(context, cmd, context.Request.Camera, cameraColorTarget, context.CameraDepthTarget, postProcessColorTarget, material, GetTemporalAAMotionVectorMaterial(), temporalAA, useTemporalAADebug);
+                useTemporalAADebug = useTemporalAA && temporalAADebugRequested;
+                if (!useTemporalAA && temporalAADebugRequested)
+                {
+                    ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
+                    renderContext.ExecuteCommandBuffer(cmd);
+                    CommandBufferPool.Release(cmd);
+                    BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments, bloomSettings, 0);
+                    return;
+                }
             }
 
             if (useTemporalAADebug)
@@ -348,6 +362,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments, bloomSettings, bloomMipCount); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
         }
 
+        private static void InvalidateTemporalAAIfEnabled(BurtRenderGraphContext context, string reason)
+        {
+            var request = context != null ? context.Request : null;
+            var temporalAA = request != null ? request.TemporalAA : null;
+            if (temporalAA == null || !temporalAA.Enabled)
+            {
+                return;
+            }
+
+            BurtTemporalAAUtility.InvalidateHistory(request.Camera, reason);
+        }
+
         private static void ExecuteTemporalAADebugUnavailable(CommandBuffer cmd, Camera camera, BurtRenderTargetHandle cameraColorTarget)
         {
             if (cmd == null || camera == null || !cameraColorTarget.IsValid)
@@ -360,7 +386,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.ClearRenderTarget(false, true, TemporalAADebugUnavailableColor);
         }
 
-        private static void ExecuteTemporalAA(
+        private static bool ExecuteTemporalAA(
             BurtRenderGraphContext context,
             CommandBuffer cmd,
             Camera camera,
@@ -372,17 +398,53 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             BurtTemporalAARequestState temporalAA,
             bool useTemporalAADebug)
         {
-            if (context == null || camera == null || !cameraDepthTarget.IsValid || temporalAA == null || !temporalAA.Enabled)
+            if (context == null)
             {
-                BurtTemporalAAUtility.InvalidateHistory(camera);
-                return;
+                BurtTemporalAAUtility.InvalidateHistory(camera, "ResolveInvalidContext");
+                return false;
+            }
+
+            if (camera == null)
+            {
+                return false;
+            }
+
+            if (temporalAA == null || !temporalAA.Enabled)
+            {
+                BurtTemporalAAUtility.InvalidateHistory(camera, "ResolveDisabled");
+                return false;
+            }
+
+            if (!cameraColorTarget.IsValid)
+            {
+                BurtTemporalAAUtility.InvalidateHistory(camera, "ResolveMissingCameraColor");
+                return false;
+            }
+
+            if (!cameraDepthTarget.IsValid)
+            {
+                BurtTemporalAAUtility.InvalidateHistory(camera, "ResolveMissingCameraDepth");
+                return false;
+            }
+
+            if (!postProcessColorTarget.IsValid)
+            {
+                BurtTemporalAAUtility.InvalidateHistory(camera, "ResolveMissingPostProcessColor");
+                return false;
+            }
+
+            if (material == null)
+            {
+                BurtTemporalAAUtility.InvalidateHistory(camera, "PostProcessShaderMissing");
+                return false;
             }
 
             var histories = BurtTemporalAAUtility.EnsureHistoryTextures(camera, out var historyValid);
             temporalAA.HistoryValid = historyValid;
             if (histories.Color == null || histories.Depth == null || histories.Confidence == null || histories.AntiFlicker == null)
             {
-                return;
+                BurtTemporalAAUtility.InvalidateHistory(camera, "HistoryTextureUnavailable");
+                return false;
             }
 
             var width = Mathf.Max(1, histories.Color.width);
@@ -532,6 +594,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.ReleaseTemporaryRT(TemporalAADilatedVelocityTextureId);
             cmd.ReleaseTemporaryRT(TemporalAAVelocityTextureId);
             cmd.ReleaseTemporaryRT(TemporalAACurrentDepthTextureId);
+            return true;
         }
 
         private static void SetTemporalAAGlobals(CommandBuffer cmd, BurtTemporalAARequestState temporalAA, int width, int height, bool historyValid)

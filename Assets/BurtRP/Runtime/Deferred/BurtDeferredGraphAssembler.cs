@@ -7,10 +7,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateGBuffer0Pass = new BurtAllocateGBuffer0Pass(); // 创建 GBuffer0 分配 Pass，第一版用于保存 baseColor 和 occlusion。
         private readonly BurtRenderPass allocateGBuffer1Pass = new BurtAllocateGBuffer1Pass(); // 创建 GBuffer1 分配 Pass，第一版用于保存 normal、metallic 和 smoothness。
         private readonly BurtRenderPass allocateGBuffer2Pass = new BurtAllocateGBuffer2Pass(); // 创建 GBuffer2 分配 Pass，第一版用于保存 emission 和 reflectance。
+        private readonly BurtRenderPass allocateScreenSpaceAmbientOcclusionRawPass = new BurtAllocateScreenSpaceAmbientOcclusionRawPass();
+        private readonly BurtRenderPass allocateScreenSpaceAmbientOcclusionPass = new BurtAllocateScreenSpaceAmbientOcclusionPass();
+        private readonly BurtRenderPass screenSpaceAmbientOcclusionTracePass = new BurtScreenSpaceAmbientOcclusionTracePass();
+        private readonly BurtRenderPass screenSpaceAmbientOcclusionBlurPass = new BurtScreenSpaceAmbientOcclusionBlurPass();
         private readonly BurtRenderPass allocateHiZDepthPass = new BurtAllocateHiZDepthPass();
+        private readonly BurtRenderPass allocateAdditionalLightBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.AdditionalLightBufferName); // Allocate the graph-owned additional light buffer before lighting globals upload.
+        private readonly BurtRenderPass allocateTileLightCountBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
+        private readonly BurtRenderPass allocateTileLightListBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.TileLightListBufferName);
+        private readonly BurtRenderPass allocateTileLightOffsetBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
         private readonly BurtRenderPass setupLightingPass = new BurtSetupLightingPass(); // 创建灯光全局参数上传 Pass，让 Forward 和后续 Deferred Lighting 共享同一套 LightingGlobals。
         private readonly BurtRenderPass allocateMainLightShadowMapPass = new BurtAllocateMainLightShadowMapPass(); // 创建主光阴影图分配 Pass，让 Deferred 路径继续复用现有主光阴影。
         private readonly BurtRenderPass drawMainLightShadowCasterPass = new BurtDrawMainLightShadowCasterPass(); // 创建主光 ShadowCaster 绘制 Pass，把阴影深度写入 MainLightShadowMap。
+        private readonly BurtRenderPass allocateAdditionalLightShadowAtlasPass = new BurtAllocateAdditionalLightShadowAtlasPass();
+        private readonly BurtRenderPass drawAdditionalLightShadowCasterPass = new BurtDrawAdditionalLightShadowCasterPass();
         private readonly BurtRenderPass seedOverlayCameraColorPass = new BurtSeedOverlayCameraColorPass(); // 创建 Overlay 颜色继承 Pass，保持非共享 Overlay 的旧兼容行为。
         private readonly BurtRenderPass setGBufferRenderTargetsPass = new BurtSetGBufferRenderTargetsPass(); // 创建 GBuffer MRT 绑定 Pass，用来验证三张 GBuffer 能被同时绑定。
         private readonly BurtRenderPass clearGBufferRenderTargetsPass = new BurtClearGBufferRenderTargetsPass(); // 创建 GBuffer 清理 Pass，用来给三张 GBuffer 写入确定的默认值。
@@ -23,6 +33,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass depthPrepass = new BurtDepthPrepass(); // 创建深度预写 Pass，暂时复用 Forward 的深度建立逻辑。
         private readonly BurtRenderPass drawDeferredForwardOnlyOpaquePass = new BurtDrawDeferredForwardOnlyOpaquePass(); // 创建 Deferred 后前向兜底 Pass，只绘制显式声明 BurtForwardOnly 的不透明物体。
         private readonly BurtRenderPass buildHiZDepthPass = new BurtBuildHiZDepthPass();
+        private readonly BurtRenderPass buildTileLightListDebugPass = new BurtBuildTileLightListDebugPass();
         private readonly BurtRenderPass drawSkyboxPass = new BurtDrawSkyboxPass(); // 创建天空盒绘制 Pass，让 Deferred 实验模式仍能保留原有天空盒行为。
         private readonly BurtRenderPass allocateScreenSpaceReflectionColorPass = new BurtAllocateScreenSpaceReflectionColorPass();
         private readonly BurtRenderPass allocateScreenSpaceReflectionDenoisedColorPass = new BurtAllocateScreenSpaceReflectionDenoisedColorPass();
@@ -45,11 +56,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass debugMainLightShadowMapPass = new BurtDebugMainLightShadowMapPass(); // 创建主光阴影图调试 Pass，让 Deferred 实验模式仍能查看 shadow map。
         private readonly BurtRenderPass debugGBufferPass = new BurtDebugGBufferPass(); // 创建 GBuffer 调试 Pass，让 Deferred 模式可以直接检查三张 GBuffer 的写入内容。
         private readonly BurtRenderPass debugHiZDepthPass = new BurtDebugHiZDepthPass();
+        private readonly BurtRenderPass debugTileLightViewPass = new BurtDebugTileLightViewPass();
+        private readonly BurtRenderPass debugScreenSpaceAmbientOcclusionPass = new BurtDebugScreenSpaceAmbientOcclusionPass();
+        private readonly BurtRenderPass debugScreenSpaceReflectionHiZDiagnosticsPass = new BurtScreenSpaceReflectionHiZDiagnosticsPass();
         private readonly BurtRenderPass finalBlitPass = new BurtFinalBlitPass(); // 创建最终拷贝 Pass，把 CameraColor 输出到 request 指定的最终目标。
         private readonly BurtRenderPass releaseMainLightShadowMapPass = new BurtReleaseMainLightShadowMapPass(); // 创建主光阴影图释放 Pass，结束 MainLightShadowMap 生命周期。
+        private readonly BurtRenderPass releaseAdditionalLightShadowAtlasPass = new BurtReleaseAdditionalLightShadowAtlasPass();
+        private readonly BurtRenderPass releaseAdditionalLightBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.AdditionalLightBufferName); // Release the per-request additional light buffer after all lighting consumers.
+        private readonly BurtRenderPass releaseTileLightCountBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
+        private readonly BurtRenderPass releaseTileLightListBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.TileLightListBufferName);
+        private readonly BurtRenderPass releaseTileLightOffsetBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
         private readonly BurtRenderPass releaseGBuffer0Pass = new BurtReleaseGBuffer0Pass(); // 创建 GBuffer0 释放 Pass，结束第一张 Deferred 缓存生命周期。
         private readonly BurtRenderPass releaseGBuffer1Pass = new BurtReleaseGBuffer1Pass(); // 创建 GBuffer1 释放 Pass，结束第二张 Deferred 缓存生命周期。
         private readonly BurtRenderPass releaseGBuffer2Pass = new BurtReleaseGBuffer2Pass(); // 创建 GBuffer2 释放 Pass，结束第三张 Deferred 缓存生命周期。
+        private readonly BurtRenderPass releaseScreenSpaceAmbientOcclusionRawPass = new BurtReleaseScreenSpaceAmbientOcclusionRawPass();
+        private readonly BurtRenderPass releaseScreenSpaceAmbientOcclusionPass = new BurtReleaseScreenSpaceAmbientOcclusionPass();
         private readonly BurtRenderPass releaseHiZDepthPass = new BurtReleaseHiZDepthPass();
         private readonly BurtRenderPass releaseCameraColorPass = new BurtReleaseCameraColorPass(); // 创建 CameraColor 释放 Pass，保持和 Forward 一致的相机颜色资源生命周期。
         private readonly BurtRenderPass releaseCameraDepthPass = new BurtReleaseCameraDepthPass(); // 创建 CameraDepth 释放 Pass，保持和 Forward 一致的相机深度资源生命周期。
@@ -79,15 +100,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             var useLocalGBufferTargets = ShouldUseLocalGBufferTargets(safeRenderOptions); // 当前阶段让 GBuffer 生命周期跟随本 request 的 CameraColor/CameraDepth 申请。
             var useHiZDepth = ShouldUseHiZDepth(request, asset, useLocalGBufferTargets); // Only allocate and build HiZ when SSR or HiZ debug needs it.
             var useMainLightShadow = BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 复用阴影工具判断当前 request 是否需要主光阴影图。
-            var mainLightShadowMapIsValid = graph.Resources.GetMainLightShadowMap().IsValid; // 读取资源表里的 MainLightShadowMap 句柄状态，用于结构化诊断。
-
-            BurtShadowUtility.LogMainLightShadowDiagnostics(request, asset, useMainLightShadow, mainLightShadowMapIsValid); // 输出主光阴影诊断，保持 Forward 和 Deferred 的排查方式一致。
+            var useAdditionalLightShadow = BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(request);
             AddCameraAllocationPasses(graph, safeRenderOptions); // 先申请 CameraColor 和 CameraDepth，确保 GBuffer MRT 可以使用独立深度。
             AddGBufferAllocationPasses(graph, useLocalGBufferTargets); // 再申请三张 GBuffer，给后面的 MRT 绑定和清理阶段准备真实 RT。
             AddHiZAllocationPass(graph, useHiZDepth);
 
+            graph.AddPass(allocateAdditionalLightBufferPass); // Allocate the additional light GPU buffer before Setup Lighting uploads packed rows.
+            AddTileLightBufferAllocationPasses(graph, request, asset, useLocalGBufferTargets);
             graph.AddPass(setupLightingPass); // 上传灯光和默认阴影全局参数，后续 Forward fallback 与 Deferred Lighting 都会依赖它。
-            AddShadowPasses(graph, useMainLightShadow); // 如果需要主光阴影，就绘制 shadow map。
+            AddTileLightBuildPass(graph, request, asset, useLocalGBufferTargets);
+            AddShadowPasses(graph, useMainLightShadow, useAdditionalLightShadow); // 如果需要阴影，就绘制 shadow map。
+            var mainLightShadowMapIsValid = graph.Resources.GetMainLightShadowMap().IsValid; // 在阴影 Pass 注册之后读取资源句柄状态，诊断才代表最终图结构。
+            BurtShadowUtility.LogMainLightShadowDiagnostics(request, asset, useMainLightShadow, mainLightShadowMapIsValid); // 输出主光阴影诊断，保持 Forward 和 Deferred 的排查方式一致。
 
             if (ShouldSeedOverlayCameraColor(request, safeRenderOptions)) // 非共享 Overlay 且不清颜色时，需要继承最终目标内容。
             {
@@ -101,6 +125,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             AddDrawGBufferOpaquePass(graph, useLocalGBufferTargets); // 绘制支持 BurtGBuffer pass 的不透明物体，当前 shader 侧没有时会自然为空。
             AddReturnToCameraColorPass(graph, useLocalGBufferTargets); // GBuffer 阶段完成后重新绑定 CameraColor，避免 Forward fallback 继续画进 GBuffer。
 
+            AddScreenSpaceAmbientOcclusionPasses(graph, request, asset, useLocalGBufferTargets);
             AddDeferredLightingPass(graph, useLocalGBufferTargets); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
             AddDeferredForwardOnlyOpaqueFallback(graph, asset); // 根据资产开关决定是否绘制不能写入 GBuffer 的前向专用不透明物体。
             AddHiZBuildPass(graph, useHiZDepth);
@@ -110,7 +135,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             AddUnsupportedShaderDebug(graph, asset); // 根据资产开关决定是否绘制不支持 Shader 的错误材质。
             AddPreImageEffectsGizmosPass(graph, request); // 编辑器里在后处理前恢复 PreImageEffects Gizmos。
             AddPostProcessPasses(graph, request, asset, safeRenderOptions); // 根据后处理和 FinalBlit 条件决定是否插入 Tonemapping 链路。
-            AddDebugViewPasses(graph, asset, useMainLightShadow, useLocalGBufferTargets); // 根据 Debug 开关决定是否覆盖显示深度、主光阴影或 GBuffer。
+            AddDebugViewPasses(graph, request, asset, useMainLightShadow, useLocalGBufferTargets); // 根据 Debug 开关决定是否覆盖显示深度、主光阴影或 GBuffer。
             AddPostImageEffectsGizmosPass(graph, request); // 后处理和 Debug 覆盖之后，把 PostImageEffects Gizmos 画回 CameraColor。
 
             if (safeRenderOptions.ShouldFinalBlit) // 只有当前 request 是最终输出点时才执行 FinalBlit。
@@ -118,8 +143,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(finalBlitPass); // 把 CameraColor 拷贝到 request.TargetIdentifier。
             }
 
-            AddShadowReleasePasses(graph, useMainLightShadow); // 释放主光阴影图，结束阴影资源生命周期。
+            AddTileLightBufferReleasePasses(graph, request, asset, useLocalGBufferTargets);
+            AddAdditionalLightBufferReleasePass(graph); // End the packed additional-light buffer lifetime after all shading consumers.
+            AddShadowReleasePasses(graph, useMainLightShadow, useAdditionalLightShadow); // 释放阴影图，结束阴影资源生命周期。
             AddHiZReleasePass(graph, useHiZDepth);
+            AddScreenSpaceAmbientOcclusionReleasePasses(graph, request, asset, useLocalGBufferTargets);
             AddGBufferReleasePasses(graph, useLocalGBufferTargets); // 释放本 request 内申请的 GBuffer，当前阶段不跨 request 保留它们。
             AddCameraReleasePasses(graph, safeRenderOptions); // 最后按相机栈策略释放 CameraColor 和 CameraDepth。
         }
@@ -187,17 +215,60 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.AddPass(allocateHiZDepthPass);
         }
 
+        private void AddTileLightBufferAllocationPasses(
+            BurtRenderGraph graph,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            if (!BurtTiledLightData.ShouldUseTiledLightResources(request, asset, useLocalGBufferTargets))
+            {
+                return;
+            }
+
+            graph.AddPass(allocateTileLightCountBufferPass);
+            if (BurtTiledLightData.ShouldUseTileLightListResources(request, asset, useLocalGBufferTargets))
+            {
+                graph.AddPass(allocateTileLightListBufferPass);
+                graph.AddPass(allocateTileLightOffsetBufferPass);
+            }
+        }
+
+        private void AddTileLightBuildPass(
+            BurtRenderGraph graph,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            if (!BurtTiledLightData.ShouldUseTiledLightResources(request, asset, useLocalGBufferTargets))
+            {
+                return;
+            }
+
+            graph.AddPass(buildTileLightListDebugPass);
+        }
+
         private void AddShadowPasses( // 添加主光阴影生成 Pass。
             BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
-            bool useMainLightShadow) // 接收当前 request 是否启用主光阴影。
+            bool useMainLightShadow, // 接收当前 request 是否启用主光阴影。
+            bool useAdditionalLightShadow)
         {
-            if (!useMainLightShadow) // 没有主光阴影时不需要申请或绘制 shadow map。
+            if (!useMainLightShadow && !useAdditionalLightShadow) // 没有阴影时不需要申请或绘制 shadow map。
             {
                 return; // 直接返回，减少无意义 Pass。
             }
 
-            graph.AddPass(allocateMainLightShadowMapPass); // 添加主光阴影图分配 Pass。
-            graph.AddPass(drawMainLightShadowCasterPass); // 添加主光 ShadowCaster 绘制 Pass。
+            if (useMainLightShadow)
+            {
+                graph.AddPass(allocateMainLightShadowMapPass); // 添加主光阴影图分配 Pass。
+                graph.AddPass(drawMainLightShadowCasterPass); // 添加主光 ShadowCaster 绘制 Pass。
+            }
+
+            if (useAdditionalLightShadow)
+            {
+                graph.AddPass(allocateAdditionalLightShadowAtlasPass);
+                graph.AddPass(drawAdditionalLightShadowCasterPass);
+            }
         }
 
         private void AddGBufferBootstrapPasses( // 添加 GBuffer MRT 结构验证 Pass。
@@ -259,6 +330,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(buildHiZDepthPass);
+        }
+
+        private void AddScreenSpaceAmbientOcclusionPasses(
+            BurtRenderGraph graph,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            if (!useLocalGBufferTargets || !BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(request, asset))
+            {
+                return;
+            }
+
+            graph.AddPass(allocateScreenSpaceAmbientOcclusionRawPass);
+            graph.AddPass(allocateScreenSpaceAmbientOcclusionPass);
+            graph.AddPass(screenSpaceAmbientOcclusionTracePass);
+            graph.AddPass(screenSpaceAmbientOcclusionBlurPass);
         }
 
         private void AddScreenSpaceReflectionPasses(
@@ -364,6 +452,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
         private void AddDebugViewPasses( // 根据资产开关添加调试视图 Pass。
             BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRenderRequest request,
             BurtRenderPipelineAsset asset, // 接收管线资产配置。
             bool useMainLightShadow, // 接收当前 request 是否真的生成了主光阴影。
             bool useLocalGBufferTargets) // 接收当前 request 是否拥有可读取的本地 GBuffer。
@@ -387,18 +476,67 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             {
                 graph.AddPass(debugHiZDepthPass);
             }
+
+            if (asset != null && asset.RendererMode == BurtRendererMode.Deferred && BurtTileLightDebugViewUtility.ShouldUseTileLightDebugView(useLocalGBufferTargets))
+            {
+                graph.AddPass(debugTileLightViewPass);
+            }
+
+            if (ShouldUseScreenSpaceAmbientOcclusionDebugView(request, asset, useLocalGBufferTargets))
+            {
+                graph.AddPass(debugScreenSpaceAmbientOcclusionPass);
+            }
+
+            if (ShouldUseScreenSpaceReflectionHiZDiagnosticView(request, asset, useLocalGBufferTargets))
+            {
+                graph.AddPass(debugScreenSpaceReflectionHiZDiagnosticsPass);
+            }
+        }
+
+        private void AddAdditionalLightBufferReleasePass(BurtRenderGraph graph)
+        {
+            graph.AddPass(releaseAdditionalLightBufferPass);
+        }
+
+        private void AddTileLightBufferReleasePasses(
+            BurtRenderGraph graph,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            if (!BurtTiledLightData.ShouldUseTiledLightResources(request, asset, useLocalGBufferTargets))
+            {
+                return;
+            }
+
+            if (BurtTiledLightData.ShouldUseTileLightListResources(request, asset, useLocalGBufferTargets))
+            {
+                graph.AddPass(releaseTileLightOffsetBufferPass);
+                graph.AddPass(releaseTileLightListBufferPass);
+            }
+
+            graph.AddPass(releaseTileLightCountBufferPass);
         }
 
         private void AddShadowReleasePasses( // 添加主光阴影释放 Pass。
             BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
-            bool useMainLightShadow) // 接收当前 request 是否启用主光阴影。
+            bool useMainLightShadow, // 接收当前 request 是否启用主光阴影。
+            bool useAdditionalLightShadow)
         {
-            if (!useMainLightShadow) // 没有申请主光阴影图时不需要释放。
+            if (!useMainLightShadow && !useAdditionalLightShadow) // 没有申请阴影图时不需要释放。
             {
                 return; // 直接返回，避免释放不存在的临时 RT。
             }
 
-            graph.AddPass(releaseMainLightShadowMapPass); // 添加主光阴影图释放 Pass。
+            if (useMainLightShadow)
+            {
+                graph.AddPass(releaseMainLightShadowMapPass); // 添加主光阴影图释放 Pass。
+            }
+
+            if (useAdditionalLightShadow)
+            {
+                graph.AddPass(releaseAdditionalLightShadowAtlasPass);
+            }
         }
 
         private void AddHiZReleasePass(
@@ -411,6 +549,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(releaseHiZDepthPass);
+        }
+
+        private void AddScreenSpaceAmbientOcclusionReleasePasses(
+            BurtRenderGraph graph,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            if (!useLocalGBufferTargets || !BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(request, asset))
+            {
+                return;
+            }
+
+            graph.AddPass(releaseScreenSpaceAmbientOcclusionPass);
+            graph.AddPass(releaseScreenSpaceAmbientOcclusionRawPass);
         }
 
         private void AddGBufferReleasePasses( // 添加三张 GBuffer 的释放 Pass。
@@ -544,7 +697,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return false; // 默认关闭 shadow map 调试视图。
             }
 
-            return asset.EnableMainLightShadowDebugView; // 使用资产上的主光 shadow map 调试开关。
+            return BurtShadingDebugSettings.Mode == BurtShadingDebugMode.MainLightShadow; // Controlled by Shading Debug Overlay instead of Pipeline Asset.
         }
 
         private static bool ShouldUseGBufferDebugView( // 判断是否启用 Deferred GBuffer 调试视图。
@@ -559,6 +712,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             bool useLocalGBufferTargets)
         {
             return useLocalGBufferTargets && BurtDebugHiZDepthPass.ShouldUseHiZDebugView(asset);
+        }
+
+        private static bool ShouldUseScreenSpaceAmbientOcclusionDebugView(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            return useLocalGBufferTargets && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusionDebugView(request, asset);
+        }
+
+        private static bool ShouldUseScreenSpaceReflectionHiZDiagnosticView(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            return useLocalGBufferTargets && BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflectionHiZDiagnosticView(request, asset);
         }
     }
 }

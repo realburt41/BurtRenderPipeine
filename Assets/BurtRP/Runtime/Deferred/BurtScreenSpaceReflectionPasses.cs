@@ -117,7 +117,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceReflectionTracePass : BurtRenderPass
     {
-        private const string ScreenSpaceReflectionShaderName = "Hidden/BurtRP/ScreenSpaceReflections";
+        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionShaderName;
         private const float ScreenSpaceReflectionEdgeFadeWidth = 0.04f;
         private static readonly int CameraColorTextureId = BurtRenderGraphResourceRegistry.CameraColorTextureId;
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
@@ -153,7 +153,10 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer0();
             builder.ReadGBuffer1();
             builder.ReadGBuffer2();
-            builder.ReadHiZDepth();
+            if (BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflectionHiZTrace(builder.Request, builder.Asset))
+            {
+                builder.ReadHiZDepth();
+            }
             builder.WriteScreenSpaceReflectionColor();
         }
 
@@ -185,13 +188,16 @@ namespace Burt.RenderPipeline
             var colorDescriptor = BurtRenderTargetDescriptorUtility.CreateScreenSpaceReflectionColorDescriptor(camera);
             var hiZDescriptor = BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(camera);
             var hiZMipCount = BurtRenderTargetDescriptorUtility.CalculateMipCount(hiZDescriptor.width, hiZDescriptor.height);
+            var hasUsableHiZDepth = hiZDepthTarget.IsValid &&
+                hiZMipCount > 1 &&
+                BurtHiZDepthPassUtility.IsHiZDepthShaderAvailable();
             var cmd = CommandBufferPool.Get(Name);
 
             cmd.SetRenderTarget(ssrColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BindInputs(cmd, cameraColorTarget, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, hiZDepthTarget);
             UploadCameraGlobals(cmd, camera, colorDescriptor, hiZMipCount);
-            UploadSettings(cmd, settings, hiZMipCount);
+            UploadSettings(cmd, settings, hiZMipCount, hasUsableHiZDepth);
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
 
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
@@ -221,7 +227,6 @@ namespace Burt.RenderPipeline
                 gbuffer0Target.IsValid &&
                 gbuffer1Target.IsValid &&
                 gbuffer2Target.IsValid &&
-                hiZDepthTarget.IsValid &&
                 ssrColorTarget.IsValid;
         }
 
@@ -240,7 +245,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
-            cmd.SetGlobalTexture(HiZDepthTextureId, hiZDepthTarget.Identifier);
+            cmd.SetGlobalTexture(HiZDepthTextureId, hiZDepthTarget.IsValid ? hiZDepthTarget.Identifier : cameraDepthTarget.Identifier);
         }
 
         private static void UploadCameraGlobals(
@@ -265,14 +270,20 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalVector(SSRSourceTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
         }
 
-        private static void UploadSettings(CommandBuffer cmd, BurtScreenSpaceReflectionSettings settings, int hiZMipCount)
+        private static void UploadSettings(CommandBuffer cmd, BurtScreenSpaceReflectionSettings settings, int hiZMipCount, bool hasUsableHiZDepth)
         {
             var maxMip = Mathf.Max(0, hiZMipCount - 1);
             var debugMode = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderDebugMode();
 
             cmd.SetGlobalVector(SSRParams0Id, new Vector4(settings.MaxDistance, settings.Thickness, settings.Intensity, settings.RoughnessFade));
             cmd.SetGlobalVector(SSRParams1Id, new Vector4(settings.MaxSteps, maxMip, debugMode, ScreenSpaceReflectionEdgeFadeWidth));
-            cmd.SetGlobalVector(SSRParams2Id, new Vector4(Time.frameCount & 7, settings.TemporalAccumulation ? 1f : 0f, 0f, 0f));
+            var hiZTraceForShader = hasUsableHiZDepth && (settings.ExperimentalHiZTrace ||
+                BurtScreenSpaceReflectionPassUtility.IsScreenSpaceReflectionHiZStepSavedDebugMode(BurtShadingDebugSettings.Mode));
+            cmd.SetGlobalVector(SSRParams2Id, new Vector4(
+                Time.frameCount & 7,
+                settings.TemporalAccumulation ? 1f : 0f,
+                hiZTraceForShader ? 1f : 0f,
+                hasUsableHiZDepth ? 1f : 0f));
         }
 
         private Material GetScreenSpaceReflectionMaterial()
@@ -302,7 +313,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceReflectionDenoisePass : BurtRenderPass
     {
-        private const string ScreenSpaceReflectionShaderName = "Hidden/BurtRP/ScreenSpaceReflections";
+        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionShaderName;
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -426,7 +437,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceReflectionTemporalPass : BurtRenderPass
     {
-        private const string ScreenSpaceReflectionShaderName = "Hidden/BurtRP/ScreenSpaceReflections";
+        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionShaderName;
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -613,7 +624,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceReflectionCompositePass : BurtRenderPass
     {
-        private const string ScreenSpaceReflectionShaderName = "Hidden/BurtRP/ScreenSpaceReflections";
+        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionShaderName;
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -770,6 +781,129 @@ namespace Burt.RenderPipeline
         }
     }
 
+    internal sealed class BurtScreenSpaceReflectionHiZDiagnosticsPass : BurtRenderPass
+    {
+        private const string HiZDiagnosticsShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionHiZDiagnosticsShaderName;
+        private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
+        private static readonly int HiZDepthTextureId = BurtRenderGraphResourceRegistry.HiZDepthTextureId;
+        private static readonly int SSRHiZDiagnosticsParamsId = Shader.PropertyToID("_BurtSSRHiZDiagnosticsParams");
+        private static readonly int SSRHiZTraceParams0Id = Shader.PropertyToID("_BurtSSRHiZTraceParams0");
+        private static readonly int SSRHiZViewProjectionMatrixId = Shader.PropertyToID("_BurtSSRHiZViewProjectionMatrix");
+        private static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseViewProjectionMatrix");
+        private static readonly int CameraWorldPositionId = Shader.PropertyToID("_BurtDeferredCameraWorldPosition");
+        private static readonly int DeferredScreenSizeId = Shader.PropertyToID("_BurtDeferredScreenSize");
+
+        private Material hiZDiagnosticsMaterial;
+        private bool hasLoggedMissingShader;
+
+        public override string Name => "Burt Screen Space Reflections HiZ Diagnostics";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflectionHiZDiagnosticView(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadCameraDepth();
+            builder.ReadHiZDepth();
+            builder.WriteCameraColor();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || !BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflectionHiZDiagnosticView(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var cameraColorTarget = context.CameraColorTarget;
+            var cameraDepthTarget = context.CameraDepthTarget;
+            var hiZDepthTarget = context.HiZDepthTarget;
+            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid || !hiZDepthTarget.IsValid)
+            {
+                return;
+            }
+
+            var material = GetHiZDiagnosticsMaterial();
+            if (material == null)
+            {
+                return;
+            }
+
+            var settings = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionSettings(context.Request, context.Asset);
+            if (!settings.Enabled)
+            {
+                return;
+            }
+
+            var camera = context.Request != null ? context.Request.Camera : null;
+            if (camera == null)
+            {
+                return;
+            }
+
+            var colorDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
+            var hiZDescriptor = BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(camera);
+            var maxMip = Mathf.Max(0, BurtRenderTargetDescriptorUtility.CalculateMipCount(hiZDescriptor.width, hiZDescriptor.height) - 1);
+            var diagnosticMip = Mathf.Clamp(maxMip >= 3 ? 3 : maxMip, 0, maxMip);
+            var debugMode = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderDebugMode();
+            var cmd = CommandBufferPool.Get(Name);
+
+            cmd.SetRenderTarget(cameraColorTarget.Identifier);
+            cmd.SetViewport(new Rect(0f, 0f, Mathf.Max(1, colorDescriptor.width), Mathf.Max(1, colorDescriptor.height)));
+            cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+            cmd.SetGlobalTexture(HiZDepthTextureId, hiZDepthTarget.Identifier);
+            cmd.SetGlobalVector(SSRHiZDiagnosticsParamsId, new Vector4(debugMode, maxMip, diagnosticMip, 512f));
+            UploadCameraGlobals(cmd, camera, colorDescriptor);
+            cmd.SetGlobalVector(SSRHiZTraceParams0Id, new Vector4(settings.MaxDistance, settings.Thickness, settings.MaxSteps, settings.RoughnessFade));
+            cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
+
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private static void UploadCameraGlobals(CommandBuffer cmd, Camera camera, RenderTextureDescriptor colorDescriptor)
+        {
+            var viewMatrix = camera.worldToCameraMatrix;
+            var projectionMatrix = GL.GetGPUProjectionMatrix(camera.projectionMatrix, true);
+            var viewProjectionMatrix = projectionMatrix * viewMatrix;
+            var inverseViewProjectionMatrix = viewProjectionMatrix.inverse;
+            var cameraPosition = camera.transform.position;
+            var width = Mathf.Max(1, colorDescriptor.width);
+            var height = Mathf.Max(1, colorDescriptor.height);
+
+            cmd.SetGlobalMatrix(SSRHiZViewProjectionMatrixId, viewProjectionMatrix);
+            cmd.SetGlobalMatrix(InverseViewProjectionMatrixId, inverseViewProjectionMatrix);
+            cmd.SetGlobalVector(CameraWorldPositionId, new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1f));
+            cmd.SetGlobalVector(DeferredScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
+        }
+
+        private Material GetHiZDiagnosticsMaterial()
+        {
+            if (hiZDiagnosticsMaterial != null)
+            {
+                return hiZDiagnosticsMaterial;
+            }
+
+            var shader = Shader.Find(HiZDiagnosticsShaderName);
+            if (shader == null)
+            {
+                if (!hasLoggedMissingShader)
+                {
+                    Debug.LogWarning("BurtRP could not find shader: " + HiZDiagnosticsShaderName);
+                    hasLoggedMissingShader = true;
+                }
+
+                return null;
+            }
+
+            hiZDiagnosticsMaterial = new Material(shader);
+            hiZDiagnosticsMaterial.hideFlags = HideFlags.HideAndDontSave;
+            return hiZDiagnosticsMaterial;
+        }
+    }
+
     internal sealed class BurtReleaseScreenSpaceReflectionColorPass : BurtRenderPass
     {
         public override string Name => "Burt Release Screen Space Reflection Color";
@@ -882,6 +1016,7 @@ namespace Burt.RenderPipeline
             1f,
             0.6f,
             false,
+            false,
             0.86f,
             0.02f,
             1f);
@@ -893,6 +1028,7 @@ namespace Burt.RenderPipeline
             float thickness,
             float intensity,
             float roughnessFade,
+            bool experimentalHiZTrace,
             bool temporalAccumulation,
             float temporalFeedback,
             float temporalDepthRejection,
@@ -904,6 +1040,7 @@ namespace Burt.RenderPipeline
             Thickness = Mathf.Max(0.0001f, thickness);
             Intensity = Mathf.Clamp01(intensity);
             RoughnessFade = Mathf.Clamp01(roughnessFade);
+            ExperimentalHiZTrace = experimentalHiZTrace;
             TemporalAccumulation = temporalAccumulation;
             TemporalFeedback = Mathf.Clamp(temporalFeedback, 0f, 0.98f);
             TemporalDepthRejection = Mathf.Clamp(temporalDepthRejection, 0.001f, 0.2f);
@@ -921,6 +1058,8 @@ namespace Burt.RenderPipeline
         public float Intensity { get; }
 
         public float RoughnessFade { get; }
+
+        public bool ExperimentalHiZTrace { get; }
 
         public bool TemporalAccumulation { get; }
 
@@ -1019,7 +1158,7 @@ namespace Burt.RenderPipeline
 
     internal static class BurtScreenSpaceReflectionHistoryUtility
     {
-        private const int HistoryAlgorithmVersion = 27;
+        private const int HistoryAlgorithmVersion = 36;
         private const float ProjectionChangeEpsilon = 0.0001f;
 
         private sealed class CameraState
@@ -1468,6 +1607,137 @@ namespace Burt.RenderPipeline
 
     internal static class BurtScreenSpaceReflectionPassUtility
     {
+        public const string ScreenSpaceReflectionShaderName = "Hidden/BurtRP/ScreenSpaceReflections";
+        public const string ScreenSpaceReflectionHiZDiagnosticsShaderName = "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics";
+        private static readonly bool EnableScreenSpaceReflectionHiZDiagnostics = true;
+        private static int shaderAvailabilityFrame = -1;
+        private static bool shaderAvailable;
+        private static int hiZDiagnosticsShaderAvailabilityFrame = -1;
+        private static bool hiZDiagnosticsShaderAvailable;
+
+        public static bool IsScreenSpaceReflectionShaderAvailable()
+        {
+            var frame = Time.frameCount;
+            if (shaderAvailabilityFrame == frame)
+            {
+                return shaderAvailable;
+            }
+
+            shaderAvailabilityFrame = frame;
+            shaderAvailable = Shader.Find(ScreenSpaceReflectionShaderName) != null;
+            return shaderAvailable;
+        }
+
+        public static string ResolveScreenSpaceReflectionShaderStatusLabel()
+        {
+            return IsScreenSpaceReflectionShaderAvailable() ? "Ready" : "Missing(" + ScreenSpaceReflectionShaderName + ")";
+        }
+
+        public static bool IsScreenSpaceReflectionHiZDiagnosticsShaderAvailable()
+        {
+            var frame = Time.frameCount;
+            if (hiZDiagnosticsShaderAvailabilityFrame == frame)
+            {
+                return hiZDiagnosticsShaderAvailable;
+            }
+
+            hiZDiagnosticsShaderAvailabilityFrame = frame;
+            hiZDiagnosticsShaderAvailable = Shader.Find(ScreenSpaceReflectionHiZDiagnosticsShaderName) != null;
+            return hiZDiagnosticsShaderAvailable;
+        }
+
+        public static bool ShouldUseScreenSpaceReflectionHiZDiagnostics()
+        {
+            return EnableScreenSpaceReflectionHiZDiagnostics &&
+                BurtShadingDebugSettings.IsDebugging &&
+                IsScreenSpaceReflectionHiZDiagnosticMode(BurtShadingDebugSettings.Mode) &&
+                IsScreenSpaceReflectionHiZDiagnosticsShaderAvailable();
+        }
+
+        public static bool ShouldUseScreenSpaceReflectionHiZTrace(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            var settings = ResolveScreenSpaceReflectionSettings(request, asset);
+            return settings.Enabled && (settings.ExperimentalHiZTrace || IsScreenSpaceReflectionHiZStepSavedDebugMode(BurtShadingDebugSettings.Mode));
+        }
+
+        public static bool ShouldUseScreenSpaceReflectionHiZDiagnosticView(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldUseScreenSpaceReflections(request, asset) &&
+                ShouldUseScreenSpaceReflectionHiZDiagnostics();
+        }
+
+        public static string ResolveScreenSpaceReflectionHiZDiagnosticsStatusLabel()
+        {
+            if (!BurtShadingDebugSettings.IsDebugging ||
+                !IsScreenSpaceReflectionHiZDiagnosticMode(BurtShadingDebugSettings.Mode))
+            {
+                return "Inactive";
+            }
+
+            if (!EnableScreenSpaceReflectionHiZDiagnostics)
+            {
+                return "Stubbed";
+            }
+
+            return IsScreenSpaceReflectionHiZDiagnosticsShaderAvailable() ? "IsolatedTraceCompare" : "Missing(" + ScreenSpaceReflectionHiZDiagnosticsShaderName + ")";
+        }
+
+        private static bool IsScreenSpaceReflectionHiZDiagnosticMode(BurtShadingDebugMode mode)
+        {
+            return mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipCandidate ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZMipLevel ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZDivergence ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZMissedHits ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZRawHitMiss ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZResolvedHitMiss ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZVisibilityMiss ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipUsed ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZProbeBlocked ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZStepCompare ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZWorkCompare;
+        }
+
+        public static bool IsScreenSpaceReflectionHiZStepSavedDebugMode(BurtShadingDebugMode mode)
+        {
+            return BurtShadingDebugSettings.IsDebugging &&
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZStepSaved;
+        }
+
+        public static string ResolveScreenSpaceReflectionTraceModeLabel(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            var hiZTrace = ShouldUseScreenSpaceReflectionHiZTrace(request, asset);
+            var hiZDiagnostics = ShouldUseScreenSpaceReflectionHiZDiagnostics();
+            var hiZStepSavedDebug = IsScreenSpaceReflectionHiZStepSavedDebugMode(BurtShadingDebugSettings.Mode);
+
+            if (hiZTrace && hiZDiagnostics)
+            {
+                return "HiZExperimentalGuarded+HiZDiagnostics";
+            }
+
+            if (hiZDiagnostics)
+            {
+                return "StableMip0+HiZDiagnostics";
+            }
+
+            if (BurtShadingDebugSettings.IsDebugging &&
+                IsScreenSpaceReflectionHiZDiagnosticMode(BurtShadingDebugSettings.Mode))
+            {
+                if (!EnableScreenSpaceReflectionHiZDiagnostics)
+                {
+                    return "StableMip0(HiZDiagnosticsStubbed)";
+                }
+
+                return IsScreenSpaceReflectionHiZDiagnosticsShaderAvailable() ? "StableMip0+HiZDiagnostics" : "StableMip0(HiZDiagnosticsMissing)";
+            }
+
+            if (hiZStepSavedDebug && hiZTrace)
+            {
+                return "StableMip0+HiZStepSavedDebug";
+            }
+
+            return hiZTrace ? "HiZExperimentalGuarded" : "StableMip0";
+        }
+
         public static bool IsScreenSpaceReflectionSuppressedByShadingDebug()
         {
             return BurtShadingDebugSettings.IsDebugging && !IsScreenSpaceReflectionDebugMode(BurtShadingDebugSettings.Mode);
@@ -1493,7 +1763,19 @@ namespace Burt.RenderPipeline
                 mode == BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality ||
                 mode == BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality ||
                 mode == BurtShadingDebugMode.ScreenSpaceReflectionResolveQuality ||
-                mode == BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport;
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipCandidate ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZMipLevel ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZDivergence ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZMissedHits ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZRawHitMiss ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZResolvedHitMiss ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZVisibilityMiss ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipUsed ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZProbeBlocked ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZStepCompare ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZWorkCompare ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionHiZStepSaved;
         }
 
         public static bool ShouldUseScreenSpaceReflections(BurtRenderRequest request, BurtRenderPipelineAsset asset)
@@ -1529,6 +1811,11 @@ namespace Burt.RenderPipeline
                 return DisableAndInvalidateHistory(request, "SSRDisabled");
             }
 
+            if (!IsScreenSpaceReflectionShaderAvailable())
+            {
+                return DisableAndInvalidateHistory(request, "ShaderMissing");
+            }
+
             return new BurtScreenSpaceReflectionSettings(
                 true,
                 screenSpaceReflections.maxSteps.value,
@@ -1536,6 +1823,7 @@ namespace Burt.RenderPipeline
                 screenSpaceReflections.thickness.value,
                 screenSpaceReflections.intensity.value,
                 screenSpaceReflections.roughnessFade.value,
+                screenSpaceReflections.experimentalHiZTrace.value,
                 screenSpaceReflections.temporalAccumulation.value,
                 screenSpaceReflections.temporalFeedback.value,
                 screenSpaceReflections.temporalDepthRejection.value,
@@ -1595,6 +1883,30 @@ namespace Burt.RenderPipeline
                     return 18;
                 case BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport:
                     return 19;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipCandidate:
+                    return 20;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZMipLevel:
+                    return 21;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZDivergence:
+                    return 22;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZMissedHits:
+                    return 23;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZRawHitMiss:
+                    return 24;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZResolvedHitMiss:
+                    return 25;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZVisibilityMiss:
+                    return 26;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipUsed:
+                    return 27;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZProbeBlocked:
+                    return 28;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZStepCompare:
+                    return 29;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZWorkCompare:
+                    return 30;
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZStepSaved:
+                    return 31;
                 default:
                     return 0;
             }
@@ -1602,7 +1914,18 @@ namespace Burt.RenderPipeline
 
         public static string ResolveScreenSpaceReflectionDebugModeLabel()
         {
-            return ResolveScreenSpaceReflectionShaderDebugMode() != 0 ? BurtShadingDebugSettings.Mode.ToString() : "Disabled";
+            if (ResolveScreenSpaceReflectionShaderDebugMode() == 0)
+            {
+                return "Disabled";
+            }
+
+            var mode = BurtShadingDebugSettings.Mode;
+            if (IsScreenSpaceReflectionHiZDiagnosticMode(mode) && !EnableScreenSpaceReflectionHiZDiagnostics)
+            {
+                return mode + "(Stubbed)";
+            }
+
+            return mode.ToString();
         }
 
         private static BurtScreenSpaceReflectionVolumeComponent GetScreenSpaceReflectionVolumeComponent()

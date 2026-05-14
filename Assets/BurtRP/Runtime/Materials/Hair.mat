@@ -49,14 +49,15 @@ Material:
     - _DoubleSidedEnable: 1
     - _DoubleSidedNormalMode: 2
     - _HairRoughnessOffset: 0.05
-    - _HairScatter: 0.6
+    - _HairScatter: 0.114
     - _HairScatterBoost: 0
+    - _HairShiftScale: 1
     - _HairSpecularScale: 0.85
     - _HairTangentFlip: 0
     - _NormalScale: 0
     - _OcclusionStrength: 1
     - _Reflectance: 0.5
-    - _Smoothness: 0.62
+    - _Smoothness: 0.883
     m_Colors:
     - _BaseColor: {r: 0.85660374, g: 0.85660374, b: 0.85660374, a: 1}
     - _DoubleSidedNormalModeConstants: {r: 1, g: 1, b: -1, a: 0}

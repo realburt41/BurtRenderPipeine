@@ -53,6 +53,16 @@ static const float BURT_SHADING_DEBUG_MODE_HAIR_PRIMARY_LOBE = 210.0f; // 对应
 static const float BURT_SHADING_DEBUG_MODE_HAIR_SECONDARY_LOBE = 211.0f; // 对应 C# BurtShadingDebugMode.HairSecondaryLobe，用来显示 Hair secondary lobe。
 static const float BURT_SHADING_DEBUG_MODE_HAIR_TRANSMISSION_LOBE = 212.0f; // 对应 C# BurtShadingDebugMode.HairTransmissionLobe，用来显示 Hair backlit/transmission lobe。
 static const float BURT_SHADING_DEBUG_MODE_HAIR_SCATTER = 213.0f; // 对应 C# BurtShadingDebugMode.HairScatter，用来显示 Hair lighting scatter。
+static const float BURT_SHADING_DEBUG_MODE_SHADOW_CASCADE_INDEX = 214.0f; // 对应 C# BurtShadingDebugMode.ShadowCascadeIndex，用颜色显示 CSM cascade。
+static const float BURT_SHADING_DEBUG_MODE_SHADOW_CASCADE_BLEND = 215.0f; // 对应 C# BurtShadingDebugMode.ShadowCascadeBlend，用来显示 cascade 边界混合。
+static const float BURT_SHADING_DEBUG_MODE_SHADOW_DISTANCE_FADE = 216.0f; // 对应 C# BurtShadingDebugMode.ShadowDistanceFade，用来显示远距离淡出。
+static const float BURT_SHADING_DEBUG_MODE_SHADOW_PCSS_RADIUS = 217.0f; // 对应 C# BurtShadingDebugMode.ShadowPCSSRadius，用来显示 PCSS 半影半径。
+static const float BURT_SHADING_DEBUG_MODE_SHADOW_RECEIVER_DEPTH_DELTA = 218.0f; // 对应 C# BurtShadingDebugMode.ShadowReceiverDepthDelta，用来显示 receiver/shadow depth 差。
+static const float BURT_SHADING_DEBUG_MODE_SHADOW_PCSS_BLOCKER_FRACTION = 225.0f; // 对应 C# BurtShadingDebugMode.ShadowPCSSBlockerFraction，用来显示 blocker 搜索命中比例。
+static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_LIGHTING = 219.0f; // 对应 C# BurtShadingDebugMode.AdditionalLighting，只显示追加光直接光。
+static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_DIFFUSE = 220.0f; // 对应 C# BurtShadingDebugMode.AdditionalDiffuse，只显示追加光漫反射。
+static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SPECULAR = 221.0f; // 对应 C# BurtShadingDebugMode.AdditionalSpecular，只显示追加光高光。
+static const float BURT_SHADING_DEBUG_MODE_HAIR_ADDITIONAL_LIGHTING = 222.0f; // 对应 C# BurtShadingDebugMode.HairAdditionalLighting，只显示 Hair 追加光。
 
 // 保存片元已经算好的调试数据，避免 Debug View 重新计算一套和正常渲染不一致的光照。
 struct BurtShadingDebugData
@@ -75,8 +85,32 @@ struct BurtShadingDebugData
     // 保存间接镜面贡献，主要来自 Unity Reflection Probe / Sky Reflection。
     float3 indirectSpecularColor;
 
+    // 保存追加光直接漫反射，不包含主光、间接光和自发光。
+    float3 additionalDiffuseColor;
+
+    // 保存追加光直接镜面高光，不包含主光、间接光和自发光。
+    float3 additionalSpecularColor;
+
     // 保存主光阴影衰减，1 表示不被阴影遮挡，0 表示完全落在阴影中。
     float shadowAttenuation;
+
+    // 保存当前像素命中的 CSM cascade 调试颜色。
+    float3 shadowCascadeColor;
+
+    // 保存当前像素在 cascade 边界处混合到下一级 cascade 的权重。
+    float shadowCascadeBlend;
+
+    // 保存最后一级 cascade 淡出到无阴影的权重。
+    float shadowDistanceFade;
+
+    // 保存当前像素估算出的 PCSS 半影半径，已归一化到 0 到 1。
+    float shadowPCSSRadius;
+
+    // 保存 receiver depth 和 shadow map stored depth 的可视化差值。
+    float shadowReceiverDepthDelta;
+
+    // 保存 PCSS blocker search 命中的 blocker 样本占比。
+    float shadowPCSSBlockerFraction;
 
     // 保存参与间接光遮蔽的 AO 输入，Forward 来自 surfaceData，Deferred 来自 GBuffer 解码。
     float ambientOcclusion;
@@ -193,6 +227,103 @@ float3 BurtEncodeNormalWSForDebug(float3 normalWS) // 把世界空间法线编�
 {
     float3 safeNormalWS = BurtSafeNormalize(normalWS); // 先安全归一化，避免插值或贴图采样造成长度偏差。
     return safeNormalWS * 0.5f + 0.5f; // 把 [-1, 1] 的法线范围映射到 [0, 1] 的颜色范围。
+}
+
+BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为不走完整 PBR 路径的 shader 生成一份可安全覆盖的调试数据默认值。
+{
+    BurtShadingDebugData data;
+    float3 safeNormalWS = BurtSafeNormalize(normalWS);
+
+    data.normalWS = safeNormalWS;
+    data.detailLightingColor = float3(0.0f, 0.0f, 0.0f);
+    data.directDiffuseColor = float3(0.0f, 0.0f, 0.0f);
+    data.directSpecularColor = float3(0.0f, 0.0f, 0.0f);
+    data.indirectDiffuseColor = float3(0.0f, 0.0f, 0.0f);
+    data.indirectSpecularColor = float3(0.0f, 0.0f, 0.0f);
+    data.additionalDiffuseColor = float3(0.0f, 0.0f, 0.0f);
+    data.additionalSpecularColor = float3(0.0f, 0.0f, 0.0f);
+    data.shadowAttenuation = 1.0f;
+    data.shadowCascadeColor = float3(0.0f, 0.0f, 0.0f);
+    data.shadowCascadeBlend = 0.0f;
+    data.shadowDistanceFade = 0.0f;
+    data.shadowPCSSRadius = 0.0f;
+    data.shadowReceiverDepthDelta = 0.0f;
+    data.shadowPCSSBlockerFraction = 0.0f;
+    data.ambientOcclusion = 1.0f;
+    data.emissionColor = float3(0.0f, 0.0f, 0.0f);
+    data.finalLightingColor = float3(0.0f, 0.0f, 0.0f);
+    data.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
+    data.perceptualRoughness = 0.5f;
+    data.specularAARoughness = 0.5f;
+    data.specularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
+    data.indirectSpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
+    data.energyPreservation = 1.0f;
+    data.specularOcclusion = 1.0f;
+    data.diffuseColor = float3(0.0f, 0.0f, 0.0f);
+    data.directBRDFD = 0.0f;
+    data.directBRDFVisibility = 0.0f;
+    data.directBRDFFresnel = float3(0.0f, 0.0f, 0.0f);
+    data.directDiffuseLobe = 0.0f;
+    data.directDiffuseBRDF = float3(0.0f, 0.0f, 0.0f);
+    data.directSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
+    data.specularAANormalVariance = 0.0f;
+    data.specularAARoughnessDelta = 0.0f;
+    data.indirectSpecularDFG = float2(0.0f, 0.0f);
+    data.indirectSpecularEnvBRDF = float3(0.0f, 0.0f, 0.0f);
+    data.hairPrimaryLobe = 0.0f;
+    data.hairSecondaryLobe = 0.0f;
+    data.hairTransmissionLobe = 0.0f;
+    data.hairScatter = 0.0f;
+    data.gbufferBaseColor = float3(0.0f, 0.0f, 0.0f);
+    data.gbufferNormalWS = safeNormalWS;
+    data.gbufferMetallic = 0.0f;
+    data.gbufferSmoothness = 0.5f;
+    data.gbufferOcclusion = 1.0f;
+    data.gbufferReflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
+    data.gbufferRoughness = 0.5f;
+    data.gbufferDiffuseColor = float3(0.0f, 0.0f, 0.0f);
+    return data;
+}
+
+void BurtFillMainLightShadowShadingDebugData(
+    float3 positionWS,
+    float3 normalWS,
+    out float3 shadowCascadeColor,
+    out float shadowCascadeBlend,
+    out float shadowDistanceFade,
+    out float shadowPCSSRadius,
+    out float shadowReceiverDepthDelta,
+    out float shadowPCSSBlockerFraction)
+{
+    shadowCascadeColor = float3(0.0f, 0.0f, 0.0f);
+    shadowCascadeBlend = 0.0f;
+    shadowDistanceFade = 0.0f;
+    shadowPCSSRadius = 0.0f;
+    shadowReceiverDepthDelta = 0.0f;
+    shadowPCSSBlockerFraction = 0.0f;
+
+    if (!BurtIsShadingDebugEnabled())
+    {
+        return;
+    }
+
+    bool needsShadowDebug = BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_CASCADE_INDEX)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_CASCADE_BLEND)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_DISTANCE_FADE)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_PCSS_RADIUS)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_RECEIVER_DEPTH_DELTA)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_PCSS_BLOCKER_FRACTION);
+    if (!needsShadowDebug)
+    {
+        return;
+    }
+
+    shadowCascadeColor = BurtGetMainLightShadowCascadeDebugColor(positionWS);
+    shadowCascadeBlend = BurtGetMainLightShadowCascadeBlendDebug(positionWS);
+    shadowDistanceFade = BurtGetMainLightShadowDistanceFadeDebug(positionWS);
+    shadowPCSSRadius = BurtGetMainLightShadowPCSSRadiusDebug(positionWS);
+    shadowReceiverDepthDelta = BurtGetMainLightShadowReceiverDepthDeltaDebug(positionWS, normalWS);
+    shadowPCSSBlockerFraction = BurtGetMainLightShadowPCSSBlockerFractionDebug(positionWS);
 }
 
 bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadingDebugData data, out float3 debugColor) // 尝试根据当前模式生成材质调试颜色。
@@ -446,6 +577,31 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_LIGHTING)) // AdditionalLighting 模式只显示追加光直接光。
+    {
+        debugColor = max(data.additionalDiffuseColor + data.additionalSpecularColor, float3(0.0f, 0.0f, 0.0f));
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_DIFFUSE)) // AdditionalDiffuse 模式只显示追加光漫反射。
+    {
+        debugColor = max(data.additionalDiffuseColor, float3(0.0f, 0.0f, 0.0f));
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SPECULAR)) // AdditionalSpecular 模式只显示追加光高光。
+    {
+        debugColor = max(data.additionalSpecularColor, float3(0.0f, 0.0f, 0.0f));
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_HAIR_ADDITIONAL_LIGHTING)) // HairAdditionalLighting 模式只显示 Hair 追加光。
+    {
+        float3 hairAdditionalLighting = max(data.additionalDiffuseColor + data.additionalSpecularColor, float3(0.0f, 0.0f, 0.0f));
+        debugColor = BurtIsHairShadingModel(surfaceData.shadingModelID) ? hairAdditionalLighting : float3(0.0f, 0.0f, 0.0f);
+        return true;
+    }
+
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_INDIRECT_DIFFUSE)) // IndirectDiffuse 模式只显示间接漫反射。
     {
         debugColor = max(data.indirectDiffuseColor, float3(0.0f, 0.0f, 0.0f)); // 显示 Unity SH / Light Probe 漫反射，方便检查间接漫反射是否存在。
@@ -462,6 +618,42 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     {
         debugColor = float3(data.shadowAttenuation, data.shadowAttenuation, data.shadowAttenuation); // 白色表示无阴影，黑色表示完全被遮挡。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_CASCADE_INDEX)) // ShadowCascadeIndex 模式用颜色显示当前 CSM cascade。
+    {
+        debugColor = saturate(data.shadowCascadeColor); // 不同 cascade 使用固定调试颜色，黑色表示没有命中任何 cascade。
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_CASCADE_BLEND)) // ShadowCascadeBlend 模式显示 cascade 边界混合权重。
+    {
+        debugColor = float3(data.shadowCascadeBlend, data.shadowCascadeBlend, data.shadowCascadeBlend); // 白色表示正在强混合到下一级 cascade。
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_DISTANCE_FADE)) // ShadowDistanceFade 模式显示远距离阴影淡出。
+    {
+        debugColor = float3(data.shadowDistanceFade, data.shadowDistanceFade, data.shadowDistanceFade); // 白色表示已经淡出到无阴影。
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_PCSS_RADIUS)) // ShadowPCSSRadius 模式显示当前 PCSS 半影半径。
+    {
+        debugColor = float3(data.shadowPCSSRadius, data.shadowPCSSRadius, data.shadowPCSSRadius); // 白色表示接近当前 PCSS 最大过滤半径。
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_RECEIVER_DEPTH_DELTA)) // ShadowReceiverDepthDelta 模式显示 receiver 与 shadow map 深度差。
+    {
+        debugColor = float3(data.shadowReceiverDepthDelta, data.shadowReceiverDepthDelta, data.shadowReceiverDepthDelta); // 0.5 灰表示基本对齐，越亮表示 acne 压力越大，越暗表示 bias 过强。
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_PCSS_BLOCKER_FRACTION)) // ShadowPCSSBlockerFraction 模式显示 blocker 搜索命中比例。
+    {
+        debugColor = float3(data.shadowPCSSBlockerFraction, data.shadowPCSSBlockerFraction, data.shadowPCSSBlockerFraction); // 越白表示 blocker search 半径里越多采样落在遮挡体上。
+        return true;
     }
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_AMBIENT_OCCLUSION)) // AmbientOcclusion 模式显示参与间接光遮蔽的 AO。

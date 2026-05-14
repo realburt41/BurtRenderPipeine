@@ -32,7 +32,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtBuildHiZDepthPass : BurtRenderPass
     {
-        private const string HiZDepthShaderName = "Hidden/BurtRP/HiZDepthPyramid";
+        private const string HiZDepthShaderName = BurtHiZDepthPassUtility.HiZDepthShaderName;
         private static readonly int HiZSourceTextureId = Shader.PropertyToID("_BurtHiZSourceTexture");
         private static readonly int HiZSourceTexelSizeId = Shader.PropertyToID("_BurtHiZSourceTexelSize");
         private static readonly int HiZMipCountId = Shader.PropertyToID("_BurtHiZMipCount");
@@ -275,10 +275,27 @@ namespace Burt.RenderPipeline
 
     internal static class BurtHiZDepthPassUtility
     {
+        public const string HiZDepthShaderName = "Hidden/BurtRP/HiZDepthPyramid";
+        private static int shaderAvailabilityFrame = -1;
+        private static bool shaderAvailable;
+
         public static Camera ResolveCamera(BurtRenderGraphContext context)
         {
             var request = context != null ? context.Request : null;
             return request != null ? request.Camera : null;
+        }
+
+        public static bool IsHiZDepthShaderAvailable()
+        {
+            var frame = Time.frameCount;
+            if (shaderAvailabilityFrame == frame)
+            {
+                return shaderAvailable;
+            }
+
+            shaderAvailabilityFrame = frame;
+            shaderAvailable = Shader.Find(HiZDepthShaderName) != null;
+            return shaderAvailable;
         }
 
         public static bool ShouldUseHiZDepth(BurtRenderRequest request, BurtRenderPipelineAsset asset)
@@ -298,7 +315,9 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            return BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflections(request, asset) || BurtDebugHiZDepthPass.ShouldUseHiZDebugView(asset);
+            return BurtDebugHiZDepthPass.ShouldUseHiZDebugView(asset) ||
+                BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflectionHiZTrace(request, asset) ||
+                BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflectionHiZDiagnostics();
         }
     }
 }

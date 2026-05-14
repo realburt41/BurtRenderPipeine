@@ -1,4 +1,5 @@
-﻿using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 RenderTargetIdentifier。
+﻿using UnityEngine; // Provides GraphicsBuffer for RenderGraph buffer resources.
+using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 RenderTargetIdentifier。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源句柄和其他 BurtRP 代码处在同一个模块里。
 {
@@ -33,6 +34,66 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源句柄
         public static BurtRenderTargetHandle Invalid(string name) // 定义创建无效句柄的静态函数。
         {
             return new BurtRenderTargetHandle(name); // 返回一个带名称的无效句柄。
+        }
+    }
+
+    public readonly struct BurtRenderBufferHandle // Logical buffer handle for RenderGraph validation and GPU buffer lookup.
+    {
+        public string Name { get; } // Buffer resource name used by builder declarations and debug output.
+
+        public GraphicsBuffer Buffer { get; } // Actual GPU buffer owned or imported by the RenderGraph registry.
+
+        public bool IsValid { get; } // Tracks whether the logical buffer exists in the current graph registry.
+
+        public BurtRenderBufferHandle(string name)
+            : this(name, null)
+        {
+        }
+
+        public BurtRenderBufferHandle(string name, GraphicsBuffer buffer)
+        {
+            Name = name;
+            Buffer = buffer;
+            IsValid = true;
+        }
+
+        private BurtRenderBufferHandle(string name, bool isValid)
+        {
+            Name = name;
+            Buffer = null;
+            IsValid = isValid;
+        }
+
+        public bool HasBuffer => Buffer != null; // True after AllocateBuffer or when imported from outside the graph.
+
+        public static BurtRenderBufferHandle Invalid(string name)
+        {
+            return new BurtRenderBufferHandle(name, false);
+        }
+    }
+
+    public readonly struct BurtRenderBufferDescriptor // Describes a GPU buffer allocation owned by the RenderGraph.
+    {
+        public int Count { get; } // Element count.
+
+        public int Stride { get; } // Element stride in bytes.
+
+        public GraphicsBuffer.Target Target { get; } // Unity buffer target, usually Structured for tiled/cluster data.
+
+        public string DebugName { get; } // Human-readable name assigned to GraphicsBuffer.name when allocated.
+
+        public bool IsValid => Count > 0 && Stride > 0; // Minimal allocation guard.
+
+        public BurtRenderBufferDescriptor(
+            int count,
+            int stride,
+            GraphicsBuffer.Target target = GraphicsBuffer.Target.Structured,
+            string debugName = null)
+        {
+            Count = count;
+            Stride = stride;
+            Target = target;
+            DebugName = debugName;
         }
     }
 }

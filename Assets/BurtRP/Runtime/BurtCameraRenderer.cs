@@ -45,7 +45,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             BurtPostProcessUtility.UpdateVolumeStack(request, asset); // 每个 request 渲染前刷新 VolumeStack，让后处理 Pass 能读取当前 Global Volume 参数。
 
-            var temporalAA = BurtTemporalAAUtility.PrepareRequest(request, asset);
+            var temporalAA = BurtTemporalAAUtility.PrepareRequest(request, asset, safeRenderOptions);
             request.SetTemporalAA(temporalAA);
 
             try
@@ -97,6 +97,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             BurtTemporalAAUtility.CommitRequest(request);
             context.Submit(); // 把当前 request 累积的所有渲染命令提交给 Unity 执行。
+            renderGraph.FlushDeferredResourceReleases(); // Release graph-owned GraphicsBuffers only after queued draw commands have been submitted.
         }
 
         private static bool ShouldCaptureRenderGraphDebug(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 判断当前 request 是否需要生成 RenderGraph Debug 文本。

@@ -28,15 +28,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         DiffuseColor = 13, // 解码后显示 GBuffer 重建出的 diffuseColor，方便检查 metallic 扣除后的漫反射颜色。
         ShadingModel = 14, // 解码后显示 shading model，黑色=Default Lit，洋红=Hair，方便验证材质是否进入 Hair 分支。
         HairStrandDirection = 15, // Hair 专用：显示 GBuffer1.rg 解码后的 strand direction，非 Hair 像素显示黑色。
-        HairScatter = 16 // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 scatter，非 Hair 像素显示黑色。
-    }
-
-    public enum BurtShadowDebugYFlipMode // 定义主光 shadow map 调试图的 Y 翻转模式，避免在不同窗口和平台之间继续硬猜方向。
-    {
-        MatchFinalBlit = 0, // 使用和 Depth Debug 一样的 FinalBlit 预翻转规则，作为默认调试方向。
-        InvertFinalBlit = 1, // 使用 FinalBlit 规则的反向结果，用来快速验证 shadow map 源纹理是否额外倒置。
-        ForceNoFlip = 2, // 强制不翻转 shadow map 调试采样，方便排查具体平台的纹理原点。
-        ForceFlip = 3 // 强制翻转 shadow map 调试采样，方便排查具体平台的纹理原点。
+        HairScatter = 16, // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 scatter，非 Hair 像素显示黑色。
+        HairShift = 17 // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 longitudinal shift scale，非 Hair 像素显示黑色。
     }
 
     [CreateAssetMenu(menuName = "Rendering/Burt Render Pipeline Asset", fileName = "BurtRenderPipelineAsset")] // 让 Unity 可以通过 Create 菜单创建 BurtRenderPipelineAsset。
@@ -82,27 +75,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [TitleGroup("Post Processing - 后处理")] // 和后处理框架开关放在同一组，表示这是管线级 Volume 查询配置。
         [SerializeField] private LayerMask postProcessVolumeLayerMask = ~0; // 定义后处理 Global Volume 查询层，默认所有层都能参与 BurtRP 后处理。
 
-        [Header("Main Light Shadows")] // 把主光阴影配置集中显示在 Inspector，便于按项目需求统一调试。
-        [SerializeField] private bool enableMainLightShadows = true; // 定义 BurtRP 是否允许渲染主方向光阴影；关闭后即使 Light 开了 Shadow 也不会申请 shadow map。
-
-        [SerializeField, Min(16f)] private int mainLightShadowResolution = BurtShadowData.DefaultMainLightShadowResolution; // 定义主光阴影默认分辨率；Light 没有自定义分辨率时使用这个 SRP 级默认值。
-
-        [SerializeField, Min(0f)] private float mainLightShadowDistance = BurtShadowData.DefaultMainLightShadowDistance; // 定义主光阴影最大剔除距离，CreateCameraRequest 会把它写入 cullingParameters.shadowDistance。
-
-        [SerializeField, Min(0f)] private float mainLightShadowDepthBias = BurtShadowData.DefaultMainLightShadowDepthBias; // 定义写入 shadow map 时使用的常量深度偏移，用来减少表面自阴影 acne。
-
-        [SerializeField, Min(0f)] private float mainLightShadowNormalBias = BurtShadowData.DefaultMainLightShadowNormalBias; // 定义写入 shadow map 时使用的顶点 normal bias，掠射角表面会沿法线获得更强偏移保护。
-
-        [SerializeField, Min(0f)] private float mainLightShadowSampleBias = BurtShadowData.DefaultMainLightShadowSampleBias; // 定义接收端采样 shadow map 前减去的深度偏移，用来兜底处理轻微自遮挡。
-
-        [SerializeField] private bool enableMainLightShadowDebugView = false; // 定义是否把主光 shadow map 直接画到 CameraColor，方便确认阴影图是否真的写入内容。
-
-        [SerializeField, Min(0.0001f)] private float mainLightShadowDebugExposure = 1f; // 定义 shadow map 调试视图亮度倍率，贴图过暗或过亮时可以直接在资产上调整。
-
-        [SerializeField] private BurtShadowDebugYFlipMode mainLightShadowDebugYFlipMode = BurtShadowDebugYFlipMode.MatchFinalBlit; // 定义主光 shadow map 调试图的 Y 翻转模式，默认先和 Depth Debug 使用同一套最终输出规则。
-
-        [SerializeField] private bool enableMainLightShadowDebugLog = false; // 定义是否输出主光阴影诊断日志；默认关闭，避免每帧每相机刷 Console。
-
         [SerializeField] private bool enableUnsupportedShaderDebug = true; // 定义是否绘制不支持的 Shader 为错误材质，方便迁移材质时立刻发现漏改的 shader。
 
         [SerializeField] private bool enableRenderGraphDebug = false; // 定义 RenderGraph 调试捕获开关，默认关闭，避免每帧生成长文本。
@@ -138,26 +110,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public BurtPostProcessSettings PostProcessSettings => EnsurePostProcessSettings(); // 暴露后处理设置给 RenderGraph 和 ForwardGraph 使用，并确保旧资产缺失字段时也有安全默认值。
 
         public LayerMask PostProcessVolumeLayerMask => postProcessVolumeLayerMask; // 暴露后处理 Volume 查询层给 VolumeManager.Update 使用。
-
-        public bool EnableMainLightShadows => enableMainLightShadows; // 暴露主光阴影总开关，让阴影数据和 Pass 组装都能统一判断是否启用。
-
-        public int MainLightShadowResolution => Mathf.Clamp(mainLightShadowResolution, 16, 8192); // 暴露经过保护的阴影分辨率，避免误填 0 或过大的值导致 RT 创建风险。
-
-        public float MainLightShadowDistance => Mathf.Max(0f, mainLightShadowDistance); // 暴露非负的阴影剔除距离，供相机 culling 阶段决定哪些投影物进入 shadow caster 集合。
-
-        public float MainLightShadowDepthBias => Mathf.Max(0f, mainLightShadowDepthBias); // 暴露非负的常量深度偏移，供 ShadowCaster Pass 设置 GPU 深度偏移。
-
-        public float MainLightShadowNormalBias => Mathf.Max(0f, mainLightShadowNormalBias); // 暴露非负的顶点 normal bias 倍率，供 ShadowCaster shader 抑制倾斜表面的 acne。
-
-        public float MainLightShadowSampleBias => Mathf.Max(0f, mainLightShadowSampleBias); // 暴露非负的接收端采样偏移，供 Lit shader 在比较 shadow map 前使用。
-
-        public bool EnableMainLightShadowDebugView => enableMainLightShadowDebugView; // 暴露 shadow map 可视化开关给 Graph Assembler 使用。
-
-        public float MainLightShadowDebugExposure => Mathf.Max(0.0001f, mainLightShadowDebugExposure); // 暴露经过保护的 shadow map 调试亮度，避免 shader 收到无效倍率。
-
-        public BurtShadowDebugYFlipMode MainLightShadowDebugYFlipMode => mainLightShadowDebugYFlipMode; // 暴露 shadow map 调试图的翻转模式，让 Debug Pass 可以按 Inspector 配置解析方向。
-
-        public bool EnableMainLightShadowDebugLog => enableMainLightShadowDebugLog; // 暴露主光阴影诊断日志开关，所有日志输出都必须先检查它。
 
         public bool EnableUnsupportedShaderDebug => enableUnsupportedShaderDebug; // 暴露不支持 Shader 调试开关给 Graph Assembler 使用。
 

@@ -219,6 +219,10 @@ Shader "BurtRP/UnlitColor"
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
 
             // 定义材质常量缓冲区，SRP Batcher 要求每材质属性放在 UnityPerMaterial 里。
             CBUFFER_START(UnityPerMaterial)
@@ -234,6 +238,7 @@ Shader "BurtRP/UnlitColor"
             {
                 // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
                 float4 positionOS : POSITION;
+                float3 normalOS : NORMAL;
             };
 
             // 定义顶点输出结构，也就是顶点 shader 传给片元 shader 的数据。
@@ -241,6 +246,8 @@ Shader "BurtRP/UnlitColor"
             {
                 // 输出裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
                 float4 positionCS : SV_POSITION;
+                float3 positionWS : TEXCOORD0;
+                float3 normalWS : TEXCOORD1;
             };
 
             // 定义顶点 shader 函数，输入 Mesh 顶点数据，输出裁剪空间位置。
@@ -251,6 +258,8 @@ Shader "BurtRP/UnlitColor"
 
                 // 把模型空间顶点位置转换到裁剪空间，GPU 后续会用它进行屏幕投影。
                 output.positionCS = UnityObjectToClipPos(input.positionOS);
+                output.positionWS = mul(unity_ObjectToWorld, input.positionOS).xyz;
+                output.normalWS = UnityObjectToWorldNormal(input.normalOS);
 
                 // 返回顶点 shader 输出结果。
                 return output;
@@ -259,6 +268,27 @@ Shader "BurtRP/UnlitColor"
             // 定义片元 shader 函数，输入插值后的顶点输出，返回屏幕像素颜色。
             float4 Frag(Varyings input) : SV_Target
             {
+                BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
+                BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(input.normalWS);
+                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
+                debugData.finalLightingColor = _BaseColor.rgb;
+
+                BurtFillMainLightShadowShadingDebugData(
+                    input.positionWS,
+                    debugData.normalWS,
+                    debugData.shadowCascadeColor,
+                    debugData.shadowCascadeBlend,
+                    debugData.shadowDistanceFade,
+                    debugData.shadowPCSSRadius,
+                    debugData.shadowReceiverDepthDelta,
+                    debugData.shadowPCSSBlockerFraction);
+
+                float3 debugColor;
+                if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
+                {
+                    return float4(debugColor, surfaceData.alpha);
+                }
+
                 // 返回材质颜色，不做光照计算，所以这是一个最简单的 Unlit shader。
                 return _BaseColor;
             }
@@ -293,6 +323,10 @@ Shader "BurtRP/UnlitColor"
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
 
             // 定义材质常量缓冲区，SRP Batcher 要求每材质属性放在 UnityPerMaterial 里。
             CBUFFER_START(UnityPerMaterial)
@@ -308,6 +342,7 @@ Shader "BurtRP/UnlitColor"
             {
                 // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
                 float4 positionOS : POSITION;
+                float3 normalOS : NORMAL;
             };
 
             // 定义 Deferred ForwardOnly 顶点输出结构，也就是顶点 shader 传给片元 shader 的数据。
@@ -315,6 +350,8 @@ Shader "BurtRP/UnlitColor"
             {
                 // 输出裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
                 float4 positionCS : SV_POSITION;
+                float3 positionWS : TEXCOORD0;
+                float3 normalWS : TEXCOORD1;
             };
 
             // 定义 Deferred ForwardOnly 顶点 shader 函数，输入 Mesh 顶点数据，输出裁剪空间位置。
@@ -325,6 +362,8 @@ Shader "BurtRP/UnlitColor"
 
                 // 把模型空间顶点位置转换到裁剪空间，GPU 后续会用它进行屏幕投影。
                 output.positionCS = UnityObjectToClipPos(input.positionOS);
+                output.positionWS = mul(unity_ObjectToWorld, input.positionOS).xyz;
+                output.normalWS = UnityObjectToWorldNormal(input.normalOS);
 
                 // 返回顶点 shader 输出结果。
                 return output;
@@ -333,6 +372,27 @@ Shader "BurtRP/UnlitColor"
             // 定义 Deferred ForwardOnly 片元 shader 函数，输入插值后的顶点输出，返回屏幕像素颜色。
             float4 FragForwardOnly(ForwardOnlyVaryings input) : SV_Target
             {
+                BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
+                BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(input.normalWS);
+                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
+                debugData.finalLightingColor = _BaseColor.rgb;
+
+                BurtFillMainLightShadowShadingDebugData(
+                    input.positionWS,
+                    debugData.normalWS,
+                    debugData.shadowCascadeColor,
+                    debugData.shadowCascadeBlend,
+                    debugData.shadowDistanceFade,
+                    debugData.shadowPCSSRadius,
+                    debugData.shadowReceiverDepthDelta,
+                    debugData.shadowPCSSBlockerFraction);
+
+                float3 debugColor;
+                if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
+                {
+                    return float4(debugColor, surfaceData.alpha);
+                }
+
                 // 返回材质颜色，不做光照计算，所以它适合作为不能写 GBuffer 的 Unlit 兜底路径。
                 return _BaseColor;
             }

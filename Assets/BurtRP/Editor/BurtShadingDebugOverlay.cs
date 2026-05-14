@@ -83,6 +83,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "GBuffer Hair Strand"; // 显示 Hair 复用 GBuffer1.rg 存储的 strand direction。
                 case BurtShadingDebugMode.GBufferHairScatter:
                     return "GBuffer Hair Scatter"; // 显示 Hair 复用 GBuffer1.b 存储的 scatter。
+                case BurtShadingDebugMode.GBufferHairShift:
+                    return "GBuffer Hair Shift"; // 显示 Hair 复用 GBuffer1.b 存储的 longitudinal shift scale。
                 case BurtShadingDebugMode.DetailLighting:
                     return "Detail Lighting"; // 对齐 XRender DEBUGID_LIGHTING_DETAIL_LIGHTING。
                 case BurtShadingDebugMode.IndirectLighting:
@@ -91,12 +93,30 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Direct Diffuse"; // 显示直接漫反射最终贡献。
                 case BurtShadingDebugMode.DirectSpecular:
                     return "Direct Specular"; // 显示直接高光最终贡献。
+                case BurtShadingDebugMode.AdditionalLighting:
+                    return "Additional Lighting"; // 只显示追加光直接光总和。
+                case BurtShadingDebugMode.AdditionalDiffuse:
+                    return "Additional Diffuse"; // 只显示追加光漫反射。
+                case BurtShadingDebugMode.AdditionalSpecular:
+                    return "Additional Specular"; // 只显示追加光高光。
                 case BurtShadingDebugMode.IndirectDiffuse:
                     return "Indirect Diffuse"; // 显示 SH / Light Probe 漫反射。
                 case BurtShadingDebugMode.IndirectSpecular:
                     return "Indirect Specular"; // 显示 Reflection Probe / Sky 高光。
                 case BurtShadingDebugMode.ShadowAttenuation:
                     return "Shadow Attenuation"; // 显示主光阴影衰减，白色表示不在阴影中。
+                case BurtShadingDebugMode.ShadowCascadeIndex:
+                    return "Shadow Cascade Index"; // 用颜色区分当前像素命中的 CSM cascade。
+                case BurtShadingDebugMode.ShadowCascadeBlend:
+                    return "Shadow Cascade Blend"; // 显示 cascade 边界混合权重。
+                case BurtShadingDebugMode.ShadowDistanceFade:
+                    return "Shadow Distance Fade"; // 显示最后一级 cascade 的远距离阴影淡出。
+                case BurtShadingDebugMode.ShadowPCSSRadius:
+                    return "Shadow PCSS Radius (Hard Only)"; // 显示 PCSS 估算出的半影半径，仅在 Hard Shadows + PCSS 下有意义。
+                case BurtShadingDebugMode.ShadowReceiverDepthDelta:
+                    return "Shadow Receiver Depth Delta"; // 显示 receiver depth 与 shadow map 深度差。
+                case BurtShadingDebugMode.ShadowPCSSBlockerFraction:
+                    return "Shadow PCSS Blockers (Hard Only)"; // 显示 blocker search 里命中的 blocker 占比，仅在 Hard Shadows + PCSS 下有意义。
                 case BurtShadingDebugMode.AmbientOcclusion:
                     return "Ambient Occlusion (Lighting)"; // 显示真正参与间接光遮蔽的 AO。
                 case BurtShadingDebugMode.Emission:
@@ -111,10 +131,22 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Hair Transmission Lobe"; // 显示 Hair 近似背光透射 lobe。
                 case BurtShadingDebugMode.HairScatter:
                     return "Hair Scatter Lighting"; // 显示参与 Hair lighting 的 scatter。
+                case BurtShadingDebugMode.HairAdditionalLighting:
+                    return "Hair Additional Lighting"; // 只显示 Hair 像素的追加光直接光。
+                case BurtShadingDebugMode.TileLightCount:
+                    return "Tile Light Count";
+                case BurtShadingDebugMode.TileLightOccupancy:
+                    return "Tile Light Occupancy";
                 case BurtShadingDebugMode.CameraDepth:
                     return "Camera Depth"; // 已有全屏深度调试。
                 case BurtShadingDebugMode.MainLightShadow:
                     return "Main Light Shadow"; // 已有主光阴影图调试。
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw:
+                    return "SSAO Raw";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal:
+                    return "SSAO Final";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay:
+                    return "SSAO Overlay";
                 case BurtShadingDebugMode.ScreenSpaceReflectionRawHitMask:
                     return "SSR Raw Hit Mask";
                 case BurtShadingDebugMode.ScreenSpaceReflectionHitMask:
@@ -153,12 +185,36 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSR Resolve Quality";
                 case BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport:
                     return "SSR Surface Support";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipCandidate:
+                    return "SSR HiZ Skip Candidate";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZMipLevel:
+                    return "SSR HiZ Mip Level";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZDivergence:
+                    return "SSR HiZ Divergence";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZMissedHits:
+                    return "SSR HiZ Missed Hits";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZRawHitMiss:
+                    return "SSR HiZ Raw Hit Miss";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZResolvedHitMiss:
+                    return "SSR HiZ Resolved Hit Miss";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZVisibilityMiss:
+                    return "SSR HiZ Visibility Miss";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipUsed:
+                    return "SSR HiZ Skip Used";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZProbeBlocked:
+                    return "SSR HiZ Probe Blocked";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZStepCompare:
+                    return "SSR HiZ Step Compare";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZWorkCompare:
+                    return "SSR HiZ Work Compare";
+                case BurtShadingDebugMode.ScreenSpaceReflectionHiZStepSaved:
+                    return "SSR HiZ Step Saved";
                 case BurtShadingDebugMode.TemporalAAHistory:
                     return "TAA History Color"; // 显示 TAA 重投影采样到的 history。
                 case BurtShadingDebugMode.TemporalAAFeedback:
                     return "TAA Feedback"; // 显示最终 history 混合权重。
                 case BurtShadingDebugMode.TemporalAARejection:
-                    return "TAA Rejection"; // 显示 luma / clip / depth 拒绝分量。
+                    return "TAA Rejection Weights"; // 显示 luma / clip / depth 通过权重，亮色不是异常 rejection。
                 case BurtShadingDebugMode.TemporalAAHistoryUV:
                     return "TAA History UV"; // 显示重投影后的 history UV 和屏幕内状态。
                 case BurtShadingDebugMode.TemporalAADifference:
@@ -200,13 +256,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 case BurtShadingDebugMode.TemporalAAGBufferNormal:
                     return "TAA GBuffer Normal";
                 case BurtShadingDebugMode.TemporalAAParallaxRejection:
-                    return "TAA Parallax Validity";
+                    return "TAA Continuity Diagnostic";
                 case BurtShadingDebugMode.TemporalAAAntiFlicker:
                     return "TAA Anti Flicker";
                 case BurtShadingDebugMode.TemporalAAVelocityCoverage:
                     return "TAA Velocity Coverage";
                 case BurtShadingDebugMode.TemporalAAResponsiveMask:
                     return "TAA Responsive Mask";
+                case BurtShadingDebugMode.TemporalAARejectionReasons:
+                    return "TAA Rejection Reasons";
+                case BurtShadingDebugMode.TemporalAAFeedbackWeight:
+                    return "TAA Feedback Weight";
                 default:
                     return ObjectNames.NicifyVariableName(mode.ToString()); // 兜底美化 enum 名，避免新增模式显示为空。
             }
@@ -272,7 +332,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.GBufferRoughness, // GBuffer -> PBRMaterialData 的 roughness。
             BurtShadingDebugMode.GBufferDiffuseColor, // GBuffer -> PBRMaterialData 的 DiffuseColor。
             BurtShadingDebugMode.GBufferHairStrandDirection, // Hair 专用：GBuffer1.rg 解码后的 strand direction。
-            BurtShadingDebugMode.GBufferHairScatter // Hair 专用：GBuffer1.b material channel 解码后的 scatter。
+            BurtShadingDebugMode.GBufferHairScatter, // Hair 专用：GBuffer1.b material channel 解码后的 scatter。
+            BurtShadingDebugMode.GBufferHairShift // Hair 专用：GBuffer1.b material channel 解码后的 shift scale。
         });
 
         public static readonly BurtShadingDebugGroup SpecularAA = new BurtShadingDebugGroup("Specular AA / Normal Filtering", "Spec AA", new[] // 对应 XRender Normal Filtering / Anti Aliasing 方向。
@@ -297,7 +358,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.HairPrimaryLobe, // Hair R/Primary 高光 lobe。
             BurtShadingDebugMode.HairSecondaryLobe, // Hair TT/Secondary 彩色高光 lobe。
             BurtShadingDebugMode.HairTransmissionLobe, // Hair 背光透射近似 lobe。
-            BurtShadingDebugMode.HairScatter // Hair 当前参与 lighting 的 scatter。
+            BurtShadingDebugMode.HairScatter, // Hair 当前参与 lighting 的 scatter。
+            BurtShadingDebugMode.HairAdditionalLighting // Hair 追加光直接贡献。
         });
 
         public static readonly BurtShadingDebugGroup IBL = new BurtShadingDebugGroup("IBL / Energy / Occlusion", "IBL", new[] // 归档环境光、能量守恒和 specular occlusion 相关调试。
@@ -315,19 +377,37 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.DetailLighting, // 中灰 BaseColor 下重新观察光照细节。
             BurtShadingDebugMode.DirectDiffuse, // 直接漫反射最终贡献。
             BurtShadingDebugMode.DirectSpecular, // 直接高光最终贡献。
+            BurtShadingDebugMode.AdditionalLighting, // 追加光直接贡献总和。
+            BurtShadingDebugMode.AdditionalDiffuse, // 追加光漫反射贡献。
+            BurtShadingDebugMode.AdditionalSpecular, // 追加光高光贡献。
+            BurtShadingDebugMode.TileLightCount, // Tiled debug：每个 tile 命中的追加光数量。
+            BurtShadingDebugMode.TileLightOccupancy, // Tiled debug：tile list 使用率。
             BurtShadingDebugMode.IndirectLighting, // 间接光总和。
             BurtShadingDebugMode.IndirectDiffuse, // 间接漫反射。
             BurtShadingDebugMode.IndirectSpecular, // 间接高光。
-            BurtShadingDebugMode.ShadowAttenuation, // 主光阴影衰减。
             BurtShadingDebugMode.AmbientOcclusion, // 参与 lighting 的 AO。
             BurtShadingDebugMode.Emission, // 自发光贡献。
             BurtShadingDebugMode.FinalLighting // PBR 光照加自发光后的最终材质颜色。
         });
 
+        public static readonly BurtShadingDebugGroup Shadow = new BurtShadingDebugGroup("Shadow", "Shadow", new[] // Shadow 独立分类，避免和 Lighting / Fullscreen 调试混在一起。
+        {
+            BurtShadingDebugMode.ShadowAttenuation, // 材质着色时实际使用的主光阴影衰减。
+            BurtShadingDebugMode.ShadowCascadeIndex, // CSM cascade 命中颜色。
+            BurtShadingDebugMode.ShadowCascadeBlend, // CSM cascade 边界混合权重。
+            BurtShadingDebugMode.ShadowDistanceFade, // 最后一级 cascade 到无阴影的远距离 fade。
+            BurtShadingDebugMode.ShadowPCSSRadius, // 当前像素的 PCSS 半影半径。
+            BurtShadingDebugMode.ShadowReceiverDepthDelta, // receiver / shadow map 深度差，用来调 bias。
+            BurtShadingDebugMode.ShadowPCSSBlockerFraction, // PCSS blocker search 命中的 blocker 占比。
+            BurtShadingDebugMode.MainLightShadow // 主光 shadow map 全屏 Debug。
+        });
+
         public static readonly BurtShadingDebugGroup Fullscreen = new BurtShadingDebugGroup("Fullscreen / Render Data", "Fullscreen", new[] // BurtRP 现有全屏调试入口。
         {
             BurtShadingDebugMode.CameraDepth, // CameraDepth 全屏 Debug。
-            BurtShadingDebugMode.MainLightShadow // MainLightShadow 全屏 Debug。
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay
         });
 
         public static readonly BurtShadingDebugGroup ScreenSpaceReflections = new BurtShadingDebugGroup("Screen Space Reflections", "SSR", new[] // SSR 独立分类，避免挤在通用 Fullscreen 调试里。
@@ -350,7 +430,19 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality,
             BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality,
             BurtShadingDebugMode.ScreenSpaceReflectionResolveQuality,
-            BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport
+            BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipCandidate,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZMipLevel,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZDivergence,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZMissedHits,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZRawHitMiss,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZResolvedHitMiss,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZVisibilityMiss,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipUsed,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZProbeBlocked,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZStepCompare,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZWorkCompare,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZStepSaved
         });
 
         public static readonly BurtShadingDebugGroup TemporalAA = new BurtShadingDebugGroup("Temporal AA", "TAA", new[] // TAA 独立分类，避免和通用 Fullscreen 调试混在一起。
@@ -358,6 +450,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.TemporalAAHistory,
             BurtShadingDebugMode.TemporalAAFeedback,
             BurtShadingDebugMode.TemporalAARejection,
+            BurtShadingDebugMode.TemporalAARejectionReasons,
             BurtShadingDebugMode.TemporalAAHistoryUV,
             BurtShadingDebugMode.TemporalAADifference,
             BurtShadingDebugMode.TemporalAAVelocity,
@@ -365,6 +458,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.TemporalAACurrentDepth,
             BurtShadingDebugMode.TemporalAADepthHistory,
             BurtShadingDebugMode.TemporalAADepthDelta,
+            BurtShadingDebugMode.TemporalAAParallaxRejection,
+            BurtShadingDebugMode.TemporalAAFeedbackWeight,
             BurtShadingDebugMode.TemporalAACurrentColor,
             BurtShadingDebugMode.TemporalAAResolvedColor,
             BurtShadingDebugMode.TemporalAARawVelocity,
@@ -378,7 +473,6 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.TemporalAAConfidenceGate,
             BurtShadingDebugMode.TemporalAAVelocitySource,
             BurtShadingDebugMode.TemporalAAGBufferNormal,
-            BurtShadingDebugMode.TemporalAAParallaxRejection,
             BurtShadingDebugMode.TemporalAAAntiFlicker,
             BurtShadingDebugMode.TemporalAAVelocityCoverage,
             BurtShadingDebugMode.TemporalAAResponsiveMask
@@ -398,6 +492,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 BurtShadingDebugHairDropdown.Id,
                 BurtShadingDebugIBLDropdown.Id,
                 BurtShadingDebugLightingDropdown.Id,
+                BurtShadingDebugShadowDropdown.Id,
                 BurtShadingDebugFullscreenDropdown.Id,
                 BurtShadingDebugSSRDropdown.Id,
                 BurtShadingDebugTemporalAADropdown.Id) // 每个 ID 对应一个 EditorToolbarElement。
@@ -538,6 +633,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         }
     }
 
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Shadow 分类按钮。
+    internal sealed class BurtShadingDebugShadowDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Shadow"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugShadowDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.Shadow) // 绑定 Shadow 独立分类。
+        {
+        }
+    }
+
     [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Fullscreen 分类按钮。
     internal sealed class BurtShadingDebugFullscreenDropdown : BurtShadingDebugGroupDropdown
     {
@@ -647,7 +753,6 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
             var serializedAsset = new SerializedObject(asset); // 通过 SerializedObject 访问私有 SerializeField，避免改运行时 API。
             SetBool(serializedAsset, "enableDepthDebugView", mode == BurtShadingDebugMode.CameraDepth); // CameraDepth 模式开启现有深度调试。
-            SetBool(serializedAsset, "enableMainLightShadowDebugView", mode == BurtShadingDebugMode.MainLightShadow); // MainLightShadow 模式开启现有阴影调试。
             SetEnum(serializedAsset, "gBufferDebugViewMode", (int)ResolveGBufferDebugViewMode(mode)); // GBuffer 分类同步到资产上的全屏 GBuffer Debug 模式，让 RenderGraph 能插入 Burt Debug GBuffer。
             serializedAsset.ApplyModifiedPropertiesWithoutUndo(); // Debug 切换不写 Undo 栈，避免污染用户操作历史。
             EditorUtility.SetDirty(asset); // 标记资产已更新，Inspector 和渲染流程能看到变化。
@@ -709,6 +814,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return BurtGBufferDebugViewMode.HairStrandDirection; // 资产同步为 HairStrandDirection。
                 case BurtShadingDebugMode.GBufferHairScatter: // Overlay 选择 Hair scatter。
                     return BurtGBufferDebugViewMode.HairScatter; // 资产同步为 HairScatter。
+                case BurtShadingDebugMode.GBufferHairShift: // Overlay 选择 Hair longitudinal shift scale。
+                    return BurtGBufferDebugViewMode.HairShift; // 资产同步为 HairShift。
                 default: // 其他 Overlay 模式不应该显示真实 GBuffer。
                     return BurtGBufferDebugViewMode.Disabled; // 资产同步为 Disabled，避免切换到 Lighting/Material 后 GBuffer Debug 残留。
             }
@@ -737,6 +844,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 BurtShadingDebugOverlayUtility.SyncExistingDebugViews(mode); // 同步 Depth/Shadow 全屏 Debug 开关。
                 BurtShadingDebugGroupDropdown.UpdateAllVisualStates(); // 刷新 Overlay 上的分类按钮。
                 SceneView.RepaintAll(); // 刷新 SceneView。
+            }
+
+            EditorGUI.BeginChangeCheck();
+            var useTileLightCpuFallback = EditorGUILayout.Toggle("Tile CPU Fallback", BurtShadingDebugSettings.UseTileLightCpuDebugColorTextureFallback);
+            if (EditorGUI.EndChangeCheck())
+            {
+                BurtShadingDebugSettings.UseTileLightCpuDebugColorTextureFallback = useTileLightCpuFallback;
+                SceneView.RepaintAll();
             }
 
             EditorGUILayout.LabelField("Display", BurtShadingDebugDisplayNames.GetDisplayName(BurtShadingDebugSettings.Mode)); // 显示友好名，方便和 Overlay 对照。

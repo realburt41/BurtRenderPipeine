@@ -14,6 +14,7 @@ CBUFFER_START(UnityPerMaterial)
     float _HairScatter;
     float _HairScatterBoost;
     float _HairSpecularScale;
+    float _HairShiftScale;
     float _HairRoughnessOffset;
     float _HairTangentFlip;
     float _Smoothness;

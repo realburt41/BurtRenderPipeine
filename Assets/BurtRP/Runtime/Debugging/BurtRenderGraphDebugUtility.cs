@@ -1,4 +1,5 @@
 using System.Collections.Generic; // 引入泛型集合命名空间，用 IReadOnlyList、Dictionary 和 List 组织 Pass 与资源关系。
+using System.Globalization; // 用 InvariantCulture 输出稳定的小数格式，避免不同系统区域设置影响 dump。
 using System.Text; // 引入文本构建命名空间，用 StringBuilder 组合多行 RenderGraph dump。
 using UnityEngine; // 引入 UnityEngine 命名空间，用 Camera、RenderTexture 和 RenderTextureDescriptor 输出 RT 诊断状态。
 
@@ -9,6 +10,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
         private const int BaseDumpCapacity = 768; // 定义 dump 基础容量，覆盖标题、Request、Camera、校验和资源摘要等固定内容。
 
         private const int PerPassDumpCapacity = 220; // 定义每个 Pass 的估算容量，减少多 Pass 场景下 StringBuilder 扩容次数。
+
+        private const int MaxCullCandidateDumpLines = 16; // Keep future-culling diagnostics compact in large graphs.
+
+        private const int MaxCullReadinessDumpLines = 24; // Limit per-pass why-not-cull rows so full dumps stay readable.
 
         public static string BuildDump( // 保留旧签名，兼容只需要 Pass 资源声明的调用方。
             BurtRenderRequest request, // 接收当前渲染请求，用来输出 Request 类型和 Camera 名称。
@@ -43,7 +48,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var renderOptionsCapacity = renderOptions != null ? 256 : 48; // RT 生命周期行较长，预留额外空间减少 StringBuilder 扩容。
 
-            var pipelineStateCapacity = 1650; // Pipeline/Camera/RT/PostProcess/Deferred/Material 状态会额外打印多行诊断信息，预留固定容量。
+            var pipelineStateCapacity = 1900; // Pipeline/Camera/RT/PostProcess/Deferred/Material 状态会额外打印多行诊断信息，预留固定容量。
 
             var capacity = BaseDumpCapacity + renderOptionsCapacity + pipelineStateCapacity + usageCount * PerPassDumpCapacity + validationCount * 96; // 根据 Pass、校验、RT 选项和管线状态数量估算字符串容量。
 
@@ -102,7 +107,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             AppendRenderOptions(builder, renderOptions); // 写入 RT 生命周期决策，让你不用只靠 Pass 列表反推 Allocate、FinalBlit 和 Release。
 
-            AppendPipelineState(builder, request, asset); // 写入管线和调试状态，方便对齐 Forward / Deferred 时确认当前到底由哪个开关驱动画面。
+            AppendPipelineState(builder, request, asset, renderOptions); // 写入管线和调试状态，方便对齐 Forward / Deferred 时确认当前到底由哪个开关驱动画面。
+
+            AppendLightingState(builder, request, asset, resourceRegistry, renderOptions); // 写入追加光数量、buffer 上传和当前 shader 读取路径。
 
             AppendCameraState(builder, request); // 写入当前相机的 HDR、尺寸和 targetTexture 状态，用来排查 Game/Scene/Preview 差异。
 
@@ -126,6 +133,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             BurtDebugLogUtility.AppendKeyValueLine(builder, "Pass Count", passCount); // 写入 RenderGraph 中的 Pass 数量，和实际执行列表保持一致。
 
             AppendValidationMessages(builder, validationMessages, resourceUsages); // 写入图级和 Pass 级校验消息，优先展示可能的问题。
+
+            var resourceRiskCounters = BuildResourceRiskCounters(validationMessages, resourceUsages); // Reuse the same counters for risk and health summaries.
+
+            var cullCandidateStats = BuildCullCandidateStats(resourceUsages, resourceRegistry); // Analyze future culling only; execution remains sequential.
+
+            AppendResourceRiskSummary(builder, resourceRiskCounters); // Print compact counters so large dumps are easier to triage.
+
+            AppendGraphHealth(builder, passCount, resourceUsages, resourceRegistry, resourceRiskCounters, cullCandidateStats); // One-line health summary for large dumps.
+
+            AppendCullCandidateSummary(builder, cullCandidateStats); // Debug-only future culling hints; no pass is skipped.
+
+            AppendCullReadinessSummary(builder, cullCandidateStats); // Explain why passes are not cullable yet without changing execution.
+
+            AppendResourceRegistry(builder, resourceRegistry); // List registered graph resources, including future logical buffers.
 
             builder.AppendLine("Passes:"); // 写入 Pass 列表标题，把后面的资源读写详情归为同一组。
 
@@ -201,7 +222,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
         private static void AppendPipelineState( // 写入当前管线资产和调试开关状态。
             StringBuilder builder, // 接收要写入的字符串构建器。
             BurtRenderRequest request, // 接收当前渲染请求，用来让间接光 Debug 按相机选择场景 ReflectionProbe。
-            BurtRenderPipelineAsset asset) // 接收当前管线资产，可能为空。
+            BurtRenderPipelineAsset asset, // 接收当前管线资产，可能为空。
+            BurtRequestRenderOptions renderOptions) // 接收 request 级 RT 生命周期，用来解释 Deferred debug 资源是否会真正构建。
         {
             builder.AppendLine("Pipeline State:"); // 单独成段输出，避免和 RT 生命周期或 Pass 列表混在一起。
 
@@ -244,11 +266,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.AppendLine(); // 结束第二行调试状态。
 
+            AppendTileLightDebugPipelineState(builder, request, asset, renderOptions);
+
             builder.Append("  DepthDebugView=").Append(asset.EnableDepthDebugView); // 写入 CameraDepth 全屏调试开关。
-
-            builder.Append(" MainLightShadowDebugView=").Append(asset.EnableMainLightShadowDebugView); // 写入主光 shadow map 全屏调试开关。
-
-            builder.Append(" MainLightShadowDebugLog=").Append(asset.EnableMainLightShadowDebugLog); // 写入主光阴影结构化日志开关。
 
             builder.Append(" UnsupportedShaderDebug=").Append(asset.EnableUnsupportedShaderDebug); // 写入错误材质绘制开关。
 
@@ -269,6 +289,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" SSRSuppressedByShadingDebug=").Append(ssrSuppressedByShadingDebug);
 
             builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());
+
+            builder.Append(" SSRShaderStatus=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderStatusLabel());
+
+            builder.Append(" SSRTraceMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionTraceModeLabel(request, asset));
+            builder.Append(" SSRHiZTraceExperimental=").Append(ssrSettings.ExperimentalHiZTrace);
+
+            builder.Append(" SSRHiZDiagnostics=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionHiZDiagnosticsStatusLabel());
 
             builder.Append(" SSRMaxSteps=").Append(ssrSettings.MaxSteps);
 
@@ -303,6 +330,525 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.AppendLine();
 
             BurtIndirectLightingUtility.AppendDebugState(builder, request != null ? request.Camera : null); // 写入 BurtRP 全局间接光数据源状态，方便确认 Deferred 不再依赖 Forward DrawRenderers 副作用。
+        }
+
+        private static void AppendTileLightDebugPipelineState(StringBuilder builder, BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions)
+        {
+            var requested = IsTileLightDebugRequested();
+            var rendererSupported = IsDeferredRequest(request, asset);
+            var hasLocalDeferredTargets = HasLocalDeferredTargets(renderOptions);
+
+            builder.Append("  TileLightDebugRequested=").Append(requested);
+            builder.Append(" TileLightDebugRendererSupported=").Append(rendererSupported);
+            builder.Append(" TileLightDebugLocalDeferredTargets=").Append(hasLocalDeferredTargets);
+            builder.Append(" TileLightDebugNote=").Append(ResolveTileLightDebugPipelineNote(requested, rendererSupported, hasLocalDeferredTargets));
+            builder.AppendLine();
+        }
+
+        private static void AppendLightingState(
+            StringBuilder builder,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            BurtRenderGraphResourceRegistry resourceRegistry,
+            BurtRequestRenderOptions renderOptions)
+        {
+            builder.AppendLine("Lighting State:");
+
+            var lightingData = request != null ? request.LightingData : null;
+            var additionalLightBufferRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName);
+            var additionalLightBufferAllocatedAtDumpTime = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.AdditionalLightBufferName);
+            var additionalLightBufferDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.AdditionalLightBufferName);
+            BurtRenderBufferDescriptor additionalLightBufferDescriptor = default;
+            var hasAdditionalLightBufferDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.AdditionalLightBufferName, out additionalLightBufferDescriptor);
+            var expectedAdditionalLightBufferDescriptor = BurtLightingData.CreateAdditionalLightBufferDescriptor();
+            var additionalLightBufferDescriptorMatches = hasAdditionalLightBufferDescriptor &&
+                additionalLightBufferDescriptor.Count == expectedAdditionalLightBufferDescriptor.Count &&
+                additionalLightBufferDescriptor.Stride == expectedAdditionalLightBufferDescriptor.Stride &&
+                additionalLightBufferDescriptor.Target == expectedAdditionalLightBufferDescriptor.Target;
+            var additionalLightBufferUploadedThisFrame = lightingData != null && lightingData.AdditionalLightBufferUploaded;
+            var additionalLightBufferReleasedBeforeDump = additionalLightBufferUploadedThisFrame && additionalLightBufferRegistered && !additionalLightBufferAllocatedAtDumpTime;
+
+            builder.Append("  AdditionalLightCount=").Append(lightingData != null ? lightingData.AdditionalLightCount : 0);
+            builder.Append(" MaxAdditionalLights=").Append(BurtLightingData.MaxAdditionalLights);
+            builder.Append(" VisibleLightCount=").Append(lightingData != null ? lightingData.VisibleLightCount : 0);
+            builder.Append(" AdditionalLightShadingPath=").Append(lightingData != null ? lightingData.AdditionalLightShadingPath : BurtLightingData.AdditionalLightShadingPathLabel);
+            builder.AppendLine();
+
+            builder.Append("  AdditionalLightBufferRegistered=").Append(additionalLightBufferRegistered);
+            builder.Append(" AdditionalLightBufferAllocatedAtDumpTime=").Append(additionalLightBufferAllocatedAtDumpTime);
+            builder.Append(" AdditionalLightBufferDescriptorValid=").Append(additionalLightBufferDescriptorValid);
+            builder.Append(" AdditionalLightBufferUploadAttemptedThisFrame=").Append(lightingData != null && lightingData.AdditionalLightBufferUploadAttempted);
+            builder.Append(" AdditionalLightBufferUploadedThisFrame=").Append(additionalLightBufferUploadedThisFrame);
+            builder.Append(" AdditionalLightBufferReleasedBeforeDump=").Append(additionalLightBufferReleasedBeforeDump);
+            builder.Append(" AdditionalLightBufferRows=").Append(BurtLightingData.AdditionalLightBufferVectorCount);
+            builder.Append(" AdditionalLightBufferStride=").Append(BurtLightingData.AdditionalLightBufferStride);
+            builder.Append(" AdditionalLightBufferDescriptorCount=").Append(hasAdditionalLightBufferDescriptor ? additionalLightBufferDescriptor.Count : 0);
+            builder.Append(" AdditionalLightBufferDescriptorStride=").Append(hasAdditionalLightBufferDescriptor ? additionalLightBufferDescriptor.Stride : 0);
+            builder.Append(" AdditionalLightBufferDescriptorMatches=").Append(additionalLightBufferDescriptorMatches);
+            builder.AppendLine();
+
+            AppendTileLightDebugState(builder, request, asset, lightingData, resourceRegistry, renderOptions);
+            AppendAdditionalLightDetails(builder, lightingData);
+        }
+
+        private static void AppendTileLightDebugState(StringBuilder builder, BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtLightingData lightingData, BurtRenderGraphResourceRegistry resourceRegistry, BurtRequestRenderOptions renderOptions)
+        {
+            var countRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
+            var listRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightListBufferName);
+            var offsetRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+            var countAllocated = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
+            var listAllocated = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.TileLightListBufferName);
+            var offsetAllocated = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+            var countDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
+            var listDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightListBufferName);
+            var offsetDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+            BurtRenderBufferDescriptor countDescriptor = default;
+            BurtRenderBufferDescriptor listDescriptor = default;
+            BurtRenderBufferDescriptor offsetDescriptor = default;
+            var hasCountDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightCountBufferName, out countDescriptor);
+            var hasListDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightListBufferName, out listDescriptor);
+            var hasOffsetDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName, out offsetDescriptor);
+            var uploaded = lightingData != null && lightingData.TileLightDebugUploaded;
+            var requested = IsTileLightDebugRequested();
+            var requiresListBuffers = requested && BurtShadingDebugSettings.Mode == BurtShadingDebugMode.TileLightOccupancy;
+            var requiredBuffersRegistered = countRegistered && (!requiresListBuffers || (listRegistered && offsetRegistered));
+            var requiredDescriptorsValid = countDescriptorValid && (!requiresListBuffers || (listDescriptorValid && offsetDescriptorValid));
+            var requiredBuffersReleased = !countAllocated && (!requiresListBuffers || (!listAllocated && !offsetAllocated));
+            var releasedBeforeDump = uploaded && requiredBuffersRegistered && requiredBuffersReleased;
+            var effectiveDeferred = IsDeferredRequest(request, asset);
+            var hasLocalDeferredTargets = HasLocalDeferredTargets(renderOptions);
+            var active = requested && effectiveDeferred && hasLocalDeferredTargets && requiredBuffersRegistered && requiredDescriptorsValid && uploaded;
+            var status = ResolveTileLightDebugStatus(requested, effectiveDeferred, hasLocalDeferredTargets, requiredBuffersRegistered, requiredDescriptorsValid, lightingData, uploaded);
+            var buildGate = ResolveTileLightDebugBuildGate(
+                requested,
+                effectiveDeferred,
+                hasLocalDeferredTargets,
+                countRegistered,
+                listRegistered,
+                offsetRegistered,
+                countDescriptorValid,
+                listDescriptorValid,
+                offsetDescriptorValid,
+                requiresListBuffers,
+                lightingData,
+                uploaded);
+            var uniformTileCount = lightingData != null && lightingData.TileLightTileCount > 0 && lightingData.TileLightMinCount == lightingData.TileLightMaxCount;
+            var visualNote = ResolveTileLightDebugVisualNote(requested, active, lightingData, uniformTileCount);
+            var hasCountSnapshot = lightingData != null && lightingData.TileLightDebugCountSnapshotLength >= lightingData.TileLightTileCount && lightingData.TileLightTileCount > 0;
+
+            builder.Append("  TileLightDebugRequested=").Append(requested);
+            builder.Append(" TileLightDebugActive=").Append(active);
+            builder.Append(" TileLightDebugStatus=").Append(status);
+            builder.Append(" TileLightDebugViewMode=").Append(requested ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
+            builder.Append(" TileLightDebugGpuPath=").Append(BurtTileLightDebugViewUtility.ResolveGpuPathLabel());
+            builder.Append(" TileLightDebugLocalDeferredTargets=").Append(hasLocalDeferredTargets);
+            builder.Append(" TileLightDebugBuildGate=").Append(buildGate);
+            builder.Append(" TileLightCountUniform=").Append(uniformTileCount);
+            builder.Append(" TileLightCountSnapshot=").Append(hasCountSnapshot);
+            builder.Append(" TileLightDebugVisualNote=").Append(visualNote);
+            builder.AppendLine();
+
+            builder.Append("  TiledLightDebugBuildAttempted=").Append(lightingData != null && lightingData.TileLightDebugBuildAttempted);
+            builder.Append(" TiledLightDebugUploadedThisFrame=").Append(uploaded);
+            builder.Append(" TiledLightDebugReleasedBeforeDump=").Append(releasedBeforeDump);
+            builder.Append(" TiledLightDebugMode=").Append(lightingData != null ? lightingData.TileLightDebugBuildMode : "Disabled");
+            builder.Append(" TileSize=").Append(lightingData != null ? lightingData.TileLightTileSize : BurtTiledLightData.TileSize);
+            builder.Append(" TileGrid=").Append(lightingData != null ? lightingData.TileLightGridX : 0).Append("x").Append(lightingData != null ? lightingData.TileLightGridY : 0);
+            builder.Append(" TileCount=").Append(lightingData != null ? lightingData.TileLightTileCount : 0);
+            builder.Append(" MaxLightsPerTile=").Append(lightingData != null ? lightingData.TileLightMaxLightsPerTile : BurtTiledLightData.MaxLightsPerTile);
+            builder.Append(" TileListCapacity=").Append(lightingData != null ? lightingData.TileLightListCapacity : 0);
+            builder.Append(" TileMinLightCount=").Append(lightingData != null ? lightingData.TileLightMinCount : 0);
+            builder.Append(" TileMaxLightCount=").Append(lightingData != null ? lightingData.TileLightMaxCount : 0);
+            builder.Append(" TileAverageLightCount=").Append(lightingData != null ? FormatFloat(lightingData.TileLightAverageCount) : "0");
+            builder.Append(" TileOverflowTiles=").Append(lightingData != null ? lightingData.TileLightOverflowTileCount : 0);
+            builder.Append(" TileMaxOverflowExtraCount=").Append(lightingData != null ? lightingData.TileLightMaxOverflowExtraCount : 0);
+            builder.AppendLine();
+
+            builder.Append("  TileLightCountBufferRegistered=").Append(countRegistered);
+            builder.Append(" TileLightCountBufferAllocatedAtDumpTime=").Append(countAllocated);
+            builder.Append(" TileLightCountBufferDescriptorValid=").Append(countDescriptorValid);
+            builder.Append(" TileLightListBufferRegistered=").Append(listRegistered);
+            builder.Append(" TileLightListBufferAllocatedAtDumpTime=").Append(listAllocated);
+            builder.Append(" TileLightListBufferDescriptorValid=").Append(listDescriptorValid);
+            builder.Append(" TileLightOffsetBufferRegistered=").Append(offsetRegistered);
+            builder.Append(" TileLightOffsetBufferAllocatedAtDumpTime=").Append(offsetAllocated);
+            builder.Append(" TileLightOffsetBufferDescriptorValid=").Append(offsetDescriptorValid);
+            builder.AppendLine();
+
+            builder.Append("  TileLightBufferDescriptors: Count=(").Append(FormatBufferDescriptor(hasCountDescriptor, countDescriptor));
+            builder.Append(") List=(").Append(FormatBufferDescriptor(hasListDescriptor, listDescriptor));
+            builder.Append(") Offset=(").Append(FormatBufferDescriptor(hasOffsetDescriptor, offsetDescriptor));
+            builder.AppendLine(")");
+
+            if (requested || (lightingData != null && lightingData.TileLightDebugBuildAttempted))
+            {
+                AppendTileLightCountSamples(builder, lightingData);
+            }
+        }
+
+        private static void AppendTileLightCountSamples(StringBuilder builder, BurtLightingData lightingData)
+        {
+            builder.Append("  TileLightCountSamples: ");
+
+            if (!TryGetTileLightCountSnapshot(lightingData, out var snapshot, out var safeCount, out var gridX, out var gridY))
+            {
+                builder.AppendLine("<none: snapshot unavailable>");
+                return;
+            }
+
+            uint minCount = uint.MaxValue;
+            uint maxCount = 0u;
+            ulong sumCount = 0ul;
+            var minIndex = 0;
+            var maxIndex = 0;
+            var nonZeroTiles = 0;
+
+            for (var tileIndex = 0; tileIndex < safeCount; tileIndex++)
+            {
+                var count = snapshot[tileIndex];
+                if (count < minCount)
+                {
+                    minCount = count;
+                    minIndex = tileIndex;
+                }
+
+                if (count > maxCount)
+                {
+                    maxCount = count;
+                    maxIndex = tileIndex;
+                }
+
+                if (count > 0u)
+                {
+                    nonZeroTiles++;
+                }
+
+                sumCount += count;
+            }
+
+            var averageCount = safeCount > 0 ? (float)sumCount / safeCount : 0f;
+            var statsMatch = lightingData != null &&
+                safeCount == lightingData.TileLightTileCount &&
+                (int)minCount == lightingData.TileLightMinCount &&
+                (int)maxCount == lightingData.TileLightMaxCount &&
+                Mathf.Abs(averageCount - lightingData.TileLightAverageCount) <= 0.001f;
+
+            builder.Append("SnapshotLength=").Append(lightingData != null ? lightingData.TileLightDebugCountSnapshotLength : 0);
+            builder.Append(" SafeCount=").Append(safeCount);
+            builder.Append(" Grid=").Append(gridX).Append("x").Append(gridY);
+            builder.Append(" NonZeroTiles=").Append(nonZeroTiles);
+            builder.Append(" SnapshotMin=").Append(minCount);
+            builder.Append(" SnapshotMax=").Append(maxCount);
+            builder.Append(" SnapshotAverage=").Append(FormatFloat(averageCount));
+            builder.Append(" StatsMatch=").Append(statsMatch);
+            builder.AppendLine();
+
+            builder.Append("  TileLightCountSamplePoints: ");
+            AppendTileLightSample(builder, "Corner00", 0, 0, gridX, gridY, safeCount, snapshot);
+            builder.Append(" ");
+            AppendTileLightSample(builder, "CornerX0", gridX - 1, 0, gridX, gridY, safeCount, snapshot);
+            builder.Append(" ");
+            AppendTileLightSample(builder, "Corner0Y", 0, gridY - 1, gridX, gridY, safeCount, snapshot);
+            builder.Append(" ");
+            AppendTileLightSample(builder, "CornerXY", gridX - 1, gridY - 1, gridX, gridY, safeCount, snapshot);
+            builder.Append(" ");
+            AppendTileLightSample(builder, "Center", gridX / 2, gridY / 2, gridX, gridY, safeCount, snapshot);
+            builder.Append(" ");
+            AppendTileLightSample(builder, "Min", minIndex % gridX, minIndex / gridX, gridX, gridY, safeCount, snapshot);
+            builder.Append(" ");
+            AppendTileLightSample(builder, "Max", maxIndex % gridX, maxIndex / gridX, gridX, gridY, safeCount, snapshot);
+            builder.AppendLine();
+        }
+
+        private static bool TryGetTileLightCountSnapshot(
+            BurtLightingData lightingData,
+            out uint[] snapshot,
+            out int safeCount,
+            out int gridX,
+            out int gridY)
+        {
+            snapshot = lightingData != null ? lightingData.TileLightDebugCountSnapshot : null;
+            gridX = lightingData != null ? lightingData.TileLightGridX : 0;
+            gridY = lightingData != null ? lightingData.TileLightGridY : 0;
+            safeCount = 0;
+
+            if (lightingData == null || snapshot == null || gridX <= 0 || gridY <= 0)
+            {
+                return false;
+            }
+
+            var declaredCount = Mathf.Min(lightingData.TileLightTileCount, lightingData.TileLightDebugCountSnapshotLength);
+            var gridCount = gridX * gridY;
+            safeCount = Mathf.Min(Mathf.Min(declaredCount, snapshot.Length), gridCount);
+            return safeCount > 0;
+        }
+
+        private static void AppendTileLightSample(
+            StringBuilder builder,
+            string label,
+            int tileX,
+            int tileY,
+            int gridX,
+            int gridY,
+            int safeCount,
+            uint[] snapshot)
+        {
+            var clampedX = Mathf.Clamp(tileX, 0, gridX - 1);
+            var clampedY = Mathf.Clamp(tileY, 0, gridY - 1);
+            var tileIndex = clampedY * gridX + clampedX;
+
+            builder.Append(label);
+            builder.Append('(').Append(clampedX).Append(',').Append(clampedY).Append(")=");
+
+            if (snapshot == null || tileIndex < 0 || tileIndex >= safeCount)
+            {
+                builder.Append("<out-of-range>");
+                return;
+            }
+
+            builder.Append(snapshot[tileIndex]);
+        }
+
+        private static void AppendAdditionalLightDetails(StringBuilder builder, BurtLightingData lightingData)
+        {
+            if (lightingData == null || lightingData.AdditionalLightCount <= 0)
+            {
+                builder.AppendLine("  Additional Lights: <none>");
+                return;
+            }
+
+            builder.AppendLine("  Additional Lights:");
+            var additionalLightCount = Mathf.Min(lightingData.AdditionalLightCount, BurtLightingData.MaxAdditionalLights);
+
+            for (var lightIndex = 0; lightIndex < additionalLightCount; lightIndex++)
+            {
+                var positionAndRange = lightingData.AdditionalLightPositionAndRange[lightIndex];
+                var colorAndType = lightingData.AdditionalLightColorAndType[lightIndex];
+                var directionAndSpot = lightingData.AdditionalLightDirectionAndSpot[lightIndex];
+                var spotParams = lightingData.AdditionalLightSpotParams[lightIndex];
+
+                builder.Append("    #").Append(lightIndex);
+                builder.Append(" Type=").Append(FormatAdditionalLightType(colorAndType.w));
+                builder.Append(" Color=").Append(FormatVector3(colorAndType.x, colorAndType.y, colorAndType.z));
+                builder.Append(" Position=").Append(FormatVector3(positionAndRange.x, positionAndRange.y, positionAndRange.z));
+                builder.Append(" Range=").Append(FormatFloat(positionAndRange.w));
+                builder.Append(" Direction=").Append(FormatVector3(directionAndSpot.x, directionAndSpot.y, directionAndSpot.z));
+                builder.Append(" SpotParams=").Append(FormatSpotParams(spotParams));
+                builder.AppendLine();
+            }
+        }
+
+        private static bool IsTileLightDebugRequested()
+        {
+            return BurtTileLightDebugViewUtility.IsTileLightDebugMode(BurtShadingDebugSettings.Mode);
+        }
+
+        private static bool HasLocalDeferredTargets(BurtRequestRenderOptions renderOptions)
+        {
+            return renderOptions == null || (renderOptions.ShouldAllocateCameraColor && renderOptions.ShouldAllocateCameraDepth);
+        }
+
+        private static string ResolveTileLightDebugPipelineNote(bool requested, bool rendererSupported, bool hasLocalDeferredTargets)
+        {
+            if (!requested)
+            {
+                return "Disabled";
+            }
+
+            if (!rendererSupported)
+            {
+                return "RequiresDeferredRenderer";
+            }
+
+            return hasLocalDeferredTargets ? "DeferredRenderer" : "WaitingForLocalDeferredTargets";
+        }
+
+        private static string ResolveTileLightDebugStatus(
+            bool requested,
+            bool effectiveDeferred,
+            bool hasLocalDeferredTargets,
+            bool requiredBuffersRegistered,
+            bool requiredDescriptorsValid,
+            BurtLightingData lightingData,
+            bool uploaded)
+        {
+            if (!requested)
+            {
+                return "Disabled";
+            }
+
+            if (!effectiveDeferred)
+            {
+                return "RequiresDeferredRenderer";
+            }
+
+            if (!hasLocalDeferredTargets)
+            {
+                return "WaitingForLocalDeferredTargets";
+            }
+
+            if (!requiredBuffersRegistered)
+            {
+                return "TileBuffersNotRegistered";
+            }
+
+            if (!requiredDescriptorsValid)
+            {
+                return "TileBufferDescriptorInvalid";
+            }
+
+            if (lightingData == null || !lightingData.TileLightDebugBuildAttempted)
+            {
+                return "BuildNotAttempted";
+            }
+
+            return uploaded ? "Active" : "UploadFailed";
+        }
+
+        private static string ResolveTileLightDebugBuildGate(
+            bool requested,
+            bool effectiveDeferred,
+            bool hasLocalDeferredTargets,
+            bool countRegistered,
+            bool listRegistered,
+            bool offsetRegistered,
+            bool countDescriptorValid,
+            bool listDescriptorValid,
+            bool offsetDescriptorValid,
+            bool requiresListBuffers,
+            BurtLightingData lightingData,
+            bool uploaded)
+        {
+            if (!requested)
+            {
+                return "ModeDisabled";
+            }
+
+            if (!effectiveDeferred)
+            {
+                return "RequiresDeferredRenderer";
+            }
+
+            if (!hasLocalDeferredTargets)
+            {
+                return "WaitingForLocalDeferredTargets";
+            }
+
+            if (!countRegistered)
+            {
+                return "CountBufferNotRegistered";
+            }
+
+            if (!countDescriptorValid)
+            {
+                return "CountBufferDescriptorInvalid";
+            }
+
+            if (requiresListBuffers && (!listRegistered || !offsetRegistered))
+            {
+                return "ListOrOffsetBufferNotRegistered";
+            }
+
+            if (requiresListBuffers && (!listDescriptorValid || !offsetDescriptorValid))
+            {
+                return "ListOrOffsetBufferDescriptorInvalid";
+            }
+
+            if (lightingData == null)
+            {
+                return "LightingDataUnavailable";
+            }
+
+            if (!lightingData.TileLightDebugBuildAttempted)
+            {
+                return "BuildPassNotAttempted";
+            }
+
+            return uploaded ? "BuiltAndUploaded" : "BuildRanUploadFailed";
+        }
+
+        private static string ResolveTileLightDebugVisualNote(bool requested, bool active, BurtLightingData lightingData, bool uniformTileCount)
+        {
+            if (!requested)
+            {
+                return "Disabled";
+            }
+
+            if (!active)
+            {
+                return "Inactive";
+            }
+
+            if (lightingData == null || lightingData.TileLightTileCount <= 0)
+            {
+                return "NoTileData";
+            }
+
+            if (lightingData.AdditionalLightCount <= 0)
+            {
+                return "NoAdditionalLights";
+            }
+
+            if (lightingData.TileLightOverflowTileCount > 0)
+            {
+                return "OverflowTiles";
+            }
+
+            if (!uniformTileCount)
+            {
+                return "VariesByTile";
+            }
+
+            return lightingData.TileLightMaxCount <= 0 ? "AllTilesZeroLights" : "AllTilesSameCount_MoveLightsOrReduceRange";
+        }
+
+        private static string FormatBufferDescriptor(bool hasDescriptor, BurtRenderBufferDescriptor descriptor)
+        {
+            if (!hasDescriptor)
+            {
+                return "<none>";
+            }
+
+            return "Count=" + descriptor.Count + ",Stride=" + descriptor.Stride + ",Target=" + descriptor.Target;
+        }
+
+        private static string FormatAdditionalLightType(float lightType)
+        {
+            if (Mathf.Abs(lightType) < 0.5f)
+            {
+                return "Directional";
+            }
+
+            if (Mathf.Abs(lightType - 1f) < 0.5f)
+            {
+                return "Point";
+            }
+
+            if (Mathf.Abs(lightType - 2f) < 0.5f)
+            {
+                return "Spot";
+            }
+
+            return "Unknown(" + FormatFloat(lightType) + ")";
+        }
+
+        private static string FormatSpotParams(Vector4 spotParams)
+        {
+            return "(InnerCos=" + FormatFloat(spotParams.x)
+                + " OuterCos=" + FormatFloat(spotParams.y)
+                + " InvAngleRange=" + FormatFloat(spotParams.z)
+                + " Spare=" + FormatFloat(spotParams.w)
+                + ")";
+        }
+
+        private static string FormatVector3(float x, float y, float z)
+        {
+            return "(" + FormatFloat(x) + "," + FormatFloat(y) + "," + FormatFloat(z) + ")";
+        }
+
+        private static string FormatFloat(float value)
+        {
+            return value.ToString("0.###", CultureInfo.InvariantCulture);
         }
 
         private static void AppendCameraState( // 写入当前相机本身的诊断状态。
@@ -375,6 +921,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
                 AppendDescriptorLine(builder, "GBuffer2", BurtRenderTargetDescriptorUtility.CreateGBuffer2Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name); // 输出 GBuffer2 格式，第一版保存 emission/reflectance。
 
+                if (BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(request, asset))
+                {
+                    AppendDescriptorLine(builder, "ScreenSpaceAmbientOcclusionRaw", BurtRenderTargetDescriptorUtility.CreateScreenSpaceAmbientOcclusionDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName);
+                    AppendDescriptorLine(builder, "ScreenSpaceAmbientOcclusionFinal", BurtRenderTargetDescriptorUtility.CreateScreenSpaceAmbientOcclusionDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
+                }
+                else
+                {
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionRaw", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionFinal", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
+                }
+
                 if (BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset))
                 {
                     AppendDescriptorLine(builder, "HiZDepth", BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
@@ -404,6 +961,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 AppendSkippedRenderTargetLine(builder, "GBuffer1", resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name); // 写出 GBuffer1 跳过状态。
 
                 AppendSkippedRenderTargetLine(builder, "GBuffer2", resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name); // 写出 GBuffer2 跳过状态。
+
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionRaw", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName);
+
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionFinal", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
 
                 AppendSkippedRenderTargetLine(builder, "HiZDepth", resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
 
@@ -523,6 +1084,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.AppendLine("Deferred State:"); // 单独成段输出，让 Deferred 分支是否生效一眼可见。
 
             var isDeferred = IsDeferredRequest(request, asset); // 判断当前 request 是否真的处于 Deferred 路径。
+            var ssaoSettings = BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionSettings(request, asset);
+            var ssaoEnabled = isDeferred && ssaoSettings.Enabled;
+            var ssaoDebugRequested = BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionDebugMode(BurtShadingDebugSettings.Mode);
+            var ssaoDebugPassRequested = isDeferred && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusionDebugView(request, asset);
 
             builder.Append("  Enabled=").Append(isDeferred); // 写入 Deferred 是否启用。
 
@@ -533,6 +1098,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" GBuffer1Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name)); // 写入 GBuffer1 是否已注册。
 
             builder.Append(" GBuffer2Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name)); // 写入 GBuffer2 是否已注册。
+
+            builder.Append(" SSAORawRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName));
+
+            builder.Append(" SSAOFinalRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName));
+
+            builder.Append(" SSAODebugMode=").Append(BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionDebugModeLabel());
 
             builder.Append(" HiZDepthRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName));
 
@@ -554,14 +1125,39 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 {
                     var hiZDescriptor = BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(request != null ? request.Camera : null);
                     builder.Append(" HiZMips=").Append(BurtRenderTargetDescriptorUtility.CalculateMipCount(hiZDescriptor.width, hiZDescriptor.height));
-                    builder.Append(" HiZMode=FurthestRawDepth");
+                    builder.Append(" HiZMode=ClosestRawDepth");
                 }
 
                 builder.Append(" HiZDebugView=").Append(asset != null && asset.EnableHiZDebugView);
                 builder.Append(" HiZDebugMip=").Append(asset != null ? asset.HiZDebugMip.ToString() : "<none>");
+                builder.Append(" SSAOEnabled=").Append(ssaoSettings.Enabled);
+                builder.Append(" SSAODebugRequested=").Append(ssaoDebugRequested);
+                builder.Append(" SSAOTracePassExpected=").Append(ssaoEnabled);
+                builder.Append(" SSAOBlurPassExpected=").Append(ssaoEnabled);
+                builder.Append(" SSAODebugPassRequested=").Append(ssaoDebugPassRequested);
+                builder.Append(" SSAOOutputTarget=ScreenSpaceAmbientOcclusion");
+                builder.Append(" SSAORawTarget=ScreenSpaceAmbientOcclusionRaw");
+                builder.Append(" SSAORadius=").Append(FormatFloat(ssaoSettings.Radius));
+                builder.Append(" SSAOIntensity=").Append(FormatFloat(ssaoSettings.Intensity));
+                builder.Append(" SSAOSamples=").Append(ssaoSettings.SampleCount);
+                builder.Append(" SSAODirections=").Append(ssaoSettings.DirectionCount);
+                builder.Append(" SSAOBias=").Append(FormatFloat(ssaoSettings.Bias));
+                builder.Append(" SSAOPower=").Append(FormatFloat(ssaoSettings.Power));
+                builder.Append(" SSAOHalfResolution=").Append(ssaoSettings.HalfResolution);
+                builder.Append(" SSAOBlur=").Append(ssaoSettings.Blur);
+                builder.Append(" SSAOSpatialDenoise=").Append(ssaoSettings.SpatialDenoise);
+                builder.Append(" SSAOBlurSharpness=").Append(FormatFloat(ssaoSettings.BlurSharpness));
+                builder.Append(" SSAOHorizonSearch=").Append(ssaoSettings.HorizonSearch);
+                builder.Append(" SSAOThickness=").Append(FormatFloat(ssaoSettings.Thickness));
+                builder.Append(" SSAOFadeRadius=").Append(FormatFloat(ssaoSettings.FadeRadius));
+                builder.Append(" SSAOFadeDistance=").Append(FormatFloat(ssaoSettings.FadeDistance));
                 builder.Append(" SSREnabled=").Append(ssrSettings.Enabled);
                 builder.Append(" SSRSuppressedByShadingDebug=").Append(ssrSuppressedByShadingDebug);
                 builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());
+                builder.Append(" SSRShaderStatus=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderStatusLabel());
+                builder.Append(" SSRTraceMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionTraceModeLabel(request, asset));
+                builder.Append(" SSRHiZTraceExperimental=").Append(ssrSettings.ExperimentalHiZTrace);
+                builder.Append(" SSRHiZDiagnostics=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionHiZDiagnosticsStatusLabel());
                 builder.Append(" SSRMaxSteps=").Append(ssrSettings.MaxSteps);
                 builder.Append(" SSRTemporal=").Append(ssrSettings.TemporalAccumulation);
                 builder.Append(" SSRHistoryValid=").Append(ssrHistory.HasHistory);
@@ -748,6 +1344,898 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.AppendLine(string.IsNullOrEmpty(message) ? "<empty>" : message); // 写入消息正文；空消息用占位符。
         }
 
+        private static ResourceRiskCounters BuildResourceRiskCounters( // Collects validation counters once so multiple debug sections agree.
+            IReadOnlyList<string> validationMessages,
+            IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages)
+        {
+            var counters = new ResourceRiskCounters();
+
+            AccumulateRiskMessages(validationMessages, counters);
+
+            if (resourceUsages != null)
+            {
+                for (var usageIndex = 0; usageIndex < resourceUsages.Count; usageIndex++)
+                {
+                    var usage = resourceUsages[usageIndex];
+                    if (usage == null)
+                    {
+                        continue;
+                    }
+
+                    AccumulateRiskMessages(usage.ValidationMessages, counters);
+                }
+            }
+
+            return counters;
+        }
+
+        private static void AppendResourceRiskSummary( // Writes compact validation counters for quick graph health checks.
+            StringBuilder builder,
+            ResourceRiskCounters counters)
+        {
+            if (counters == null)
+            {
+                counters = new ResourceRiskCounters();
+            }
+
+            builder.AppendLine("Resource Risks:");
+
+            if (counters.Total == 0)
+            {
+                builder.AppendLine("  OK");
+                return;
+            }
+
+            builder.Append("  ReadBeforeWrite=");
+            builder.Append(counters.ReadBeforeWrite);
+            builder.Append(" Unregistered=");
+            builder.Append(counters.Unregistered);
+            builder.Append(" Missing=");
+            builder.Append(counters.Missing);
+            builder.Append(" Duplicate=");
+            builder.Append(counters.DuplicateDeclarations);
+            builder.Append(" SamePassReadWrite=");
+            builder.Append(counters.SamePassReadWrite);
+            builder.Append(" ReleaseIssues=");
+            builder.Append(counters.ReleaseIssues);
+            builder.Append(" GlobalState=");
+            builder.Append(counters.GlobalStateIssues);
+            builder.Append(" Culling=");
+            builder.Append(counters.CullingIssues);
+            builder.Append(" TerminalWrite=");
+            builder.Append(counters.TerminalWriteIssues);
+            builder.Append(" NoConsumer=");
+            builder.Append(counters.NoConsumer);
+            builder.Append(" Other=");
+            builder.AppendLine(counters.Other.ToString());
+        }
+
+        private static void AccumulateRiskMessages(IReadOnlyList<string> messages, ResourceRiskCounters counters)
+        {
+            if (messages == null || counters == null)
+            {
+                return;
+            }
+
+            for (var messageIndex = 0; messageIndex < messages.Count; messageIndex++)
+            {
+                AccumulateRiskMessage(messages[messageIndex], counters);
+            }
+        }
+
+        private static void AccumulateRiskMessage(string message, ResourceRiskCounters counters)
+        {
+            if (string.IsNullOrEmpty(message) || counters == null)
+            {
+                return;
+            }
+
+            if (message.IndexOf("Read-before-Write", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.ReadBeforeWrite++;
+            }
+            else if (message.IndexOf("未注册", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     message.IndexOf("Unregistered", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.Unregistered++;
+            }
+            else if (message.IndexOf("缺失", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     message.IndexOf("Missing", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.Missing++;
+            }
+            else if (message.IndexOf("重复", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     message.IndexOf("Duplicate", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.DuplicateDeclarations++;
+            }
+            else if (message.IndexOf("同时 Read/Write", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.SamePassReadWrite++;
+            }
+            else if (message.IndexOf("Release", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     message.IndexOf("释放", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.ReleaseIssues++;
+            }
+            else if (message.IndexOf("全局状态", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     message.IndexOf("Global", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.GlobalStateIssues++;
+            }
+            else if (message.IndexOf("AllowCulling", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     message.IndexOf("HasSideEffects", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     message.IndexOf("裁剪", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.CullingIssues++;
+            }
+            else if (message.IndexOf("AllowUnconsumedWrite", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     message.IndexOf("终端写入", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.TerminalWriteIssues++;
+            }
+            else if (message.IndexOf("没有消费者", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                counters.NoConsumer++;
+            }
+            else
+            {
+                counters.Other++;
+            }
+        }
+
+        private static void AppendGraphHealth( // Writes a compact, read-only summary of graph metadata.
+            StringBuilder builder,
+            int passCount,
+            IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages,
+            BurtRenderGraphResourceRegistry resourceRegistry,
+            ResourceRiskCounters riskCounters,
+            CullCandidateStats cullStats)
+        {
+            if (riskCounters == null)
+            {
+                riskCounters = new ResourceRiskCounters();
+            }
+
+            if (cullStats == null)
+            {
+                cullStats = new CullCandidateStats();
+            }
+
+            var usageCount = resourceUsages != null ? resourceUsages.Count : 0;
+            var nullUsageCount = CountNullUsages(resourceUsages);
+            var validationIssueCount = riskCounters.Total;
+            var lifetimes = BuildResourceLifetimes(resourceUsages, resourceRegistry);
+            var longestLifetimeName = "<none>";
+            var longestLifetimeSpan = -1;
+            FindLongestLifetime(lifetimes, ref longestLifetimeName, ref longestLifetimeSpan);
+            if (longestLifetimeSpan < 0)
+            {
+                longestLifetimeSpan = 0;
+            }
+
+            builder.AppendLine("Graph Health:");
+            builder.Append("  Status=");
+            builder.Append(riskCounters.Total == 0 && passCount == usageCount && nullUsageCount == 0 ? "OK" : "NeedsAttention");
+            builder.Append(" Passes=");
+            builder.Append(passCount);
+            builder.Append(" Usages=");
+            builder.Append(usageCount);
+            builder.Append(" NullUsages=");
+            builder.Append(nullUsageCount);
+            builder.Append(" RegisteredRT=");
+            builder.Append(resourceRegistry != null ? CountNames(resourceRegistry.RenderTargetNames) : 0);
+            builder.Append(" RegisteredBuffers=");
+            builder.Append(resourceRegistry != null ? CountNames(resourceRegistry.BufferNames) : 0);
+            builder.Append(" Resources=");
+            builder.Append(lifetimes.Count);
+            builder.Append(" Longest=");
+            builder.Append(longestLifetimeName);
+            builder.Append("(Span=");
+            builder.Append(longestLifetimeSpan);
+            builder.Append(")");
+            builder.Append(" ValidationIssues=");
+            builder.Append(validationIssueCount);
+            builder.Append(" RiskIssues=");
+            builder.Append(riskCounters.Total);
+            builder.Append(" AllowCulling=");
+            builder.Append(cullStats.AllowCullingCount);
+            builder.Append(" SideEffectPasses=");
+            builder.Append(cullStats.SideEffectCount);
+            builder.Append(" CullCandidates=");
+            builder.Append(cullStats.Candidates.Count);
+            builder.AppendLine(" NonInvasive=True");
+        }
+
+        private static int CountNullUsages(IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages)
+        {
+            if (resourceUsages == null)
+            {
+                return 0;
+            }
+
+            var count = 0;
+            for (var usageIndex = 0; usageIndex < resourceUsages.Count; usageIndex++)
+            {
+                if (resourceUsages[usageIndex] == null)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static int CountNames(IEnumerable<string> names)
+        {
+            if (names == null)
+            {
+                return 0;
+            }
+
+            var count = 0;
+            foreach (var name in names)
+            {
+                count++;
+            }
+
+            return count;
+        }
+
+        private static void FindLongestLifetime(Dictionary<string, ResourceLifetime> lifetimes, ref string longestName, ref int longestSpan)
+        {
+            if (lifetimes == null)
+            {
+                return;
+            }
+
+            foreach (var pair in lifetimes)
+            {
+                var lifetime = pair.Value;
+                if (lifetime == null || lifetime.FirstPassIndex == int.MaxValue || lifetime.LastPassIndex == int.MinValue)
+                {
+                    continue;
+                }
+
+                var span = lifetime.LastPassIndex - lifetime.FirstPassIndex;
+                if (span > longestSpan)
+                {
+                    longestSpan = span;
+                    longestName = lifetime.Name;
+                }
+            }
+        }
+
+        private static CullCandidateStats BuildCullCandidateStats( // Analyzes future pass-culling metadata without changing execution.
+            IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages,
+            BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            var stats = new CullCandidateStats();
+            if (resourceUsages == null)
+            {
+                return stats;
+            }
+
+            var futureReadPasses = BuildFutureReadPasses(resourceUsages);
+            for (var usageIndex = 0; usageIndex < resourceUsages.Count; usageIndex++)
+            {
+                stats.TotalPasses++;
+                var usage = resourceUsages[usageIndex];
+                if (usage == null)
+                {
+                    stats.NullUsageCount++;
+                    stats.ReadinessRecords.Add(new CullReadinessRecord("Pass #" + usageIndex, false, new[] { "NullUsage" }, null));
+                    continue;
+                }
+
+                if (usage.AllowCulling)
+                {
+                    stats.AllowCullingCount++;
+                }
+                else
+                {
+                    stats.BlockedByCullingDisabled++;
+                }
+
+                if (usage.HasSideEffects)
+                {
+                    stats.SideEffectCount++;
+                }
+                else
+                {
+                    stats.NoSideEffectCount++;
+                }
+
+                if (!usage.AllowCulling || usage.HasSideEffects)
+                {
+                    stats.NeedsMetadataCount++;
+                }
+
+                var producedResources = new List<string>();
+                CollectCullProducedResources(producedResources, usage);
+                var hasTerminalWrite = HasTerminalWriteMarker(usage);
+                var hasExternalWrite = HasExternalProducedResource(producedResources, resourceRegistry);
+                var hasFutureConsumer = HasFutureConsumer(producedResources, GetEffectivePassIndex(usageIndex, usage), futureReadPasses);
+                var hasDeclaredOutputs = producedResources.Count > 0;
+                var reasons = new List<string>();
+
+                if (!usage.AllowCulling)
+                {
+                    AddUnique(reasons, "CullingDisabled");
+                }
+
+                if (usage.HasSideEffects)
+                {
+                    AddUnique(reasons, "HasSideEffects");
+                }
+
+                if (hasFutureConsumer)
+                {
+                    stats.FeedsFutureReadCount++;
+                    AddUnique(reasons, "FeedsFutureRead");
+                }
+                else if (hasDeclaredOutputs)
+                {
+                    stats.NoFutureConsumerCount++;
+                    AddUnique(reasons, "NoFutureConsumer");
+                }
+
+                if (hasExternalWrite)
+                {
+                    stats.ExternalWriteCount++;
+                    AddUnique(reasons, "ExternalWrite");
+                }
+
+                if (hasTerminalWrite)
+                {
+                    stats.TerminalWriteCount++;
+                    AddUnique(reasons, "TerminalWrite");
+                }
+
+                if (!hasDeclaredOutputs)
+                {
+                    stats.NoDeclaredOutputsCount++;
+                    AddUnique(reasons, "NoDeclaredOutputs");
+                }
+
+                var metadataReady = usage.AllowCulling && !usage.HasSideEffects;
+                var isCandidate = metadataReady && !hasTerminalWrite && !hasExternalWrite && !hasFutureConsumer;
+                if (isCandidate)
+                {
+                    AddUnique(reasons, hasDeclaredOutputs ? "OutputsHaveNoFutureRead" : "NoDeclaredOutputs");
+                }
+
+                stats.ReadinessRecords.Add(new CullReadinessRecord(FormatPassLabel(usageIndex, usage), isCandidate, reasons, producedResources));
+
+                if (usage.AllowCulling && usage.HasSideEffects)
+                {
+                    stats.BlockedBySideEffects++;
+                }
+
+                if (!usage.AllowCulling || usage.HasSideEffects)
+                {
+                    continue;
+                }
+
+                stats.MetadataReadyCount++;
+
+                if (hasTerminalWrite)
+                {
+                    stats.BlockedByTerminalWrite++;
+                    continue;
+                }
+
+                if (hasExternalWrite)
+                {
+                    stats.BlockedByExternalWrite++;
+                    continue;
+                }
+
+                if (hasFutureConsumer)
+                {
+                    stats.BlockedByFutureConsumer++;
+                    continue;
+                }
+
+                var reason = producedResources.Count == 0 ? "NoDeclaredOutputs" : "OutputsHaveNoFutureRead";
+                stats.Candidates.Add(new CullCandidate(FormatPassLabel(usageIndex, usage), reason, producedResources));
+            }
+
+            return stats;
+        }
+
+        private static void AppendCullCandidateSummary(StringBuilder builder, CullCandidateStats stats) // Reports future culling hints only.
+        {
+            builder.AppendLine("Cull Candidates:");
+
+            if (stats == null || stats.TotalPasses == 0)
+            {
+                builder.AppendLine("  <none>");
+                return;
+            }
+
+            builder.Append("  Metadata: AllowCulling=");
+            builder.Append(stats.AllowCullingCount);
+            builder.Append(" NoSideEffects=");
+            builder.Append(stats.NoSideEffectCount);
+            builder.Append(" MetadataReady=");
+            builder.Append(stats.MetadataReadyCount);
+            builder.Append(" Candidates=");
+            builder.Append(stats.Candidates.Count);
+            builder.Append(" BlockedByDisabled=");
+            builder.Append(stats.BlockedByCullingDisabled);
+            builder.Append(" BlockedBySideEffects=");
+            builder.Append(stats.BlockedBySideEffects);
+            builder.Append(" BlockedByConsumer=");
+            builder.Append(stats.BlockedByFutureConsumer);
+            builder.Append(" BlockedByExternalWrite=");
+            builder.Append(stats.BlockedByExternalWrite);
+            builder.Append(" BlockedByTerminalWrite=");
+            builder.AppendLine(stats.BlockedByTerminalWrite.ToString());
+
+            if (stats.Candidates.Count == 0)
+            {
+                if (stats.AllowCullingCount == 0)
+                {
+                    builder.AppendLine("  <none: all passes currently opt out of culling>");
+                }
+                else
+                {
+                    builder.AppendLine("  <none: metadata-ready passes still feed later reads or terminal/external writes>");
+                }
+
+                return;
+            }
+
+            var lineCount = stats.Candidates.Count < MaxCullCandidateDumpLines ? stats.Candidates.Count : MaxCullCandidateDumpLines;
+            for (var candidateIndex = 0; candidateIndex < lineCount; candidateIndex++)
+            {
+                var candidate = stats.Candidates[candidateIndex];
+                builder.Append("  ");
+                builder.Append(candidate.PassLabel);
+                builder.Append(" Reason=");
+                builder.Append(candidate.Reason);
+                builder.Append(" Outputs=");
+                AppendInlineStringList(builder, candidate.Outputs);
+                builder.AppendLine();
+            }
+
+            if (stats.Candidates.Count > lineCount)
+            {
+                builder.Append("  ... ");
+                builder.Append(stats.Candidates.Count - lineCount);
+                builder.AppendLine(" more");
+            }
+        }
+
+        private static void AppendCullReadinessSummary(StringBuilder builder, CullCandidateStats stats) // Explains why passes are not cullable yet.
+        {
+            builder.AppendLine("Cull Readiness:");
+
+            if (stats == null || stats.TotalPasses == 0)
+            {
+                builder.AppendLine("  <none>");
+                return;
+            }
+
+            builder.Append("  Summary: Ready=");
+            builder.Append(stats.Candidates.Count);
+            builder.Append(" NeedsMetadata=");
+            builder.Append(stats.NeedsMetadataCount);
+            builder.Append(" CullingDisabled=");
+            builder.Append(stats.BlockedByCullingDisabled);
+            builder.Append(" SideEffects=");
+            builder.Append(stats.SideEffectCount);
+            builder.Append(" FeedsFutureRead=");
+            builder.Append(stats.FeedsFutureReadCount);
+            builder.Append(" NoFutureConsumer=");
+            builder.Append(stats.NoFutureConsumerCount);
+            builder.Append(" ExternalWrite=");
+            builder.Append(stats.ExternalWriteCount);
+            builder.Append(" TerminalWrite=");
+            builder.Append(stats.TerminalWriteCount);
+            builder.Append(" NoDeclaredOutputs=");
+            builder.Append(stats.NoDeclaredOutputsCount);
+            builder.Append(" NullUsages=");
+            builder.AppendLine(stats.NullUsageCount.ToString());
+
+            builder.AppendLine("  Note: Readiness is diagnostic only; RenderGraph still executes every pass.");
+
+            if (stats.ReadinessRecords.Count == 0)
+            {
+                builder.AppendLine("  <none>");
+                return;
+            }
+
+            var lineCount = stats.ReadinessRecords.Count < MaxCullReadinessDumpLines ? stats.ReadinessRecords.Count : MaxCullReadinessDumpLines;
+            for (var recordIndex = 0; recordIndex < lineCount; recordIndex++)
+            {
+                AppendCullReadinessRecord(builder, stats.ReadinessRecords[recordIndex]);
+            }
+
+            if (stats.ReadinessRecords.Count > lineCount)
+            {
+                builder.Append("  ... ");
+                builder.Append(stats.ReadinessRecords.Count - lineCount);
+                builder.AppendLine(" more");
+            }
+        }
+
+        private static void AppendCullReadinessRecord(StringBuilder builder, CullReadinessRecord record)
+        {
+            if (record == null)
+            {
+                return;
+            }
+
+            builder.Append("  ");
+            builder.Append(record.PassLabel);
+            builder.Append(" Ready=");
+            builder.Append(record.IsCandidate);
+            builder.Append(" Why=");
+            AppendInlineStringList(builder, record.Reasons);
+            builder.Append(" Outputs=");
+            AppendInlineStringList(builder, record.Outputs);
+            builder.AppendLine();
+        }
+
+        private static Dictionary<string, List<int>> BuildFutureReadPasses(IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages)
+        {
+            var readPasses = new Dictionary<string, List<int>>();
+            if (resourceUsages == null)
+            {
+                return readPasses;
+            }
+
+            for (var usageIndex = 0; usageIndex < resourceUsages.Count; usageIndex++)
+            {
+                var usage = resourceUsages[usageIndex];
+                if (usage == null)
+                {
+                    continue;
+                }
+
+                var passIndex = GetEffectivePassIndex(usageIndex, usage);
+                AddReadPasses(readPasses, usage.RenderTargetAccesses, passIndex);
+                AddReadPasses(readPasses, usage.BufferAccesses, passIndex);
+                AddReadPasses(readPasses, usage.GlobalResourceAccesses, passIndex);
+            }
+
+            return readPasses;
+        }
+
+        private static void AddReadPasses(
+            Dictionary<string, List<int>> readPasses,
+            IReadOnlyList<BurtRenderTargetResourceAccess> accesses,
+            int passIndex)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                if (access.AccessType == BurtRenderResourceAccessType.Read)
+                {
+                    AddReadPass(readPasses, FormatResourceName(access.Handle.Name), passIndex);
+                }
+            }
+        }
+
+        private static void AddReadPasses(
+            Dictionary<string, List<int>> readPasses,
+            IReadOnlyList<BurtRenderBufferResourceAccess> accesses,
+            int passIndex)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                if (access.AccessType == BurtRenderResourceAccessType.Read)
+                {
+                    AddReadPass(readPasses, FormatResourceName(access.Handle.Name), passIndex);
+                }
+            }
+        }
+
+        private static void AddReadPasses(
+            Dictionary<string, List<int>> readPasses,
+            IReadOnlyList<BurtGlobalResourceAccess> accesses,
+            int passIndex)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                if (access.AccessType == BurtRenderResourceAccessType.Read)
+                {
+                    AddReadPass(readPasses, FormatResourceName(access.ResourceName), passIndex);
+                }
+            }
+        }
+
+        private static void AddReadPass(Dictionary<string, List<int>> readPasses, string resourceName, int passIndex)
+        {
+            if (!readPasses.TryGetValue(resourceName, out var passes))
+            {
+                passes = new List<int>();
+                readPasses.Add(resourceName, passes);
+            }
+
+            passes.Add(passIndex);
+        }
+
+        private static void CollectCullProducedResources(List<string> producedResources, BurtRenderPassResourceUsage usage)
+        {
+            if (producedResources == null || usage == null)
+            {
+                return;
+            }
+
+            AddCullProducedRenderTargets(producedResources, usage.RenderTargetAccesses);
+            AddCullProducedBuffers(producedResources, usage.BufferAccesses);
+            AddCullProducedGlobals(producedResources, usage.GlobalResourceAccesses);
+        }
+
+        private static void AddCullProducedRenderTargets(List<string> producedResources, IReadOnlyList<BurtRenderTargetResourceAccess> accesses)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                if (IsCullProducingAccess(access.AccessType))
+                {
+                    AddUnique(producedResources, FormatResourceName(access.Handle.Name));
+                }
+            }
+        }
+
+        private static void AddCullProducedBuffers(List<string> producedResources, IReadOnlyList<BurtRenderBufferResourceAccess> accesses)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                if (IsCullProducingAccess(access.AccessType))
+                {
+                    AddUnique(producedResources, FormatResourceName(access.Handle.Name));
+                }
+            }
+        }
+
+        private static void AddCullProducedGlobals(List<string> producedResources, IReadOnlyList<BurtGlobalResourceAccess> accesses)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                if (IsCullProducingAccess(access.AccessType))
+                {
+                    AddUnique(producedResources, FormatResourceName(access.ResourceName));
+                }
+            }
+        }
+
+        private static bool IsCullProducingAccess(BurtRenderResourceAccessType accessType)
+        {
+            return accessType == BurtRenderResourceAccessType.Write ||
+                   accessType == BurtRenderResourceAccessType.Clear ||
+                   accessType == BurtRenderResourceAccessType.Copy;
+        }
+
+        private static bool HasTerminalWriteMarker(BurtRenderPassResourceUsage usage)
+        {
+            return usage != null && usage.AllowUnconsumedWriteResources != null && usage.AllowUnconsumedWriteResources.Count > 0;
+        }
+
+        private static bool HasExternalProducedResource(IReadOnlyList<string> producedResources, BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            if (producedResources == null || resourceRegistry == null)
+            {
+                return false;
+            }
+
+            for (var resourceIndex = 0; resourceIndex < producedResources.Count; resourceIndex++)
+            {
+                var resourceName = producedResources[resourceIndex];
+                if (resourceRegistry.IsExternalRenderTarget(resourceName) || resourceRegistry.IsExternalBuffer(resourceName))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool HasFutureConsumer(
+            IReadOnlyList<string> producedResources,
+            int passIndex,
+            Dictionary<string, List<int>> readPasses)
+        {
+            if (producedResources == null || readPasses == null)
+            {
+                return false;
+            }
+
+            for (var resourceIndex = 0; resourceIndex < producedResources.Count; resourceIndex++)
+            {
+                var resourceName = producedResources[resourceIndex];
+                if (!readPasses.TryGetValue(resourceName, out var passes))
+                {
+                    continue;
+                }
+
+                for (var readIndex = 0; readIndex < passes.Count; readIndex++)
+                {
+                    if (passes[readIndex] > passIndex)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static void AppendInlineStringList(StringBuilder builder, IReadOnlyList<string> values)
+        {
+            if (values == null || values.Count == 0)
+            {
+                builder.Append("<none>");
+                return;
+            }
+
+            for (var valueIndex = 0; valueIndex < values.Count; valueIndex++)
+            {
+                if (valueIndex > 0)
+                {
+                    builder.Append(",");
+                }
+
+                builder.Append(values[valueIndex]);
+            }
+        }
+
+        private static void AppendResourceRegistry( // Dumps the resources registered before pass execution.
+            StringBuilder builder,
+            BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            builder.AppendLine("Resource Registry:");
+
+            if (resourceRegistry == null)
+            {
+                builder.AppendLine("  <none>");
+                return;
+            }
+
+            AppendRegistryNameList(builder, "  RenderTargets", resourceRegistry.RenderTargetNames, resourceRegistry, false);
+            AppendRegistryNameList(builder, "  Buffers", resourceRegistry.BufferNames, resourceRegistry, true);
+            AppendBufferRegistryDetails(builder, resourceRegistry);
+        }
+
+        private static void AppendRegistryNameList( // Writes a sorted registry name list with external markers.
+            StringBuilder builder,
+            string label,
+            IEnumerable<string> names,
+            BurtRenderGraphResourceRegistry resourceRegistry,
+            bool isBuffer)
+        {
+            builder.Append(label);
+            builder.Append(": ");
+
+            var sortedNames = new List<string>();
+            if (names != null)
+            {
+                foreach (var name in names)
+                {
+                    sortedNames.Add(name);
+                }
+            }
+
+            if (sortedNames.Count == 0)
+            {
+                builder.AppendLine("<none>");
+                return;
+            }
+
+            sortedNames.Sort();
+
+            for (var nameIndex = 0; nameIndex < sortedNames.Count; nameIndex++)
+            {
+                if (nameIndex > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                var name = sortedNames[nameIndex];
+                builder.Append(FormatResourceName(name));
+
+                if (resourceRegistry != null && IsRegistryResourceExternal(resourceRegistry, name, isBuffer))
+                {
+                    builder.Append("(External)");
+                }
+            }
+
+            builder.AppendLine();
+        }
+
+        private static bool IsRegistryResourceExternal(BurtRenderGraphResourceRegistry resourceRegistry, string name, bool isBuffer)
+        {
+            return isBuffer ? resourceRegistry.IsExternalBuffer(name) : resourceRegistry.IsExternalRenderTarget(name);
+        }
+
+        private static void AppendBufferRegistryDetails(StringBuilder builder, BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            if (resourceRegistry == null)
+            {
+                return;
+            }
+
+            var bufferNames = new List<string>();
+            foreach (var name in resourceRegistry.BufferNames)
+            {
+                bufferNames.Add(name);
+            }
+
+            if (bufferNames.Count == 0)
+            {
+                return;
+            }
+
+            bufferNames.Sort();
+            for (var nameIndex = 0; nameIndex < bufferNames.Count; nameIndex++)
+            {
+                var name = bufferNames[nameIndex];
+                builder.Append("  Buffer ");
+                builder.Append(FormatResourceName(name));
+                builder.Append(": Allocated=");
+                builder.Append(resourceRegistry.IsBufferAllocated(name));
+
+                if (resourceRegistry.TryGetBufferDescriptor(name, out var descriptor) && descriptor.IsValid)
+                {
+                    builder.Append(" Count=");
+                    builder.Append(descriptor.Count);
+                    builder.Append(" Stride=");
+                    builder.Append(descriptor.Stride);
+                    builder.Append(" Target=");
+                    builder.Append(descriptor.Target);
+                }
+                else if (!resourceRegistry.IsExternalBuffer(name))
+                {
+                    builder.Append(" Descriptor=<none>");
+                }
+
+                if (resourceRegistry.IsExternalBuffer(name))
+                {
+                    builder.Append(" External=True");
+                }
+
+                builder.AppendLine();
+            }
+        }
+
         private static void AppendPassUsages( // 写入所有 Pass 的资源使用记录。
             StringBuilder builder, // 接收要写入的字符串构建器。
             IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages) // 接收资源使用记录列表，可能为空。
@@ -791,13 +2279,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             AppendPassMetadata(builder, usage); // Show pass classification and future culling metadata next to the pass boundary.
 
+            AppendOptionalStringList(builder, "    Allow Unconsumed Write", usage.AllowUnconsumedWriteResources); // Shows resources intentionally ending as side effects.
+
             AppendRenderTargetAccessList(builder, "    Access", usage.RenderTargetAccesses); // Writes typed RT accesses, separating Allocate/Bind/Clear/Write/Release.
+
+            AppendBufferAccessList(builder, "    Buffer Access", usage.BufferAccesses); // Writes typed logical buffer accesses for future tiled/cluster passes.
 
             AppendGlobalResourceAccessList(builder, "    Global Access", usage.GlobalResourceAccesses); // Writes typed global resource accesses.
 
             AppendRenderTargetList(builder, "    Read", usage.ReadRenderTargets); // 写入当前 Pass 声明读取的 RenderTarget 列表。
 
             AppendRenderTargetList(builder, "    Write", usage.WriteRenderTargets); // 写入当前 Pass 声明写入的 RenderTarget 列表。
+
+            AppendBufferList(builder, "    Read Buffer", usage.ReadBuffers); // Writes logical buffers read by this pass.
+
+            AppendBufferList(builder, "    Write Buffer", usage.WriteBuffers); // Writes logical buffers written by this pass.
 
             AppendOptionalStringList(builder, "    Read Global", usage.ReadGlobalResources); // 只在非空时写入当前 Pass 声明读取的逻辑全局资源列表。
 
@@ -842,6 +2338,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
                 var access = accesses[accessIndex];
                 AppendRenderTarget(builder, access.Handle);
+                builder.Append("(");
+                builder.Append(access.AccessType);
+                builder.Append(")");
+            }
+
+            builder.AppendLine();
+        }
+
+        private static void AppendBufferAccessList( // Writes typed logical buffer accesses for one pass.
+            StringBuilder builder,
+            string label,
+            IReadOnlyList<BurtRenderBufferResourceAccess> accesses)
+        {
+            if (accesses == null || accesses.Count == 0)
+            {
+                return;
+            }
+
+            builder.Append(label);
+            builder.Append(": ");
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                if (accessIndex > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                var access = accesses[accessIndex];
+                AppendBuffer(builder, access.Handle);
                 builder.Append("(");
                 builder.Append(access.AccessType);
                 builder.Append(")");
@@ -909,6 +2435,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.AppendLine(); // 当前资源方向写完后换行，下一行输出另一个方向或下一个 Pass。
         }
 
+        private static void AppendBufferList( // Writes a logical buffer list when non-empty to keep dumps compact.
+            StringBuilder builder,
+            string label,
+            IReadOnlyList<BurtRenderBufferHandle> handles)
+        {
+            if (handles == null || handles.Count == 0)
+            {
+                return;
+            }
+
+            builder.Append(label);
+            builder.Append(": ");
+
+            for (var handleIndex = 0; handleIndex < handles.Count; handleIndex++)
+            {
+                if (handleIndex > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                AppendBuffer(builder, handles[handleIndex]);
+            }
+
+            builder.AppendLine();
+        }
+
         private static void AppendResourceLifetimes( // Writes first/last resource access ranges for the configured graph.
             StringBuilder builder,
             IReadOnlyList<BurtRenderPassResourceUsage> resourceUsages,
@@ -973,6 +2525,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 var passIndex = GetEffectivePassIndex(usageIndex, usage);
 
                 AddRenderTargetLifetimeAccesses(lifetimes, usage.RenderTargetAccesses, passIndex, resourceRegistry);
+                AddBufferLifetimeAccesses(lifetimes, usage.BufferAccesses, passIndex, resourceRegistry);
                 AddGlobalResourceLifetimeAccesses(lifetimes, usage.GlobalResourceAccesses, passIndex);
             }
 
@@ -999,6 +2552,37 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 lifetime.RecordAccess(passIndex, access.AccessType);
 
                 if (resourceRegistry != null && resourceRegistry.IsExternalRenderTarget(handle.Name))
+                {
+                    lifetime.IsExternal = true;
+                }
+
+                if (!handle.IsValid)
+                {
+                    lifetime.HasMissingDeclaration = true;
+                }
+            }
+        }
+
+        private static void AddBufferLifetimeAccesses( // Adds typed logical buffer accesses into resource lifetime records.
+            Dictionary<string, ResourceLifetime> lifetimes,
+            IReadOnlyList<BurtRenderBufferResourceAccess> accesses,
+            int passIndex,
+            BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                var handle = access.Handle;
+                var lifetime = GetOrCreateLifetime(lifetimes, FormatResourceName(handle.Name));
+
+                lifetime.RecordAccess(passIndex, access.AccessType);
+
+                if (resourceRegistry != null && resourceRegistry.IsExternalBuffer(handle.Name))
                 {
                     lifetime.IsExternal = true;
                 }
@@ -1127,6 +2711,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
                 AppendOptionalStringList(builder, "    Read", summary.Readers);
 
+                AppendOptionalStringList(builder, "    Allow Unconsumed Write", summary.AllowedUnconsumedWriters);
+
                 AppendOptionalStringList(builder, "    Release", summary.Releasers);
 
                 if (summary.HasMissingDeclaration) // 缺失资源给出额外提示。
@@ -1158,7 +2744,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
                 AddResourceAccesses(summaries, usage.RenderTargetAccesses, FormatPassLabel(usageIndex, usage), resourceRegistry); // Records typed RT accesses.
 
+                AddBufferResourceAccesses(summaries, usage.BufferAccesses, FormatPassLabel(usageIndex, usage), resourceRegistry); // Records typed logical buffer accesses.
+
                 AddGlobalResourceAccesses(summaries, usage.GlobalResourceAccesses, FormatPassLabel(usageIndex, usage)); // Records typed global resource accesses.
+
+                AddTerminalWriteResources(summaries, usage.AllowUnconsumedWriteResources, FormatPassLabel(usageIndex, usage)); // Records explicit terminal side-effect writes.
             }
 
             return summaries; // 返回完整资源摘要。
@@ -1195,6 +2785,37 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             }
         }
 
+        private static void AddBufferResourceAccesses( // Adds typed logical buffer accesses to resource summaries.
+            Dictionary<string, ResourceSummary> summaries,
+            IReadOnlyList<BurtRenderBufferResourceAccess> accesses,
+            string passLabel,
+            BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            if (accesses == null)
+            {
+                return;
+            }
+
+            for (var accessIndex = 0; accessIndex < accesses.Count; accessIndex++)
+            {
+                var access = accesses[accessIndex];
+                var handle = access.Handle;
+                var summary = GetOrCreateSummary(summaries, FormatResourceName(handle.Name));
+
+                if (resourceRegistry != null && resourceRegistry.IsExternalBuffer(handle.Name))
+                {
+                    summary.IsExternal = true;
+                }
+
+                if (!handle.IsValid)
+                {
+                    summary.HasMissingDeclaration = true;
+                }
+
+                AddTypedAccess(summary, passLabel, access.AccessType);
+            }
+        }
+
         private static void AddGlobalResourceAccesses( // Adds typed global resource accesses to resource summaries.
             Dictionary<string, ResourceSummary> summaries,
             IReadOnlyList<BurtGlobalResourceAccess> accesses,
@@ -1211,6 +2832,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 var summary = GetOrCreateSummary(summaries, FormatResourceName(access.ResourceName));
 
                 AddTypedAccess(summary, passLabel, access.AccessType);
+            }
+        }
+
+        private static void AddTerminalWriteResources( // Adds explicit terminal-write markers to resource summaries.
+            Dictionary<string, ResourceSummary> summaries,
+            IReadOnlyList<string> resourceNames,
+            string passLabel)
+        {
+            if (resourceNames == null)
+            {
+                return;
+            }
+
+            for (var resourceIndex = 0; resourceIndex < resourceNames.Count; resourceIndex++)
+            {
+                var resourceName = resourceNames[resourceIndex];
+                if (string.IsNullOrEmpty(resourceName))
+                {
+                    continue;
+                }
+
+                var summary = GetOrCreateSummary(summaries, FormatResourceName(resourceName));
+                AddUnique(summary.AllowedUnconsumedWriters, passLabel);
             }
         }
 
@@ -1304,6 +2948,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             if (!handle.IsValid) // 如果句柄无效，说明 Pass 声明了一个资源表里没有的目标。
             {
                 builder.Append(" (Invalid/Missing)"); // 在资源名后标记缺失，让资源注册问题在 dump 中非常醒目。
+            }
+        }
+
+        private static void AppendBuffer( // Writes one logical buffer handle.
+            StringBuilder builder,
+            BurtRenderBufferHandle handle)
+        {
+            builder.Append(FormatResourceName(handle.Name));
+
+            if (!handle.IsValid)
+            {
+                builder.Append(" (Invalid/Missing)");
             }
         }
 
@@ -1410,6 +3066,134 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             }
         }
 
+        private sealed class ResourceRiskCounters // Compact validation counters for the Resource Risks section.
+        {
+            public int ReadBeforeWrite;
+
+            public int Unregistered;
+
+            public int Missing;
+
+            public int DuplicateDeclarations;
+
+            public int SamePassReadWrite;
+
+            public int ReleaseIssues;
+
+            public int GlobalStateIssues;
+
+            public int CullingIssues;
+
+            public int TerminalWriteIssues;
+
+            public int NoConsumer;
+
+            public int Other;
+
+            public int Total => ReadBeforeWrite + Unregistered + Missing + DuplicateDeclarations + SamePassReadWrite + ReleaseIssues + GlobalStateIssues + CullingIssues + TerminalWriteIssues + NoConsumer + Other;
+        }
+
+        private sealed class CullCandidateStats // Debug-only summary for future pass-culling metadata.
+        {
+            public int TotalPasses;
+
+            public int NullUsageCount;
+
+            public int AllowCullingCount;
+
+            public int SideEffectCount;
+
+            public int NoSideEffectCount;
+
+            public int MetadataReadyCount;
+
+            public int NeedsMetadataCount;
+
+            public int BlockedByCullingDisabled;
+
+            public int BlockedBySideEffects;
+
+            public int BlockedByFutureConsumer;
+
+            public int BlockedByExternalWrite;
+
+            public int BlockedByTerminalWrite;
+
+            public int FeedsFutureReadCount;
+
+            public int NoFutureConsumerCount;
+
+            public int ExternalWriteCount;
+
+            public int TerminalWriteCount;
+
+            public int NoDeclaredOutputsCount;
+
+            public readonly List<CullCandidate> Candidates = new List<CullCandidate>();
+
+            public readonly List<CullReadinessRecord> ReadinessRecords = new List<CullReadinessRecord>();
+        }
+
+        private sealed class CullCandidate // One diagnostic-only future culling candidate.
+        {
+            public readonly string PassLabel;
+
+            public readonly string Reason;
+
+            public readonly List<string> Outputs = new List<string>();
+
+            public CullCandidate(string passLabel, string reason, IReadOnlyList<string> outputs)
+            {
+                PassLabel = string.IsNullOrEmpty(passLabel) ? "<unnamed pass>" : passLabel;
+                Reason = string.IsNullOrEmpty(reason) ? "<none>" : reason;
+
+                if (outputs == null)
+                {
+                    return;
+                }
+
+                for (var outputIndex = 0; outputIndex < outputs.Count; outputIndex++)
+                {
+                    Outputs.Add(outputs[outputIndex]);
+                }
+            }
+        }
+
+        private sealed class CullReadinessRecord // One diagnostic row explaining current culling blockers for a pass.
+        {
+            public readonly string PassLabel;
+
+            public readonly bool IsCandidate;
+
+            public readonly List<string> Reasons = new List<string>();
+
+            public readonly List<string> Outputs = new List<string>();
+
+            public CullReadinessRecord(string passLabel, bool isCandidate, IReadOnlyList<string> reasons, IReadOnlyList<string> outputs)
+            {
+                PassLabel = string.IsNullOrEmpty(passLabel) ? "<unnamed pass>" : passLabel;
+                IsCandidate = isCandidate;
+                CopyStrings(reasons, Reasons);
+                CopyStrings(outputs, Outputs);
+            }
+
+            private static void CopyStrings(IReadOnlyList<string> source, List<string> destination)
+            {
+                if (source == null || destination == null)
+                {
+                    return;
+                }
+
+                for (var valueIndex = 0; valueIndex < source.Count; valueIndex++)
+                {
+                    if (!string.IsNullOrEmpty(source[valueIndex]))
+                    {
+                        destination.Add(source[valueIndex]);
+                    }
+                }
+            }
+        }
+
         private sealed class ResourceSummary // 定义资源视角的调试摘要，只在 DebugUtility 内部使用。
         {
             public readonly string Name; // 保存资源名。
@@ -1425,6 +3209,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             public readonly List<string> Copiers = new List<string>(); // Passes that copy into this resource.
 
             public readonly List<string> Readers = new List<string>(); // Passes that read this resource.
+
+            public readonly List<string> AllowedUnconsumedWriters = new List<string>(); // Passes that intentionally leave this write without a consumer.
 
             public readonly List<string> Releasers = new List<string>(); // Passes that release this resource.
 

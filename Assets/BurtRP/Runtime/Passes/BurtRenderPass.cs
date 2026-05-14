@@ -59,7 +59,7 @@
                 return BurtRenderPassKind.PostProcess;
             }
 
-            if (Contains(passName, "Deferred Lighting") || Contains(passName, "HiZ") || Contains(passName, "Screen Space Reflections"))
+            if (IsDeferredLightingPass(passName) || Contains(passName, "HiZ") || Contains(passName, "Screen Space Reflections"))
             {
                 return BurtRenderPassKind.FullScreen;
             }
@@ -75,6 +75,11 @@
         private static bool Contains(string passName, string token)
         {
             return !string.IsNullOrEmpty(passName) && passName.IndexOf(token, System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsDeferredLightingPass(string passName)
+        {
+            return Contains(passName, "Deferred") && Contains(passName, "Lighting");
         }
     }
 
@@ -94,5 +99,63 @@
 
         public abstract void Execute( // 定义 Pass 的执行入口，每个具体 Pass 都必须实现这个函数。
             BurtRenderGraphContext context); // 接收 RenderGraph 执行上下文，里面包含 ScriptableContext、Request、Asset、资源表。
+    }
+
+    internal sealed class BurtAllocateRenderBufferPass : BurtRenderPass // Generic RenderGraph buffer allocation pass used by tiled/cluster setup.
+    {
+        private readonly string bufferName;
+
+        public BurtAllocateRenderBufferPass(string bufferName)
+        {
+            this.bufferName = bufferName;
+        }
+
+        public override string Name => "Burt Allocate Buffer " + (string.IsNullOrEmpty(bufferName) ? "<unnamed>" : bufferName);
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.Allocate;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.WriteBuffer(bufferName);
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || context.ResourceRegistry == null)
+            {
+                return;
+            }
+
+            context.ResourceRegistry.AllocateBuffer(bufferName);
+        }
+    }
+
+    internal sealed class BurtReleaseRenderBufferPass : BurtRenderPass // Generic RenderGraph buffer release pass used by tiled/cluster cleanup.
+    {
+        private readonly string bufferName;
+
+        public BurtReleaseRenderBufferPass(string bufferName)
+        {
+            this.bufferName = bufferName;
+        }
+
+        public override string Name => "Burt Release Buffer " + (string.IsNullOrEmpty(bufferName) ? "<unnamed>" : bufferName);
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.Release;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.ReadBuffer(bufferName);
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || context.ResourceRegistry == null)
+            {
+                return;
+            }
+
+            context.ResourceRegistry.ReleaseBuffer(bufferName);
+        }
     }
 }

@@ -55,6 +55,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
             resources.RegisterCameraDepthTexture(); // 把 BurtRP 自己的临时深度 RT 注册成 CameraDepth，让颜色目标和深度目标真正分离。
 
+            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName, BurtLightingData.CreateAdditionalLightBufferDescriptor()); // Register the graph-owned additional light buffer used by future tiled/cluster lighting.
+
             if (ShouldRegisterPostProcessColor(request, asset)) // 如果当前 request 启用了后处理框架，就把后处理中间颜色纳入资源表。
             {
                 resources.RegisterPostProcessColorTexture(); // 注册 PostProcessColor 临时 RT，让分配、No-op Copy 和释放 Pass 使用同一个资源句柄。
@@ -65,6 +67,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 resources.RegisterGBuffer0Texture(); // 注册 GBuffer0 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer1Texture(); // 注册 GBuffer1 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer2Texture(); // 注册 GBuffer2 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
+                if (ShouldRegisterTileLightBuffers(request, asset))
+                {
+                    resources.RegisterBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName, BurtTiledLightData.CreateTileLightCountBufferDescriptor(request.Camera));
+                    if (ShouldRegisterTileLightListBuffers(request, asset))
+                    {
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.TileLightListBufferName, BurtTiledLightData.CreateTileLightListBufferDescriptor(request.Camera));
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName, BurtTiledLightData.CreateTileLightOffsetBufferDescriptor(request.Camera));
+                    }
+                }
                 if (ShouldRegisterHiZDepth(request, asset))
                 {
                     resources.RegisterHiZDepthTexture();
@@ -76,11 +87,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     resources.RegisterScreenSpaceReflectionDenoisedColorTexture();
                     resources.RegisterScreenSpaceReflectionTemporalColorTexture();
                 }
+
+                if (ShouldRegisterScreenSpaceAmbientOcclusion(request, asset))
+                {
+                    resources.RegisterScreenSpaceAmbientOcclusionRawTexture();
+                    resources.RegisterScreenSpaceAmbientOcclusionTexture();
+                }
             }
 
             if (ShouldRegisterMainLightShadowMap(request, asset)) // 如果当前 request 的主光需要阴影，就把主光阴影图纳入资源表。
             {
                 resources.RegisterMainLightShadowMapTexture(); // 注册主光阴影图临时 RT，让后续分配、绘制和释放 Pass 使用同一个资源句柄。
+            }
+
+            if (ShouldRegisterAdditionalLightShadowAtlas(request))
+            {
+                resources.RegisterAdditionalLightShadowAtlasTexture();
             }
         }
 
@@ -96,6 +118,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderPipelineAsset asset) // 接收当前管线资产，用来让资源注册尊重主光阴影总开关和默认配置。
         {
             return BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 复用阴影工具的判定逻辑，保证资源注册和 Pass 组装使用同一套条件。
+        }
+
+        private static bool ShouldRegisterAdditionalLightShadowAtlas(BurtRenderRequest request)
+        {
+            return BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(request);
         }
 
         private static bool ShouldRegisterGBufferTargets( // 定义判断当前 request 是否需要注册 Deferred GBuffer 资源的辅助函数。
@@ -132,11 +159,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             return ShouldRegisterGBufferTargets(request, asset) && BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
         }
 
+        private static bool ShouldRegisterTileLightBuffers(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) &&
+                BurtTiledLightData.ShouldUseTiledLightResources(request, asset, true);
+        }
+
+        private static bool ShouldRegisterTileLightListBuffers(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) &&
+                BurtTiledLightData.ShouldUseTileLightListResources(request, asset, true);
+        }
+
         private static bool ShouldRegisterScreenSpaceReflectionColor(
             BurtRenderRequest request,
             BurtRenderPipelineAsset asset)
         {
             return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflections(request, asset);
+        }
+
+        private static bool ShouldRegisterScreenSpaceAmbientOcclusion(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(request, asset);
         }
 
         public void AddPass(BurtRenderPass pass) // 定义添加 Pass 的函数，Assembler 会通过它把 Pass 放进图里。
@@ -196,6 +246,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RT 生命周期选项。
         {
             return BurtRenderGraphDebugUtility.BuildDump(request, passes.Count, resourceUsages, validationMessages, resources, renderOptions); // 把 request、Pass、资源声明、校验和 RT 生命周期选项交给统一工具格式化。
+        }
+
+        public void FlushDeferredResourceReleases()
+        {
+            resources.FlushDeferredBufferReleases();
         }
 
         public string DumpDebugInfo( // 定义带管线资产状态的 RenderGraph 调试文本入口。

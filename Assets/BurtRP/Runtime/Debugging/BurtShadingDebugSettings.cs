@@ -39,6 +39,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         GBufferDiffuseColor = 137, // GBuffer 调试：显示从 GBuffer 还原 PBRMaterialData 后的 DiffuseColor。
         GBufferHairStrandDirection = 138, // GBuffer 调试：只显示 Hair 像素复用 GBuffer1.rg 存储的 strand direction。
         GBufferHairScatter = 139, // GBuffer 调试：只显示 Hair 像素复用 GBuffer1.b material channel 存储的 scatter。
+        GBufferHairShift = 140, // GBuffer 调试：只显示 Hair 像素复用 GBuffer1.b material channel 存储的 longitudinal shift scale。
         DetailLighting = 200, // 光照调试：参考 XRender Detail Lighting，用 0.18 中灰 BaseColor 重新计算光照，方便只看明暗细节。
         IndirectLighting = 201, // 光照调试：只显示 PBR 间接光，方便检查 SH 漫反射和 Reflection Probe 镜面反射。
         DirectDiffuse = 202, // 光照调试：只显示直接漫反射，方便检查 NdotL、阴影和 1/PI。
@@ -53,8 +54,23 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         HairSecondaryLobe = 211, // Hair 调试：显示 TT/Secondary 彩色高光 lobe，非 Hair 材质为黑。
         HairTransmissionLobe = 212, // Hair 调试：显示当前近似 backlit/transmission lobe，非 Hair 材质为黑。
         HairScatter = 213, // Hair 调试：显示参与 lighting 的 scatter 强度，非 Hair 材质为黑。
+        ShadowCascadeIndex = 214, // 阴影调试：用颜色显示当前像素命中的主光 CSM cascade。
+        ShadowCascadeBlend = 215, // 阴影调试：显示 cascade 边界混合权重，白色表示正在混合到下一级 cascade。
+        ShadowDistanceFade = 216, // 阴影调试：显示最后一级 cascade 的远距离 fade，白色表示已经淡出到无阴影。
+        ShadowPCSSRadius = 217, // 阴影调试：显示当前像素估算出的 PCSS 半影半径。
+        ShadowReceiverDepthDelta = 218, // 阴影调试：0.5 灰表示 receiver/shadow depth 基本对齐，亮表示 acne 压力，暗表示 bias 过强。
+        ShadowPCSSBlockerFraction = 225, // 阴影调试：显示 PCSS blocker search 命中的 blocker 样本占比。
+        AdditionalLighting = 219, // 光照调试：只显示追加光直接光，不包含主光、间接光和自发光。
+        AdditionalDiffuse = 220, // 光照调试：只显示追加光漫反射，方便检查多光源 NdotL 和距离衰减。
+        AdditionalSpecular = 221, // 光照调试：只显示追加光高光，方便检查多光源镜面贡献。
+        HairAdditionalLighting = 222, // Hair 调试：只显示 Hair 像素的追加光直接光，非 Hair 材质为黑。
+        TileLightCount = 223, // Tiled light debug: full-screen per-tile additional light count.
+        TileLightOccupancy = 224, // Tiled light debug: per-tile list occupancy versus max lights per tile.
         CameraDepth = 300, // 全屏调试：复用 BurtRP 当前已有的 CameraDepth debug pass。
         MainLightShadow = 301, // 全屏调试：复用 BurtRP 当前已有的 MainLightShadow debug pass。
+        ScreenSpaceAmbientOcclusionRaw = 302, // SSAO debug: raw AO before optional blur.
+        ScreenSpaceAmbientOcclusionFinal = 303, // SSAO debug: final AO texture consumed by deferred lighting.
+        ScreenSpaceAmbientOcclusionOverlay = 304, // SSAO debug: final AO multiplied over the current camera color.
         ScreenSpaceReflectionRawHitMask = 309, // SSR debug: raw raymarch hit before resolve filters.
         ScreenSpaceReflectionHitMask = 310, // SSR 调试：显示最终参与 composite 的屏幕空间反射遮罩。
         ScreenSpaceReflectionHitUV = 311, // SSR 调试：显示命中位置的屏幕 UV，方便检查方向和翻转。
@@ -68,7 +84,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceReflectionResolveAlpha = 319, // SSR debug: final alpha used by composite.
         TemporalAAHistory = 320, // TAA debug: reprojected history color.
         TemporalAAFeedback = 321, // TAA debug: final history feedback weight.
-        TemporalAARejection = 322, // TAA debug: luma/clip/depth-normal rejection weights.
+        TemporalAARejection = 322, // TAA debug: luma/clip/depth-normal pass weights; bright means stable/accepted.
         TemporalAAHistoryUV = 323, // TAA debug: history UV and in-bounds state.
         TemporalAADifference = 324, // TAA debug: current frame versus history difference.
         TemporalAAVelocity = 325, // TAA debug: reprojection velocity, gray means zero motion.
@@ -100,7 +116,21 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceReflectionDepthQuality = 351, // SSR debug: trace depth quality after softened thickness gate.
         ScreenSpaceReflectionWorldQuality = 352, // SSR debug: trace world-space ray distance quality.
         ScreenSpaceReflectionResolveQuality = 353, // SSR debug: combined trace quality before denoise/temporal resolve.
-        ScreenSpaceReflectionSurfaceSupport = 354 // SSR debug: same-surface support around the traced hit point.
+        ScreenSpaceReflectionSurfaceSupport = 354, // SSR debug: same-surface support around the traced hit point.
+        ScreenSpaceReflectionHiZSkipCandidate = 355, // SSR debug: raw HiZ empty-space skip candidate without affecting the trace.
+        ScreenSpaceReflectionHiZMipLevel = 356, // SSR debug: HiZ mip level that would be considered for skip diagnostics.
+        ScreenSpaceReflectionHiZDivergence = 357, // SSR debug: raw HiZ skip candidate rejected by mip0 guard.
+        ScreenSpaceReflectionHiZMissedHits = 358, // SSR debug: red marks stable mip0 hits missed by the candidate HiZ skip trace.
+        ScreenSpaceReflectionHiZRawHitMiss = 359, // SSR debug: red marks raw trace hits lost by the candidate HiZ skip trace.
+        ScreenSpaceReflectionHiZResolvedHitMiss = 360, // SSR debug: red marks resolved trace hits lost by the candidate HiZ skip trace.
+        ScreenSpaceReflectionHiZVisibilityMiss = 361, // SSR debug: red marks visible SSR pixels lost after candidate HiZ visibility weighting.
+        ScreenSpaceReflectionHiZSkipUsed = 362, // SSR debug: candidate HiZ trace pixels that actually skipped at least one cell.
+        ScreenSpaceReflectionHiZProbeBlocked = 363, // SSR debug: candidate HiZ skip attempts blocked by local mip0 raw-hit proof.
+        ScreenSpaceReflectionHiZStepCompare = 364, // SSR debug: green means candidate used fewer normalized steps, red means more, blue means near equal.
+        TemporalAARejectionReasons = 365, // TAA debug: RGB rejection causes, with magenta highlighting clamp pressure.
+        TemporalAAFeedbackWeight = 367, // TAA debug: heatmap of the final history feedback weight.
+        ScreenSpaceReflectionHiZWorkCompare = 366, // SSR debug: green means candidate has lower estimated work including proof probes, red means higher.
+        ScreenSpaceReflectionHiZStepSaved = 368 // SSR debug: production guarded HiZ saved normalized ray steps versus stable mip0, green means saved and red means regression.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -134,6 +164,24 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         public static BurtShadingDebugMode PreviousMode => previousMode; // 暴露上一个模式，当前最小版本暂时只作为状态记录。
 
         public static bool IsDebugging => currentMode != BurtShadingDebugMode.None; // 只要不是 None，就认为 debug 已开启。
+
+        public static bool UseTileLightCpuDebugColorTextureFallback { get; set; } // Diagnostic fallback for tile-light debug; StructuredBuffer remains the default path.
+
+        private static int tileLightDebugMaxLightsPerTile = BurtLightingData.MaxAdditionalLights; // Debug-only tile-list capacity override; normal lighting still uses MaxAdditionalLights.
+
+        public static int TileLightDebugMaxLightsPerTile
+        {
+            get => tileLightDebugMaxLightsPerTile;
+            set => tileLightDebugMaxLightsPerTile = Mathf.Clamp(value, 1, BurtLightingData.MaxAdditionalLights);
+        }
+
+        public static bool IsMainLightShadowDebugMode(BurtShadingDebugMode mode) // 统一判断主光阴影相关调试模式，方便日志和阴影诊断共享同一套入口。
+        {
+            return mode == BurtShadingDebugMode.ShadowAttenuation
+                || (mode >= BurtShadingDebugMode.ShadowCascadeIndex && mode <= BurtShadingDebugMode.ShadowReceiverDepthDelta)
+                || mode == BurtShadingDebugMode.ShadowPCSSBlockerFraction
+                || mode == BurtShadingDebugMode.MainLightShadow;
+        }
 
         public static void ApplyGlobalShaderProperties() // 把当前 shading debug 状态上传给 shader。
         {
