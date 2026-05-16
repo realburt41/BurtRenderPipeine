@@ -21,13 +21,52 @@ MonoBehaviour:
     m_Value: 0.5
   intensity:
     m_OverrideState: 1
-    m_Value: 0.2
+    m_Value: 1.1
   scatter:
     m_OverrideState: 0
     m_Value: 0.65
+  sizeScale:
+    m_OverrideState: 0
+    m_Value: 1
   maxIterations:
     m_OverrideState: 0
     m_Value: 5
+  filter1Size:
+    m_OverrideState: 0
+    m_Value: 0.3
+  filter2Size:
+    m_OverrideState: 0
+    m_Value: 1
+  filter3Size:
+    m_OverrideState: 0
+    m_Value: 2
+  filter4Size:
+    m_OverrideState: 0
+    m_Value: 10
+  filter5Size:
+    m_OverrideState: 0
+    m_Value: 30
+  filter6Size:
+    m_OverrideState: 0
+    m_Value: 64
+  filter1Tint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  filter2Tint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  filter3Tint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  filter4Tint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  filter5Tint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  filter6Tint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
 --- !u!114 &-4438491104656152674
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -89,6 +128,31 @@ MonoBehaviour:
   pcssMaxFilterRadius:
     m_OverrideState: 1
     m_Value: 24
+--- !u!114 &-1522021868769821207
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e99cdea3ba647f3ba7346377364c620, type: 3}
+  m_Name: BurtColorAdjustmentsVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  saturation:
+    m_OverrideState: 0
+    m_Value: 1
+  contrast:
+    m_OverrideState: 0
+    m_Value: 1
+  gamma:
+    m_OverrideState: 0
+    m_Value: 1
+  colorFilter:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -103,7 +167,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   components:
   - {fileID: -5432317182717837885}
-  - {fileID: 8629201300352807944}
+  - {fileID: -1522021868769821207}
   - {fileID: 9113136322530897853}
   - {fileID: 3971589225541114367}
   - {fileID: 1724650135256992785}
@@ -134,15 +198,30 @@ MonoBehaviour:
   sampleCount:
     m_OverrideState: 0
     m_Value: 16
+  horizonSearch:
+    m_OverrideState: 0
+    m_Value: 1
+  directionCount:
+    m_OverrideState: 0
+    m_Value: 2
   bias:
     m_OverrideState: 0
     m_Value: 0.02
   power:
     m_OverrideState: 0
     m_Value: 1
+  halfResolution:
+    m_OverrideState: 0
+    m_Value: 1
   blur:
     m_OverrideState: 0
     m_Value: 1
+  spatialDenoise:
+    m_OverrideState: 0
+    m_Value: 1
+  blurSharpness:
+    m_OverrideState: 0
+    m_Value: 0.12
   thickness:
     m_OverrideState: 0
     m_Value: 0.5
@@ -215,7 +294,7 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 2
   postExposure:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0
   filmSlope:
     m_OverrideState: 0
@@ -241,31 +320,6 @@ MonoBehaviour:
   toneCurveAmount:
     m_OverrideState: 0
     m_Value: 1
---- !u!114 &8629201300352807944
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9e99cdea3ba647f3ba7346377364c620, type: 3}
-  m_Name: BurtColorAdjustmentsVolumeComponent
-  m_EditorClassIdentifier: 
-  active: 1
-  saturation:
-    m_OverrideState: 0
-    m_Value: 1
-  contrast:
-    m_OverrideState: 0
-    m_Value: 1
-  gamma:
-    m_OverrideState: 0
-    m_Value: 1
-  colorFilter:
-    m_OverrideState: 0
-    m_Value: {r: 1, g: 1, b: 1, a: 1}
 --- !u!114 &9113136322530897853
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -351,3 +405,15 @@ MonoBehaviour:
   depthWeightedFilterFloor:
     m_OverrideState: 0
     m_Value: 0.12
+  debugFreezeJitter:
+    m_OverrideState: 0
+    m_Value: 0
+  debugJitterFrame:
+    m_OverrideState: 0
+    m_Value: 0
+  debugOverrideJitterScale:
+    m_OverrideState: 0
+    m_Value: 0
+  debugJitterScale:
+    m_OverrideState: 0
+    m_Value: 1

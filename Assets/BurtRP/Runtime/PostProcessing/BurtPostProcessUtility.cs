@@ -8,12 +8,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
         public static bool IsPostProcessSuppressedByShadingDebug()
         {
             return BurtShadingDebugSettings.IsDebugging &&
+                !IsBloomPrefilterDebugRequested() &&
                 !IsTemporalAADebugRequested();
+        }
+
+        public static bool IsBloomPrefilterDebugRequested()
+        {
+            return BurtShadingDebugSettings.Mode == BurtShadingDebugMode.BloomPrefilter;
         }
 
         public static bool IsTemporalAADebugRequested()
         {
             return BurtTemporalAAUtility.IsTemporalAADebugMode(BurtShadingDebugSettings.Mode);
+        }
+
+        public static BurtBloomDebugView ResolveBloomDebugView(BurtBloomSettings settings)
+        {
+            return IsBloomPrefilterDebugRequested() ? BurtBloomDebugView.Prefilter : settings.DebugView;
         }
 
         public static bool ShouldUsePostProcessFramework( // 定义判断当前 request 是否需要后处理框架的统一入口。
@@ -46,31 +57,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             var temporalAADebugRequested = IsTemporalAADebugRequested();
+            var bloomPrefilterDebugRequested = IsBloomPrefilterDebugRequested();
 
             if (asset == null) // 如果管线资产为空，说明当前没有 Inspector 配置来源。
             {
-                return temporalAADebugRequested; // TAA debug still needs the post stack so it can show a disabled/invalid state.
+                return temporalAADebugRequested || bloomPrefilterDebugRequested; // TAA/Bloom debug still need the post stack so they can show a disabled/invalid state.
             }
 
             var settings = asset.PostProcessSettings; // 从管线资产读取后处理框架设置，资产内部会处理旧数据为空的兜底情况。
 
             if (settings == null) // 如果设置对象仍然为空，说明资产处于异常状态。
             {
-                return temporalAADebugRequested; // Keep TAA debug visible even when the asset settings object is missing.
+                return temporalAADebugRequested || bloomPrefilterDebugRequested; // Keep post-backed debug visible even when the asset settings object is missing.
             }
 
             if (!settings.EnablePostProcessing) // 如果资产关闭了后处理框架，就算 Volume 里有 Tonemapping 也不执行。
             {
-                return temporalAADebugRequested; // TAA debug should fail visibly instead of being silently skipped.
+                return temporalAADebugRequested || bloomPrefilterDebugRequested; // Post-backed debug should fail visibly instead of being silently skipped.
             }
 
-            return temporalAADebugRequested || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume() || HasActiveBloomVolume() || HasActiveTemporalAAVolume(); // Only real post effects allocate and run the framework; pure No-op is skipped.
+            return temporalAADebugRequested || bloomPrefilterDebugRequested || HasActiveExposureVolume() || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume() || HasActiveBloomVolume() || HasActiveTemporalAAVolume(); // Only real post effects allocate and run the framework; pure No-op is skipped.
         }
 
         public static bool ShouldUseBloom( // 定义判断当前 request 是否需要 Bloom 的统一入口。
             BurtRenderRequest request, // 接收当前渲染请求，用来确认相机任务是否有效。
             BurtRenderPipelineAsset asset) // 接收管线资产，用来确认后处理总开关是否打开。
         {
+            var bloomPrefilterDebugRequested = IsBloomPrefilterDebugRequested();
             if (request == null) // 如果 request 为空，说明没有合法渲染任务。
             {
                 return false; // 返回 false，避免异常任务执行 Bloom。
@@ -96,7 +109,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return false; // 返回 false，让后处理 Pass 跳过 Bloom。
             }
 
-            return HasActiveBloomVolume(); // 只有当前 VolumeStack 中存在有效 Bloom 时，才需要执行 Bloom。
+            return bloomPrefilterDebugRequested || HasActiveBloomVolume(); // Shading debug 里的 Bloom Prefilter 也需要执行 Bloom 链来生成源纹理。
         }
 
         public static bool ShouldUseColorAdjustments( // 定义判断当前 request 是否需要 Color Adjustments 的统一入口。
@@ -216,24 +229,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
         public static float ResolvePostExposureMultiplier(BurtRenderPipelineAsset asset) // 定义把 Volume EV 曝光转换为线性倍率的函数。
         {
+            return ResolvePhysicalExposureSettings(asset).Multiplier;
+        }
+
+        public static BurtPhysicalExposureSettings ResolvePhysicalExposureSettings(BurtRenderPipelineAsset asset)
+        {
             if (!IsPostProcessEnabled(asset)) // 如果后处理框架关闭，曝光参数不应该影响画面。
             {
-                return 1f; // 返回 1，表示不改变颜色亮度。
+                return BurtPhysicalExposureSettings.Default;
             }
 
-            var tonemapping = GetTonemappingVolumeComponent(); // 从当前 VolumeStack 读取 BurtRP Tonemapping 组件。
+            var exposure = GetExposureVolumeComponent();
 
-            if (tonemapping == null) // 如果没有 Tonemapping 组件，就没有曝光补偿来源。
+            if (exposure == null)
             {
-                return 1f; // 返回 1，保证 No-op Copy 不改变画面。
+                return BurtPhysicalExposureSettings.Default;
             }
 
-            if (!tonemapping.IsEnabled()) // 如果 Tonemapping 未启用，曝光参数不应该参与 No-op Copy。
+            if (!exposure.IsEnabled())
             {
-                return 1f; // 返回 1，保证关闭 Tonemapping 时画面不变。
+                return BurtPhysicalExposureSettings.Default;
             }
 
-            return Mathf.Pow(2f, tonemapping.postExposure.value); // 把 Volume 里的 EV 曝光转成线性倍率，+1 EV 等于乘以 2。
+            return new BurtPhysicalExposureSettings(
+                exposure.mode.value,
+                exposure.manualEV100.value,
+                exposure.iso.value,
+                exposure.shutterTime.value,
+                exposure.aperture.value,
+                exposure.calibration.value,
+                exposure.compensation.value);
         }
 
         public static BurtTonemappingFilmSettings ResolveTonemappingFilmSettings(BurtRenderPipelineAsset asset) // 定义解析 UE/XRender Filmic 参数的函数，让 Pass 不直接访问 Volume 组件字段。
@@ -317,7 +342,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 bloom.softKnee.value, // 读取软阈值。
                 bloom.intensity.value, // 读取合成强度。
                 bloom.scatter.value, // 读取散布权重。
-                bloom.maxIterations.value); // 读取最大 mip 数。
+                bloom.sizeScale.value, // 读取 XRender 风格 Bloom 尺寸倍率。
+                bloom.quality.value, // 读取 XRender 风格 Bloom 质量档。
+                bloom.maxIterations.value, // 读取最大 mip 数。
+                bloom.bloomAlphaChannel.value, // 读取 Bloom alpha 输出开关。
+                bloom.debugView.value, // 读取 Bloom 调试输出模式。
+                bloom.filter1Size.value, // 读取 Filter1 尺寸。
+                bloom.filter2Size.value, // 读取 Filter2 尺寸。
+                bloom.filter3Size.value, // 读取 Filter3 尺寸。
+                bloom.filter4Size.value, // 读取 Filter4 尺寸。
+                bloom.filter5Size.value, // 读取 Filter5 尺寸。
+                bloom.filter6Size.value, // 读取 Filter6 尺寸。
+                bloom.filter1Tint.value, // 读取 Filter1 tint。
+                bloom.filter2Tint.value, // 读取 Filter2 tint。
+                bloom.filter3Tint.value, // 读取 Filter3 tint。
+                bloom.filter4Tint.value, // 读取 Filter4 tint。
+                bloom.filter5Tint.value, // 读取 Filter5 tint。
+                bloom.filter6Tint.value); // 读取 Filter6 tint。
         }
 
         public static bool ShouldUseTemporalAA(BurtRenderRequest request, BurtRenderPipelineAsset asset)
@@ -397,9 +438,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return 0; // 返回 0，保持安全跳过。
             }
 
-            var width = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth) / 2; // Bloom mip0 使用半分辨率。
-            var height = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight) / 2; // Bloom mip0 使用半分辨率。
-            var maxMipCount = Mathf.Clamp(settings.MaxMipCount, 1, 8); // 把 Volume 上限限制在第一版实现支持范围内。
+            var width = Mathf.Max(1, (camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth) / 2); // Bloom mip0 使用半分辨率，并保持最小 1。
+            var height = Mathf.Max(1, (camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight) / 2); // Bloom mip0 使用半分辨率，并保持最小 1。
+            var qualityMipCount = ResolveBloomQualityMipCount(settings.Quality); // 按 XRender Q1-Q5 映射到最多参与的 Bloom 阶段数。
+            if (qualityMipCount <= 0) // 质量档关闭或无效时跳过 Bloom 链。
+            {
+                return 0; // 返回 0 表示不申请 Bloom mip。
+            }
+
+            var maxMipCount = Mathf.Min(Mathf.Clamp(settings.MaxMipCount, 1, 8), qualityMipCount); // 质量档决定目标阶段数，maxIterations 作为兼容上限继续生效。
             var count = 0; // 记录实际可用 mip 数。
 
             while (count < maxMipCount && width >= 1 && height >= 1) // 按分辨率逐级停止，避免申请 0 尺寸 RT。
@@ -416,6 +463,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             return count; // 返回实际 mip 数。
+        }
+
+        private static int ResolveBloomQualityMipCount(BurtBloomQuality quality) // 对齐 XRender Bloom Q1-Q5 到 stage/mip 数的映射。
+        {
+            switch (quality)
+            {
+                case BurtBloomQuality.Q1:
+                case BurtBloomQuality.Q2:
+                    return 3; // XRender Q1/Q2 都使用 3 个 Bloom stage。
+                case BurtBloomQuality.Q3:
+                    return 4; // XRender Q3 使用 4 个 Bloom stage。
+                case BurtBloomQuality.Q4:
+                    return 5; // XRender Q4 使用 5 个 Bloom stage。
+                case BurtBloomQuality.Q5:
+                    return 6; // XRender Q5 使用 6 个 Bloom stage。
+                default:
+                    return 0; // 0 表示关闭 Bloom stage。
+            }
         }
 
         public static void LogPostProcessExecuted( // 定义后处理执行日志，集中格式避免 Pass 内部堆字符串逻辑。
@@ -444,8 +509,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
             var temporalAA = request != null ? request.TemporalAA : null;
             var temporalAADebugRequested = IsTemporalAADebugRequested();
+            var bloomDebugView = ResolveBloomDebugView(bloomSettings);
+            var bloomPrefilterDebugRequested = IsBloomPrefilterDebugRequested();
             var temporalHistory = BurtTemporalAAUtility.GetHistoryStatus(camera);
-            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMul=" + postExposureMultiplier + " ColorAdjustments=" + useColorAdjustments + " Bloom=" + bloomSettings.Enabled + " BloomMips=" + bloomMipCount + " BloomThreshold=" + bloomSettings.Threshold + " BloomIntensity=" + bloomSettings.Intensity + " BloomScatter=" + bloomSettings.Scatter + " TAA=" + (temporalAA != null && temporalAA.Enabled) + " TAAHistoryValid=" + (temporalAA != null && temporalAA.HistoryValid) + " TAAHistoryAge=" + temporalHistory.HistoryAge + " TAAHistoryReason=" + temporalHistory.LastInvalidationReason + " TAAVelocity=" + (temporalAA != null ? temporalAA.VelocityMode.ToString() : BurtTemporalAAVelocityMode.Disabled.ToString()) + " TAAObjectMVPass=" + (temporalAA != null && temporalAA.ObjectMotionVectorPassDrawn) + " TAASharpness=" + (temporalAA != null ? temporalAA.Settings.Sharpness.ToString("0.###") : BurtTemporalAASettings.Default.Sharpness.ToString("0.###")) + " TAAStaticRelax=" + (temporalAA != null ? temporalAA.Settings.StaticEdgeRelaxation.ToString("0.###") : BurtTemporalAASettings.Default.StaticEdgeRelaxation.ToString("0.###")) + " TAALumaReject=" + (temporalAA != null ? temporalAA.Settings.LumaRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.LumaRejectionStrength.ToString("0.###")) + " TAADepthReject=" + (temporalAA != null ? temporalAA.Settings.DepthRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.DepthRejectionStrength.ToString("0.###")) + " TAAMotionReject=" + (temporalAA != null ? (temporalAA.Settings.MotionRejectionStart.ToString("0.###") + "/" + temporalAA.Settings.MotionRejectionRange.ToString("0.###")) : (BurtTemporalAASettings.Default.MotionRejectionStart.ToString("0.###") + "/" + BurtTemporalAASettings.Default.MotionRejectionRange.ToString("0.###"))) + " TAAAntiFlicker=" + (temporalAA != null ? temporalAA.Settings.AntiFlickering.ToString("0.###") : BurtTemporalAASettings.Default.AntiFlickering.ToString("0.###")) + " TAAMVReject=" + (temporalAA != null ? temporalAA.Settings.MotionVectorRejection.ToString("0.###") : BurtTemporalAASettings.Default.MotionVectorRejection.ToString("0.###")) + " TAAResponsive=" + (temporalAA != null ? temporalAA.Settings.ResponsiveRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.ResponsiveRejectionStrength.ToString("0.###")) + " TAAUntrustedMVScale=" + (temporalAA != null ? temporalAA.Settings.UntrustedMotionFeedbackScale.ToString("0.###") : BurtTemporalAASettings.Default.UntrustedMotionFeedbackScale.ToString("0.###")) + " TAADisocclusionScale=" + (temporalAA != null ? temporalAA.Settings.DisocclusionFeedbackScale.ToString("0.###") : BurtTemporalAASettings.Default.DisocclusionFeedbackScale.ToString("0.###")) + " TAAMotionEdge=" + (temporalAA != null ? temporalAA.Settings.MotionEdgeResponsiveStrength.ToString("0.###") : BurtTemporalAASettings.Default.MotionEdgeResponsiveStrength.ToString("0.###")) + " TAADepthEdge=" + (temporalAA != null ? temporalAA.Settings.DepthEdgeResponsiveStrength.ToString("0.###") : BurtTemporalAASettings.Default.DepthEdgeResponsiveStrength.ToString("0.###")) + " TAAClampTight=" + (temporalAA != null ? temporalAA.Settings.HistoryClampTightness.ToString("0.###") : BurtTemporalAASettings.Default.HistoryClampTightness.ToString("0.###")) + " TAADepthFilterFloor=" + (temporalAA != null ? temporalAA.Settings.DepthWeightedFilterFloor.ToString("0.###") : BurtTemporalAASettings.Default.DepthWeightedFilterFloor.ToString("0.###")) + " TAADebugMode=" + (temporalAADebugRequested ? BurtShadingDebugSettings.Mode.ToString() : "Disabled") + " TAADebugActive=" + (temporalAADebugRequested && temporalAA != null && temporalAA.Enabled) + " TAANote=XRenderTSRStyleVelocityDepthClampV7"); // 输出后处理执行摘要，说明当前模式、曝光倍率、颜色调整、Bloom 和 TAA 状态。
+            var exposure = ResolvePhysicalExposureSettings(context.Asset);
+            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMode=" + exposure.Mode + " EV100=" + exposure.EV100.ToString("0.###") + " ISO=" + exposure.ISO.ToString("0.###") + " Shutter=" + exposure.ShutterTime.ToString("0.######") + " Aperture=" + exposure.Aperture.ToString("0.###") + " ExposureCalibration=" + exposure.Calibration.ToString("0.###") + " ExposureCompensationEV=" + exposure.Compensation.ToString("0.###") + " ExposureMul=" + postExposureMultiplier + " ColorAdjustments=" + useColorAdjustments + " Bloom=" + bloomSettings.Enabled + " BloomMips=" + bloomMipCount + " BloomQuality=" + bloomSettings.Quality + " BloomMaxMips=" + bloomSettings.MaxMipCount + " BloomThreshold=" + bloomSettings.Threshold + " BloomIntensity=" + bloomSettings.Intensity + " BloomScatter=" + bloomSettings.Scatter + " BloomSizeScale=" + bloomSettings.SizeScale + " BloomAlpha=" + bloomSettings.BloomAlphaChannel + " BloomDebug=" + bloomDebugView + " BloomDebugSource=" + (bloomPrefilterDebugRequested ? "ShadingDebug" : "Volume") + " TAA=" + (temporalAA != null && temporalAA.Enabled) + " TAAHistoryValid=" + (temporalAA != null && temporalAA.HistoryValid) + " TAAHistoryAge=" + temporalHistory.HistoryAge + " TAAHistoryReason=" + temporalHistory.LastInvalidationReason + " TAAVelocity=" + (temporalAA != null ? temporalAA.VelocityMode.ToString() : BurtTemporalAAVelocityMode.Disabled.ToString()) + " TAAObjectMVPass=" + (temporalAA != null && temporalAA.ObjectMotionVectorPassDrawn) + " TAASharpness=" + (temporalAA != null ? temporalAA.Settings.Sharpness.ToString("0.###") : BurtTemporalAASettings.Default.Sharpness.ToString("0.###")) + " TAAStaticRelax=" + (temporalAA != null ? temporalAA.Settings.StaticEdgeRelaxation.ToString("0.###") : BurtTemporalAASettings.Default.StaticEdgeRelaxation.ToString("0.###")) + " TAALumaReject=" + (temporalAA != null ? temporalAA.Settings.LumaRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.LumaRejectionStrength.ToString("0.###")) + " TAADepthReject=" + (temporalAA != null ? temporalAA.Settings.DepthRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.DepthRejectionStrength.ToString("0.###")) + " TAAMotionReject=" + (temporalAA != null ? (temporalAA.Settings.MotionRejectionStart.ToString("0.###") + "/" + temporalAA.Settings.MotionRejectionRange.ToString("0.###")) : (BurtTemporalAASettings.Default.MotionRejectionStart.ToString("0.###") + "/" + BurtTemporalAASettings.Default.MotionRejectionRange.ToString("0.###"))) + " TAAAntiFlicker=" + (temporalAA != null ? temporalAA.Settings.AntiFlickering.ToString("0.###") : BurtTemporalAASettings.Default.AntiFlickering.ToString("0.###")) + " TAAMVReject=" + (temporalAA != null ? temporalAA.Settings.MotionVectorRejection.ToString("0.###") : BurtTemporalAASettings.Default.MotionVectorRejection.ToString("0.###")) + " TAAResponsive=" + (temporalAA != null ? temporalAA.Settings.ResponsiveRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.ResponsiveRejectionStrength.ToString("0.###")) + " TAAUntrustedMVScale=" + (temporalAA != null ? temporalAA.Settings.UntrustedMotionFeedbackScale.ToString("0.###") : BurtTemporalAASettings.Default.UntrustedMotionFeedbackScale.ToString("0.###")) + " TAADisocclusionScale=" + (temporalAA != null ? temporalAA.Settings.DisocclusionFeedbackScale.ToString("0.###") : BurtTemporalAASettings.Default.DisocclusionFeedbackScale.ToString("0.###")) + " TAAMotionEdge=" + (temporalAA != null ? temporalAA.Settings.MotionEdgeResponsiveStrength.ToString("0.###") : BurtTemporalAASettings.Default.MotionEdgeResponsiveStrength.ToString("0.###")) + " TAADepthEdge=" + (temporalAA != null ? temporalAA.Settings.DepthEdgeResponsiveStrength.ToString("0.###") : BurtTemporalAASettings.Default.DepthEdgeResponsiveStrength.ToString("0.###")) + " TAAClampTight=" + (temporalAA != null ? temporalAA.Settings.HistoryClampTightness.ToString("0.###") : BurtTemporalAASettings.Default.HistoryClampTightness.ToString("0.###")) + " TAADepthFilterFloor=" + (temporalAA != null ? temporalAA.Settings.DepthWeightedFilterFloor.ToString("0.###") : BurtTemporalAASettings.Default.DepthWeightedFilterFloor.ToString("0.###")) + " TAADebugMode=" + (temporalAADebugRequested ? BurtShadingDebugSettings.Mode.ToString() : "Disabled") + " TAADebugActive=" + (temporalAADebugRequested && temporalAA != null && temporalAA.Enabled) + " TAANote=XRenderTSRStyleVelocityDepthClampV7"); // 输出后处理执行摘要，说明当前模式、曝光倍率、颜色调整、Bloom 和 TAA 状态。
         }
 
         private static bool IsPostProcessEnabled(BurtRenderPipelineAsset asset) // 定义判断资产是否允许后处理运行的统一辅助函数。
@@ -475,6 +543,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             var tonemapping = GetTonemappingVolumeComponent(); // 从当前 VolumeStack 中读取 BurtRP Tonemapping 组件。
 
             return tonemapping != null && tonemapping.IsEnabled(); // 只有组件存在、激活且模式不是 None 时，才认为 Tonemapping 需要运行。
+        }
+
+        private static bool HasActiveExposureVolume()
+        {
+            var exposure = GetExposureVolumeComponent();
+
+            return exposure != null && exposure.IsEnabled();
         }
 
         private static bool HasActiveColorAdjustmentsVolume() // 定义判断当前 VolumeStack 是否存在有效 Color Adjustments 的辅助函数。
@@ -514,6 +589,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             return stack.GetComponent<BurtTonemappingVolumeComponent>(); // 返回 BurtRP Tonemapping 组件，未添加时 Unity 会返回默认组件或空值。
+        }
+
+        private static BurtExposureVolumeComponent GetExposureVolumeComponent()
+        {
+            var volumeManager = VolumeManager.instance;
+            if (volumeManager == null)
+            {
+                return null;
+            }
+
+            var stack = volumeManager.stack;
+            if (stack == null)
+            {
+                return null;
+            }
+
+            return stack.GetComponent<BurtExposureVolumeComponent>();
         }
 
         private static BurtColorAdjustmentsVolumeComponent GetColorAdjustmentsVolumeComponent() // 定义从 Unity VolumeStack 读取 BurtRP Color Adjustments 组件的辅助函数。

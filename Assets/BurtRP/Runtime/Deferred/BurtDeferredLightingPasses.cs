@@ -38,6 +38,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
         private static readonly int CameraDepthId = BurtRenderGraphResourceRegistry.CameraDepthTextureId; // 缓存 CameraDepth 全局纹理 ID，Deferred Lighting 需要用它重建位置。
         private static readonly int ScreenSpaceAmbientOcclusionId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionTextureId;
         private static readonly int ScreenSpaceAmbientOcclusionEnabledId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionEnabled");
+        private static readonly int AdditionalLightBufferId = Shader.PropertyToID("_BurtAdditionalLightBuffer");
+        private static readonly int AdditionalLightBufferEnabledId = Shader.PropertyToID("_BurtAdditionalLightBufferEnabled");
         private static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseViewProjectionMatrix"); // 缓存逆 ViewProjection 矩阵 ID，shader 可用它从屏幕和深度重建世界坐标。
         private static readonly int CameraWorldPositionId = Shader.PropertyToID("_BurtDeferredCameraWorldPosition"); // 缓存相机世界坐标 ID，shader 可用它计算 view direction。
         private static readonly int CameraClipPlanesId = Shader.PropertyToID("_BurtDeferredCameraClipPlanes"); // 缓存相机裁剪面参数 ID，shader 可用它做深度线性化兜底。
@@ -118,7 +120,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier); // 把当前 request 的 GBuffer1 绑定给 Deferred Lighting shader。
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier); // 把当前 request 的 GBuffer2 绑定给 Deferred Lighting shader。
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier); // 确保 _BurtCameraDepthTexture 指向当前 request 的深度纹理。
-            BindScreenSpaceAmbientOcclusion(context, cmd);
+            BindScreenSpaceAmbientOcclusion(context, cmd, material);
+            BindAdditionalLightBuffer(context, cmd, material);
             BindRuntimeTiledLighting(context, cmd);
             UploadMainLightShadowReceiverGlobals(context, cmd, material); // Rebind shadow globals and shadow map on the deferred material so fullscreen lighting cannot see stale globals.
             UploadAdditionalLightShadowReceiverGlobals(context, cmd, material);
@@ -147,7 +150,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             return cameraColorTarget.IsValid && cameraDepthTarget.IsValid && gbuffer0Target.IsValid && gbuffer1Target.IsValid && gbuffer2Target.IsValid; // 只有所有目标有效时才允许执行全屏合成。
         }
 
-        private static void BindScreenSpaceAmbientOcclusion(BurtRenderGraphContext context, CommandBuffer cmd)
+        private static void BindScreenSpaceAmbientOcclusion(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
         {
             var enabled = false;
             var target = context != null ? context.ScreenSpaceAmbientOcclusionTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
@@ -161,6 +164,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             }
 
             cmd.SetGlobalFloat(ScreenSpaceAmbientOcclusionEnabledId, enabled ? 1f : 0f);
+            if (material != null)
+            {
+                material.SetFloat(ScreenSpaceAmbientOcclusionEnabledId, enabled ? 1f : 0f);
+            }
+        }
+
+        private static void BindAdditionalLightBuffer(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
+        {
+            var additionalLightBuffer = context != null ? context.AdditionalLightBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.AdditionalLightBufferName);
+            var enabled = additionalLightBuffer.IsValid && additionalLightBuffer.HasBuffer;
+            if (enabled)
+            {
+                cmd.SetGlobalBuffer(AdditionalLightBufferId, additionalLightBuffer.Buffer);
+                if (material != null)
+                {
+                    material.SetBuffer(AdditionalLightBufferId, additionalLightBuffer.Buffer);
+                }
+            }
+
+            cmd.SetGlobalFloat(AdditionalLightBufferEnabledId, enabled ? 1f : 0f);
+            if (material != null)
+            {
+                material.SetFloat(AdditionalLightBufferEnabledId, enabled ? 1f : 0f);
+            }
         }
 
         private static bool ShouldUseRuntimeTiledLighting(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRenderGraphResourceRegistry resourceRegistry)
@@ -192,7 +219,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
                 listBuffer.IsValid && listBuffer.HasBuffer &&
                 offsetBuffer.IsValid && offsetBuffer.HasBuffer)
             {
-                var layout = BurtTiledLightData.CalculateLayout(context.Request != null ? context.Request.Camera : null);
+                var layout = ResolveRuntimeTileLightLayout(context, lightingData);
                 var maxLightsPerTile = lightingData.TileLightMaxLightsPerTile > 0
                     ? Mathf.Min(lightingData.TileLightMaxLightsPerTile, BurtTiledLightData.ResolveRuntimeMaxLightsPerTile())
                     : BurtTiledLightData.ResolveRuntimeMaxLightsPerTile();
@@ -204,6 +231,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             }
 
             cmd.SetGlobalFloat(BurtTiledLightData.TileLightCountBufferEnabledId, enabled ? 1f : 0f);
+        }
+
+        private static BurtTileLightLayout ResolveRuntimeTileLightLayout(BurtRenderGraphContext context, BurtLightingData lightingData)
+        {
+            if (lightingData != null &&
+                lightingData.TileLightGridX > 0 &&
+                lightingData.TileLightGridY > 0 &&
+                lightingData.TileLightTileSize > 0)
+            {
+                return new BurtTileLightLayout(
+                    lightingData.TileLightGridX * lightingData.TileLightTileSize,
+                    lightingData.TileLightGridY * lightingData.TileLightTileSize,
+                    lightingData.TileLightTileSize);
+            }
+
+            return BurtTiledLightData.CalculateLayout(context != null && context.Request != null ? context.Request.Camera : null);
         }
 
         private static void UploadCameraReconstructionGlobals( // 上传 Deferred Lighting 重建世界坐标需要的相机参数。

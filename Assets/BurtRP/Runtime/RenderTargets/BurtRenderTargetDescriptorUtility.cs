@@ -243,9 +243,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             var tileResolution = lightingData != null && lightingData.AdditionalLightShadowTileResolution > 0
                 ? lightingData.AdditionalLightShadowTileResolution
                 : BurtLightingData.DefaultAdditionalLightShadowTileResolution;
+            var atlasTileCountX = lightingData != null && lightingData.AdditionalLightShadowAtlasTileCountX > 0
+                ? lightingData.AdditionalLightShadowAtlasTileCountX
+                : 5;
             var atlasResolution = lightingData != null && lightingData.AdditionalLightShadowAtlasResolution > 0
                 ? lightingData.AdditionalLightShadowAtlasResolution
-                : tileResolution * 2;
+                : tileResolution * atlasTileCountX;
             atlasResolution = Mathf.Max(1, atlasResolution);
 
             var depthFormat = GraphicsFormatUtility.GetDepthStencilFormat(32, 0);

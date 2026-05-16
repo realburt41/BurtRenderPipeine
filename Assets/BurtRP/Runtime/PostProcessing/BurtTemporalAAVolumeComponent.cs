@@ -39,6 +39,12 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter historyClampTightness = new ClampedFloatParameter(1.15f, 0f, 2f);
         public ClampedFloatParameter depthWeightedFilterFloor = new ClampedFloatParameter(0.12f, 0f, 0.5f);
 
+        [Title("Debug Temporal")]
+        public BoolParameter debugFreezeJitter = new BoolParameter(false);
+        public ClampedIntParameter debugJitterFrame = new ClampedIntParameter(0, 0, 1023);
+        public BoolParameter debugOverrideJitterScale = new BoolParameter(false);
+        public ClampedFloatParameter debugJitterScale = new ClampedFloatParameter(1.0f, 0f, 2f);
+
         public bool IsEnabled()
         {
             return active && enabled.value;

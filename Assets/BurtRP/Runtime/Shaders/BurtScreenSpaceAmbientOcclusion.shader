@@ -12,6 +12,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
             sampler2D _BurtScreenSpaceAmbientOcclusionRawTexture;
             sampler2D _BurtScreenSpaceAmbientOcclusionTexture;
             sampler2D _BurtSSAOBlurSourceTexture;
+            sampler2D _BurtSSAODebugCameraColorTexture;
             sampler2D _BurtSSAOHalfDepthNormalTexture;
             sampler2D _BurtSSAOHalfAmbientOcclusionTexture;
             float4x4 _BurtSSAOViewProjectionMatrix;
@@ -21,7 +22,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
             float4 _BurtSSAOParams1; // x power, y blur enabled, z frame salt, w unused.
             float4 _BurtSSAOParams2; // x fade distance, y fade radius, z thickness, w projected radius scale.
             float4 _BurtSSAOParams3; // x horizon search enabled, y direction count, z blur sharpness, w spatial denoise enabled.
-            float4 _BurtSSAOBlurDirection;
+            float4 _BurtSSAOBlurDirection; // xy blur direction, z resolve final curve.
             float _BurtSSAODebugMode;
 
             struct Attributes
@@ -122,6 +123,14 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 return lerp(ao, 1.0f, distanceFade);
             }
 
+            float BurtSSAOApplyFinalCurve(float rawVisibility, float centerLinearDepth)
+            {
+                float intensity = max(_BurtSSAOParams0.y, 0.0f);
+                float power = max(_BurtSSAOParams1.x, 0.0001f);
+                float curvedAO = 1.0f - (1.0f - pow(abs(saturate(rawVisibility)), power)) * intensity;
+                return BurtSSAOApplyDistanceFade(saturate(curvedAO), centerLinearDepth);
+            }
+
             float BurtSSAOEvaluateHemisphereWithDepthNormal(float2 screenUV, float rawDepth, float3 normalWS, float2 randomSize)
             {
                 if (BurtSSAOIsSkyDepth(rawDepth))
@@ -133,10 +142,8 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 normalWS = BurtSafeNormalize(normalWS);
                 float centerLinearDepth = LinearEyeDepth(rawDepth);
                 float radius = max(_BurtSSAOParams0.x, 0.0001f);
-                float intensity = max(_BurtSSAOParams0.y, 0.0f);
                 int sampleCount = clamp((int)round(_BurtSSAOParams0.z), 1, 32);
                 float bias = saturate(_BurtSSAOParams0.w);
-                float power = max(_BurtSSAOParams1.x, 0.0001f);
                 float thickness = saturate(_BurtSSAOParams2.z);
                 float projectedRadiusPixels = radius * max(_BurtSSAOParams2.w, 1.0f) / max(centerLinearDepth, 0.0001f);
                 float projectedRadiusFade = saturate((projectedRadiusPixels - 0.5f) / 2.0f);
@@ -192,9 +199,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 }
 
                 float normalizedOcclusion = occlusion / max(validSamples, 1.0f);
-                float ao = 1.0f - normalizedOcclusion * intensity * projectedRadiusFade;
-                ao = pow(saturate(ao), power);
-                return BurtSSAOApplyDistanceFade(ao, centerLinearDepth);
+                return saturate(1.0f - normalizedOcclusion * projectedRadiusFade);
             }
 
             float BurtSSAOEvaluateHorizonSample(
@@ -245,11 +250,9 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 normalWS = BurtSafeNormalize(normalWS);
                 float centerLinearDepth = LinearEyeDepth(rawDepth);
                 float radius = max(_BurtSSAOParams0.x, 0.0001f);
-                float intensity = max(_BurtSSAOParams0.y, 0.0f);
                 int stepCount = clamp((int)round(_BurtSSAOParams0.z), 1, 32);
                 int directionCount = clamp((int)round(_BurtSSAOParams3.y), 1, 8);
                 float bias = saturate(_BurtSSAOParams0.w);
-                float power = max(_BurtSSAOParams1.x, 0.0001f);
                 float thickness = saturate(_BurtSSAOParams2.z);
                 float projectedRadiusPixels = radius * max(_BurtSSAOParams2.w, 1.0f) / max(centerLinearDepth, 0.0001f);
                 float projectedRadiusFade = saturate((projectedRadiusPixels - 0.5f) / 2.0f);
@@ -296,9 +299,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 }
 
                 float normalizedOcclusion = occlusion / max(validDirections, 1.0f);
-                float ao = 1.0f - normalizedOcclusion * intensity * projectedRadiusFade;
-                ao = pow(saturate(ao), power);
-                return BurtSSAOApplyDistanceFade(ao, centerLinearDepth);
+                return saturate(1.0f - normalizedOcclusion * projectedRadiusFade);
             }
 
             float BurtSSAOEvaluateWithDepthNormal(float2 screenUV, float rawDepth, float3 normalWS, float2 randomSize)
@@ -430,12 +431,41 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 float depthDelta = abs(sampleLinearDepth - centerLinearDepth);
                 float depthTolerance = max(centerLinearDepth * 0.025f, 0.025f);
                 float depthWeight = exp2(-depthDelta / depthTolerance);
-                float normalWeight = pow(saturate(dot(centerNormalWS, sampleNormalWS)), 16.0f);
+                float normalSimilarity = saturate(dot(centerNormalWS, sampleNormalWS));
+                float normalWeight = pow(normalSimilarity, 16.0f);
                 float edgeMismatch = saturate(depthDelta / max(depthTolerance * 2.0f, 0.0001f));
                 float conservativeAO = lerp(sampleAO, 1.0f, edgeMismatch);
                 float weight = baseWeight * depthWeight * normalWeight;
                 totalAO += conservativeAO * weight;
                 totalWeight += weight;
+            }
+
+            void BurtSSAOAccumulateUpsampleFootprint(
+                float2 screenUV,
+                float centerLinearDepth,
+                float3 centerNormalWS,
+                inout float totalAO,
+                inout float totalWeight)
+            {
+                float2 halfTexel = _BurtSSAOHalfScreenSize.zw;
+                float2 halfPixel = screenUV * _BurtSSAOHalfScreenSize.xy - 0.5f;
+                float2 basePixel = floor(halfPixel);
+                float2 bilinearFraction = saturate(halfPixel - basePixel);
+
+                [unroll]
+                for (int sampleIndex = 0; sampleIndex < 4; sampleIndex++)
+                {
+                    float2 offset = sampleIndex == 0 ? float2(0.0f, 0.0f) :
+                        sampleIndex == 1 ? float2(1.0f, 0.0f) :
+                        sampleIndex == 2 ? float2(0.0f, 1.0f) :
+                        float2(1.0f, 1.0f);
+                    float2 samplePixel = clamp(basePixel + offset, 0.0f, _BurtSSAOHalfScreenSize.xy - 1.0f);
+                    float2 sampleUV = (samplePixel + 0.5f) * halfTexel;
+
+                    float bilinearWeight = (offset.x > 0.5f ? bilinearFraction.x : 1.0f - bilinearFraction.x) *
+                        (offset.y > 0.5f ? bilinearFraction.y : 1.0f - bilinearFraction.y);
+                    BurtSSAOAccumulateUpsampleSample(sampleUV, bilinearWeight, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                }
             }
 
             float4 FragUpsampleRaw(Varyings input) : SV_Target
@@ -452,13 +482,14 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 float totalAO = 0.0f;
                 float totalWeight = 0.0f;
 
-                BurtSSAOAccumulateUpsampleSample(input.screenUV, 1.0f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
-                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(halfTexel.x, 0.0f), 0.5f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
-                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(-halfTexel.x, 0.0f), 0.5f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
-                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(0.0f, halfTexel.y), 0.5f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
-                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(0.0f, -halfTexel.y), 0.5f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleFootprint(input.screenUV, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(halfTexel.x, 0.0f), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(-halfTexel.x, 0.0f), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(0.0f, halfTexel.y), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(0.0f, -halfTexel.y), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
 
-                float ao = totalWeight > 0.0001f ? totalAO / totalWeight : 1.0f;
+                float fallbackAO = tex2D(_BurtSSAOHalfAmbientOcclusionTexture, saturate(input.screenUV)).r;
+                float ao = totalWeight > 0.0001f ? totalAO / totalWeight : fallbackAO;
                 return float4(ao, ao, ao, 1.0f);
             }
 
@@ -579,12 +610,23 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                     totalWeight += weight;
                 }
 
-                return totalAO / max(totalWeight, 0.0001f);
+                return totalWeight > 0.0001f ? totalAO / totalWeight : centerAO;
             }
 
             float4 FragBlur(Varyings input) : SV_Target
             {
-                float ao = BurtSSAOBilateralBlur(input.screenUV);
+                float ao = saturate(BurtSSAOBilateralBlur(input.screenUV));
+                if (_BurtSSAOBlurDirection.z > 0.5f)
+                {
+                    float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
+                    if (BurtSSAOIsSkyDepth(rawDepth))
+                    {
+                        return float4(1.0f, 1.0f, 1.0f, 1.0f);
+                    }
+
+                    ao = BurtSSAOApplyFinalCurve(ao, LinearEyeDepth(rawDepth));
+                }
+
                 return float4(ao, ao, ao, 1.0f);
             }
 
@@ -593,13 +635,14 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 float rawAO = tex2D(_BurtScreenSpaceAmbientOcclusionRawTexture, input.screenUV).r;
                 float finalAO = tex2D(_BurtScreenSpaceAmbientOcclusionTexture, input.screenUV).r;
                 float ao = _BurtSSAODebugMode < 1.5f ? rawAO : finalAO;
-                return float4(ao, ao, ao, 1.0f);
+                return float4(saturate(ao).xxx, 1.0f);
             }
 
             float4 FragOverlay(Varyings input) : SV_Target
             {
-                float ao = tex2D(_BurtScreenSpaceAmbientOcclusionTexture, input.screenUV).r;
-                return float4(ao, ao, ao, 1.0f);
+                float4 cameraColor = tex2D(_BurtSSAODebugCameraColorTexture, input.screenUV);
+                float ao = saturate(tex2D(_BurtScreenSpaceAmbientOcclusionTexture, input.screenUV).r);
+                return float4(cameraColor.rgb * ao, cameraColor.a);
             }
         ENDHLSL
 
@@ -651,7 +694,6 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
             Cull Off
             ZWrite Off
             ZTest Always
-            Blend DstColor Zero, Zero One
 
             HLSLPROGRAM
             #pragma target 3.5

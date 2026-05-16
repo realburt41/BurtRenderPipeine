@@ -189,22 +189,59 @@ namespace Burt.RenderPipeline
             }
         }
 
+        private void AddLocalLightToCandidateTiles(
+            int lightIndex,
+            Vector4 positionAndRange,
+            int minTileX,
+            int minTileY,
+            int maxTileX,
+            int maxTileY,
+            BurtTileLightLayout layout,
+            BurtTileLightCullingContext cullingContext,
+            bool includeListData,
+            int maxLightsPerTile)
+        {
+            if (!TryGetViewSphere(positionAndRange, cullingContext, out var viewSphere))
+            {
+                AddLightToTileRect(lightIndex, minTileX, minTileY, maxTileX, maxTileY, layout, includeListData, maxLightsPerTile);
+                return;
+            }
+
+            for (var tileY = minTileY; tileY <= maxTileY; tileY++)
+            {
+                for (var tileX = minTileX; tileX <= maxTileX; tileX++)
+                {
+                    if (!TileIntersectsViewSphere(tileX, tileY, cullingContext, viewSphere))
+                    {
+                        continue;
+                    }
+
+                    AddLightToTile(lightIndex, tileX, tileY, layout, includeListData, maxLightsPerTile);
+                }
+            }
+        }
+
         private void AddLightToTileRect(int lightIndex, int minTileX, int minTileY, int maxTileX, int maxTileY, BurtTileLightLayout layout, bool includeListData, int maxLightsPerTile)
         {
             for (var tileY = minTileY; tileY <= maxTileY; tileY++)
             {
                 for (var tileX = minTileX; tileX <= maxTileX; tileX++)
                 {
-                    var tileIndex = tileY * layout.TileCountX + tileX;
-                    var currentCount = tileLightCountData[tileIndex];
-                    if (includeListData && currentCount < (uint)maxLightsPerTile)
-                    {
-                        tileLightListData[tileIndex * maxLightsPerTile + (int)currentCount] = (uint)lightIndex;
-                    }
-
-                    tileLightCountData[tileIndex] = currentCount + 1u;
+                    AddLightToTile(lightIndex, tileX, tileY, layout, includeListData, maxLightsPerTile);
                 }
             }
+        }
+
+        private void AddLightToTile(int lightIndex, int tileX, int tileY, BurtTileLightLayout layout, bool includeListData, int maxLightsPerTile)
+        {
+            var tileIndex = tileY * layout.TileCountX + tileX;
+            var currentCount = tileLightCountData[tileIndex];
+            if (includeListData && currentCount < (uint)maxLightsPerTile)
+            {
+                tileLightListData[tileIndex * maxLightsPerTile + (int)currentCount] = (uint)lightIndex;
+            }
+
+            tileLightCountData[tileIndex] = currentCount + 1u;
         }
 
         private BurtTileLightStats FinalizeTileMetadata(BurtTileLightLayout layout, bool includeListData, int maxLightsPerTile)
@@ -364,6 +401,11 @@ namespace Burt.RenderPipeline
 
             var worldPosition = new Vector3(positionAndRange.x, positionAndRange.y, positionAndRange.z);
             var viewPosition = camera.worldToCameraMatrix.MultiplyPoint(worldPosition);
+            if (!IsFinite(viewPosition.x) || !IsFinite(viewPosition.y) || !IsFinite(viewPosition.z))
+            {
+                return false;
+            }
+
             var viewDepth = -viewPosition.z;
             var nearPlane = Mathf.Max(camera.nearClipPlane, 0.0001f);
 
@@ -400,18 +442,52 @@ namespace Burt.RenderPipeline
                     var halfWidth = Mathf.Max(halfHeight * camera.aspect, 0.0001f);
                     radiusU = range / (halfWidth * 2f);
                     radiusV = range / (halfHeight * 2f);
+                    minU = viewportPosition.x - radiusU;
+                    maxU = viewportPosition.x + radiusU;
+                    minV = viewportPosition.y - radiusV;
+                    maxV = viewportPosition.y + radiusV;
                 }
                 else
                 {
                     var projection = camera.projectionMatrix;
-                    radiusU = 0.5f * Mathf.Abs(projection.m00) * range / viewDepth;
-                    radiusV = 0.5f * Mathf.Abs(projection.m11) * range / viewDepth;
-                }
+                    if (Mathf.Abs(projection.m00) <= 0.0001f ||
+                        Mathf.Abs(projection.m11) <= 0.0001f ||
+                        !IsFinite(projection.m00) ||
+                        !IsFinite(projection.m02) ||
+                        !IsFinite(projection.m11) ||
+                        !IsFinite(projection.m12))
+                    {
+                        minU = 0f;
+                        minV = 0f;
+                        maxU = 1f;
+                        maxV = 1f;
+                    }
+                    else
+                    {
+                        var nearDepth = Mathf.Max(viewDepth - range, nearPlane);
+                        var farDepth = Mathf.Max(viewDepth + range, nearDepth);
+                        CalculateConservativeSlopeRange(viewPosition.x, range, nearDepth, farDepth, out var minXSlope, out var maxXSlope);
+                        CalculateConservativeSlopeRange(viewPosition.y, range, nearDepth, farDepth, out var minYSlope, out var maxYSlope);
 
-                minU = viewportPosition.x - radiusU;
-                maxU = viewportPosition.x + radiusU;
-                minV = viewportPosition.y - radiusV;
-                maxV = viewportPosition.y + radiusV;
+                        minU = 0.5f * (projection.m00 * minXSlope - projection.m02 + 1f);
+                        maxU = 0.5f * (projection.m00 * maxXSlope - projection.m02 + 1f);
+                        minV = 0.5f * (projection.m11 * minYSlope - projection.m12 + 1f);
+                        maxV = 0.5f * (projection.m11 * maxYSlope - projection.m12 + 1f);
+                        if (minU > maxU)
+                        {
+                            var swap = minU;
+                            minU = maxU;
+                            maxU = swap;
+                        }
+
+                        if (minV > maxV)
+                        {
+                            var swap = minV;
+                            minV = maxV;
+                            maxV = swap;
+                        }
+                    }
+                }
             }
 
             if (maxU <= 0f || minU >= 1f || maxV <= 0f || minV >= 1f)
@@ -424,12 +500,131 @@ namespace Burt.RenderPipeline
             minV = Mathf.Clamp01(minV);
             maxV = Mathf.Clamp01(maxV);
 
-            minTileX = Mathf.Clamp(Mathf.FloorToInt(minU * layout.TileCountX), 0, layout.TileCountX - 1);
-            minTileY = Mathf.Clamp(Mathf.FloorToInt(minV * layout.TileCountY), 0, layout.TileCountY - 1);
-            maxTileX = Mathf.Clamp(Mathf.CeilToInt(maxU * layout.TileCountX) - 1, 0, layout.TileCountX - 1);
-            maxTileY = Mathf.Clamp(Mathf.CeilToInt(maxV * layout.TileCountY) - 1, 0, layout.TileCountY - 1);
+            minTileX = Mathf.Clamp(Mathf.FloorToInt(minU * layout.TileCountX) - 1, 0, layout.TileCountX - 1);
+            minTileY = Mathf.Clamp(Mathf.FloorToInt(minV * layout.TileCountY) - 1, 0, layout.TileCountY - 1);
+            maxTileX = Mathf.Clamp(Mathf.CeilToInt(maxU * layout.TileCountX), 0, layout.TileCountX - 1);
+            maxTileY = Mathf.Clamp(Mathf.CeilToInt(maxV * layout.TileCountY), 0, layout.TileCountY - 1);
 
             return maxTileX >= minTileX && maxTileY >= minTileY;
+        }
+
+        private static void CalculateConservativeSlopeRange(float center, float radius, float nearDepth, float farDepth, out float minSlope, out float maxSlope)
+        {
+            var minPosition = center - radius;
+            var maxPosition = center + radius;
+            var safeNearDepth = Mathf.Max(nearDepth, 0.0001f);
+            var safeFarDepth = Mathf.Max(farDepth, safeNearDepth);
+            var slope0 = minPosition / safeNearDepth;
+            var slope1 = minPosition / safeFarDepth;
+            var slope2 = maxPosition / safeNearDepth;
+            var slope3 = maxPosition / safeFarDepth;
+            minSlope = Mathf.Min(Mathf.Min(slope0, slope1), Mathf.Min(slope2, slope3));
+            maxSlope = Mathf.Max(Mathf.Max(slope0, slope1), Mathf.Max(slope2, slope3));
+        }
+
+        private static bool TryGetViewSphere(Vector4 positionAndRange, BurtTileLightCullingContext cullingContext, out BurtViewSphere viewSphere)
+        {
+            viewSphere = default;
+            if (!cullingContext.IsValid)
+            {
+                return false;
+            }
+
+            var worldPosition = new Vector3(positionAndRange.x, positionAndRange.y, positionAndRange.z);
+            var cameraViewPosition = cullingContext.WorldToCameraMatrix.MultiplyPoint(worldPosition);
+            var radius = Mathf.Max(positionAndRange.w, 0f);
+            if (!IsFinite(cameraViewPosition.x) || !IsFinite(cameraViewPosition.y) || !IsFinite(cameraViewPosition.z) || radius <= 0.0001f)
+            {
+                return false;
+            }
+
+            viewSphere = new BurtViewSphere(new Vector3(cameraViewPosition.x, cameraViewPosition.y, -cameraViewPosition.z), radius);
+            return true;
+        }
+
+        private static bool TileIntersectsViewSphere(int tileX, int tileY, BurtTileLightCullingContext cullingContext, BurtViewSphere viewSphere)
+        {
+            if (!cullingContext.IsValid)
+            {
+                return true;
+            }
+
+            return cullingContext.Orthographic
+                ? OrthographicTileIntersectsViewSphere(tileX, tileY, cullingContext, viewSphere)
+                : PerspectiveTileIntersectsViewSphere(tileX, tileY, cullingContext, viewSphere);
+        }
+
+        private static bool PerspectiveTileIntersectsViewSphere(int tileX, int tileY, BurtTileLightCullingContext cullingContext, BurtViewSphere viewSphere)
+        {
+            if (viewSphere.Center.magnitude <= viewSphere.Radius)
+            {
+                return true;
+            }
+
+            var u0 = (float)tileX / cullingContext.TileCountX;
+            var u1 = (float)(tileX + 1) / cullingContext.TileCountX;
+            var v0 = (float)tileY / cullingContext.TileCountY;
+            var v1 = (float)(tileY + 1) / cullingContext.TileCountY;
+
+            var xSlope0 = cullingContext.CalculateViewXSlope(u0);
+            var xSlope1 = cullingContext.CalculateViewXSlope(u1);
+            var ySlope0 = cullingContext.CalculateViewYSlope(v0);
+            var ySlope1 = cullingContext.CalculateViewYSlope(v1);
+            var leftSlope = Mathf.Min(xSlope0, xSlope1);
+            var rightSlope = Mathf.Max(xSlope0, xSlope1);
+            var bottomSlope = Mathf.Min(ySlope0, ySlope1);
+            var topSlope = Mathf.Max(ySlope0, ySlope1);
+
+            if (SphereOutsidePlane(viewSphere, new Vector3(1f, 0f, -leftSlope)))
+            {
+                return false;
+            }
+
+            if (SphereOutsidePlane(viewSphere, new Vector3(-1f, 0f, rightSlope)))
+            {
+                return false;
+            }
+
+            if (SphereOutsidePlane(viewSphere, new Vector3(0f, 1f, -bottomSlope)))
+            {
+                return false;
+            }
+
+            if (SphereOutsidePlane(viewSphere, new Vector3(0f, -1f, topSlope)))
+            {
+                return false;
+            }
+
+            return viewSphere.Center.z + viewSphere.Radius >= cullingContext.NearPlane;
+        }
+
+        private static bool OrthographicTileIntersectsViewSphere(int tileX, int tileY, BurtTileLightCullingContext cullingContext, BurtViewSphere viewSphere)
+        {
+            var u0 = (float)tileX / cullingContext.TileCountX;
+            var u1 = (float)(tileX + 1) / cullingContext.TileCountX;
+            var v0 = (float)tileY / cullingContext.TileCountY;
+            var v1 = (float)(tileY + 1) / cullingContext.TileCountY;
+            var minX = Mathf.Lerp(-cullingContext.OrthographicHalfWidth, cullingContext.OrthographicHalfWidth, u0);
+            var maxX = Mathf.Lerp(-cullingContext.OrthographicHalfWidth, cullingContext.OrthographicHalfWidth, u1);
+            var minY = Mathf.Lerp(-cullingContext.OrthographicHalfHeight, cullingContext.OrthographicHalfHeight, v0);
+            var maxY = Mathf.Lerp(-cullingContext.OrthographicHalfHeight, cullingContext.OrthographicHalfHeight, v1);
+            var closestX = Mathf.Clamp(viewSphere.Center.x, Mathf.Min(minX, maxX), Mathf.Max(minX, maxX));
+            var closestY = Mathf.Clamp(viewSphere.Center.y, Mathf.Min(minY, maxY), Mathf.Max(minY, maxY));
+            var dx = viewSphere.Center.x - closestX;
+            var dy = viewSphere.Center.y - closestY;
+            return dx * dx + dy * dy <= viewSphere.Radius * viewSphere.Radius;
+        }
+
+        private static bool SphereOutsidePlane(BurtViewSphere viewSphere, Vector3 planeNormal)
+        {
+            var length = planeNormal.magnitude;
+            if (length <= 0.0001f)
+            {
+                return false;
+            }
+
+            var signedDistance = Vector3.Dot(planeNormal, viewSphere.Center) / length;
+            return signedDistance < -viewSphere.Radius - 0.0001f;
         }
 
         private static bool IsDirectionalLight(float lightType)
@@ -440,6 +635,108 @@ namespace Burt.RenderPipeline
         private static bool IsFinite(float value)
         {
             return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private readonly struct BurtViewSphere
+        {
+            public Vector3 Center { get; }
+            public float Radius { get; }
+
+            public BurtViewSphere(Vector3 center, float radius)
+            {
+                Center = center;
+                Radius = radius;
+            }
+        }
+
+        private readonly struct BurtTileLightCullingContext
+        {
+            public bool IsValid { get; }
+            public bool Orthographic { get; }
+            public Matrix4x4 WorldToCameraMatrix { get; }
+            public float ProjectionM00 { get; }
+            public float ProjectionM02 { get; }
+            public float ProjectionM11 { get; }
+            public float ProjectionM12 { get; }
+            public float NearPlane { get; }
+            public float OrthographicHalfWidth { get; }
+            public float OrthographicHalfHeight { get; }
+            public int TileCountX { get; }
+            public int TileCountY { get; }
+
+            private BurtTileLightCullingContext(
+                bool isValid,
+                bool orthographic,
+                Matrix4x4 worldToCameraMatrix,
+                float projectionM00,
+                float projectionM02,
+                float projectionM11,
+                float projectionM12,
+                float nearPlane,
+                float orthographicHalfWidth,
+                float orthographicHalfHeight,
+                int tileCountX,
+                int tileCountY)
+            {
+                IsValid = isValid;
+                Orthographic = orthographic;
+                WorldToCameraMatrix = worldToCameraMatrix;
+                ProjectionM00 = projectionM00;
+                ProjectionM02 = projectionM02;
+                ProjectionM11 = projectionM11;
+                ProjectionM12 = projectionM12;
+                NearPlane = nearPlane;
+                OrthographicHalfWidth = orthographicHalfWidth;
+                OrthographicHalfHeight = orthographicHalfHeight;
+                TileCountX = tileCountX;
+                TileCountY = tileCountY;
+            }
+
+            public static BurtTileLightCullingContext Create(Camera camera, BurtTileLightLayout layout)
+            {
+                if (camera == null || layout.TileCountX <= 0 || layout.TileCountY <= 0)
+                {
+                    return default;
+                }
+
+                var projection = camera.projectionMatrix;
+                if (!camera.orthographic &&
+                    (Mathf.Abs(projection.m00) <= 0.0001f ||
+                    Mathf.Abs(projection.m11) <= 0.0001f ||
+                    !IsFinite(projection.m00) ||
+                    !IsFinite(projection.m02) ||
+                    !IsFinite(projection.m11) ||
+                    !IsFinite(projection.m12)))
+                {
+                    return default;
+                }
+
+                var orthographicHalfHeight = camera.orthographic ? Mathf.Max(camera.orthographicSize, 0.0001f) : 0f;
+                var orthographicHalfWidth = camera.orthographic ? Mathf.Max(orthographicHalfHeight * camera.aspect, 0.0001f) : 0f;
+                return new BurtTileLightCullingContext(
+                    true,
+                    camera.orthographic,
+                    camera.worldToCameraMatrix,
+                    projection.m00,
+                    projection.m02,
+                    projection.m11,
+                    projection.m12,
+                    Mathf.Max(camera.nearClipPlane, 0.0001f),
+                    orthographicHalfWidth,
+                    orthographicHalfHeight,
+                    layout.TileCountX,
+                    layout.TileCountY);
+            }
+
+            public float CalculateViewXSlope(float viewportX)
+            {
+                return ((viewportX * 2f) - 1f + ProjectionM02) / ProjectionM00;
+            }
+
+            public float CalculateViewYSlope(float viewportY)
+            {
+                return ((viewportY * 2f) - 1f + ProjectionM12) / ProjectionM11;
+            }
         }
 
         [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
@@ -568,6 +865,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalVector(BurtTiledLightData.TileLightGridParamsId, new Vector4(layout.TileCountX, layout.TileCountY, layout.TileSize, maxLightsPerTile));
             cmd.SetGlobalVector(BurtTiledLightData.TileLightDebugStatsId, new Vector4(0f, maxCount, averageCount, additionalCount));
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
+            cmd.SetGlobalFloat(BurtTiledLightData.TileLightCountBufferEnabledId, 0f);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -578,6 +876,7 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(cameraColor.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.ClearRenderTarget(false, true, color);
+            cmd.SetGlobalFloat(BurtTiledLightData.TileLightCountBufferEnabledId, 0f);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }

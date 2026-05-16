@@ -313,13 +313,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" SSRHistoryValid=").Append(ssrHistory.HasHistory);
 
-            builder.Append(" SSRHistoryAllocated=").Append(ssrHistory.HasHistory || ssrHistory.HasDepthHistory);
+            builder.Append(" SSRHistoryAllocated=").Append(ssrHistory.HasHistory || ssrHistory.HasDepthHistory || ssrHistory.HasNormalRoughnessHistory);
 
             builder.Append(" SSRHistoryMatches=").Append(ssrHistory.DescriptorMatches);
 
             builder.Append(" SSRDepthHistoryAllocated=").Append(ssrHistory.HasDepthHistory);
 
             builder.Append(" SSRDepthHistoryMatches=").Append(ssrHistory.DepthDescriptorMatches);
+
+            builder.Append(" SSRNormalRoughnessHistoryAllocated=").Append(ssrHistory.HasNormalRoughnessHistory);
+
+            builder.Append(" SSRNormalRoughnessHistoryMatches=").Append(ssrHistory.NormalRoughnessDescriptorMatches);
 
             builder.Append(" SSRHistoryAge=").Append(ssrHistory.HistoryAge);
 
@@ -387,8 +391,46 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" AdditionalLightBufferDescriptorMatches=").Append(additionalLightBufferDescriptorMatches);
             builder.AppendLine();
 
+            AppendAdditionalLightShadowState(builder, lightingData, resourceRegistry);
             AppendTileLightDebugState(builder, request, asset, lightingData, resourceRegistry, renderOptions);
             AppendAdditionalLightDetails(builder, lightingData);
+        }
+
+        private static void AppendAdditionalLightShadowState(StringBuilder builder, BurtLightingData lightingData, BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            var atlasRegistered = IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.AdditionalLightShadowAtlasName);
+            var markedSlots = lightingData != null ? Mathf.Clamp(lightingData.ShadowedAdditionalLightCount, 0, BurtLightingData.MaxShadowedAdditionalLights) : 0;
+            var activeSlots = CountActiveAdditionalLightShadowSlots(lightingData);
+            var softSlots = CountSoftAdditionalLightShadowSlots(lightingData);
+            var maxActiveSlot = ResolveMaxActiveAdditionalLightShadowSlot(lightingData);
+
+            builder.Append("  AdditionalLightShadowAtlasRegistered=").Append(atlasRegistered);
+            builder.Append(" AdditionalLightShadowAtlasValid=").Append(lightingData != null && lightingData.AdditionalLightShadowAtlasValid);
+            builder.Append(" AdditionalLightShadowCacheValid=").Append(lightingData != null && lightingData.AdditionalLightShadowCacheValid);
+            builder.Append(" AdditionalLightShadowCandidates=").Append(lightingData != null ? lightingData.AdditionalLightShadowCandidateCount : 0);
+            builder.Append(" AdditionalLightShadowMarkedSlots=").Append(markedSlots);
+            builder.Append(" AdditionalLightShadowActiveSlots=").Append(activeSlots);
+            builder.Append(" AdditionalLightShadowSoftSlots=").Append(softSlots);
+            builder.Append(" AdditionalLightShadowMaxActiveSlot=").Append(maxActiveSlot);
+            builder.Append(" AdditionalLightShadowSparseSlots=").Append(activeSlots > 0 && maxActiveSlot + 1 > activeSlots);
+            builder.Append(" AdditionalLightShadowTileResolution=").Append(lightingData != null ? lightingData.AdditionalLightShadowTileResolution : 0);
+            builder.Append(" AdditionalLightShadowAtlasResolution=").Append(lightingData != null ? lightingData.AdditionalLightShadowAtlasResolution : 0);
+            builder.Append(" AdditionalLightShadowAtlasTileGrid=");
+            builder.Append(lightingData != null ? lightingData.AdditionalLightShadowAtlasTileCountX : 0);
+            builder.Append("x").Append(lightingData != null ? lightingData.AdditionalLightShadowAtlasTileCountY : 0);
+            builder.Append(" AdditionalLightShadowActiveSlices=").Append(lightingData != null ? lightingData.AdditionalLightShadowActiveSliceCount : 0);
+            builder.AppendLine();
+
+            builder.Append("  AdditionalLightShadowDiagnostics:");
+            builder.Append(" PrepareAttempted=").Append(lightingData != null && lightingData.AdditionalLightShadowPrepareAttempted);
+            builder.Append(" PrepareSucceeded=").Append(lightingData != null && lightingData.AdditionalLightShadowPrepareSucceeded);
+            builder.Append(" PrepareFailed=").Append(lightingData != null ? lightingData.AdditionalLightShadowPrepareFailedCount : 0);
+            builder.Append(" PointUnsupported=").Append(lightingData != null ? lightingData.AdditionalLightShadowPointUnsupportedCount : 0);
+            builder.Append(" UnsupportedType=").Append(lightingData != null ? lightingData.AdditionalLightShadowUnsupportedTypeCount : 0);
+            builder.Append(" ShadowTypeNone=").Append(lightingData != null ? lightingData.AdditionalLightShadowNoneCount : 0);
+            builder.Append(" ShadowStrengthZero=").Append(lightingData != null ? lightingData.AdditionalLightShadowStrengthZeroCount : 0);
+            builder.Append(" SlotLimitExceeded=").Append(lightingData != null ? lightingData.AdditionalLightShadowSlotLimitExceededCount : 0);
+            builder.AppendLine();
         }
 
         private static void AppendTileLightDebugState(StringBuilder builder, BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtLightingData lightingData, BurtRenderGraphResourceRegistry resourceRegistry, BurtRequestRenderOptions renderOptions)
@@ -634,8 +676,78 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" Range=").Append(FormatFloat(positionAndRange.w));
                 builder.Append(" Direction=").Append(FormatVector3(directionAndSpot.x, directionAndSpot.y, directionAndSpot.z));
                 builder.Append(" SpotParams=").Append(FormatSpotParams(spotParams));
+                builder.Append(" Shadow=").Append(FormatAdditionalLightShadowState(lightingData, lightIndex));
                 builder.AppendLine();
             }
+        }
+
+        private static int CountActiveAdditionalLightShadowSlots(BurtLightingData lightingData)
+        {
+            if (lightingData == null)
+            {
+                return 0;
+            }
+
+            var count = 0;
+            var additionalLightCount = Mathf.Min(lightingData.AdditionalLightCount, BurtLightingData.MaxAdditionalLights);
+            for (var lightIndex = 0; lightIndex < additionalLightCount; lightIndex++)
+            {
+                if (IsActiveAdditionalLightShadowSlot(lightingData, lightIndex))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static int CountSoftAdditionalLightShadowSlots(BurtLightingData lightingData)
+        {
+            if (lightingData == null)
+            {
+                return 0;
+            }
+
+            var count = 0;
+            var additionalLightCount = Mathf.Min(lightingData.AdditionalLightCount, BurtLightingData.MaxAdditionalLights);
+            for (var lightIndex = 0; lightIndex < additionalLightCount; lightIndex++)
+            {
+                if (IsActiveAdditionalLightShadowSlot(lightingData, lightIndex) && lightingData.AdditionalLightShadowData[lightIndex].w > 0.5f)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static int ResolveMaxActiveAdditionalLightShadowSlot(BurtLightingData lightingData)
+        {
+            if (lightingData == null)
+            {
+                return -1;
+            }
+
+            var additionalLightCount = Mathf.Min(lightingData.AdditionalLightCount, BurtLightingData.MaxAdditionalLights);
+            for (var lightIndex = additionalLightCount - 1; lightIndex >= 0; lightIndex--)
+            {
+                if (IsActiveAdditionalLightShadowSlot(lightingData, lightIndex))
+                {
+                    return lightIndex;
+                }
+            }
+
+            return -1;
+        }
+
+        private static bool IsActiveAdditionalLightShadowSlot(BurtLightingData lightingData, int lightIndex)
+        {
+            return lightingData != null &&
+                lightIndex >= 0 &&
+                lightIndex < BurtLightingData.MaxAdditionalLights &&
+                lightIndex < lightingData.AdditionalLightCount &&
+                lightingData.AdditionalLightShadowData[lightIndex].x > 0.5f &&
+                lightingData.AdditionalLightShadowVisibleLightIndices[lightIndex] >= 0;
         }
 
         private static bool IsTileLightDebugRequested()
@@ -841,6 +953,80 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 + ")";
         }
 
+        private static string FormatAdditionalLightShadowState(BurtLightingData lightingData, int lightIndex)
+        {
+            if (lightingData == null || lightIndex < 0 || lightIndex >= BurtLightingData.MaxAdditionalLights)
+            {
+                return "<none>";
+            }
+
+            var visibleLightIndex = lightingData.AdditionalLightShadowVisibleLightIndices[lightIndex];
+            var shadowData = lightingData.AdditionalLightShadowData[lightIndex];
+            var status = lightingData.AdditionalLightShadowStatuses != null && lightingData.AdditionalLightShadowStatuses.Length > lightIndex
+                ? lightingData.AdditionalLightShadowStatuses[lightIndex]
+                : BurtAdditionalLightShadowStatus.None;
+            var sourceMode = lightingData.AdditionalLightShadowSourceModes != null && lightingData.AdditionalLightShadowSourceModes.Length > lightIndex
+                ? lightingData.AdditionalLightShadowSourceModes[lightIndex]
+                : LightShadows.None;
+            var sourceStrength = lightingData.AdditionalLightShadowSourceStrengths != null && lightingData.AdditionalLightShadowSourceStrengths.Length > lightIndex
+                ? lightingData.AdditionalLightShadowSourceStrengths[lightIndex]
+                : 0f;
+            if (visibleLightIndex < 0 && shadowData.y <= 0.0001f)
+            {
+                return status == BurtAdditionalLightShadowStatus.None ? "None" : status.ToString();
+            }
+
+            var shadowMode = shadowData.w > 0.5f ? "Soft" : "Hard";
+            var lightParams = lightingData.AdditionalLightShadowLightParams != null && lightingData.AdditionalLightShadowLightParams.Length > lightIndex
+                ? lightingData.AdditionalLightShadowLightParams[lightIndex]
+                : Vector4.zero;
+            if (shadowData.x <= 0.5f)
+            {
+                return status + "(VisibleLight=" + visibleLightIndex
+                    + ",Strength=" + FormatFloat(shadowData.y)
+                    + ",UnityShadows=" + sourceMode
+                    + ",UnityStrength=" + FormatFloat(sourceStrength)
+                    + ",Mode=" + shadowMode
+                    + ")";
+            }
+
+            return status + "(VisibleLight=" + visibleLightIndex
+                + ",Strength=" + FormatFloat(shadowData.y)
+                + ",Tile=" + FormatFloat(shadowData.z)
+                + ",FirstSlice=" + FormatFloat(lightParams.x)
+                + ",SliceCount=" + FormatFloat(lightParams.y)
+                + ",ShadowType=" + FormatAdditionalLightShadowType(lightParams.z)
+                + ",UnityShadows=" + sourceMode
+                + ",UnityStrength=" + FormatFloat(sourceStrength)
+                + ",Mode=" + shadowMode
+                + ",Rect=" + FormatVector4(lightingData.AdditionalLightShadowAtlasRects[lightIndex])
+                + ")";
+        }
+
+        private static string FormatAdditionalLightShadowType(float type)
+        {
+            if (type > 0.5f && type < 1.5f)
+            {
+                return "Point";
+            }
+
+            if (type > 1.5f && type < 2.5f)
+            {
+                return "Spot";
+            }
+
+            return FormatFloat(type);
+        }
+
+        private static string FormatVector4(Vector4 value)
+        {
+            return "(" + FormatFloat(value.x)
+                + "," + FormatFloat(value.y)
+                + "," + FormatFloat(value.z)
+                + "," + FormatFloat(value.w)
+                + ")";
+        }
+
         private static string FormatVector3(float x, float y, float z)
         {
             return "(" + FormatFloat(x) + "," + FormatFloat(y) + "," + FormatFloat(z) + ")";
@@ -1003,6 +1189,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var postExposureMultiplier = BurtPostProcessUtility.ResolvePostExposureMultiplier(asset); // 解析当前 Volume 中 Tonemapping 前曝光倍率。
 
+            var exposureSettings = BurtPostProcessUtility.ResolvePhysicalExposureSettings(asset);
+
             var useColorAdjustments = BurtPostProcessUtility.ShouldUseColorAdjustments(request, asset); // 判断当前 Volume 是否启用基础颜色调整。
 
             var bloomSettings = BurtPostProcessUtility.ResolveBloomSettings(asset); // 解析当前 Volume 中真正生效的 Bloom 参数。
@@ -1010,6 +1198,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var bloomEnabled = BurtPostProcessUtility.ShouldUseBloom(request, asset); // 判断当前 request 是否启用 Bloom。
 
             var bloomMipCount = BurtPostProcessUtility.ResolveBloomMipCount(request, asset); // 解析当前 request 实际会使用的 Bloom mip 数。
+            var bloomDebugView = BurtPostProcessUtility.ResolveBloomDebugView(bloomSettings); // 合并 Volume Bloom Debug 和 Shading Debug 中的 Bloom Prefilter 入口。
+            var bloomPrefilterDebugRequested = BurtPostProcessUtility.IsBloomPrefilterDebugRequested();
 
             var temporalAA = request != null ? request.TemporalAA : null;
             var temporalAASettings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
@@ -1025,6 +1215,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" Tonemapping=").Append(tonemappingMode); // 写入 Volume 解析后的 Tonemapping 模式。
 
+            builder.Append(" ExposureMode=").Append(exposureSettings.Mode);
+
+            builder.Append(" EV100=").Append(exposureSettings.EV100.ToString("0.###"));
+
+            builder.Append(" ISO=").Append(exposureSettings.ISO.ToString("0.###"));
+
+            builder.Append(" Shutter=").Append(exposureSettings.ShutterTime.ToString("0.######"));
+
+            builder.Append(" Aperture=").Append(exposureSettings.Aperture.ToString("0.###"));
+
+            builder.Append(" ExposureCalibration=").Append(exposureSettings.Calibration.ToString("0.###"));
+
+            builder.Append(" ExposureCompensationEV=").Append(exposureSettings.Compensation.ToString("0.###"));
+
             builder.Append(" PostExposureMul=").Append(postExposureMultiplier.ToString("0.###")); // 写入 EV 转换后的线性曝光倍率。
 
             builder.Append(" ColorAdjustments=").Append(useColorAdjustments); // 写入是否启用颜色调整。
@@ -1033,11 +1237,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" BloomMips=").Append(bloomMipCount); // 写入当前 request 实际使用的 Bloom mip 数。
 
+            builder.Append(" BloomQuality=").Append(bloomSettings.Quality); // 写入 Bloom 质量档，便于确认 Q1-Q5 映射。
+
+            builder.Append(" BloomMaxMips=").Append(bloomSettings.MaxMipCount); // 写入 Bloom mip 上限，便于排查 quality 与 maxIterations 的夹取结果。
+
             builder.Append(" BloomThreshold=").Append(bloomSettings.Threshold.ToString("0.###")); // 写入 Bloom 阈值。
 
             builder.Append(" BloomIntensity=").Append(bloomSettings.Intensity.ToString("0.###")); // 写入 Bloom 强度。
 
             builder.Append(" BloomScatter=").Append(bloomSettings.Scatter.ToString("0.###")); // 写入 Bloom 散布。
+
+            builder.Append(" BloomSizeScale=").Append(bloomSettings.SizeScale.ToString("0.###")); // 写入 Bloom 尺寸倍率。
+
+            builder.Append(" BloomAlpha=").Append(bloomSettings.BloomAlphaChannel); // 写入 Bloom alpha 输出开关。
+
+            builder.Append(" BloomDebug=").Append(bloomDebugView); // 写入最终生效的 Bloom 调试视图，便于确认是否正在覆盖最终画面。
+
+            builder.Append(" BloomDebugSource=").Append(bloomPrefilterDebugRequested ? "ShadingDebug" : "Volume"); // 标明 Bloom debug 是从 Shading Debug 菜单还是 Volume 参数进入。
+
+            builder.Append(" BloomDebugSuppressedByShadingDebug=").Append(bloomDebugView != BurtBloomDebugView.Disabled && suppressedByShadingDebug); // Shading debug 优先级更高时，Bloom debug 不覆盖画面。
 
             builder.Append(" TAAEnabled=").Append(temporalAA != null && temporalAA.Enabled);
             builder.Append(" TAAHistoryValid=").Append(temporalAA != null && temporalAA.HistoryValid);
@@ -1136,7 +1354,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSAOBlurPassExpected=").Append(ssaoEnabled);
                 builder.Append(" SSAODebugPassRequested=").Append(ssaoDebugPassRequested);
                 builder.Append(" SSAOOutputTarget=ScreenSpaceAmbientOcclusion");
+                builder.Append(" SSAOOutputSemantic=FinalVisibilityWithPowerIntensity");
                 builder.Append(" SSAORawTarget=ScreenSpaceAmbientOcclusionRaw");
+                builder.Append(" SSAORawSemantic=PreCurveVisibility");
                 builder.Append(" SSAORadius=").Append(FormatFloat(ssaoSettings.Radius));
                 builder.Append(" SSAOIntensity=").Append(FormatFloat(ssaoSettings.Intensity));
                 builder.Append(" SSAOSamples=").Append(ssaoSettings.SampleCount);
@@ -1161,6 +1381,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSRMaxSteps=").Append(ssrSettings.MaxSteps);
                 builder.Append(" SSRTemporal=").Append(ssrSettings.TemporalAccumulation);
                 builder.Append(" SSRHistoryValid=").Append(ssrHistory.HasHistory);
+                builder.Append(" SSRHistoryMatches=").Append(ssrHistory.DescriptorMatches);
+                builder.Append(" SSRDepthHistoryAllocated=").Append(ssrHistory.HasDepthHistory);
+                builder.Append(" SSRDepthHistoryMatches=").Append(ssrHistory.DepthDescriptorMatches);
+                builder.Append(" SSRNormalRoughnessHistoryAllocated=").Append(ssrHistory.HasNormalRoughnessHistory);
+                builder.Append(" SSRNormalRoughnessHistoryMatches=").Append(ssrHistory.NormalRoughnessDescriptorMatches);
                 builder.Append(" SSRHistoryAge=").Append(ssrHistory.HistoryAge);
                 builder.Append(" SSRHistoryReason=").Append(ssrHistory.LastInvalidationReason);
             }

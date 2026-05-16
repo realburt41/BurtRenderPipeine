@@ -3,10 +3,29 @@ using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 C
 
 namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光数据和 request、pass 保持在同一模块里。
 {
+    public enum BurtAdditionalLightShadowStatus
+    {
+        None,
+        UnsupportedPointLight,
+        UnsupportedLightType,
+        ShadowTypeNone,
+        ShadowStrengthZero,
+        SlotLimitExceeded,
+        Marked,
+        AtlasInvalid,
+        PrepareInvalidVisibleLightIndex,
+        PrepareSpotMatrixFailed,
+        PreparePointMatrixFailed,
+        Prepared,
+        Active
+    }
+
     public sealed class BurtLightingData // 保存一个 BurtRenderRequest 收集到的灯光信息。
     {
         public const int MaxAdditionalLights = 32; // 第一版追加光源走全局数组，先限制数量避免 shader 常量数组过大。
         public const int MaxShadowedAdditionalLights = 4; // ?????????????????????????? atlas ???
+        public const int PointLightShadowFaceCount = 6;
+        public const int MaxAdditionalLightShadowSlices = MaxShadowedAdditionalLights * PointLightShadowFaceCount;
         public const int DefaultAdditionalLightShadowTileResolution = 512; // V1 ???????? tile ?????????????
 
         public const int AdditionalLightBufferVectorCount = MaxAdditionalLights * 4; // One additional light uses four float4 rows in the GPU buffer.
@@ -48,13 +67,38 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
         public bool AdditionalLightShadowCacheValid { get; private set; } // ?? spot shadow ??? atlas rect ??????? request ?????
         public int AdditionalLightShadowTileResolution { get; private set; } // ?????? atlas ?? tile ???????? texel size ???
         public int AdditionalLightShadowAtlasResolution { get; private set; } // ?????? atlas ??????? RT ??? shader ?????
+        public int AdditionalLightShadowAtlasTileCountX { get; private set; }
+        public int AdditionalLightShadowAtlasTileCountY { get; private set; }
+        public int AdditionalLightShadowActiveSliceCount { get; private set; }
         public int[] AdditionalLightShadowVisibleLightIndices { get; } = new int[MaxAdditionalLights]; // ? additional light slot ?? visible light ???shadow pass ????? Unity ? DrawShadows ???
-        public Vector4[] AdditionalLightShadowData { get; } = new Vector4[MaxAdditionalLights]; // x=enabled, y=strength, z/w=reserved?
+        public Vector4[] AdditionalLightShadowData { get; } = new Vector4[MaxAdditionalLights]; // x=enabled, y=strength, z=atlas tile, w=soft shadow.
+        public Vector4[] AdditionalLightShadowLightParams { get; } = new Vector4[MaxAdditionalLights]; // x=first slice, y=slice count, z=light type, w=receiver normal bias in world units.
         public Vector4[] AdditionalLightShadowAtlasRects { get; } = new Vector4[MaxAdditionalLights]; // xy=min uv, zw=max uv?? additional light slot ???shader ???? lightIndex ???
         public Matrix4x4[] AdditionalLightShadowViewMatrices { get; } = new Matrix4x4[MaxAdditionalLights]; // ?? spot shadow view matrix??? setup/draw/deferred ???????
         public Matrix4x4[] AdditionalLightShadowProjectionMatrices { get; } = new Matrix4x4[MaxAdditionalLights]; // ?? spot shadow projection matrix?? shadow draw pass ?????
-        public Matrix4x4[] AdditionalLightWorldToShadowMatrices { get; } = new Matrix4x4[MaxAdditionalLights]; // ????? atlas rect ? world-to-shadow matrix?? receiver ?????
         public ShadowSplitData[] AdditionalLightShadowSplitDatas { get; } = new ShadowSplitData[MaxAdditionalLights]; // ?? spot shadow split data?DrawShadows ??????
+        public LightShadows[] AdditionalLightShadowSourceModes { get; } = new LightShadows[MaxAdditionalLights];
+        public float[] AdditionalLightShadowSourceStrengths { get; } = new float[MaxAdditionalLights];
+        public int[] AdditionalLightShadowSliceLightIndices { get; } = new int[MaxAdditionalLightShadowSlices];
+        public int[] AdditionalLightShadowSliceFaceIndices { get; } = new int[MaxAdditionalLightShadowSlices];
+        public Vector4[] AdditionalLightShadowSliceAtlasRects { get; } = new Vector4[MaxAdditionalLightShadowSlices];
+        public Matrix4x4[] AdditionalLightShadowSliceViewMatrices { get; } = new Matrix4x4[MaxAdditionalLightShadowSlices];
+        public Matrix4x4[] AdditionalLightShadowSliceProjectionMatrices { get; } = new Matrix4x4[MaxAdditionalLightShadowSlices];
+        public Matrix4x4[] AdditionalLightShadowSliceWorldToShadowMatrices { get; } = new Matrix4x4[MaxAdditionalLightShadowSlices];
+        public ShadowSplitData[] AdditionalLightShadowSliceSplitDatas { get; } = new ShadowSplitData[MaxAdditionalLightShadowSlices];
+        public BurtAdditionalLightShadowStatus[] AdditionalLightShadowStatuses { get; } = new BurtAdditionalLightShadowStatus[MaxAdditionalLights];
+        public int AdditionalLightShadowCandidateCount { get; private set; }
+        public int AdditionalLightShadowMarkedCount { get; private set; }
+        public int AdditionalLightShadowSlotLimitExceededCount { get; private set; }
+        public int AdditionalLightShadowPointUnsupportedCount { get; private set; }
+        public int AdditionalLightShadowUnsupportedTypeCount { get; private set; }
+        public int AdditionalLightShadowNoneCount { get; private set; }
+        public int AdditionalLightShadowStrengthZeroCount { get; private set; }
+        public bool AdditionalLightShadowPrepareAttempted { get; private set; }
+        public bool AdditionalLightShadowPrepareSucceeded { get; private set; }
+        public int AdditionalLightShadowPrepareFailedCount { get; private set; }
+        public bool AdditionalLightShadowAtlasRegistered { get; private set; }
+        public bool AdditionalLightShadowAtlasValid { get; private set; }
 
         public Vector4[] AdditionalLightBufferData { get; } = new Vector4[AdditionalLightBufferVectorCount]; // Packed rows consumed by the RenderGraph additional-light buffer path.
 
@@ -117,9 +161,41 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public void SetAdditionalLightShadowCacheState(bool isValid, int tileResolution, int atlasResolution)
         {
+            SetAdditionalLightShadowCacheState(isValid, tileResolution, atlasResolution, 0, 0, AdditionalLightShadowActiveSliceCount);
+        }
+
+        public void SetAdditionalLightShadowCacheState(
+            bool isValid,
+            int tileResolution,
+            int atlasResolution,
+            int atlasTileCountX,
+            int atlasTileCountY,
+            int activeSliceCount)
+        {
             AdditionalLightShadowCacheValid = isValid;
             AdditionalLightShadowTileResolution = tileResolution;
             AdditionalLightShadowAtlasResolution = atlasResolution;
+            AdditionalLightShadowAtlasTileCountX = Mathf.Max(0, atlasTileCountX);
+            AdditionalLightShadowAtlasTileCountY = Mathf.Max(0, atlasTileCountY);
+            AdditionalLightShadowActiveSliceCount = Mathf.Clamp(activeSliceCount, 0, MaxAdditionalLightShadowSlices);
+
+            if (isValid)
+            {
+                PromotePreparedAdditionalLightShadowSlots();
+            }
+        }
+
+        public void SetAdditionalLightShadowPrepareState(bool attempted, bool succeeded, int failedCount)
+        {
+            AdditionalLightShadowPrepareAttempted = attempted;
+            AdditionalLightShadowPrepareSucceeded = succeeded;
+            AdditionalLightShadowPrepareFailedCount = Mathf.Max(0, failedCount);
+        }
+
+        public void SetAdditionalLightShadowAtlasState(bool registered, bool valid)
+        {
+            AdditionalLightShadowAtlasRegistered = registered;
+            AdditionalLightShadowAtlasValid = valid;
         }
 
         public void SetAdditionalLightShadowSlot(
@@ -141,11 +217,60 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             AdditionalLightShadowAtlasRects[lightIndex] = atlasRect;
             AdditionalLightShadowViewMatrices[lightIndex] = viewMatrix;
             AdditionalLightShadowProjectionMatrices[lightIndex] = projectionMatrix;
-            AdditionalLightWorldToShadowMatrices[lightIndex] = worldToShadowMatrix;
             AdditionalLightShadowSplitDatas[lightIndex] = splitData;
+            AdditionalLightShadowStatuses[lightIndex] = BurtAdditionalLightShadowStatus.Prepared;
+        }
+
+        public void SetAdditionalLightShadowSlice(
+            int sliceIndex,
+            int lightIndex,
+            int faceIndex,
+            Vector4 atlasRect,
+            Matrix4x4 viewMatrix,
+            Matrix4x4 projectionMatrix,
+            Matrix4x4 worldToShadowMatrix,
+            ShadowSplitData splitData)
+        {
+            if (sliceIndex < 0 || sliceIndex >= MaxAdditionalLightShadowSlices)
+            {
+                return;
+            }
+
+            AdditionalLightShadowSliceLightIndices[sliceIndex] = lightIndex;
+            AdditionalLightShadowSliceFaceIndices[sliceIndex] = faceIndex;
+            AdditionalLightShadowSliceAtlasRects[sliceIndex] = atlasRect;
+            AdditionalLightShadowSliceViewMatrices[sliceIndex] = viewMatrix;
+            AdditionalLightShadowSliceProjectionMatrices[sliceIndex] = projectionMatrix;
+            AdditionalLightShadowSliceWorldToShadowMatrices[sliceIndex] = worldToShadowMatrix;
+            AdditionalLightShadowSliceSplitDatas[sliceIndex] = splitData;
+        }
+
+        public void SetAdditionalLightShadowLightParams(int lightIndex, int firstSliceIndex, int sliceCount, float lightType, float receiverNormalBias = 0f)
+        {
+            if (lightIndex < 0 || lightIndex >= MaxAdditionalLights)
+            {
+                return;
+            }
+
+            var shadowData = AdditionalLightShadowData[lightIndex];
+            AdditionalLightShadowData[lightIndex] = new Vector4(shadowData.x, shadowData.y, Mathf.Max(0, firstSliceIndex), shadowData.w);
+            AdditionalLightShadowLightParams[lightIndex] = new Vector4(
+                Mathf.Max(0, firstSliceIndex),
+                Mathf.Clamp(sliceCount, 0, PointLightShadowFaceCount),
+                lightType,
+                Mathf.Max(0f, receiverNormalBias));
+            if (firstSliceIndex >= 0 && firstSliceIndex < MaxAdditionalLightShadowSlices)
+            {
+                AdditionalLightShadowAtlasRects[lightIndex] = AdditionalLightShadowSliceAtlasRects[firstSliceIndex];
+            }
         }
 
         public void DisableAdditionalLightShadowSlot(int lightIndex)
+        {
+            DisableAdditionalLightShadowSlot(lightIndex, BurtAdditionalLightShadowStatus.None);
+        }
+
+        public void DisableAdditionalLightShadowSlot(int lightIndex, BurtAdditionalLightShadowStatus status)
         {
             if (lightIndex < 0 || lightIndex >= MaxAdditionalLights)
             {
@@ -154,11 +279,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
             AdditionalLightShadowVisibleLightIndices[lightIndex] = -1;
             AdditionalLightShadowData[lightIndex] = Vector4.zero;
+            AdditionalLightShadowLightParams[lightIndex] = Vector4.zero;
             AdditionalLightShadowAtlasRects[lightIndex] = new Vector4(0f, 0f, 1f, 1f);
             AdditionalLightShadowViewMatrices[lightIndex] = Matrix4x4.identity;
             AdditionalLightShadowProjectionMatrices[lightIndex] = Matrix4x4.identity;
-            AdditionalLightWorldToShadowMatrices[lightIndex] = Matrix4x4.identity;
             AdditionalLightShadowSplitDatas[lightIndex] = default;
+            AdditionalLightShadowStatuses[lightIndex] = status;
         }
 
         public void SetTileLightDebugState(
@@ -256,6 +382,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
             SetAdditionalLightBufferUploadState(false, false);
             SetAdditionalLightShadowCacheState(false, 0, 0);
+            ResetAdditionalLightShadowDiagnostics();
             SetTileLightDebugState(false, false, "Disabled", 0, 0, 0, 0, 0, 0, 0, 0, 0f);
             TileLightDebugCountSnapshotLength = 0;
 
@@ -310,10 +437,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
                 switch (visibleLight.lightType)
                 {
                     case LightType.Directional:
-                        TryAddDirectionalAdditionalLight(visibleLight);
+                        TryAddDirectionalAdditionalLight(visibleLight, lightIndex);
                         break;
                     case LightType.Point:
-                        TryAddPointAdditionalLight(visibleLight);
+                        TryAddPointAdditionalLight(visibleLight, lightIndex);
                         break;
                     case LightType.Spot:
                         TryAddSpotAdditionalLight(visibleLight, lightIndex);
@@ -322,7 +449,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             }
         }
 
-        private void TryAddDirectionalAdditionalLight(VisibleLight visibleLight)
+        private void TryAddDirectionalAdditionalLight(VisibleLight visibleLight, int visibleLightIndex)
         {
             var forwardColumn = visibleLight.localToWorldMatrix.GetColumn(2);
             var directionTowardLight = new Vector3(-forwardColumn.x, -forwardColumn.y, -forwardColumn.z);
@@ -338,11 +465,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             AdditionalLightColorAndType[slot] = new Vector4(color.r, color.g, color.b, AdditionalLightTypeDirectional);
             AdditionalLightDirectionAndSpot[slot] = new Vector4(direction.x, direction.y, direction.z, 0f);
             PackAdditionalLightBufferSlot(slot);
+            TryMarkUnsupportedAdditionalLightShadow(slot, visibleLight, visibleLightIndex, BurtAdditionalLightShadowStatus.UnsupportedLightType);
         }
 
-        private void TryAddPointAdditionalLight(VisibleLight visibleLight)
+        private void TryAddPointAdditionalLight(VisibleLight visibleLight, int visibleLightIndex)
         {
-            AddLocalAdditionalLight(visibleLight, AdditionalLightTypePoint, Vector3.forward, 1f, -1f, 0f);
+            AddLocalAdditionalLight(visibleLight, AdditionalLightTypePoint, Vector3.forward, 1f, -1f, 0f, true, visibleLightIndex);
         }
 
         private void TryAddSpotAdditionalLight(VisibleLight visibleLight, int visibleLightIndex)
@@ -416,32 +544,171 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
                 AdditionalLightSpotParams[lightIndex] = Vector4.zero;
                 AdditionalLightShadowVisibleLightIndices[lightIndex] = -1;
                 AdditionalLightShadowData[lightIndex] = Vector4.zero;
+                AdditionalLightShadowLightParams[lightIndex] = Vector4.zero;
                 AdditionalLightShadowAtlasRects[lightIndex] = new Vector4(0f, 0f, 1f, 1f);
                 AdditionalLightShadowViewMatrices[lightIndex] = Matrix4x4.identity;
                 AdditionalLightShadowProjectionMatrices[lightIndex] = Matrix4x4.identity;
-                AdditionalLightWorldToShadowMatrices[lightIndex] = Matrix4x4.identity;
                 AdditionalLightShadowSplitDatas[lightIndex] = default;
+                AdditionalLightShadowSourceModes[lightIndex] = LightShadows.None;
+                AdditionalLightShadowSourceStrengths[lightIndex] = 0f;
+                AdditionalLightShadowStatuses[lightIndex] = BurtAdditionalLightShadowStatus.None;
                 PackAdditionalLightBufferSlot(lightIndex);
             }
+
+            ClearAdditionalLightShadowSliceArrays();
         }
 
         private void TryMarkAdditionalLightShadow(int slot, VisibleLight visibleLight, int visibleLightIndex)
         {
-            if (slot < 0 || slot >= MaxAdditionalLights || ShadowedAdditionalLightCount >= MaxShadowedAdditionalLights)
+            if (slot < 0 || slot >= MaxAdditionalLights)
             {
                 return;
             }
 
             var light = visibleLight.light;
-            if (light == null || light.shadows == LightShadows.None || light.shadowStrength <= 0.0001f)
+            AdditionalLightShadowVisibleLightIndices[slot] = visibleLightIndex;
+            AdditionalLightShadowSourceModes[slot] = light != null ? light.shadows : LightShadows.None;
+            AdditionalLightShadowSourceStrengths[slot] = light != null ? light.shadowStrength : 0f;
+            if (light == null || light.shadows == LightShadows.None)
+            {
+                SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.ShadowTypeNone);
+                AdditionalLightShadowNoneCount++;
+                return;
+            }
+
+            if (light.shadowStrength <= 0.0001f)
+            {
+                SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.ShadowStrengthZero);
+                AdditionalLightShadowStrengthZeroCount++;
+                return;
+            }
+
+            AdditionalLightShadowCandidateCount++;
+            if (visibleLight.lightType == LightType.Point)
+            {
+                if (ShadowedAdditionalLightCount >= MaxShadowedAdditionalLights)
+                {
+                    SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.SlotLimitExceeded);
+                    AdditionalLightShadowSlotLimitExceededCount++;
+                    return;
+                }
+
+                var pointSoftShadow = light.shadows == LightShadows.Soft ? 1f : 0f;
+                AdditionalLightShadowData[slot] = new Vector4(1f, Mathf.Clamp01(light.shadowStrength), 0f, pointSoftShadow);
+                AdditionalLightShadowLightParams[slot] = new Vector4(0f, PointLightShadowFaceCount, AdditionalLightTypePoint, 0f);
+                SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.Marked);
+                ShadowedAdditionalLightCount++;
+                AdditionalLightShadowMarkedCount++;
+                SetAdditionalLightShadowCacheState(false, 0, 0);
+                return;
+            }
+
+            if (visibleLight.lightType != LightType.Spot)
+            {
+                SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.UnsupportedLightType);
+                AdditionalLightShadowUnsupportedTypeCount++;
+                return;
+            }
+
+            if (ShadowedAdditionalLightCount >= MaxShadowedAdditionalLights)
+            {
+                SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.SlotLimitExceeded);
+                AdditionalLightShadowSlotLimitExceededCount++;
+                return;
+            }
+
+            var softShadow = light.shadows == LightShadows.Soft ? 1f : 0f;
+            AdditionalLightShadowData[slot] = new Vector4(1f, Mathf.Clamp01(light.shadowStrength), 0f, softShadow);
+            AdditionalLightShadowLightParams[slot] = new Vector4(0f, 1f, AdditionalLightTypeSpot, 0f);
+            SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.Marked);
+            ShadowedAdditionalLightCount++;
+            AdditionalLightShadowMarkedCount++;
+            SetAdditionalLightShadowCacheState(false, 0, 0);
+        }
+
+        private void TryMarkUnsupportedAdditionalLightShadow(
+            int slot,
+            VisibleLight visibleLight,
+            int visibleLightIndex,
+            BurtAdditionalLightShadowStatus unsupportedStatus)
+        {
+            if (slot < 0 || slot >= MaxAdditionalLights)
             {
                 return;
             }
 
+            var light = visibleLight.light;
             AdditionalLightShadowVisibleLightIndices[slot] = visibleLightIndex;
-            AdditionalLightShadowData[slot] = new Vector4(1f, Mathf.Clamp01(light.shadowStrength), 0f, 0f);
-            ShadowedAdditionalLightCount++;
-            SetAdditionalLightShadowCacheState(false, 0, 0);
+            AdditionalLightShadowSourceModes[slot] = light != null ? light.shadows : LightShadows.None;
+            AdditionalLightShadowSourceStrengths[slot] = light != null ? light.shadowStrength : 0f;
+            if (light == null || light.shadows == LightShadows.None)
+            {
+                return;
+            }
+
+            if (light.shadowStrength <= 0.0001f)
+            {
+                SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.ShadowStrengthZero);
+                AdditionalLightShadowStrengthZeroCount++;
+                return;
+            }
+
+            AdditionalLightShadowCandidateCount++;
+            SetAdditionalLightShadowStatus(slot, unsupportedStatus);
+            AdditionalLightShadowUnsupportedTypeCount++;
+        }
+
+        public void SetAdditionalLightShadowStatus(int lightIndex, BurtAdditionalLightShadowStatus status)
+        {
+            if (lightIndex < 0 || lightIndex >= MaxAdditionalLights)
+            {
+                return;
+            }
+
+            AdditionalLightShadowStatuses[lightIndex] = status;
+        }
+
+        private void ResetAdditionalLightShadowDiagnostics()
+        {
+            AdditionalLightShadowCandidateCount = 0;
+            AdditionalLightShadowMarkedCount = 0;
+            AdditionalLightShadowSlotLimitExceededCount = 0;
+            AdditionalLightShadowPointUnsupportedCount = 0;
+            AdditionalLightShadowUnsupportedTypeCount = 0;
+            AdditionalLightShadowNoneCount = 0;
+            AdditionalLightShadowStrengthZeroCount = 0;
+            AdditionalLightShadowPrepareAttempted = false;
+            AdditionalLightShadowPrepareSucceeded = false;
+            AdditionalLightShadowPrepareFailedCount = 0;
+            AdditionalLightShadowAtlasRegistered = false;
+            AdditionalLightShadowAtlasValid = false;
+            AdditionalLightShadowActiveSliceCount = 0;
+        }
+
+        private void PromotePreparedAdditionalLightShadowSlots()
+        {
+            var additionalLightCount = Mathf.Min(AdditionalLightCount, MaxAdditionalLights);
+            for (var lightIndex = 0; lightIndex < additionalLightCount; lightIndex++)
+            {
+                if (AdditionalLightShadowData[lightIndex].x > 0.5f && AdditionalLightShadowVisibleLightIndices[lightIndex] >= 0)
+                {
+                    AdditionalLightShadowStatuses[lightIndex] = BurtAdditionalLightShadowStatus.Active;
+                }
+            }
+        }
+
+        private void ClearAdditionalLightShadowSliceArrays()
+        {
+            for (var sliceIndex = 0; sliceIndex < MaxAdditionalLightShadowSlices; sliceIndex++)
+            {
+                AdditionalLightShadowSliceLightIndices[sliceIndex] = -1;
+                AdditionalLightShadowSliceFaceIndices[sliceIndex] = -1;
+                AdditionalLightShadowSliceAtlasRects[sliceIndex] = new Vector4(0f, 0f, 1f, 1f);
+                AdditionalLightShadowSliceViewMatrices[sliceIndex] = Matrix4x4.identity;
+                AdditionalLightShadowSliceProjectionMatrices[sliceIndex] = Matrix4x4.identity;
+                AdditionalLightShadowSliceWorldToShadowMatrices[sliceIndex] = Matrix4x4.identity;
+                AdditionalLightShadowSliceSplitDatas[sliceIndex] = default;
+            }
         }
 
         private void PackAdditionalLightBufferSlot(int lightIndex)

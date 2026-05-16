@@ -42,9 +42,6 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
             {
                 float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
                 float2 uv = ndc * 0.5 + 0.5;
-                #if UNITY_UV_STARTS_AT_TOP
-                    uv.y = 1.0 - uv.y;
-                #endif
                 return uv;
             }
 
@@ -74,8 +71,13 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
                 float valid = step(1e-5, input.currentClipNoJitter.w) * step(1e-5, input.previousClipNoJitter.w);
                 float2 currentUv = BurtTaaClipToUv(input.currentClipNoJitter);
                 float2 previousUv = BurtTaaClipToUv(input.previousClipNoJitter);
+                valid *= step(0.0, currentUv.x) * step(currentUv.x, 1.0) * step(0.0, currentUv.y) * step(currentUv.y, 1.0);
+                valid *= step(0.0, previousUv.x) * step(previousUv.x, 1.0) * step(0.0, previousUv.y) * step(previousUv.y, 1.0);
                 float2 velocity = previousUv - currentUv;
-                return float4(velocity, valid, saturate(input.sourceConfidence));
+                float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
+                float keepVelocity = step(0.02, max(velocityPixels.x, velocityPixels.y));
+                velocity *= keepVelocity;
+                return float4(velocity * valid, valid, saturate(input.sourceConfidence));
             }
             ENDHLSL
         }

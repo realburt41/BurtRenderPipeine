@@ -206,6 +206,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 // 写入追加光直接光拆分，Additional Light Debug View 会显示它。
                 debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
                 debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
+                debugData.additionalUnshadowedColor = BurtEvaluateAdditionalLightingUnshadowedDebugFromGBuffer(shadingGBufferData, viewDirectionWS, positionWS, screenUV);
 
                 // 写入间接漫反射结果，IndirectDiffuse Debug View 会显示 Unity SH / Light Probe 贡献。
                 debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
@@ -215,6 +216,15 @@ Shader "Hidden/BurtRP/DeferredLighting"
 
                 // 写入主光阴影衰减，ShadowAttenuation Debug View 用它确认 Deferred 接收阴影是否和 Forward 一致。
                 debugData.shadowAttenuation = shadowAttenuation;
+                debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, deferredAONormalWS, screenUV);
+                BurtFillAdditionalLightShadowProjectionDebugData(
+                    positionWS,
+                    deferredAONormalWS,
+                    screenUV,
+                    debugData.additionalShadowFaceColor,
+                    debugData.additionalShadowUVColor,
+                    debugData.additionalShadowDepthColor,
+                    debugData.additionalShadowDepthDeltaColor);
 
                 BurtFillMainLightShadowShadingDebugData(
                     positionWS,

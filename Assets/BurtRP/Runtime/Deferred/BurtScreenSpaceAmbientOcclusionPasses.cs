@@ -315,7 +315,9 @@ namespace Burt.RenderPipeline
         private static readonly int AOBlurSourceTextureId = Shader.PropertyToID("_BurtSSAOBlurSourceTexture");
         private static readonly int AOBlurDirectionId = Shader.PropertyToID("_BurtSSAOBlurDirection");
         private static readonly int DeferredScreenSizeId = Shader.PropertyToID("_BurtDeferredScreenSize");
+        private static readonly int SSAOParams0Id = Shader.PropertyToID("_BurtSSAOParams0");
         private static readonly int SSAOParams1Id = Shader.PropertyToID("_BurtSSAOParams1");
+        private static readonly int SSAOParams2Id = Shader.PropertyToID("_BurtSSAOParams2");
         private static readonly int SSAOParams3Id = Shader.PropertyToID("_BurtSSAOParams3");
         private static readonly int SSAOEnabledId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionEnabled");
 
@@ -369,18 +371,20 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
             cmd.SetGlobalTexture(AORawTextureId, aoRawTarget.Identifier);
             cmd.SetGlobalVector(DeferredScreenSizeId, new Vector4(descriptor.width, descriptor.height, 1f / descriptor.width, 1f / descriptor.height));
+            cmd.SetGlobalVector(SSAOParams0Id, new Vector4(settings.Radius, settings.Intensity, settings.SampleCount, settings.Bias));
             cmd.SetGlobalVector(SSAOParams1Id, new Vector4(settings.Power, settings.Blur ? 1f : 0f, Time.frameCount & 1023, 0f));
+            cmd.SetGlobalVector(SSAOParams2Id, new Vector4(settings.FadeDistance, settings.FadeRadius, settings.Thickness, 1f));
             cmd.SetGlobalVector(SSAOParams3Id, new Vector4(settings.HorizonSearch ? 1f : 0f, settings.DirectionCount, settings.BlurSharpness, settings.SpatialDenoise ? 1f : 0f));
             if (settings.Blur)
             {
                 cmd.GetTemporaryRT(AOBlurTempTextureId, descriptor, FilterMode.Bilinear);
-                DrawBlur(cmd, material, aoRawTarget.Identifier, blurTempIdentifier, camera, Vector2.right);
-                DrawBlur(cmd, material, blurTempIdentifier, aoTarget.Identifier, camera, Vector2.up);
+                DrawBlur(cmd, material, aoRawTarget.Identifier, blurTempIdentifier, camera, Vector2.right, false);
+                DrawBlur(cmd, material, blurTempIdentifier, aoTarget.Identifier, camera, Vector2.up, true);
                 cmd.ReleaseTemporaryRT(AOBlurTempTextureId);
             }
             else
             {
-                DrawBlur(cmd, material, aoRawTarget.Identifier, aoTarget.Identifier, camera, Vector2.zero);
+                DrawBlur(cmd, material, aoRawTarget.Identifier, aoTarget.Identifier, camera, Vector2.zero, true);
             }
 
             cmd.SetGlobalTexture(AOTextureId, aoTarget.Identifier);
@@ -395,12 +399,13 @@ namespace Burt.RenderPipeline
             RenderTargetIdentifier source,
             RenderTargetIdentifier destination,
             Camera camera,
-            Vector2 direction)
+            Vector2 direction,
+            bool resolveFinal)
         {
             cmd.SetRenderTarget(destination);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(AOBlurSourceTextureId, source);
-            cmd.SetGlobalVector(AOBlurDirectionId, new Vector4(direction.x, direction.y, 0f, 0f));
+            cmd.SetGlobalVector(AOBlurDirectionId, new Vector4(direction.x, direction.y, resolveFinal ? 1f : 0f, 0f));
             cmd.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1);
         }
 
@@ -448,6 +453,8 @@ namespace Burt.RenderPipeline
         private const string ScreenSpaceAmbientOcclusionShaderName = "Hidden/BurtRP/ScreenSpaceAmbientOcclusion";
         private static readonly int AORawTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawTextureId;
         private static readonly int AOTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionTextureId;
+        private static readonly int DebugCameraColorTextureId = Shader.PropertyToID("_BurtSSAODebugCameraColorTexture");
+        private static readonly int DebugCameraColorCopyTextureId = Shader.PropertyToID("_BurtSSAODebugCameraColorCopyTexture");
         private static readonly int SSAODebugModeId = Shader.PropertyToID("_BurtSSAODebugMode");
 
         private Material screenSpaceAmbientOcclusionMaterial;
@@ -494,12 +501,27 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(Name);
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var isOverlay = BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionOverlayDebugMode(BurtShadingDebugSettings.Mode);
+            if (isOverlay)
+            {
+                var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
+                cmd.GetTemporaryRT(DebugCameraColorCopyTextureId, descriptor, FilterMode.Bilinear);
+                cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(DebugCameraColorCopyTextureId));
+                cmd.SetGlobalTexture(DebugCameraColorTextureId, new RenderTargetIdentifier(DebugCameraColorCopyTextureId));
+            }
+
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
-            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(AORawTextureId, aoRawTarget.Identifier);
             cmd.SetGlobalTexture(AOTextureId, aoTarget.Identifier);
             cmd.SetGlobalFloat(SSAODebugModeId, BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionShaderDebugMode());
             cmd.DrawProcedural(Matrix4x4.identity, material, BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionDebugPassIndex(), MeshTopology.Triangles, 3, 1);
+            if (isOverlay)
+            {
+                cmd.ReleaseTemporaryRT(DebugCameraColorCopyTextureId);
+            }
+
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -593,8 +615,8 @@ namespace Burt.RenderPipeline
 
     internal readonly struct BurtScreenSpaceAmbientOcclusionSettings
     {
-        public static readonly BurtScreenSpaceAmbientOcclusionSettings Disabled = new BurtScreenSpaceAmbientOcclusionSettings(false, 2f, 1f, 16, true, 2, 0.02f, 1f, true, true, true, 0.12f, 0.5f, 50f, 80f);
-        public static readonly BurtScreenSpaceAmbientOcclusionSettings DebugDefault = new BurtScreenSpaceAmbientOcclusionSettings(true, 2f, 1f, 16, true, 2, 0.02f, 1f, true, true, true, 0.12f, 0.5f, 50f, 80f);
+        public static readonly BurtScreenSpaceAmbientOcclusionSettings Disabled = new BurtScreenSpaceAmbientOcclusionSettings(false, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, 0.12f, 0.5f, 50f, 80f);
+        public static readonly BurtScreenSpaceAmbientOcclusionSettings DebugDefault = new BurtScreenSpaceAmbientOcclusionSettings(true, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, 0.12f, 0.5f, 50f, 80f);
 
         public BurtScreenSpaceAmbientOcclusionSettings(
             bool enabled,
@@ -615,12 +637,12 @@ namespace Burt.RenderPipeline
         {
             Enabled = enabled;
             Intensity = Mathf.Clamp(intensity, 0f, 4f);
-            Radius = Mathf.Clamp(radius, 0.01f, 5f);
+            Radius = Mathf.Clamp(radius, 0.01f, 8f);
             SampleCount = Mathf.Clamp(sampleCount, 1, 32);
             HorizonSearch = horizonSearch;
             DirectionCount = Mathf.Clamp(directionCount, 1, 8);
             Bias = Mathf.Clamp(bias, 0f, 0.2f);
-            Power = Mathf.Clamp(power, 0.25f, 4f);
+            Power = Mathf.Clamp(power, 0.1f, 16f);
             HalfResolution = halfResolution;
             Blur = blur;
             SpatialDenoise = spatialDenoise;

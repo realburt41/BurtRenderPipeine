@@ -11,7 +11,6 @@ namespace Burt.RenderPipeline
         [Title("BurtRP Tonemapping")]
         [InfoBox("Tonemapping parameters are stored in Global Volume; BurtRenderPipelineAsset only controls the post-processing framework switch.")]
         public BurtTonemappingModeParameter mode = new BurtTonemappingModeParameter(BurtTonemappingMode.None);
-        public ClampedFloatParameter postExposure = new ClampedFloatParameter(0f, -8f, 8f);
 
         [Title("UE / XRender Filmic Parameters")]
         [InfoBox("Default values match the XRender / UE Filmic tonemapper film settings.")]

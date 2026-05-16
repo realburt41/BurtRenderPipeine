@@ -11,6 +11,64 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
         [InspectorName("XRender / UE Filmic (ACES)")] ACES = 2 // 使用 XRender 当前对齐 UE Filmic/ACES 的曲线，名称保留 ACES 是为了不破坏旧 Volume 序列化值。
     }
 
+    public enum BurtExposureMode
+    {
+        ManualEV100 = 0,
+        PhysicalCamera = 1
+    }
+
+    internal readonly struct BurtPhysicalExposureSettings
+    {
+        public const BurtExposureMode DefaultMode = BurtExposureMode.ManualEV100;
+        public const float DefaultManualEv100 = 0f;
+        public const float DefaultIso = 100f;
+        public const float DefaultShutterTime = 1f / 60f;
+        public const float DefaultAperture = 2.8f;
+        public const float DefaultCalibration = 1f;
+        public const float DefaultCompensation = 0f;
+        public static readonly BurtPhysicalExposureSettings Default = new BurtPhysicalExposureSettings(DefaultMode, DefaultManualEv100, DefaultIso, DefaultShutterTime, DefaultAperture, DefaultCalibration, DefaultCompensation);
+
+        public BurtExposureMode Mode { get; }
+        public float EV100 { get; }
+        public float ISO { get; }
+        public float ShutterTime { get; }
+        public float Aperture { get; }
+        public float Calibration { get; }
+        public float Compensation { get; }
+        public float Multiplier { get; }
+
+        public BurtPhysicalExposureSettings(
+            BurtExposureMode mode,
+            float manualEv100,
+            float iso,
+            float shutterTime,
+            float aperture,
+            float calibration,
+            float compensation)
+        {
+            Mode = NormalizeMode(mode);
+            ISO = Mathf.Clamp(SanitizeFinite(iso, DefaultIso), 1f, 204800f);
+            ShutterTime = Mathf.Clamp(SanitizeFinite(shutterTime, DefaultShutterTime), 0.000001f, 60f);
+            Aperture = Mathf.Clamp(SanitizeFinite(aperture, DefaultAperture), 0.1f, 64f);
+            Calibration = Mathf.Clamp(SanitizeFinite(calibration, DefaultCalibration), 0f, 1024f);
+            Compensation = Mathf.Clamp(SanitizeFinite(compensation, DefaultCompensation), -16f, 16f);
+            EV100 = Mode == BurtExposureMode.PhysicalCamera
+                ? Mathf.Log((Aperture * Aperture) / ShutterTime * (100f / ISO), 2f)
+                : Mathf.Clamp(SanitizeFinite(manualEv100, DefaultManualEv100), -16f, 24f);
+            Multiplier = Mathf.Clamp(Mathf.Pow(2f, -EV100 + Compensation) * Calibration, 0f, 65504f);
+        }
+
+        private static BurtExposureMode NormalizeMode(BurtExposureMode mode)
+        {
+            return mode == BurtExposureMode.PhysicalCamera ? BurtExposureMode.PhysicalCamera : BurtExposureMode.ManualEV100;
+        }
+
+        private static float SanitizeFinite(float value, float fallback)
+        {
+            return float.IsNaN(value) || float.IsInfinity(value) ? fallback : value;
+        }
+    }
+
     internal readonly struct BurtTonemappingFilmSettings // 定义一组 UE/XRender Filmic Tonemapping 参数，方便 C# 和 Shader 用同一套默认值。
     {
         public const float DefaultSlope = 0.88f; // 定义默认 Film Slope，对齐 XRender TonemappingComponent 和 UE Film 默认值。
@@ -79,30 +137,146 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
         }
     }
 
+    public enum BurtBloomQuality
+    {
+        Disabled = 0,
+        Q1 = 1,
+        Q2 = 2,
+        Q3 = 3,
+        Q4 = 4,
+        Q5 = 5
+    }
+
+    public enum BurtBloomDebugView
+    {
+        Disabled = 0,
+        Prefilter = 1,
+        FinalBloom = 2,
+        Mip1 = 3,
+        Mip2 = 4,
+        Mip3 = 5,
+        Mip4 = 6,
+        Mip5 = 7,
+        Alpha = 8
+    }
+
     internal readonly struct BurtBloomSettings // 定义 Bloom 的运行时参数包，让 Pass 不直接依赖 Volume 组件字段。
     {
         public const float DefaultThreshold = 1.0f; // 默认只让 HDR 高光进入 Bloom。
         public const float DefaultIntensity = 0.6f; // 默认强度保持可见但不过曝，便于第一版诊断。
         public const float DefaultScatter = 0.65f; // 默认散布控制上采样叠加权重。
-        public const int DefaultMaxMipCount = 5; // 第一版最多 5 级，避免低端分辨率上申请过多临时 RT。
+        public const float DefaultSizeScale = 1f; // 默认保持旧 scatter 尺寸语义，新增参数只作为额外 XRender 风格尺寸倍率。
+        public const BurtBloomQuality DefaultQuality = BurtBloomQuality.Q4; // 默认对齐当前 5-stage 行为，同时暴露 XRender 风格质量档。
+        public const BurtBloomDebugView DefaultDebugView = BurtBloomDebugView.Disabled; // 默认不显示 Bloom 调试纹理。
+        public const int DefaultMaxMipCount = 6; // 默认上限允许 Q5 使用 6 级；默认 Q4 仍保持当前 5-stage 视觉。
         public const float DefaultSoftKnee = 0.5f; // 默认软阈值让高光进入 Bloom 时更平滑。
-        public static readonly BurtBloomSettings Default = new BurtBloomSettings(false, DefaultThreshold, DefaultSoftKnee, DefaultIntensity, DefaultScatter, DefaultMaxMipCount); // 关闭 Bloom 的安全默认值。
+        public const float DefaultFilter1Size = 0.3f; // 对齐 XRender PC Bloom Filter1 的默认直径百分比。
+        public const float DefaultFilter2Size = 1f; // 对齐 XRender PC Bloom Filter2 的默认直径百分比。
+        public const float DefaultFilter3Size = 2f; // 对齐 XRender PC Bloom Filter3 的默认直径百分比。
+        public const float DefaultFilter4Size = 10f; // 对齐 XRender PC Bloom Filter4 的默认直径百分比。
+        public const float DefaultFilter5Size = 30f; // 对齐 XRender PC Bloom Filter5 的默认直径百分比。
+        public const float DefaultFilter6Size = 64f; // 对齐 XRender PC Bloom Filter6 的默认直径百分比。
+        public static readonly BurtBloomSettings Default = new BurtBloomSettings(false, DefaultThreshold, DefaultSoftKnee, DefaultIntensity, DefaultScatter, DefaultSizeScale, DefaultQuality, DefaultMaxMipCount, false, DefaultDebugView, DefaultFilter1Size, DefaultFilter2Size, DefaultFilter3Size, DefaultFilter4Size, DefaultFilter5Size, DefaultFilter6Size, Color.white, Color.white, Color.white, Color.white, Color.white, Color.white); // 关闭 Bloom 的安全默认值。
 
         public bool Enabled { get; } // 保存 Bloom 是否启用。
         public float Threshold { get; } // 保存亮度阈值。
         public float SoftKnee { get; } // 保存软阈值。
         public float Intensity { get; } // 保存合成强度。
         public float Scatter { get; } // 保存上采样散布强度。
+        public float SizeScale { get; } // 保存 XRender 风格的 Bloom 尺寸倍率。
+        public BurtBloomQuality Quality { get; } // 保存 XRender 风格 Bloom 质量档，决定最多使用多少 Filter 阶段。
         public int MaxMipCount { get; } // 保存最大 mip 数。
+        public bool BloomAlphaChannel { get; } // 保存是否把 Bloom 强度写入 alpha 通道。
+        public BurtBloomDebugView DebugView { get; } // 保存 Bloom 调试输出模式。
+        public float Filter1Size { get; } // 保存 Filter1 的直径百分比。
+        public float Filter2Size { get; } // 保存 Filter2 的直径百分比。
+        public float Filter3Size { get; } // 保存 Filter3 的直径百分比。
+        public float Filter4Size { get; } // 保存 Filter4 的直径百分比。
+        public float Filter5Size { get; } // 保存 Filter5 的直径百分比。
+        public float Filter6Size { get; } // 保存 Filter6 的直径百分比。
+        public Color Filter1Tint { get; } // 保存 Filter1 的颜色权重。
+        public Color Filter2Tint { get; } // 保存 Filter2 的颜色权重。
+        public Color Filter3Tint { get; } // 保存 Filter3 的颜色权重。
+        public Color Filter4Tint { get; } // 保存 Filter4 的颜色权重。
+        public Color Filter5Tint { get; } // 保存 Filter5 的颜色权重。
+        public Color Filter6Tint { get; } // 保存 Filter6 的颜色权重。
 
-        public BurtBloomSettings(bool enabled, float threshold, float softKnee, float intensity, float scatter, int maxMipCount) // 收拢 Bloom 参数。
+        public static bool IsQualityEnabled(BurtBloomQuality quality) // 判断 Bloom 质量档是否代表有效 Bloom 阶段。
+        {
+            return NormalizeQuality(quality) != BurtBloomQuality.Disabled; // 非法枚举值会被归一化为 Disabled。
+        }
+
+        public BurtBloomSettings(bool enabled, float threshold, float softKnee, float intensity, float scatter, float sizeScale, BurtBloomQuality quality, int maxMipCount, bool bloomAlphaChannel, BurtBloomDebugView debugView, float filter1Size, float filter2Size, float filter3Size, float filter4Size, float filter5Size, float filter6Size, Color filter1Tint, Color filter2Tint, Color filter3Tint, Color filter4Tint, Color filter5Tint, Color filter6Tint) // 收拢 Bloom 参数。
         {
             Enabled = enabled; // 保存启用状态。
-            Threshold = threshold; // 保存阈值。
-            SoftKnee = softKnee; // 保存软阈值。
-            Intensity = intensity; // 保存强度。
-            Scatter = scatter; // 保存散布。
-            MaxMipCount = maxMipCount; // 保存最大 mip 数。
+            Threshold = Mathf.Clamp(SanitizeFinite(threshold, DefaultThreshold), -1f, 10f); // 保存阈值，保留 -1 的 XRender bypass 语义。
+            SoftKnee = Mathf.Clamp01(SanitizeFinite(softKnee, DefaultSoftKnee)); // 保存软阈值。
+            Intensity = Mathf.Clamp(SanitizeFinite(intensity, DefaultIntensity), 0f, 10f); // 保存强度。
+            Scatter = Mathf.Clamp01(SanitizeFinite(scatter, DefaultScatter)); // 保存散布。
+            SizeScale = Mathf.Clamp(SanitizeFinite(sizeScale, DefaultSizeScale), 0f, 64f); // 保存尺寸倍率。
+            Quality = NormalizeQuality(quality); // 保存质量档，避免非法枚举值进入 mip 计算。
+            MaxMipCount = Mathf.Clamp(maxMipCount, 1, 8); // 保存最大 mip 数。
+            BloomAlphaChannel = bloomAlphaChannel; // 保存 Bloom alpha 输出开关。
+            DebugView = NormalizeDebugView(debugView); // 保存 Bloom 调试输出模式。
+            Filter1Size = Mathf.Clamp(SanitizeFinite(filter1Size, DefaultFilter1Size), 0f, 4f); // 保存 Filter1 尺寸。
+            Filter2Size = Mathf.Clamp(SanitizeFinite(filter2Size, DefaultFilter2Size), 0f, 8f); // 保存 Filter2 尺寸。
+            Filter3Size = Mathf.Clamp(SanitizeFinite(filter3Size, DefaultFilter3Size), 0f, 16f); // 保存 Filter3 尺寸。
+            Filter4Size = Mathf.Clamp(SanitizeFinite(filter4Size, DefaultFilter4Size), 0f, 32f); // 保存 Filter4 尺寸。
+            Filter5Size = Mathf.Clamp(SanitizeFinite(filter5Size, DefaultFilter5Size), 0f, 64f); // 保存 Filter5 尺寸。
+            Filter6Size = Mathf.Clamp(SanitizeFinite(filter6Size, DefaultFilter6Size), 0f, 128f); // 保存 Filter6 尺寸。
+            Filter1Tint = SanitizeTint(filter1Tint); // 保存 Filter1 tint。
+            Filter2Tint = SanitizeTint(filter2Tint); // 保存 Filter2 tint。
+            Filter3Tint = SanitizeTint(filter3Tint); // 保存 Filter3 tint。
+            Filter4Tint = SanitizeTint(filter4Tint); // 保存 Filter4 tint。
+            Filter5Tint = SanitizeTint(filter5Tint); // 保存 Filter5 tint。
+            Filter6Tint = SanitizeTint(filter6Tint); // 保存 Filter6 tint。
+        }
+
+        private static BurtBloomQuality NormalizeQuality(BurtBloomQuality quality) // 归一化旧资产或脚本传入的 Bloom 质量枚举。
+        {
+            switch (quality)
+            {
+                case BurtBloomQuality.Q1:
+                case BurtBloomQuality.Q2:
+                case BurtBloomQuality.Q3:
+                case BurtBloomQuality.Q4:
+                case BurtBloomQuality.Q5:
+                    return quality; // 有效质量档保持原样。
+                default:
+                    return BurtBloomQuality.Disabled; // Disabled 和非法枚举值都按关闭处理。
+            }
+        }
+
+        private static BurtBloomDebugView NormalizeDebugView(BurtBloomDebugView debugView) // 归一化 Bloom 调试模式，避免非法枚举影响最终输出。
+        {
+            switch (debugView)
+            {
+                case BurtBloomDebugView.Prefilter:
+                case BurtBloomDebugView.FinalBloom:
+                case BurtBloomDebugView.Mip1:
+                case BurtBloomDebugView.Mip2:
+                case BurtBloomDebugView.Mip3:
+                case BurtBloomDebugView.Mip4:
+                case BurtBloomDebugView.Mip5:
+                case BurtBloomDebugView.Alpha:
+                    return debugView;
+                default:
+                    return BurtBloomDebugView.Disabled;
+            }
+        }
+
+        private static float SanitizeFinite(float value, float fallback) // 过滤 NaN/Infinity，避免参数热改后进入 shader。
+        {
+            return float.IsNaN(value) || float.IsInfinity(value) ? fallback : value;
+        }
+
+        private static Color SanitizeTint(Color tint) // 保留 HDR tint 上限，只清掉非法和负值。
+        {
+            return new Color(
+                Mathf.Max(0f, SanitizeFinite(tint.r, 1f)),
+                Mathf.Max(0f, SanitizeFinite(tint.g, 1f)),
+                Mathf.Max(0f, SanitizeFinite(tint.b, 1f)),
+                Mathf.Max(0f, SanitizeFinite(tint.a, 1f)));
         }
     }
 

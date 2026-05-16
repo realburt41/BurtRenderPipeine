@@ -89,7 +89,7 @@ Shader "BurtRP/UnlitColor"
             Name "Burt Unlit Shadow Caster"
 
             // 使用 Unity 标准 ShadowCaster LightMode，因为 ScriptableRenderContext.DrawShadows 会查找这个标签。
-            Tags { "LightMode" = "ShadowCaster" }
+            Tags { "LightMode" = "BurtDisabledShadowCaster" }
 
             // 关闭颜色写入，因为 shadow map 只需要深度信息。
             ColorMask 0
@@ -109,11 +109,18 @@ Shader "BurtRP/UnlitColor"
             // 声明片元 shader 函数名是 FragShadow。
             #pragma fragment FragShadow
 
+            #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+
             // 引入 Unity 的基础 shader 工具函数，UnityObjectToClipPos 会使用当前主光视图投影矩阵。
             #include "UnityCG.cginc"
 
             // 保存当前 request 的主光方向，ShadowCaster 顶点偏移需要用它计算法线和光向夹角。
             float4 _BurtMainLightDirection;
+            float4 _BurtShadowCasterLightPosition;
+            float _BurtCastingPunctualLightShadow;
+            float3 _LightDirection;
+            float3 _LightPosition;
+            float4 _ShadowBias;
 
             // 保存 C# 已折算到世界单位的 normal bias，ShadowCaster 只在顶点阶段使用它。
             float _BurtMainLightShadowDepthBias;
@@ -146,18 +153,40 @@ Shader "BurtRP/UnlitColor"
                 float3 normalWS = UnityObjectToWorldNormal(normalOS);
                 normalWS *= rsqrt(max(dot(normalWS, normalWS), 0.000001f));
 
-                // C# 每次 ShadowCaster 绘制前都会上传当前主光方向，这里做安全归一化避免长度影响偏移。
-                float3 lightDirectionWS = _BurtMainLightDirection.xyz;
+                float3 lightDirectionWS = _LightDirection;
+                if (dot(lightDirectionWS, lightDirectionWS) <= 0.000001f)
+                {
+                    lightDirectionWS = _BurtMainLightDirection.xyz;
+                }
+
+#if defined(_CASTING_PUNCTUAL_LIGHT_SHADOW)
+                lightDirectionWS = _BurtShadowCasterLightPosition.xyz - positionWS;
+                if (dot(lightDirectionWS, lightDirectionWS) <= 0.000001f)
+                {
+                    lightDirectionWS = _LightPosition - positionWS;
+                }
+#else
+                if (_BurtCastingPunctualLightShadow > 0.5f)
+                {
+                    lightDirectionWS = _BurtShadowCasterLightPosition.xyz - positionWS;
+                }
+#endif
+
                 lightDirectionWS *= rsqrt(max(dot(lightDirectionWS, lightDirectionWS), 0.000001f));
 
-                // C# 已按 shadow texel 把 bias 转成世界单位，这里只做非负保护避免反向拉回表面。
-                float normalBias = _BurtMainLightShadowNormalBias;
+                float depthBias = _ShadowBias.x;
+                float normalBias = _ShadowBias.y;
+                if (abs(depthBias) <= 0.0000001f && abs(normalBias) <= 0.0000001f)
+                {
+                    depthBias = _BurtMainLightShadowDepthBias;
+                    normalBias = _BurtMainLightShadowNormalBias;
+                }
 
                 // 表面越接近掠射角越容易出现 self-shadow，所以用 1 - NdotL 放大法线偏移。
                 float normalBiasScale = (1.0f - saturate(dot(normalWS, lightDirectionWS))) * normalBias;
 
                 // 沿世界法线推出 caster 顶点，让 shadow map 深度和接收面错开一小段距离。
-                return positionWS + lightDirectionWS * _BurtMainLightShadowDepthBias + normalWS * normalBiasScale;
+                return positionWS + lightDirectionWS * depthBias + normalWS * normalBiasScale;
             }
 
             // 定义阴影 Pass 的顶点 shader 函数。
@@ -269,8 +298,24 @@ Shader "BurtRP/UnlitColor"
             float4 Frag(Varyings input) : SV_Target
             {
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
-                BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(input.normalWS);
+                float3 normalWS = BurtSafeNormalize(input.normalWS);
+                float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
+                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS));
+                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.positionWS);
+
+                BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
                 debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
+                debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
+                debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
+                debugData.additionalUnshadowedColor = BurtEvaluateAdditionalLightingUnshadowedDebug(surfaceData, normalWS, viewDirectionWS, input.positionWS);
+                debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS);
+                BurtFillAdditionalLightShadowProjectionDebugData(
+                    input.positionWS,
+                    normalWS,
+                    debugData.additionalShadowFaceColor,
+                    debugData.additionalShadowUVColor,
+                    debugData.additionalShadowDepthColor,
+                    debugData.additionalShadowDepthDeltaColor);
                 debugData.finalLightingColor = _BaseColor.rgb;
 
                 BurtFillMainLightShadowShadingDebugData(
@@ -373,8 +418,24 @@ Shader "BurtRP/UnlitColor"
             float4 FragForwardOnly(ForwardOnlyVaryings input) : SV_Target
             {
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
-                BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(input.normalWS);
+                float3 normalWS = BurtSafeNormalize(input.normalWS);
+                float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
+                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS));
+                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.positionWS);
+
+                BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
                 debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
+                debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
+                debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
+                debugData.additionalUnshadowedColor = BurtEvaluateAdditionalLightingUnshadowedDebug(surfaceData, normalWS, viewDirectionWS, input.positionWS);
+                debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS);
+                BurtFillAdditionalLightShadowProjectionDebugData(
+                    input.positionWS,
+                    normalWS,
+                    debugData.additionalShadowFaceColor,
+                    debugData.additionalShadowUVColor,
+                    debugData.additionalShadowDepthColor,
+                    debugData.additionalShadowDepthDeltaColor);
                 debugData.finalLightingColor = _BaseColor.rgb;
 
                 BurtFillMainLightShadowShadingDebugData(

@@ -32,6 +32,7 @@ namespace Burt.RenderPipeline
         public const int TileLightOffsetStride = 8;
         public const string DebugBuildModeLabel = "CPUApproxDebugOnly";
         public const string RuntimeBuildModeLabel = "CPUApproxRuntime";
+        private const bool EnableExperimentalRuntimeTiledLighting = false;
 
         public const string TileLightCountBufferShaderName = "_BurtTileLightCountBuffer";
         public const string TileLightListBufferShaderName = "_BurtTileLightListBuffer";
@@ -139,7 +140,8 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            return asset.RendererMode == BurtRendererMode.Deferred;
+            return EnableExperimentalRuntimeTiledLighting &&
+                asset.RendererMode == BurtRendererMode.Deferred;
         }
 
         public static bool ShouldUseTiledLightResources(BurtRenderRequest request, BurtRenderPipelineAsset asset, bool hasLocalDeferredTargets)

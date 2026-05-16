@@ -189,6 +189,8 @@ Shader "BurtRP/Hair"
             // Declares the shadow fragment shader entry point.
             #pragma fragment FragShadow
 
+            #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+
             // Includes Unity helper functions, including UnityObjectToClipPos which uses the current light view-projection matrix.
             #include "UnityCG.cginc"
 
@@ -200,6 +202,11 @@ Shader "BurtRP/Hair"
 
             // 保存当前 request 的主光方向，ShadowCaster 顶点偏移需要用它计算法线和光向夹角。
             float4 _BurtMainLightDirection;
+            float4 _BurtShadowCasterLightPosition;
+            float _BurtCastingPunctualLightShadow;
+            float3 _LightDirection;
+            float3 _LightPosition;
+            float4 _ShadowBias;
 
             // 保存 C# 已折算到世界单位的 normal bias，ShadowCaster 只在顶点阶段使用它。
             float _BurtMainLightShadowDepthBias;
@@ -238,18 +245,40 @@ Shader "BurtRP/Hair"
                 float3 normalWS = UnityObjectToWorldNormal(normalOS);
                 normalWS *= rsqrt(max(dot(normalWS, normalWS), 0.000001f));
 
-                // C# 每次 ShadowCaster 绘制前都会上传当前主光方向，这里做安全归一化避免长度影响偏移。
-                float3 lightDirectionWS = _BurtMainLightDirection.xyz;
+                float3 lightDirectionWS = _LightDirection;
+                if (dot(lightDirectionWS, lightDirectionWS) <= 0.000001f)
+                {
+                    lightDirectionWS = _BurtMainLightDirection.xyz;
+                }
+
+#if defined(_CASTING_PUNCTUAL_LIGHT_SHADOW)
+                lightDirectionWS = _BurtShadowCasterLightPosition.xyz - positionWS;
+                if (dot(lightDirectionWS, lightDirectionWS) <= 0.000001f)
+                {
+                    lightDirectionWS = _LightPosition - positionWS;
+                }
+#else
+                if (_BurtCastingPunctualLightShadow > 0.5f)
+                {
+                    lightDirectionWS = _BurtShadowCasterLightPosition.xyz - positionWS;
+                }
+#endif
+
                 lightDirectionWS *= rsqrt(max(dot(lightDirectionWS, lightDirectionWS), 0.000001f));
 
-                // C# 已按 shadow texel 把 bias 转成世界单位，这里只做非负保护避免反向拉回表面。
-                float normalBias = _BurtMainLightShadowNormalBias;
+                float depthBias = _ShadowBias.x;
+                float normalBias = _ShadowBias.y;
+                if (abs(depthBias) <= 0.0000001f && abs(normalBias) <= 0.0000001f)
+                {
+                    depthBias = _BurtMainLightShadowDepthBias;
+                    normalBias = _BurtMainLightShadowNormalBias;
+                }
 
                 // 表面越接近掠射角越容易出现 self-shadow，所以用 1 - NdotL 放大法线偏移。
                 float normalBiasScale = (1.0f - saturate(dot(normalWS, lightDirectionWS))) * normalBias;
 
                 // 沿世界法线推出 caster 顶点，让 shadow map 深度和接收面错开一小段距离。
-                return positionWS + lightDirectionWS * _BurtMainLightShadowDepthBias + normalWS * normalBiasScale;
+                return positionWS + lightDirectionWS * depthBias + normalWS * normalBiasScale;
             }
 
             // Converts object-space vertices into the current light clip space.
@@ -706,6 +735,7 @@ Shader "BurtRP/Hair"
                 // 写入追加光直接光拆分，Additional Light Debug View 会显示它。
                 debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
                 debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
+                debugData.additionalUnshadowedColor = BurtEvaluateAdditionalLightingUnshadowedDebug(shadingSurfaceData, strandDirectionWS, viewDirectionWS, input.positionWS);
 
                 // 写入间接漫反射结果，IndirectDiffuse Debug View 会显示它。
                 debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
@@ -715,6 +745,14 @@ Shader "BurtRP/Hair"
 
                 // 写入主光阴影衰减，ShadowAttenuation Debug View 用它确认当前像素的阴影接收结果。
                 debugData.shadowAttenuation = shadowAttenuation;
+                debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS);
+                BurtFillAdditionalLightShadowProjectionDebugData(
+                    input.positionWS,
+                    normalWS,
+                    debugData.additionalShadowFaceColor,
+                    debugData.additionalShadowUVColor,
+                    debugData.additionalShadowDepthColor,
+                    debugData.additionalShadowDepthDeltaColor);
 
                 BurtFillMainLightShadowShadingDebugData(
                     input.positionWS,

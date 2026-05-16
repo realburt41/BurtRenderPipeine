@@ -63,6 +63,12 @@ static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_LIGHTING = 219.0f; // 对�
 static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_DIFFUSE = 220.0f; // 对应 C# BurtShadingDebugMode.AdditionalDiffuse，只显示追加光漫反射。
 static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SPECULAR = 221.0f; // 对应 C# BurtShadingDebugMode.AdditionalSpecular，只显示追加光高光。
 static const float BURT_SHADING_DEBUG_MODE_HAIR_ADDITIONAL_LIGHTING = 222.0f; // 对应 C# BurtShadingDebugMode.HairAdditionalLighting，只显示 Hair 追加光。
+static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_ATTENUATION = 226.0f; // 对应 C# BurtShadingDebugMode.AdditionalShadowAttenuation，用来显示追加光阴影衰减。
+static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_LIGHTING_UNSHADOWED = 227.0f; // 对应 C# BurtShadingDebugMode.AdditionalLightingUnshadowed，用来对照追加光未乘阴影时的贡献。
+static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_FACE = 228.0f;
+static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_UV = 229.0f;
+static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH = 230.0f;
+static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH_DELTA = 231.0f;
 
 // 保存片元已经算好的调试数据，避免 Debug View 重新计算一套和正常渲染不一致的光照。
 struct BurtShadingDebugData
@@ -91,8 +97,19 @@ struct BurtShadingDebugData
     // 保存追加光直接镜面高光，不包含主光、间接光和自发光。
     float3 additionalSpecularColor;
 
+    // 保存追加光直接光在不乘 additional shadow attenuation 时的贡献，用来确认 shadow 只减少追加光。
+    float3 additionalUnshadowedColor;
+
     // 保存主光阴影衰减，1 表示不被阴影遮挡，0 表示完全落在阴影中。
     float shadowAttenuation;
+
+    // 保存追加光阴影衰减，1 表示不被追加光阴影遮挡，0 表示完全落在追加光阴影中。
+    float additionalShadowAttenuation;
+
+    float3 additionalShadowFaceColor;
+    float3 additionalShadowUVColor;
+    float3 additionalShadowDepthColor;
+    float3 additionalShadowDepthDeltaColor;
 
     // 保存当前像素命中的 CSM cascade 调试颜色。
     float3 shadowCascadeColor;
@@ -242,7 +259,13 @@ BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为�
     data.indirectSpecularColor = float3(0.0f, 0.0f, 0.0f);
     data.additionalDiffuseColor = float3(0.0f, 0.0f, 0.0f);
     data.additionalSpecularColor = float3(0.0f, 0.0f, 0.0f);
+    data.additionalUnshadowedColor = float3(0.0f, 0.0f, 0.0f);
     data.shadowAttenuation = 1.0f;
+    data.additionalShadowAttenuation = 1.0f;
+    data.additionalShadowFaceColor = float3(0.0f, 0.0f, 0.0f);
+    data.additionalShadowUVColor = float3(0.0f, 0.0f, 0.0f);
+    data.additionalShadowDepthColor = float3(0.0f, 0.0f, 0.0f);
+    data.additionalShadowDepthDeltaColor = float3(0.0f, 0.0f, 0.0f);
     data.shadowCascadeColor = float3(0.0f, 0.0f, 0.0f);
     data.shadowCascadeBlend = 0.0f;
     data.shadowDistanceFade = 0.0f;
@@ -595,6 +618,12 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
         return true;
     }
 
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_LIGHTING_UNSHADOWED)) // AdditionalLightingUnshadowed 模式显示追加光未乘阴影的贡献。
+    {
+        debugColor = max(data.additionalUnshadowedColor, float3(0.0f, 0.0f, 0.0f));
+        return true;
+    }
+
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_HAIR_ADDITIONAL_LIGHTING)) // HairAdditionalLighting 模式只显示 Hair 追加光。
     {
         float3 hairAdditionalLighting = max(data.additionalDiffuseColor + data.additionalSpecularColor, float3(0.0f, 0.0f, 0.0f));
@@ -618,6 +647,36 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     {
         debugColor = float3(data.shadowAttenuation, data.shadowAttenuation, data.shadowAttenuation); // 白色表示无阴影，黑色表示完全被遮挡。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_ATTENUATION)) // AdditionalShadowAttenuation 模式显示追加光阴影衰减。
+    {
+        debugColor = float3(data.additionalShadowAttenuation, data.additionalShadowAttenuation, data.additionalShadowAttenuation); // 白色表示追加光未被阴影遮挡，黑色表示完全被遮挡。
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_FACE))
+    {
+        debugColor = saturate(data.additionalShadowFaceColor);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_UV))
+    {
+        debugColor = saturate(data.additionalShadowUVColor);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH))
+    {
+        debugColor = saturate(data.additionalShadowDepthColor);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH_DELTA))
+    {
+        debugColor = saturate(data.additionalShadowDepthDeltaColor);
+        return true;
     }
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_CASCADE_INDEX)) // ShadowCascadeIndex 模式用颜色显示当前 CSM cascade。

@@ -41,7 +41,17 @@ static const float BURT_LIGHT_TYPE_DIRECTIONAL = 0.0f;
 static const float BURT_LIGHT_TYPE_POINT = 1.0f;
 static const float BURT_LIGHT_TYPE_SPOT = 2.0f;
 
-float BurtSampleAdditionalLightShadow(int lightIndex, float3 positionWS);
+float BurtSampleAdditionalLightShadow(int lightIndex, float3 positionWS, float3 lightDirectionWS, float3 normalWS, float3 lightPositionWS);
+bool BurtGetAdditionalLightShadowProjectionDebug(
+    int lightIndex,
+    float3 positionWS,
+    float3 lightPositionWS,
+    float3 lightDirectionWS,
+    float3 normalWS,
+    out float3 faceColor,
+    out float3 uvColor,
+    out float3 depthColor,
+    out float3 depthDeltaColor);
 
 // 保存 BurtRP 当前环境光颜色，Simple Lit 会直接使用它，PBR 间接光会把它作为 SH / Sky Reflection 兜底。
 float4 _BurtAmbientLightColor;
@@ -156,13 +166,23 @@ bool BurtUseTileLightList()
 #endif
 }
 
+float2 BurtGetTileLightLookupUV(float2 screenUV)
+{
+    float2 tileUV = screenUV;
+#if UNITY_UV_STARTS_AT_TOP
+    tileUV.y = 1.0f - tileUV.y;
+#endif
+    return saturate(tileUV);
+}
+
 uint BurtGetTileLightIndex(float2 screenUV)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
+    float2 tileUV = BurtGetTileLightLookupUV(screenUV);
     uint tileCountX = (uint)max((int)round(_BurtTileLightGridParams.x), 1);
     uint tileCountY = (uint)max((int)round(_BurtTileLightGridParams.y), 1);
-    uint tileX = (uint)floor(saturate(screenUV.x) * (float)tileCountX);
-    uint tileY = (uint)floor(saturate(screenUV.y) * (float)tileCountY);
+    uint tileX = (uint)floor(tileUV.x * (float)tileCountX);
+    uint tileY = (uint)floor(tileUV.y * (float)tileCountY);
     tileX = min(tileX, tileCountX - 1u);
     tileY = min(tileY, tileCountY - 1u);
     return tileY * tileCountX + tileX;
@@ -174,6 +194,11 @@ uint BurtGetTileLightIndex(float2 screenUV)
 uint2 BurtGetTileLightRange(float2 screenUV)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
+    if (!BurtUseTileLightList())
+    {
+        return uint2(0u, 0u);
+    }
+
     uint tileIndex = BurtGetTileLightIndex(screenUV);
     uint2 range = _BurtTileLightOffsetBuffer[tileIndex];
     uint maxLightsPerTile = (uint)max((int)round(_BurtTileLightGridParams.w), 1);
@@ -188,6 +213,24 @@ uint2 BurtGetTileLightRange(float2 screenUV)
     return range;
 #else
     return uint2(0u, 0u);
+#endif
+}
+
+bool BurtTileLightListOverflows(float2 screenUV)
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    if (!BurtUseTileLightList())
+    {
+        return false;
+    }
+
+    uint tileIndex = BurtGetTileLightIndex(screenUV);
+    uint maxLightsPerTile = (uint)max((int)round(_BurtTileLightGridParams.w), 1);
+    uint additionalLightCount = (uint)BurtGetAdditionalLightCount();
+    uint storedCapacity = min(maxLightsPerTile, additionalLightCount);
+    return _BurtTileLightCountBuffer[tileIndex] > storedCapacity;
+#else
+    return false;
 #endif
 }
 
@@ -246,7 +289,7 @@ float BurtEvaluateAdditionalLightDistanceAttenuation(float distanceSquared, floa
     return rangeFade * rangeFade * rcp(max(distanceSquared, 0.25f));
 }
 
-BurtLight BurtCreateAdditionalLight(int lightIndex, float3 positionWS)
+BurtLight BurtCreateAdditionalLightInternal(int lightIndex, float3 positionWS, float3 normalWS, bool sampleShadow)
 {
     BurtLight light;
     light.directionWS = float3(0.0f, 1.0f, 0.0f);
@@ -281,8 +324,215 @@ BurtLight BurtCreateAdditionalLight(int lightIndex, float3 positionWS)
     }
 
     light.color = max(colorAndType.rgb, float3(0.0f, 0.0f, 0.0f)) * attenuation;
-    light.shadowAttenuation = BurtSampleAdditionalLightShadow(lightIndex, positionWS);
+    light.shadowAttenuation = sampleShadow && lightType > 0.5f ? BurtSampleAdditionalLightShadow(lightIndex, positionWS, light.directionWS, normalWS, positionAndRange.xyz) : 1.0f;
     return light;
+}
+
+BurtLight BurtCreateAdditionalLight(int lightIndex, float3 positionWS, float3 normalWS)
+{
+    return BurtCreateAdditionalLightInternal(lightIndex, positionWS, normalWS, true);
+}
+
+BurtLight BurtCreateAdditionalLight(int lightIndex, float3 positionWS)
+{
+    return BurtCreateAdditionalLightInternal(lightIndex, positionWS, float3(0.0f, 0.0f, 0.0f), true);
+}
+
+BurtLight BurtCreateAdditionalLightUnshadowed(int lightIndex, float3 positionWS, float3 normalWS)
+{
+    return BurtCreateAdditionalLightInternal(lightIndex, positionWS, normalWS, false);
+}
+
+BurtLight BurtCreateAdditionalLightUnshadowed(int lightIndex, float3 positionWS)
+{
+    return BurtCreateAdditionalLightInternal(lightIndex, positionWS, float3(0.0f, 0.0f, 0.0f), false);
+}
+
+float BurtEvaluateAdditionalShadowAttenuationDebug(float3 positionWS, float3 normalWS)
+{
+    float attenuation = 1.0f;
+    int additionalLightCount = BurtGetAdditionalLightCount();
+
+    for (int lightIndex = 0; lightIndex < BURT_MAX_ADDITIONAL_LIGHTS; lightIndex++)
+    {
+        if (lightIndex >= additionalLightCount)
+        {
+            break;
+        }
+
+        BurtLight additionalLight = BurtCreateAdditionalLight(lightIndex, positionWS, normalWS);
+        if (dot(additionalLight.color, float3(0.2126f, 0.7152f, 0.0722f)) <= 0.0001f)
+        {
+            continue;
+        }
+
+        attenuation = min(attenuation, saturate(additionalLight.shadowAttenuation));
+    }
+
+    return attenuation;
+}
+
+float BurtEvaluateAdditionalShadowAttenuationDebug(float3 positionWS)
+{
+    return BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, float3(0.0f, 0.0f, 0.0f));
+}
+
+float BurtEvaluateAdditionalShadowAttenuationDebug(float3 positionWS, float3 normalWS, float2 screenUV)
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    if (!BurtUseTileLightList())
+    {
+        return BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, normalWS);
+    }
+
+    if (BurtTileLightListOverflows(screenUV))
+    {
+        return BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, normalWS);
+    }
+
+    float attenuation = 1.0f;
+    uint2 range = BurtGetTileLightRange(screenUV);
+    int additionalLightCount = BurtGetAdditionalLightCount();
+
+    for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
+    {
+        if (localLightIndex >= range.y)
+        {
+            break;
+        }
+
+        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        if (storedLightIndex >= (uint)additionalLightCount)
+        {
+            continue;
+        }
+
+        BurtLight additionalLight = BurtCreateAdditionalLight((int)storedLightIndex, positionWS, normalWS);
+        if (dot(additionalLight.color, float3(0.2126f, 0.7152f, 0.0722f)) <= 0.0001f)
+        {
+            continue;
+        }
+
+        attenuation = min(attenuation, saturate(additionalLight.shadowAttenuation));
+    }
+
+    return attenuation;
+#else
+    return BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, normalWS);
+#endif
+}
+
+float BurtEvaluateAdditionalShadowAttenuationDebug(float3 positionWS, float2 screenUV)
+{
+    return BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, float3(0.0f, 0.0f, 0.0f), screenUV);
+}
+
+bool BurtTryFillAdditionalLightShadowProjectionDebugForLight(
+    int lightIndex,
+    float3 positionWS,
+    float3 normalWS,
+    out float3 faceColor,
+    out float3 uvColor,
+    out float3 depthColor,
+    out float3 depthDeltaColor)
+{
+    faceColor = float3(0.0f, 0.0f, 0.0f);
+    uvColor = float3(0.0f, 0.0f, 0.0f);
+    depthColor = float3(0.0f, 0.0f, 0.0f);
+    depthDeltaColor = float3(0.0f, 0.0f, 0.0f);
+
+    float4 positionAndRange = BurtReadAdditionalLightPositionAndRange(lightIndex);
+    BurtLight additionalLight = BurtCreateAdditionalLightUnshadowed(lightIndex, positionWS, normalWS);
+    if (dot(additionalLight.color, float3(0.2126f, 0.7152f, 0.0722f)) <= 0.0001f)
+    {
+        return false;
+    }
+
+    return BurtGetAdditionalLightShadowProjectionDebug(
+        lightIndex,
+        positionWS,
+        positionAndRange.xyz,
+        additionalLight.directionWS,
+        normalWS,
+        faceColor,
+        uvColor,
+        depthColor,
+        depthDeltaColor);
+}
+
+void BurtFillAdditionalLightShadowProjectionDebugData(
+    float3 positionWS,
+    float3 normalWS,
+    out float3 faceColor,
+    out float3 uvColor,
+    out float3 depthColor,
+    out float3 depthDeltaColor)
+{
+    faceColor = float3(0.0f, 0.0f, 0.0f);
+    uvColor = float3(0.0f, 0.0f, 0.0f);
+    depthColor = float3(0.0f, 0.0f, 0.0f);
+    depthDeltaColor = float3(0.0f, 0.0f, 0.0f);
+
+    int additionalLightCount = BurtGetAdditionalLightCount();
+    for (int lightIndex = 0; lightIndex < BURT_MAX_ADDITIONAL_LIGHTS; lightIndex++)
+    {
+        if (lightIndex >= additionalLightCount)
+        {
+            break;
+        }
+
+        if (BurtTryFillAdditionalLightShadowProjectionDebugForLight(lightIndex, positionWS, normalWS, faceColor, uvColor, depthColor, depthDeltaColor))
+        {
+            return;
+        }
+    }
+}
+
+void BurtFillAdditionalLightShadowProjectionDebugData(
+    float3 positionWS,
+    float3 normalWS,
+    float2 screenUV,
+    out float3 faceColor,
+    out float3 uvColor,
+    out float3 depthColor,
+    out float3 depthDeltaColor)
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    if (!BurtUseTileLightList() || BurtTileLightListOverflows(screenUV))
+    {
+        BurtFillAdditionalLightShadowProjectionDebugData(positionWS, normalWS, faceColor, uvColor, depthColor, depthDeltaColor);
+        return;
+    }
+
+    faceColor = float3(0.0f, 0.0f, 0.0f);
+    uvColor = float3(0.0f, 0.0f, 0.0f);
+    depthColor = float3(0.0f, 0.0f, 0.0f);
+    depthDeltaColor = float3(0.0f, 0.0f, 0.0f);
+
+    uint2 range = BurtGetTileLightRange(screenUV);
+    int additionalLightCount = BurtGetAdditionalLightCount();
+
+    for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
+    {
+        if (localLightIndex >= range.y)
+        {
+            break;
+        }
+
+        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        if (storedLightIndex >= (uint)additionalLightCount)
+        {
+            continue;
+        }
+
+        if (BurtTryFillAdditionalLightShadowProjectionDebugForLight((int)storedLightIndex, positionWS, normalWS, faceColor, uvColor, depthColor, depthDeltaColor))
+        {
+            return;
+        }
+    }
+#else
+    BurtFillAdditionalLightShadowProjectionDebugData(positionWS, normalWS, faceColor, uvColor, depthColor, depthDeltaColor);
+#endif
 }
 
 // 获取 BurtRP 当前简单光照和 PBR 间接光使用的环境光颜色。
@@ -888,7 +1138,7 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
             break;
         }
 
-        BurtLight additionalLight = BurtCreateAdditionalLight(lightIndex, positionWS);
+        BurtLight additionalLight = BurtCreateAdditionalLight(lightIndex, positionWS, coreData.geometryData.normalWS);
         additionalDirectComponents = BurtAddPBRDirectComponents(additionalDirectComponents, BurtEvaluatePBRDirectFromCore(coreData, additionalLight));
     }
 
@@ -899,6 +1149,11 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
 {
 #if defined(BURT_USE_TILED_LIGHTING)
     if (!BurtUseTileLightList())
+    {
+        return BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS);
+    }
+
+    if (BurtTileLightListOverflows(screenUV))
     {
         return BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS);
     }
@@ -920,13 +1175,72 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
             continue;
         }
 
-        BurtLight additionalLight = BurtCreateAdditionalLight((int)storedLightIndex, positionWS);
+        BurtLight additionalLight = BurtCreateAdditionalLight((int)storedLightIndex, positionWS, coreData.geometryData.normalWS);
         additionalDirectComponents = BurtAddPBRDirectComponents(additionalDirectComponents, BurtEvaluatePBRDirectFromCore(coreData, additionalLight));
     }
 
     return additionalDirectComponents;
 #else
     return BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS);
+#endif
+}
+
+BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(BurtPBRShadingCoreData coreData, float3 positionWS)
+{
+    BurtDirectPBRComponents additionalDirectComponents = BurtCreateZeroPBRDirectComponents();
+    int additionalLightCount = BurtGetAdditionalLightCount();
+
+    for (int lightIndex = 0; lightIndex < BURT_MAX_ADDITIONAL_LIGHTS; lightIndex++)
+    {
+        if (lightIndex >= additionalLightCount)
+        {
+            break;
+        }
+
+        BurtLight additionalLight = BurtCreateAdditionalLightUnshadowed(lightIndex, positionWS);
+        additionalDirectComponents = BurtAddPBRDirectComponents(additionalDirectComponents, BurtEvaluatePBRDirectFromCore(coreData, additionalLight));
+    }
+
+    return additionalDirectComponents;
+}
+
+BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(BurtPBRShadingCoreData coreData, float3 positionWS, float2 screenUV)
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    if (!BurtUseTileLightList())
+    {
+        return BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS);
+    }
+
+    if (BurtTileLightListOverflows(screenUV))
+    {
+        return BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS);
+    }
+
+    BurtDirectPBRComponents additionalDirectComponents = BurtCreateZeroPBRDirectComponents();
+    uint2 range = BurtGetTileLightRange(screenUV);
+    int additionalLightCount = BurtGetAdditionalLightCount();
+
+    for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
+    {
+        if (localLightIndex >= range.y)
+        {
+            break;
+        }
+
+        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        if (storedLightIndex >= (uint)additionalLightCount)
+        {
+            continue;
+        }
+
+        BurtLight additionalLight = BurtCreateAdditionalLightUnshadowed((int)storedLightIndex, positionWS);
+        additionalDirectComponents = BurtAddPBRDirectComponents(additionalDirectComponents, BurtEvaluatePBRDirectFromCore(coreData, additionalLight));
+    }
+
+    return additionalDirectComponents;
+#else
+    return BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS);
 #endif
 }
 
@@ -1406,7 +1720,7 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
             break;
         }
 
-        BurtLight additionalLight = BurtCreateAdditionalLight(lightIndex, positionWS);
+        BurtLight additionalLight = BurtCreateAdditionalLight(lightIndex, positionWS, geometryData.normalWS);
         additionalDirectComponents = BurtAddHairDirectComponents(additionalDirectComponents, BurtEvaluateHairDirectComponents(gbufferData, geometryData, additionalLight));
     }
 
@@ -1417,6 +1731,11 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
 {
 #if defined(BURT_USE_TILED_LIGHTING)
     if (!BurtUseTileLightList())
+    {
+        return BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS);
+    }
+
+    if (BurtTileLightListOverflows(screenUV))
     {
         return BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS);
     }
@@ -1438,13 +1757,72 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
             continue;
         }
 
-        BurtLight additionalLight = BurtCreateAdditionalLight((int)storedLightIndex, positionWS);
+        BurtLight additionalLight = BurtCreateAdditionalLight((int)storedLightIndex, positionWS, geometryData.normalWS);
         additionalDirectComponents = BurtAddHairDirectComponents(additionalDirectComponents, BurtEvaluateHairDirectComponents(gbufferData, geometryData, additionalLight));
     }
 
     return additionalDirectComponents;
 #else
     return BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS);
+#endif
+}
+
+BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(BurtGBufferData gbufferData, BurtPBRGeometryData geometryData, float3 positionWS)
+{
+    BurtHairDirectComponents additionalDirectComponents = BurtCreateZeroHairDirectComponents();
+    int additionalLightCount = BurtGetAdditionalLightCount();
+
+    for (int lightIndex = 0; lightIndex < BURT_MAX_ADDITIONAL_LIGHTS; lightIndex++)
+    {
+        if (lightIndex >= additionalLightCount)
+        {
+            break;
+        }
+
+        BurtLight additionalLight = BurtCreateAdditionalLightUnshadowed(lightIndex, positionWS);
+        additionalDirectComponents = BurtAddHairDirectComponents(additionalDirectComponents, BurtEvaluateHairDirectComponents(gbufferData, geometryData, additionalLight));
+    }
+
+    return additionalDirectComponents;
+}
+
+BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(BurtGBufferData gbufferData, BurtPBRGeometryData geometryData, float3 positionWS, float2 screenUV)
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    if (!BurtUseTileLightList())
+    {
+        return BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, geometryData, positionWS);
+    }
+
+    if (BurtTileLightListOverflows(screenUV))
+    {
+        return BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, geometryData, positionWS);
+    }
+
+    BurtHairDirectComponents additionalDirectComponents = BurtCreateZeroHairDirectComponents();
+    uint2 range = BurtGetTileLightRange(screenUV);
+    int additionalLightCount = BurtGetAdditionalLightCount();
+
+    for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
+    {
+        if (localLightIndex >= range.y)
+        {
+            break;
+        }
+
+        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        if (storedLightIndex >= (uint)additionalLightCount)
+        {
+            continue;
+        }
+
+        BurtLight additionalLight = BurtCreateAdditionalLightUnshadowed((int)storedLightIndex, positionWS);
+        additionalDirectComponents = BurtAddHairDirectComponents(additionalDirectComponents, BurtEvaluateHairDirectComponents(gbufferData, geometryData, additionalLight));
+    }
+
+    return additionalDirectComponents;
+#else
+    return BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, geometryData, positionWS);
 #endif
 }
 
@@ -1667,6 +2045,72 @@ BurtPBRShadingComponents BurtEvaluateShadingModelComponents(BurtSurfaceData surf
     return BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, positionWS, screenUV);
 }
 
+float3 BurtEvaluateAdditionalLightingUnshadowedDebug(BurtSurfaceData surfaceData, float3 normalWS, float3 viewDirectionWS, float3 positionWS)
+{
+    if (BurtIsHairShadingModel(surfaceData.shadingModelID))
+    {
+        BurtGBufferData hairGBufferData = BurtCreateHairGBufferData(surfaceData, normalWS, float3(0.0f, 0.0f, 0.0f));
+        float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(hairGBufferData));
+        float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
+        BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+        BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(hairGBufferData, hairGeometryData, positionWS);
+        return hairAdditional.diffuse + hairAdditional.specular;
+    }
+
+    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(surfaceData, normalWS, viewDirectionWS);
+    BurtDirectPBRComponents additional = BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS);
+    return additional.diffuse + additional.specular;
+}
+
+float3 BurtEvaluateAdditionalLightingUnshadowedDebug(BurtSurfaceData surfaceData, float3 normalWS, float3 viewDirectionWS, float3 positionWS, float2 screenUV)
+{
+    if (BurtIsHairShadingModel(surfaceData.shadingModelID))
+    {
+        BurtGBufferData hairGBufferData = BurtCreateHairGBufferData(surfaceData, normalWS, float3(0.0f, 0.0f, 0.0f));
+        float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(hairGBufferData));
+        float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
+        BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+        BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(hairGBufferData, hairGeometryData, positionWS, screenUV);
+        return hairAdditional.diffuse + hairAdditional.specular;
+    }
+
+    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(surfaceData, normalWS, viewDirectionWS);
+    BurtDirectPBRComponents additional = BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS, screenUV);
+    return additional.diffuse + additional.specular;
+}
+
+float3 BurtEvaluateAdditionalLightingUnshadowedDebugFromGBuffer(BurtGBufferData gbufferData, float3 viewDirectionWS, float3 positionWS)
+{
+    if (BurtIsHairShadingModel(gbufferData.shadingModelID))
+    {
+        float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
+        float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
+        BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+        BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, hairGeometryData, positionWS);
+        return hairAdditional.diffuse + hairAdditional.specular;
+    }
+
+    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(gbufferData, viewDirectionWS);
+    BurtDirectPBRComponents additional = BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS);
+    return additional.diffuse + additional.specular;
+}
+
+float3 BurtEvaluateAdditionalLightingUnshadowedDebugFromGBuffer(BurtGBufferData gbufferData, float3 viewDirectionWS, float3 positionWS, float2 screenUV)
+{
+    if (BurtIsHairShadingModel(gbufferData.shadingModelID))
+    {
+        float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
+        float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
+        BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+        BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, hairGeometryData, positionWS, screenUV);
+        return hairAdditional.diffuse + hairAdditional.specular;
+    }
+
+    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(gbufferData, viewDirectionWS);
+    BurtDirectPBRComponents additional = BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS, screenUV);
+    return additional.diffuse + additional.specular;
+}
+
 BurtPBRShadingComponents BurtEvaluateShadingModelComponentsFromGBuffer(BurtGBufferData gbufferData, BurtLight mainLight, float3 viewDirectionWS)
 {
     if (BurtIsHairShadingModel(gbufferData.shadingModelID))
@@ -1749,7 +2193,7 @@ float3 BurtEvaluateAdditionalDiffuseLights(BurtSurfaceData surfaceData, float3 n
             break;
         }
 
-        diffuseLighting += BurtEvaluateDiffuse(surfaceData.baseColor.rgb, BurtCreateAdditionalLight(lightIndex, positionWS), normalWS);
+        diffuseLighting += BurtEvaluateDiffuse(surfaceData.baseColor.rgb, BurtCreateAdditionalLight(lightIndex, positionWS, normalWS), normalWS);
     }
 
     return diffuseLighting;
@@ -1767,7 +2211,7 @@ float3 BurtEvaluateAdditionalSpecularLights(BurtSurfaceData surfaceData, float3 
             break;
         }
 
-        specularLighting += BurtEvaluateSpecular(surfaceData, BurtCreateAdditionalLight(lightIndex, positionWS), normalWS, viewDirectionWS);
+        specularLighting += BurtEvaluateSpecular(surfaceData, BurtCreateAdditionalLight(lightIndex, positionWS, normalWS), normalWS, viewDirectionWS);
     }
 
     return specularLighting;

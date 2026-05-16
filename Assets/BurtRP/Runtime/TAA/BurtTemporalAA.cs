@@ -89,6 +89,35 @@ namespace Burt.RenderPipeline
             HistoryClampTightness = historyClampTightness;
             DepthWeightedFilterFloor = depthWeightedFilterFloor;
         }
+
+        public BurtTemporalAASettings WithJitterScale(float jitterScale)
+        {
+            return new BurtTemporalAASettings(
+                Enabled,
+                Feedback,
+                jitterScale,
+                ClampStrength,
+                Sharpness,
+                StaticEdgeRelaxation,
+                LumaRejectionStrength,
+                ClipRejectionStrength,
+                DepthRejectionStrength,
+                MotionRejectionStart,
+                MotionRejectionRange,
+                HistoryConfidenceWeight,
+                HistoryConfidenceBoost,
+                ConfidenceGrowth,
+                AntiFlickering,
+                MotionVectorRejection,
+                BaseBlendFactor,
+                ResponsiveRejectionStrength,
+                UntrustedMotionFeedbackScale,
+                DisocclusionFeedbackScale,
+                MotionEdgeResponsiveStrength,
+                DepthEdgeResponsiveStrength,
+                HistoryClampTightness,
+                DepthWeightedFilterFloor);
+        }
     }
 
     public enum BurtTemporalAAVelocityMode
@@ -245,6 +274,7 @@ namespace Burt.RenderPipeline
     internal static class BurtTemporalAAUtility
     {
         private const float ProjectionChangeEpsilon = 0.0001f;
+        private const float TemporalAAPostProcessSignatureEpsilon = 0.001f;
         private const int HaltonSequenceLength = 1024;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
@@ -267,6 +297,8 @@ namespace Burt.RenderPipeline
             public int PreviousTargetWidth;
             public int PreviousTargetHeight;
             public Vector2 PreviousRenderScale = Vector2.one;
+            public Vector4 PreviousTemporalAAPostProcessSignature0;
+            public Vector4 PreviousTemporalAAPostProcessSignature1;
             public Matrix4x4 PreviousViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredProjectionMatrix = Matrix4x4.identity;
@@ -330,6 +362,36 @@ namespace Burt.RenderPipeline
             return camera != null && (camera.cameraType == CameraType.Preview || camera.cameraType == CameraType.Reflection);
         }
 
+        private static BurtTemporalAASettings ApplyTemporalAADebugOverrides(BurtTemporalAASettings settings, out int? jitterFrameOverride)
+        {
+            jitterFrameOverride = null;
+            var temporalAA = GetTemporalAAVolumeComponent();
+            if (temporalAA == null || !temporalAA.IsEnabled())
+            {
+                return settings;
+            }
+
+            if (temporalAA.debugFreezeJitter.value)
+            {
+                jitterFrameOverride = Mathf.Clamp(temporalAA.debugJitterFrame.value, 0, HaltonSequenceLength - 1) + 1;
+            }
+
+            return temporalAA.debugOverrideJitterScale.value
+                ? settings.WithJitterScale(temporalAA.debugJitterScale.value)
+                : settings;
+        }
+
+        private static BurtTemporalAAVolumeComponent GetTemporalAAVolumeComponent()
+        {
+            var volumeManager = VolumeManager.instance;
+            if (volumeManager == null || volumeManager.stack == null)
+            {
+                return null;
+            }
+
+            return volumeManager.stack.GetComponent<BurtTemporalAAVolumeComponent>();
+        }
+
         public static BurtTemporalAARequestState PrepareRequest(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
             return PrepareRequest(request, asset, null);
@@ -349,11 +411,13 @@ namespace Burt.RenderPipeline
             }
 
             var settings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
+            settings = ApplyTemporalAADebugOverrides(settings, out var jitterFrameOverride);
             var cameraId = camera.GetInstanceID();
             var state = GetOrCreateState(cameraId);
             state.Camera = camera;
             PruneDisposedCameraStates();
             var rendererMode = asset != null ? asset.RendererMode : BurtRendererMode.Forward;
+            ResolveTemporalAAPostProcessSignature(out var postProcessSignature0, out var postProcessSignature1);
             var colorDescriptor = CreateColorHistoryDescriptor(camera);
             var depthDescriptor = CreateScalarHistoryDescriptor(camera);
             var confidenceDescriptor = CreateScalarHistoryDescriptor(camera);
@@ -374,6 +438,8 @@ namespace Burt.RenderPipeline
                 targetWidth,
                 targetHeight,
                 renderScale,
+                postProcessSignature0,
+                postProcessSignature1,
                 projectionMatrix,
                 descriptorsMatch);
             state.CurrentRendererMode = rendererMode;
@@ -390,7 +456,8 @@ namespace Burt.RenderPipeline
 
             var frameIndex = state.FrameIndex + 1;
             state.FrameIndex = frameIndex;
-            var jitterPixels = CalculateHaltonJitter(frameIndex) * settings.JitterScale;
+            var jitterFrameIndex = jitterFrameOverride.HasValue ? jitterFrameOverride.Value : frameIndex;
+            var jitterPixels = CalculateHaltonJitter(jitterFrameIndex) * settings.JitterScale;
             var pixelWidth = Mathf.Max(1, colorDescriptor.width);
             var pixelHeight = Mathf.Max(1, colorDescriptor.height);
             var jitter = new Vector2(jitterPixels.x * 2f / pixelWidth, jitterPixels.y * 2f / pixelHeight);
@@ -439,6 +506,7 @@ namespace Burt.RenderPipeline
             state.PreviousTargetWidth = targetWidth;
             state.PreviousTargetHeight = targetHeight;
             state.PreviousRenderScale = CalculateRenderScale(camera, colorDescriptor);
+            ResolveTemporalAAPostProcessSignature(out state.PreviousTemporalAAPostProcessSignature0, out state.PreviousTemporalAAPostProcessSignature1);
             state.PreviousViewProjectionMatrix = temporalAA.CurrentViewProjectionMatrix;
             state.PreviousNonJitteredViewProjectionMatrix = temporalAA.CurrentNonJitteredViewProjectionMatrix;
             state.PreviousNonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
@@ -729,7 +797,15 @@ namespace Burt.RenderPipeline
 
         private static bool Matches(RenderTextureDescriptor left, RenderTextureDescriptor right)
         {
-            return left.width == right.width && left.height == right.height && left.colorFormat == right.colorFormat && left.sRGB == right.sRGB;
+            return left.width == right.width
+                && left.height == right.height
+                && left.colorFormat == right.colorFormat
+                && left.graphicsFormat == right.graphicsFormat
+                && left.depthBufferBits == right.depthBufferBits
+                && left.msaaSamples == right.msaaSamples
+                && left.useMipMap == right.useMipMap
+                && left.autoGenerateMips == right.autoGenerateMips
+                && left.sRGB == right.sRGB;
         }
 
         private static string ResolveHistoryInvalidationReason(
@@ -740,6 +816,8 @@ namespace Burt.RenderPipeline
             int targetWidth,
             int targetHeight,
             Vector2 renderScale,
+            Vector4 postProcessSignature0,
+            Vector4 postProcessSignature1,
             Matrix4x4 projectionMatrix,
             bool descriptorsMatch)
         {
@@ -771,6 +849,12 @@ namespace Burt.RenderPipeline
             if (VectorChanged(renderScale, state.PreviousRenderScale, 0.0001f))
             {
                 return "RenderScaleChanged";
+            }
+
+            if (VectorChanged(postProcessSignature0, state.PreviousTemporalAAPostProcessSignature0, TemporalAAPostProcessSignatureEpsilon)
+                || VectorChanged(postProcessSignature1, state.PreviousTemporalAAPostProcessSignature1, TemporalAAPostProcessSignatureEpsilon))
+            {
+                return "PostProcessColorChanged";
             }
 
             if (camera != null)
@@ -887,6 +971,57 @@ namespace Burt.RenderPipeline
             return FloatChanged(current.x, previous.x, epsilon) || FloatChanged(current.y, previous.y, epsilon);
         }
 
+        private static bool VectorChanged(Vector4 current, Vector4 previous, float epsilon)
+        {
+            return FloatChanged(current.x, previous.x, epsilon)
+                || FloatChanged(current.y, previous.y, epsilon)
+                || FloatChanged(current.z, previous.z, epsilon)
+                || FloatChanged(current.w, previous.w, epsilon);
+        }
+
+        private static void ResolveTemporalAAPostProcessSignature(out Vector4 signature0, out Vector4 signature1)
+        {
+            var volumeManager = VolumeManager.instance;
+            var stack = volumeManager != null ? volumeManager.stack : null;
+            if (stack == null)
+            {
+                signature0 = Vector4.zero;
+                signature1 = Vector4.zero;
+                return;
+            }
+
+            var tonemapping = stack.GetComponent<BurtTonemappingVolumeComponent>();
+            var exposure = stack.GetComponent<BurtExposureVolumeComponent>();
+            var colorAdjustments = stack.GetComponent<BurtColorAdjustmentsVolumeComponent>();
+            var tonemappingEnabled = tonemapping != null && tonemapping.IsEnabled();
+            var exposureEnabled = exposure != null && exposure.IsEnabled();
+            var colorAdjustmentsEnabled = colorAdjustments != null && colorAdjustments.IsEnabled();
+            var exposureMultiplier = exposureEnabled
+                ? new BurtPhysicalExposureSettings(
+                    exposure.mode.value,
+                    exposure.manualEV100.value,
+                    exposure.iso.value,
+                    exposure.shutterTime.value,
+                    exposure.aperture.value,
+                    exposure.calibration.value,
+                    exposure.compensation.value).Multiplier
+                : 1f;
+            var saturation = colorAdjustmentsEnabled ? colorAdjustments.saturation.value : BurtColorAdjustmentsSettings.DefaultSaturation;
+            var contrast = colorAdjustmentsEnabled ? colorAdjustments.contrast.value : BurtColorAdjustmentsSettings.DefaultContrast;
+            var gamma = colorAdjustmentsEnabled ? colorAdjustments.gamma.value : BurtColorAdjustmentsSettings.DefaultGamma;
+            var colorFilter = colorAdjustmentsEnabled ? colorAdjustments.colorFilter.value : BurtColorAdjustmentsSettings.DefaultColorFilter;
+            signature0 = new Vector4(
+                exposureMultiplier,
+                saturation,
+                contrast,
+                gamma);
+            signature1 = new Vector4(
+                colorFilter.r,
+                colorFilter.g,
+                colorFilter.b,
+                tonemappingEnabled ? (int)tonemapping.mode.value + 1 : 0f);
+        }
+
         private static bool ProjectionChanged(Matrix4x4 current, Matrix4x4 previous)
         {
             for (var i = 0; i < 16; i++)
@@ -947,7 +1082,7 @@ namespace Burt.RenderPipeline
 
         private static Vector2 CalculateHaltonJitter(int frameIndex)
         {
-            var sequenceIndex = frameIndex % HaltonSequenceLength;
+            var sequenceIndex = ((Mathf.Max(1, frameIndex) - 1) % HaltonSequenceLength) + 1;
             return new Vector2(Halton(sequenceIndex, 2) - 0.5f, Halton(sequenceIndex, 3) - 0.5f);
         }
 

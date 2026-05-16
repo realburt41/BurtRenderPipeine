@@ -46,7 +46,7 @@ namespace Burt.RenderPipeline.Editor
             material.SetOverrideTag("Queue", string.Empty);
             material.renderQueue = (int)RenderQueue.Geometry;
             material.SetShaderPassEnabled("BurtDepthOnly", true);
-            material.SetShaderPassEnabled("ShadowCaster", true);
+            material.SetShaderPassEnabled("ShadowCaster", false);
             material.SetShaderPassEnabled("BurtForward", true);
             material.SetShaderPassEnabled("BurtForwardOnly", true);
         }
@@ -68,7 +68,7 @@ namespace Burt.RenderPipeline.Editor
                     BurtShaderGUIUtility.DrawSeparator();
                     BurtShaderGUIUtility.DrawSubHeader("Resolved State");
                     EditorGUILayout.LabelField(RenderQueueLabel, new GUIContent(material.renderQueue.ToString()));
-                    EditorGUILayout.TextField(EnabledPassesLabel, "BurtDepthOnly, ShadowCaster, BurtForward, BurtForwardOnly");
+                    EditorGUILayout.TextField(EnabledPassesLabel, "BurtDepthOnly, BurtForward, BurtForwardOnly");
                 }
             }
 
