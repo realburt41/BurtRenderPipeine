@@ -14,7 +14,7 @@ BurtRenderPipeine 是一个面向实时渲染质量的 Unity 自定义渲染管�
 - additional point shadow 已修正 face / split culling sphere 稳定性问题，并增加 stable key、slice、rect、matrix hash、bias 等诊断信息。
 - 接入了 additional light buffer、additional light shading 和 tile light debug。
 - 接入了 HiZ Depth、SSAO 和 SSR。
-- SSAO 已有质量预设、空间降噪、RHalf 时域历史、边缘感知时域累积、历史深度校验和 Surface Stability 诊断视图。
+- SSAO 已有质量预设、可选 SSAO/GTAO/HBAO trace 算法、空间降噪、RHalf 时域历史、边缘感知时域累积、历史深度校验和 Surface Stability 诊断视图。
 - SSR 已有质量预设、全/半分辨率、时域历史和 HiZ 实验诊断。
 - 接入了后处理链路，包括 TAA、Bloom、Tonemapping、Color Adjustments、物理曝光和自动曝光。
 - Bloom 已有质量档、mip/stage 诊断、threshold / soft knee、scatter、tint、alpha 和 debug view。
@@ -30,18 +30,9 @@ BurtRenderPipeine 是一个面向实时渲染质量的 Unity 自定义渲染管�
 - 后处理：TAA、Bloom、SSAO、SSR、物理曝光、自动曝光、Tonemapping 和 Color Adjustments 已接入，当前重点是默认效果标定和稳定性回归。
 - 调试：RenderGraph dump、Shading Debug Overlay、GBuffer / Shadow / Atmosphere / SSAO / SSR / TAA / Bloom / Auto Exposure debug view 已覆盖主要排查入口。
 
-## 子 agent 跟进情况
-
-- SSAO：已合入 RHalf 时域历史、temporal final copy 和 Surface Stability debug view。
-- 材质：Clear Coat / Subsurface GUI 与独立 shader 已推进，Clear Coat 参数区调整到 Normal 之后。
-- 大气：Atmosphere + Aerial Perspective 已接入，并给出 Global Volume 推荐参数。
-- 阴影：主光和 additional light shadow caster 为空时会跳过 DrawShadows，避免空 caster warning 和旧阴影干扰。
-- TAA / Bloom / SSR / 自动曝光：当前仓库已有多项 debug、质量和诊断改动；仍需在 Unity 场景中做最终画面回归。
-- 仍有两个子 agent 本轮没有返回最终状态，文档只记录当前代码中可见且已合入的结果。
-
 ## GBuffer 通道规划
 
-当前 Deferred 路径使用四张 GBuffer，并用 GBuffer pass 写入的 Stencil 低 2 bit 标记 shading model：`0 = Default Lit`、`1 = Hair`、`2 = Clear Coat`、`3 = Subsurface`，材质 pass 使用 `ReadMask/WriteMask = 3`。Hair lighting pass 已使用 Stencil Ref 1 做 pass 级过滤；Default Lit / Clear Coat / Subsurface 当前仍共用 Lit lighting pass，再通过 GBuffer 解码后的 model id 进入对应 shading 分支。位数口径按当前 RT 申请方式记录：`GBuffer0 = ARGB32`，每通道 8-bit UNorm；`GBuffer1 = ARGBHalf`，每通道 16-bit float；`GBuffer2 = DefaultHDR`，实际位宽由 Unity / 平台 HDR 格式决定；`GBuffer3 = ARGBHalf`，当前用于 Clear Coat 独立法线，其他模型先写默认/占位值。表格按 Stencil model tag + GBuffer payload 规划计位；当前 HLSL 里 `GBuffer1.b` 仍临时镜像 `shadingModelID`，用于现有 decode / debug / shader 内过滤过渡，后续完全切到 Stencil 分 pass 后可以释放这部分冗余。
+当前 Deferred 路径使用四张 GBuffer，并用 GBuffer pass 写入的 Stencil 低 2 bit 标记 shading model：`0 = Default Lit`、`1 = Hair`、`2 = Clear Coat`、`3 = Subsurface`，材质 pass 使用 `ReadMask/WriteMask = 3`。Deferred Lighting 已按这四个 id 拆成 Default Lit / Hair / Clear Coat / Subsurface pass，并保留与 Stencil Ref 相同的 GBuffer model id 作为 shader 内过滤兜底。位数口径按当前 RT 申请方式记录：`GBuffer0 = ARGB32`，每通道 8-bit UNorm；`GBuffer1 = ARGBHalf`，每通道 16-bit float；`GBuffer2 = DefaultHDR`，实际位宽由 Unity / 平台 HDR 格式决定；`GBuffer3 = ARGBHalf`，当前用于 Clear Coat 独立法线，其他模型先写默认/占位值。表格按 Stencil model tag + GBuffer payload 规划计位；当前 HLSL 里 `GBuffer1.b` 仍临时镜像 `shadingModelID`，用于现有 decode / debug / shader 内过滤过渡，后续完全切到 Stencil 分 pass 后可以释放这部分冗余。
 
 ### Default Lit (0) / `BurtRP/Lit`
 
@@ -60,7 +51,7 @@ BurtRenderPipeine 是一个面向实时渲染质量的 Unity 自定义渲染管�
 <tr>
 <td>Stencil<br/>Depth/Stencil</td>
 <td colspan="4">shading model = 0<br/>2 bit，Ref 0，ReadMask/WriteMask 3</td>
-<td>GBuffer pass 写入的 model tag；后续可用于 Lit pass 级过滤</td>
+<td>Deferred Lit lighting pass 使用 Stencil Ref 0 / model id 0 过滤</td>
 </tr>
 <tr>
 <td>GBuffer0<br/>ARGB32</td>
@@ -156,7 +147,7 @@ BurtRenderPipeine 是一个面向实时渲染质量的 Unity 自定义渲染管�
 <tr>
 <td>Stencil<br/>Depth/Stencil</td>
 <td colspan="4">shading model = 2<br/>2 bit，Ref 2，ReadMask/WriteMask 3</td>
-<td>GBuffer pass 写入的 model tag；当前 lighting 仍走 Lit pass 内分支</td>
+<td>Deferred Clear Coat lighting pass 使用 Stencil Ref 2 / model id 2 过滤</td>
 </tr>
 <tr>
 <td>GBuffer0<br/>ARGB32</td>
@@ -204,7 +195,7 @@ BurtRenderPipeine 是一个面向实时渲染质量的 Unity 自定义渲染管�
 <tr>
 <td>Stencil<br/>Depth/Stencil</td>
 <td colspan="4">shading model = 3<br/>2 bit，Ref 3，ReadMask/WriteMask 3</td>
-<td>GBuffer pass 写入的 model tag；当前 lighting 仍走 Lit pass 内分支</td>
+<td>Deferred Subsurface lighting pass 使用 Stencil Ref 3 / model id 3 过滤</td>
 </tr>
 <tr>
 <td>GBuffer0<br/>ARGB32</td>
@@ -239,7 +230,7 @@ BurtRenderPipeine 是一个面向实时渲染质量的 Unity 自定义渲染管�
 
 ## 后续 TODO
 
-- 自动曝光：已加入亮度热力图、测光权重和直方图范围调试，并限制直方图 readback 采样规模；后续继续验证真实场景稳定性，再决定是否需要 compute histogram。
+- 自动曝光：已加入亮度热力图、测光权重、直方图范围调试和 latest-ready readout 状态，并限制直方图 readback 采样规模；后续继续验证真实场景稳定性，再决定是否需要 compute histogram。
 - 在 Unity 场景中继续验证 additional point shadow 多光源稳定性，重点看 point light face 边界、slot / atlas slice 是否还跳变，以及 slice culling sphere 是否不再出现无效半径。
 - 继续用固定动态场景标定 TAA 的拖影、闪烁和锐度平衡。
 - 标定 Bloom、SSR、SSAO、PBR、SkyLight、IBL、物理曝光、自动曝光和 Tonemapping 的默认效果。
