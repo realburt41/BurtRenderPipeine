@@ -21,11 +21,27 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter shutterTime = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultShutterTime, 0.000001f, 60f);
         public ClampedFloatParameter aperture = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAperture, 0.1f, 64f);
 
+        [Title("Automatic")]
+        public ClampedFloatParameter autoMinEV100 = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAutoMinEv100, -16f, 24f);
+        public ClampedFloatParameter autoMaxEV100 = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAutoMaxEv100, -16f, 24f);
+        public ClampedFloatParameter autoMiddleGrey = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAutoMiddleGrey, 0.001f, 1f);
+        public ClampedFloatParameter autoSpeedUp = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAutoSpeedUp, 0.02f, 20f);
+        public ClampedFloatParameter autoSpeedDown = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAutoSpeedDown, 0.02f, 20f);
+        public ClampedFloatParameter autoLowPercent = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAutoLowPercent, 0f, 100f);
+        public ClampedFloatParameter autoHighPercent = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAutoHighPercent, 0f, 100f);
+        public ClampedFloatParameter autoHistogramMinEV100 = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAutoHistogramMinEv100, -16f, 24f);
+        public ClampedFloatParameter autoHistogramMaxEV100 = new ClampedFloatParameter(BurtPhysicalExposureSettings.DefaultAutoHistogramMaxEv100, -16f, 24f);
+
         public bool IsEnabled()
         {
             if (!active)
             {
                 return false;
+            }
+
+            if (mode.value == BurtExposureMode.Automatic || mode.value == BurtExposureMode.AutomaticHistogram)
+            {
+                return true;
             }
 
             return mode.value != BurtPhysicalExposureSettings.DefaultMode ||

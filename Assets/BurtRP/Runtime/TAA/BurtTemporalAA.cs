@@ -144,6 +144,7 @@ namespace Burt.RenderPipeline
         public Matrix4x4 PreviousViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 PreviousNonJitteredViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 InverseCurrentViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
+        public Matrix4x4 InverseCurrentNonJitteredViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public BurtTemporalAASettings Settings { get; private set; } = BurtTemporalAASettings.Default;
         public BurtTemporalAAVelocityMode VelocityMode { get; internal set; } = BurtTemporalAAVelocityMode.Disabled;
         public bool ObjectMotionVectorPassDrawn { get; internal set; }
@@ -163,6 +164,7 @@ namespace Burt.RenderPipeline
                 PreviousViewProjectionMatrix = viewProjection,
                 PreviousNonJitteredViewProjectionMatrix = viewProjection,
                 InverseCurrentViewProjectionMatrix = viewProjection.inverse,
+                InverseCurrentNonJitteredViewProjectionMatrix = viewProjection.inverse,
                 Settings = BurtTemporalAASettings.Default,
                 VelocityMode = BurtTemporalAAVelocityMode.Disabled
             };
@@ -199,6 +201,7 @@ namespace Burt.RenderPipeline
                 PreviousViewProjectionMatrix = previousViewProjectionMatrix,
                 PreviousNonJitteredViewProjectionMatrix = previousNonJitteredViewProjectionMatrix,
                 InverseCurrentViewProjectionMatrix = currentViewProjection.inverse,
+                InverseCurrentNonJitteredViewProjectionMatrix = currentNonJitteredViewProjection.inverse,
                 Settings = settings,
                 VelocityMode = BurtTemporalAAVelocityMode.CameraOnly
             };
@@ -568,7 +571,8 @@ namespace Burt.RenderPipeline
         {
             return (mode >= BurtShadingDebugMode.TemporalAAHistory && mode <= BurtShadingDebugMode.TemporalAAResponsiveMask)
                 || mode == BurtShadingDebugMode.TemporalAARejectionReasons
-                || mode == BurtShadingDebugMode.TemporalAAFeedbackWeight;
+                || mode == BurtShadingDebugMode.TemporalAAFeedbackWeight
+                || mode == BurtShadingDebugMode.TemporalAAPrevUseCount;
         }
 
         public static BurtTemporalAAHistoryTextures EnsureHistoryTextures(Camera camera, out bool historyValid)
@@ -996,7 +1000,9 @@ namespace Burt.RenderPipeline
             var tonemappingEnabled = tonemapping != null && tonemapping.IsEnabled();
             var exposureEnabled = exposure != null && exposure.IsEnabled();
             var colorAdjustmentsEnabled = colorAdjustments != null && colorAdjustments.IsEnabled();
-            var exposureMultiplier = exposureEnabled
+            var exposureMultiplier = exposureEnabled &&
+                exposure.mode.value != BurtExposureMode.Automatic &&
+                exposure.mode.value != BurtExposureMode.AutomaticHistogram
                 ? new BurtPhysicalExposureSettings(
                     exposure.mode.value,
                     exposure.manualEV100.value,

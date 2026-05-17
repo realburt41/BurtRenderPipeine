@@ -202,6 +202,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         {
             return 1f;
         }
+
+        public static bool HasShadowCasters(CullingResults cullingResults, int visibleLightIndex)
+        {
+            if (visibleLightIndex < 0 || visibleLightIndex >= cullingResults.visibleLights.Length)
+            {
+                return false;
+            }
+
+            return cullingResults.GetShadowCasterBounds(visibleLightIndex, out _);
+        }
     }
 
     internal static class BurtMainLightShadowMatrixUtility
@@ -965,9 +975,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                     renderContext.ExecuteCommandBuffer(cmd);
                     cmd.Clear();
 
-                    var shadowDrawingSettings = new ShadowDrawingSettings(request.CullingResults, shadowData.MainLightIndex, BatchCullingProjectionType.Orthographic);
-                    shadowDrawingSettings.splitData = cascadeCache.SplitDatas[cascadeIndex];
-                    renderContext.DrawShadows(ref shadowDrawingSettings);
+                    if (BurtShadowRenderTargetUtility.HasShadowCasters(request.CullingResults, shadowData.MainLightIndex))
+                    {
+                        var shadowDrawingSettings = new ShadowDrawingSettings(request.CullingResults, shadowData.MainLightIndex, BatchCullingProjectionType.Orthographic);
+                        shadowDrawingSettings.splitData = cascadeCache.SplitDatas[cascadeIndex];
+                        renderContext.DrawShadows(ref shadowDrawingSettings);
+                    }
                 }
             }
             finally
@@ -1111,7 +1124,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
     {
         public const int AtlasTileCountX = 5;
         public const int AtlasTileCountY = 5;
-        private const float AdditionalLightShadowReceiverDepthBias = 0f;
+        private const float AdditionalLightShadowReceiverDepthBias = 0.001f;
 
         private static readonly int AdditionalLightShadowDataId = Shader.PropertyToID("_BurtAdditionalLightShadowData");
         private static readonly int AdditionalLightShadowLightParamsId = Shader.PropertyToID("_BurtAdditionalLightShadowLightParams");
@@ -1131,6 +1144,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         private static readonly Vector4[] SliceWorldToShadowRows1 = new Vector4[BurtLightingData.MaxAdditionalLightShadowSlices];
         private static readonly Vector4[] SliceWorldToShadowRows2 = new Vector4[BurtLightingData.MaxAdditionalLightShadowSlices];
         private static readonly Vector4[] SliceWorldToShadowRows3 = new Vector4[BurtLightingData.MaxAdditionalLightShadowSlices];
+        private static readonly AdditionalShadowCandidate[] AdditionalShadowCandidates = new AdditionalShadowCandidate[BurtLightingData.MaxAdditionalLights];
+
+        private struct AdditionalShadowCandidate
+        {
+            public int LightIndex;
+            public int VisibleLightIndex;
+            public LightType LightType;
+            public int RequiredSliceCount;
+        }
 
         public static bool ShouldUseAdditionalLightShadows(BurtRenderRequest request)
         {
@@ -1151,7 +1173,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var atlasResolution = tileResolution * AtlasTileCountX;
             var packedSliceIndex = 0;
             var failedCount = 0;
-            for (var lightIndex = 0; lightIndex < BurtLightingData.MaxAdditionalLights; lightIndex++)
+            var candidateCount = 0;
+            var additionalLightCount = Mathf.Min(lightingData.AdditionalLightCount, BurtLightingData.MaxAdditionalLights);
+            for (var lightIndex = 0; lightIndex < additionalLightCount; lightIndex++)
             {
                 if (!IsCandidateShadowSlot(lightingData, lightIndex))
                 {
@@ -1161,9 +1185,37 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
                 var visibleLightIndex = lightingData.AdditionalLightShadowVisibleLightIndices[lightIndex];
                 var visibleLightType = ResolveVisibleLightType(request, visibleLightIndex);
-                if (visibleLightType == LightType.Spot)
+                var requiredSliceCount = ResolveRequiredAdditionalShadowSliceCount(visibleLightType);
+                if (requiredSliceCount <= 0)
                 {
-                    if (!TryPrepareSpotAdditionalLightShadowSlice(request, lightingData, lightIndex, visibleLightIndex, ref packedSliceIndex))
+                    FailPreparedAdditionalLightShadowSlot(lightingData, lightIndex, BurtAdditionalLightShadowStatus.PrepareInvalidVisibleLightIndex);
+                    failedCount++;
+                    continue;
+                }
+
+                AdditionalShadowCandidates[candidateCount++] = new AdditionalShadowCandidate
+                {
+                    LightIndex = lightIndex,
+                    VisibleLightIndex = visibleLightIndex,
+                    LightType = visibleLightType,
+                    RequiredSliceCount = requiredSliceCount
+                };
+            }
+
+            var sliceCapacity = ResolveAdditionalShadowSliceCapacity();
+            for (var candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++)
+            {
+                var candidate = AdditionalShadowCandidates[candidateIndex];
+                if (packedSliceIndex + candidate.RequiredSliceCount > sliceCapacity)
+                {
+                    FailAdditionalLightShadowSlotLimitExceeded(lightingData, candidate.LightIndex);
+                    failedCount++;
+                    continue;
+                }
+
+                if (candidate.LightType == LightType.Spot)
+                {
+                    if (!TryPrepareSpotAdditionalLightShadowSlice(request, lightingData, candidate.LightIndex, candidate.VisibleLightIndex, ref packedSliceIndex))
                     {
                         failedCount++;
                     }
@@ -1171,23 +1223,38 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                     continue;
                 }
 
-                if (visibleLightType == LightType.Point)
+                if (candidate.LightType == LightType.Point)
                 {
-                    if (!TryPreparePointAdditionalLightShadowSlices(request, lightingData, lightIndex, visibleLightIndex, ref packedSliceIndex, out var pointFailedCount))
+                    if (!TryPreparePointAdditionalLightShadowSlices(request, lightingData, candidate.LightIndex, candidate.VisibleLightIndex, ref packedSliceIndex, out var pointFailedCount))
                     {
-                        failedCount += pointFailedCount;
+                        failedCount += Mathf.Max(1, pointFailedCount);
                     }
-
-                    continue;
                 }
-
-                FailPreparedAdditionalLightShadowSlot(lightingData, lightIndex, BurtAdditionalLightShadowStatus.PrepareInvalidVisibleLightIndex);
-                failedCount++;
             }
 
             lightingData.SetAdditionalLightShadowCacheState(packedSliceIndex > 0, tileResolution, atlasResolution, AtlasTileCountX, AtlasTileCountY, packedSliceIndex);
             lightingData.SetAdditionalLightShadowPrepareState(true, packedSliceIndex > 0, failedCount);
             return packedSliceIndex > 0;
+        }
+
+        private static int ResolveRequiredAdditionalShadowSliceCount(LightType lightType)
+        {
+            if (lightType == LightType.Point)
+            {
+                return BurtLightingData.PointLightShadowFaceCount;
+            }
+
+            if (lightType == LightType.Spot)
+            {
+                return 1;
+            }
+
+            return 0;
+        }
+
+        private static int ResolveAdditionalShadowSliceCapacity()
+        {
+            return Mathf.Min(BurtLightingData.MaxAdditionalLightShadowSlices, AtlasTileCountX * AtlasTileCountY);
         }
 
         private static bool TryPrepareSpotAdditionalLightShadowSlice(
@@ -1199,7 +1266,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         {
             if (!HasFreeAdditionalShadowSlices(packedSliceIndex, 1))
             {
-                FailPreparedAdditionalLightShadowSlot(lightingData, lightIndex, BurtAdditionalLightShadowStatus.SlotLimitExceeded);
+                FailAdditionalLightShadowSlotLimitExceeded(lightingData, lightIndex);
                 return false;
             }
 
@@ -1234,7 +1301,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             failedCount = 0;
             if (!HasFreeAdditionalShadowSlices(packedSliceIndex, BurtLightingData.PointLightShadowFaceCount))
             {
-                FailPreparedAdditionalLightShadowSlot(lightingData, lightIndex, BurtAdditionalLightShadowStatus.SlotLimitExceeded);
+                FailAdditionalLightShadowSlotLimitExceeded(lightingData, lightIndex);
                 failedCount = BurtLightingData.PointLightShadowFaceCount;
                 return false;
             }
@@ -1259,6 +1326,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 }
 
                 StabilizePointShadowViewMatrix(ref viewMatrix);
+                splitData = SanitizePointShadowSplitData(splitData, lightingData, lightIndex);
 
                 var sliceIndex = firstSliceIndex + faceIndex;
                 var atlasRect = ResolveAtlasRect(sliceIndex);
@@ -1311,6 +1379,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         public static float ResolveAdditionalLightShadowCasterNormalBias(BurtRenderRequest request, BurtLightingData lightingData, int lightIndex, int tileResolution)
         {
             var light = ResolveUnityLight(request, lightingData, lightIndex);
+            if (light != null && light.type == LightType.Point)
+            {
+                return 0f;
+            }
+
             var normalBias = light != null ? Mathf.Max(0f, light.shadowNormalBias) : 0f;
             if (normalBias <= 0f)
             {
@@ -1400,6 +1473,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             lightingData.DisableAdditionalLightShadowSlot(lightIndex, status);
             lightingData.AdditionalLightShadowVisibleLightIndices[lightIndex] = visibleLightIndex;
             lightingData.AdditionalLightShadowData[lightIndex] = new Vector4(0f, shadowData.y, 0f, shadowData.w);
+        }
+
+        private static void FailAdditionalLightShadowSlotLimitExceeded(BurtLightingData lightingData, int lightIndex)
+        {
+            FailPreparedAdditionalLightShadowSlot(lightingData, lightIndex, BurtAdditionalLightShadowStatus.SlotLimitExceeded);
+            lightingData?.IncrementAdditionalLightShadowSlotLimitExceededCount();
         }
 
         public static bool IsActiveShadowSlot(BurtLightingData lightingData, int lightIndex)
@@ -1508,6 +1587,44 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             viewMatrix.m13 = -viewMatrix.m13;
         }
 
+        private static ShadowSplitData SanitizePointShadowSplitData(ShadowSplitData splitData, BurtLightingData lightingData, int lightIndex)
+        {
+            if (IsValidCullingSphere(splitData.cullingSphere))
+            {
+                return splitData;
+            }
+
+            var lightPositionAndRange = lightingData != null &&
+                lightIndex >= 0 &&
+                lightIndex < BurtLightingData.MaxAdditionalLights
+                    ? lightingData.AdditionalLightPositionAndRange[lightIndex]
+                    : Vector4.zero;
+            var fallbackX = IsFinite(lightPositionAndRange.x) ? lightPositionAndRange.x : 0f;
+            var fallbackY = IsFinite(lightPositionAndRange.y) ? lightPositionAndRange.y : 0f;
+            var fallbackZ = IsFinite(lightPositionAndRange.z) ? lightPositionAndRange.z : 0f;
+            var fallbackRadius = IsFinite(lightPositionAndRange.w) && lightPositionAndRange.w > 0f ? lightPositionAndRange.w : 0.0001f;
+            splitData.cullingSphere = new Vector4(
+                fallbackX,
+                fallbackY,
+                fallbackZ,
+                fallbackRadius);
+            return splitData;
+        }
+
+        private static bool IsValidCullingSphere(Vector4 cullingSphere)
+        {
+            return IsFinite(cullingSphere.x) &&
+                IsFinite(cullingSphere.y) &&
+                IsFinite(cullingSphere.z) &&
+                IsFinite(cullingSphere.w) &&
+                cullingSphere.w > 0f;
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
         private static int CountActiveShadowSlots(BurtLightingData lightingData)
         {
             var count = 0;
@@ -1519,7 +1636,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 }
             }
 
-            return Mathf.Clamp(count, 0, BurtLightingData.MaxShadowedAdditionalLights);
+            return Mathf.Clamp(count, 0, BurtLightingData.MaxAdditionalLights);
         }
 
         public static void UploadAdditionalLightShadowReceiverGlobals(
@@ -1875,6 +1992,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
                     cmd.SetRenderTarget(atlasTarget.Identifier);
                     cmd.SetViewport(viewport);
+                    cmd.EnableScissorRect(viewport);
                     cmd.SetViewProjectionMatrices(lightingData.AdditionalLightShadowSliceViewMatrices[sliceIndex], lightingData.AdditionalLightShadowSliceProjectionMatrices[sliceIndex]);
                     cmd.SetGlobalDepthBias(1f, 2.5f);
                     cmd.SetGlobalVector(UnityLightDirectionId, new Vector4(shadowDirection.x, shadowDirection.y, shadowDirection.z, 0f));
@@ -1889,10 +2007,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                     cmd.Clear();
 
                     var visibleLightIndex = lightingData.AdditionalLightShadowVisibleLightIndices[lightIndex];
-                    var shadowDrawingSettings = new ShadowDrawingSettings(request.CullingResults, visibleLightIndex, BatchCullingProjectionType.Perspective);
-                    shadowDrawingSettings.splitData = lightingData.AdditionalLightShadowSliceSplitDatas[sliceIndex];
-                    context.ScriptableContext.DrawShadows(ref shadowDrawingSettings);
+                    if (BurtShadowRenderTargetUtility.HasShadowCasters(request.CullingResults, visibleLightIndex))
+                    {
+                        var shadowDrawingSettings = new ShadowDrawingSettings(request.CullingResults, visibleLightIndex, BatchCullingProjectionType.Perspective);
+                        shadowDrawingSettings.splitData = lightingData.AdditionalLightShadowSliceSplitDatas[sliceIndex];
+                        context.ScriptableContext.DrawShadows(ref shadowDrawingSettings);
+                    }
 
+                    cmd.DisableScissorRect();
                     context.ScriptableContext.ExecuteCommandBuffer(cmd);
                     cmd.Clear();
                 }
@@ -2395,6 +2517,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             if (clearMode != BurtCameraClearMode.Skybox) // 如果当前清屏模式不是 Skybox，就不绘制天空盒。
             {
                 return; // 直接结束这个 Pass。
+            }
+
+            if (BurtAtmosphereUtility.ShouldUseAtmosphere(request))
+            {
+                return;
             }
 
             renderContext.DrawSkybox(camera); // 使用 Unity SRP 上下文绘制当前相机的天空盒。

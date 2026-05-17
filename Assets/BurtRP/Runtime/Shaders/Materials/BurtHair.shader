@@ -293,10 +293,12 @@ Shader "BurtRP/Hair"
                 // 使用 BurtDrawMainLightShadowCasterPass 设置的主光 VP 矩阵，把偏移后的世界坐标写入 shadow map。
                 output.positionCS = mul(UNITY_MATRIX_VP, float4(biasedPositionWS, 1.0f));
 
-                #if UNITY_REVERSED_Z
-                    output.positionCS.z = min(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
-                #else
-                    output.positionCS.z = max(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
+                #if !defined(_CASTING_PUNCTUAL_LIGHT_SHADOW)
+                    #if UNITY_REVERSED_Z
+                        output.positionCS.z = min(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
+                    #else
+                        output.positionCS.z = max(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
+                    #endif
                 #endif
 
                 // Applies the same Base Map tiling and offset as Forward so cast shadows match the visible cutout silhouette.
@@ -357,7 +359,7 @@ Shader "BurtRP/Hair"
             // 声明 GBuffer 片元 shader 入口。
             #pragma fragment FragGBuffer
 
-            // MRT 输出 SV_Target0/1/2，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
+            // MRT 输出 SV_Target0/1/2/3，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
             #pragma target 3.0
 
             // 引入 Unity 基础变换和 normal map 解包函数。
@@ -375,7 +377,7 @@ Shader "BurtRP/Hair"
             // 引入自发光工具，GBuffer2.rgb 会保存 Forward 最终叠加前的 emission 输入。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEmission.hlsl"
 
-            // 引入 BurtRP 三张 GBuffer 的 encode/decode 约定；出处参考 XRender SlabGBufferPass.hlsl -> GBufferPack(SlabParams) 的分层做法。
+            // 引入 BurtRP 四张 GBuffer 的 encode/decode 约定；出处参考 XRender SlabGBufferPass.hlsl -> GBufferPack(SlabParams) 的分层做法。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl"
 
             // 引入 Hair 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
@@ -419,7 +421,7 @@ Shader "BurtRP/Hair"
                 float2 emissionMapUV : TEXCOORD4;
             };
 
-            // 三张 MRT 的片元输出；出处参考 XRender SlabGBufferDefine.hlsl::FGBufferOutput 使用 SV_TargetN 显式绑定。
+            // 四张 MRT 的片元输出；出处参考 XRender SlabGBufferDefine.hlsl::FGBufferOutput 使用 SV_TargetN 显式绑定。
             struct GBufferFragmentOutput
             {
                 // SV_Target0 对应 _BurtGBuffer0，保存 baseColor.rgb 和 occlusion.a。
@@ -430,6 +432,8 @@ Shader "BurtRP/Hair"
 
                 // SV_Target2 对应 _BurtGBuffer2，保存 emission.rgb 和 reflectance.a。
                 float4 gbuffer2 : SV_Target2;
+
+                float4 gbuffer3 : SV_Target3;
             };
 
             // 把 mesh 顶点转换成 GBuffer 片元阶段需要的数据。
@@ -460,7 +464,7 @@ Shader "BurtRP/Hair"
                 return output;
             }
 
-            // 片元阶段采样材质输入并打包到三张 GBuffer。
+            // 片元阶段采样材质输入并打包到四张 GBuffer。
             GBufferFragmentOutput FragGBuffer(GBufferVaryings input, fixed facing : VFACE)
             {
                 // 采样 Base Map 并乘材质颜色，GBuffer0.rgb 保存的就是这份未光照 baseColor。
@@ -489,10 +493,10 @@ Shader "BurtRP/Hair"
                 // 把 surfaceData、strand direction 和 emission 整理成语义化 GBuffer 数据；Hair 解码后把 normalWS 字段解释为 strand direction。
                 BurtGBufferData gbufferData = BurtCreateHairGBufferData(surfaceData, strandDirectionWS, emissionColor);
 
-                // 出处参考 XRender SM_DefaultLit.GBuffer.hlsl::Pack_GBuffer_PC_High_DefaultLit，把 SlabParams 拆分写入多个 MRT；这里用 BurtEncodeGBuffer 固化 BurtRP 自己的三张 RT 布局。
+                // 出处参考 XRender SM_DefaultLit.GBuffer.hlsl::Pack_GBuffer_PC_High_DefaultLit，把 SlabParams 拆分写入多个 MRT；这里用 BurtEncodeGBuffer 固化 BurtRP 自己的四张 RT 布局。
                 BurtEncodedGBuffer encodedGBuffer = BurtEncodeGBuffer(gbufferData);
 
-                // 创建 MRT 输出结构，按 SV_Target0/1/2 顺序写入。
+                // 创建 MRT 输出结构，按 SV_Target0/1/2/3 顺序写入。
                 GBufferFragmentOutput output;
 
                 // 写入 _BurtGBuffer0：baseColor.rgb + occlusion.a。
@@ -504,7 +508,9 @@ Shader "BurtRP/Hair"
                 // 写入 _BurtGBuffer2：emission.rgb + reflectance.a。
                 output.gbuffer2 = encodedGBuffer.gbuffer2;
 
-                // 返回三张 GBuffer 颜色，RenderGraph 侧绑定的 MRT 顺序必须和这里保持一致。
+                output.gbuffer3 = encodedGBuffer.gbuffer3;
+
+                // 返回四张 GBuffer 颜色，RenderGraph 侧绑定的 MRT 顺序必须和这里保持一致。
                 return output;
             }
 
@@ -708,7 +714,7 @@ Shader "BurtRP/Hair"
                 // 用 Forward 当前片元数据做一次 GBuffer 编码再解码，提前验证 Deferred 后续会消费的材质/法线还原路径。
                 BurtGBufferData debugGBufferSourceData = BurtCreateHairGBufferData(surfaceData, strandDirectionWS, float3(0.0f, 0.0f, 0.0f));
 
-                // 按 BurtGBuffer.hlsl 顶部约定生成三张逻辑 GBuffer；这里只在 shader 内部 roundtrip，不写入真实 RT。
+                // 按 BurtGBuffer.hlsl 顶部约定生成四张逻辑 GBuffer；这里只在 shader 内部 roundtrip，不写入真实 RT。
                 BurtEncodedGBuffer debugEncodedGBuffer = BurtEncodeGBuffer(debugGBufferSourceData);
 
                 // 从逻辑 GBuffer 解码回语义数据，Debug View 读取的是这份解码结果。
@@ -841,6 +847,9 @@ Shader "BurtRP/Hair"
 
                 // 写入 GBuffer 解码后的 Hair scatter；字段名沿用 Metallic，实际语义由 Hair shader 决定。
                 debugData.gbufferMetallic = BurtGetHairScatter(debugDecodedGBufferData);
+                debugData.gbufferClearCoatMask = BurtGetClearCoatMask(debugDecodedGBufferData);
+                debugData.gbufferClearCoatNormalWS = BurtGetClearCoatNormalWS(debugDecodedGBufferData);
+                debugData.gbufferSubsurfaceStrength = BurtGetSubsurfaceStrength(debugDecodedGBufferData);
 
                 // 写入 GBuffer 解码后的 Smoothness，用来检查 GBuffer1.a 的面板语义还原。
                 debugData.gbufferSmoothness = debugDecodedGBufferData.smoothness;

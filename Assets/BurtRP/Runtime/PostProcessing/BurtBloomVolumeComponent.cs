@@ -31,12 +31,12 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter filter4Size = new ClampedFloatParameter(BurtBloomSettings.DefaultFilter4Size, 0f, 32f);
         public ClampedFloatParameter filter5Size = new ClampedFloatParameter(BurtBloomSettings.DefaultFilter5Size, 0f, 64f);
         public ClampedFloatParameter filter6Size = new ClampedFloatParameter(BurtBloomSettings.DefaultFilter6Size, 0f, 128f);
-        public ColorParameter filter1Tint = new ColorParameter(Color.white, true, false, false);
-        public ColorParameter filter2Tint = new ColorParameter(Color.white, true, false, false);
-        public ColorParameter filter3Tint = new ColorParameter(Color.white, true, false, false);
-        public ColorParameter filter4Tint = new ColorParameter(Color.white, true, false, false);
-        public ColorParameter filter5Tint = new ColorParameter(Color.white, true, false, false);
-        public ColorParameter filter6Tint = new ColorParameter(Color.white, true, false, false);
+        public ColorParameter filter1Tint = new ColorParameter(BurtBloomSettings.DefaultFilter1Tint, true, false, false);
+        public ColorParameter filter2Tint = new ColorParameter(BurtBloomSettings.DefaultFilter2Tint, true, false, false);
+        public ColorParameter filter3Tint = new ColorParameter(BurtBloomSettings.DefaultFilter3Tint, true, false, false);
+        public ColorParameter filter4Tint = new ColorParameter(BurtBloomSettings.DefaultFilter4Tint, true, false, false);
+        public ColorParameter filter5Tint = new ColorParameter(BurtBloomSettings.DefaultFilter5Tint, true, false, false);
+        public ColorParameter filter6Tint = new ColorParameter(BurtBloomSettings.DefaultFilter6Tint, true, false, false);
 
         public bool IsEnabled()
         {

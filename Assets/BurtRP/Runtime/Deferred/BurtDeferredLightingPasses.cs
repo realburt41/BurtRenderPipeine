@@ -35,12 +35,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id; // 缓存 GBuffer0 全局纹理 ID，避免每帧重复查找字符串。
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id; // 缓存 GBuffer1 全局纹理 ID，避免每帧重复查找字符串。
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id; // 缓存 GBuffer2 全局纹理 ID，避免每帧重复查找字符串。
+        private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int CameraDepthId = BurtRenderGraphResourceRegistry.CameraDepthTextureId; // 缓存 CameraDepth 全局纹理 ID，Deferred Lighting 需要用它重建位置。
         private static readonly int ScreenSpaceAmbientOcclusionId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionTextureId;
         private static readonly int ScreenSpaceAmbientOcclusionEnabledId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionEnabled");
         private static readonly int AdditionalLightBufferId = Shader.PropertyToID("_BurtAdditionalLightBuffer");
         private static readonly int AdditionalLightBufferEnabledId = Shader.PropertyToID("_BurtAdditionalLightBufferEnabled");
         private static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseViewProjectionMatrix"); // 缓存逆 ViewProjection 矩阵 ID，shader 可用它从屏幕和深度重建世界坐标。
+        private static readonly int InverseNonJitteredViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseNonJitteredViewProjectionMatrix");
         private static readonly int CameraWorldPositionId = Shader.PropertyToID("_BurtDeferredCameraWorldPosition"); // 缓存相机世界坐标 ID，shader 可用它计算 view direction。
         private static readonly int CameraClipPlanesId = Shader.PropertyToID("_BurtDeferredCameraClipPlanes"); // 缓存相机裁剪面参数 ID，shader 可用它做深度线性化兜底。
         private static readonly int ScreenSizeId = Shader.PropertyToID("_BurtDeferredScreenSize"); // 缓存屏幕尺寸参数 ID，shader 可用它把像素坐标和 UV 互相转换。
@@ -64,6 +66,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             builder.ReadGBuffer0(); // 声明 Deferred Lighting 会读取 GBuffer0 中的 baseColor 和 occlusion。
             builder.ReadGBuffer1(); // 声明 Deferred Lighting 会读取 GBuffer1 中的 normal、metallic 和 smoothness。
             builder.ReadGBuffer2(); // 声明 Deferred Lighting 会读取 GBuffer2 中的 emission 和 reflectance。
+            builder.ReadGBuffer3();
             builder.ReadCameraDepth(); // 声明 Deferred Lighting 会读取 CameraDepth 来重建世界坐标。
             if (BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(builder.Request, builder.Asset))
             {
@@ -95,7 +98,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
 
         public override void Execute(BurtRenderGraphContext context) // 执行 Deferred Lighting 全屏合成。
         {
-            if (!TryGetRequiredTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target)) // 先读取并验证本 Pass 需要的全部 RT。
+            if (!TryGetRequiredTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target)) // 先读取并验证本 Pass 需要的全部 RT。
             {
                 return; // 资源不完整时直接跳过，避免向错误目标绘制全屏三角形。
             }
@@ -119,6 +122,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier); // 把当前 request 的 GBuffer0 绑定给 Deferred Lighting shader。
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier); // 把当前 request 的 GBuffer1 绑定给 Deferred Lighting shader。
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier); // 把当前 request 的 GBuffer2 绑定给 Deferred Lighting shader。
+            cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier); // 确保 _BurtCameraDepthTexture 指向当前 request 的深度纹理。
             BindScreenSpaceAmbientOcclusion(context, cmd, material);
             BindAdditionalLightBuffer(context, cmd, material);
@@ -133,21 +137,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             CommandBufferPool.Release(cmd); // 把 CommandBuffer 放回池子，避免每帧产生额外 GC。
         }
 
-        private static bool TryGetRequiredTargets( // 安全读取 Deferred Lighting 需要的全部渲染目标。
-            BurtRenderGraphContext context, // 接收当前 RenderGraph 执行上下文。
-            out BurtRenderTargetHandle cameraColorTarget, // 输出 CameraColor 句柄。
-            out BurtRenderTargetHandle cameraDepthTarget, // 输出 CameraDepth 句柄。
-            out BurtRenderTargetHandle gbuffer0Target, // 输出 GBuffer0 句柄。
-            out BurtRenderTargetHandle gbuffer1Target, // 输出 GBuffer1 句柄。
-            out BurtRenderTargetHandle gbuffer2Target) // 输出 GBuffer2 句柄。
+        private static bool TryGetRequiredTargets(
+            BurtRenderGraphContext context,
+            out BurtRenderTargetHandle cameraColorTarget,
+            out BurtRenderTargetHandle cameraDepthTarget,
+            out BurtRenderTargetHandle gbuffer0Target,
+            out BurtRenderTargetHandle gbuffer1Target,
+            out BurtRenderTargetHandle gbuffer2Target,
+            out BurtRenderTargetHandle gbuffer3Target)
         {
-            cameraColorTarget = context != null ? context.CameraColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraColorName); // context 有效时读取 CameraColor，否则返回无效句柄。
-            cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName); // context 有效时读取 CameraDepth，否则返回无效句柄。
-            gbuffer0Target = context != null ? context.GBuffer0Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer0Name); // context 有效时读取 GBuffer0，否则返回无效句柄。
-            gbuffer1Target = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name); // context 有效时读取 GBuffer1，否则返回无效句柄。
-            gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name); // context 有效时读取 GBuffer2，否则返回无效句柄。
+            cameraColorTarget = context != null ? context.CameraColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraColorName);
+            cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
+            gbuffer0Target = context != null ? context.GBuffer0Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer0Name);
+            gbuffer1Target = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name);
+            gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
+            gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
 
-            return cameraColorTarget.IsValid && cameraDepthTarget.IsValid && gbuffer0Target.IsValid && gbuffer1Target.IsValid && gbuffer2Target.IsValid; // 只有所有目标有效时才允许执行全屏合成。
+            return cameraColorTarget.IsValid &&
+                cameraDepthTarget.IsValid &&
+                gbuffer0Target.IsValid &&
+                gbuffer1Target.IsValid &&
+                gbuffer2Target.IsValid &&
+                gbuffer3Target.IsValid;
         }
 
         private static void BindScreenSpaceAmbientOcclusion(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
@@ -266,6 +277,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             var projectionMatrix = GL.GetGPUProjectionMatrix(camera.projectionMatrix, true); // 把 Unity 投影矩阵转换成 GPU 渲染到 RT 时使用的投影矩阵。
             var viewProjectionMatrix = projectionMatrix * viewMatrix; // 合成 GPU 视图投影矩阵，和当前 CameraDepth/GBuffer 渲染路径保持一致。
             var inverseViewProjectionMatrix = viewProjectionMatrix.inverse; // 计算逆矩阵，shader 可用它把 NDC 和深度还原到世界空间。
+            var inverseNonJitteredViewProjectionMatrix = request != null && request.TemporalAA != null
+                ? request.TemporalAA.InverseCurrentNonJitteredViewProjectionMatrix
+                : inverseViewProjectionMatrix;
             var pixelWidth = Mathf.Max(1, camera.pixelWidth); // 读取相机像素宽度，并保证最小为 1。
             var pixelHeight = Mathf.Max(1, camera.pixelHeight); // 读取相机像素高度，并保证最小为 1。
             var screenSize = new Vector4(pixelWidth, pixelHeight, 1f / pixelWidth, 1f / pixelHeight); // 组织屏幕尺寸和倒数，方便 shader 做 UV/像素换算。
@@ -277,12 +291,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             if (material != null)
             {
                 material.SetMatrix(InverseViewProjectionMatrixId, inverseViewProjectionMatrix);
+                material.SetMatrix(InverseNonJitteredViewProjectionMatrixId, inverseNonJitteredViewProjectionMatrix);
                 material.SetVector(CameraWorldPositionId, cameraWorldPosition);
                 material.SetVector(CameraClipPlanesId, clipPlanes);
                 material.SetVector(ScreenSizeId, screenSize);
             }
 
             cmd.SetGlobalMatrix(InverseViewProjectionMatrixId, inverseViewProjectionMatrix); // 上传逆 ViewProjection 矩阵。
+            cmd.SetGlobalMatrix(InverseNonJitteredViewProjectionMatrixId, inverseNonJitteredViewProjectionMatrix);
             cmd.SetGlobalVector(CameraWorldPositionId, cameraWorldPosition); // 上传相机世界坐标，w 固定为 1 方便 shader 识别这是位置。
             cmd.SetGlobalVector(CameraClipPlanesId, clipPlanes); // 上传相机裁剪面参数。
             cmd.SetGlobalVector(ScreenSizeId, screenSize); // 上传屏幕尺寸参数。

@@ -113,7 +113,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                     screenUV.y = 1.0f - screenUV.y;
                 }
 
-                // 读取三张 GBuffer 的原始编码值。
+                // 读取四张 GBuffer 的原始编码值。
                 BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
 
                 // 把原始 GBuffer 解码成语义化材质数据。
@@ -141,6 +141,11 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                 {
                     // 返回 emission.rgb 的原始颜色，alpha 不显示。
                     return float4(saturate(encodedGBuffer.gbuffer2.rgb), 1.0f);
+                }
+
+                if (debugMode == 19)
+                {
+                    return float4(saturate(encodedGBuffer.gbuffer3.rgb), 1.0f);
                 }
 
                 // 模式 4：显示解码后的 baseColor。
@@ -223,7 +228,9 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                 if (debugMode == 14)
                 {
                     float isHair = BurtIsHairShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
-                    return float4(0.6f * isHair, 0.1f * isHair, 0.5f * isHair, 1.0f);
+                    float isClearCoat = BurtIsClearCoatShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float isSubsurface = BurtIsSubsurfaceShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    return float4(0.6f * isHair + 0.1f * isSubsurface, 0.1f * isHair + 0.45f * isClearCoat + 0.55f * isSubsurface, 0.5f * isHair + 0.7f * isClearCoat + 0.15f * isSubsurface, 1.0f);
                 }
 
                 // 模式 15：Hair 专用 strand direction；当前 Hair 复用 GBuffer1.rg 向量槽，非 Hair 像素显示黑色。
@@ -251,6 +258,22 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                     float isHair = BurtIsHairShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
                     float shiftScale = BurtGetHairLongitudinalShiftScale(gbufferData) * isHair;
                     return float4(shiftScale, shiftScale, shiftScale, 1.0f);
+                }
+
+                if (debugMode == 18)
+                {
+                    float strength = BurtGetSubsurfaceStrength(gbufferData);
+                    return float4(strength, strength, strength, 1.0f);
+                }
+
+                if (debugMode == 20)
+                {
+                    if (!BurtIsClearCoatShadingModel(gbufferData.shadingModelID))
+                    {
+                        return float4(0.0f, 0.0f, 0.0f, 1.0f);
+                    }
+
+                    return BurtDebugNormal(BurtGetClearCoatNormalWS(gbufferData));
                 }
 
                 // 默认分支显示解码后的 baseColor，避免异常模式导致黑屏。

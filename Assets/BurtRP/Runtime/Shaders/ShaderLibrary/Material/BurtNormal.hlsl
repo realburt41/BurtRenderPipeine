@@ -6,12 +6,18 @@
 
 // 声明材质法线贴图，BurtLit 的 Forward pass 会用 mesh UV0 对它进行采样。
 sampler2D _NormalMap;
+sampler2D _ClearCoatNormalMap;
 
 // 采样材质法线贴图，当前阶段复用 Base Map 的 UV 和 Tiling / Offset。
 float4 BurtSampleNormalMap(float2 normalMapUV)
 {
     // 返回 normal map 的原始打包值，后续函数会把它解包成切线空间法线。
     return tex2D(_NormalMap, normalMapUV);
+}
+
+float4 BurtSampleClearCoatNormalMap(float2 normalMapUV)
+{
+    return tex2D(_ClearCoatNormalMap, normalMapUV);
 }
 
 // 把 Unity normal map 的打包颜色解包成切线空间法线，并应用强度缩放。
@@ -89,6 +95,14 @@ float3 BurtSampleNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS,
 float3 BurtSampleNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS, float normalScale, float facing, float4 doubleSidedNormalModeConstants)
 {
     float4 packedNormal = BurtSampleNormalMap(normalMapUV);
+    float3 normalTS = BurtUnpackNormalScale(packedNormal, normalScale);
+    normalTS = BurtApplyDoubleSidedNormalMode(normalTS, facing, doubleSidedNormalModeConstants);
+    return BurtTransformTangentToWorld(normalTS, normalWS, tangentWS);
+}
+
+float3 BurtSampleClearCoatNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS, float normalScale, float facing, float4 doubleSidedNormalModeConstants)
+{
+    float4 packedNormal = BurtSampleClearCoatNormalMap(normalMapUV);
     float3 normalTS = BurtUnpackNormalScale(packedNormal, normalScale);
     normalTS = BurtApplyDoubleSidedNormalMode(normalTS, facing, doubleSidedNormalModeConstants);
     return BurtTransformTangentToWorld(normalTS, normalWS, tangentWS);

@@ -16,6 +16,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         GBuffer0 = 1, // 直接显示 GBuffer0 原始内容，用来检查 baseColor 和 occlusion 是否写入。
         GBuffer1 = 2, // 直接显示 GBuffer1 原始内容，用来检查 oct normal、packed shadingModel/material 和 smoothness 是否写入。
         GBuffer2 = 3, // 直接显示 GBuffer2 原始内容，用来检查 emission 和 reflectance 是否写入。
+        GBuffer3 = 19,
         BaseColor = 4, // 解码后只显示材质基础色，方便和 Forward Lit 的颜色输入对齐。
         NormalWS = 5, // 解码后显示 GBuffer 向量槽；Default Lit=normalWS，Hair=strandDirectionWS。
         Metallic = 6, // 解码后显示 GBuffer 材质通道；Default Lit=metallic，Hair=scatter。
@@ -29,7 +30,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         ShadingModel = 14, // 解码后显示 shading model，黑色=Default Lit，洋红=Hair，方便验证材质是否进入 Hair 分支。
         HairStrandDirection = 15, // Hair 专用：显示 GBuffer1.rg 解码后的 strand direction，非 Hair 像素显示黑色。
         HairScatter = 16, // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 scatter，非 Hair 像素显示黑色。
-        HairShift = 17 // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 longitudinal shift scale，非 Hair 像素显示黑色。
+        HairShift = 17, // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 longitudinal shift scale，非 Hair 像素显示黑色。
+        SubsurfaceStrength = 18, // Subsurface 专用：显示复用 GBuffer1.b material channel 解码出的 strength。
+        ClearCoatNormalWS = 20
     }
 
     [CreateAssetMenu(menuName = "Rendering/Burt Render Pipeline Asset", fileName = "BurtRenderPipelineAsset")] // 让 Unity 可以通过 Create 菜单创建 BurtRenderPipelineAsset。

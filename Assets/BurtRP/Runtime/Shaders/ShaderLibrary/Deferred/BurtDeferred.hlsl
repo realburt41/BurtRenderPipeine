@@ -4,10 +4,11 @@
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl" // 引入 BurtEncodedGBuffer / BurtGBufferData，以及 GBuffer 编解码函数。
 
-// 主 Agent 分配并绑定的三张 GBuffer，全局名来自 BurtRenderGraphResourceRegistry 的 _BurtGBuffer0/1/2 约定。
+// 主 Agent 分配并绑定的四张 GBuffer，全局名来自 BurtRenderGraphResourceRegistry 的 _BurtGBuffer0/1/2/3 约定。
 sampler2D _BurtGBuffer0;
 sampler2D _BurtGBuffer1;
 sampler2D _BurtGBuffer2;
+sampler2D _BurtGBuffer3;
 
 // 主 Agent 绑定的 CameraDepth；来源可以是 DepthPrepass，也可以是 GBuffer pass 写入的共享深度。
 UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -15,6 +16,7 @@ UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
 // 主 Agent 在 Deferred Lighting Pass 上传的逆 ViewProjection；C# 侧使用 GL.GetGPUProjectionMatrix(..., true) 对齐渲染到 RT 的投影。
 float4x4 _BurtDeferredInverseViewProjectionMatrix;
 
+float4x4 _BurtDeferredInverseNonJitteredViewProjectionMatrix;
 
 // 主 Agent 上传的相机世界坐标；Deferred 用它和重建 positionWS 计算 viewDirectionWS。
 float4 _BurtDeferredCameraWorldPosition;
@@ -80,13 +82,13 @@ float4 BurtBuildDeferredClipPosition(float2 screenUV, float rawDepth)
 }
 
 // 出处：XRender/Shaders/Library/CommonTransform.hlsl::ReconstructPositionWS；用屏幕 UV、硬件深度和逆 VP 重建世界坐标。
-float3 BurtReconstructDeferredPositionWS(float2 screenUV, float rawDepth)
+float3 BurtReconstructDeferredPositionWSWithMatrix(float2 screenUV, float rawDepth, float4x4 inverseViewProjectionMatrix)
 {
     // 先构建与当前图形 API 和 UV 原点匹配的裁剪空间位置。
     float4 clipPosition = BurtBuildDeferredClipPosition(screenUV, rawDepth);
 
     // 乘以主 Agent 上传的逆 ViewProjection，把裁剪空间点还原到世界空间齐次坐标。
-    float4 positionWS = mul(_BurtDeferredInverseViewProjectionMatrix, clipPosition);
+    float4 positionWS = mul(inverseViewProjectionMatrix, clipPosition);
 
     // 对 w 做极小值保护，避免异常深度或未上传矩阵时产生 NaN。
     float safeW = abs(positionWS.w) > BURT_EPSILON ? positionWS.w : (positionWS.w < 0.0f ? -BURT_EPSILON : BURT_EPSILON);
@@ -95,11 +97,21 @@ float3 BurtReconstructDeferredPositionWS(float2 screenUV, float rawDepth)
     return positionWS.xyz / safeW;
 }
 
+// 出处：XRender/Shaders/Library/CommonTransform.hlsl::ReconstructPositionWS；用屏幕 UV、硬件深度和逆 VP 重建世界坐标。
+float3 BurtReconstructDeferredPositionWS(float2 screenUV, float rawDepth)
+{
+    return BurtReconstructDeferredPositionWSWithMatrix(screenUV, rawDepth, _BurtDeferredInverseViewProjectionMatrix);
+}
 
-// 采样 BurtRP 当前三张 GBuffer RT，并打包成 BurtGBuffer.hlsl 定义的 BurtEncodedGBuffer。
+float3 BurtReconstructDeferredNonJitteredPositionWS(float2 screenUV, float rawDepth)
+{
+    return BurtReconstructDeferredPositionWSWithMatrix(screenUV, rawDepth, _BurtDeferredInverseNonJitteredViewProjectionMatrix);
+}
+
+// 采样 BurtRP 当前四张 GBuffer RT，并打包成 BurtGBuffer.hlsl 定义的 BurtEncodedGBuffer。
 BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
 {
-    // 创建编码 GBuffer 输出，字段顺序必须和 BurtLit.shader 的 SV_Target0/1/2 保持一致。
+    // 创建编码 GBuffer 输出，字段顺序必须和材质 shader 的 SV_Target0/1/2/3 保持一致。
     BurtEncodedGBuffer encodedGBuffer;
 
     // GBuffer0：baseColor.rgb + occlusion.a。
@@ -110,6 +122,8 @@ BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
 
     // GBuffer2：emission.rgb + reflectance.a。
     encodedGBuffer.gbuffer2 = tex2D(_BurtGBuffer2, screenUV);
+
+    encodedGBuffer.gbuffer3 = tex2D(_BurtGBuffer3, screenUV);
 
     // 返回采样结果，让调用方继续 Decode 或做原始 GBuffer Debug。
     return encodedGBuffer;
@@ -142,6 +156,14 @@ void BurtPrepareDeferredViewDataFromUVs(float2 textureUV, float2 reconstructionU
 void BurtPrepareDeferredViewData(float2 screenUV, out float rawDepth, out float3 positionWS, out float3 viewDirectionWS)
 {
     BurtPrepareDeferredViewDataFromUVs(screenUV, screenUV, rawDepth, positionWS, viewDirectionWS);
+}
+
+void BurtPrepareDeferredViewData(float2 screenUV, out float rawDepth, out float3 positionWS, out float3 nonJitteredPositionWS, out float3 viewDirectionWS)
+{
+    rawDepth = BurtSampleDeferredRawDepth(screenUV);
+    positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+    nonJitteredPositionWS = BurtReconstructDeferredNonJitteredPositionWS(screenUV, rawDepth);
+    viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
 }
 
 #endif // BURT_DEFERRED_INCLUDED // 结束 BurtDeferred.hlsl 的 include guard。

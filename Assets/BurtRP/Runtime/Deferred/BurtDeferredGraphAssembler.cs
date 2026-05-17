@@ -7,6 +7,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateGBuffer0Pass = new BurtAllocateGBuffer0Pass(); // 创建 GBuffer0 分配 Pass，第一版用于保存 baseColor 和 occlusion。
         private readonly BurtRenderPass allocateGBuffer1Pass = new BurtAllocateGBuffer1Pass(); // 创建 GBuffer1 分配 Pass，第一版用于保存 normal、metallic 和 smoothness。
         private readonly BurtRenderPass allocateGBuffer2Pass = new BurtAllocateGBuffer2Pass(); // 创建 GBuffer2 分配 Pass，第一版用于保存 emission 和 reflectance。
+        private readonly BurtRenderPass allocateGBuffer3Pass = new BurtAllocateGBuffer3Pass();
         private readonly BurtRenderPass allocateScreenSpaceAmbientOcclusionRawPass = new BurtAllocateScreenSpaceAmbientOcclusionRawPass();
         private readonly BurtRenderPass allocateScreenSpaceAmbientOcclusionPass = new BurtAllocateScreenSpaceAmbientOcclusionPass();
         private readonly BurtRenderPass screenSpaceAmbientOcclusionTracePass = new BurtScreenSpaceAmbientOcclusionTracePass();
@@ -35,6 +36,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass buildHiZDepthPass = new BurtBuildHiZDepthPass();
         private readonly BurtRenderPass buildTileLightListDebugPass = new BurtBuildTileLightListDebugPass();
         private readonly BurtRenderPass drawSkyboxPass = new BurtDrawSkyboxPass(); // 创建天空盒绘制 Pass，让 Deferred 实验模式仍能保留原有天空盒行为。
+        private readonly BurtRenderPass drawAtmospherePass = new BurtDrawAtmospherePass();
+        private readonly BurtRenderPass applyAtmosphereAerialPerspectivePass = new BurtApplyAtmosphereAerialPerspectivePass();
         private readonly BurtRenderPass allocateScreenSpaceReflectionColorPass = new BurtAllocateScreenSpaceReflectionColorPass();
         private readonly BurtRenderPass allocateScreenSpaceReflectionDenoisedColorPass = new BurtAllocateScreenSpaceReflectionDenoisedColorPass();
         private readonly BurtRenderPass allocateScreenSpaceReflectionTemporalColorPass = new BurtAllocateScreenSpaceReflectionTemporalColorPass();
@@ -69,6 +72,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass releaseGBuffer0Pass = new BurtReleaseGBuffer0Pass(); // 创建 GBuffer0 释放 Pass，结束第一张 Deferred 缓存生命周期。
         private readonly BurtRenderPass releaseGBuffer1Pass = new BurtReleaseGBuffer1Pass(); // 创建 GBuffer1 释放 Pass，结束第二张 Deferred 缓存生命周期。
         private readonly BurtRenderPass releaseGBuffer2Pass = new BurtReleaseGBuffer2Pass(); // 创建 GBuffer2 释放 Pass，结束第三张 Deferred 缓存生命周期。
+        private readonly BurtRenderPass releaseGBuffer3Pass = new BurtReleaseGBuffer3Pass();
         private readonly BurtRenderPass releaseScreenSpaceAmbientOcclusionRawPass = new BurtReleaseScreenSpaceAmbientOcclusionRawPass();
         private readonly BurtRenderPass releaseScreenSpaceAmbientOcclusionPass = new BurtReleaseScreenSpaceAmbientOcclusionPass();
         private readonly BurtRenderPass releaseHiZDepthPass = new BurtReleaseHiZDepthPass();
@@ -129,7 +133,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             AddDeferredLightingPass(graph, useLocalGBufferTargets); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
             AddDeferredForwardOnlyOpaqueFallback(graph, asset); // 根据资产开关决定是否绘制不能写入 GBuffer 的前向专用不透明物体。
             AddHiZBuildPass(graph, useHiZDepth);
+            if (BurtAtmosphereUtility.ShouldUseAerialPerspective(request))
+            {
+                graph.AddPass(applyAtmosphereAerialPerspectivePass);
+            }
+
             graph.AddPass(drawSkyboxPass); // 在不透明之后绘制天空盒，保持 Forward 现有顺序。
+            if (BurtAtmosphereUtility.ShouldUseAtmosphere(request))
+            {
+                graph.AddPass(drawAtmospherePass);
+            }
             AddScreenSpaceReflectionPasses(graph, request, asset, useLocalGBufferTargets);
             graph.AddPass(drawTransparentPass); // 透明物体继续走 Forward，未来 Deferred 第一版也会保持这个策略。
             AddUnsupportedShaderDebug(graph, asset); // 根据资产开关决定是否绘制不支持 Shader 的错误材质。
@@ -201,6 +214,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.AddPass(allocateGBuffer0Pass); // 添加 GBuffer0 分配 Pass。
             graph.AddPass(allocateGBuffer1Pass); // 添加 GBuffer1 分配 Pass。
             graph.AddPass(allocateGBuffer2Pass); // 添加 GBuffer2 分配 Pass。
+            graph.AddPass(allocateGBuffer3Pass);
         }
 
         private void AddHiZAllocationPass(
@@ -575,6 +589,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return; // 直接返回，避免释放不存在的临时 RT。
             }
 
+            graph.AddPass(releaseGBuffer3Pass);
             graph.AddPass(releaseGBuffer2Pass); // 先释放 GBuffer2，和申请顺序相反，方便观察生命周期。
             graph.AddPass(releaseGBuffer1Pass); // 再释放 GBuffer1。
             graph.AddPass(releaseGBuffer0Pass); // 最后释放 GBuffer0。

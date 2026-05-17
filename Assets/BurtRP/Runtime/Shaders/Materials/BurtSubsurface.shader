@@ -1,5 +1,5 @@
 // Defines the Shader menu path for the first BurtRP lit material model.
-Shader "BurtRP/Lit"
+Shader "BurtRP/Subsurface"
 {
     // Defines material properties shown in Unity's Inspector.
     Properties
@@ -30,6 +30,7 @@ Shader "BurtRP/Lit"
 
         // 定义环境遮蔽强度，0 表示忽略 Mask Map 的 G 通道，1 表示完全使用 G 通道。
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
+        _SubsurfaceStrength ("Subsurface Strength", Range(0, 1)) = 0
 
         // 定义自发光贴图，Forward 光照会把它作为不受灯光影响的颜色叠加到最终结果。
         _EmissionMap ("Emission Map", 2D) = "white" {}
@@ -333,10 +334,10 @@ Shader "BurtRP/Lit"
             // 如果前面已经跑过 Depth Prepass，LEqual 会让等深度片元通过；如果没跑过，也能正常建立 CameraDepth。
             ZTest LEqual
 
-            // Deferred stencil layout: 0 = Default Lit. Keeping Lit at 0 matches the cleared stencil background and leaves Hair to mark 1.
+            // Deferred stencil layout: 3 = Subsurface. Lighting treats it as the non-Hair PBR branch.
             Stencil
             {
-                Ref 0
+                Ref 3
                 ReadMask 3
                 WriteMask 3
                 Comp Always
@@ -477,12 +478,13 @@ Shader "BurtRP/Lit"
 
                 // Build Default Lit surface data; Hair now lives in the standalone BurtRP/Hair shader.
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
+                surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceStrength);
 
                 // 采样自发光输入，GBuffer2.rgb 直接保存 emission，让 Deferred Lighting 最后再叠加。
                 float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
 
                 // 把 surfaceData、最终 normalWS 和 emission 整理成语义化 GBuffer 数据。
-                BurtGBufferData gbufferData = BurtCreateGBufferData(surfaceData, normalWS, emissionColor);
+                BurtGBufferData gbufferData = BurtCreateSubsurfaceGBufferData(surfaceData, normalWS, emissionColor);
 
                 // 出处参考 XRender SM_DefaultLit.GBuffer.hlsl::Pack_GBuffer_PC_High_DefaultLit，把 SlabParams 拆分写入多个 MRT；这里用 BurtEncodeGBuffer 固化 BurtRP 自己的四张 RT 布局。
                 BurtEncodedGBuffer encodedGBuffer = BurtEncodeGBuffer(gbufferData);
@@ -671,6 +673,7 @@ Shader "BurtRP/Lit"
 
                 // Build Default Lit surface data from scalar properties and Mask Map; Hair lives in BurtRP/Hair.
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
+                surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceStrength);
 
                 // Samples the main-light shadow attenuation using the shared shadow receiver helper.
                 float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
@@ -706,7 +709,7 @@ Shader "BurtRP/Lit"
                 }
 
                 // 用 Forward 当前片元数据做一次 GBuffer 编码再解码，提前验证 Deferred 后续会消费的材质/法线还原路径。
-                BurtGBufferData debugGBufferSourceData = BurtCreateGBufferData(surfaceData, normalWS, float3(0.0f, 0.0f, 0.0f));
+                BurtGBufferData debugGBufferSourceData = BurtCreateSubsurfaceGBufferData(surfaceData, normalWS, float3(0.0f, 0.0f, 0.0f));
 
                 // 按 BurtGBuffer.hlsl 顶部约定生成四张逻辑 GBuffer；这里只在 shader 内部 roundtrip，不写入真实 RT。
                 BurtEncodedGBuffer debugEncodedGBuffer = BurtEncodeGBuffer(debugGBufferSourceData);

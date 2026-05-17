@@ -42,6 +42,10 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
             {
                 float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
                 float2 uv = ndc * 0.5 + 0.5;
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
+
                 return uv;
             }
 
@@ -50,7 +54,9 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
                 Varyings output;
                 float4 currentWorld = mul(unity_ObjectToWorld, float4(input.positionOS, 1.0));
                 float4 previousObjectWorld = mul(unity_MatrixPreviousM, float4(input.positionOS, 1.0));
-                float allowObjectMotion = step(0.5, unity_MotionVectorsParams.y);
+                float forceNoMotion = step(unity_MotionVectorsParams.y, 0.5);
+                float cameraMotion = step(unity_MotionVectorsParams.w, 0.5);
+                float allowObjectMotion = (1.0 - forceNoMotion) * (1.0 - cameraMotion);
                 float3 objectDelta = previousObjectWorld.xyz - currentWorld.xyz;
                 float objectMoved = step(1e-8, dot(objectDelta, objectDelta)) * allowObjectMotion;
                 float4 previousWorld = lerp(currentWorld, previousObjectWorld, objectMoved);
@@ -68,6 +74,8 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
 
             float4 Frag(Varyings input) : SV_Target
             {
+                clip(input.sourceConfidence - 0.5);
+
                 float valid = step(1e-5, input.currentClipNoJitter.w) * step(1e-5, input.previousClipNoJitter.w);
                 float2 currentUv = BurtTaaClipToUv(input.currentClipNoJitter);
                 float2 previousUv = BurtTaaClipToUv(input.previousClipNoJitter);

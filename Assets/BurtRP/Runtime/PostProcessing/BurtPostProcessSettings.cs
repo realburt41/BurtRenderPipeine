@@ -14,7 +14,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
     public enum BurtExposureMode
     {
         ManualEV100 = 0,
-        PhysicalCamera = 1
+        PhysicalCamera = 1,
+        Automatic = 2,
+        AutomaticHistogram = 3
     }
 
     internal readonly struct BurtPhysicalExposureSettings
@@ -26,6 +28,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
         public const float DefaultAperture = 2.8f;
         public const float DefaultCalibration = 1f;
         public const float DefaultCompensation = 0f;
+        public const float DefaultAutoMinEv100 = -10f;
+        public const float DefaultAutoMaxEv100 = 20f;
+        public const float DefaultAutoMiddleGrey = 0.18f;
+        public const float DefaultAutoSpeedUp = 3f;
+        public const float DefaultAutoSpeedDown = 1f;
+        public const float DefaultAutoLowPercent = 10f;
+        public const float DefaultAutoHighPercent = 90f;
+        public const float DefaultAutoHistogramMinEv100 = -10f;
+        public const float DefaultAutoHistogramMaxEv100 = 20f;
+        public const float DefaultAutoAverageLuminance = 1f;
+        public const float DefaultAutoAverageLogLuminance = 0f;
+        public const float DefaultAutoTargetEv100 = 0f;
+        public const int DefaultAutoFrameAge = -1;
+        public const int DefaultAutoSampleCount = 0;
+        public const string DefaultAutoSampleRejectedReason = "None";
         public static readonly BurtPhysicalExposureSettings Default = new BurtPhysicalExposureSettings(DefaultMode, DefaultManualEv100, DefaultIso, DefaultShutterTime, DefaultAperture, DefaultCalibration, DefaultCompensation);
 
         public BurtExposureMode Mode { get; }
@@ -36,6 +53,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
         public float Calibration { get; }
         public float Compensation { get; }
         public float Multiplier { get; }
+        public float AutoMinEV100 { get; }
+        public float AutoMaxEV100 { get; }
+        public float AutoMiddleGrey { get; }
+        public float AutoSpeedUp { get; }
+        public float AutoSpeedDown { get; }
+        public float AutoLowPercent { get; }
+        public float AutoHighPercent { get; }
+        public float AutoHistogramMinEV100 { get; }
+        public float AutoHistogramMaxEV100 { get; }
+        public float AutoAverageLuminance { get; }
+        public float AutoAverageLogLuminance { get; }
+        public float AutoTargetEV100 { get; }
+        public bool AutoHasSample { get; }
+        public bool AutoReadbackPending { get; }
+        public int AutoReadbackAgeFrames { get; }
+        public int AutoSampleAgeFrames { get; }
+        public int AutoSampleCount { get; }
+        public string AutoSampleRejectedReason { get; }
 
         public BurtPhysicalExposureSettings(
             BurtExposureMode mode,
@@ -44,7 +79,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
             float shutterTime,
             float aperture,
             float calibration,
-            float compensation)
+            float compensation,
+            float autoEV100 = DefaultManualEv100,
+            float autoMinEV100 = DefaultAutoMinEv100,
+            float autoMaxEV100 = DefaultAutoMaxEv100,
+            float autoMiddleGrey = DefaultAutoMiddleGrey,
+            float autoSpeedUp = DefaultAutoSpeedUp,
+            float autoSpeedDown = DefaultAutoSpeedDown,
+            float autoLowPercent = DefaultAutoLowPercent,
+            float autoHighPercent = DefaultAutoHighPercent,
+            float autoHistogramMinEV100 = DefaultAutoHistogramMinEv100,
+            float autoHistogramMaxEV100 = DefaultAutoHistogramMaxEv100,
+            float autoAverageLuminance = DefaultAutoAverageLuminance,
+            float autoAverageLogLuminance = DefaultAutoAverageLogLuminance,
+            float autoTargetEV100 = DefaultAutoTargetEv100,
+            bool autoHasSample = false,
+            bool autoReadbackPending = false,
+            int autoReadbackAgeFrames = DefaultAutoFrameAge,
+            int autoSampleAgeFrames = DefaultAutoFrameAge,
+            int autoSampleCount = DefaultAutoSampleCount,
+            string autoSampleRejectedReason = DefaultAutoSampleRejectedReason)
         {
             Mode = NormalizeMode(mode);
             ISO = Mathf.Clamp(SanitizeFinite(iso, DefaultIso), 1f, 204800f);
@@ -52,15 +106,79 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
             Aperture = Mathf.Clamp(SanitizeFinite(aperture, DefaultAperture), 0.1f, 64f);
             Calibration = Mathf.Clamp(SanitizeFinite(calibration, DefaultCalibration), 0f, 1024f);
             Compensation = Mathf.Clamp(SanitizeFinite(compensation, DefaultCompensation), -16f, 16f);
-            EV100 = Mode == BurtExposureMode.PhysicalCamera
-                ? Mathf.Log((Aperture * Aperture) / ShutterTime * (100f / ISO), 2f)
-                : Mathf.Clamp(SanitizeFinite(manualEv100, DefaultManualEv100), -16f, 24f);
+            var minAutoEV100 = Mathf.Clamp(SanitizeFinite(autoMinEV100, DefaultAutoMinEv100), -16f, 24f);
+            var maxAutoEV100 = Mathf.Clamp(SanitizeFinite(autoMaxEV100, DefaultAutoMaxEv100), -16f, 24f);
+            if (maxAutoEV100 < minAutoEV100)
+            {
+                var swapped = minAutoEV100;
+                minAutoEV100 = maxAutoEV100;
+                maxAutoEV100 = swapped;
+            }
+
+            AutoMinEV100 = minAutoEV100;
+            AutoMaxEV100 = maxAutoEV100;
+            AutoMiddleGrey = Mathf.Clamp(SanitizeFinite(autoMiddleGrey, DefaultAutoMiddleGrey), 0.001f, 1f);
+            AutoSpeedUp = Mathf.Clamp(SanitizeFinite(autoSpeedUp, DefaultAutoSpeedUp), 0.02f, 20f);
+            AutoSpeedDown = Mathf.Clamp(SanitizeFinite(autoSpeedDown, DefaultAutoSpeedDown), 0.02f, 20f);
+            var lowPercent = Mathf.Clamp(SanitizeFinite(autoLowPercent, DefaultAutoLowPercent), 0f, 100f);
+            var highPercent = Mathf.Clamp(SanitizeFinite(autoHighPercent, DefaultAutoHighPercent), 0f, 100f);
+            if (highPercent < lowPercent)
+            {
+                var swappedPercent = lowPercent;
+                lowPercent = highPercent;
+                highPercent = swappedPercent;
+            }
+
+            var histogramMinEV100 = Mathf.Clamp(SanitizeFinite(autoHistogramMinEV100, DefaultAutoHistogramMinEv100), -16f, 24f);
+            var histogramMaxEV100 = Mathf.Clamp(SanitizeFinite(autoHistogramMaxEV100, DefaultAutoHistogramMaxEv100), -16f, 24f);
+            if (histogramMaxEV100 < histogramMinEV100)
+            {
+                var swappedHistogram = histogramMinEV100;
+                histogramMinEV100 = histogramMaxEV100;
+                histogramMaxEV100 = swappedHistogram;
+            }
+
+            AutoLowPercent = lowPercent;
+            AutoHighPercent = highPercent;
+            AutoHistogramMinEV100 = histogramMinEV100;
+            AutoHistogramMaxEV100 = histogramMaxEV100;
+            AutoAverageLuminance = Mathf.Clamp(SanitizeFinite(autoAverageLuminance, DefaultAutoAverageLuminance), 0.000001f, 65504f);
+            AutoAverageLogLuminance = Mathf.Clamp(SanitizeFinite(autoAverageLogLuminance, DefaultAutoAverageLogLuminance), -32f, 32f);
+            AutoTargetEV100 = Mathf.Clamp(SanitizeFinite(autoTargetEV100, DefaultAutoTargetEv100), AutoMinEV100, AutoMaxEV100);
+            AutoHasSample = autoHasSample;
+            AutoReadbackPending = autoReadbackPending;
+            AutoReadbackAgeFrames = Mathf.Max(DefaultAutoFrameAge, autoReadbackAgeFrames);
+            AutoSampleAgeFrames = Mathf.Max(DefaultAutoFrameAge, autoSampleAgeFrames);
+            AutoSampleCount = Mathf.Max(0, autoSampleCount);
+            AutoSampleRejectedReason = string.IsNullOrEmpty(autoSampleRejectedReason) ? DefaultAutoSampleRejectedReason : autoSampleRejectedReason;
+
+            if (Mode == BurtExposureMode.PhysicalCamera)
+            {
+                EV100 = Mathf.Log((Aperture * Aperture) / ShutterTime * (100f / ISO), 2f);
+            }
+            else if (Mode == BurtExposureMode.Automatic || Mode == BurtExposureMode.AutomaticHistogram)
+            {
+                EV100 = Mathf.Clamp(SanitizeFinite(autoEV100, DefaultManualEv100), AutoMinEV100, AutoMaxEV100);
+            }
+            else
+            {
+                EV100 = Mathf.Clamp(SanitizeFinite(manualEv100, DefaultManualEv100), -16f, 24f);
+            }
+
             Multiplier = Mathf.Clamp(Mathf.Pow(2f, -EV100 + Compensation) * Calibration, 0f, 65504f);
         }
 
         private static BurtExposureMode NormalizeMode(BurtExposureMode mode)
         {
-            return mode == BurtExposureMode.PhysicalCamera ? BurtExposureMode.PhysicalCamera : BurtExposureMode.ManualEV100;
+            switch (mode)
+            {
+                case BurtExposureMode.PhysicalCamera:
+                case BurtExposureMode.Automatic:
+                case BurtExposureMode.AutomaticHistogram:
+                    return mode;
+                default:
+                    return BurtExposureMode.ManualEV100;
+            }
         }
 
         private static float SanitizeFinite(float value, float fallback)
@@ -157,7 +275,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
         Mip3 = 5,
         Mip4 = 6,
         Mip5 = 7,
-        Alpha = 8
+        Alpha = 8,
+        ThresholdMask = 9
     }
 
     internal readonly struct BurtBloomSettings // 定义 Bloom 的运行时参数包，让 Pass 不直接依赖 Volume 组件字段。
@@ -176,7 +295,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
         public const float DefaultFilter4Size = 10f; // 对齐 XRender PC Bloom Filter4 的默认直径百分比。
         public const float DefaultFilter5Size = 30f; // 对齐 XRender PC Bloom Filter5 的默认直径百分比。
         public const float DefaultFilter6Size = 64f; // 对齐 XRender PC Bloom Filter6 的默认直径百分比。
-        public static readonly BurtBloomSettings Default = new BurtBloomSettings(false, DefaultThreshold, DefaultSoftKnee, DefaultIntensity, DefaultScatter, DefaultSizeScale, DefaultQuality, DefaultMaxMipCount, false, DefaultDebugView, DefaultFilter1Size, DefaultFilter2Size, DefaultFilter3Size, DefaultFilter4Size, DefaultFilter5Size, DefaultFilter6Size, Color.white, Color.white, Color.white, Color.white, Color.white, Color.white); // 关闭 Bloom 的安全默认值。
+        public static readonly Color DefaultFilter1Tint = new Color(0.3465f, 0.3465f, 0.3465f);
+        public static readonly Color DefaultFilter2Tint = new Color(0.138f, 0.138f, 0.138f);
+        public static readonly Color DefaultFilter3Tint = new Color(0.1176f, 0.1176f, 0.1176f);
+        public static readonly Color DefaultFilter4Tint = new Color(0.066f, 0.066f, 0.066f);
+        public static readonly Color DefaultFilter5Tint = new Color(0.066f, 0.066f, 0.066f);
+        public static readonly Color DefaultFilter6Tint = new Color(0.061f, 0.061f, 0.061f);
+        public static readonly BurtBloomSettings Default = new BurtBloomSettings(false, DefaultThreshold, DefaultSoftKnee, DefaultIntensity, DefaultScatter, DefaultSizeScale, DefaultQuality, DefaultMaxMipCount, false, DefaultDebugView, DefaultFilter1Size, DefaultFilter2Size, DefaultFilter3Size, DefaultFilter4Size, DefaultFilter5Size, DefaultFilter6Size, DefaultFilter1Tint, DefaultFilter2Tint, DefaultFilter3Tint, DefaultFilter4Tint, DefaultFilter5Tint, DefaultFilter6Tint); // 关闭 Bloom 的安全默认值。
 
         public bool Enabled { get; } // 保存 Bloom 是否启用。
         public float Threshold { get; } // 保存亮度阈值。
@@ -259,6 +384,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
                 case BurtBloomDebugView.Mip4:
                 case BurtBloomDebugView.Mip5:
                 case BurtBloomDebugView.Alpha:
+                case BurtBloomDebugView.ThresholdMask:
                     return debugView;
                 default:
                     return BurtBloomDebugView.Disabled;

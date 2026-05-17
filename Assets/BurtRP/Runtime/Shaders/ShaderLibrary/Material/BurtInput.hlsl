@@ -14,6 +14,8 @@ static const float BURT_INPUT_DEFAULT_REFLECTANCE = 0.5f;
 // Deferred shading model ids. 0 keeps old Default Lit behavior; 1 is the first experimental Hair path.
 static const float BURT_SHADING_MODEL_DEFAULT_LIT = 0.0f;
 static const float BURT_SHADING_MODEL_HAIR = 1.0f;
+static const float BURT_SHADING_MODEL_CLEAR_COAT = 2.0f;
+static const float BURT_SHADING_MODEL_SUBSURFACE = 3.0f;
 static const float BURT_SHADING_MODEL_MAX_ENCODED = 3.0f;
 
 float BurtResolveSurfaceShadingModel(float shadingModelID)
@@ -25,6 +27,16 @@ float BurtResolveSurfaceShadingModel(float shadingModelID)
 bool BurtIsHairShadingModel(float shadingModelID)
 {
     return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_HAIR) < 0.5f;
+}
+
+bool BurtIsClearCoatShadingModel(float shadingModelID)
+{
+    return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_CLEAR_COAT) < 0.5f;
+}
+
+bool BurtIsSubsurfaceShadingModel(float shadingModelID)
+{
+    return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_SUBSURFACE) < 0.5f;
 }
 
 // 保存光照函数需要的材质表面属性。
@@ -48,8 +60,17 @@ struct BurtSurfaceData
     // 保存材质环境遮蔽，1 表示不遮蔽环境光，0 表示完全遮蔽环境光。
     float occlusion;
 
+    // Stores Mask Map B as the material height debug channel. 0.5 is neutral for materials without a height map.
+    float height;
+
     // 保存 Deferred shading model，当前 0=Default Lit、1=Hair；Forward 默认也按这个字段选择实验分支。
     float shadingModelID;
+
+    float clearCoatMask;
+
+    float clearCoatRoughness;
+
+    float subsurfaceStrength;
 };
 
 // 保存片元级几何输入，后续高光、雾效、附加光等功能会继续扩展这个结构。
@@ -153,6 +174,10 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor)
 
     // 默认使用 Default Lit，保持所有旧材质和透明 Lit 路径不变。
     surfaceData.shadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
+    surfaceData.height = 0.5f;
+    surfaceData.clearCoatMask = 0.0f;
+    surfaceData.clearCoatRoughness = 0.2f;
+    surfaceData.subsurfaceStrength = 0.0f;
 
     // 返回填充完成的表面数据。
     return surfaceData;
@@ -184,6 +209,10 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
 
     // 默认使用 Default Lit；独立 BurtRP/Hair shader 会覆盖为 Hair。
     surfaceData.shadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
+    surfaceData.height = 0.5f;
+    surfaceData.clearCoatMask = 0.0f;
+    surfaceData.clearCoatRoughness = 0.2f;
+    surfaceData.subsurfaceStrength = 0.0f;
 
     // 返回填充完成的表面数据。
     return surfaceData;
@@ -215,12 +244,36 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
 
     // 默认使用 Default Lit；独立 BurtRP/Hair shader 会覆盖为 Hair。
     surfaceData.shadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
+    surfaceData.height = 0.5f;
+    surfaceData.clearCoatMask = 0.0f;
+    surfaceData.clearCoatRoughness = 0.2f;
+    surfaceData.subsurfaceStrength = 0.0f;
 
     // 返回填充完成的表面数据。
     return surfaceData;
 }
 
 // 根据基础颜色、reflectance、标量参数和 Mask Map 创建完整 PBR 用 BurtSurfaceData。
+BurtSurfaceData BurtApplyClearCoatSurfaceSemantics(BurtSurfaceData surfaceData, float clearCoatMask, float clearCoatRoughness)
+{
+    surfaceData.clearCoatMask = saturate(clearCoatMask);
+    surfaceData.clearCoatRoughness = saturate(clearCoatRoughness);
+    surfaceData.shadingModelID = surfaceData.clearCoatMask > 0.0001f ? BURT_SHADING_MODEL_CLEAR_COAT : BURT_SHADING_MODEL_DEFAULT_LIT;
+    return surfaceData;
+}
+
+BurtSurfaceData BurtApplyClearCoatSurfaceSemantics(BurtSurfaceData surfaceData, float clearCoatMask)
+{
+    return BurtApplyClearCoatSurfaceSemantics(surfaceData, clearCoatMask, 0.2f);
+}
+
+BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(BurtSurfaceData surfaceData, float subsurfaceStrength)
+{
+    surfaceData.subsurfaceStrength = saturate(subsurfaceStrength);
+    surfaceData.shadingModelID = surfaceData.subsurfaceStrength > 0.0001f ? BURT_SHADING_MODEL_SUBSURFACE : BURT_SHADING_MODEL_DEFAULT_LIT;
+    return surfaceData;
+}
+
 BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float smoothness, float metallic, float4 maskMap, float occlusionStrength)
 {
     // 创建一个输出结构体，下面逐项填充，供 PBR BRDF 和环境遮蔽共同使用。
@@ -246,6 +299,10 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
 
     // 默认使用 Default Lit；独立 BurtRP/Hair shader 会覆盖为 Hair。
     surfaceData.shadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
+    surfaceData.height = saturate(maskMap.b);
+    surfaceData.clearCoatMask = 0.0f;
+    surfaceData.clearCoatRoughness = 0.2f;
+    surfaceData.subsurfaceStrength = 0.0f;
 
     // 返回填充完成的表面数据。
     return surfaceData;

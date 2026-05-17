@@ -79,6 +79,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
         public ShadowSplitData[] AdditionalLightShadowSplitDatas { get; } = new ShadowSplitData[MaxAdditionalLights]; // ?? spot shadow split data?DrawShadows ??????
         public LightShadows[] AdditionalLightShadowSourceModes { get; } = new LightShadows[MaxAdditionalLights];
         public float[] AdditionalLightShadowSourceStrengths { get; } = new float[MaxAdditionalLights];
+        public int[] AdditionalLightShadowStableKeys { get; } = new int[MaxAdditionalLights];
         public int[] AdditionalLightShadowSliceLightIndices { get; } = new int[MaxAdditionalLightShadowSlices];
         public int[] AdditionalLightShadowSliceFaceIndices { get; } = new int[MaxAdditionalLightShadowSlices];
         public Vector4[] AdditionalLightShadowSliceAtlasRects { get; } = new Vector4[MaxAdditionalLightShadowSlices];
@@ -190,6 +191,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             AdditionalLightShadowPrepareAttempted = attempted;
             AdditionalLightShadowPrepareSucceeded = succeeded;
             AdditionalLightShadowPrepareFailedCount = Mathf.Max(0, failedCount);
+        }
+
+        public void IncrementAdditionalLightShadowSlotLimitExceededCount()
+        {
+            AdditionalLightShadowSlotLimitExceededCount++;
         }
 
         public void SetAdditionalLightShadowAtlasState(bool registered, bool valid)
@@ -551,6 +557,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
                 AdditionalLightShadowSplitDatas[lightIndex] = default;
                 AdditionalLightShadowSourceModes[lightIndex] = LightShadows.None;
                 AdditionalLightShadowSourceStrengths[lightIndex] = 0f;
+                AdditionalLightShadowStableKeys[lightIndex] = 0;
                 AdditionalLightShadowStatuses[lightIndex] = BurtAdditionalLightShadowStatus.None;
                 PackAdditionalLightBufferSlot(lightIndex);
             }
@@ -569,6 +576,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             AdditionalLightShadowVisibleLightIndices[slot] = visibleLightIndex;
             AdditionalLightShadowSourceModes[slot] = light != null ? light.shadows : LightShadows.None;
             AdditionalLightShadowSourceStrengths[slot] = light != null ? light.shadowStrength : 0f;
+            AdditionalLightShadowStableKeys[slot] = light != null ? light.GetInstanceID() : visibleLightIndex;
             if (light == null || light.shadows == LightShadows.None)
             {
                 SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.ShadowTypeNone);
@@ -586,13 +594,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             AdditionalLightShadowCandidateCount++;
             if (visibleLight.lightType == LightType.Point)
             {
-                if (ShadowedAdditionalLightCount >= MaxShadowedAdditionalLights)
-                {
-                    SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.SlotLimitExceeded);
-                    AdditionalLightShadowSlotLimitExceededCount++;
-                    return;
-                }
-
                 var pointSoftShadow = light.shadows == LightShadows.Soft ? 1f : 0f;
                 AdditionalLightShadowData[slot] = new Vector4(1f, Mathf.Clamp01(light.shadowStrength), 0f, pointSoftShadow);
                 AdditionalLightShadowLightParams[slot] = new Vector4(0f, PointLightShadowFaceCount, AdditionalLightTypePoint, 0f);
@@ -607,13 +608,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             {
                 SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.UnsupportedLightType);
                 AdditionalLightShadowUnsupportedTypeCount++;
-                return;
-            }
-
-            if (ShadowedAdditionalLightCount >= MaxShadowedAdditionalLights)
-            {
-                SetAdditionalLightShadowStatus(slot, BurtAdditionalLightShadowStatus.SlotLimitExceeded);
-                AdditionalLightShadowSlotLimitExceededCount++;
                 return;
             }
 
@@ -641,6 +635,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             AdditionalLightShadowVisibleLightIndices[slot] = visibleLightIndex;
             AdditionalLightShadowSourceModes[slot] = light != null ? light.shadows : LightShadows.None;
             AdditionalLightShadowSourceStrengths[slot] = light != null ? light.shadowStrength : 0f;
+            AdditionalLightShadowStableKeys[slot] = light != null ? light.GetInstanceID() : visibleLightIndex;
             if (light == null || light.shadows == LightShadows.None)
             {
                 return;

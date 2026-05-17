@@ -43,6 +43,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Indirect Specular Energy Compensation"; // 显示环境高光补能。
                 case BurtShadingDebugMode.DiffuseColor:
                     return "Diffuse Color"; // 显示 metallic 扣除后的漫反射颜色。
+                case BurtShadingDebugMode.Height:
+                    return "Height";
                 case BurtShadingDebugMode.DirectBRDFD:
                     return "Direct BRDF D (GGX)"; // 显示 GGX NDF D 项。
                 case BurtShadingDebugMode.DirectBRDFVisibility:
@@ -85,6 +87,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "GBuffer Hair Scatter"; // 显示 Hair 复用 GBuffer1.b 存储的 scatter。
                 case BurtShadingDebugMode.GBufferHairShift:
                     return "GBuffer Hair Shift"; // 显示 Hair 复用 GBuffer1.b 存储的 longitudinal shift scale。
+                case BurtShadingDebugMode.GBufferClearCoatNormalWS:
+                    return "GBuffer Clear Coat Normal";
+                case BurtShadingDebugMode.GBufferSubsurfaceStrength:
+                    return "GBuffer Subsurface";
                 case BurtShadingDebugMode.DetailLighting:
                     return "Detail Lighting"; // 对齐 XRender DEBUGID_LIGHTING_DETAIL_LIGHTING。
                 case BurtShadingDebugMode.IndirectLighting:
@@ -159,8 +165,50 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSAO Final";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay:
                     return "SSAO Overlay";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionHistory:
+                    return "SSAO History";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference:
+                    return "SSAO Temporal Difference";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity:
+                    return "SSAO Depth Validity";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability:
+                    return "SSAO Surface Stability";
                 case BurtShadingDebugMode.BloomPrefilter:
                     return "Bloom Prefilter";
+                case BurtShadingDebugMode.BloomFinalBloom:
+                    return "Bloom Final";
+                case BurtShadingDebugMode.BloomMip1:
+                    return "Bloom Mip 1";
+                case BurtShadingDebugMode.BloomMip2:
+                    return "Bloom Mip 2";
+                case BurtShadingDebugMode.BloomMip3:
+                    return "Bloom Mip 3";
+                case BurtShadingDebugMode.BloomMip4:
+                    return "Bloom Mip 4";
+                case BurtShadingDebugMode.BloomMip5:
+                    return "Bloom Mip 5";
+                case BurtShadingDebugMode.BloomAlpha:
+                    return "Bloom Alpha";
+                case BurtShadingDebugMode.BloomThresholdMask:
+                    return "Bloom Threshold Mask";
+                case BurtShadingDebugMode.Atmosphere:
+                    return "Atmosphere Summary";
+                case BurtShadingDebugMode.AtmosphereRayleigh:
+                    return "Atmosphere Rayleigh";
+                case BurtShadingDebugMode.AtmosphereMie:
+                    return "Atmosphere Mie";
+                case BurtShadingDebugMode.AtmosphereTransmittance:
+                    return "Atmosphere Transmittance";
+                case BurtShadingDebugMode.AtmosphereAerialTransmittance:
+                    return "Atmosphere Aerial Transmittance";
+                case BurtShadingDebugMode.AtmosphereAerialInscatter:
+                    return "Atmosphere Aerial Inscatter";
+                case BurtShadingDebugMode.AutoExposureLuminance:
+                    return "Auto Exposure Luminance";
+                case BurtShadingDebugMode.AutoExposureMeteringWeight:
+                    return "Auto Exposure Metering Weight";
+                case BurtShadingDebugMode.AutoExposureHistogramRange:
+                    return "Auto Exposure Histogram Range";
                 case BurtShadingDebugMode.ScreenSpaceReflectionRawHitMask:
                     return "SSR Raw Hit Mask";
                 case BurtShadingDebugMode.ScreenSpaceReflectionHitMask:
@@ -275,6 +323,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "TAA Anti Flicker";
                 case BurtShadingDebugMode.TemporalAAHistoryCoverage:
                     return "TAA History Coverage";
+                case BurtShadingDebugMode.TemporalAAPrevUseCount:
+                    return "TAA Prev Use Count";
                 case BurtShadingDebugMode.TemporalAAResponsiveMask:
                     return "TAA Responsive Mask";
                 case BurtShadingDebugMode.TemporalAARejectionReasons:
@@ -323,7 +373,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.None // 正常渲染模式。
         });
 
-        public static readonly BurtShadingDebugGroup Material = new BurtShadingDebugGroup("Material / Generic Data", "Material", new[] // 材质输入和 XRender GenericData 派生值。
+        public static readonly BurtShadingDebugGroup Material = new BurtShadingDebugGroup("Material / Generic Data", "Material", new[] // 基础材质输入和 XRender GenericData 派生值。
         {
             BurtShadingDebugMode.Albedo, // BaseMap 与 BaseColor 合成后的基础色。
             BurtShadingDebugMode.DiffuseColor, // metallic 扣除后的 diffuse 颜色。
@@ -332,6 +382,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.Roughness, // shader 内部使用的感知粗糙度。
             BurtShadingDebugMode.Metallic, // 最终金属度。
             BurtShadingDebugMode.Occlusion, // 最终 AO。
+            BurtShadingDebugMode.Height, // Mask Map B height channel.
             BurtShadingDebugMode.Reflectance // XRender reflectance 输入。
         });
 
@@ -347,7 +398,9 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.GBufferDiffuseColor, // GBuffer -> PBRMaterialData 的 DiffuseColor。
             BurtShadingDebugMode.GBufferHairStrandDirection, // Hair 专用：GBuffer1.rg 解码后的 strand direction。
             BurtShadingDebugMode.GBufferHairScatter, // Hair 专用：GBuffer1.b material channel 解码后的 scatter。
-            BurtShadingDebugMode.GBufferHairShift // Hair 专用：GBuffer1.b material channel 解码后的 shift scale。
+            BurtShadingDebugMode.GBufferHairShift, // Hair 专用：GBuffer1.b material channel 解码后的 shift scale。
+            BurtShadingDebugMode.GBufferClearCoatNormalWS,
+            BurtShadingDebugMode.GBufferSubsurfaceStrength // Subsurface 专用：GBuffer1.b material channel 解码后的 strength。
         });
 
         public static readonly BurtShadingDebugGroup SpecularAA = new BurtShadingDebugGroup("Specular AA / Normal Filtering", "Spec AA", new[] // 对应 XRender Normal Filtering / Anti Aliasing 方向。
@@ -386,17 +439,25 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.SpecularOcclusion // 环境高光遮蔽。
         });
 
-        public static readonly BurtShadingDebugGroup Lighting = new BurtShadingDebugGroup("Lighting", "Lighting", new[] // 对应 XRender Lighting Debug，保留 Detail Lighting 入口。
+        public static readonly BurtShadingDebugGroup Lighting = new BurtShadingDebugGroup("Direct Lighting", "Direct", new[] // 直接光照相关拆项。
         {
             BurtShadingDebugMode.DetailLighting, // 中灰 BaseColor 下重新观察光照细节。
             BurtShadingDebugMode.DirectDiffuse, // 直接漫反射最终贡献。
-            BurtShadingDebugMode.DirectSpecular, // 直接高光最终贡献。
+            BurtShadingDebugMode.DirectSpecular // 直接高光最终贡献。
+        });
+
+        public static readonly BurtShadingDebugGroup LightingAdditional = new BurtShadingDebugGroup("Additional Lights / Tiling", "Additional", new[] // 追加光和 tiled light 调试。
+        {
             BurtShadingDebugMode.AdditionalLighting, // 追加光直接贡献总和。
             BurtShadingDebugMode.AdditionalLightingUnshadowed, // 追加光不乘 additional shadow attenuation 的直接贡献总和。
             BurtShadingDebugMode.AdditionalDiffuse, // 追加光漫反射贡献。
             BurtShadingDebugMode.AdditionalSpecular, // 追加光高光贡献。
             BurtShadingDebugMode.TileLightCount, // Tiled debug：每个 tile 命中的追加光数量。
-            BurtShadingDebugMode.TileLightOccupancy, // Tiled debug：tile list 使用率。
+            BurtShadingDebugMode.TileLightOccupancy // Tiled debug：tile list 使用率。
+        });
+
+        public static readonly BurtShadingDebugGroup LightingIndirect = new BurtShadingDebugGroup("Indirect / Output", "Indirect", new[] // 间接光、AO、自发光和最终输出。
+        {
             BurtShadingDebugMode.IndirectLighting, // 间接光总和。
             BurtShadingDebugMode.IndirectDiffuse, // 间接漫反射。
             BurtShadingDebugMode.IndirectSpecular, // 间接高光。
@@ -422,13 +483,134 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.MainLightShadow // 主光 shadow map 全屏 Debug。
         });
 
-        public static readonly BurtShadingDebugGroup Fullscreen = new BurtShadingDebugGroup("Fullscreen / Render Data", "Fullscreen", new[] // BurtRP 现有全屏调试入口。
+        public static readonly BurtShadingDebugGroup Fullscreen = new BurtShadingDebugGroup("Fullscreen / Render Data", "Fullscreen", new[] // 非后处理的全屏 Render Data 入口。
         {
-            BurtShadingDebugMode.CameraDepth, // CameraDepth 全屏 Debug。
+            BurtShadingDebugMode.CameraDepth // CameraDepth 全屏 Debug。
+        });
+
+        public static readonly BurtShadingDebugGroup PostProcess = new BurtShadingDebugGroup("Post Process", "Post FX", new[] // SSAO、SSR、TAA、Bloom、Auto Exposure 等后处理相关调试统一入口。
+        {
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay,
-            BurtShadingDebugMode.BloomPrefilter
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionHistory,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability,
+            BurtShadingDebugMode.BloomPrefilter,
+            BurtShadingDebugMode.BloomFinalBloom,
+            BurtShadingDebugMode.BloomMip1,
+            BurtShadingDebugMode.BloomMip2,
+            BurtShadingDebugMode.BloomMip3,
+            BurtShadingDebugMode.BloomMip4,
+            BurtShadingDebugMode.BloomMip5,
+            BurtShadingDebugMode.BloomAlpha,
+            BurtShadingDebugMode.BloomThresholdMask,
+            BurtShadingDebugMode.AutoExposureLuminance,
+            BurtShadingDebugMode.AutoExposureMeteringWeight,
+            BurtShadingDebugMode.AutoExposureHistogramRange,
+            BurtShadingDebugMode.ScreenSpaceReflectionRawHitMask,
+            BurtShadingDebugMode.ScreenSpaceReflectionHitMask,
+            BurtShadingDebugMode.ScreenSpaceReflectionHitUV,
+            BurtShadingDebugMode.ScreenSpaceReflectionStepCount,
+            BurtShadingDebugMode.ScreenSpaceReflectionColor,
+            BurtShadingDebugMode.ScreenSpaceReflectionConfidence,
+            BurtShadingDebugMode.ScreenSpaceReflectionDepthDelta,
+            BurtShadingDebugMode.ScreenSpaceReflectionWorldError,
+            BurtShadingDebugMode.ScreenSpaceReflectionDenoisedColor,
+            BurtShadingDebugMode.ScreenSpaceReflectionTemporalColor,
+            BurtShadingDebugMode.ScreenSpaceReflectionResolveAlpha,
+            BurtShadingDebugMode.ScreenSpaceReflectionVisibilityAlpha,
+            BurtShadingDebugMode.ScreenSpaceReflectionMaterialWeight,
+            BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMip,
+            BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor,
+            BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality,
+            BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality,
+            BurtShadingDebugMode.ScreenSpaceReflectionResolveQuality,
+            BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipCandidate,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZMipLevel,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZDivergence,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZMissedHits,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZRawHitMiss,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZResolvedHitMiss,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZVisibilityMiss,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipUsed,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZProbeBlocked,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZStepCompare,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZWorkCompare,
+            BurtShadingDebugMode.ScreenSpaceReflectionHiZStepSaved,
+            BurtShadingDebugMode.TemporalAAHistory,
+            BurtShadingDebugMode.TemporalAAFeedback,
+            BurtShadingDebugMode.TemporalAARejection,
+            BurtShadingDebugMode.TemporalAARejectionReasons,
+            BurtShadingDebugMode.TemporalAAHistoryUV,
+            BurtShadingDebugMode.TemporalAADifference,
+            BurtShadingDebugMode.TemporalAAVelocity,
+            BurtShadingDebugMode.TemporalAAConfidence,
+            BurtShadingDebugMode.TemporalAACurrentDepth,
+            BurtShadingDebugMode.TemporalAADepthHistory,
+            BurtShadingDebugMode.TemporalAADepthDelta,
+            BurtShadingDebugMode.TemporalAAParallaxRejection,
+            BurtShadingDebugMode.TemporalAAFeedbackWeight,
+            BurtShadingDebugMode.TemporalAACurrentColor,
+            BurtShadingDebugMode.TemporalAAResolvedColor,
+            BurtShadingDebugMode.TemporalAARawVelocity,
+            BurtShadingDebugMode.TemporalAAUpdatedConfidence,
+            BurtShadingDebugMode.TemporalAAStaticRelax,
+            BurtShadingDebugMode.TemporalAALumaRejection,
+            BurtShadingDebugMode.TemporalAAClipRejection,
+            BurtShadingDebugMode.TemporalAADepthRejection,
+            BurtShadingDebugMode.TemporalAANormalRejection,
+            BurtShadingDebugMode.TemporalAAMotionRejection,
+            BurtShadingDebugMode.TemporalAAConfidenceGate,
+            BurtShadingDebugMode.TemporalAAVelocitySource,
+            BurtShadingDebugMode.TemporalAAGBufferNormal,
+            BurtShadingDebugMode.TemporalAAAntiFlicker,
+            BurtShadingDebugMode.TemporalAAHistoryCoverage,
+            BurtShadingDebugMode.TemporalAAPrevUseCount,
+            BurtShadingDebugMode.TemporalAAResponsiveMask
+        });
+
+        public static readonly BurtShadingDebugGroup ScreenSpaceAmbientOcclusion = new BurtShadingDebugGroup("Screen Space Ambient Occlusion", "SSAO", new[] // SSAO 后处理调试。
+        {
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionHistory,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability
+        });
+
+        public static readonly BurtShadingDebugGroup Bloom = new BurtShadingDebugGroup("Bloom", "Bloom", new[] // Bloom 后处理调试。
+        {
+            BurtShadingDebugMode.BloomPrefilter,
+            BurtShadingDebugMode.BloomFinalBloom,
+            BurtShadingDebugMode.BloomMip1,
+            BurtShadingDebugMode.BloomMip2,
+            BurtShadingDebugMode.BloomMip3,
+            BurtShadingDebugMode.BloomMip4,
+            BurtShadingDebugMode.BloomMip5,
+            BurtShadingDebugMode.BloomAlpha,
+            BurtShadingDebugMode.BloomThresholdMask
+        });
+
+        public static readonly BurtShadingDebugGroup AutoExposure = new BurtShadingDebugGroup("Auto Exposure", "Exposure", new[] // 自动曝光后处理调试。
+        {
+            BurtShadingDebugMode.AutoExposureLuminance,
+            BurtShadingDebugMode.AutoExposureMeteringWeight,
+            BurtShadingDebugMode.AutoExposureHistogramRange
+        });
+
+        public static readonly BurtShadingDebugGroup Atmosphere = new BurtShadingDebugGroup("Atmosphere", "Atmosphere", new[]
+        {
+            BurtShadingDebugMode.Atmosphere,
+            BurtShadingDebugMode.AtmosphereRayleigh,
+            BurtShadingDebugMode.AtmosphereMie,
+            BurtShadingDebugMode.AtmosphereTransmittance,
+            BurtShadingDebugMode.AtmosphereAerialTransmittance,
+            BurtShadingDebugMode.AtmosphereAerialInscatter
         });
 
         public static readonly BurtShadingDebugGroup ScreenSpaceReflections = new BurtShadingDebugGroup("Screen Space Reflections", "SSR", new[] // SSR 独立分类，避免挤在通用 Fullscreen 调试里。
@@ -496,6 +678,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.TemporalAAGBufferNormal,
             BurtShadingDebugMode.TemporalAAAntiFlicker,
             BurtShadingDebugMode.TemporalAAHistoryCoverage,
+            BurtShadingDebugMode.TemporalAAPrevUseCount,
             BurtShadingDebugMode.TemporalAAResponsiveMask
         });
     }
@@ -505,18 +688,50 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
     {
         public BurtShadingDebugOverlay() // Unity 创建 Overlay 时会调用这个构造函数。
             : base(
-                BurtShadingDebugOffDropdown.Id,
+                BurtShadingDebugFullscreenDropdown.Id,
+                BurtShadingDebugAtmosphereDropdown.Id) // 每个 ID 对应一个 EditorToolbarElement。
+        {
+        }
+    }
+
+    [Overlay(typeof(SceneView), "Burt Material Debug")] // 在 SceneView Overlays 菜单中单独注册材质调试入口。
+    internal sealed class BurtMaterialDebugOverlay : ToolbarOverlay
+    {
+        public BurtMaterialDebugOverlay()
+            : base(
                 BurtShadingDebugMaterialDropdown.Id,
                 BurtShadingDebugGBufferDropdown.Id,
                 BurtShadingDebugSpecularAADropdown.Id,
                 BurtShadingDebugBRDFDropdown.Id,
                 BurtShadingDebugHairDropdown.Id,
-                BurtShadingDebugIBLDropdown.Id,
+                BurtShadingDebugIBLDropdown.Id)
+        {
+        }
+    }
+
+    [Overlay(typeof(SceneView), "Burt Lighting Debug")] // 在 SceneView Overlays 菜单中单独注册光照调试入口。
+    internal sealed class BurtLightingDebugOverlay : ToolbarOverlay
+    {
+        public BurtLightingDebugOverlay()
+            : base(
                 BurtShadingDebugLightingDropdown.Id,
-                BurtShadingDebugShadowDropdown.Id,
-                BurtShadingDebugFullscreenDropdown.Id,
+                BurtShadingDebugAdditionalLightingDropdown.Id,
+                BurtShadingDebugIndirectLightingDropdown.Id,
+                BurtShadingDebugShadowDropdown.Id)
+        {
+        }
+    }
+
+    [Overlay(typeof(SceneView), "Burt Post Process Debug")] // 在 SceneView Overlays 菜单中单独注册后处理调试入口。
+    internal sealed class BurtPostProcessDebugOverlay : ToolbarOverlay
+    {
+        public BurtPostProcessDebugOverlay()
+            : base(
+                BurtShadingDebugSSAODropdown.Id,
+                BurtShadingDebugBloomDropdown.Id,
+                BurtShadingDebugAutoExposureDropdown.Id,
                 BurtShadingDebugSSRDropdown.Id,
-                BurtShadingDebugTemporalAADropdown.Id) // 每个 ID 对应一个 EditorToolbarElement。
+                BurtShadingDebugTemporalAADropdown.Id)
         {
         }
     }
@@ -537,14 +752,15 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             dropdownClicked += () => UnityEditor.PopupWindow.Show(worldBound, new BurtShadingDebugPopup(group)); // 打开只包含该分类的弹窗。
             RegisterCallback<AttachToPanelEvent>(_ => RegisterInstance()); // 挂载到 SceneView 时登记实例。
             RegisterCallback<DetachFromPanelEvent>(_ => Instances.Remove(this)); // 从 SceneView 移除时解除登记，避免保留失效引用。
+            this.RegisterValueChangedCallback(OnToggleValueChanged); // 点击已激活的工具栏按钮时切回正常画面。
         }
 
         public void UpdateVisualState() // 根据全局 Debug 模式刷新按钮显示。
         {
             var mode = BurtShadingDebugSettings.Mode; // 读取当前选中的 Debug 模式。
-            bool isActiveGroup = group.Contains(mode); // 当前模式属于该分类时高亮该 Dropdown，None 会高亮 Off。
-            value = isActiveGroup; // 让 Toolbar Toggle 视觉上反映当前分类。
-            text = isActiveGroup && mode != BurtShadingDebugMode.None ? BurtShadingDebugDisplayNames.GetDisplayName(mode) : group.ButtonText; // 激活分类显示具体模式，Off 保持短名。
+            bool isActiveGroup = group.Contains(mode); // 当前模式属于该分类时高亮该 Dropdown。
+            SetValueWithoutNotify(isActiveGroup); // 让 Toolbar Toggle 视觉上反映当前分类，避免刷新状态时触发关闭逻辑。
+            text = isActiveGroup && mode != BurtShadingDebugMode.None ? BurtShadingDebugDisplayNames.GetDisplayName(mode) : group.ButtonText; // 激活分类显示具体模式，未激活时显示分类名。
         }
 
         public static void UpdateAllVisualStates() // 外部切换模式后调用，刷新所有已创建的 Dropdown。
@@ -564,16 +780,16 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
             UpdateVisualState(); // 挂载后再刷新一次，处理域重载后的状态恢复。
         }
-    }
 
-    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Off 分类按钮。
-    internal sealed class BurtShadingDebugOffDropdown : BurtShadingDebugGroupDropdown
-    {
-        public const string Id = "BurtRP/Shading Debug/Off"; // ToolbarOverlay 引用的唯一 ID。
-
-        public BurtShadingDebugOffDropdown() // Unity 通过无参构造创建 ToolbarElement。
-            : base(BurtShadingDebugGroups.General) // 绑定 General / None 分类。
+        private void OnToggleValueChanged(ChangeEvent<bool> evt) // 处理用户直接点击 toolbar 按钮本体的开关行为。
         {
+            if (evt.newValue || !group.Contains(BurtShadingDebugSettings.Mode)) // 未激活分类被点亮时没有明确模式可切，交回 popup 选择。
+            {
+                UpdateVisualState(); // 还原为当前真实状态，避免按钮假亮。
+                return;
+            }
+
+            BurtShadingDebugOverlayUtility.SetMode(BurtShadingDebugMode.None); // 已激活分类再次点击时关闭 Debug。
         }
     }
 
@@ -583,7 +799,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public const string Id = "BurtRP/Shading Debug/Material"; // ToolbarOverlay 引用的唯一 ID。
 
         public BurtShadingDebugMaterialDropdown() // Unity 通过无参构造创建 ToolbarElement。
-            : base(BurtShadingDebugGroups.Material) // 绑定 Material / Generic Data 分类。
+            : base(BurtShadingDebugGroups.Material) // 绑定基础材质分类。
         {
         }
     }
@@ -654,6 +870,28 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         }
     }
 
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册追加光分类按钮。
+    internal sealed class BurtShadingDebugAdditionalLightingDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/AdditionalLighting"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugAdditionalLightingDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.LightingAdditional) // 绑定追加光和 tiled light 分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册间接光分类按钮。
+    internal sealed class BurtShadingDebugIndirectLightingDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/IndirectLighting"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugIndirectLightingDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.LightingIndirect) // 绑定间接光和最终输出分类。
+        {
+        }
+    }
+
     [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Shadow 分类按钮。
     internal sealed class BurtShadingDebugShadowDropdown : BurtShadingDebugGroupDropdown
     {
@@ -676,24 +914,68 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         }
     }
 
-    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 SSR 分类按钮。
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 SSAO 后处理分类按钮。
+    internal sealed class BurtShadingDebugSSAODropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/SSAO"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugSSAODropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.ScreenSpaceAmbientOcclusion) // 绑定 SSAO 后处理调试分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 Bloom 后处理分类按钮。
+    internal sealed class BurtShadingDebugBloomDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Bloom"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugBloomDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.Bloom) // 绑定 Bloom 后处理调试分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册自动曝光后处理分类按钮。
+    internal sealed class BurtShadingDebugAutoExposureDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/AutoExposure"; // ToolbarOverlay 引用的唯一 ID。
+
+        public BurtShadingDebugAutoExposureDropdown() // Unity 通过无参构造创建 ToolbarElement。
+            : base(BurtShadingDebugGroups.AutoExposure) // 绑定自动曝光后处理调试分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 SSR 后处理分类按钮。
     internal sealed class BurtShadingDebugSSRDropdown : BurtShadingDebugGroupDropdown
     {
         public const string Id = "BurtRP/Shading Debug/SSR"; // ToolbarOverlay 引用的唯一 ID。
 
         public BurtShadingDebugSSRDropdown() // Unity 通过无参构造创建 ToolbarElement。
-            : base(BurtShadingDebugGroups.ScreenSpaceReflections) // 绑定 SSR 独立分类。
+            : base(BurtShadingDebugGroups.ScreenSpaceReflections) // 绑定 SSR 后处理调试分类。
         {
         }
     }
 
-    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 TAA 分类按钮。
+    [EditorToolbarElement(Id, typeof(SceneView))] // 注册 TAA 后处理分类按钮。
     internal sealed class BurtShadingDebugTemporalAADropdown : BurtShadingDebugGroupDropdown
     {
         public const string Id = "BurtRP/Shading Debug/TAA"; // ToolbarOverlay 引用的唯一 ID。
 
         public BurtShadingDebugTemporalAADropdown() // Unity 通过无参构造创建 ToolbarElement。
-            : base(BurtShadingDebugGroups.TemporalAA) // 绑定 TAA 独立分类。
+            : base(BurtShadingDebugGroups.TemporalAA) // 绑定 TAA 后处理调试分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugAtmosphereDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Atmosphere";
+
+        public BurtShadingDebugAtmosphereDropdown()
+            : base(BurtShadingDebugGroups.Atmosphere)
         {
         }
     }
@@ -701,6 +983,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
     internal sealed class BurtShadingDebugPopup : PopupWindowContent // 每个分类按钮点击后弹出的菜单内容。
     {
         private const float ScrollMaxHeight = 320f; // 单个分类仍限制最大高度，后续模式增加时不会撑出屏幕。
+        private const float AutoExposureReadoutHeight = 128f;
 
         private readonly BurtShadingDebugGroup group; // 当前弹窗展示的分类。
 
@@ -715,6 +998,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         {
             float listHeight = group.Modes.Length * EditorGUIUtility.singleLineHeight + 8f; // 根据模式数量估算列表高度。
             float contentHeight = 30f + Mathf.Min(listHeight, ScrollMaxHeight) + 48f; // 预留标题和说明区域，不再显示资产信息行。
+            if (IsAutoExposureGroup())
+            {
+                contentHeight += AutoExposureReadoutHeight;
+            }
+
             return new Vector2(320f, contentHeight); // 固定宽度，避免不同分类宽度跳变太大。
         }
 
@@ -733,31 +1021,75 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             EditorGUILayout.EndScrollView(); // 结束滚动区域。
             EditorGUILayout.Space(4f); // 与资产信息隔开一点距离。
 
-            EditorGUILayout.HelpBox("参考 XRender Shader Debug 的分类 Toolbar；Depth / Shadow 同步现有全屏 Debug，SSR / TAA 使用独立分类入口。", MessageType.Info); // 说明分类来源和全屏 Debug 行为。
+            if (IsAutoExposureGroup())
+            {
+                DrawAutoExposureReadout();
+                EditorGUILayout.Space(4f);
+            }
+
+            EditorGUILayout.HelpBox("参考 XRender Shader Debug 的分类 Toolbar；Material、Lighting、Post Process 分别在独立 Overlay 中按细分栏位展开。", MessageType.Info); // 说明分类来源和全局 Debug 行为。
         }
 
         private void DrawMode(BurtShadingDebugMode mode) // 绘制一个可选 Debug 模式。
         {
             var isCurrent = BurtShadingDebugSettings.Mode == mode; // 判断该模式是否是当前模式。
 
-            if (!GUILayout.Toggle(isCurrent, BurtShadingDebugDisplayNames.GetDisplayName(mode), "MenuItem")) // 使用 MenuItem 样式获得类似 Unity 菜单的勾选效果。
+            bool isSelectedAfterClick = GUILayout.Toggle(isCurrent, BurtShadingDebugDisplayNames.GetDisplayName(mode), "MenuItem"); // 使用 MenuItem 样式获得类似 Unity 菜单的勾选效果。
+            if (isSelectedAfterClick == isCurrent) // 状态没有变化时说明这一项没有被点击。
             {
                 return; // 未点击或点击当前项取消时不做任何改变。
             }
 
-            if (!isCurrent) // 只在切换到新模式时更新状态。
-            {
-                SetMode(mode); // 写入全局 Debug 模式。
-                editorWindow.Close(); // 选择后关闭弹窗，和常规 Dropdown 菜单行为一致。
-            }
+            BurtShadingDebugOverlayUtility.SetMode(isCurrent ? BurtShadingDebugMode.None : mode); // 再次点击当前 Debug 项时切回正常画面。
+            editorWindow.Close(); // 选择后关闭弹窗，和常规 Dropdown 菜单行为一致。
         }
 
-        private void SetMode(BurtShadingDebugMode mode) // 设置 shading debug 模式并同步相关状态。
+        private bool IsAutoExposureGroup()
         {
-            BurtShadingDebugSettings.Mode = mode; // 写入运行时静态状态，并上传 shader 全局参数。
-            BurtShadingDebugOverlayUtility.SyncExistingDebugViews(mode); // 同步 BurtRP Asset 上已有的 Depth / Shadow 全屏调试开关。
-            BurtShadingDebugGroupDropdown.UpdateAllVisualStates(); // 刷新所有分类按钮的高亮和文本。
-            SceneView.RepaintAll(); // 立即刷新 SceneView，避免等待下一次交互才看到结果。
+            return ReferenceEquals(group, BurtShadingDebugGroups.AutoExposure);
+        }
+
+        private static void DrawAutoExposureReadout()
+        {
+            var sceneView = SceneView.lastActiveSceneView;
+            var camera = sceneView != null ? sceneView.camera : null;
+            if (camera == null)
+            {
+                EditorGUILayout.HelpBox("Auto Exposure: no active SceneView camera.", MessageType.Info);
+                return;
+            }
+
+            if (!BurtAutoExposureDebugUtility.TryGetSnapshot(camera, out var snapshot))
+            {
+                EditorGUILayout.HelpBox("Auto Exposure: no per-camera state yet. Select an automatic exposure mode and render one frame.", MessageType.Info);
+                return;
+            }
+
+            EditorGUILayout.LabelField("Auto Exposure State", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Camera", camera.name);
+            EditorGUILayout.LabelField("Mode", snapshot.Mode.ToString());
+            EditorGUILayout.LabelField("EV100", Format(snapshot.CurrentEV100) + " -> " + Format(snapshot.TargetEV100) + "   Range " + Format(snapshot.MinEV100) + " / " + Format(snapshot.MaxEV100));
+            EditorGUILayout.LabelField("Average", "Luma " + Format(snapshot.AverageLuminance) + "   Log2 " + Format(snapshot.AverageLogLuminance));
+            EditorGUILayout.LabelField("Sample", "Has=" + snapshot.HasSample + " Count=" + snapshot.SampleCount + " Age=" + FormatFrameAge(snapshot.SampleAgeFrames));
+            EditorGUILayout.LabelField("Readback", "Pending=" + snapshot.ReadbackPending + " Age=" + FormatFrameAge(snapshot.ReadbackAgeFrames) + " Size=" + FormatReadbackSize(snapshot));
+            EditorGUILayout.LabelField("Rejected", snapshot.SampleRejectedReason);
+        }
+
+        private static string Format(float value)
+        {
+            return value.ToString("0.###");
+        }
+
+        private static string FormatFrameAge(int age)
+        {
+            return age >= 0 ? age.ToString() : "n/a";
+        }
+
+        private static string FormatReadbackSize(BurtAutoExposureDebugSnapshot snapshot)
+        {
+            return snapshot.ReadbackWidth > 0 && snapshot.ReadbackHeight > 0
+                ? snapshot.ReadbackWidth + "x" + snapshot.ReadbackHeight
+                : "n/a";
         }
     }
 
@@ -777,6 +1109,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             SetEnum(serializedAsset, "gBufferDebugViewMode", (int)ResolveGBufferDebugViewMode(mode)); // GBuffer 分类同步到资产上的全屏 GBuffer Debug 模式，让 RenderGraph 能插入 Burt Debug GBuffer。
             serializedAsset.ApplyModifiedPropertiesWithoutUndo(); // Debug 切换不写 Undo 栈，避免污染用户操作历史。
             EditorUtility.SetDirty(asset); // 标记资产已更新，Inspector 和渲染流程能看到变化。
+        }
+
+        public static void SetMode(BurtShadingDebugMode mode) // 设置 shading debug 模式并同步相关状态。
+        {
+            BurtShadingDebugSettings.Mode = mode; // 写入运行时静态状态，并上传 shader 全局参数。
+            SyncExistingDebugViews(mode); // 同步 BurtRP Asset 上已有的 Depth / Shadow / GBuffer 全屏调试开关。
+            BurtShadingDebugGroupDropdown.UpdateAllVisualStates(); // 刷新所有分类按钮的高亮和文本。
+            SceneView.RepaintAll(); // 立即刷新 SceneView，避免等待下一次交互才看到结果。
         }
 
         public static BurtRenderPipelineAsset GetActiveBurtAsset() // 获取当前 Unity 设置中的 BurtRP Asset。
@@ -837,6 +1177,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return BurtGBufferDebugViewMode.HairScatter; // 资产同步为 HairScatter。
                 case BurtShadingDebugMode.GBufferHairShift: // Overlay 选择 Hair longitudinal shift scale。
                     return BurtGBufferDebugViewMode.HairShift; // 资产同步为 HairShift。
+                case BurtShadingDebugMode.GBufferClearCoatNormalWS:
+                    return BurtGBufferDebugViewMode.ClearCoatNormalWS;
+                case BurtShadingDebugMode.GBufferSubsurfaceStrength:
+                    return BurtGBufferDebugViewMode.SubsurfaceStrength;
                 default: // 其他 Overlay 模式不应该显示真实 GBuffer。
                     return BurtGBufferDebugViewMode.Disabled; // 资产同步为 Disabled，避免切换到 Lighting/Material 后 GBuffer Debug 残留。
             }

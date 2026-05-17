@@ -307,18 +307,36 @@ namespace Burt.RenderPipeline
     internal sealed class BurtScreenSpaceAmbientOcclusionBlurPass : BurtRenderPass
     {
         private const string ScreenSpaceAmbientOcclusionShaderName = "Hidden/BurtRP/ScreenSpaceAmbientOcclusion";
+        private const int BlurPassIndex = 1;
+        private const int TemporalPassIndex = 7;
+        private const int CopyCurrentDepthPassIndex = 8;
+        private const int CopyTemporalFinalPassIndex = 10;
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
         private static readonly int AORawTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawTextureId;
         private static readonly int AOTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionTextureId;
         private static readonly int AOBlurTempTextureId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionBlurTempTexture");
+        private static readonly int AOSpatialFinalTextureId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionSpatialFinalTexture");
+        private static readonly int AOSpatialFinalInputTextureId = Shader.PropertyToID("_BurtSSAOSpatialFinalTexture");
+        private static readonly int AOTemporalFinalTextureId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionTemporalFinalTexture");
+        private static readonly int AOTemporalFinalInputTextureId = Shader.PropertyToID("_BurtSSAOTemporalFinalTexture");
+        private static readonly int AOCurrentDepthTextureId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionCurrentDepthTexture");
         private static readonly int AOBlurSourceTextureId = Shader.PropertyToID("_BurtSSAOBlurSourceTexture");
         private static readonly int AOBlurDirectionId = Shader.PropertyToID("_BurtSSAOBlurDirection");
         private static readonly int DeferredScreenSizeId = Shader.PropertyToID("_BurtDeferredScreenSize");
+        private static readonly int ViewProjectionMatrixId = Shader.PropertyToID("_BurtSSAOViewProjectionMatrix");
+        private static readonly int PreviousViewProjectionMatrixId = Shader.PropertyToID("_BurtSSAOPreviousViewProjectionMatrix");
+        private static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseViewProjectionMatrix");
+        private static readonly int SSAOFullScreenSizeId = Shader.PropertyToID("_BurtSSAOFullScreenSize");
         private static readonly int SSAOParams0Id = Shader.PropertyToID("_BurtSSAOParams0");
         private static readonly int SSAOParams1Id = Shader.PropertyToID("_BurtSSAOParams1");
         private static readonly int SSAOParams2Id = Shader.PropertyToID("_BurtSSAOParams2");
         private static readonly int SSAOParams3Id = Shader.PropertyToID("_BurtSSAOParams3");
+        private static readonly int SSAOTemporalParamsId = Shader.PropertyToID("_BurtSSAOTemporalParams");
+        private static readonly int SSAOHistoryTextureId = Shader.PropertyToID("_BurtSSAOHistoryTexture");
+        private static readonly int SSAOHistoryDepthTextureId = Shader.PropertyToID("_BurtSSAOHistoryDepthTexture");
+        private static readonly int SSAOPreviousHistoryTextureId = Shader.PropertyToID("_BurtSSAOPreviousHistoryTexture");
+        private static readonly int SSAOPreviousHistoryDepthTextureId = Shader.PropertyToID("_BurtSSAOPreviousHistoryDepthTexture");
         private static readonly int SSAOEnabledId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionEnabled");
 
         private Material screenSpaceAmbientOcclusionMaterial;
@@ -366,25 +384,44 @@ namespace Burt.RenderPipeline
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateScreenSpaceAmbientOcclusionDescriptor(camera);
             var blurTempIdentifier = new RenderTargetIdentifier(AOBlurTempTextureId);
+            var spatialFinalIdentifier = new RenderTargetIdentifier(AOSpatialFinalTextureId);
+            var temporalFinalIdentifier = new RenderTargetIdentifier(AOTemporalFinalTextureId);
+            var currentDepthIdentifier = new RenderTargetIdentifier(AOCurrentDepthTextureId);
             var cmd = CommandBufferPool.Get(Name);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
             cmd.SetGlobalTexture(AORawTextureId, aoRawTarget.Identifier);
-            cmd.SetGlobalVector(DeferredScreenSizeId, new Vector4(descriptor.width, descriptor.height, 1f / descriptor.width, 1f / descriptor.height));
-            cmd.SetGlobalVector(SSAOParams0Id, new Vector4(settings.Radius, settings.Intensity, settings.SampleCount, settings.Bias));
-            cmd.SetGlobalVector(SSAOParams1Id, new Vector4(settings.Power, settings.Blur ? 1f : 0f, Time.frameCount & 1023, 0f));
-            cmd.SetGlobalVector(SSAOParams2Id, new Vector4(settings.FadeDistance, settings.FadeRadius, settings.Thickness, 1f));
-            cmd.SetGlobalVector(SSAOParams3Id, new Vector4(settings.HorizonSearch ? 1f : 0f, settings.DirectionCount, settings.BlurSharpness, settings.SpatialDenoise ? 1f : 0f));
+            UploadResolveGlobals(cmd, context.Request, settings, camera, descriptor);
+            var outputTarget = aoTarget.Identifier;
+            var shouldUseTemporal = settings.TemporalAccumulation;
+            if (shouldUseTemporal)
+            {
+                cmd.GetTemporaryRT(AOSpatialFinalTextureId, descriptor, FilterMode.Bilinear);
+                cmd.GetTemporaryRT(AOTemporalFinalTextureId, BurtScreenSpaceAmbientOcclusionHistoryUtility.CreateColorHistoryDescriptor(camera), FilterMode.Bilinear);
+                outputTarget = spatialFinalIdentifier;
+            }
+            else
+            {
+                BurtScreenSpaceAmbientOcclusionHistoryUtility.InvalidateHistory(camera, "TemporalDisabled");
+            }
+
             if (settings.Blur)
             {
                 cmd.GetTemporaryRT(AOBlurTempTextureId, descriptor, FilterMode.Bilinear);
                 DrawBlur(cmd, material, aoRawTarget.Identifier, blurTempIdentifier, camera, Vector2.right, false);
-                DrawBlur(cmd, material, blurTempIdentifier, aoTarget.Identifier, camera, Vector2.up, true);
+                DrawBlur(cmd, material, blurTempIdentifier, outputTarget, camera, Vector2.up, true);
                 cmd.ReleaseTemporaryRT(AOBlurTempTextureId);
             }
             else
             {
-                DrawBlur(cmd, material, aoRawTarget.Identifier, aoTarget.Identifier, camera, Vector2.zero, true);
+                DrawBlur(cmd, material, aoRawTarget.Identifier, outputTarget, camera, Vector2.zero, true);
+            }
+
+            if (shouldUseTemporal)
+            {
+                ResolveTemporal(cmd, material, context.Request, context.Asset, settings, camera, descriptor, spatialFinalIdentifier, temporalFinalIdentifier, aoTarget.Identifier, currentDepthIdentifier);
+                cmd.ReleaseTemporaryRT(AOTemporalFinalTextureId);
+                cmd.ReleaseTemporaryRT(AOSpatialFinalTextureId);
             }
 
             cmd.SetGlobalTexture(AOTextureId, aoTarget.Identifier);
@@ -406,7 +443,80 @@ namespace Burt.RenderPipeline
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(AOBlurSourceTextureId, source);
             cmd.SetGlobalVector(AOBlurDirectionId, new Vector4(direction.x, direction.y, resolveFinal ? 1f : 0f, 0f));
-            cmd.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, BlurPassIndex, MeshTopology.Triangles, 3, 1);
+        }
+
+        private static void ResolveTemporal(
+            CommandBuffer cmd,
+            Material material,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            BurtScreenSpaceAmbientOcclusionSettings settings,
+            Camera camera,
+            RenderTextureDescriptor descriptor,
+            RenderTargetIdentifier spatialFinal,
+            RenderTargetIdentifier temporalFinalTarget,
+            RenderTargetIdentifier finalTarget,
+            RenderTargetIdentifier currentDepthTarget)
+        {
+            var history = BurtScreenSpaceAmbientOcclusionHistoryUtility.EnsureHistoryTextures(request, asset, settings, out var historyValid);
+            var width = Mathf.Max(1, descriptor.width);
+            var height = Mathf.Max(1, descriptor.height);
+            cmd.SetGlobalTexture(AOSpatialFinalInputTextureId, spatialFinal);
+            cmd.SetGlobalTexture(SSAOHistoryTextureId, history.Color != null ? (Texture)history.Color : Texture2D.whiteTexture);
+            cmd.SetGlobalTexture(SSAOHistoryDepthTextureId, history.Depth != null ? (Texture)history.Depth : Texture2D.blackTexture);
+            cmd.SetGlobalTexture(SSAOPreviousHistoryTextureId, history.Color != null ? (Texture)history.Color : Texture2D.whiteTexture);
+            cmd.SetGlobalTexture(SSAOPreviousHistoryDepthTextureId, history.Depth != null ? (Texture)history.Depth : Texture2D.blackTexture);
+            cmd.SetGlobalMatrix(PreviousViewProjectionMatrixId, history.PreviousViewProjectionMatrix);
+            cmd.SetGlobalMatrix(InverseViewProjectionMatrixId, history.CurrentInverseViewProjectionMatrix);
+            cmd.SetGlobalVector(DeferredScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
+            cmd.SetGlobalVector(SSAOFullScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
+            cmd.SetGlobalVector(SSAOTemporalParamsId, new Vector4(settings.TemporalFeedback, historyValid ? 1f : 0f, settings.TemporalDepthRejection, settings.TemporalClamp));
+
+            cmd.SetRenderTarget(temporalFinalTarget);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.DrawProcedural(Matrix4x4.identity, material, TemporalPassIndex, MeshTopology.Triangles, 3, 1);
+
+            cmd.SetGlobalTexture(AOTemporalFinalInputTextureId, temporalFinalTarget);
+            cmd.SetRenderTarget(finalTarget);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.DrawProcedural(Matrix4x4.identity, material, CopyTemporalFinalPassIndex, MeshTopology.Triangles, 3, 1);
+
+            if (history.Color == null || history.Depth == null)
+            {
+                return;
+            }
+
+            BurtScreenSpaceAmbientOcclusionHistoryUtility.CopyHistoryToDebugSnapshot(cmd, camera);
+            cmd.CopyTexture(temporalFinalTarget, new RenderTargetIdentifier(history.Color));
+            var depthDescriptor = BurtScreenSpaceAmbientOcclusionHistoryUtility.CreateDepthHistoryDescriptor(camera);
+            cmd.GetTemporaryRT(AOCurrentDepthTextureId, depthDescriptor, FilterMode.Point);
+            cmd.SetRenderTarget(currentDepthTarget);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
+            cmd.DrawProcedural(Matrix4x4.identity, material, CopyCurrentDepthPassIndex, MeshTopology.Triangles, 3, 1);
+            cmd.CopyTexture(currentDepthTarget, new RenderTargetIdentifier(history.Depth));
+            cmd.ReleaseTemporaryRT(AOCurrentDepthTextureId);
+            BurtScreenSpaceAmbientOcclusionHistoryUtility.MarkHistoryValid(camera);
+        }
+
+        private static void UploadResolveGlobals(
+            CommandBuffer cmd,
+            BurtRenderRequest request,
+            BurtScreenSpaceAmbientOcclusionSettings settings,
+            Camera camera,
+            RenderTextureDescriptor descriptor)
+        {
+            var matrices = BurtScreenSpaceAmbientOcclusionHistoryUtility.CreateCurrentMatrices(request);
+            var width = Mathf.Max(1, descriptor.width);
+            var height = Mathf.Max(1, descriptor.height);
+            cmd.SetGlobalMatrix(ViewProjectionMatrixId, matrices.ViewProjectionMatrix);
+            cmd.SetGlobalMatrix(InverseViewProjectionMatrixId, matrices.InverseViewProjectionMatrix);
+            cmd.SetGlobalVector(DeferredScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
+            cmd.SetGlobalVector(SSAOFullScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
+            cmd.SetGlobalVector(SSAOParams0Id, new Vector4(settings.Radius, settings.Intensity, settings.SampleCount, settings.Bias));
+            cmd.SetGlobalVector(SSAOParams1Id, new Vector4(settings.Power, settings.Blur ? 1f : 0f, Time.frameCount & 1023, 0f));
+            cmd.SetGlobalVector(SSAOParams2Id, new Vector4(settings.FadeDistance, settings.FadeRadius, settings.Thickness, 1f));
+            cmd.SetGlobalVector(SSAOParams3Id, new Vector4(settings.HorizonSearch ? 1f : 0f, settings.DirectionCount, settings.BlurSharpness, settings.SpatialDenoise ? 1f : 0f));
         }
 
         private static bool TryGetTargets(
@@ -451,11 +561,21 @@ namespace Burt.RenderPipeline
     internal sealed class BurtDebugScreenSpaceAmbientOcclusionPass : BurtRenderPass
     {
         private const string ScreenSpaceAmbientOcclusionShaderName = "Hidden/BurtRP/ScreenSpaceAmbientOcclusion";
+        private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int AORawTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawTextureId;
         private static readonly int AOTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionTextureId;
         private static readonly int DebugCameraColorTextureId = Shader.PropertyToID("_BurtSSAODebugCameraColorTexture");
         private static readonly int DebugCameraColorCopyTextureId = Shader.PropertyToID("_BurtSSAODebugCameraColorCopyTexture");
         private static readonly int SSAODebugModeId = Shader.PropertyToID("_BurtSSAODebugMode");
+        private static readonly int DeferredScreenSizeId = Shader.PropertyToID("_BurtDeferredScreenSize");
+        private static readonly int SSAOFullScreenSizeId = Shader.PropertyToID("_BurtSSAOFullScreenSize");
+        private static readonly int SSAOTemporalParamsId = Shader.PropertyToID("_BurtSSAOTemporalParams");
+        private static readonly int SSAOHistoryTextureId = Shader.PropertyToID("_BurtSSAOHistoryTexture");
+        private static readonly int SSAOHistoryDepthTextureId = Shader.PropertyToID("_BurtSSAOHistoryDepthTexture");
+        private static readonly int SSAOPreviousHistoryTextureId = Shader.PropertyToID("_BurtSSAOPreviousHistoryTexture");
+        private static readonly int SSAOPreviousHistoryDepthTextureId = Shader.PropertyToID("_BurtSSAOPreviousHistoryDepthTexture");
+        private static readonly int PreviousViewProjectionMatrixId = Shader.PropertyToID("_BurtSSAOPreviousViewProjectionMatrix");
+        private static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseViewProjectionMatrix");
 
         private Material screenSpaceAmbientOcclusionMaterial;
         private bool hasLoggedMissingShader;
@@ -471,6 +591,11 @@ namespace Burt.RenderPipeline
 
             builder.ReadScreenSpaceAmbientOcclusionRaw();
             builder.ReadScreenSpaceAmbientOcclusion();
+            if (BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionDepthDiagnosticDebugMode(BurtShadingDebugSettings.Mode))
+            {
+                builder.ReadCameraDepth();
+            }
+
             if (BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionOverlayDebugMode(BurtShadingDebugSettings.Mode))
             {
                 builder.ReadCameraColor();
@@ -487,9 +612,16 @@ namespace Burt.RenderPipeline
             }
 
             var cameraColorTarget = context.CameraColorTarget;
+            var cameraDepthTarget = context.CameraDepthTarget;
             var aoRawTarget = context.ScreenSpaceAmbientOcclusionRawTarget;
             var aoTarget = context.ScreenSpaceAmbientOcclusionTarget;
             if (!cameraColorTarget.IsValid || !aoRawTarget.IsValid || !aoTarget.IsValid)
+            {
+                return;
+            }
+
+            var isDepthDiagnostic = BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionDepthDiagnosticDebugMode(BurtShadingDebugSettings.Mode);
+            if (isDepthDiagnostic && !cameraDepthTarget.IsValid)
             {
                 return;
             }
@@ -515,6 +647,12 @@ namespace Burt.RenderPipeline
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(AORawTextureId, aoRawTarget.Identifier);
             cmd.SetGlobalTexture(AOTextureId, aoTarget.Identifier);
+            if (isDepthDiagnostic)
+            {
+                cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+            }
+
+            UploadTemporalDebugGlobals(cmd, context.Request, context.Asset);
             cmd.SetGlobalFloat(SSAODebugModeId, BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionShaderDebugMode());
             cmd.DrawProcedural(Matrix4x4.identity, material, BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionDebugPassIndex(), MeshTopology.Triangles, 3, 1);
             if (isOverlay)
@@ -524,6 +662,26 @@ namespace Burt.RenderPipeline
 
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
+        }
+
+        private static void UploadTemporalDebugGlobals(CommandBuffer cmd, BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            var camera = request != null ? request.Camera : null;
+            var settings = BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionSettings(request, asset);
+            var history = BurtScreenSpaceAmbientOcclusionHistoryUtility.GetDebugSnapshotTextures(request);
+            var status = BurtScreenSpaceAmbientOcclusionHistoryUtility.GetHistoryStatus(camera);
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateScreenSpaceAmbientOcclusionDescriptor(camera);
+            var width = Mathf.Max(1, descriptor.width);
+            var height = Mathf.Max(1, descriptor.height);
+            cmd.SetGlobalTexture(SSAOHistoryTextureId, history.Color != null ? (Texture)history.Color : Texture2D.whiteTexture);
+            cmd.SetGlobalTexture(SSAOHistoryDepthTextureId, history.Depth != null ? (Texture)history.Depth : Texture2D.blackTexture);
+            cmd.SetGlobalTexture(SSAOPreviousHistoryTextureId, history.Color != null ? (Texture)history.Color : Texture2D.whiteTexture);
+            cmd.SetGlobalTexture(SSAOPreviousHistoryDepthTextureId, history.Depth != null ? (Texture)history.Depth : Texture2D.blackTexture);
+            cmd.SetGlobalMatrix(PreviousViewProjectionMatrixId, history.PreviousViewProjectionMatrix);
+            cmd.SetGlobalMatrix(InverseViewProjectionMatrixId, history.CurrentInverseViewProjectionMatrix);
+            cmd.SetGlobalVector(DeferredScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
+            cmd.SetGlobalVector(SSAOFullScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
+            cmd.SetGlobalVector(SSAOTemporalParamsId, new Vector4(settings.TemporalFeedback, status.HasHistory ? 1f : 0f, settings.TemporalDepthRejection, settings.TemporalClamp));
         }
 
         private Material GetScreenSpaceAmbientOcclusionMaterial()
@@ -615,11 +773,12 @@ namespace Burt.RenderPipeline
 
     internal readonly struct BurtScreenSpaceAmbientOcclusionSettings
     {
-        public static readonly BurtScreenSpaceAmbientOcclusionSettings Disabled = new BurtScreenSpaceAmbientOcclusionSettings(false, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, 0.12f, 0.5f, 50f, 80f);
-        public static readonly BurtScreenSpaceAmbientOcclusionSettings DebugDefault = new BurtScreenSpaceAmbientOcclusionSettings(true, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, 0.12f, 0.5f, 50f, 80f);
+        public static readonly BurtScreenSpaceAmbientOcclusionSettings Disabled = new BurtScreenSpaceAmbientOcclusionSettings(false, BurtScreenSpaceAmbientOcclusionQuality.Medium, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, true, 0.78f, 0.012f, 0.75f, 0.12f, 0.5f, 50f, 80f);
+        public static readonly BurtScreenSpaceAmbientOcclusionSettings DebugDefault = new BurtScreenSpaceAmbientOcclusionSettings(true, BurtScreenSpaceAmbientOcclusionQuality.Medium, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, true, 0.78f, 0.012f, 0.75f, 0.12f, 0.5f, 50f, 80f);
 
         public BurtScreenSpaceAmbientOcclusionSettings(
             bool enabled,
+            BurtScreenSpaceAmbientOcclusionQuality quality,
             float intensity,
             float radius,
             int sampleCount,
@@ -630,12 +789,17 @@ namespace Burt.RenderPipeline
             bool halfResolution,
             bool blur,
             bool spatialDenoise,
+            bool temporalAccumulation,
+            float temporalFeedback,
+            float temporalDepthRejection,
+            float temporalClamp,
             float blurSharpness,
             float thickness,
             float fadeRadius,
             float fadeDistance)
         {
             Enabled = enabled;
+            Quality = NormalizeQuality(quality);
             Intensity = Mathf.Clamp(intensity, 0f, 4f);
             Radius = Mathf.Clamp(radius, 0.01f, 8f);
             SampleCount = Mathf.Clamp(sampleCount, 1, 32);
@@ -646,6 +810,10 @@ namespace Burt.RenderPipeline
             HalfResolution = halfResolution;
             Blur = blur;
             SpatialDenoise = spatialDenoise;
+            TemporalAccumulation = temporalAccumulation;
+            TemporalFeedback = Mathf.Clamp(temporalFeedback, 0f, 0.98f);
+            TemporalDepthRejection = Mathf.Clamp(temporalDepthRejection, 0.001f, 0.2f);
+            TemporalClamp = Mathf.Clamp(temporalClamp, 0f, 4f);
             BlurSharpness = Mathf.Clamp01(blurSharpness);
             Thickness = Mathf.Clamp01(thickness);
             FadeRadius = Mathf.Clamp(fadeRadius, 0.01f, 200f);
@@ -653,6 +821,8 @@ namespace Burt.RenderPipeline
         }
 
         public bool Enabled { get; }
+
+        public BurtScreenSpaceAmbientOcclusionQuality Quality { get; }
 
         public float Intensity { get; }
 
@@ -674,6 +844,14 @@ namespace Burt.RenderPipeline
 
         public bool SpatialDenoise { get; }
 
+        public bool TemporalAccumulation { get; }
+
+        public float TemporalFeedback { get; }
+
+        public float TemporalDepthRejection { get; }
+
+        public float TemporalClamp { get; }
+
         public float BlurSharpness { get; }
 
         public float Thickness { get; }
@@ -681,6 +859,728 @@ namespace Burt.RenderPipeline
         public float FadeRadius { get; }
 
         public float FadeDistance { get; }
+
+        public int CreateHistorySignature()
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = hash * 31 + BoolToInt(Enabled);
+                hash = hash * 31 + (int)Quality;
+                hash = hash * 31 + Quantize(Intensity, 1000f);
+                hash = hash * 31 + Quantize(Radius, 1000f);
+                hash = hash * 31 + SampleCount;
+                hash = hash * 31 + BoolToInt(HorizonSearch);
+                hash = hash * 31 + DirectionCount;
+                hash = hash * 31 + Quantize(Bias, 100000f);
+                hash = hash * 31 + Quantize(Power, 1000f);
+                hash = hash * 31 + BoolToInt(HalfResolution);
+                hash = hash * 31 + BoolToInt(Blur);
+                hash = hash * 31 + BoolToInt(SpatialDenoise);
+                hash = hash * 31 + BoolToInt(TemporalAccumulation);
+                hash = hash * 31 + Quantize(TemporalFeedback, 1000f);
+                hash = hash * 31 + Quantize(TemporalDepthRejection, 10000f);
+                hash = hash * 31 + Quantize(TemporalClamp, 1000f);
+                hash = hash * 31 + Quantize(BlurSharpness, 1000f);
+                hash = hash * 31 + Quantize(Thickness, 1000f);
+                hash = hash * 31 + Quantize(FadeRadius, 100f);
+                hash = hash * 31 + Quantize(FadeDistance, 100f);
+                return hash;
+            }
+        }
+
+        private static int BoolToInt(bool value)
+        {
+            return value ? 1 : 0;
+        }
+
+        private static int Quantize(float value, float scale)
+        {
+            return Mathf.RoundToInt(value * scale);
+        }
+
+        private static BurtScreenSpaceAmbientOcclusionQuality NormalizeQuality(BurtScreenSpaceAmbientOcclusionQuality quality)
+        {
+            switch (quality)
+            {
+                case BurtScreenSpaceAmbientOcclusionQuality.Low:
+                case BurtScreenSpaceAmbientOcclusionQuality.Medium:
+                case BurtScreenSpaceAmbientOcclusionQuality.High:
+                    return quality;
+                default:
+                    return BurtScreenSpaceAmbientOcclusionQuality.Custom;
+            }
+        }
+    }
+
+    internal readonly struct BurtScreenSpaceAmbientOcclusionHistoryMatrices
+    {
+        public Matrix4x4 ViewProjectionMatrix { get; }
+        public Matrix4x4 InverseViewProjectionMatrix { get; }
+        public Matrix4x4 NonJitteredProjectionMatrix { get; }
+
+        public BurtScreenSpaceAmbientOcclusionHistoryMatrices(
+            Matrix4x4 viewProjectionMatrix,
+            Matrix4x4 inverseViewProjectionMatrix,
+            Matrix4x4 nonJitteredProjectionMatrix)
+        {
+            ViewProjectionMatrix = viewProjectionMatrix;
+            InverseViewProjectionMatrix = inverseViewProjectionMatrix;
+            NonJitteredProjectionMatrix = nonJitteredProjectionMatrix;
+        }
+    }
+
+    internal readonly struct BurtScreenSpaceAmbientOcclusionHistoryTextures
+    {
+        public RenderTexture Color { get; }
+        public RenderTexture Depth { get; }
+        public Matrix4x4 PreviousViewProjectionMatrix { get; }
+        public Matrix4x4 CurrentInverseViewProjectionMatrix { get; }
+
+        public BurtScreenSpaceAmbientOcclusionHistoryTextures(
+            RenderTexture color,
+            RenderTexture depth,
+            Matrix4x4 previousViewProjectionMatrix,
+            Matrix4x4 currentInverseViewProjectionMatrix)
+        {
+            Color = color;
+            Depth = depth;
+            PreviousViewProjectionMatrix = previousViewProjectionMatrix;
+            CurrentInverseViewProjectionMatrix = currentInverseViewProjectionMatrix;
+        }
+
+        public static BurtScreenSpaceAmbientOcclusionHistoryTextures CreateInvalid(BurtScreenSpaceAmbientOcclusionHistoryMatrices matrices)
+        {
+            return new BurtScreenSpaceAmbientOcclusionHistoryTextures(null, null, matrices.ViewProjectionMatrix, matrices.InverseViewProjectionMatrix);
+        }
+    }
+
+    internal readonly struct BurtScreenSpaceAmbientOcclusionHistoryStatus
+    {
+        public bool HasHistory { get; }
+        public bool DescriptorMatches { get; }
+        public bool HasDepthHistory { get; }
+        public bool DepthDescriptorMatches { get; }
+        public int Width { get; }
+        public int Height { get; }
+        public RenderTextureFormat Format { get; }
+        public int FrameIndex { get; }
+        public int HistoryAge { get; }
+        public int FirstValidFrameIndex { get; }
+        public int LastInvalidationFrameIndex { get; }
+        public string LastInvalidationReason { get; }
+
+        public BurtScreenSpaceAmbientOcclusionHistoryStatus(
+            bool hasHistory,
+            bool descriptorMatches,
+            bool hasDepthHistory,
+            bool depthDescriptorMatches,
+            int width,
+            int height,
+            RenderTextureFormat format,
+            int frameIndex,
+            int historyAge,
+            int firstValidFrameIndex,
+            int lastInvalidationFrameIndex,
+            string lastInvalidationReason)
+        {
+            HasHistory = hasHistory;
+            DescriptorMatches = descriptorMatches;
+            HasDepthHistory = hasDepthHistory;
+            DepthDescriptorMatches = depthDescriptorMatches;
+            Width = width;
+            Height = height;
+            Format = format;
+            FrameIndex = frameIndex;
+            HistoryAge = historyAge;
+            FirstValidFrameIndex = firstValidFrameIndex;
+            LastInvalidationFrameIndex = lastInvalidationFrameIndex;
+            LastInvalidationReason = lastInvalidationReason;
+        }
+    }
+
+    internal static class BurtScreenSpaceAmbientOcclusionHistoryUtility
+    {
+        private const int HistoryAlgorithmVersion = 2;
+        private const int CameraStatePruneInterval = 128;
+        private const float ProjectionChangeEpsilon = 0.0001f;
+
+        private sealed class CameraState
+        {
+            public Camera Camera;
+            public RenderTexture ColorHistory;
+            public RenderTexture DepthHistory;
+            public RenderTexture DebugPreviousColorHistory;
+            public RenderTexture DebugPreviousDepthHistory;
+            public RenderTextureDescriptor ColorDescriptor;
+            public RenderTextureDescriptor DepthDescriptor;
+            public RenderTextureDescriptor DebugPreviousColorDescriptor;
+            public RenderTextureDescriptor DebugPreviousDepthDescriptor;
+            public int AlgorithmVersion;
+            public bool HasValidHistory;
+            public bool HasPreviousCameraState;
+            public int FrameIndex;
+            public int FirstValidFrameIndex;
+            public int LastInvalidationFrameIndex;
+            public Matrix4x4 CurrentViewProjectionMatrix = Matrix4x4.identity;
+            public Matrix4x4 CurrentInverseViewProjectionMatrix = Matrix4x4.identity;
+            public Matrix4x4 CurrentNonJitteredProjectionMatrix = Matrix4x4.identity;
+            public Matrix4x4 PreviousViewProjectionMatrix = Matrix4x4.identity;
+            public Matrix4x4 PreviousNonJitteredProjectionMatrix = Matrix4x4.identity;
+            public Matrix4x4 DebugPreviousViewProjectionMatrix = Matrix4x4.identity;
+            public BurtRendererMode CurrentRendererMode = BurtRendererMode.Forward;
+            public BurtRendererMode PreviousRendererMode = BurtRendererMode.Forward;
+            public Vector3 CurrentCameraPosition;
+            public Vector3 PreviousCameraPosition;
+            public Quaternion CurrentCameraRotation = Quaternion.identity;
+            public Quaternion PreviousCameraRotation = Quaternion.identity;
+            public bool CurrentOrthographic;
+            public bool PreviousOrthographic;
+            public float CurrentFieldOfView;
+            public float PreviousFieldOfView;
+            public float CurrentOrthographicSize;
+            public float PreviousOrthographicSize;
+            public float CurrentNearClipPlane;
+            public float PreviousNearClipPlane;
+            public float CurrentFarClipPlane;
+            public float PreviousFarClipPlane;
+            public int CurrentTargetTextureId;
+            public int PreviousTargetTextureId;
+            public int CurrentTargetWidth;
+            public int CurrentTargetHeight;
+            public int PreviousTargetWidth;
+            public int PreviousTargetHeight;
+            public int SettingsSignature;
+            public bool HasSettingsSignature;
+            public string LastInvalidationReason = "NeverAllocated";
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<int, CameraState> CameraStates = new System.Collections.Generic.Dictionary<int, CameraState>();
+        private static readonly System.Collections.Generic.List<int> CameraStateRemovalKeys = new System.Collections.Generic.List<int>();
+        private static int cameraStatePruneCounter;
+
+        public static BurtScreenSpaceAmbientOcclusionHistoryTextures EnsureHistoryTextures(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            BurtScreenSpaceAmbientOcclusionSettings settings,
+            out bool historyValid)
+        {
+            historyValid = false;
+            var camera = request != null ? request.Camera : null;
+            var matrices = CreateCurrentMatrices(request);
+            if (camera == null)
+            {
+                return BurtScreenSpaceAmbientOcclusionHistoryTextures.CreateInvalid(matrices);
+            }
+
+            var state = GetOrCreateState(camera.GetInstanceID());
+            state.Camera = camera;
+            PruneDisposedCameraStates();
+            if (state.AlgorithmVersion != HistoryAlgorithmVersion)
+            {
+                ReleaseHistory(state);
+                state.AlgorithmVersion = HistoryAlgorithmVersion;
+                SetAllocationInvalidationReason(state, "AlgorithmChanged");
+            }
+
+            var colorDescriptor = CreateColorHistoryDescriptor(camera);
+            var depthDescriptor = CreateDepthHistoryDescriptor(camera);
+            var colorMatches = state.ColorHistory != null && Matches(state.ColorDescriptor, colorDescriptor);
+            var depthMatches = state.DepthHistory != null && Matches(state.DepthDescriptor, depthDescriptor);
+            var debugColorMatches = state.DebugPreviousColorHistory != null && Matches(state.DebugPreviousColorDescriptor, colorDescriptor);
+            var debugDepthMatches = state.DebugPreviousDepthHistory != null && Matches(state.DebugPreviousDepthDescriptor, depthDescriptor);
+            var descriptorsMatch = colorMatches && depthMatches;
+            GetTargetSize(camera, out var targetWidth, out var targetHeight);
+            var rendererMode = asset != null ? asset.RendererMode : BurtRendererMode.Forward;
+            var invalidationReason = ResolveHistoryInvalidationReason(camera, state, rendererMode, matrices.NonJitteredProjectionMatrix, targetWidth, targetHeight, descriptorsMatch);
+            var settingsSignature = settings.CreateHistorySignature();
+            if (string.IsNullOrEmpty(invalidationReason) && state.HasSettingsSignature && state.SettingsSignature != settingsSignature)
+            {
+                invalidationReason = "SettingsChanged";
+            }
+
+            if (!descriptorsMatch)
+            {
+                ReleaseHistory(state);
+            }
+
+            if (!debugColorMatches)
+            {
+                ReleaseTexture(state.DebugPreviousColorHistory);
+                state.DebugPreviousColorHistory = null;
+            }
+
+            if (!debugDepthMatches)
+            {
+                ReleaseTexture(state.DebugPreviousDepthHistory);
+                state.DebugPreviousDepthHistory = null;
+            }
+
+            if (state.ColorHistory == null)
+            {
+                state.ColorDescriptor = colorDescriptor;
+                state.ColorHistory = CreateHistoryTexture(colorDescriptor, "Burt SSAO History " + camera.GetInstanceID(), FilterMode.Bilinear);
+                SetAllocationInvalidationReason(state, "HistoryAllocated");
+            }
+
+            if (state.DepthHistory == null)
+            {
+                state.DepthDescriptor = depthDescriptor;
+                state.DepthHistory = CreateHistoryTexture(depthDescriptor, "Burt SSAO Depth History " + camera.GetInstanceID(), FilterMode.Point);
+                SetAllocationInvalidationReason(state, "DepthHistoryAllocated");
+            }
+
+            if (state.DebugPreviousColorHistory == null)
+            {
+                state.DebugPreviousColorDescriptor = colorDescriptor;
+                state.DebugPreviousColorHistory = CreateHistoryTexture(colorDescriptor, "Burt SSAO Previous History Debug " + camera.GetInstanceID(), FilterMode.Bilinear);
+            }
+
+            if (state.DebugPreviousDepthHistory == null)
+            {
+                state.DebugPreviousDepthDescriptor = depthDescriptor;
+                state.DebugPreviousDepthHistory = CreateHistoryTexture(depthDescriptor, "Burt SSAO Previous Depth Debug " + camera.GetInstanceID(), FilterMode.Point);
+            }
+
+            if (!string.IsNullOrEmpty(invalidationReason))
+            {
+                InvalidateState(state, invalidationReason);
+            }
+
+            state.FrameIndex++;
+            state.CurrentRendererMode = rendererMode;
+            state.CurrentViewProjectionMatrix = matrices.ViewProjectionMatrix;
+            state.CurrentInverseViewProjectionMatrix = matrices.InverseViewProjectionMatrix;
+            state.CurrentNonJitteredProjectionMatrix = matrices.NonJitteredProjectionMatrix;
+            state.SettingsSignature = settingsSignature;
+            state.HasSettingsSignature = true;
+            CaptureCurrentCameraState(camera, state, targetWidth, targetHeight);
+
+            historyValid = state.HasValidHistory && state.HasPreviousCameraState && state.ColorHistory != null && state.DepthHistory != null;
+            var previousViewProjectionMatrix = state.HasPreviousCameraState ? state.PreviousViewProjectionMatrix : matrices.ViewProjectionMatrix;
+            return new BurtScreenSpaceAmbientOcclusionHistoryTextures(state.ColorHistory, state.DepthHistory, previousViewProjectionMatrix, matrices.InverseViewProjectionMatrix);
+        }
+
+        public static BurtScreenSpaceAmbientOcclusionHistoryMatrices CreateCurrentMatrices(BurtRenderRequest request)
+        {
+            var camera = request != null ? request.Camera : null;
+            return CreateCurrentMatrices(camera, request != null ? request.TemporalAA : null);
+        }
+
+        private static BurtScreenSpaceAmbientOcclusionHistoryMatrices CreateCurrentMatrices(Camera camera)
+        {
+            return CreateCurrentMatrices(camera, null);
+        }
+
+        private static BurtScreenSpaceAmbientOcclusionHistoryMatrices CreateCurrentMatrices(Camera camera, BurtTemporalAARequestState temporalAA)
+        {
+            if (camera == null)
+            {
+                return new BurtScreenSpaceAmbientOcclusionHistoryMatrices(Matrix4x4.identity, Matrix4x4.identity, Matrix4x4.identity);
+            }
+
+            var viewMatrix = temporalAA != null ? temporalAA.ViewMatrix : camera.worldToCameraMatrix;
+            var projectionMatrix = temporalAA != null ? temporalAA.JitteredProjectionMatrix : camera.projectionMatrix;
+            var nonJitteredProjectionMatrix = temporalAA != null ? temporalAA.NonJitteredProjectionMatrix : camera.projectionMatrix;
+            var viewProjectionMatrix = GL.GetGPUProjectionMatrix(projectionMatrix, true) * viewMatrix;
+            return new BurtScreenSpaceAmbientOcclusionHistoryMatrices(viewProjectionMatrix, viewProjectionMatrix.inverse, nonJitteredProjectionMatrix);
+        }
+
+        public static void MarkHistoryValid(Camera camera)
+        {
+            if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
+            {
+                return;
+            }
+
+            if (!state.HasValidHistory)
+            {
+                state.FirstValidFrameIndex = state.FrameIndex;
+            }
+
+            state.HasValidHistory = true;
+            state.PreviousRendererMode = state.CurrentRendererMode;
+            state.PreviousViewProjectionMatrix = state.CurrentViewProjectionMatrix;
+            state.PreviousNonJitteredProjectionMatrix = state.CurrentNonJitteredProjectionMatrix;
+            state.PreviousCameraPosition = state.CurrentCameraPosition;
+            state.PreviousCameraRotation = state.CurrentCameraRotation;
+            state.PreviousOrthographic = state.CurrentOrthographic;
+            state.PreviousFieldOfView = state.CurrentFieldOfView;
+            state.PreviousOrthographicSize = state.CurrentOrthographicSize;
+            state.PreviousNearClipPlane = state.CurrentNearClipPlane;
+            state.PreviousFarClipPlane = state.CurrentFarClipPlane;
+            state.PreviousTargetTextureId = state.CurrentTargetTextureId;
+            state.PreviousTargetWidth = state.CurrentTargetWidth;
+            state.PreviousTargetHeight = state.CurrentTargetHeight;
+            state.HasPreviousCameraState = true;
+        }
+
+        public static void InvalidateHistory(Camera camera, string reason)
+        {
+            if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
+            {
+                return;
+            }
+
+            InvalidateState(state, string.IsNullOrEmpty(reason) ? "Manual" : reason);
+        }
+
+        public static BurtScreenSpaceAmbientOcclusionHistoryStatus GetHistoryStatus(Camera camera)
+        {
+            if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
+            {
+                return new BurtScreenSpaceAmbientOcclusionHistoryStatus(false, false, false, false, 0, 0, RenderTextureFormat.Default, 0, 0, 0, 0, "NoCameraOrHistory");
+            }
+
+            var colorDescriptor = CreateColorHistoryDescriptor(camera);
+            var depthDescriptor = CreateDepthHistoryDescriptor(camera);
+            var hasColor = state.ColorHistory != null;
+            var hasDepth = state.DepthHistory != null;
+            var historyAge = state.HasValidHistory && state.FirstValidFrameIndex > 0 ? Mathf.Max(0, state.FrameIndex - state.FirstValidFrameIndex + 1) : 0;
+            return new BurtScreenSpaceAmbientOcclusionHistoryStatus(
+                state.HasValidHistory && hasColor && hasDepth,
+                hasColor && Matches(state.ColorDescriptor, colorDescriptor),
+                hasDepth,
+                hasDepth && Matches(state.DepthDescriptor, depthDescriptor),
+                hasColor ? state.ColorHistory.width : 0,
+                hasColor ? state.ColorHistory.height : 0,
+                hasColor ? state.ColorHistory.format : RenderTextureFormat.Default,
+                state.FrameIndex,
+                historyAge,
+                state.FirstValidFrameIndex,
+                state.LastInvalidationFrameIndex,
+                state.LastInvalidationReason);
+        }
+
+        public static void CopyHistoryToDebugSnapshot(CommandBuffer cmd, Camera camera)
+        {
+            if (cmd == null || camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
+            {
+                return;
+            }
+
+            if (state.ColorHistory == null || state.DepthHistory == null || state.DebugPreviousColorHistory == null || state.DebugPreviousDepthHistory == null)
+            {
+                return;
+            }
+
+            cmd.CopyTexture(new RenderTargetIdentifier(state.ColorHistory), new RenderTargetIdentifier(state.DebugPreviousColorHistory));
+            cmd.CopyTexture(new RenderTargetIdentifier(state.DepthHistory), new RenderTargetIdentifier(state.DebugPreviousDepthHistory));
+            state.DebugPreviousViewProjectionMatrix = state.HasPreviousCameraState ? state.PreviousViewProjectionMatrix : state.CurrentViewProjectionMatrix;
+        }
+
+        public static BurtScreenSpaceAmbientOcclusionHistoryTextures GetDebugSnapshotTextures(BurtRenderRequest request)
+        {
+            var matrices = CreateCurrentMatrices(request);
+            var camera = request != null ? request.Camera : null;
+            if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
+            {
+                return BurtScreenSpaceAmbientOcclusionHistoryTextures.CreateInvalid(matrices);
+            }
+
+            var previousViewProjectionMatrix = state.DebugPreviousColorHistory != null && state.DebugPreviousDepthHistory != null
+                ? state.DebugPreviousViewProjectionMatrix
+                : (state.HasPreviousCameraState ? state.PreviousViewProjectionMatrix : matrices.ViewProjectionMatrix);
+            return new BurtScreenSpaceAmbientOcclusionHistoryTextures(state.DebugPreviousColorHistory, state.DebugPreviousDepthHistory, previousViewProjectionMatrix, matrices.InverseViewProjectionMatrix);
+        }
+
+        public static RenderTextureDescriptor CreateDepthHistoryDescriptor(Camera camera)
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateScreenSpaceAmbientOcclusionDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.RFloat;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.mipCount = 1;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateColorHistoryDescriptor(Camera camera)
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateScreenSpaceAmbientOcclusionDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.RHalf;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.mipCount = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
+        private static CameraState GetOrCreateState(int cameraId)
+        {
+            if (!CameraStates.TryGetValue(cameraId, out var state))
+            {
+                state = new CameraState();
+                CameraStates.Add(cameraId, state);
+            }
+
+            return state;
+        }
+
+        private static void PruneDisposedCameraStates()
+        {
+            cameraStatePruneCounter++;
+            if (cameraStatePruneCounter < CameraStatePruneInterval)
+            {
+                return;
+            }
+
+            cameraStatePruneCounter = 0;
+            CameraStateRemovalKeys.Clear();
+            foreach (var pair in CameraStates)
+            {
+                if (pair.Value.Camera != null)
+                {
+                    continue;
+                }
+
+                ReleaseHistory(pair.Value);
+                CameraStateRemovalKeys.Add(pair.Key);
+            }
+
+            for (var i = 0; i < CameraStateRemovalKeys.Count; i++)
+            {
+                CameraStates.Remove(CameraStateRemovalKeys[i]);
+            }
+
+            CameraStateRemovalKeys.Clear();
+        }
+
+        private static RenderTexture CreateHistoryTexture(RenderTextureDescriptor descriptor, string name, FilterMode filterMode)
+        {
+            var texture = new RenderTexture(descriptor)
+            {
+                name = name,
+                hideFlags = HideFlags.HideAndDontSave,
+                filterMode = filterMode,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            texture.Create();
+            return texture;
+        }
+
+        private static bool Matches(RenderTextureDescriptor left, RenderTextureDescriptor right)
+        {
+            return left.width == right.width &&
+                left.height == right.height &&
+                left.colorFormat == right.colorFormat &&
+                left.depthBufferBits == right.depthBufferBits &&
+                left.msaaSamples == right.msaaSamples &&
+                left.useMipMap == right.useMipMap &&
+                left.autoGenerateMips == right.autoGenerateMips &&
+                left.mipCount == right.mipCount &&
+                left.sRGB == right.sRGB;
+        }
+
+        private static string ResolveHistoryInvalidationReason(
+            Camera camera,
+            CameraState state,
+            BurtRendererMode rendererMode,
+            Matrix4x4 nonJitteredProjectionMatrix,
+            int targetWidth,
+            int targetHeight,
+            bool descriptorsMatch)
+        {
+            if (state == null)
+            {
+                return "NoCameraState";
+            }
+
+            if (!state.HasPreviousCameraState)
+            {
+                return descriptorsMatch ? null : "DescriptorChanged";
+            }
+
+            if (rendererMode != state.PreviousRendererMode)
+            {
+                return "RendererModeChanged";
+            }
+
+            if (GetTargetTextureId(camera) != state.PreviousTargetTextureId)
+            {
+                return "TargetTextureChanged";
+            }
+
+            if (targetWidth != state.PreviousTargetWidth || targetHeight != state.PreviousTargetHeight)
+            {
+                return GetTargetTextureId(camera) != 0 ? "TargetTextureSizeChanged" : "CameraResolutionChanged";
+            }
+
+            if (!descriptorsMatch)
+            {
+                return "DescriptorChanged";
+            }
+
+            if (camera != null)
+            {
+                if (camera.orthographic != state.PreviousOrthographic)
+                {
+                    return "ProjectionModeChanged";
+                }
+
+                if (camera.orthographic)
+                {
+                    if (FloatChanged(camera.orthographicSize, state.PreviousOrthographicSize, 0.0001f))
+                    {
+                        return "OrthographicSizeChanged";
+                    }
+                }
+                else if (FloatChanged(camera.fieldOfView, state.PreviousFieldOfView, 0.0001f))
+                {
+                    return "FOVChanged";
+                }
+
+                if (FloatChanged(camera.nearClipPlane, state.PreviousNearClipPlane, 0.0001f))
+                {
+                    return "NearClipChanged";
+                }
+
+                if (FloatChanged(camera.farClipPlane, state.PreviousFarClipPlane, 0.001f))
+                {
+                    return "FarClipChanged";
+                }
+            }
+
+            if (ProjectionChanged(nonJitteredProjectionMatrix, state.PreviousNonJitteredProjectionMatrix))
+            {
+                return "ProjectionChanged";
+            }
+
+            return CameraCutDetected(camera, state) ? "CameraCut" : null;
+        }
+
+        private static void CaptureCurrentCameraState(Camera camera, CameraState state, int targetWidth, int targetHeight)
+        {
+            if (camera == null || state == null)
+            {
+                return;
+            }
+
+            state.CurrentCameraPosition = camera.transform.position;
+            state.CurrentCameraRotation = camera.transform.rotation;
+            state.CurrentOrthographic = camera.orthographic;
+            state.CurrentFieldOfView = camera.fieldOfView;
+            state.CurrentOrthographicSize = camera.orthographicSize;
+            state.CurrentNearClipPlane = camera.nearClipPlane;
+            state.CurrentFarClipPlane = camera.farClipPlane;
+            state.CurrentTargetTextureId = GetTargetTextureId(camera);
+            state.CurrentTargetWidth = targetWidth;
+            state.CurrentTargetHeight = targetHeight;
+        }
+
+        private static void InvalidateState(CameraState state, string reason)
+        {
+            if (state == null)
+            {
+                return;
+            }
+
+            state.HasValidHistory = false;
+            state.FirstValidFrameIndex = 0;
+            state.LastInvalidationFrameIndex = state.FrameIndex;
+            state.LastInvalidationReason = string.IsNullOrEmpty(reason) ? "Unknown" : reason;
+        }
+
+        private static void SetAllocationInvalidationReason(CameraState state, string reason)
+        {
+            if (state == null)
+            {
+                return;
+            }
+
+            if (!state.HasPreviousCameraState ||
+                state.LastInvalidationReason == "NeverAllocated" ||
+                state.LastInvalidationReason == "HistoryAllocated" ||
+                state.LastInvalidationReason == "DepthHistoryAllocated")
+            {
+                state.LastInvalidationReason = reason;
+            }
+        }
+
+        private static int GetTargetTextureId(Camera camera)
+        {
+            return camera != null && camera.targetTexture != null ? camera.targetTexture.GetInstanceID() : 0;
+        }
+
+        private static void GetTargetSize(Camera camera, out int width, out int height)
+        {
+            if (camera != null && camera.targetTexture != null)
+            {
+                width = Mathf.Max(1, camera.targetTexture.width);
+                height = Mathf.Max(1, camera.targetTexture.height);
+                return;
+            }
+
+            width = Mathf.Max(1, camera != null ? camera.pixelWidth : 1);
+            height = Mathf.Max(1, camera != null ? camera.pixelHeight : 1);
+        }
+
+        private static bool FloatChanged(float current, float previous, float epsilon)
+        {
+            return Mathf.Abs(current - previous) > epsilon;
+        }
+
+        private static bool ProjectionChanged(Matrix4x4 current, Matrix4x4 previous)
+        {
+            for (var i = 0; i < 16; i++)
+            {
+                if (Mathf.Abs(current[i] - previous[i]) > ProjectionChangeEpsilon)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool CameraCutDetected(Camera camera, CameraState state)
+        {
+            if (camera == null || state == null)
+            {
+                return false;
+            }
+
+            var positionDelta = camera.transform.position - state.PreviousCameraPosition;
+            var rotationDelta = Quaternion.Angle(camera.transform.rotation, state.PreviousCameraRotation);
+            var farClip = Mathf.Max(camera.farClipPlane, 1f);
+            var cutDistance = Mathf.Clamp(farClip * 0.25f, 25f, 250f);
+            return positionDelta.sqrMagnitude > cutDistance * cutDistance || rotationDelta > 60f;
+        }
+
+        private static void ReleaseHistory(CameraState state)
+        {
+            if (state == null)
+            {
+                return;
+            }
+
+            ReleaseTexture(state.ColorHistory);
+            ReleaseTexture(state.DepthHistory);
+            ReleaseTexture(state.DebugPreviousColorHistory);
+            ReleaseTexture(state.DebugPreviousDepthHistory);
+            state.ColorHistory = null;
+            state.DepthHistory = null;
+            state.DebugPreviousColorHistory = null;
+            state.DebugPreviousDepthHistory = null;
+            state.HasValidHistory = false;
+            state.HasSettingsSignature = false;
+            state.FirstValidFrameIndex = 0;
+        }
+
+        private static void ReleaseTexture(RenderTexture texture)
+        {
+            if (texture == null)
+            {
+                return;
+            }
+
+            texture.Release();
+            Object.DestroyImmediate(texture);
+        }
     }
 
     internal static class BurtScreenSpaceAmbientOcclusionPassUtility
@@ -699,12 +1599,32 @@ namespace Burt.RenderPipeline
         {
             return mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw ||
                 mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal ||
-                IsScreenSpaceAmbientOcclusionOverlayDebugMode(mode);
+                IsScreenSpaceAmbientOcclusionOverlayDebugMode(mode) ||
+                IsScreenSpaceAmbientOcclusionTemporalDebugMode(mode);
         }
 
         public static bool IsScreenSpaceAmbientOcclusionOverlayDebugMode(BurtShadingDebugMode mode)
         {
             return mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay;
+        }
+
+        public static bool IsScreenSpaceAmbientOcclusionTemporalDebugMode(BurtShadingDebugMode mode)
+        {
+            return mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionHistory ||
+                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference ||
+                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity ||
+                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability;
+        }
+
+        public static bool IsScreenSpaceAmbientOcclusionDepthValidityDebugMode(BurtShadingDebugMode mode)
+        {
+            return mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity;
+        }
+
+        public static bool IsScreenSpaceAmbientOcclusionDepthDiagnosticDebugMode(BurtShadingDebugMode mode)
+        {
+            return mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity ||
+                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability;
         }
 
         public static int ResolveScreenSpaceAmbientOcclusionShaderDebugMode()
@@ -717,6 +1637,14 @@ namespace Burt.RenderPipeline
                     return 2;
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay:
                     return 3;
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionHistory:
+                    return 4;
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference:
+                    return 5;
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity:
+                    return 6;
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability:
+                    return 7;
                 default:
                     return 0;
             }
@@ -724,7 +1652,13 @@ namespace Burt.RenderPipeline
 
         public static int ResolveScreenSpaceAmbientOcclusionDebugPassIndex()
         {
-            return IsScreenSpaceAmbientOcclusionOverlayDebugMode(BurtShadingDebugSettings.Mode) ? 3 : 2;
+            if (IsScreenSpaceAmbientOcclusionOverlayDebugMode(BurtShadingDebugSettings.Mode))
+            {
+                return 3;
+            }
+
+            return IsScreenSpaceAmbientOcclusionDepthValidityDebugMode(BurtShadingDebugSettings.Mode) ||
+                BurtShadingDebugSettings.Mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability ? 9 : 2;
         }
 
         public static string ResolveScreenSpaceAmbientOcclusionDebugModeLabel()
@@ -737,6 +1671,14 @@ namespace Burt.RenderPipeline
                     return "Final";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay:
                     return "Overlay";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionHistory:
+                    return "History";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference:
+                    return "TemporalDifference";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity:
+                    return "DepthValidity";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability:
+                    return "SurfaceStability";
                 default:
                     return "Disabled";
             }
@@ -751,42 +1693,137 @@ namespace Burt.RenderPipeline
 
             if (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection)
             {
-                return BurtScreenSpaceAmbientOcclusionSettings.Disabled;
+                return DisableScreenSpaceAmbientOcclusion(request, "RequestTypeDisabled");
             }
 
             if (asset == null || asset.RendererMode != BurtRendererMode.Deferred)
             {
-                return BurtScreenSpaceAmbientOcclusionSettings.Disabled;
+                return DisableScreenSpaceAmbientOcclusion(request, "RendererDisabled");
             }
 
             var debugRequested = IsScreenSpaceAmbientOcclusionDebugMode(BurtShadingDebugSettings.Mode);
             var component = GetScreenSpaceAmbientOcclusionVolumeComponent();
             if (component == null || (debugRequested && !component.IsEnabled()))
             {
-                return debugRequested ? BurtScreenSpaceAmbientOcclusionSettings.DebugDefault : BurtScreenSpaceAmbientOcclusionSettings.Disabled;
+                return debugRequested ? BurtScreenSpaceAmbientOcclusionSettings.DebugDefault : DisableScreenSpaceAmbientOcclusion(request, "VolumeMissing");
             }
 
             if (!component.IsEnabled() && !debugRequested)
             {
-                return BurtScreenSpaceAmbientOcclusionSettings.Disabled;
+                return DisableScreenSpaceAmbientOcclusion(request, "VolumeDisabled");
             }
+
+            var quality = component.quality.value;
+            var sampleCount = component.sampleCount.value;
+            var horizonSearch = component.horizonSearch.value;
+            var directionCount = component.directionCount.value;
+            var halfResolution = component.halfResolution.value;
+            var blur = component.blur.value;
+            var spatialDenoise = component.spatialDenoise.value;
+            var temporalAccumulation = component.temporalAccumulation.value;
+            var temporalFeedback = component.temporalFeedback.value;
+            var temporalDepthRejection = component.temporalDepthRejection.value;
+            var temporalClamp = component.temporalClamp.value;
+            var blurSharpness = component.blurSharpness.value;
+            ApplyScreenSpaceAmbientOcclusionQualityPreset(
+                quality,
+                ref sampleCount,
+                ref horizonSearch,
+                ref directionCount,
+                ref halfResolution,
+                ref blur,
+                ref spatialDenoise,
+                ref temporalAccumulation,
+                ref temporalFeedback,
+                ref temporalDepthRejection,
+                ref temporalClamp,
+                ref blurSharpness);
 
             return new BurtScreenSpaceAmbientOcclusionSettings(
                 true,
+                quality,
                 component.intensity.value,
                 component.radius.value,
-                component.sampleCount.value,
-                component.horizonSearch.value,
-                component.directionCount.value,
+                sampleCount,
+                horizonSearch,
+                directionCount,
                 component.bias.value,
                 component.power.value,
-                component.halfResolution.value,
-                component.blur.value,
-                component.spatialDenoise.value,
-                component.blurSharpness.value,
+                halfResolution,
+                blur,
+                spatialDenoise,
+                temporalAccumulation,
+                temporalFeedback,
+                temporalDepthRejection,
+                temporalClamp,
+                blurSharpness,
                 component.thickness.value,
                 component.fadeRadius.value,
                 component.fadeDistance.value);
+        }
+
+        private static void ApplyScreenSpaceAmbientOcclusionQualityPreset(
+            BurtScreenSpaceAmbientOcclusionQuality quality,
+            ref int sampleCount,
+            ref bool horizonSearch,
+            ref int directionCount,
+            ref bool halfResolution,
+            ref bool blur,
+            ref bool spatialDenoise,
+            ref bool temporalAccumulation,
+            ref float temporalFeedback,
+            ref float temporalDepthRejection,
+            ref float temporalClamp,
+            ref float blurSharpness)
+        {
+            switch (quality)
+            {
+                case BurtScreenSpaceAmbientOcclusionQuality.Low:
+                    sampleCount = 8;
+                    horizonSearch = true;
+                    directionCount = 1;
+                    halfResolution = true;
+                    blur = true;
+                    spatialDenoise = true;
+                    temporalAccumulation = true;
+                    temporalFeedback = 0.72f;
+                    temporalDepthRejection = 0.018f;
+                    temporalClamp = 0.55f;
+                    blurSharpness = 0.08f;
+                    break;
+                case BurtScreenSpaceAmbientOcclusionQuality.Medium:
+                    sampleCount = 16;
+                    horizonSearch = true;
+                    directionCount = 2;
+                    halfResolution = true;
+                    blur = true;
+                    spatialDenoise = true;
+                    temporalAccumulation = true;
+                    temporalFeedback = 0.78f;
+                    temporalDepthRejection = 0.012f;
+                    temporalClamp = 0.75f;
+                    blurSharpness = 0.12f;
+                    break;
+                case BurtScreenSpaceAmbientOcclusionQuality.High:
+                    sampleCount = 24;
+                    horizonSearch = true;
+                    directionCount = 4;
+                    halfResolution = false;
+                    blur = true;
+                    spatialDenoise = true;
+                    temporalAccumulation = true;
+                    temporalFeedback = 0.82f;
+                    temporalDepthRejection = 0.01f;
+                    temporalClamp = 0.9f;
+                    blurSharpness = 0.18f;
+                    break;
+            }
+        }
+
+        private static BurtScreenSpaceAmbientOcclusionSettings DisableScreenSpaceAmbientOcclusion(BurtRenderRequest request, string reason)
+        {
+            BurtScreenSpaceAmbientOcclusionHistoryUtility.InvalidateHistory(request != null ? request.Camera : null, reason);
+            return BurtScreenSpaceAmbientOcclusionSettings.Disabled;
         }
 
         private static BurtScreenSpaceAmbientOcclusionVolumeComponent GetScreenSpaceAmbientOcclusionVolumeComponent()

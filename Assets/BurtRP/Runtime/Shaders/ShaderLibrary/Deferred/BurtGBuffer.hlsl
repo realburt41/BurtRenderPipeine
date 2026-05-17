@@ -7,6 +7,7 @@
 // GBuffer0 约定：rgb = baseColor，a = occlusion；baseColor 保持材质基础色，不预乘灯光或能量项。
 // GBuffer1 约定：rg = octahedron directionWS，b = packed(shadingModelID, material channel)，a = smoothness；Default Lit 存 normal，Hair 存 strand direction。
 // GBuffer2 约定：rgb = emission，a = reflectance；emission 建议使用 HDR RT，reflectance 继续按 XRender 语义重建 F0，不直接存 F0。
+// GBuffer3 stores the Clear Coat top-layer normalWS from _ClearCoatNormalMap; Clear Coat keeps the base/bottom normal in GBuffer1.rg.
 
 // 保存 Deferred 解码后的材质数据；字段只覆盖 PBR shading 所需的最小集合，方便后续替换真实 GBuffer RT。
 struct BurtGBufferData
@@ -17,8 +18,12 @@ struct BurtGBufferData
     // 保存世界空间方向，解码后必须是单位向量；Default Lit=normalWS，Hair=strandDirectionWS。
     float3 normalWS;
 
+    float3 clearCoatNormalWS;
+
     // 保存材质通道；Default Lit=metallic，Hair=packed(scatter, shift)。访问时优先使用下面的语义 helper，避免混用。
     float metallic;
+
+    float materialChannel;
 
     // 保存光滑度，GBuffer 保留面板语义，后续统一走 smoothness -> perceptual roughness。
     float smoothness;
@@ -37,9 +42,15 @@ struct BurtGBufferData
 
     // 保存 shading model id；0=Default Lit，1=Hair。它决定 vector/material 两个复用槽的语义。
     float shadingModelID;
+
+    float clearCoatMask;
+
+    float clearCoatRoughness;
+
+    float subsurfaceStrength;
 };
 
-// 保存实际写入 RenderTarget 的三张 GBuffer 颜色；这里只定义编码结果，不负责 RT 创建或生命周期。
+// 保存实际写入 RenderTarget 的四张 GBuffer 颜色；这里只定义编码结果，不负责 RT 创建或生命周期。
 struct BurtEncodedGBuffer
 {
     // GBuffer0：baseColor.rgb + occlusion。
@@ -50,6 +61,8 @@ struct BurtEncodedGBuffer
 
     // GBuffer2：emission.rgb + reflectance。
     float4 gbuffer2;
+
+    float4 gbuffer3;
 };
 
 // Octahedron normal 编码的折叠函数；把背半球折回二维平面，节省 GBuffer normal 通道。
@@ -125,6 +138,14 @@ static const float BURT_HAIR_SCATTER_PACK_MAX_BUCKET = BURT_HAIR_SCATTER_PACK_DI
 static const float BURT_HAIR_SHIFT_PACK_MAX_BUCKET = BURT_HAIR_SHIFT_PACK_DIMENSION - 1.0f;
 static const float BURT_HAIR_MATERIAL_PACK_MAX_VALUE = BURT_HAIR_SCATTER_PACK_DIMENSION * BURT_HAIR_SHIFT_PACK_DIMENSION - 1.0f;
 
+static const float BURT_CLEAR_COAT_METALLIC_PACK_DIMENSION = 8.0f;
+static const float BURT_CLEAR_COAT_MASK_PACK_DIMENSION = 8.0f;
+static const float BURT_CLEAR_COAT_ROUGHNESS_PACK_DIMENSION = 8.0f;
+static const float BURT_CLEAR_COAT_METALLIC_PACK_MAX_BUCKET = BURT_CLEAR_COAT_METALLIC_PACK_DIMENSION - 1.0f;
+static const float BURT_CLEAR_COAT_MASK_PACK_MAX_BUCKET = BURT_CLEAR_COAT_MASK_PACK_DIMENSION - 1.0f;
+static const float BURT_CLEAR_COAT_ROUGHNESS_PACK_MAX_BUCKET = BURT_CLEAR_COAT_ROUGHNESS_PACK_DIMENSION - 1.0f;
+static const float BURT_CLEAR_COAT_MATERIAL_PACK_MAX_VALUE = BURT_CLEAR_COAT_METALLIC_PACK_DIMENSION * BURT_CLEAR_COAT_MASK_PACK_DIMENSION * BURT_CLEAR_COAT_ROUGHNESS_PACK_DIMENSION - 1.0f;
+
 float BurtQuantizeHairMaterialValue(float value, float maxBucket)
 {
     return floor(saturate(value) * maxBucket + 0.5f);
@@ -148,6 +169,27 @@ void BurtDecodeHairMaterialChannel(float packedHairMaterial, out float hairScatt
     hairShiftScale = saturate(shiftBucket / BURT_HAIR_SHIFT_PACK_MAX_BUCKET);
 }
 
+float BurtEncodeClearCoatMaterialChannel(float metallic, float clearCoatMask, float clearCoatRoughness)
+{
+    float metallicBucket = floor(saturate(metallic) * BURT_CLEAR_COAT_METALLIC_PACK_MAX_BUCKET + 0.5f);
+    float maskBucket = floor(saturate(clearCoatMask) * BURT_CLEAR_COAT_MASK_PACK_MAX_BUCKET + 0.5f);
+    float roughnessBucket = floor(saturate(clearCoatRoughness) * BURT_CLEAR_COAT_ROUGHNESS_PACK_MAX_BUCKET + 0.5f);
+    return (roughnessBucket * BURT_CLEAR_COAT_MASK_PACK_DIMENSION * BURT_CLEAR_COAT_METALLIC_PACK_DIMENSION + maskBucket * BURT_CLEAR_COAT_METALLIC_PACK_DIMENSION + metallicBucket) / BURT_CLEAR_COAT_MATERIAL_PACK_MAX_VALUE;
+}
+
+void BurtDecodeClearCoatMaterialChannel(float packedClearCoatMaterial, out float metallic, out float clearCoatMask, out float clearCoatRoughness)
+{
+    float packedBucket = floor(saturate(packedClearCoatMaterial) * BURT_CLEAR_COAT_MATERIAL_PACK_MAX_VALUE + 0.5f);
+    float roughnessBucket = floor(packedBucket / (BURT_CLEAR_COAT_MASK_PACK_DIMENSION * BURT_CLEAR_COAT_METALLIC_PACK_DIMENSION));
+    float remainderBucket = packedBucket - roughnessBucket * BURT_CLEAR_COAT_MASK_PACK_DIMENSION * BURT_CLEAR_COAT_METALLIC_PACK_DIMENSION;
+    float maskBucket = floor(remainderBucket / BURT_CLEAR_COAT_METALLIC_PACK_DIMENSION);
+    float metallicBucket = remainderBucket - maskBucket * BURT_CLEAR_COAT_METALLIC_PACK_DIMENSION;
+
+    metallic = saturate(metallicBucket / BURT_CLEAR_COAT_METALLIC_PACK_MAX_BUCKET);
+    clearCoatMask = saturate(maskBucket / BURT_CLEAR_COAT_MASK_PACK_MAX_BUCKET);
+    clearCoatRoughness = ClampPerceptualRoughness(roughnessBucket / BURT_CLEAR_COAT_ROUGHNESS_PACK_MAX_BUCKET);
+}
+
 // 从 Forward 已经算好的 SurfaceData / direction / emission 生成待编码的 GBuffer 数据；Hair 会把 direction 当 strand。
 BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float3 emission)
 {
@@ -159,9 +201,11 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
 
     // 向量槽保存世界空间方向，编码前先做安全归一化；Hair shader 会传入 strand direction。
     data.normalWS = BurtSafeNormalize(normalWS);
+    data.clearCoatNormalWS = data.normalWS;
 
     // 保留材质输入语义，避免 Deferred 阶段直接依赖 F0 或临时 BRDF 结果。
-    data.metallic = saturate(surfaceData.metallic);
+    data.metallic = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? 0.0f : saturate(surfaceData.metallic);
+    data.materialChannel = BurtIsClearCoatShadingModel(surfaceData.shadingModelID) ? BurtEncodeClearCoatMaterialChannel(surfaceData.metallic, surfaceData.clearCoatMask, surfaceData.clearCoatRoughness) : (BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.subsurfaceStrength) : saturate(surfaceData.metallic));
     data.smoothness = saturate(surfaceData.smoothness);
     data.reflectance = saturate(surfaceData.reflectance);
     data.occlusion = saturate(surfaceData.occlusion);
@@ -174,6 +218,17 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
 
     // 记录材质 shading model；Hair 第一版不增加 GBuffer 数量，复用向量槽和 material channel。
     data.shadingModelID = BurtResolveSurfaceShadingModel(surfaceData.shadingModelID);
+    data.clearCoatMask = 0.0f;
+    data.clearCoatRoughness = 0.2f;
+    data.subsurfaceStrength = 0.0f;
+    if (BurtIsClearCoatShadingModel(data.shadingModelID))
+    {
+        BurtDecodeClearCoatMaterialChannel(data.materialChannel, data.metallic, data.clearCoatMask, data.clearCoatRoughness);
+    }
+    if (BurtIsSubsurfaceShadingModel(data.shadingModelID))
+    {
+        data.subsurfaceStrength = saturate(data.materialChannel);
+    }
 
     // 返回未编码的 GBuffer 数据，调用方可选择直接调试或继续编码到 RT。
     return data;
@@ -198,6 +253,25 @@ BurtGBufferData BurtCreateHairGBufferData(BurtSurfaceData surfaceData, float3 st
     return BurtCreateGBufferData(surfaceData, strandDirectionWS, emission);
 }
 
+BurtGBufferData BurtCreateClearCoatGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float3 clearCoatNormalWS, float3 emission)
+{
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_CLEAR_COAT;
+    BurtGBufferData data = BurtCreateGBufferData(surfaceData, normalWS, emission);
+    data.clearCoatNormalWS = BurtSafeNormalize(clearCoatNormalWS);
+    return data;
+}
+
+BurtGBufferData BurtCreateClearCoatGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float3 emission)
+{
+    return BurtCreateClearCoatGBufferData(surfaceData, normalWS, normalWS, emission);
+}
+
+BurtGBufferData BurtCreateSubsurfaceGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float3 emission)
+{
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_SUBSURFACE;
+    return BurtCreateGBufferData(surfaceData, normalWS, emission);
+}
+
 float3 BurtGetGBufferDirectionWS(BurtGBufferData gbufferData)
 {
     return gbufferData.normalWS;
@@ -208,6 +282,11 @@ float3 BurtGetDefaultLitNormalWS(BurtGBufferData gbufferData)
     return gbufferData.normalWS;
 }
 
+float3 BurtGetClearCoatNormalWS(BurtGBufferData gbufferData)
+{
+    return BurtIsClearCoatShadingModel(gbufferData.shadingModelID) ? gbufferData.clearCoatNormalWS : gbufferData.normalWS;
+}
+
 float3 BurtGetHairStrandDirectionWS(BurtGBufferData gbufferData)
 {
     return gbufferData.normalWS;
@@ -215,7 +294,22 @@ float3 BurtGetHairStrandDirectionWS(BurtGBufferData gbufferData)
 
 float BurtGetDefaultLitMetallic(BurtGBufferData gbufferData)
 {
-    return saturate(gbufferData.metallic);
+    return BurtIsSubsurfaceShadingModel(gbufferData.shadingModelID) ? 0.0f : saturate(gbufferData.metallic);
+}
+
+float BurtGetClearCoatMask(BurtGBufferData gbufferData)
+{
+    return BurtIsClearCoatShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.clearCoatMask) : 0.0f;
+}
+
+float BurtGetClearCoatRoughness(BurtGBufferData gbufferData)
+{
+    return BurtIsClearCoatShadingModel(gbufferData.shadingModelID) ? ClampPerceptualRoughness(gbufferData.clearCoatRoughness) : 0.2f;
+}
+
+float BurtGetSubsurfaceStrength(BurtGBufferData gbufferData)
+{
+    return BurtIsSubsurfaceShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.subsurfaceStrength) : 0.0f;
 }
 
 float BurtGetHairScatter(BurtGBufferData gbufferData)
@@ -236,32 +330,34 @@ float BurtGetHairLongitudinalShiftScale(BurtGBufferData gbufferData)
 
 float BurtGetGBufferMaterialChannel(BurtGBufferData gbufferData)
 {
-    return BurtIsHairShadingModel(gbufferData.shadingModelID) ? BurtGetHairScatter(gbufferData) : BurtGetDefaultLitMetallic(gbufferData);
+    return BurtIsHairShadingModel(gbufferData.shadingModelID) ? BurtGetHairScatter(gbufferData) : (BurtIsClearCoatShadingModel(gbufferData.shadingModelID) ? BurtGetClearCoatMask(gbufferData) : (BurtIsSubsurfaceShadingModel(gbufferData.shadingModelID) ? BurtGetSubsurfaceStrength(gbufferData) : BurtGetDefaultLitMetallic(gbufferData)));
 }
 
-// 把语义化 GBuffer 数据编码成三张 RT 的 float4 输出。
+// 把语义化 GBuffer 数据编码成四张 RT 的 float4 输出。
 BurtEncodedGBuffer BurtEncodeGBuffer(BurtGBufferData data)
 {
-    // 创建输出结构体，下面按顶部约定写入三个 GBuffer。
+    // 创建输出结构体，下面按顶部约定写入四个 GBuffer。
     BurtEncodedGBuffer encoded;
 
     // GBuffer0 保存基础色和 AO；baseColor/AO 都限制到 0..1，避免材质贴图异常污染后续光照。
     encoded.gbuffer0 = float4(saturate(data.baseColor), saturate(data.occlusion));
 
     // GBuffer1 保存压缩法线、packed shading model/material channel 和光滑度；Hair 时 material channel 解释为 packed scatter/shift。
-    encoded.gbuffer1 = float4(BurtEncodeNormalWSForGBuffer(data.normalWS), BurtEncodeMetallicAndShadingModelForGBuffer(data.metallic, data.shadingModelID), saturate(data.smoothness));
+    encoded.gbuffer1 = float4(BurtEncodeNormalWSForGBuffer(data.normalWS), BurtEncodeMetallicAndShadingModelForGBuffer(data.materialChannel, data.shadingModelID), saturate(data.smoothness));
 
     // GBuffer2 保存自发光和 reflectance；emission 不做 saturate，reflectance 保持 XRender 0..1 输入范围。
     encoded.gbuffer2 = float4(max(data.emission, float3(0.0f, 0.0f, 0.0f)), saturate(data.reflectance));
 
-    // 返回三张 RT 的编码结果。
+    encoded.gbuffer3 = float4(BurtEncodeNormalWSForGBuffer(data.clearCoatNormalWS), 0.0f, 0.0f);
+
+    // 返回四张 RT 的编码结果。
     return encoded;
 }
 
-// 从三张 RT 的 float4 结果解码回语义化 GBuffer 数据。
+// 从四张 RT 的 float4 结果解码回语义化 GBuffer 数据。
 BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
 {
-    // 创建输出结构体，下面按顶部约定从三个 GBuffer 还原字段。
+    // 创建输出结构体，下面按顶部约定从四个 GBuffer 还原字段。
     BurtGBufferData data;
 
     // GBuffer0：还原基础色和 AO。
@@ -270,7 +366,20 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
 
     // GBuffer1：还原世界空间向量槽、shading model、材质通道和光滑度。
     data.normalWS = BurtDecodeNormalWSFromGBuffer(encoded.gbuffer1.rg);
-    data.metallic = BurtDecodeMetallicAndShadingModelFromGBuffer(encoded.gbuffer1.b, data.shadingModelID);
+    data.materialChannel = BurtDecodeMetallicAndShadingModelFromGBuffer(encoded.gbuffer1.b, data.shadingModelID);
+    data.clearCoatNormalWS = BurtIsClearCoatShadingModel(data.shadingModelID) ? BurtDecodeNormalWSFromGBuffer(encoded.gbuffer3.rg) : data.normalWS;
+    data.metallic = BurtIsSubsurfaceShadingModel(data.shadingModelID) ? 0.0f : data.materialChannel;
+    data.clearCoatMask = 0.0f;
+    data.clearCoatRoughness = 0.2f;
+    data.subsurfaceStrength = 0.0f;
+    if (BurtIsClearCoatShadingModel(data.shadingModelID))
+    {
+        BurtDecodeClearCoatMaterialChannel(data.materialChannel, data.metallic, data.clearCoatMask, data.clearCoatRoughness);
+    }
+    if (BurtIsSubsurfaceShadingModel(data.shadingModelID))
+    {
+        data.subsurfaceStrength = saturate(data.materialChannel);
+    }
     data.smoothness = saturate(encoded.gbuffer1.a);
 
     // smoothness 仍然是 GBuffer 中的主存储语义，perceptual roughness 在解码后统一计算。
@@ -293,6 +402,9 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData gbufferData)
     // 拷贝 GBuffer 保存的材质输入语义；Hair 的 material channel 已打包 scatter/shift，不参与 PBR metallic 重建。
     materialData.baseColor = gbufferData.baseColor;
     materialData.metallic = BurtIsHairShadingModel(gbufferData.shadingModelID) ? 0.0f : BurtGetDefaultLitMetallic(gbufferData);
+    materialData.clearCoatMask = BurtGetClearCoatMask(gbufferData);
+    materialData.clearCoatRoughness = BurtGetClearCoatRoughness(gbufferData);
+    materialData.subsurfaceStrength = BurtGetSubsurfaceStrength(gbufferData);
     materialData.reflectance = gbufferData.reflectance;
     materialData.occlusion = gbufferData.occlusion;
     materialData.smoothness = gbufferData.smoothness;

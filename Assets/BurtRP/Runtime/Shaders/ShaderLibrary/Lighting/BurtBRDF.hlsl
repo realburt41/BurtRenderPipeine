@@ -236,6 +236,12 @@ struct BurtPBRMaterialData
 
     // 保存默认掠射角端点，对应 XRender GenericData.F90。
     float3 f90;
+
+    float clearCoatMask;
+
+    float clearCoatRoughness;
+
+    float subsurfaceStrength;
 };
 
 // 从 BurtSurfaceData 准备 PBR 材质数据；Deferred 后续可以做一个从 GBuffer 还原到同一结构的入口。
@@ -246,7 +252,10 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
 
     // 记录原始材质输入，避免后续光照函数再次依赖 SurfaceData 的字段布局。
     materialData.baseColor = surfaceData.baseColor.rgb;
-    materialData.metallic = surfaceData.metallic;
+    materialData.metallic = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? 0.0f : surfaceData.metallic;
+    materialData.clearCoatMask = BurtIsClearCoatShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.clearCoatMask) : 0.0f;
+    materialData.clearCoatRoughness = ClampPerceptualRoughness(surfaceData.clearCoatRoughness);
+    materialData.subsurfaceStrength = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.subsurfaceStrength) : 0.0f;
     materialData.reflectance = surfaceData.reflectance;
     materialData.occlusion = surfaceData.occlusion;
     materialData.smoothness = surfaceData.smoothness;

@@ -116,6 +116,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle GBuffer3Target
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
+                }
+
+                return ResourceRegistry.GetGBuffer3();
+            }
+        }
+
         public BurtRenderTargetHandle HiZDepthTarget
         {
             get

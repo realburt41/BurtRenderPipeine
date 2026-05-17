@@ -15,7 +15,14 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
             sampler2D _BurtSSAODebugCameraColorTexture;
             sampler2D _BurtSSAOHalfDepthNormalTexture;
             sampler2D _BurtSSAOHalfAmbientOcclusionTexture;
+            sampler2D _BurtSSAOSpatialFinalTexture;
+            sampler2D _BurtSSAOTemporalFinalTexture;
+            sampler2D _BurtSSAOHistoryTexture;
+            sampler2D _BurtSSAOHistoryDepthTexture;
+            sampler2D _BurtSSAOPreviousHistoryTexture;
+            sampler2D _BurtSSAOPreviousHistoryDepthTexture;
             float4x4 _BurtSSAOViewProjectionMatrix;
+            float4x4 _BurtSSAOPreviousViewProjectionMatrix;
             float4 _BurtSSAOFullScreenSize;
             float4 _BurtSSAOHalfScreenSize;
             float4 _BurtSSAOParams0; // x radius, y intensity, z sample count, w bias.
@@ -23,6 +30,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
             float4 _BurtSSAOParams2; // x fade distance, y fade radius, z thickness, w projected radius scale.
             float4 _BurtSSAOParams3; // x horizon search enabled, y direction count, z blur sharpness, w spatial denoise enabled.
             float4 _BurtSSAOBlurDirection; // xy blur direction, z resolve final curve.
+            float4 _BurtSSAOTemporalParams; // x feedback, y history valid, z depth rejection, w clamp scale.
             float _BurtSSAODebugMode;
 
             struct Attributes
@@ -129,6 +137,22 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 float power = max(_BurtSSAOParams1.x, 0.0001f);
                 float curvedAO = 1.0f - (1.0f - pow(abs(saturate(rawVisibility)), power)) * intensity;
                 return BurtSSAOApplyDistanceFade(saturate(curvedAO), centerLinearDepth);
+            }
+
+            bool BurtSSAOProjectHistoryUV(float3 positionWS, out float2 historyUV, out float historyRawDepth)
+            {
+                float4 previousClip = mul(_BurtSSAOPreviousViewProjectionMatrix, float4(positionWS, 1.0f));
+                if (previousClip.w <= 0.00001f)
+                {
+                    historyUV = 0.0f;
+                    historyRawDepth = 0.0f;
+                    return false;
+                }
+
+                float3 previousNDC = previousClip.xyz / previousClip.w;
+                historyUV = BurtSSAOClipToScreenUV(previousNDC.xy);
+                historyRawDepth = BurtSSAORawDepthFromClip(previousNDC.z);
+                return !any(historyUV < 0.0f) && !any(historyUV > 1.0f) && !BurtSSAOIsSkyDepth(historyRawDepth);
             }
 
             float BurtSSAOEvaluateHemisphereWithDepthNormal(float2 screenUV, float rawDepth, float3 normalWS, float2 randomSize)
@@ -634,7 +658,20 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
             {
                 float rawAO = tex2D(_BurtScreenSpaceAmbientOcclusionRawTexture, input.screenUV).r;
                 float finalAO = tex2D(_BurtScreenSpaceAmbientOcclusionTexture, input.screenUV).r;
-                float ao = _BurtSSAODebugMode < 1.5f ? rawAO : finalAO;
+                float debugMode = round(_BurtSSAODebugMode);
+                if (debugMode == 4.0f)
+                {
+                    float historyAO = tex2D(_BurtSSAOPreviousHistoryTexture, input.screenUV).r;
+                    return float4(saturate(historyAO).xxx, 1.0f);
+                }
+
+                if (debugMode == 5.0f)
+                {
+                    float historyAO = tex2D(_BurtSSAOPreviousHistoryTexture, input.screenUV).r;
+                    return float4(saturate(abs(finalAO - historyAO) * 4.0f).xxx, 1.0f);
+                }
+
+                float ao = debugMode < 1.5f ? rawAO : finalAO;
                 return float4(saturate(ao).xxx, 1.0f);
             }
 
@@ -643,6 +680,194 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 float4 cameraColor = tex2D(_BurtSSAODebugCameraColorTexture, input.screenUV);
                 float ao = saturate(tex2D(_BurtScreenSpaceAmbientOcclusionTexture, input.screenUV).r);
                 return float4(cameraColor.rgb * ao, cameraColor.a);
+            }
+
+            void BurtSSAOAccumulateTemporalNeighbor(
+                float2 sampleUV,
+                float centerLinearDepth,
+                float3 centerNormalWS,
+                inout float minAO,
+                inout float maxAO,
+                inout float weightedAO,
+                inout float totalWeight)
+            {
+                sampleUV = saturate(sampleUV);
+                float sampleRawDepth = BurtSampleDeferredRawDepth(sampleUV);
+                if (BurtSSAOIsSkyDepth(sampleRawDepth))
+                {
+                    return;
+                }
+
+                float sampleAO = saturate(tex2D(_BurtSSAOSpatialFinalTexture, sampleUV).r);
+                float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
+                float3 sampleNormalWS = BurtSSAOSampleNormalWS(sampleUV);
+                float depthTolerance = max(centerLinearDepth * 0.012f, 0.02f);
+                float depthWeight = exp2(-abs(sampleLinearDepth - centerLinearDepth) / depthTolerance);
+                float normalWeight = pow(saturate(dot(centerNormalWS, sampleNormalWS)), 16.0f);
+                float weight = depthWeight * normalWeight;
+                if (weight <= 0.001f)
+                {
+                    return;
+                }
+
+                minAO = min(minAO, sampleAO);
+                maxAO = max(maxAO, sampleAO);
+                weightedAO += sampleAO * weight;
+                totalWeight += weight;
+            }
+
+            void BurtSSAOSampleTemporalNeighborhood(float2 screenUV, float rawDepth, out float centerAO, out float minAO, out float maxAO, out float averageAO)
+            {
+                float2 texel = _BurtSSAOFullScreenSize.zw;
+                float centerLinearDepth = LinearEyeDepth(rawDepth);
+                float3 centerNormalWS = BurtSSAOSampleNormalWS(screenUV);
+                centerAO = saturate(tex2D(_BurtSSAOSpatialFinalTexture, screenUV).r);
+                minAO = centerAO;
+                maxAO = centerAO;
+                float weightedAO = centerAO;
+                float totalWeight = 1.0f;
+
+                BurtSSAOAccumulateTemporalNeighbor(screenUV + float2(texel.x, 0.0f), centerLinearDepth, centerNormalWS, minAO, maxAO, weightedAO, totalWeight);
+                BurtSSAOAccumulateTemporalNeighbor(screenUV - float2(texel.x, 0.0f), centerLinearDepth, centerNormalWS, minAO, maxAO, weightedAO, totalWeight);
+                BurtSSAOAccumulateTemporalNeighbor(screenUV + float2(0.0f, texel.y), centerLinearDepth, centerNormalWS, minAO, maxAO, weightedAO, totalWeight);
+                BurtSSAOAccumulateTemporalNeighbor(screenUV - float2(0.0f, texel.y), centerLinearDepth, centerNormalWS, minAO, maxAO, weightedAO, totalWeight);
+                averageAO = totalWeight > 0.0001f ? weightedAO / totalWeight : centerAO;
+            }
+
+            float BurtSSAOEvaluateCurrentSurfaceStability(
+                float2 historyUV,
+                float projectedHistoryLinearDepth,
+                float3 centerNormalWS,
+                float centerLinearDepth)
+            {
+                float currentRawDepthAtHistoryUV = BurtSampleDeferredRawDepth(historyUV);
+                if (BurtSSAOIsSkyDepth(currentRawDepthAtHistoryUV))
+                {
+                    return 0.0f;
+                }
+
+                float currentLinearDepthAtHistoryUV = LinearEyeDepth(currentRawDepthAtHistoryUV);
+                float currentDepthTolerance = max(centerLinearDepth * 0.018f, 0.03f);
+                float currentDepthSimilarity = saturate(1.0f - abs(currentLinearDepthAtHistoryUV - centerLinearDepth) / currentDepthTolerance);
+                float projectedDepthTolerance = max(projectedHistoryLinearDepth * 0.018f, 0.03f);
+                float projectedDepthSimilarity = saturate(1.0f - abs(currentLinearDepthAtHistoryUV - projectedHistoryLinearDepth) / projectedDepthTolerance);
+                float3 currentNormalAtHistoryUV = BurtSSAOSampleNormalWS(historyUV);
+                float normalSimilarity = smoothstep(0.55f, 0.95f, saturate(dot(centerNormalWS, currentNormalAtHistoryUV)));
+                return currentDepthSimilarity * projectedDepthSimilarity * normalSimilarity;
+            }
+
+            float BurtSSAOTemporalResolveAO(float2 screenUV)
+            {
+                float rawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (BurtSSAOIsSkyDepth(rawDepth))
+                {
+                    return 1.0f;
+                }
+
+                float centerAO;
+                float minAO;
+                float maxAO;
+                float averageAO;
+                BurtSSAOSampleTemporalNeighborhood(screenUV, rawDepth, centerAO, minAO, maxAO, averageAO);
+                float centerLinearDepth = LinearEyeDepth(rawDepth);
+                float3 centerNormalWS = BurtSSAOSampleNormalWS(screenUV);
+
+                if (_BurtSSAOTemporalParams.y < 0.5f)
+                {
+                    return centerAO;
+                }
+
+                float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                float2 historyUV;
+                float projectedHistoryRawDepth;
+                if (!BurtSSAOProjectHistoryUV(positionWS, historyUV, projectedHistoryRawDepth))
+                {
+                    return centerAO;
+                }
+
+                float historyDepth = tex2D(_BurtSSAOPreviousHistoryDepthTexture, historyUV).r;
+                float projectedHistoryLinearDepth = LinearEyeDepth(projectedHistoryRawDepth);
+                float historyLinearDepth = LinearEyeDepth(historyDepth);
+                float depthTolerance = max(projectedHistoryLinearDepth * max(_BurtSSAOTemporalParams.z, 0.0001f), 0.025f);
+                float depthValidity = saturate(1.0f - abs(historyLinearDepth - projectedHistoryLinearDepth) / depthTolerance);
+                if (BurtSSAOIsSkyDepth(historyDepth) || depthValidity <= 0.0001f)
+                {
+                    return centerAO;
+                }
+
+                float surfaceStability = BurtSSAOEvaluateCurrentSurfaceStability(historyUV, projectedHistoryLinearDepth, centerNormalWS, centerLinearDepth);
+                if (surfaceStability <= 0.0001f)
+                {
+                    return centerAO;
+                }
+
+                float clampScale = max(_BurtSSAOTemporalParams.w, 0.0f);
+                float localRange = maxAO - minAO;
+                float clampPad = max(localRange, 0.002f) * clampScale;
+                float historyAO = saturate(tex2D(_BurtSSAOPreviousHistoryTexture, historyUV).r);
+                float clampedHistoryAO = clamp(historyAO, minAO - clampPad, maxAO + clampPad);
+                float historyDelta = abs(historyAO - centerAO);
+                float rangeTolerance = max(localRange + clampPad, 0.01f);
+                float historyConsistency = saturate(1.0f - historyDelta / rangeTolerance);
+                float finalHistoryAO = lerp(clampedHistoryAO, historyAO, historyConsistency * 0.25f);
+                float feedback = saturate(_BurtSSAOTemporalParams.x) * depthValidity * surfaceStability * lerp(0.35f, 1.0f, historyConsistency);
+                float currentAO = lerp(centerAO, averageAO, 0.35f);
+                return saturate(lerp(currentAO, finalHistoryAO, feedback));
+            }
+
+            float4 FragTemporal(Varyings input) : SV_Target
+            {
+                float ao = BurtSSAOTemporalResolveAO(input.screenUV);
+                return float4(ao, ao, ao, 1.0f);
+            }
+
+            float4 FragCopyTemporalFinal(Varyings input) : SV_Target
+            {
+                float ao = saturate(tex2D(_BurtSSAOTemporalFinalTexture, input.screenUV).r);
+                return float4(ao, ao, ao, 1.0f);
+            }
+
+            float4 FragCopyCurrentDepth(Varyings input) : SV_Target
+            {
+                float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
+                return float4(rawDepth, rawDepth, rawDepth, 1.0f);
+            }
+
+            float4 FragTemporalDepthValidity(Varyings input) : SV_Target
+            {
+                float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
+                if (_BurtSSAOTemporalParams.y < 0.5f || BurtSSAOIsSkyDepth(rawDepth))
+                {
+                    return float4(0.0f, 0.0f, 0.0f, 1.0f);
+                }
+
+                float3 positionWS = BurtReconstructDeferredPositionWS(input.screenUV, rawDepth);
+                float2 historyUV;
+                float projectedHistoryRawDepth;
+                if (!BurtSSAOProjectHistoryUV(positionWS, historyUV, projectedHistoryRawDepth))
+                {
+                    return float4(1.0f, 0.0f, 0.0f, 1.0f);
+                }
+
+                float historyDepth = tex2D(_BurtSSAOHistoryDepthTexture, historyUV).r;
+                if (BurtSSAOIsSkyDepth(historyDepth))
+                {
+                    return float4(1.0f, 0.25f, 0.0f, 1.0f);
+                }
+
+                float projectedHistoryLinearDepth = LinearEyeDepth(projectedHistoryRawDepth);
+                float historyLinearDepth = LinearEyeDepth(historyDepth);
+                float depthTolerance = max(projectedHistoryLinearDepth * max(_BurtSSAOTemporalParams.z, 0.0001f), 0.025f);
+                float depthValidity = saturate(1.0f - abs(historyLinearDepth - projectedHistoryLinearDepth) / depthTolerance);
+                if (round(_BurtSSAODebugMode) == 7.0f)
+                {
+                    float3 centerNormalWS = BurtSSAOSampleNormalWS(input.screenUV);
+                    float centerLinearDepth = LinearEyeDepth(rawDepth);
+                    float surfaceStability = BurtSSAOEvaluateCurrentSurfaceStability(historyUV, projectedHistoryLinearDepth, centerNormalWS, centerLinearDepth);
+                    return float4(surfaceStability.xxx, 1.0f);
+                }
+
+                return float4(1.0f - depthValidity, depthValidity, 0.0f, 1.0f);
             }
         ENDHLSL
 
@@ -741,6 +966,62 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
             #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment FragUpsampleRaw
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt SSAO Temporal"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment FragTemporal
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt SSAO Copy Current Depth"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment FragCopyCurrentDepth
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt SSAO Temporal Depth Validity"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment FragTemporalDepthValidity
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt SSAO Copy Temporal Final"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment FragCopyTemporalFinal
             ENDHLSL
         }
     }

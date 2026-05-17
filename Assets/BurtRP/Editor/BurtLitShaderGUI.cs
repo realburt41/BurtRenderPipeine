@@ -9,12 +9,15 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent SurfaceOptionsLabel = new GUIContent("Surface Options");
         private static readonly GUIContent BaseInputsLabel = new GUIContent("Base Inputs");
         private static readonly GUIContent PbrMaskLabel = new GUIContent("PBR / Mask Inputs");
+        private static readonly GUIContent ClearCoatLabel = new GUIContent("Clear Coat");
+        private static readonly GUIContent SubsurfaceLabel = new GUIContent("Subsurface");
         private static readonly GUIContent NormalLabel = new GUIContent("Normal");
         private static readonly GUIContent EmissionLabel = new GUIContent("Emission");
 
         private static readonly GUIContent BaseMapLabel = new GUIContent("Base Map", "Albedo RGB and alpha for clipping or transparent materials.");
         private static readonly GUIContent MaskMapLabel = new GUIContent("Mask Map", "R Metallic, G Occlusion, B Reserved, A Smoothness.");
         private static readonly GUIContent NormalMapLabel = new GUIContent("Normal Map");
+        private static readonly GUIContent ClearCoatNormalMapLabel = new GUIContent("Clear Coat Normal Map");
         private static readonly GUIContent EmissionMapLabel = new GUIContent("Emission Map");
         private static readonly GUIContent ShadingModelLabel = new GUIContent("Shading Model");
         private static readonly GUIContent DoubleSidedLabel = new GUIContent("Double Sided", "Render both front and back faces by switching culling off.");
@@ -31,6 +34,8 @@ namespace Burt.RenderPipeline.Editor
         private static bool showSurfaceOptions = true;
         private static bool showBaseInputs = true;
         private static bool showPbrMaskInputs = true;
+        private static bool showClearCoatInputs = true;
+        private static bool showSubsurfaceInputs = true;
         private static bool showNormalInputs = true;
         private static bool showEmissionInputs = true;
 
@@ -44,6 +49,11 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty smoothness;
         private MaterialProperty occlusionStrength;
         private MaterialProperty reflectance;
+        private MaterialProperty clearCoatMask;
+        private MaterialProperty clearCoatRoughness;
+        private MaterialProperty clearCoatNormalMap;
+        private MaterialProperty clearCoatNormalScale;
+        private MaterialProperty subsurfaceStrength;
         private MaterialProperty normalMap;
         private MaterialProperty normalScale;
         private MaterialProperty emissionMap;
@@ -71,6 +81,8 @@ namespace Burt.RenderPipeline.Editor
             DrawBaseInputs();
             DrawPbrInputs();
             DrawNormalInputs();
+            DrawClearCoatInputs(material);
+            DrawSubsurfaceInputs(material);
             DrawEmissionInputs();
         }
 
@@ -99,6 +111,11 @@ namespace Burt.RenderPipeline.Editor
             smoothness = Find("_Smoothness");
             occlusionStrength = Find("_OcclusionStrength");
             reflectance = Find("_Reflectance");
+            clearCoatMask = Find("_ClearCoatMask");
+            clearCoatRoughness = Find("_ClearCoatRoughness");
+            clearCoatNormalMap = Find("_ClearCoatNormalMap");
+            clearCoatNormalScale = Find("_ClearCoatNormalScale");
+            subsurfaceStrength = Find("_SubsurfaceStrength");
             normalMap = Find("_NormalMap");
             normalScale = Find("_NormalScale");
             emissionMap = Find("_EmissionMap");
@@ -293,6 +310,42 @@ namespace Burt.RenderPipeline.Editor
             BurtShaderGUIUtility.EndSection();
         }
 
+        private void DrawClearCoatInputs(Material material)
+        {
+            if (!IsClearCoatShader(material) || clearCoatMask == null)
+            {
+                return;
+            }
+
+            if (!BurtShaderGUIUtility.BeginSection(ClearCoatLabel, ref showClearCoatInputs))
+            {
+                return;
+            }
+
+            DrawProperty(clearCoatMask);
+            DrawProperty(clearCoatRoughness);
+            DrawTextureWithExtra(ClearCoatNormalMapLabel, clearCoatNormalMap, clearCoatNormalScale);
+            EditorGUILayout.HelpBox("Clear Coat writes shading model 2 and packs coat mask / roughness into the GBuffer material channel.", MessageType.None);
+            BurtShaderGUIUtility.EndSection();
+        }
+
+        private void DrawSubsurfaceInputs(Material material)
+        {
+            if (!IsSubsurfaceShader(material) || subsurfaceStrength == null)
+            {
+                return;
+            }
+
+            if (!BurtShaderGUIUtility.BeginSection(SubsurfaceLabel, ref showSubsurfaceInputs))
+            {
+                return;
+            }
+
+            DrawProperty(subsurfaceStrength);
+            EditorGUILayout.HelpBox("Subsurface writes shading model 3 and stores strength in the GBuffer material channel.", MessageType.None);
+            BurtShaderGUIUtility.EndSection();
+        }
+
         private void DrawNormalInputs()
         {
             if (!BurtShaderGUIUtility.BeginSection(NormalLabel, ref showNormalInputs))
@@ -373,7 +426,31 @@ namespace Burt.RenderPipeline.Editor
 
         private static string GetShadingModelName(Material material)
         {
+            if (IsClearCoatShader(material))
+            {
+                return IsTransparentMaterial(material) ? "PBR Transparent Clear Coat" : "PBR Clear Coat / Deferred GBuffer";
+            }
+
+            if (IsSubsurfaceShader(material))
+            {
+                return IsTransparentMaterial(material) ? "PBR Transparent Subsurface" : "PBR Subsurface / Deferred GBuffer";
+            }
+
             return IsTransparentMaterial(material) ? "PBR Transparent" : "PBR Lit / Deferred GBuffer";
+        }
+
+        private static bool IsClearCoatShader(Material material)
+        {
+            return material != null &&
+                material.shader != null &&
+                material.shader.name.IndexOf("Clear Coat", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsSubsurfaceShader(Material material)
+        {
+            return material != null &&
+                material.shader != null &&
+                material.shader.name.IndexOf("Subsurface", System.StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool IsDoubleSidedMaterial(Material material)

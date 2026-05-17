@@ -201,10 +201,12 @@ Shader "BurtRP/UnlitColor"
                 // 使用 BurtDrawMainLightShadowCasterPass 设置的主光 VP 矩阵，把偏移后的世界坐标写入 shadow map。
                 output.positionCS = mul(UNITY_MATRIX_VP, float4(biasedPositionWS, 1.0f));
 
-                #if UNITY_REVERSED_Z
-                    output.positionCS.z = min(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
-                #else
-                    output.positionCS.z = max(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
+                #if !defined(_CASTING_PUNCTUAL_LIGHT_SHADOW)
+                    #if UNITY_REVERSED_Z
+                        output.positionCS.z = min(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
+                    #else
+                        output.positionCS.z = max(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
+                    #endif
                 #endif
 
                 // 返回顶点 shader 输出结果。

@@ -67,6 +67,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 resources.RegisterGBuffer0Texture(); // 注册 GBuffer0 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer1Texture(); // 注册 GBuffer1 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer2Texture(); // 注册 GBuffer2 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
+                resources.RegisterGBuffer3Texture(); // 注册 GBuffer3 临时 RT，用于保存 Clear Coat 独立法线等专用扩展通道。
                 if (ShouldRegisterTileLightBuffers(request, asset))
                 {
                     resources.RegisterBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName, BurtTiledLightData.CreateTileLightCountBufferDescriptor(request.Camera));

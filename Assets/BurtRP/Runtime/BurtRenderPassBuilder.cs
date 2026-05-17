@@ -261,6 +261,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBuffer2Name); // 使用统一资源名声明写入 Deferred GBuffer2。
         }
 
+        public BurtRenderTargetHandle ReadGBuffer3() // 定义声明读取 GBuffer3 的快捷函数。
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.GBuffer3Name); // 使用统一资源名声明读取 Deferred GBuffer3。
+        }
+
+        public BurtRenderTargetHandle WriteGBuffer3() // 定义声明写入 GBuffer3 的快捷函数。
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBuffer3Name); // 使用统一资源名声明写入 Deferred GBuffer3。
+        }
+
         public BurtRenderTargetHandle ReadHiZDepth()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.HiZDepthName);

@@ -21,6 +21,7 @@ static const float BURT_SHADING_DEBUG_MODE_SPECULAR_OCCLUSION = 109.0f; // 对�
 static const float BURT_SHADING_DEBUG_MODE_ENERGY_PRESERVATION = 110.0f; // 对应 C# BurtShadingDebugMode.EnergyPreservation，用来显示 XRender 底层 diffuse 保能比例。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_ENERGY_COMPENSATION = 111.0f; // 对应 C# BurtShadingDebugMode.IndirectSpecularEnergyCompensation，用来显示间接高光能量补偿强度。
 static const float BURT_SHADING_DEBUG_MODE_DIFFUSE_COLOR = 112.0f; // 对应 C# BurtShadingDebugMode.DiffuseColor，用来显示 XRender GenericData.DiffuseColor。
+static const float BURT_SHADING_DEBUG_MODE_HEIGHT = 113.0f; // Corresponds to C# BurtShadingDebugMode.Height, showing Mask Map B.
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_D = 115.0f; // 对应 C# BurtShadingDebugMode.DirectBRDFD，用来显示 GGX D 项。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_VISIBILITY = 116.0f; // 对应 C# BurtShadingDebugMode.DirectBRDFVisibility，用来显示 Smith Joint Visibility。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_BRDF_FRESNEL = 117.0f; // 对应 C# BurtShadingDebugMode.DirectBRDFFresnel，用来显示 Schlick Fresnel。
@@ -39,6 +40,9 @@ static const float BURT_SHADING_DEBUG_MODE_GBUFFER_OCCLUSION = 134.0f; // 对应
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_REFLECTANCE = 135.0f; // 对应 C# BurtShadingDebugMode.GBufferReflectance，用来显示 GBuffer 解码 Reflectance。
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_ROUGHNESS = 136.0f; // 对应 C# BurtShadingDebugMode.GBufferRoughness，用来显示 GBuffer 还原的 Base.Roughness。
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_DIFFUSE_COLOR = 137.0f; // 对应 C# BurtShadingDebugMode.GBufferDiffuseColor，用来显示 GBuffer 还原的 DiffuseColor。
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_CLEAR_COAT_MASK = 141.0f;
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_SUBSURFACE_STRENGTH = 142.0f;
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_CLEAR_COAT_NORMAL_WS = 143.0f;
 static const float BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING = 200.0f; // 对应 C# BurtShadingDebugMode.DetailLighting，用 0.18 中灰 BaseColor 显示光照细节。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_LIGHTING = 201.0f; // 对应 C# BurtShadingDebugMode.IndirectLighting，用来显示 PBR 间接光。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE = 202.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuse，用来显示直接漫反射。
@@ -213,6 +217,12 @@ struct BurtShadingDebugData
     // 保存 GBuffer 解码后的材质通道；Default Lit=metallic，Hair=scatter。
     float gbufferMetallic;
 
+    float gbufferClearCoatMask;
+
+    float3 gbufferClearCoatNormalWS;
+
+    float gbufferSubsurfaceStrength;
+
     // 保存 GBuffer 解码后的 Smoothness，Deferred 会再由它还原 Roughness。
     float gbufferSmoothness;
 
@@ -300,6 +310,9 @@ BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为�
     data.gbufferBaseColor = float3(0.0f, 0.0f, 0.0f);
     data.gbufferNormalWS = safeNormalWS;
     data.gbufferMetallic = 0.0f;
+    data.gbufferClearCoatMask = 0.0f;
+    data.gbufferClearCoatNormalWS = safeNormalWS;
+    data.gbufferSubsurfaceStrength = 0.0f;
     data.gbufferSmoothness = 0.5f;
     data.gbufferOcclusion = 1.0f;
     data.gbufferReflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
@@ -386,6 +399,12 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     {
         debugColor = float3(surfaceData.occlusion, surfaceData.occlusion, surfaceData.occlusion); // 把单通道环境遮蔽复制到 RGB，形成灰度图。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_HEIGHT))
+    {
+        debugColor = float3(surfaceData.height, surfaceData.height, surfaceData.height);
+        return true;
     }
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_REFLECTANCE)) // Reflectance 模式显示材质介质反射率。
@@ -544,6 +563,24 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     {
         debugColor = float3(data.gbufferMetallic, data.gbufferMetallic, data.gbufferMetallic); // 把单通道材质值复制到 RGB。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_CLEAR_COAT_MASK))
+    {
+        debugColor = float3(data.gbufferClearCoatMask, data.gbufferClearCoatMask, data.gbufferClearCoatMask);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_CLEAR_COAT_NORMAL_WS))
+    {
+        debugColor = BurtEncodeNormalWSForDebug(data.gbufferClearCoatNormalWS);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_SUBSURFACE_STRENGTH))
+    {
+        debugColor = float3(data.gbufferSubsurfaceStrength, data.gbufferSubsurfaceStrength, data.gbufferSubsurfaceStrength);
+        return true;
     }
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_SMOOTHNESS)) // GBufferSmoothness 模式显示解码后的光滑度。

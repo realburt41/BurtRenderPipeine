@@ -926,6 +926,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float4 _BurtTAACurrentSampleWeights1;
             float4 _BurtTAACurrentSampleWeights2;
             float _BurtTAAHasGBuffer;
+            float _BurtTAADebugYFlip;
             float _BurtShadingDebugEnabled;
             float _BurtShadingDebugMode;
 
@@ -1075,6 +1076,10 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             {
                 float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
                 float2 uv = ndc * 0.5 + 0.5;
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
+
                 return uv;
             }
 
@@ -1183,6 +1188,18 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float surfaceDepthWeight = centerSurface * sampleSurface * saturate(1.0 - abs(centerEyeDepth - sampleEyeDepth) / depthTolerance);
                 float skyWeight = (1.0 - centerSurface) * (1.0 - sampleSurface);
                 return max(surfaceDepthWeight, skyWeight);
+            }
+
+            float BurtTaaHistoryCoverageEdge(float2 uv)
+            {
+                float2 texel = _BurtTAATexelSize.xy;
+                float centerCoverage = tex2D(_BurtTAAParallaxRejectionTexture, uv).g;
+                float minCoverage = centerCoverage;
+                minCoverage = min(minCoverage, tex2D(_BurtTAAParallaxRejectionTexture, saturate(uv + float2(texel.x, 0.0))).g);
+                minCoverage = min(minCoverage, tex2D(_BurtTAAParallaxRejectionTexture, saturate(uv - float2(texel.x, 0.0))).g);
+                minCoverage = min(minCoverage, tex2D(_BurtTAAParallaxRejectionTexture, saturate(uv + float2(0.0, texel.y))).g);
+                minCoverage = min(minCoverage, tex2D(_BurtTAAParallaxRejectionTexture, saturate(uv - float2(0.0, texel.y))).g);
+                return saturate(centerCoverage - minCoverage);
             }
 
             float3 BurtSampleCurrent(float2 uv)
@@ -1337,6 +1354,11 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float4 Frag(Varyings input) : SV_Target
             {
                 float2 uv = input.uv;
+                if (_BurtTAADebugYFlip > 0.5)
+                {
+                    uv.y = 1.0 - uv.y;
+                }
+
                 float rawDepth = tex2D(_BurtTAACurrentDepthTexture, uv).r;
                 float surfaceWeight = BurtTaaValidSurfaceWeight(rawDepth);
                 float3 current = BurtSampleCurrent(uv);
@@ -1446,8 +1468,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 disocclusionContinuity *= saturate(lerp(0.35, 1.0, coverageValidity));
                 antiFlickerBoost *= disocclusionContinuity;
                 float historyContinuity = saturate(disocclusionContinuity * (1.0 - edgeResponsive));
+                float historyCoverageEdge = BurtTaaHistoryCoverageEdge(uv) * historyValid * inBounds * velocityValid;
                 float coverageClampTighten = coverageBreak * saturate(_BurtTAAResponsiveParams.x);
-                float clampTighten = saturate(max(edgeResponsive * saturate(_BurtTAAResponsiveParams.x) * max(_BurtTAAEdgeParams.z, 0.0), coverageClampTighten));
+                float clampTighten = saturate(max(edgeResponsive * saturate(_BurtTAAResponsiveParams.x) * max(_BurtTAAEdgeParams.z, 0.0), max(coverageClampTighten, historyCoverageEdge * 0.85)));
                 float clampStrength = max((_BurtTAAParams.y + antiFlickerBoost) * lerp(1.0, 0.55, clampTighten), 0.18);
                 float3 neighborhoodMean = neighborhoodSum * (1.0 / 9.0);
                 float3 neighborhoodVariance = max(neighborhoodSumSq * (1.0 / 9.0) - neighborhoodMean * neighborhoodMean, 0.0);
@@ -1512,7 +1535,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float taaParallaxBreak = saturate(1.0 - parallaxValidity);
                 float taaVelocityBreak = saturate(max(velocityEdgeResponsive, motionResponsive));
                 float taaClampBreak = saturate(max(1.0 - clipWeight, clampTighten));
-                float edgeFeedbackGuard = saturate(edgeResponsive * max(max(max(taaParallaxBreak, coverageBreak), taaVelocityBreak), taaClampBreak) * (1.0 - historyContinuity));
+                float edgeFeedbackGuard = saturate(max(edgeResponsive, historyCoverageEdge) * max(max(max(taaParallaxBreak, coverageBreak), taaVelocityBreak), taaClampBreak) * (1.0 - historyContinuity));
                 float responsiveMask = max(max(colorResponsive, depthResponsive), max(max(max(motionResponsive * 0.65, untrustedObjectMotion), velocityEdgeResponsive), responsivePreMask));
                 responsiveMask = saturate(responsiveMask * saturate(_BurtTAAResponsiveParams.x) * historyValid * inBounds * velocityValid * surfaceWeight);
                 responsiveMask = max(responsiveMask, edgeFeedbackGuard * historyValid * inBounds * velocityValid * surfaceWeight);
@@ -1526,6 +1549,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 feedback *= lerp(1.0, saturate(_BurtTAAResponsiveParams.y), untrustedObjectMotion * historyValid * inBounds * velocityValid);
                 feedback *= lerp(1.0, 0.55, edgeFeedbackGuard);
                 feedback *= lerp(0.72, 1.0, saturate(coverageValidity));
+                feedback *= lerp(1.0, 0.62, historyCoverageEdge * (1.0 - historyContinuity));
                 float geometryFeedbackValidity = min(min(depthWeight, depthRangeWeight), min(min(normalWeight, motionWeight), min(parallaxValidity, coverageValidity)));
                 float settledFeedbackFloor = baseFeedback * lerp(0.56, 0.88, historySampleTrust);
                 feedback = max(feedback, settledFeedbackFloor * stableColorRecovery * geometryFeedbackValidity);
@@ -1553,7 +1577,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float3 resolved = BurtTaaFromWorkingPerceptualSpace(resolvedWorking);
 
                 int debugMode = (int)round(_BurtShadingDebugMode);
-                if (_BurtShadingDebugEnabled > 0.5 && ((debugMode >= 320 && debugMode <= 346) || debugMode == 365 || debugMode == 367))
+                if (_BurtShadingDebugEnabled > 0.5 && ((debugMode >= 320 && debugMode <= 346) || debugMode == 365 || debugMode == 367 || debugMode == 376))
                 {
                     if (debugMode == 320) return float4(BurtTaaDebugColor(rawHistory), 1.0);
                     if (debugMode == 321) return float4(finalFeedback.xxx, 1.0);
@@ -1604,9 +1628,13 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     if (debugMode == 344) return float4(antiFlickerHistory.x, antiFlickerHistory.y, persistentAntiFlicker, 1.0);
                     if (debugMode == 345)
                     {
-                        float coverageAvailability = historyValid * inBounds * velocityValid * surfaceWeight;
-                        float coverageDebug = BurtTaaHistoryUseCountDebug(historyUv) * coverageAvailability;
+                        float coverageDebug = coverageValidity * surfaceWeight;
                         return float4(coverageDebug.xxx, 1.0);
+                    }
+                    if (debugMode == 376)
+                    {
+                        float rawUseCountDebug = BurtTaaHistoryUseCountDebug(uv);
+                        return float4(rawUseCountDebug.xxx, 1.0);
                     }
                     if (debugMode == 365)
                     {
@@ -1719,12 +1747,21 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             {
                 float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
                 float2 uv = ndc * 0.5 + 0.5;
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
+
                 return uv;
             }
 
             float4 BurtTaaScreenUvToClip(float2 uv, float rawDepth)
             {
-                return float4(uv * 2.0 - 1.0, rawDepth, 1.0);
+                float2 clipXY = uv * 2.0 - 1.0;
+                #if UNITY_UV_STARTS_AT_TOP
+                    clipXY.y = -clipXY.y;
+                #endif
+
+                return float4(clipXY, rawDepth, 1.0);
             }
 
             float4 Frag(Varyings input) : SV_Target
@@ -1964,9 +2001,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float previousConfidence = tex2D(_BurtTAAHistoryConfidenceTexture, safeHistoryUv).r;
                 float depthValidity = BurtTaaHistoryDepthNeighborhoodValidity(safeHistoryUv, currentRawDepth, previousConfidence);
                 float coverageValidity = BurtTaaHistoryCoverageWeight(historyUv);
-                float historyValidity = _BurtTAAParams.z * inBounds * velocityData.z;
-                float parallaxValidity = depthValidity * coverageValidity * historyValidity;
-                return float4(saturate(parallaxValidity), saturate(coverageValidity * historyValidity), 0.0, 1.0);
+                float parallaxValidity = depthValidity * coverageValidity;
+                return float4(saturate(parallaxValidity), saturate(coverageValidity), 0.0, 1.0);
             }
             ENDHLSL
         }
@@ -2160,6 +2196,23 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return lerp(centerCoverage, minCoverage, saturate(edgeStrength));
             }
 
+            float BurtTaaDepthEdgeResponsive(float2 uv, float centerRawDepth)
+            {
+                float2 texel = _BurtTAATexelSize.xy;
+                float centerSurface = BurtTaaValidSurfaceWeight(centerRawDepth);
+                float centerEyeDepth = LinearEyeDepth(centerRawDepth);
+                float maxBreak = 0.0;
+                float sampleDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(uv + float2(texel.x, 0.0))).r;
+                maxBreak = max(maxBreak, 1.0 - BurtTaaDepthWeight(centerRawDepth, sampleDepth));
+                sampleDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(uv - float2(texel.x, 0.0))).r;
+                maxBreak = max(maxBreak, 1.0 - BurtTaaDepthWeight(centerRawDepth, sampleDepth));
+                sampleDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(uv + float2(0.0, texel.y))).r;
+                maxBreak = max(maxBreak, 1.0 - BurtTaaDepthWeight(centerRawDepth, sampleDepth));
+                sampleDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(uv - float2(0.0, texel.y))).r;
+                maxBreak = max(maxBreak, 1.0 - BurtTaaDepthWeight(centerRawDepth, sampleDepth));
+                return saturate(maxBreak * centerSurface * max(_BurtTAAEdgeParams.y, 0.0));
+            }
+
             float4 Frag(Varyings input) : SV_Target
             {
                 float4 velocityData = tex2D(_BurtTAAVelocityTexture, input.uv);
@@ -2179,10 +2232,11 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float velocityEdgeResponsive = BurtTaaVelocityDiscontinuity(input.uv, velocityData);
                 float normalWeight = BurtTaaNormalEdgeWeight(input.uv);
                 float normalEdgeResponsive = saturate((1.0 - normalWeight) * 0.65);
-                float edgeResponsive = max(velocityEdgeResponsive, normalEdgeResponsive);
+                float depthEdgeResponsive = BurtTaaDepthEdgeResponsive(input.uv, currentRawDepth);
+                float edgeResponsive = max(max(velocityEdgeResponsive, normalEdgeResponsive), depthEdgeResponsive);
                 float parallaxValidity = BurtTaaDilatedHistoryValidity(input.uv, rawParallaxValidity, edgeResponsive);
                 float coverageValidity = BurtTaaDilatedHistoryCoverage(input.uv, rawCoverageValidity, edgeResponsive);
-                float disocclusionResponsive = saturate(max(max(max(1.0 - depthWeight, 1.0 - parallaxValidity), 1.0 - coverageValidity), max(velocityEdgeResponsive, normalEdgeResponsive)) * saturate(_BurtTAAResponsiveParams.x));
+                float disocclusionResponsive = saturate(max(max(max(1.0 - depthWeight, 1.0 - parallaxValidity), 1.0 - coverageValidity), edgeResponsive) * saturate(_BurtTAAResponsiveParams.x));
                 float confidenceScale = lerp(1.0, saturate(_BurtTAAResponsiveParams.z), disocclusionResponsive);
                 confidenceScale *= lerp(1.0, saturate(_BurtTAAResponsiveParams.y), untrustedObjectMotion);
                 float valid = _BurtTAAParams.z * inBounds * velocityData.z * depthWeight * speedWeight * parallaxValidity * lerp(0.35, 1.0, coverageValidity);
@@ -2210,6 +2264,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             sampler2D _BurtPostProcessSourceTexture;
             sampler2D _BurtTAAHistoryTexture;
             sampler2D _BurtTAAAntiFlickerHistoryTexture;
+            sampler2D _BurtTAACurrentDepthTexture;
             sampler2D _BurtTAARawVelocityTexture;
             sampler2D _BurtTAAVelocityTexture;
             sampler2D _BurtTAAParallaxRejectionTexture;
@@ -2236,6 +2291,43 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float BurtTaaWorkingLuma(float3 rgb)
             {
                 return dot(rgb, float3(0.25, 0.5, 0.25));
+            }
+
+            float BurtTaaValidSurfaceWeight(float rawDepth)
+            {
+                #if defined(UNITY_REVERSED_Z)
+                    return step(1e-6, rawDepth);
+                #else
+                    return 1.0 - step(1.0 - 1e-6, rawDepth);
+                #endif
+            }
+
+            float BurtTaaDepthWeight(float currentRawDepth, float sampleRawDepth)
+            {
+                float currentSurface = BurtTaaValidSurfaceWeight(currentRawDepth);
+                float sampleSurface = BurtTaaValidSurfaceWeight(sampleRawDepth);
+                float currentEyeDepth = LinearEyeDepth(currentRawDepth);
+                float sampleEyeDepth = LinearEyeDepth(sampleRawDepth);
+                float tolerance = max(currentEyeDepth * 0.018, 0.035);
+                float surfaceWeight = currentSurface * sampleSurface * saturate(1.0 - abs(currentEyeDepth - sampleEyeDepth) / tolerance);
+                float skyWeight = (1.0 - currentSurface) * (1.0 - sampleSurface);
+                return max(surfaceWeight, skyWeight);
+            }
+
+            float BurtTaaDepthEdgeResponsive(float2 uv, float centerRawDepth)
+            {
+                float2 texel = _BurtTAATexelSize.xy;
+                float centerSurface = BurtTaaValidSurfaceWeight(centerRawDepth);
+                float maxBreak = 0.0;
+                float sampleDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(uv + float2(texel.x, 0.0))).r;
+                maxBreak = max(maxBreak, 1.0 - BurtTaaDepthWeight(centerRawDepth, sampleDepth));
+                sampleDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(uv - float2(texel.x, 0.0))).r;
+                maxBreak = max(maxBreak, 1.0 - BurtTaaDepthWeight(centerRawDepth, sampleDepth));
+                sampleDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(uv + float2(0.0, texel.y))).r;
+                maxBreak = max(maxBreak, 1.0 - BurtTaaDepthWeight(centerRawDepth, sampleDepth));
+                sampleDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(uv - float2(0.0, texel.y))).r;
+                maxBreak = max(maxBreak, 1.0 - BurtTaaDepthWeight(centerRawDepth, sampleDepth));
+                return saturate(maxBreak * centerSurface * max(_BurtTAAEdgeParams.y, 0.0));
             }
 
             float3 BurtTaaDecodeOctNormal(float2 encodedNormal)
@@ -2370,11 +2462,13 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float velocityEdgeResponsive = BurtTaaVelocityDiscontinuity(input.uv, velocityData);
                 float normalWeight = BurtTaaNormalEdgeWeight(input.uv);
                 float normalEdgeResponsive = saturate((1.0 - normalWeight) * 0.65);
-                float edgeResponsive = max(velocityEdgeResponsive, normalEdgeResponsive);
+                float centerRawDepth = velocityData.z > 0.5 ? velocityData.w : tex2D(_BurtTAACurrentDepthTexture, input.uv).r;
+                float depthEdgeResponsive = BurtTaaDepthEdgeResponsive(input.uv, centerRawDepth);
+                float edgeResponsive = max(max(velocityEdgeResponsive, normalEdgeResponsive), depthEdgeResponsive);
                 float parallaxValidity = BurtTaaDilatedHistoryValidity(input.uv, rawParallaxValidity, edgeResponsive);
                 float coverageValidity = BurtTaaDilatedHistoryCoverage(input.uv, rawCoverageValidity, edgeResponsive);
                 float valid = _BurtTAAParams.z * inBounds * velocityData.z * parallaxValidity * lerp(0.35, 1.0, coverageValidity);
-                float responsiveBlock = saturate(max(max(max(1.0 - parallaxValidity, 1.0 - coverageValidity), untrustedObjectMotion), max(velocityEdgeResponsive, normalEdgeResponsive)) * saturate(_BurtTAAResponsiveParams.x));
+                float responsiveBlock = saturate(max(max(max(1.0 - parallaxValidity, 1.0 - coverageValidity), untrustedObjectMotion), edgeResponsive) * saturate(_BurtTAAResponsiveParams.x));
                 float currentSignal = smoothstep(0.05, max(_BurtTAAXRenderParams.y, 0.051), temporalContrast) * lowMotion * valid * (1.0 - responsiveBlock);
                 float highlightSignal = smoothstep(0.18, 0.75, max(localHighlightContrast, localHighlightEnergy)) * lowMotion * valid * (1.0 - responsiveBlock);
                 currentSignal = max(currentSignal, highlightSignal * 0.65);
@@ -2433,6 +2527,11 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             sampler2D _BurtPostProcessSourceTexture;
             float _BurtBloomDebugMode;
             float _BurtBloomDebugYFlip;
+            float _BurtBloomThreshold;
+            float _BurtBloomSoftKnee;
+            float _BurtBloomBypassThreshold;
+            float _BurtBloomFireflyClamp;
+            float _BurtPostExposure;
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -2454,6 +2553,36 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return min(max(color, 0.0), 65504.0);
             }
 
+            float BurtBloomDebugLuminance(float3 color)
+            {
+                return dot(color, float3(0.299, 0.587, 0.114));
+            }
+
+            float3 ClampBloomDebugFirefly(float3 color)
+            {
+                float clampLuma = max(_BurtBloomFireflyClamp, 1.0);
+                float luma = BurtBloomDebugLuminance(color);
+                float softLuma = clampLuma + (luma - clampLuma) / (1.0 + max(luma - clampLuma, 0.0) / clampLuma);
+                float scale = luma > clampLuma ? softLuma / max(luma, 1e-4) : 1.0;
+                return color * scale;
+            }
+
+            float BloomThresholdMask(float3 color)
+            {
+                if (_BurtBloomBypassThreshold > 0.5)
+                {
+                    return 1.0;
+                }
+
+                float brightness = BurtBloomDebugLuminance(color * _BurtPostExposure);
+                float knee = max(_BurtBloomThreshold * _BurtBloomSoftKnee, 0.0001);
+                float soft = clamp(brightness - _BurtBloomThreshold + knee, 0.0, 2.0 * knee);
+                soft = soft * soft / (4.0 * knee);
+                float contribution = max(soft, brightness - _BurtBloomThreshold);
+                contribution /= max(brightness, 0.0001);
+                return saturate(contribution);
+            }
+
             float4 Frag(Varyings input) : SV_Target
             {
                 float2 uv = input.uv;
@@ -2465,6 +2594,12 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float4 color = tex2D(_BurtPostProcessSourceTexture, uv);
                 color.rgb = SafeBloomDebugColor(color.rgb);
                 color.a = color.a == color.a ? saturate(color.a) : 0.0;
+                if (_BurtBloomDebugMode > 1.5)
+                {
+                    float mask = BloomThresholdMask(ClampBloomDebugFirefly(color.rgb));
+                    return float4(mask.xxx, 1.0);
+                }
+
                 if (_BurtBloomDebugMode > 0.5)
                 {
                     return float4(color.a.xxx, 1.0);
@@ -2531,6 +2666,197 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 BurtTaaAddUseCount(int2(basePixel) + int2(0, 1), (1.0 - blend.x) * blend.y * valid, textureSize);
                 BurtTaaAddUseCount(int2(basePixel) + int2(1, 1), blend.x * blend.y * valid, textureSize);
                 return 0.0;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Auto Exposure Log Luminance Reduce"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+
+            sampler2D _BurtPostProcessSourceTexture;
+            float4 _BurtAutoExposureTexelSize;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.uv = uv;
+                return output;
+            }
+
+            float BurtAutoExposureLuminance(float3 color)
+            {
+                color.r = color.r == color.r ? color.r : 0.0;
+                color.g = color.g == color.g ? color.g : 0.0;
+                color.b = color.b == color.b ? color.b : 0.0;
+                return max(dot(max(color, 0.0), float3(0.2126, 0.7152, 0.0722)), 1e-6);
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float2 texel = _BurtAutoExposureTexelSize.xy;
+                float2 uv = input.uv;
+                float sum = 0.0;
+                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(-0.5, -0.5))).rgb));
+                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(0.5, -0.5))).rgb));
+                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(-0.5, 0.5))).rgb));
+                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(0.5, 0.5))).rgb));
+                return float4(sum * 0.25, 0.0, 0.0, 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Auto Exposure Final Reduce"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+
+            sampler2D _BurtPostProcessSourceTexture;
+            float4 _BurtAutoExposureTexelSize;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.uv = uv;
+                return output;
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float2 texel = _BurtAutoExposureTexelSize.xy;
+                float2 uv = input.uv;
+                float sum = 0.0;
+                sum += tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(-0.5, -0.5))).r;
+                sum += tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(0.5, -0.5))).r;
+                sum += tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(-0.5, 0.5))).r;
+                sum += tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(0.5, 0.5))).r;
+                return float4(clamp(sum * 0.25, -20.0, 16.0), 0.0, 0.0, 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Auto Exposure Debug"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+
+            sampler2D _BurtPostProcessSourceTexture;
+            float4 _BurtAutoExposureTexelSize;
+            float _BurtAutoExposureDebugMode;
+            float4 _BurtAutoExposureDebugParams;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.uv = uv;
+                return output;
+            }
+
+            float BurtAutoExposureDebugLuminance(float3 color)
+            {
+                color.r = color.r == color.r ? color.r : 0.0;
+                color.g = color.g == color.g ? color.g : 0.0;
+                color.b = color.b == color.b ? color.b : 0.0;
+                return max(dot(max(color, 0.0), float3(0.2126, 0.7152, 0.0722)), 1e-6);
+            }
+
+            float3 BurtAutoExposureHeatmap(float t)
+            {
+                t = saturate(t);
+                float3 cold = float3(0.02, 0.05, 0.45);
+                float3 cyan = float3(0.0, 0.75, 1.0);
+                float3 green = float3(0.1, 0.9, 0.2);
+                float3 yellow = float3(1.0, 0.85, 0.05);
+                float3 red = float3(1.0, 0.08, 0.02);
+                float3 a = lerp(cold, cyan, saturate(t * 4.0));
+                float3 b = lerp(green, yellow, saturate((t - 0.5) * 4.0));
+                float3 c = lerp(b, red, saturate((t - 0.75) * 4.0));
+                return t < 0.5 ? lerp(a, green, saturate((t - 0.25) * 4.0)) : c;
+            }
+
+            float BurtAutoExposureMeterWeight(float2 uv)
+            {
+                float width = max(1.0, _BurtAutoExposureTexelSize.z);
+                float height = max(1.0, _BurtAutoExposureTexelSize.w);
+                float2 centered = (uv - 0.5) * 2.0;
+                centered.x *= width / height;
+                float radius = length(centered);
+                float t = smoothstep(0.35, 0.9, radius);
+                return lerp(1.0, 0.2, t);
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float3 color = tex2D(_BurtPostProcessSourceTexture, input.uv).rgb;
+                float logLum = clamp(log2(BurtAutoExposureDebugLuminance(color)), -20.0, 16.0);
+                float minLogLum = _BurtAutoExposureDebugParams.x;
+                float maxLogLum = max(minLogLum + 0.001, _BurtAutoExposureDebugParams.y);
+                float normalized = saturate((logLum - minLogLum) / (maxLogLum - minLogLum));
+
+                if (_BurtAutoExposureDebugMode < 1.5)
+                {
+                    return float4(BurtAutoExposureHeatmap(normalized), 1.0);
+                }
+
+                if (_BurtAutoExposureDebugMode < 2.5)
+                {
+                    float weight = BurtAutoExposureMeterWeight(input.uv);
+                    return float4(weight.xxx, 1.0);
+                }
+
+                if (logLum < minLogLum)
+                {
+                    return float4(0.05, 0.2, 1.0, 1.0);
+                }
+
+                if (logLum > maxLogLum)
+                {
+                    return float4(1.0, 0.08, 0.02, 1.0);
+                }
+
+                float avgLine = 1.0 - smoothstep(0.03, 0.08, abs(normalized - saturate((_BurtAutoExposureDebugParams.w - minLogLum) / (maxLogLum - minLogLum))));
+                float3 rangeColor = lerp(float3(normalized, normalized, normalized), float3(1.0, 0.9, 0.1), avgLine);
+                return float4(rangeColor, 1.0);
             }
             ENDHLSL
         }

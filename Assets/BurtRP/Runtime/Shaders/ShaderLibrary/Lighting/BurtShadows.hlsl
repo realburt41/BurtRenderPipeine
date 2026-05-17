@@ -1000,10 +1000,64 @@ bool BurtResolveAdditionalLightShadowSlice(
     return sliceIndex >= 0 && sliceIndex < BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES;
 }
 
+bool BurtResolveAdditionalLightShadowSliceFromData(
+    int lightIndex,
+    float3 positionWS,
+    float3 lightPositionWS,
+    float3 lightDirectionWS,
+    float4 shadowData,
+    float4 lightParams,
+    out int sliceIndex,
+    out int sliceOffset,
+    out bool isPointShadow)
+{
+    sliceIndex = -1;
+    sliceOffset = 0;
+    isPointShadow = false;
+
+    if (lightIndex < 0 || lightIndex >= BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT)
+    {
+        return false;
+    }
+
+    if (shadowData.x <= 0.5f || shadowData.y <= 0.0001f)
+    {
+        return false;
+    }
+
+    int firstSliceIndex = (int)(lightParams.x + 0.5f);
+    int sliceCount = (int)(lightParams.y + 0.5f);
+    if (firstSliceIndex < 0 || firstSliceIndex >= BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES || sliceCount <= 0)
+    {
+        return false;
+    }
+
+    isPointShadow = lightParams.z > (BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_POINT - 0.5f) && lightParams.z < (BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_POINT + 0.5f);
+    if (isPointShadow)
+    {
+        if (sliceCount < BURT_ADDITIONAL_LIGHT_SHADOW_POINT_FACE_COUNT)
+        {
+            return false;
+        }
+
+        float3 fromLightDirectionWS = -BurtSafeNormalize(lightDirectionWS);
+        float3 fromLightVectorWS = positionWS - lightPositionWS;
+        if (dot(fromLightVectorWS, fromLightVectorWS) > BURT_EPSILON)
+        {
+            fromLightDirectionWS = BurtSafeNormalize(fromLightVectorWS);
+        }
+
+        sliceOffset = BurtSelectPointLightShadowFace(fromLightDirectionWS);
+    }
+
+    sliceIndex = firstSliceIndex + min(sliceOffset, max(sliceCount - 1, 0));
+    return sliceIndex >= 0 && sliceIndex < BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES;
+}
+
 float2 BurtGetAdditionalLightShadowAtlasTexelMargin(int sliceIndex, bool isPointShadow)
 {
     float4 atlasRect = _BurtAdditionalLightShadowSliceAtlasRects[sliceIndex];
-    float2 texelMargin = max(_BurtAdditionalLightShadowTexelSize.xy, float2(0.0f, 0.0f)) * (isPointShadow ? 2.0f : 1.0f);
+    float2 texelMargin = max(_BurtAdditionalLightShadowTexelSize.xy, float2(0.0f, 0.0f)) * (isPointShadow ? 3.0f : 1.0f);
     float2 rectSize = max(atlasRect.zw - atlasRect.xy, max(_BurtAdditionalLightShadowTexelSize.xy, float2(0.0f, 0.0f)));
     return min(texelMargin, rectSize * 0.45f);
 }
@@ -1037,6 +1091,16 @@ float3 BurtApplyAdditionalLightReceiverNormalBias(int lightIndex, float3 positio
     }
 
     return positionWS + BurtSafeNormalize(normalWS) * receiverNormalBias;
+}
+
+float3 BurtResolveAdditionalLightShadowSamplePositionWS(int lightIndex, float3 positionWS, float3 normalWS, float4 shadowData)
+{
+    if (shadowData.w <= 0.5f)
+    {
+        return positionWS;
+    }
+
+    return BurtApplyAdditionalLightReceiverNormalBias(lightIndex, positionWS, normalWS);
 }
 
 float2 BurtClampAdditionalLightShadowUVToRect(float2 shadowUV, int sliceIndex, bool isPointShadow)
@@ -1098,7 +1162,16 @@ float BurtSampleAdditionalLightShadow(int lightIndex, float3 positionWS, float3 
         return 1.0f;
     }
 
-    float3 shadowPositionWS = BurtApplyAdditionalLightReceiverNormalBias(lightIndex, positionWS, normalWS);
+    float3 shadowPositionWS = BurtResolveAdditionalLightShadowSamplePositionWS(lightIndex, positionWS, normalWS, shadowData);
+    if (isPointShadow)
+    {
+        float4 lightParams = _BurtAdditionalLightShadowLightParams[lightIndex];
+        if (!BurtResolveAdditionalLightShadowSliceFromData(lightIndex, shadowPositionWS, lightPositionWS, lightDirectionWS, shadowData, lightParams, sliceIndex, sliceOffset, isPointShadow))
+        {
+            return 1.0f;
+        }
+    }
+
     float4 shadowCoord;
     if (!BurtTryProjectAdditionalLightShadowSlice(shadowPositionWS, sliceIndex, shadowCoord))
     {
@@ -1145,7 +1218,16 @@ bool BurtGetAdditionalLightShadowProjectionDebug(
         return false;
     }
 
-    float3 shadowPositionWS = BurtApplyAdditionalLightReceiverNormalBias(lightIndex, positionWS, normalWS);
+    float3 shadowPositionWS = BurtResolveAdditionalLightShadowSamplePositionWS(lightIndex, positionWS, normalWS, shadowData);
+    if (isPointShadow)
+    {
+        float4 lightParams = _BurtAdditionalLightShadowLightParams[lightIndex];
+        if (!BurtResolveAdditionalLightShadowSliceFromData(lightIndex, shadowPositionWS, lightPositionWS, lightDirectionWS, shadowData, lightParams, sliceIndex, sliceOffset, isPointShadow))
+        {
+            return false;
+        }
+    }
+
     float4 shadowCoord;
     if (!BurtTryProjectAdditionalLightShadowSlice(shadowPositionWS, sliceIndex, shadowCoord))
     {

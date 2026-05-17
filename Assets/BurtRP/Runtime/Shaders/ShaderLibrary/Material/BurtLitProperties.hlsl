@@ -38,6 +38,15 @@ CBUFFER_START(UnityPerMaterial)
     // 保存环境遮蔽强度，0 表示忽略 Mask Map 的 AO，1 表示完全使用 Mask Map 的 AO。
     float _OcclusionStrength;
 
+    // Standalone Clear Coat/Subsurface shaders share the Lit pass layout, while BurtRP/Lit no longer exposes or reads these controls.
+    float _ClearCoatMask;
+
+    float _ClearCoatRoughness;
+
+    float _ClearCoatNormalScale;
+
+    float _SubsurfaceStrength;
+
     // 保存自发光颜色，Forward 用它和 Emission Map 相乘。
     float4 _EmissionColor;
 

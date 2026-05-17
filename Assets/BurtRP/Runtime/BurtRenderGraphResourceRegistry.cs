@@ -46,6 +46,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int GBuffer2Id = Shader.PropertyToID(GBuffer2ShaderName); // 把 GBuffer2 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
 
+        public const string GBuffer3Name = "GBuffer3"; // 定义 Deferred 第四张 GBuffer 的统一资源名，第一版用于保存 Clear Coat 独立法线。
+
+        public const string GBuffer3ShaderName = "_BurtGBuffer3"; // 定义 GBuffer3 暴露给 shader 的全局纹理名称，Deferred Lighting 会采样它。
+
+        public static readonly int GBuffer3Id = Shader.PropertyToID(GBuffer3ShaderName); // 把 GBuffer3 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
+
         public const string HiZDepthName = "HiZDepth";
 
         public const string HiZDepthTextureShaderName = "_BurtHiZDepthTexture";
@@ -443,6 +449,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetGBuffer2() // 定义读取 GBuffer2 的快捷函数。
         {
             return GetRenderTarget(GBuffer2Name); // 使用统一名称从资源表读取 GBuffer2 目标。
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer3Texture() // 定义注册 Deferred GBuffer3 临时 RT 的快捷函数。
+        {
+            return RegisterGBuffer3(new RenderTargetIdentifier(GBuffer3Id)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 GBuffer3。
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer3(RenderTargetIdentifier identifier) // 定义注册 GBuffer3 的快捷函数。
+        {
+            return RegisterRenderTarget(GBuffer3Name, identifier); // 使用统一名称把 GBuffer3 注册进资源表。
+        }
+
+        public BurtRenderTargetHandle GetGBuffer3() // 定义读取 GBuffer3 的快捷函数。
+        {
+            return GetRenderTarget(GBuffer3Name); // 使用统一名称从资源表读取 GBuffer3 目标。
         }
 
         public BurtRenderTargetHandle RegisterHiZDepthTexture()

@@ -73,8 +73,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 return GetIndirectSpecularOcclusion(noV, saturate(screenSpaceAO), components.perceptualRoughness);
             }
 
-            void BurtApplyDeferredScreenSpaceAmbientOcclusion(
-                inout BurtPBRShadingComponents components,
+            BurtPBRShadingComponents BurtApplyDeferredScreenSpaceAmbientOcclusion(
+                BurtPBRShadingComponents components,
                 float noV,
                 float screenSpaceAO)
             {
@@ -85,6 +85,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 components.specularOcclusion *= specularAO;
                 components.indirectLighting = components.indirectDiffuse + components.indirectSpecular;
                 components.lighting = components.directLighting + components.indirectLighting;
+                return components;
             }
 
             // 出处：XRender/Shaders/SlabShaderPass/SlabDeferredLightingPass.hlsl::Vert，通过 vertexID 生成全屏三角形。
@@ -116,7 +117,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
                     return float4(0.0f, 0.0f, 0.0f, 0.0f);
                 }
 
-                // 采样三张 GBuffer，字段布局由 BurtGBuffer.hlsl 统一定义。
+                // 采样四张 GBuffer，字段布局由 BurtGBuffer.hlsl 统一定义。
                 BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
 
                 // 把 RT 中的编码值还原成 Deferred shading 使用的语义化材质数据。
@@ -125,11 +126,12 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 // 从 CameraDepth 和逆 ViewProjection 重建世界坐标，同时得到和 Forward 一致的 viewDirectionWS。
                 float rawDepth;
                 float3 positionWS;
+                float3 shadowPositionWS;
                 float3 viewDirectionWS;
-                BurtPrepareDeferredViewData(screenUV, rawDepth, positionWS, viewDirectionWS);
+                BurtPrepareDeferredViewData(screenUV, rawDepth, positionWS, shadowPositionWS, viewDirectionWS);
 
                 // 采样主光阴影；当 C# 没有启用阴影时，BurtShadows.hlsl 会安全返回 1。
-                float shadowAttenuation = BurtSampleMainLightShadow(positionWS);
+                float shadowAttenuation = BurtSampleMainLightShadow(shadowPositionWS);
 
 
                 // 从 BurtRP 全局主光参数创建一盏方向光，阴影衰减已经写入 light 数据。
@@ -146,7 +148,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 }
 
                 // 从 GBuffer 进入 shading-model dispatch；Default Lit 走 PBR，Hair 走独立的最小 Hair lighting 分支。
-                BurtPBRShadingComponents pbrComponents = BurtEvaluateShadingModelComponentsFromGBuffer(shadingGBufferData, mainLight, viewDirectionWS, positionWS, screenUV);
+                BurtPBRShadingComponents pbrComponents = BurtEvaluateShadingModelComponentsFromGBuffer(shadingGBufferData, mainLight, viewDirectionWS, positionWS, shadowPositionWS, screenUV);
                 float screenSpaceAmbientOcclusion = BurtSampleDeferredScreenSpaceAmbientOcclusion(screenUV);
                 float3 deferredAONormalWS = BurtSafeNormalize(BurtGetGBufferDirectionWS(shadingGBufferData));
                 float3 deferredAOViewDirectionWS = BurtSafeNormalize(viewDirectionWS);
@@ -156,10 +158,15 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 }
 
                 float deferredNoV = saturate(dot(deferredAONormalWS, deferredAOViewDirectionWS));
-                BurtApplyDeferredScreenSpaceAmbientOcclusion(pbrComponents, deferredNoV, screenSpaceAmbientOcclusion);
+                pbrComponents = BurtApplyDeferredScreenSpaceAmbientOcclusion(pbrComponents, deferredNoV, screenSpaceAmbientOcclusion);
 
                 // 先合成最终材质颜色，后续 Shading Debug 可以直接观察写入 CameraColor 前的最终结果。
                 float3 finalColor = pbrComponents.lighting + gbufferData.emission;
+
+                if (!BurtIsShadingDebugEnabled())
+                {
+                    return float4(finalColor, 1.0f);
+                }
 
                 // 创建一份 SurfaceData；Shading Debug 的公共函数使用 SurfaceData 读取材质输入类调试项。
                 BurtSurfaceData debugSurfaceData;
@@ -178,6 +185,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
 
                 // 写入 GBuffer 保存的 material channel；Default Lit 是 metallic，Hair 第一版显示 scatter。
                 debugSurfaceData.metallic = BurtGetGBufferMaterialChannel(gbufferData);
+                debugSurfaceData.clearCoatMask = BurtGetClearCoatMask(gbufferData);
+                debugSurfaceData.subsurfaceStrength = BurtGetSubsurfaceStrength(gbufferData);
 
                 // 写入 GBuffer 保存的 occlusion，保证 Occlusion Debug 和间接光使用同一 AO。
                 debugSurfaceData.occlusion = gbufferData.occlusion;
@@ -216,9 +225,9 @@ Shader "Hidden/BurtRP/DeferredLighting"
 
                 // 写入主光阴影衰减，ShadowAttenuation Debug View 用它确认 Deferred 接收阴影是否和 Forward 一致。
                 debugData.shadowAttenuation = shadowAttenuation;
-                debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, deferredAONormalWS, screenUV);
+                debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(shadowPositionWS, deferredAONormalWS, screenUV);
                 BurtFillAdditionalLightShadowProjectionDebugData(
-                    positionWS,
+                    shadowPositionWS,
                     deferredAONormalWS,
                     screenUV,
                     debugData.additionalShadowFaceColor,
@@ -227,7 +236,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
                     debugData.additionalShadowDepthDeltaColor);
 
                 BurtFillMainLightShadowShadingDebugData(
-                    positionWS,
+                    shadowPositionWS,
                     debugData.normalWS,
                     debugData.shadowCascadeColor,
                     debugData.shadowCascadeBlend,
@@ -313,6 +322,9 @@ Shader "Hidden/BurtRP/DeferredLighting"
 
                 // 写入真实 GBuffer 解码后的材质通道；Default Lit=metallic，Hair=scatter。
                 debugData.gbufferMetallic = BurtGetGBufferMaterialChannel(gbufferData);
+                debugData.gbufferClearCoatMask = BurtGetClearCoatMask(gbufferData);
+                debugData.gbufferClearCoatNormalWS = BurtGetClearCoatNormalWS(gbufferData);
+                debugData.gbufferSubsurfaceStrength = BurtGetSubsurfaceStrength(gbufferData);
 
                 // 写入真实 GBuffer 解码后的 Smoothness，用来检查 GBuffer1.a 的面板语义还原。
                 debugData.gbufferSmoothness = gbufferData.smoothness;
@@ -364,13 +376,6 @@ Shader "Hidden/BurtRP/DeferredLighting"
             Cull Off
             ZWrite Off
             ZTest Always
-            Stencil
-            {
-                Ref 0
-                ReadMask 3
-                Comp Equal
-                Pass Keep
-            }
             Blend Off
 
             HLSLPROGRAM

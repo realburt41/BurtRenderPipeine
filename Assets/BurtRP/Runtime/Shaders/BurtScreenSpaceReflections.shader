@@ -1499,7 +1499,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             {
                 float2 edgeDistance = min(uv, 1.0 - uv);
                 float edgeFadeWidth = max(_BurtSSRParams1.w, 0.0001);
-                return saturate(min(edgeDistance.x, edgeDistance.y) / edgeFadeWidth);
+                float fade = saturate(min(edgeDistance.x, edgeDistance.y) / edgeFadeWidth);
+                return fade * fade * (3.0 - 2.0 * fade);
             }
 
             float BurtSSRHitContinuityWeight(float surfaceSupport, float depthError, float worldError)
@@ -1920,7 +1921,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             sampler2D _BurtSSRHistoryMomentTexture;
             float4 _BurtSSRSourceTexelSize;
             float4 _BurtSSRParams0; // z=intensity, w=roughnessFade
-            float4 _BurtSSRParams1; // z=debugMode
+            float4 _BurtSSRParams1; // y=maxMip, z=debugMode, w=edgeFadeWidth
             static const float BurtSSRCompositeHistoryMax = 32.0;
 
             struct Attributes
@@ -2058,6 +2059,83 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 return highVarianceGate * lerp(0.35, 1.0, shortHistoryGate);
             }
 
+            float BurtSSRCompositeEdgeFade(float2 uv)
+            {
+                float2 edgeDistance = min(uv, 1.0 - uv);
+                float edgeFadeWidth = max(_BurtSSRParams1.w, 0.0001);
+                float fade = saturate(min(edgeDistance.x, edgeDistance.y) / edgeFadeWidth);
+                return fade * fade * (3.0 - 2.0 * fade);
+            }
+
+            float4 BurtSSRCompositeSampleTemporalUpscaled(float2 screenUV)
+            {
+                float4 centerSSR = tex2D(_BurtScreenSpaceReflectionTemporalColorTexture, screenUV);
+                if (_BurtSSRSourceTexelSize.z >= _BurtDeferredScreenSize.x * 0.75 ||
+                    _BurtSSRSourceTexelSize.w >= _BurtDeferredScreenSize.y * 0.75)
+                {
+                    return centerSSR;
+                }
+
+                float fullRawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (BurtSSRCompositeIsSkyDepth(fullRawDepth))
+                {
+                    return centerSSR;
+                }
+
+                float fullLinearDepth = LinearEyeDepth(fullRawDepth);
+                float2 halfPixel = screenUV * _BurtSSRSourceTexelSize.zw - 0.5;
+                float2 baseHalfPixel = floor(halfPixel);
+                float2 fractionalHalfPixel = saturate(halfPixel - baseHalfPixel);
+                float4 spatialWeights = float4(
+                    (1.0 - fractionalHalfPixel.x) * (1.0 - fractionalHalfPixel.y),
+                    fractionalHalfPixel.x * (1.0 - fractionalHalfPixel.y),
+                    (1.0 - fractionalHalfPixel.x) * fractionalHalfPixel.y,
+                    fractionalHalfPixel.x * fractionalHalfPixel.y);
+                float2 halfMaxPixel = max(_BurtSSRSourceTexelSize.zw - 1.0, 0.0);
+                float depthTolerance = max(fullLinearDepth * 0.018, 0.035);
+                float3 accumulatedColor = 0.0;
+                float accumulatedAlpha = 0.0;
+                float totalWeight = 0.0;
+
+                [unroll]
+                for (int sampleIndex = 0; sampleIndex < 4; sampleIndex++)
+                {
+                    float2 sampleOffset = float2(sampleIndex == 1 || sampleIndex == 3 ? 1.0 : 0.0, sampleIndex >= 2 ? 1.0 : 0.0);
+                    float2 samplePixel = clamp(baseHalfPixel + sampleOffset, 0.0, halfMaxPixel);
+                    float2 sampleUV = (samplePixel + 0.5) * _BurtSSRSourceTexelSize.xy;
+                    float sampleRawDepth = BurtSampleDeferredRawDepth(sampleUV);
+                    if (BurtSSRCompositeIsSkyDepth(sampleRawDepth))
+                    {
+                        continue;
+                    }
+
+                    float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
+                    float depthWeight = rcp(abs(sampleLinearDepth - fullLinearDepth) + depthTolerance);
+                    float spatialWeight = sampleIndex == 0 ? spatialWeights.x :
+                        sampleIndex == 1 ? spatialWeights.y :
+                        sampleIndex == 2 ? spatialWeights.z :
+                        spatialWeights.w;
+                    float4 sampleSSR = tex2Dlod(_BurtScreenSpaceReflectionTemporalColorTexture, float4(sampleUV, 0.0, 0.0));
+                    float sampleAlpha = saturate(sampleSSR.a);
+                    float confidenceWeight = smoothstep(0.002, 0.08, sampleAlpha);
+                    float weight = spatialWeight * depthWeight * confidenceWeight;
+                    accumulatedColor += sampleSSR.rgb * sampleAlpha * weight;
+                    accumulatedAlpha += sampleAlpha * weight;
+                    totalWeight += weight;
+                }
+
+                if (totalWeight <= 0.0001)
+                {
+                    return centerSSR;
+                }
+
+                float upscaledAlpha = accumulatedAlpha / totalWeight;
+                float3 upscaledColor = accumulatedAlpha > 0.0001 ? accumulatedColor / accumulatedAlpha : centerSSR.rgb;
+                float4 upscaledSSR = float4(upscaledColor, upscaledAlpha);
+                float centerLock = smoothstep(0.12, 0.35, saturate(centerSSR.a));
+                return lerp(upscaledSSR, centerSSR, centerLock * 0.35);
+            }
+
             float3 BurtSSRResolveCompositeColor(float2 screenUV, float4 centerSSR, float resolvedVisibility)
             {
                 float centerRawDepth = BurtSampleDeferredRawDepth(screenUV);
@@ -2157,8 +2235,10 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float axialSupport = max(horizontalSupport, verticalSupport);
                 float bridgeSupport = max(max(min(alphaLeft, alphaRight), min(alphaUp, alphaDown)), diagonalSupport);
                 float varianceGate = BurtSSRCompositeVarianceGate(screenUV);
+                float edgeFade = BurtSSRCompositeEdgeFade(screenUV);
                 float bridgeGate = smoothstep(0.04, 0.16, bridgeSupport) * (1.0 - smoothstep(0.015, 0.08, centerAlpha));
                 bridgeGate *= lerp(1.0, 0.55, varianceGate);
+                bridgeGate *= smoothstep(0.22, 0.85, edgeFade);
                 float resolvedCenterAlpha = max(centerAlpha, bridgeSupport * bridgeGate);
                 float strongAlphaGate = smoothstep(0.04, 0.16, resolvedCenterAlpha);
                 float support = lerp(twoDimensionalSupport, max(twoDimensionalSupport, axialSupport * 0.6), strongAlphaGate);
@@ -2166,7 +2246,9 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float lowAlphaGate = smoothstep(0.001, 0.006, resolvedCenterAlpha);
                 float isolatedFade = lerp(0.25 + supportGate * 0.75, 1.0, strongAlphaGate);
                 isolatedFade *= lerp(1.0, 0.85, varianceGate * (1.0 - strongAlphaGate));
-                return saturate(resolvedCenterAlpha * lowAlphaGate * isolatedFade);
+                float centerHitGate = smoothstep(0.02, 0.12, centerAlpha);
+                float edgeAlphaFade = lerp(edgeFade * edgeFade, edgeFade, centerHitGate);
+                return saturate(resolvedCenterAlpha * lowAlphaGate * isolatedFade * edgeAlphaFade);
             }
 
             float BurtSSRComputeMaterialWeight(float2 screenUV)
@@ -2196,12 +2278,12 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             float4 FragComposite(Varyings input) : SV_Target
             {
                 float2 screenUV = input.screenUV;
-                float4 ssrColor = tex2D(_BurtScreenSpaceReflectionTemporalColorTexture, screenUV);
                 int debugMode = (int)_BurtSSRParams1.z;
 
                 if (debugMode != 0 && (debugMode < 10 || debugMode > 15))
                 {
-                    return float4(ssrColor.rgb, 1.0);
+                    float4 debugSSRColor = tex2D(_BurtScreenSpaceReflectionTemporalColorTexture, screenUV);
+                    return float4(debugSSRColor.rgb, 1.0);
                 }
 
                 float materialWeight = BurtSSRComputeMaterialWeight(screenUV);
@@ -2223,6 +2305,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                     return float4(0.0, 0.0, 0.0, 0.0);
                 }
 
+                float4 ssrColor = BurtSSRCompositeSampleTemporalUpscaled(screenUV);
                 float resolvedVisibility = BurtSSRResolveCompositeAlpha(screenUV, saturate(ssrColor.a));
                 float3 resolvedColor = BurtSSRResolveCompositeColor(screenUV, ssrColor, resolvedVisibility);
                 float resolvedAlpha = saturate(resolvedVisibility * materialWeight);
@@ -2362,7 +2445,13 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                         sampleIndex == 5 ? float2(-1.0, 1.0) :
                         sampleIndex == 6 ? float2(1.0, -1.0) :
                         float2(-1.0, -1.0);
-                    float4 sampleSSR = tex2D(_BurtScreenSpaceReflectionDenoisedColorTexture, saturate(screenUV + offset * texel));
+                    float2 sampleUV = screenUV + offset * texel;
+                    if (!all(sampleUV >= 0.0) || !all(sampleUV <= 1.0))
+                    {
+                        continue;
+                    }
+
+                    float4 sampleSSR = tex2D(_BurtScreenSpaceReflectionDenoisedColorTexture, sampleUV);
                     neighborhoodAlpha = max(neighborhoodAlpha, saturate(sampleSSR.a));
                     neighborhoodMin = min(neighborhoodMin, sampleSSR.rgb);
                     neighborhoodMax = max(neighborhoodMax, sampleSSR.rgb);
@@ -2533,11 +2622,24 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float minimumCurrentWeight = max(1.0 - _BurtSSRTemporalParams0.x, 1.0 / historyLength);
                 feedback = min(feedback, 1.0 - minimumCurrentWeight);
                 feedback *= lerp(0.4, 1.0, varianceConfidence);
+                float currentSupport = max(currentConfidence, neighborhoodAlpha);
+                float historyOnlyGate = smoothstep(0.08, 0.24, historyConfidence) *
+                    (1.0 - smoothstep(0.01, 0.08, currentSupport));
+                feedback *= lerp(1.0, 0.12, historyOnlyGate);
+                float alphaDivergence = abs(historyConfidence - currentConfidence) /
+                    max(max(historyConfidence, currentConfidence), 0.05);
+                float alphaDivergenceGate = smoothstep(0.45, 0.9, alphaDivergence) *
+                    smoothstep(0.04, 0.16, max(historyConfidence, currentConfidence)) *
+                    (1.0 - holeSupport * 0.75);
+                feedback *= lerp(1.0, 0.55, alphaDivergenceGate);
                 float currentLuminance = BurtSSRTemporalLuminance(currentSSR.rgb);
                 float historyLuminance = BurtSSRTemporalLuminance(historyColor);
                 float luminanceDivergence = abs(historyLuminance - currentLuminance) / max(max(historyLuminance, currentLuminance), 0.02);
-                float divergenceGate = smoothstep(0.35, 1.25, luminanceDivergence) * currentHitGate * unstableHistoryGate;
-                feedback *= lerp(1.0, 0.45, divergenceGate);
+                float unstableDivergenceGate = smoothstep(0.35, 1.25, luminanceDivergence) * currentHitGate * unstableHistoryGate;
+                float confidentDivergenceGate = smoothstep(0.55, 1.35, luminanceDivergence) *
+                    currentHitGate * (1.0 - holeSupport * 0.5);
+                float divergenceGate = max(unstableDivergenceGate, confidentDivergenceGate * 0.65);
+                feedback *= lerp(1.0, 0.4, divergenceGate);
                 float3 outputColor = lerp(currentSSR.rgb, historyColor, feedback);
                 float outputConfidence = saturate(lerp(currentConfidence, historyConfidence, feedback));
                 outputConfidence = max(outputConfidence, min(neighborhoodAlpha, historyConfidence) * holeSupport * 0.55);
@@ -2935,10 +3037,13 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 float previousHistoryLength = previousMomentSample.a * BurtSSRHistoryMax;
-                float historyLength = min(BurtSSRHistoryMax, max(previousHistoryLength, 0.0) + 1.0);
+                float confidenceHistoryGate = smoothstep(0.015, 0.12, confidence);
+                float historyLength = min(BurtSSRHistoryMax, (max(previousHistoryLength, 0.0) + 1.0) * confidenceHistoryGate);
+                float safeHistoryLength = max(historyLength, 1.0);
                 float momentAlpha = max(0.2, 1.0 - saturate(_BurtSSRTemporalParams0.x));
-                momentAlpha = max(momentAlpha, 1.0 / historyLength);
+                momentAlpha = max(momentAlpha, 1.0 / safeHistoryLength);
                 momentAlpha = hasPreviousMoment > 0.0 ? momentAlpha : 1.0;
+                momentAlpha = lerp(1.0, momentAlpha, confidenceHistoryGate);
                 float luminance = BurtSSRTemporalMomentLuminance(temporalSSR.rgb);
                 float2 currentMoment = float2(luminance, luminance * luminance);
                 float2 previousMoment = previousMomentSample.rg;

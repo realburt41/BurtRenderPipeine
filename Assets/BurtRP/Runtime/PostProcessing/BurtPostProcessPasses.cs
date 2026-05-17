@@ -58,13 +58,37 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private const int MaxBloomMipCount = 8; // 第一版 Bloom 最多申请 8 级临时 RT，避免动态 RenderGraph 资源注册过重。
 
-        private const int MaxBloomGaussianSamples = 64; // Match XRender PC GaussianBlur sample cap.
+        private const int MaxBloomGaussianSamples = BurtPostProcessUtility.BloomGaussianMaxSamples; // Match XRender PC GaussianBlur sample cap.
         private const int BloomGaussianKernelCacheSize = MaxBloomMipCount * 2; // One horizontal and one vertical kernel per Bloom mip.
         private const float BloomGaussianKernelRadiusCacheScale = 1024f; // Quantize radius enough to keep cache stable without visible drift.
         private const float BloomGaussianKernelTintCacheScale = 1024f; // Quantize RGB tint for compact Bloom kernel cache keys.
-        private const float BloomFireflyClamp = 64f; // Soft HDR luma cap for Bloom prefilter fireflies; regular highlights stay below this.
-        private const int BloomDebugShaderPassIndex = 12; // Bloom debug pass is appended after existing TAA passes so their indices stay stable.
-        private const int TemporalAABuildPrevUseCountShaderPassIndex = 13;
+        private const float BloomFireflyClamp = BurtPostProcessUtility.BloomPrefilterFireflyClamp; // Soft HDR luma cap for Bloom prefilter fireflies; regular highlights stay below this.
+        private const int TemporalAAObjectMotionVectorShaderPassIndex = 0;
+        private enum PostProcessShaderPass
+        {
+            CopyAndComposite = 0,
+            BloomPrefilter = 1,
+            BloomDownsample = 2,
+            BloomGaussian = 3,
+            TemporalAAResolve = 4,
+            TemporalAACurrentDepth = 5,
+            TemporalAACameraVelocity = 6,
+            TemporalAAVelocityDilation = 7,
+            TemporalAADecimateHistory = 8,
+            TemporalAAConfidenceUpdate = 9,
+            TemporalAAAntiFlickerUpdate = 10,
+            TemporalAACopy = 11,
+            BloomDebug = 12,
+            TemporalAABuildPrevUseCount = 13,
+            AutoExposureLogLuminanceReduce = 14,
+            AutoExposureFinalReduce = 15,
+            AutoExposureDebug = 16
+        }
+
+        private static int ShaderPass(PostProcessShaderPass pass)
+        {
+            return (int)pass;
+        }
 
         private static readonly int SourceTextureId = Shader.PropertyToID("_BurtPostProcessSourceTexture"); // 缓存源纹理属性 ID，避免每帧通过字符串查找。
 
@@ -83,6 +107,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAAConfidenceTextureId = Shader.PropertyToID("_BurtTAAConfidenceTexture");
         private static readonly int TemporalAAAntiFlickerTextureId = Shader.PropertyToID("_BurtTAAAntiFlickerTexture");
         private static readonly int TemporalAADebugTextureId = Shader.PropertyToID("_BurtTAADebugTexture");
+        private static readonly int TemporalAADebugYFlipId = Shader.PropertyToID("_BurtTAADebugYFlip");
         private static readonly int TemporalAAPreviousViewProjectionId = Shader.PropertyToID("_BurtTAAPreviousViewProjection");
         private static readonly int TemporalAAPreviousNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAAPreviousNonJitteredViewProjection");
         private static readonly int TemporalAACurrentViewProjectionId = Shader.PropertyToID("_BurtTAACurrentViewProjection");
@@ -140,6 +165,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int BloomBlurTextureId = Shader.PropertyToID("_BurtBloomBlurTemp"); // 缓存 PC Bloom 高斯横向模糊临时 RT 的属性 ID。
 
         private static readonly int BloomDebugTextureId = Shader.PropertyToID("_BurtBloomDebugTexture"); // Stores the prefilter snapshot for Bloom debug view.
+        private static readonly int AutoExposureTexelSizeId = Shader.PropertyToID("_BurtAutoExposureTexelSize");
+        private static readonly int AutoExposureDebugModeId = Shader.PropertyToID("_BurtAutoExposureDebugMode");
+        private static readonly int AutoExposureDebugParamsId = Shader.PropertyToID("_BurtAutoExposureDebugParams");
+        private static readonly int[] AutoExposureTextureIds = CreateAutoExposureTextureIds();
 
         private static readonly Vector4[] BloomGaussianWeights = new Vector4[MaxBloomGaussianSamples]; // Reused upload buffer for Gaussian weights.
 
@@ -277,7 +306,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var tonemappingMode = BurtPostProcessUtility.ResolveTonemappingMode(context.Asset); // 从当前 VolumeStack 安全解析本次后处理应该使用的 Tonemapping 模式。
 
-            var postExposureMultiplier = BurtPostProcessUtility.ResolvePostExposureMultiplier(context.Asset); // 把 Global Volume 中的 EV 曝光转换成本次 shader 使用的线性倍率。
+            var exposureSettings = BurtPostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
+            var postExposureMultiplier = exposureSettings.Multiplier; // 把 Global Volume 中的 EV 曝光转换成本次 shader 使用的线性倍率。
 
             var filmSettings = BurtPostProcessUtility.ResolveTonemappingFilmSettings(context.Asset); // 从 Global Volume 读取 UE/XRender Filmic 曲线参数，缺失时回退到默认值。
 
@@ -289,6 +319,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var temporalAADebugRequested = BurtPostProcessUtility.IsTemporalAADebugRequested();
             var useTemporalAA = temporalAA.Enabled;
             var useTemporalAADebug = useTemporalAA && temporalAADebugRequested;
+            var autoExposureDebugMode = BurtPostProcessUtility.ResolveAutoExposureDebugMode(BurtShadingDebugSettings.Mode);
 
             var bloomSettings = BurtPostProcessUtility.ResolveBloomSettings(context.Asset); // 从 Global Volume 读取 Bloom 参数，未启用时回退到关闭状态。
 
@@ -333,14 +364,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 ExecuteBloom(cmd, context.Request.Camera, cameraColorTarget, material, bloomSettings, bloomDebugView, bloomMipCount, postExposureMultiplier); // 先对 HDR CameraColor 做 prefilter/downsample/upsample。
             }
 
+            if (BurtAutoExposureUtility.ShouldCapture(exposureSettings, context.Request.Camera))
+            {
+                BurtAutoExposureUtility.CaptureAverageLogLuminance(
+                    cmd,
+                    context.Request.Camera,
+                    cameraColorTarget,
+                    exposureSettings,
+                    material,
+                    AutoExposureTextureIds,
+                    ShaderPass(PostProcessShaderPass.AutoExposureLogLuminanceReduce),
+                    ShaderPass(PostProcessShaderPass.AutoExposureFinalReduce),
+                    SourceTextureId,
+                    AutoExposureTexelSizeId);
+                exposureSettings = BurtPostProcessUtility.ResolvePhysicalExposureSettingsForFrame(context.Request, context.Asset, Time.deltaTime);
+                postExposureMultiplier = exposureSettings.Multiplier;
+            }
+
             cmd.SetRenderTarget(postProcessColorTarget.Identifier); // 先绑定 PostProcessColor，让第一段全屏拷贝写入后处理中间目标。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request.Camera);
 
             var useBloomDebug = ShouldUseBloomDebugView(bloomDebugView, bloomMipCount); // Bloom debug 只在 Bloom 实际执行且没有其他 shading debug 抢占时显示。
             if (useBloomDebug)
             {
-                SetBloomDebugSource(cmd, context.Request.Camera, bloomDebugView, bloomMipCount); // 把选中的 Bloom 中间纹理绑定到 debug pass。
-                cmd.DrawProcedural(Matrix4x4.identity, material, BloomDebugShaderPassIndex, MeshTopology.Triangles, 3, 1); // 直接把 Bloom debug 画到 PostProcessColor。
+                SetBloomDebugSource(cmd, context.Request.Camera, cameraColorTarget.Identifier, bloomSettings, bloomDebugView, bloomMipCount, postExposureMultiplier); // 把选中的 Bloom 中间纹理绑定到 debug pass。
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomDebug), MeshTopology.Triangles, 3, 1); // 直接把 Bloom debug 画到 PostProcessColor。
+            }
+            else if (autoExposureDebugMode > 0)
+            {
+                SetAutoExposureDebugSource(cmd, context.Request.Camera, cameraColorTarget.Identifier, exposureSettings, autoExposureDebugMode);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.AutoExposureDebug), MeshTopology.Triangles, 3, 1);
             }
             else
             {
@@ -352,7 +405,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
                 cmd.SetGlobalFloat(BloomIntensityId, bloomMipCount > 0 ? bloomSettings.Intensity : 0f); // 上传 Bloom 强度，最终合成发生在 Tonemapping 前。
 
-                cmd.SetGlobalFloat(UseBloomAlphaId, bloomMipCount > 0 && bloomSettings.BloomAlphaChannel ? 1f : 0f); // 上传 Bloom alpha 开关，默认不改变目标 alpha。
+                cmd.SetGlobalFloat(UseBloomAlphaId, bloomMipCount > 0 && BurtPostProcessUtility.ShouldPreserveBloomAlpha(bloomSettings, bloomDebugView) ? 1f : 0f); // 上传 Bloom alpha 开关，默认不改变目标 alpha。
 
                 cmd.SetGlobalFloat(TonemappingModeId, (float)tonemappingMode); // 上传 Tonemapping 模式，None 会让 shader 原样输出，其他模式会执行对应曲线。
 
@@ -384,7 +437,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
                 cmd.SetGlobalColor(ColorAdjustmentsColorFilterId, colorAdjustmentsSettings.ColorFilter); // 上传颜色滤镜，白色表示不额外染色。
 
-                cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，把 CameraColor 处理到 PostProcessColor。
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.CopyAndComposite), MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，把 CameraColor 处理到 PostProcessColor。
             }
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier); // 再绑定回 CameraColor，让第二段拷贝把后处理结果写回主颜色目标。
@@ -402,7 +455,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             cmd.SetGlobalFloat(UseColorAdjustmentsId, 0f); // 第二段只负责把 PostProcessColor 写回 CameraColor，必须关闭颜色调整，避免同一帧重复执行。
 
-            cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 再绘制一次全屏三角形，把 PostProcessColor 原样写回 CameraColor。
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.CopyAndComposite), MeshTopology.Triangles, 3, 1); // 再绘制一次全屏三角形，把 PostProcessColor 原样写回 CameraColor。
 
             ReleaseBloom(cmd, bloomMipCount, useBloomDebug && bloomDebugView == BurtBloomDebugView.Prefilter); // 释放 Bloom 临时 mip，命令会随同一个 CommandBuffer 一起提交。
 
@@ -555,12 +608,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             cmd.SetRenderTarget(currentDepth);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 5, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACurrentDepth), MeshTopology.Triangles, 3, 1);
 
             cmd.SetRenderTarget(velocity);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 6, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACameraVelocity), MeshTopology.Triangles, 3, 1);
 
             var drewObjectMotionVectors = DrawTemporalAAObjectMotionVectors(context, cmd, camera, velocity, cameraDepthTarget, motionVectorMaterial);
             temporalAA.ObjectMotionVectorPassDrawn = drewObjectMotionVectors;
@@ -570,7 +623,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(TemporalAAVelocityTextureId, velocity);
             cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 7, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAVelocityDilation), MeshTopology.Triangles, 3, 1);
 
             cmd.SetRenderTarget(prevUseCount);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
@@ -580,7 +633,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
             cmd.SetRandomWriteTarget(1, prevUseCount);
-            cmd.DrawProcedural(Matrix4x4.identity, material, TemporalAABuildPrevUseCountShaderPassIndex, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAABuildPrevUseCount), MeshTopology.Triangles, 3, 1);
             cmd.ClearRandomWriteTargets();
 
             var blackTexture = new RenderTargetIdentifier(Texture2D.blackTexture);
@@ -591,7 +644,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
             cmd.SetGlobalTexture(TemporalAADepthHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth);
             cmd.SetGlobalTexture(TemporalAAHistoryConfidenceTextureId, historyValid ? new RenderTargetIdentifier(histories.Confidence) : blackTexture);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 8, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAADecimateHistory), MeshTopology.Triangles, 3, 1);
 
             var hasGBuffer1 = context.GBuffer1Target.IsValid;
             cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier);
@@ -606,58 +659,61 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(TemporalAAParallaxRejectionTextureId, parallaxRejection);
             cmd.SetGlobalFloat(TemporalAAHasGBufferId, hasGBuffer1 ? 1f : 0f);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.GBuffer1Id, hasGBuffer1 ? context.GBuffer1Target.Identifier : blackTexture);
+            cmd.SetGlobalFloat(TemporalAADebugYFlipId, 0f);
             cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
 
             cmd.SetRenderTarget(postProcessColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 4, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAResolve), MeshTopology.Triangles, 3, 1);
 
             cmd.SetRenderTarget(confidence);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 9, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAConfidenceUpdate), MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalTexture(TemporalAAConfidenceTextureId, confidence);
 
             cmd.SetRenderTarget(antiFlicker);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 10, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAAntiFlickerUpdate), MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalTexture(TemporalAAAntiFlickerTextureId, antiFlicker);
 
             if (useTemporalAADebug)
             {
                 cmd.SetRenderTarget(debugTarget);
                 BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+                cmd.SetGlobalFloat(TemporalAADebugYFlipId, BurtFinalBlitUtility.ResolveFinalBlitYFlip(context.Request));
                 cmd.SetGlobalFloat(ShadingDebugEnabledId, 1f);
-                cmd.DrawProcedural(Matrix4x4.identity, material, 4, MeshTopology.Triangles, 3, 1);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAResolve), MeshTopology.Triangles, 3, 1);
                 cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
+                cmd.SetGlobalFloat(TemporalAADebugYFlipId, 0f);
             }
 
             DisablePostProcessEffects(cmd);
             cmd.SetRenderTarget(histories.Confidence);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.SetGlobalTexture(SourceTextureId, confidence);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACopy), MeshTopology.Triangles, 3, 1);
 
             cmd.SetRenderTarget(histories.Depth);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.SetGlobalTexture(SourceTextureId, currentDepth);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACopy), MeshTopology.Triangles, 3, 1);
 
             cmd.SetRenderTarget(histories.AntiFlicker);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.SetGlobalTexture(SourceTextureId, antiFlicker);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACopy), MeshTopology.Triangles, 3, 1);
 
             cmd.SetRenderTarget(histories.Color);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.SetGlobalTexture(SourceTextureId, postProcessColorTarget.Identifier);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACopy), MeshTopology.Triangles, 3, 1);
             BurtTemporalAAUtility.MarkHistoryValid(camera);
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             DisablePostProcessEffects(cmd);
             cmd.SetGlobalTexture(SourceTextureId, useTemporalAADebug ? debugTarget : postProcessColorTarget.Identifier);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 11, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACopy), MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalFloat(ShadingDebugEnabledId, BurtShadingDebugSettings.IsDebugging ? 1f : 0f);
 
             if (useTemporalAADebug)
@@ -752,7 +808,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var drawingSettings = new DrawingSettings(new ShaderTagId("BurtGBuffer"), sortingSettings)
             {
                 overrideMaterial = motionVectorMaterial,
-                overrideMaterialPassIndex = 0,
+                overrideMaterialPassIndex = TemporalAAObjectMotionVectorShaderPassIndex,
                 perObjectData = PerObjectData.MotionVectors,
                 enableDynamicBatching = false,
                 enableInstancing = false
@@ -794,6 +850,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             return ids; // 返回缓存数组。
         }
 
+        private static int[] CreateAutoExposureTextureIds()
+        {
+            var ids = new int[16];
+            for (var i = 0; i < ids.Length; i++)
+            {
+                ids[i] = Shader.PropertyToID("_BurtAutoExposureLogLum" + i);
+            }
+
+            return ids;
+        }
+
         private static BloomGaussianKernelCacheEntry[] CreateBloomGaussianKernelCache()
         {
             var entries = new BloomGaussianKernelCacheEntry[BloomGaussianKernelCacheSize];
@@ -815,7 +882,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             int mipCount, // 接收本帧实际使用的 mip 数。
             float postExposureMultiplier) // 接收当前 Tonemapping 前曝光倍率，用来让 Bloom 阈值和最终曝光保持一致。
         {
-            var descriptor = CreateBloomDescriptor(camera, 1, 1, settings.BloomAlphaChannel); // Bloom mip 优先使用轻量 HDR 格式，尺寸在每级申请前填入。
+            var preserveAlpha = BurtPostProcessUtility.ShouldPreserveBloomAlpha(settings, debugView); // Alpha debug also needs an alpha-capable Bloom chain even when the Volume output toggle is off.
+            var descriptor = BurtPostProcessUtility.CreateBloomRenderTextureDescriptor(camera, 1, 1, settings, debugView); // Bloom mip 优先使用轻量 HDR 格式，尺寸在每级申请前填入。
 
             for (var i = 0; i < mipCount; i++) // 逐级申请 Bloom 临时 RT。
             {
@@ -826,17 +894,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             cmd.SetGlobalFloat(BloomThresholdId, settings.Threshold); // 上传 Bloom 阈值。
             cmd.SetGlobalFloat(BloomSoftKneeId, settings.SoftKnee); // 上传 Bloom 软阈值，让 prefilter 过渡更连续。
-            cmd.SetGlobalFloat(BloomBypassThresholdId, settings.Threshold <= -1f ? 1f : 0f); // threshold 为 -1 时对齐 XRender，跳过亮度裁剪让所有像素参与 Bloom。
+            cmd.SetGlobalFloat(BloomBypassThresholdId, BurtPostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings) ? 1f : 0f); // threshold 为 -1 时对齐 XRender，跳过亮度裁剪让所有像素参与 Bloom。
             cmd.SetGlobalFloat(BloomFireflyClampId, BloomFireflyClamp); // 在 Bloom prefilter 前软压极端 HDR 亮点，避免异常像素扩散到整条 mip 链。
-            cmd.SetGlobalFloat(UseBloomAlphaId, settings.BloomAlphaChannel ? 1f : 0f); // 上传 Bloom alpha 开关，让预过滤和高斯阶段保持一致。
-            cmd.SetGlobalFloat(PostExposureId, Mathf.Max(0f, postExposureMultiplier)); // Bloom 阈值使用 Tonemapping 前曝光后的亮度判断，贴近最终画面亮度。
+            cmd.SetGlobalFloat(UseBloomAlphaId, preserveAlpha ? 1f : 0f); // 上传 Bloom alpha 开关，让预过滤和高斯阶段保持一致。
+            cmd.SetGlobalFloat(PostExposureId, BurtPostProcessUtility.ResolveBloomPrefilterPostExposure(postExposureMultiplier)); // Bloom 阈值使用 Tonemapping 前曝光后的亮度判断，贴近最终画面亮度。
             cmd.SetRenderTarget(new RenderTargetIdentifier(BloomMipTextureIds[0])); // prefilter 写入 mip0。
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(camera, 0), GetBloomMipHeight(camera, 0));
             SetBloomSource(cmd, cameraColorTarget.Identifier, camera); // CameraColor 是 prefilter 源。
-            cmd.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1); // 执行高光预过滤。
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomPrefilter), MeshTopology.Triangles, 3, 1); // 执行高光预过滤。
             if (ShouldUseBloomDebugView(debugView, mipCount) && debugView == BurtBloomDebugView.Prefilter)
             {
-                var debugDescriptor = CreateBloomDescriptor(camera, GetBloomMipWidth(camera, 0), GetBloomMipHeight(camera, 0), settings.BloomAlphaChannel);
+                var debugDescriptor = BurtPostProcessUtility.CreateBloomRenderTextureDescriptor(camera, GetBloomMipWidth(camera, 0), GetBloomMipHeight(camera, 0), settings, debugView);
                 cmd.GetTemporaryRT(BloomDebugTextureId, debugDescriptor, FilterMode.Bilinear);
                 cmd.SetRenderTarget(new RenderTargetIdentifier(BloomDebugTextureId));
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, debugDescriptor.width, debugDescriptor.height);
@@ -845,7 +913,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 cmd.SetGlobalFloat(TonemappingModeId, (float)BurtTonemappingMode.None);
                 cmd.SetGlobalFloat(PostExposureId, 1f);
                 cmd.SetGlobalFloat(UseColorAdjustmentsId, 0f);
-                cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.CopyAndComposite), MeshTopology.Triangles, 3, 1);
             }
 
             for (var i = 1; i < mipCount; i++) // 从 mip0 开始逐级下采样。
@@ -856,7 +924,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 cmd.SetRenderTarget(new RenderTargetIdentifier(targetId)); // 绑定当前 mip 作为写入目标。
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(camera, i), GetBloomMipHeight(camera, i));
                 SetBloomSource(cmd, new RenderTargetIdentifier(sourceId), GetBloomMipWidth(camera, i - 1), GetBloomMipHeight(camera, i - 1)); // 设置上一层源纹理和 texel size。
-                cmd.DrawProcedural(Matrix4x4.identity, material, 2, MeshTopology.Triangles, 3, 1); // 执行 4 tap 下采样。
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomDownsample), MeshTopology.Triangles, 3, 1); // 执行 4 tap 下采样。
             }
 
             for (var i = mipCount - 1; i >= 0; i--) // 按 XRender PC Bloom 的思路，从小 mip 到大 mip 做高斯并叠加。
@@ -864,9 +932,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 var width = GetBloomMipWidth(camera, i); // 计算当前 mip 宽度。
                 var height = GetBloomMipHeight(camera, i); // 计算当前 mip 高度。
                 var stageIndex = mipCount - 1 - i; // XRender PC Bloom 从最小 mip 的 Filter6 逐步走向 Filter1。
-                var blurRadius = CalculatePcBloomBlurRadius(settings, width, stageIndex); // 用 scatter、sizeScale 和 Filter6..Filter1 百分比计算高斯半径。
-                var stageTint = ResolvePcBloomStageTint(settings, stageIndex); // 获取当前 Bloom 阶段的 tint，纵向阶段乘入以贴近 XRender。
-                var blurDescriptor = CreateBloomDescriptor(camera, width, height, settings.BloomAlphaChannel); // 横向模糊临时 RT 只需要当前 mip 尺寸。
+                var blurRadius = BurtPostProcessUtility.CalculateBloomBlurRadius(settings, width, stageIndex); // 用 scatter、sizeScale 和 Filter6..Filter1 百分比计算高斯半径。
+                var stageTint = BurtPostProcessUtility.ResolveBloomStageTint(settings, stageIndex); // 获取当前 Bloom 阶段的 tint，纵向阶段乘入以贴近 XRender。
+                var blurDescriptor = BurtPostProcessUtility.CreateBloomRenderTextureDescriptor(camera, width, height, settings, debugView); // 横向模糊临时 RT 只需要当前 mip 尺寸。
 
                 cmd.GetTemporaryRT(BloomBlurTextureId, blurDescriptor, FilterMode.Bilinear); // 每级只临时申请一张横向高斯 RT，用完立即释放。
                 cmd.SetRenderTarget(new RenderTargetIdentifier(BloomBlurTextureId)); // 横向高斯写入同尺寸临时 RT。
@@ -875,7 +943,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 SetBloomGaussianKernel(cmd, blurRadius, width, height, true, Color.white); // 横向阶段只做滤波，保持白色权重。
                 cmd.SetGlobalVector(BloomBlurDirectionId, new Vector4(1f, 0f, blurRadius, 0f)); // 横向模糊轴和半径，shader 内按 XRender PC 高斯公式计算权重。
                 cmd.SetGlobalFloat(UseBloomAdditiveId, 0f); // 横向阶段不做加法合成。
-                cmd.DrawProcedural(Matrix4x4.identity, material, 3, MeshTopology.Triangles, 3, 1); // 执行 PC Bloom 横向高斯。
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomGaussian), MeshTopology.Triangles, 3, 1); // 执行 PC Bloom 横向高斯。
 
                 cmd.SetRenderTarget(new RenderTargetIdentifier(BloomMipTextureIds[i])); // 纵向高斯写回当前 mip，后续更大 mip 会把它作为 additive 输入。
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
@@ -884,7 +952,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 cmd.SetGlobalVector(BloomBlurDirectionId, new Vector4(0f, 1f, blurRadius, 0f)); // 纵向模糊轴和半径，shader 内按 XRender PC 高斯公式计算权重。
                 cmd.SetGlobalTexture(BloomAdditiveTextureId, i + 1 < mipCount ? new RenderTargetIdentifier(BloomMipTextureIds[i + 1]) : new RenderTargetIdentifier(BloomBlurTextureId)); // 更小一级的已累积结果作为 additive，最小 mip 绑定兜底纹理。
                 cmd.SetGlobalFloat(UseBloomAdditiveId, i + 1 < mipCount ? 1f : 0f); // 最小 mip 没有 additive，其他 mip 叠加上一轮结果。
-                cmd.DrawProcedural(Matrix4x4.identity, material, 3, MeshTopology.Triangles, 3, 1); // 执行 PC Bloom 纵向高斯并合成。
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomGaussian), MeshTopology.Triangles, 3, 1); // 执行 PC Bloom 纵向高斯并合成。
                 cmd.ReleaseTemporaryRT(BloomBlurTextureId); // 当前 mip 的横向高斯 RT 已不再需要，立即释放以降低峰值显存。
             }
 
@@ -892,14 +960,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalFloat(PostExposureId, 1f); // Bloom 链结束后恢复默认曝光，后续最终合成会重新上传正确值。
         }
 
-        private static void SetBloomDebugSource(CommandBuffer cmd, Camera camera, BurtBloomDebugView debugView, int mipCount) // 选择 Bloom debug 要显示的中间纹理。
+        private static void SetBloomDebugSource(CommandBuffer cmd, Camera camera, RenderTargetIdentifier cameraColorTarget, BurtBloomSettings settings, BurtBloomDebugView debugView, int mipCount, float postExposureMultiplier) // 选择 Bloom debug 要显示的中间纹理。
         {
             var sourceId = BloomMipTextureIds[0]; // 默认显示最终合成后的 Bloom mip0。
             var sourceWidth = GetBloomMipWidth(camera, 0);
             var sourceHeight = GetBloomMipHeight(camera, 0);
-            var debugMode = debugView == BurtBloomDebugView.Alpha ? 1f : 0f;
+            var debugMode = ResolveBloomDebugShaderMode(debugView);
+            var useCameraColorSource = debugView == BurtBloomDebugView.ThresholdMask;
 
-            if (debugView == BurtBloomDebugView.Prefilter)
+            if (useCameraColorSource)
+            {
+                sourceWidth = BurtPostProcessUtility.ResolveBloomSourceWidth(camera);
+                sourceHeight = BurtPostProcessUtility.ResolveBloomSourceHeight(camera);
+            }
+            else if (debugView == BurtBloomDebugView.Prefilter)
             {
                 sourceId = BloomDebugTextureId;
             }
@@ -911,27 +985,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 sourceHeight = GetBloomMipHeight(camera, mipIndex);
             }
 
-            cmd.SetGlobalTexture(SourceTextureId, new RenderTargetIdentifier(sourceId));
+            cmd.SetGlobalTexture(SourceTextureId, useCameraColorSource ? cameraColorTarget : new RenderTargetIdentifier(sourceId));
             cmd.SetGlobalVector(BloomTexelSizeId, new Vector4(1f / Mathf.Max(1, sourceWidth), 1f / Mathf.Max(1, sourceHeight), sourceWidth, sourceHeight));
+            if (debugView == BurtBloomDebugView.ThresholdMask)
+            {
+                cmd.SetGlobalFloat(BloomThresholdId, settings.Threshold);
+                cmd.SetGlobalFloat(BloomSoftKneeId, settings.SoftKnee);
+                cmd.SetGlobalFloat(BloomBypassThresholdId, BurtPostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings) ? 1f : 0f);
+                cmd.SetGlobalFloat(BloomFireflyClampId, BloomFireflyClamp);
+                cmd.SetGlobalFloat(PostExposureId, BurtPostProcessUtility.ResolveBloomPrefilterPostExposure(postExposureMultiplier));
+            }
+
             cmd.SetGlobalFloat(BloomDebugModeId, debugMode);
             cmd.SetGlobalFloat(BloomDebugYFlipId, debugView == BurtBloomDebugView.Prefilter ? 1f : 0f);
         }
 
-        private static RenderTextureDescriptor CreateBloomDescriptor(Camera camera, int width, int height, bool preserveAlpha) // 创建 Bloom 专用临时 RT 描述，尽量贴近 XRender 的 B10G11R11 HDR 格式。
+        private static float ResolveBloomDebugShaderMode(BurtBloomDebugView debugView)
         {
-            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera); // 先继承当前相机和后处理基础设置。
-            descriptor.width = Mathf.Max(1, width); // Bloom mip 尺寸由调用方指定。
-            descriptor.height = Mathf.Max(1, height); // Bloom mip 尺寸由调用方指定。
-            if (preserveAlpha && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf)) // 需要 Bloom alpha 时使用明确带 alpha 的 HDR 格式。
+            if (debugView == BurtBloomDebugView.Alpha)
             {
-                descriptor.colorFormat = RenderTextureFormat.ARGBHalf; // 保证 Bloom alpha 不会因为无 alpha 目标格式被丢掉。
-            }
-            else if (!preserveAlpha && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGB111110Float)) // 不需要 alpha 且平台支持时使用 32-bit packed HDR，降低 Bloom 链带宽和显存。
-            {
-                descriptor.colorFormat = RenderTextureFormat.RGB111110Float; // Bloom 只使用 RGB，匹配 xrender setup 使用的 B10G11R11 思路。
+                return 1f;
             }
 
-            return descriptor; // 返回可直接用于 GetTemporaryRT 的描述。
+            return debugView == BurtBloomDebugView.ThresholdMask ? 2f : 0f;
         }
 
         private static void ReleaseBloom(CommandBuffer cmd, int mipCount, bool releaseDebugTexture) // 释放本帧申请的 Bloom 临时 RT。
@@ -944,53 +1020,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             if (releaseDebugTexture)
             {
                 cmd.ReleaseTemporaryRT(BloomDebugTextureId); // 释放 prefilter debug 快照。
-            }
-        }
-
-        private static float CalculatePcBloomBlurRadius(BurtBloomSettings settings, int sourceWidth, int stageIndexFromSmallest) // Approximate XRender PC Bloom per-stage kernel size.
-        {
-            var scatter = Mathf.Clamp01(settings.Scatter); // Use scatter as the first BurtRP size-scale control.
-            var kernelSizePercent = ResolvePcBloomStageSize(settings, stageIndexFromSmallest) * Mathf.Max(0f, settings.SizeScale) * Mathf.Lerp(0.5f, 4f, scatter); // Combine XRender stage size, explicit size scale, and legacy scatter control.
-            var sourceDimension = Mathf.Max(1, sourceWidth); // Keep the radius valid for very narrow bloom mips.
-
-            return Mathf.Clamp(sourceDimension * kernelSizePercent * 0.01f * 0.5f, 0.00001f, MaxBloomGaussianSamples - 1); // XRender GetBlurRadius: width * percent * 0.01 * 0.5.
-        }
-
-        private static float ResolvePcBloomStageSize(BurtBloomSettings settings, int stageIndexFromSmallest) // Resolve XRender Filter6..Filter1 size for the current PC Bloom stage.
-        {
-            switch (Mathf.Clamp(stageIndexFromSmallest, 0, 5))
-            {
-                case 0:
-                    return settings.Filter6Size;
-                case 1:
-                    return settings.Filter5Size;
-                case 2:
-                    return settings.Filter4Size;
-                case 3:
-                    return settings.Filter3Size;
-                case 4:
-                    return settings.Filter2Size;
-                default:
-                    return settings.Filter1Size;
-            }
-        }
-
-        private static Color ResolvePcBloomStageTint(BurtBloomSettings settings, int stageIndexFromSmallest) // Resolve XRender Filter6..Filter1 tint for the current PC Bloom stage.
-        {
-            switch (Mathf.Clamp(stageIndexFromSmallest, 0, 5))
-            {
-                case 0:
-                    return settings.Filter6Tint;
-                case 1:
-                    return settings.Filter5Tint;
-                case 2:
-                    return settings.Filter4Tint;
-                case 3:
-                    return settings.Filter3Tint;
-                case 4:
-                    return settings.Filter2Tint;
-                default:
-                    return settings.Filter1Tint;
             }
         }
 
@@ -1132,28 +1161,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalVector(BloomTexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height)); // 上传 texel size，便于 shader 做邻域采样。
         }
 
-        private static int GetBloomMipWidth(Camera camera, int mipIndex) // 计算指定 Bloom mip 的宽度。
+        private static void SetAutoExposureDebugSource(CommandBuffer cmd, Camera camera, RenderTargetIdentifier source, BurtPhysicalExposureSettings exposure, int debugMode)
         {
-            var width = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth) / 2; // mip0 半分辨率。
-
-            for (var i = 0; i < mipIndex; i++) // 按 mipIndex 继续减半。
+            var width = 1;
+            var height = 1;
+            if (camera != null)
             {
-                width = Mathf.Max(1, width / 2); // 保持最小 1。
+                width = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth);
+                height = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight);
             }
 
-            return Mathf.Max(1, width); // 返回安全宽度。
+            cmd.SetGlobalTexture(SourceTextureId, source);
+            cmd.SetGlobalVector(AutoExposureTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
+            cmd.SetGlobalFloat(AutoExposureDebugModeId, debugMode);
+            cmd.SetGlobalVector(AutoExposureDebugParamsId, new Vector4(
+                exposure.AutoHistogramMinEV100,
+                exposure.AutoHistogramMaxEV100,
+                exposure.AutoMiddleGrey,
+                exposure.AutoAverageLogLuminance));
+        }
+
+        private static int GetBloomMipWidth(Camera camera, int mipIndex) // 计算指定 Bloom mip 的宽度。
+        {
+            return BurtPostProcessUtility.GetBloomMipWidth(camera, mipIndex); // 和 Bloom 诊断共用同一套尺寸计算。
         }
 
         private static int GetBloomMipHeight(Camera camera, int mipIndex) // 计算指定 Bloom mip 的高度。
         {
-            var height = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight) / 2; // mip0 半分辨率。
-
-            for (var i = 0; i < mipIndex; i++) // 按 mipIndex 继续减半。
-            {
-                height = Mathf.Max(1, height / 2); // 保持最小 1。
-            }
-
-            return Mathf.Max(1, height); // 返回安全高度。
+            return BurtPostProcessUtility.GetBloomMipHeight(camera, mipIndex); // 和 Bloom 诊断共用同一套尺寸计算。
         }
 
         private Material GetPostProcessMaterial() // 定义获取后处理材质的内部辅助函数。
