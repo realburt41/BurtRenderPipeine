@@ -23,8 +23,11 @@ namespace Burt.RenderPipeline
         public readonly bool ReadbackPending;
         public readonly int ReadbackAgeFrames;
         public readonly int SampleAgeFrames;
+        public readonly int ReadbackCompletedAgeFrames;
         public readonly int SampleCount;
         public readonly string SampleRejectedReason;
+        public readonly string SampleStatus;
+        public readonly bool UsingFallbackSample;
         public readonly int ReadbackWidth;
         public readonly int ReadbackHeight;
 
@@ -46,8 +49,11 @@ namespace Burt.RenderPipeline
             bool readbackPending,
             int readbackAgeFrames,
             int sampleAgeFrames,
+            int readbackCompletedAgeFrames,
             int sampleCount,
             string sampleRejectedReason,
+            string sampleStatus,
+            bool usingFallbackSample,
             int readbackWidth,
             int readbackHeight)
         {
@@ -68,8 +74,11 @@ namespace Burt.RenderPipeline
             ReadbackPending = readbackPending;
             ReadbackAgeFrames = readbackAgeFrames;
             SampleAgeFrames = sampleAgeFrames;
+            ReadbackCompletedAgeFrames = readbackCompletedAgeFrames;
             SampleCount = sampleCount;
             SampleRejectedReason = string.IsNullOrEmpty(sampleRejectedReason) ? BurtPhysicalExposureSettings.DefaultAutoSampleRejectedReason : sampleRejectedReason;
+            SampleStatus = string.IsNullOrEmpty(sampleStatus) ? "Waiting" : sampleStatus;
+            UsingFallbackSample = usingFallbackSample;
             ReadbackWidth = Mathf.Max(0, readbackWidth);
             ReadbackHeight = Mathf.Max(0, readbackHeight);
         }
@@ -103,6 +112,10 @@ namespace Burt.RenderPipeline
         private const string SampleRejectedReasonEmptyReadback = "EmptyReadback";
         private const string SampleRejectedReasonLowLuminance = "LowLuminance";
         private const string SampleRejectedReasonReadbackTimeout = "ReadbackTimeout";
+        private const string SampleStatusAccepted = "Accepted latest readback";
+        private const string SampleStatusPending = "Waiting for async readback";
+        private const string SampleStatusFallback = "Using previous valid sample";
+        private const string SampleStatusWaiting = "Waiting for first valid sample";
 
         private sealed class CameraExposureState
         {
@@ -124,8 +137,10 @@ namespace Burt.RenderPipeline
             public string SampleRejectedReason = SampleRejectedReasonNone;
             public int LastFrameTouched = -1;
             public int ReadbackRequestedFrame = -1;
+            public int ReadbackCompletedFrame = -1;
             public int LastSampleFrame = -1;
             public int SampleCount;
+            public bool UsingFallbackSample;
             public RenderTexture ReadbackTexture;
             public readonly float[] HistogramBins = new float[HistogramBinCount];
         }
@@ -355,8 +370,11 @@ namespace Burt.RenderPipeline
                 state.ReadbackPending,
                 CalculateFrameAge(state.ReadbackRequestedFrame),
                 CalculateFrameAge(state.LastSampleFrame),
+                CalculateFrameAge(state.ReadbackCompletedFrame),
                 state.SampleCount,
                 state.SampleRejectedReason,
+                GetSampleStatus(state),
+                state.UsingFallbackSample,
                 state.ReadbackTexture != null ? state.ReadbackTexture.width : 0,
                 state.ReadbackTexture != null ? state.ReadbackTexture.height : 0);
             return true;
@@ -428,15 +446,19 @@ namespace Burt.RenderPipeline
             }
 
             state.ReadbackPending = false;
+            state.ReadbackCompletedFrame = Time.frameCount;
             state.ReadbackRequestedFrame = -1;
+            state.UsingFallbackSample = false;
             if (request.hasError)
             {
+                state.UsingFallbackSample = state.HasSample;
                 state.SampleRejectedReason = SampleRejectedReasonReadbackError;
                 return;
             }
 
             if (state.Mode != mode)
             {
+                state.UsingFallbackSample = state.HasSample;
                 state.SampleRejectedReason = SampleRejectedReasonModeChanged;
                 return;
             }
@@ -444,6 +466,7 @@ namespace Burt.RenderPipeline
             var data = request.GetData<float>();
             if (data.Length <= 0)
             {
+                state.UsingFallbackSample = state.HasSample;
                 state.SampleRejectedReason = SampleRejectedReasonEmptyReadback;
                 return;
             }
@@ -471,6 +494,7 @@ namespace Burt.RenderPipeline
                     state.TargetEV100 = Mathf.Clamp(previousTargetEV100, state.MinEV100, state.MaxEV100);
                     state.CurrentEV100 = Mathf.Clamp(state.CurrentEV100, state.MinEV100, state.MaxEV100);
                     state.HasSample = true;
+                    state.UsingFallbackSample = true;
                 }
                 else
                 {
@@ -479,6 +503,7 @@ namespace Burt.RenderPipeline
                     state.HasSample = false;
                     state.CurrentEV100 = Mathf.Clamp(BurtPhysicalExposureSettings.DefaultAutoTargetEv100, state.MinEV100, state.MaxEV100);
                     state.TargetEV100 = state.CurrentEV100;
+                    state.UsingFallbackSample = false;
                 }
 
                 state.SampleRejectedReason = SampleRejectedReasonLowLuminance;
@@ -488,6 +513,7 @@ namespace Burt.RenderPipeline
             state.AverageLogLuminance = averageLogLuminance;
             state.AverageLuminance = averageLuminance;
             state.SampleRejectedReason = SampleRejectedReasonNone;
+            state.UsingFallbackSample = false;
             state.LastSampleFrame = Time.frameCount;
             state.SampleCount++;
 
@@ -926,7 +952,29 @@ namespace Burt.RenderPipeline
 
             state.ReadbackPending = false;
             state.ReadbackRequestedFrame = -1;
+            state.ReadbackCompletedFrame = Time.frameCount;
+            state.UsingFallbackSample = state.HasSample;
             state.SampleRejectedReason = SampleRejectedReasonReadbackTimeout;
+        }
+
+        private static string GetSampleStatus(CameraExposureState state)
+        {
+            if (state == null)
+            {
+                return SampleStatusWaiting;
+            }
+
+            if (state.ReadbackPending)
+            {
+                return SampleStatusPending;
+            }
+
+            if (state.UsingFallbackSample)
+            {
+                return SampleStatusFallback;
+            }
+
+            return state.HasSample ? SampleStatusAccepted : SampleStatusWaiting;
         }
 
         private static int CalculateFrameAge(int frame)

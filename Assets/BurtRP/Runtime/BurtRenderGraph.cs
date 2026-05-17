@@ -62,12 +62,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 resources.RegisterPostProcessColorTexture(); // 注册 PostProcessColor 临时 RT，让分配、No-op Copy 和释放 Pass 使用同一个资源句柄。
             }
 
-            if (ShouldRegisterGBufferTargets(request, asset)) // 如果当前 request 走 Deferred 实验路径，就把三张 GBuffer 纳入资源表。
+            if (ShouldRegisterGBufferTargets(request, asset)) // 如果当前 request 走 Deferred 实验路径，就把五张 GBuffer 纳入资源表。
             {
                 resources.RegisterGBuffer0Texture(); // 注册 GBuffer0 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer1Texture(); // 注册 GBuffer1 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer2Texture(); // 注册 GBuffer2 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer3Texture(); // 注册 GBuffer3 临时 RT，用于保存 Clear Coat 独立法线等专用扩展通道。
+                resources.RegisterGBuffer4Texture(); // 注册 GBuffer4 临时 RT，用于保存底层 tangent 和 anisotropy。
                 if (ShouldRegisterTileLightBuffers(request, asset))
                 {
                     resources.RegisterBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName, BurtTiledLightData.CreateTileLightCountBufferDescriptor(request.Camera));
@@ -76,6 +77,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.TileLightListBufferName, BurtTiledLightData.CreateTileLightListBufferDescriptor(request.Camera));
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName, BurtTiledLightData.CreateTileLightOffsetBufferDescriptor(request.Camera));
                     }
+                }
+                if (ShouldRegisterClusterLightBuffers(request, asset))
+                {
+                    resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName, BurtTiledLightData.CreateClusterLightCountBufferDescriptor(request.Camera));
+                    resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName, BurtTiledLightData.CreateClusterLightListBufferDescriptor(request.Camera));
+                    resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName, BurtTiledLightData.CreateClusterLightOffsetBufferDescriptor(request.Camera));
                 }
                 if (ShouldRegisterHiZDepth(request, asset))
                 {
@@ -93,6 +100,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 {
                     resources.RegisterScreenSpaceAmbientOcclusionRawTexture();
                     resources.RegisterScreenSpaceAmbientOcclusionTexture();
+                }
+
+                if (ShouldRegisterScreenSpaceSubsurface(request, asset))
+                {
+                    resources.RegisterScreenSpaceSubsurfaceSourceTexture();
+                    resources.RegisterScreenSpaceSubsurfaceTempTexture();
+                    resources.RegisterScreenSpaceSubsurfaceBlurTexture();
                 }
             }
 
@@ -176,6 +190,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 BurtTiledLightData.ShouldUseTileLightListResources(request, asset, true);
         }
 
+        private static bool ShouldRegisterClusterLightBuffers(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) &&
+                BurtTiledLightData.ShouldUseClusterLightResources(request, asset, true);
+        }
+
         private static bool ShouldRegisterScreenSpaceReflectionColor(
             BurtRenderRequest request,
             BurtRenderPipelineAsset asset)
@@ -188,6 +210,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderPipelineAsset asset)
         {
             return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(request, asset);
+        }
+
+        private static bool ShouldRegisterScreenSpaceSubsurface(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset);
         }
 
         public void AddPass(BurtRenderPass pass) // 定义添加 Pass 的函数，Assembler 会通过它把 Pass 放进图里。

@@ -32,6 +32,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
         private readonly BurtRenderPass drawSkyboxPass = new BurtDrawSkyboxPass(); // 创建天空盒绘制 Pass，并在整个管线生命周期内复用它。
         private readonly BurtRenderPass drawAtmospherePass = new BurtDrawAtmospherePass();
         private readonly BurtRenderPass applyAtmosphereAerialPerspectivePass = new BurtApplyAtmosphereAerialPerspectivePass();
+        private readonly BurtRenderPass applyFogPass = new BurtApplyFogPass();
+        private readonly BurtRenderPass applyVolumetricFogPass = new BurtApplyVolumetricFogPass();
 
         private readonly BurtRenderPass drawTransparentPass = new BurtDrawTransparentPass(); // 创建透明物体绘制 Pass，并在整个管线生命周期内复用它。
 
@@ -151,15 +153,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 }
 
                 graph.AddPass(drawOpaquePass); // 把不透明物体绘制 Pass 添加到 RenderGraph，让它在已有深度基础上写入颜色。
-                if (BurtAtmosphereUtility.ShouldUseAerialPerspective(request))
+                if (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterOpaqueBeforeSky(request))
                 {
                     graph.AddPass(applyAtmosphereAerialPerspectivePass);
+                }
+
+                if (BurtFogUtility.ShouldUseFog(request))
+                {
+                    graph.AddPass(applyFogPass);
                 }
 
                 graph.AddPass(drawSkyboxPass); // 把天空盒 Pass 添加到 RenderGraph，由 Pass 自己决定是否真正绘制。
                 if (BurtAtmosphereUtility.ShouldUseAtmosphere(request))
                 {
                     graph.AddPass(drawAtmospherePass);
+                }
+                if (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(request)
+                    || BurtAtmosphereUtility.ShouldApplyAerialPerspectiveBeforeTransparent(request))
+                {
+                    graph.AddPass(applyAtmosphereAerialPerspectivePass);
+                }
+
+                if (BurtVolumetricFogUtility.ShouldUseVolumetricFog(request))
+                {
+                    graph.AddPass(applyVolumetricFogPass);
                 }
 
                 graph.AddPass(drawTransparentPass); // 把透明物体绘制 Pass 添加到 RenderGraph，让透明物体最后做混合。

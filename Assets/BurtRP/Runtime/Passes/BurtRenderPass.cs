@@ -39,6 +39,14 @@
                 return BurtRenderPassKind.SetRenderTarget;
             }
 
+            if (IsDeferredLightingPass(passName) ||
+                Contains(passName, "HiZ") ||
+                Contains(passName, "Screen Space Reflections") ||
+                Contains(passName, "Screen Space Subsurface"))
+            {
+                return BurtRenderPassKind.FullScreen;
+            }
+
             if (Contains(passName, "Clear"))
             {
                 return BurtRenderPassKind.Clear;
@@ -59,11 +67,6 @@
                 return BurtRenderPassKind.PostProcess;
             }
 
-            if (IsDeferredLightingPass(passName) || Contains(passName, "HiZ") || Contains(passName, "Screen Space Reflections"))
-            {
-                return BurtRenderPassKind.FullScreen;
-            }
-
             if (Contains(passName, "Draw") || Contains(passName, "Depth Prepass"))
             {
                 return BurtRenderPassKind.DrawRenderers;
@@ -79,7 +82,9 @@
 
         private static bool IsDeferredLightingPass(string passName)
         {
-            return Contains(passName, "Deferred") && Contains(passName, "Lighting");
+            return Contains(passName, "Deferred") &&
+                Contains(passName, "Lighting") &&
+                !Contains(passName, "Clear Deferred Lighting Target");
         }
     }
 

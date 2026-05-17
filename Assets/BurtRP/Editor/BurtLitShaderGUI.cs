@@ -46,6 +46,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty baseColor;
         private MaterialProperty maskMap;
         private MaterialProperty metallic;
+        private MaterialProperty anisotropy;
         private MaterialProperty smoothness;
         private MaterialProperty occlusionStrength;
         private MaterialProperty reflectance;
@@ -54,6 +55,11 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty clearCoatNormalMap;
         private MaterialProperty clearCoatNormalScale;
         private MaterialProperty subsurfaceStrength;
+        private MaterialProperty subsurfaceThickness;
+        private MaterialProperty subsurfacePower;
+        private MaterialProperty subsurfaceDistortion;
+        private MaterialProperty subsurfaceAmbient;
+        private MaterialProperty subsurfaceTint;
         private MaterialProperty normalMap;
         private MaterialProperty normalScale;
         private MaterialProperty emissionMap;
@@ -108,6 +114,7 @@ namespace Burt.RenderPipeline.Editor
             baseColor = Find("_BaseColor");
             maskMap = Find("_MaskMap");
             metallic = Find("_Metallic");
+            anisotropy = Find("_Anisotropy");
             smoothness = Find("_Smoothness");
             occlusionStrength = Find("_OcclusionStrength");
             reflectance = Find("_Reflectance");
@@ -116,6 +123,11 @@ namespace Burt.RenderPipeline.Editor
             clearCoatNormalMap = Find("_ClearCoatNormalMap");
             clearCoatNormalScale = Find("_ClearCoatNormalScale");
             subsurfaceStrength = Find("_SubsurfaceStrength");
+            subsurfaceThickness = Find("_SubsurfaceThickness");
+            subsurfacePower = Find("_SubsurfacePower");
+            subsurfaceDistortion = Find("_SubsurfaceDistortion");
+            subsurfaceAmbient = Find("_SubsurfaceAmbient");
+            subsurfaceTint = Find("_SubsurfaceTint");
             normalMap = Find("_NormalMap");
             normalScale = Find("_NormalScale");
             emissionMap = Find("_EmissionMap");
@@ -175,7 +187,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawDoubleSidedOptions(material);
-            DrawProperty(alphaClip);
+            DrawAlphaClipProperty();
 
             if (cutoff != null)
             {
@@ -296,6 +308,7 @@ namespace Burt.RenderPipeline.Editor
 
             BurtShaderGUIUtility.DrawSubHeader("Lit");
             DrawProperty(metallic);
+            DrawProperty(anisotropy);
 
             BurtShaderGUIUtility.DrawSubHeader("Shared");
             DrawProperty(smoothness);
@@ -325,7 +338,7 @@ namespace Burt.RenderPipeline.Editor
             DrawProperty(clearCoatMask);
             DrawProperty(clearCoatRoughness);
             DrawTextureWithExtra(ClearCoatNormalMapLabel, clearCoatNormalMap, clearCoatNormalScale);
-            EditorGUILayout.HelpBox("Clear Coat writes shading model 2 and packs coat mask / roughness into the GBuffer material channel.", MessageType.None);
+            EditorGUILayout.HelpBox("Clear Coat writes stencil/model 2, keeps base metallic in GBuffer1.b, stores coat normal / mask / roughness in GBuffer3, and stores base tangent / anisotropy in GBuffer4.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -342,7 +355,12 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawProperty(subsurfaceStrength);
-            EditorGUILayout.HelpBox("Subsurface writes shading model 3 and stores strength in the GBuffer material channel.", MessageType.None);
+            DrawProperty(subsurfaceThickness);
+            DrawProperty(subsurfacePower);
+            DrawProperty(subsurfaceDistortion);
+            DrawProperty(subsurfaceAmbient);
+            DrawProperty(subsurfaceTint);
+            EditorGUILayout.HelpBox("Subsurface writes shading model 3, stores strength in GBuffer1.b, tint/power/ambient in GBuffer3, and thickness/distortion in GBuffer4 for the PC skin lobe.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -395,6 +413,26 @@ namespace Burt.RenderPipeline.Editor
         private void DrawProperty(MaterialProperty property)
         {
             BurtShaderGUIUtility.DrawProperty(materialEditor, property);
+        }
+
+        private void DrawAlphaClipProperty()
+        {
+            if (alphaClip == null)
+            {
+                return;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            DrawProperty(alphaClip);
+            if (!EditorGUI.EndChangeCheck())
+            {
+                return;
+            }
+
+            foreach (Object target in materialEditor.targets)
+            {
+                BurtShaderGUIUtility.ApplyAlphaClipKeyword(target as Material);
+            }
         }
 
         private bool ShouldDrawResolvedState()
@@ -530,6 +568,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             ApplyDoubleSidedNormalState(material);
+            BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
 
             material.SetOverrideTag("RenderType", transparent ? "Transparent" : "Opaque");
             material.SetOverrideTag("Queue", transparent ? "Transparent" : string.Empty);

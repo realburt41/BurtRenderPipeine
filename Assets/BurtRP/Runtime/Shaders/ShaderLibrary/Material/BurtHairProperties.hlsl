@@ -2,6 +2,8 @@
 #ifndef BURT_HAIR_PROPERTIES_INCLUDED
 #define BURT_HAIR_PROPERTIES_INCLUDED
 
+#include "UnityCG.cginc"
+
 CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;
     float4 _BaseMap_ST;

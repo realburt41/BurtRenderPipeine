@@ -128,7 +128,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawDoubleSidedOptions();
-            DrawProperty(alphaClip);
+            DrawAlphaClipProperty();
 
             if (cutoff != null)
             {
@@ -293,6 +293,26 @@ namespace Burt.RenderPipeline.Editor
             BurtShaderGUIUtility.DrawProperty(materialEditor, property);
         }
 
+        private void DrawAlphaClipProperty()
+        {
+            if (alphaClip == null)
+            {
+                return;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            DrawProperty(alphaClip);
+            if (!EditorGUI.EndChangeCheck())
+            {
+                return;
+            }
+
+            foreach (Object target in materialEditor.targets)
+            {
+                BurtShaderGUIUtility.ApplyAlphaClipKeyword(target as Material);
+            }
+        }
+
         internal static void ApplyHairMaterialOptions(Material material)
         {
             if (material == null)
@@ -301,6 +321,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             BurtShaderGUIUtility.ApplyDoubleSidedState(material, true);
+            BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
             material.SetOverrideTag("RenderType", "Opaque");
             material.SetOverrideTag("Queue", string.Empty);
             material.renderQueue = (int)RenderQueue.Geometry;

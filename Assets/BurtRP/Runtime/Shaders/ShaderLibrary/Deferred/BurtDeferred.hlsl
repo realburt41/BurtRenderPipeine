@@ -2,13 +2,15 @@
 #ifndef BURT_DEFERRED_INCLUDED // 开始 include guard，防止 DeferredLighting 和 GBuffer Debug 重复包含。
 #define BURT_DEFERRED_INCLUDED // 标记 BurtDeferred.hlsl 已经被包含过。
 
+#include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl" // 引入 BurtEncodedGBuffer / BurtGBufferData，以及 GBuffer 编解码函数。
 
-// 主 Agent 分配并绑定的四张 GBuffer，全局名来自 BurtRenderGraphResourceRegistry 的 _BurtGBuffer0/1/2/3 约定。
+// 主 Agent 分配并绑定的五张 GBuffer，全局名来自 BurtRenderGraphResourceRegistry 的 _BurtGBuffer0/1/2/3/4 约定。
 sampler2D _BurtGBuffer0;
 sampler2D _BurtGBuffer1;
 sampler2D _BurtGBuffer2;
 sampler2D _BurtGBuffer3;
+sampler2D _BurtGBuffer4;
 
 // 主 Agent 绑定的 CameraDepth；来源可以是 DepthPrepass，也可以是 GBuffer pass 写入的共享深度。
 UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -108,7 +110,7 @@ float3 BurtReconstructDeferredNonJitteredPositionWS(float2 screenUV, float rawDe
     return BurtReconstructDeferredPositionWSWithMatrix(screenUV, rawDepth, _BurtDeferredInverseNonJitteredViewProjectionMatrix);
 }
 
-// 采样 BurtRP 当前四张 GBuffer RT，并打包成 BurtGBuffer.hlsl 定义的 BurtEncodedGBuffer。
+// 采样 BurtRP 当前五张 GBuffer RT，并打包成 BurtGBuffer.hlsl 定义的 BurtEncodedGBuffer。
 BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
 {
     // 创建编码 GBuffer 输出，字段顺序必须和材质 shader 的 SV_Target0/1/2/3 保持一致。
@@ -124,6 +126,8 @@ BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
     encodedGBuffer.gbuffer2 = tex2D(_BurtGBuffer2, screenUV);
 
     encodedGBuffer.gbuffer3 = tex2D(_BurtGBuffer3, screenUV);
+
+    encodedGBuffer.gbuffer4 = tex2D(_BurtGBuffer4, screenUV);
 
     // 返回采样结果，让调用方继续 Decode 或做原始 GBuffer Debug。
     return encodedGBuffer;

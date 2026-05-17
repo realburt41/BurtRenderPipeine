@@ -36,6 +36,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id; // 缓存 GBuffer1 全局纹理 ID，避免每帧重复查找字符串。
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id; // 缓存 GBuffer2 全局纹理 ID，避免每帧重复查找字符串。
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
+        private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
         private static readonly int CameraDepthId = BurtRenderGraphResourceRegistry.CameraDepthTextureId; // 缓存 CameraDepth 全局纹理 ID，Deferred Lighting 需要用它重建位置。
         private static readonly int ScreenSpaceAmbientOcclusionId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionTextureId;
         private static readonly int ScreenSpaceAmbientOcclusionEnabledId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionEnabled");
@@ -48,7 +49,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
         private static readonly int ScreenSizeId = Shader.PropertyToID("_BurtDeferredScreenSize"); // 缓存屏幕尺寸参数 ID，shader 可用它把像素坐标和 UV 互相转换。
         private readonly string passName; // 缓存当前 lighting pass 的调试名称，Frame Debugger 中会区分 Lit 和 Hair。
         private readonly int shaderPassIndex; // 缓存当前要执行的 shader pass index；0=Lit，1=Hair。
-        private readonly bool readsExistingCameraColor; // Hair pass 使用加法混合，需要声明它依赖前一个 Lit pass 的 CameraColor。
+        private readonly bool readsExistingCameraColor; // Additive shading model passes need to declare that they depend on the previous CameraColor result.
         private Material deferredLightingMaterial; // 缓存 Deferred Lighting 运行时材质，避免每帧重复创建 Material。
         private bool hasLoggedMissingShader; // 记录是否已经提示过 shader 缺失，避免 Console 每帧刷屏。
         private bool hasLoggedMissingShaderPass;
@@ -60,6 +61,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
         }
 
         public override string Name => passName; // 返回 Pass 名称，方便 RenderGraph Debug 和 Frame Debugger 识别 Lit/Hair 合成阶段。
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.FullScreen;
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源读写关系。
         {
@@ -67,6 +69,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             builder.ReadGBuffer1(); // 声明 Deferred Lighting 会读取 GBuffer1 中的 normal、metallic 和 smoothness。
             builder.ReadGBuffer2(); // 声明 Deferred Lighting 会读取 GBuffer2 中的 emission 和 reflectance。
             builder.ReadGBuffer3();
+            builder.ReadGBuffer4();
             builder.ReadCameraDepth(); // 声明 Deferred Lighting 会读取 CameraDepth 来重建世界坐标。
             if (BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(builder.Request, builder.Asset))
             {
@@ -80,6 +83,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
                 builder.ReadTileLightOffsetBuffer();
             }
 
+            if (ShouldUseRuntimeClusteredLighting(builder.Request, builder.Asset, builder.ResourceRegistry))
+            {
+                builder.ReadClusterLightCountBuffer();
+                builder.ReadClusterLightListBuffer();
+                builder.ReadClusterLightOffsetBuffer();
+            }
+
             builder.ReadLightingGlobals(); // 声明 Deferred Lighting 会读取 Setup Lighting 上传的主光和环境光全局状态。
             builder.ReadShadowGlobals(); // 声明 Deferred Lighting 会读取阴影矩阵、强度和 texel size 等全局状态。
 
@@ -88,7 +98,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
                 builder.ReadMainLightShadowMap(); // 声明 Deferred Lighting 会采样 MainLightShadowMap。
             }
 
-            if (readsExistingCameraColor) // Hair pass 以 additive 方式叠加到 Lit pass 结果上，所以在资源声明中保留这个依赖。
+            if (readsExistingCameraColor) // Additive model passes blend onto the Lit pass result, so keep this dependency in the graph.
             {
                 builder.ReadCameraColor();
             }
@@ -98,7 +108,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
 
         public override void Execute(BurtRenderGraphContext context) // 执行 Deferred Lighting 全屏合成。
         {
-            if (!TryGetRequiredTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target)) // 先读取并验证本 Pass 需要的全部 RT。
+            if (!TryGetRequiredTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target)) // 先读取并验证本 Pass 需要的全部 RT。
             {
                 return; // 资源不完整时直接跳过，避免向错误目标绘制全屏三角形。
             }
@@ -123,6 +133,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier); // 把当前 request 的 GBuffer1 绑定给 Deferred Lighting shader。
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier); // 把当前 request 的 GBuffer2 绑定给 Deferred Lighting shader。
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier); // 确保 _BurtCameraDepthTexture 指向当前 request 的深度纹理。
             BindScreenSpaceAmbientOcclusion(context, cmd, material);
             BindAdditionalLightBuffer(context, cmd, material);
@@ -144,7 +155,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             out BurtRenderTargetHandle gbuffer0Target,
             out BurtRenderTargetHandle gbuffer1Target,
             out BurtRenderTargetHandle gbuffer2Target,
-            out BurtRenderTargetHandle gbuffer3Target)
+            out BurtRenderTargetHandle gbuffer3Target,
+            out BurtRenderTargetHandle gbuffer4Target)
         {
             cameraColorTarget = context != null ? context.CameraColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraColorName);
             cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
@@ -152,13 +164,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             gbuffer1Target = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name);
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
+            gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
 
             return cameraColorTarget.IsValid &&
                 cameraDepthTarget.IsValid &&
                 gbuffer0Target.IsValid &&
                 gbuffer1Target.IsValid &&
                 gbuffer2Target.IsValid &&
-                gbuffer3Target.IsValid;
+                gbuffer3Target.IsValid &&
+                gbuffer4Target.IsValid;
         }
 
         private static void BindScreenSpaceAmbientOcclusion(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
@@ -214,6 +228,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
                 resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
         }
 
+        private static bool ShouldUseRuntimeClusteredLighting(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            if (!BurtTiledLightData.ShouldUseRuntimeClusteredLightingResources(request, asset, true))
+            {
+                return false;
+            }
+
+            return resourceRegistry != null &&
+                resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName) &&
+                resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName) &&
+                resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName);
+        }
+
         private static void BindRuntimeTiledLighting(BurtRenderGraphContext context, CommandBuffer cmd)
         {
             var enabled = false;
@@ -221,6 +248,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             var countBuffer = context != null ? context.TileLightCountBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
             var listBuffer = context != null ? context.TileLightListBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.TileLightListBufferName);
             var offsetBuffer = context != null ? context.TileLightOffsetBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+            var clusterCountBuffer = context != null ? context.ClusterLightCountBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName);
+            var clusterListBuffer = context != null ? context.ClusterLightListBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.ClusterLightListBufferName);
+            var clusterOffsetBuffer = context != null ? context.ClusterLightOffsetBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName);
 
             if (context != null &&
                 BurtTiledLightData.ShouldUseRuntimeTiledLightingResources(context.Request, context.Asset, true) &&
@@ -242,6 +272,47 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
             }
 
             cmd.SetGlobalFloat(BurtTiledLightData.TileLightCountBufferEnabledId, enabled ? 1f : 0f);
+            BindRuntimeClusteredLighting(cmd, lightingData, clusterCountBuffer, clusterListBuffer, clusterOffsetBuffer);
+        }
+
+        private static void BindRuntimeClusteredLighting(
+            CommandBuffer cmd,
+            BurtLightingData lightingData,
+            BurtRenderBufferHandle countBuffer,
+            BurtRenderBufferHandle listBuffer,
+            BurtRenderBufferHandle offsetBuffer)
+        {
+            var enabled = lightingData != null &&
+                lightingData.ClusterLightUploaded &&
+                lightingData.TileLightGridX > 0 &&
+                lightingData.TileLightGridY > 0 &&
+                lightingData.ClusterLightDepthSliceCount > 0 &&
+                lightingData.ClusterLightMaxLightsPerCluster > 0 &&
+                lightingData.ClusterLightListCapacity > 0 &&
+                lightingData.ClusterLightInvDepthRange > 0f &&
+                countBuffer.IsValid && countBuffer.HasBuffer &&
+                listBuffer.IsValid && listBuffer.HasBuffer &&
+                offsetBuffer.IsValid && offsetBuffer.HasBuffer;
+
+            if (enabled)
+            {
+                cmd.SetGlobalBuffer(BurtTiledLightData.ClusterLightCountBufferId, countBuffer.Buffer);
+                cmd.SetGlobalBuffer(BurtTiledLightData.ClusterLightListBufferId, listBuffer.Buffer);
+                cmd.SetGlobalBuffer(BurtTiledLightData.ClusterLightOffsetBufferId, offsetBuffer.Buffer);
+                cmd.SetGlobalVector(
+                    BurtTiledLightData.ClusterLightGridParamsId,
+                    new Vector4(lightingData.TileLightGridX, lightingData.TileLightGridY, lightingData.ClusterLightDepthSliceCount, lightingData.ClusterLightMaxLightsPerCluster));
+                cmd.SetGlobalVector(
+                    BurtTiledLightData.ClusterLightDepthParamsId,
+                    new Vector4(
+                        lightingData.ClusterLightNearPlane,
+                        lightingData.ClusterLightFarPlane,
+                        lightingData.ClusterLightInvDepthRange,
+                        lightingData.ClusterLightDepthSliceCount));
+                cmd.SetGlobalVector(BurtTiledLightData.ClusterLightWorldToViewZId, lightingData.ClusterLightWorldToViewZ);
+            }
+
+            cmd.SetGlobalFloat(BurtTiledLightData.ClusterLightBufferEnabledId, enabled ? 1f : 0f);
         }
 
         private static BurtTileLightLayout ResolveRuntimeTileLightLayout(BurtRenderGraphContext context, BurtLightingData lightingData)
@@ -417,6 +488,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Li
     {
         public BurtDeferredHairLightingPass()
             : base("Burt Deferred Hair Lighting", 1, true)
+        {
+        }
+    }
+
+    internal sealed class BurtDeferredClearCoatLightingPass : BurtDeferredLightingPass
+    {
+        public BurtDeferredClearCoatLightingPass()
+            : base("Burt Deferred Clear Coat Lighting", 2, true)
+        {
+        }
+    }
+
+    internal sealed class BurtDeferredSubsurfaceLightingPass : BurtDeferredLightingPass
+    {
+        public BurtDeferredSubsurfaceLightingPass()
+            : base("Burt Deferred Subsurface Lighting", 3, true)
         {
         }
     }

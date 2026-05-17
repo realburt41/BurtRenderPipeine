@@ -340,7 +340,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             float BurtSSRHitNormalWeight(float2 hitUV, float3 reflectionDirectionWS)
             {
                 BurtGBufferData hitGBufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(hitUV));
-                float3 hitNormalWS = BurtSafeNormalize(hitGBufferData.normalWS);
+                float3 hitNormalWS = BurtGetReflectionNormalWS(hitGBufferData);
                 float frontFaceWeight = smoothstep(-0.15, 0.15, dot(-reflectionDirectionWS, hitNormalWS));
                 return lerp(0.35, 1.0, frontFaceWeight);
             }
@@ -940,7 +940,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
                 BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
-                float normalSupport = saturate(dot(centerNormal, BurtSafeNormalize(sampleGBuffer.normalWS)));
+                float normalSupport = saturate(dot(centerNormal, BurtGetReflectionNormalWS(sampleGBuffer)));
                 normalSupport *= normalSupport;
                 float depthSupport = 1.0 - smoothstep(depthTolerance * 0.5, depthTolerance, abs(sampleLinearDepth - centerLinearDepth));
                 return normalSupport * depthSupport;
@@ -956,7 +956,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(hitUV));
-                float3 centerNormal = BurtSafeNormalize(centerGBuffer.normalWS);
+                float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
                 float depthTolerance = max(centerLinearDepth * 0.025, 0.035);
                 float2 rayPixels = rayDeltaUV * _BurtSSRSourceTexelSize.zw;
                 float rayPixelLength = length(rayPixels);
@@ -1598,10 +1598,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
-                float3 normalWS = BurtSafeNormalize(gbufferData.normalWS);
+                float3 normalWS = BurtGetReflectionNormalWS(gbufferData);
                 float nDotV = saturate(dot(normalWS, viewDirectionWS));
 
-                float roughnessFade = saturate((_BurtSSRParams0.w - gbufferData.perceptualRoughness) / max(_BurtSSRParams0.w, 0.0001));
+                float reflectionRoughness = BurtGetReflectionRoughness(gbufferData);
+                float roughnessFade = saturate((_BurtSSRParams0.w - reflectionRoughness) / max(_BurtSSRParams0.w, 0.0001));
                 float roughnessIntensity = roughnessFade * _BurtSSRParams0.z;
                 if (debugMode == 0)
                 {
@@ -1801,7 +1802,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float centerLinearDepth = LinearEyeDepth(centerDepth);
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                float3 centerNormal = BurtSafeNormalize(centerGBuffer.normalWS);
+                float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
+                float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
 
                 int debugMode = (int)_BurtSSRParams1.z;
                 if ((debugMode > 0 && debugMode <= 7) || (debugMode >= 16 && debugMode <= 31))
@@ -1815,7 +1817,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float accumulatedConfidence = centerConfidence;
                 float totalWeight = max(centerConfidence, 0.0001);
 
-                float baseSampleRadius = lerp(1.0, 2.25, saturate(centerGBuffer.perceptualRoughness * 2.0));
+                float baseSampleRadius = lerp(1.0, 2.25, saturate(centerRoughness * 2.0));
                 float sampleRadius = lerp(1.0, baseSampleRadius, saturate(centerConfidence * 4.0));
                 float fillSupport = 0.0;
                 float4 axialSupport = 0.0;
@@ -1847,12 +1849,12 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                     float sampleLinearDepth = LinearEyeDepth(sampleDepth);
                     BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
-                    float normalWeight = saturate(dot(centerNormal, BurtSafeNormalize(sampleGBuffer.normalWS)));
+                    float normalWeight = saturate(dot(centerNormal, BurtGetReflectionNormalWS(sampleGBuffer)));
                     normalWeight *= normalWeight * normalWeight;
                     float depthTolerance = max(centerLinearDepth * 0.015, 0.01);
                     float depthWeight = exp2(-abs(sampleLinearDepth - centerLinearDepth) / depthTolerance);
                     depthWeight *= depthWeight;
-                    float roughnessWeight = exp2(-abs(sampleGBuffer.perceptualRoughness - centerGBuffer.perceptualRoughness) * 10.0);
+                    float roughnessWeight = exp2(-abs(BurtGetReflectionRoughness(sampleGBuffer) - centerRoughness) * 10.0);
                     float sampleConfidence = saturate(sampleSSR.a);
                     float confidenceGate = smoothstep(0.02, 0.18, sampleConfidence);
                     float alphaWeight = centerConfidence > 0.05 ?
@@ -1993,12 +1995,12 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
-                float normalWeight = saturate(dot(centerNormal, BurtSafeNormalize(sampleGBuffer.normalWS)));
+                float normalWeight = saturate(dot(centerNormal, BurtGetReflectionNormalWS(sampleGBuffer)));
                 normalWeight *= normalWeight * normalWeight;
                 float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
                 float depthTolerance = max(centerLinearDepth * 0.012, 0.01);
                 float depthWeight = exp2(-abs(sampleLinearDepth - centerLinearDepth) / depthTolerance);
-                float roughnessWeight = exp2(-abs(sampleGBuffer.perceptualRoughness - centerRoughness) * 10.0);
+                float roughnessWeight = exp2(-abs(BurtGetReflectionRoughness(sampleGBuffer) - centerRoughness) * 10.0);
                 return saturate(normalWeight * depthWeight * depthWeight * roughnessWeight);
             }
 
@@ -2045,7 +2047,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                return BurtSSRComputeRoughnessMipFromRoughness(gbufferData.perceptualRoughness);
+                return BurtSSRComputeRoughnessMipFromRoughness(BurtGetReflectionRoughness(gbufferData));
             }
 
             float BurtSSRCompositeVarianceGate(float2 screenUV)
@@ -2146,8 +2148,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
-                float3 centerNormal = BurtSafeNormalize(centerGBuffer.normalWS);
-                float centerRoughness = centerGBuffer.perceptualRoughness;
+                float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
+                float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
                 float centerAlpha = saturate(centerSSR.a);
                 float centerLuminance = BurtSSRCompositeLuminance(centerSSR.rgb);
                 float pureSpecularRoughness = 0.06;
@@ -2260,7 +2262,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                float roughnessFade = saturate((_BurtSSRParams0.w - gbufferData.perceptualRoughness) / max(_BurtSSRParams0.w, 0.0001));
+                float reflectionRoughness = BurtGetReflectionRoughness(gbufferData);
+                float roughnessFade = saturate((_BurtSSRParams0.w - reflectionRoughness) / max(_BurtSSRParams0.w, 0.0001));
                 if (roughnessFade <= 0.0 || _BurtSSRParams0.z <= 0.0)
                 {
                     return 0.0;
@@ -2268,7 +2271,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
-                float3 normalWS = BurtSafeNormalize(gbufferData.normalWS);
+                float3 normalWS = BurtGetReflectionNormalWS(gbufferData);
                 float nDotV = saturate(dot(normalWS, viewDirectionWS));
                 BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
                 float3 fresnel = F_Schlick(materialData.f0, materialData.f90, nDotV);
@@ -2577,8 +2580,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, currentRawDepth);
                 BurtGBufferData currentGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                float3 currentNormalWS = BurtSafeNormalize(currentGBuffer.normalWS);
-                float currentRoughness = saturate(currentGBuffer.perceptualRoughness);
+                float3 currentNormalWS = BurtGetReflectionNormalWS(currentGBuffer);
+                float currentRoughness = BurtGetReflectionRoughness(currentGBuffer);
                 float2 previousUV;
                 float previousLinearDepth;
                 if (!BurtSSRTemporalProjectPrevious(positionWS, previousUV, previousLinearDepth))
@@ -2770,8 +2773,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             float4 FragCopyNormalRoughnessHistory(Varyings input) : SV_Target
             {
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(input.screenUV));
-                float3 normalWS = BurtSafeNormalize(gbufferData.normalWS);
-                return float4(normalWS * 0.5 + 0.5, saturate(gbufferData.perceptualRoughness));
+                float3 normalWS = BurtGetReflectionNormalWS(gbufferData);
+                return float4(normalWS * 0.5 + 0.5, BurtGetReflectionRoughness(gbufferData));
             }
             ENDHLSL
         }
@@ -2990,11 +2993,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                     }
 
                     BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
-                    float3 sampleNormalWS = BurtSafeNormalize(sampleGBuffer.normalWS);
+                    float3 sampleNormalWS = BurtGetReflectionNormalWS(sampleGBuffer);
                     float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
                     float depthWeight = exp2(-abs(sampleLinearDepth - centerLinearDepth) / depthTolerance);
                     float normalWeight = smoothstep(0.72, 0.96, dot(centerNormalWS, sampleNormalWS));
-                    float roughnessWeight = exp2(-abs(saturate(sampleGBuffer.perceptualRoughness) - centerRoughness) * 10.0);
+                    float roughnessWeight = exp2(-abs(BurtGetReflectionRoughness(sampleGBuffer) - centerRoughness) * 10.0);
                     float sampleWeight = sampleAlphaWeight * depthWeight * normalWeight * roughnessWeight;
                     float sampleLuminance = BurtSSRTemporalMomentLuminance(sampleSSR.rgb);
                     moment1 += sampleLuminance * sampleWeight;
@@ -3024,8 +3027,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float historyValid = saturate(_BurtSSRTemporalParams0.y);
                 BurtGBufferData currentGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(input.screenUV));
-                float3 currentNormalWS = BurtSafeNormalize(currentGBuffer.normalWS);
-                float currentRoughness = saturate(currentGBuffer.perceptualRoughness);
+                float3 currentNormalWS = BurtGetReflectionNormalWS(currentGBuffer);
+                float currentRoughness = BurtGetReflectionRoughness(currentGBuffer);
                 float3 positionWS = BurtReconstructDeferredPositionWS(input.screenUV, rawDepth);
                 float2 previousUV;
                 float previousLinearDepth;

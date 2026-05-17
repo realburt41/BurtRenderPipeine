@@ -84,10 +84,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                     return BurtGBufferDebugViewMode.HairScatter; // 显示 Hair 复用 GBuffer1.b material channel 存储的 scatter。
                 case BurtShadingDebugMode.GBufferHairShift: // Overlay 选择 Hair longitudinal shift scale 时。
                     return BurtGBufferDebugViewMode.HairShift; // 显示 Hair 复用 GBuffer1.b material channel 存储的 shift scale。
+                case BurtShadingDebugMode.GBufferClearCoatMask:
+                    return BurtGBufferDebugViewMode.ClearCoatMask;
                 case BurtShadingDebugMode.GBufferSubsurfaceStrength:
                     return BurtGBufferDebugViewMode.SubsurfaceStrength;
+                case BurtShadingDebugMode.GBufferSubsurfaceThickness:
+                    return BurtGBufferDebugViewMode.SubsurfaceThickness;
                 case BurtShadingDebugMode.GBufferClearCoatNormalWS:
                     return BurtGBufferDebugViewMode.ClearCoatNormalWS;
+                case BurtShadingDebugMode.GBufferClearCoatRoughness:
+                    return BurtGBufferDebugViewMode.ClearCoatRoughness;
                 default: // 其他 Shading Debug 模式不是全屏 GBuffer 数据源。
                     return BurtGBufferDebugViewMode.Disabled; // 返回 Disabled，让 Deferred 正常渲染或交给其他 Debug Pass。
             }
@@ -106,6 +112,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id; // 缓存 GBuffer1 全局纹理 ID，避免每帧重复把字符串转换成整数。
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id; // 缓存 GBuffer2 全局纹理 ID，避免每帧重复把字符串转换成整数。
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
+        private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
         private static readonly int CameraDepthId = BurtRenderGraphResourceRegistry.CameraDepthTextureId; // 缓存 CameraDepth 全局纹理 ID，让 RawDepth 调试模式能读取当前相机深度。
         private static readonly int DebugModeId = Shader.PropertyToID("_BurtGBufferDebugMode"); // 缓存调试模式属性 ID，shader 通过它决定显示哪个 GBuffer 通道。
         private static readonly int DebugYFlipId = Shader.PropertyToID("_BurtGBufferDebugYFlip"); // 保留 GBuffer 调试 shader 的 Y 翻转属性 ID；当前默认传 0，因为采样 UV 已在 BurtDeferred.hlsl 中按平台修正。
@@ -125,6 +132,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
             builder.ReadGBuffer1(); // 声明调试 shader 会读取 GBuffer1 的 normal、metallic 和 smoothness。
             builder.ReadGBuffer2(); // 声明调试 shader 会读取 GBuffer2 的 emission 和 reflectance。
             builder.ReadGBuffer3();
+            builder.ReadGBuffer4();
             builder.ReadCameraDepth(); // 声明调试 shader 会读取 CameraDepth，RawDepth 模式和后续重建调试会用到它。
             builder.WriteCameraColor(); // 声明调试结果会覆盖写回 CameraColor，并在 FinalBlit 前显示到最终窗口。
         }
@@ -136,7 +144,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                 return; // 未开启时直接跳过，不改变 CameraColor。
             }
 
-            if (!TryGetRequiredTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target)) // 读取并验证调试所需的全部 RT。
+            if (!TryGetRequiredTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target)) // 读取并验证调试所需的全部 RT。
             {
                 return; // 任意目标无效时直接跳过，避免绑定或采样错误资源。
             }
@@ -158,6 +166,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier); // 把当前 request 的 GBuffer1 绑定给调试 shader。
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier); // 把当前 request 的 GBuffer2 绑定给调试 shader。
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier); // 把当前 request 的 CameraDepth 绑定给调试 shader。
             cmd.SetGlobalFloat(DebugModeId, debugMode); // 上传调试模式，让 shader 选择显示原始 GBuffer 或解码后的材质分量。
             cmd.SetGlobalFloat(DebugYFlipId, debugYFlip); // 上传固定为 0 的调试翻转值，避免 GBuffer Debug 在 Deferred 平台 UV 修正后再次翻转。
@@ -174,7 +183,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
             out BurtRenderTargetHandle gbuffer0Target, // 输出 GBuffer0 句柄。
             out BurtRenderTargetHandle gbuffer1Target, // 输出 GBuffer1 句柄。
             out BurtRenderTargetHandle gbuffer2Target, // 输出 GBuffer2 句柄。
-            out BurtRenderTargetHandle gbuffer3Target)
+            out BurtRenderTargetHandle gbuffer3Target,
+            out BurtRenderTargetHandle gbuffer4Target)
         {
             cameraColorTarget = context != null ? context.CameraColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraColorName); // context 有效时读取 CameraColor，否则返回无效句柄。
             cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName); // context 有效时读取 CameraDepth，否则返回无效句柄。
@@ -182,8 +192,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
             gbuffer1Target = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name); // context 有效时读取 GBuffer1，否则返回无效句柄。
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name); // context 有效时读取 GBuffer2，否则返回无效句柄。
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
+            gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
 
-            return cameraColorTarget.IsValid && cameraDepthTarget.IsValid && gbuffer0Target.IsValid && gbuffer1Target.IsValid && gbuffer2Target.IsValid && gbuffer3Target.IsValid; // 只有全部目标有效时才允许绘制调试视图。
+            return cameraColorTarget.IsValid && cameraDepthTarget.IsValid && gbuffer0Target.IsValid && gbuffer1Target.IsValid && gbuffer2Target.IsValid && gbuffer3Target.IsValid && gbuffer4Target.IsValid; // 只有全部目标有效时才允许绘制调试视图。
         }
 
         private Material GetDebugGBufferMaterial() // 获取或创建 GBuffer 调试材质。

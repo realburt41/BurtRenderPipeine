@@ -87,10 +87,20 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "GBuffer Hair Scatter"; // 显示 Hair 复用 GBuffer1.b 存储的 scatter。
                 case BurtShadingDebugMode.GBufferHairShift:
                     return "GBuffer Hair Shift"; // 显示 Hair 复用 GBuffer1.b 存储的 longitudinal shift scale。
+                case BurtShadingDebugMode.GBufferClearCoatMask:
+                    return "GBuffer Clear Coat Mask";
                 case BurtShadingDebugMode.GBufferClearCoatNormalWS:
                     return "GBuffer Clear Coat Normal";
+                case BurtShadingDebugMode.GBufferClearCoatRoughness:
+                    return "GBuffer Clear Coat Roughness";
                 case BurtShadingDebugMode.GBufferSubsurfaceStrength:
                     return "GBuffer Subsurface";
+                case BurtShadingDebugMode.GBufferSubsurfaceThickness:
+                    return "GBuffer Subsurface Thickness";
+                case BurtShadingDebugMode.GBufferAnisotropy:
+                    return "GBuffer Anisotropy";
+                case BurtShadingDebugMode.GBufferTangentWS:
+                    return "GBuffer Tangent WS";
                 case BurtShadingDebugMode.DetailLighting:
                     return "Detail Lighting"; // 对齐 XRender DEBUGID_LIGHTING_DETAIL_LIGHTING。
                 case BurtShadingDebugMode.IndirectLighting:
@@ -155,6 +165,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Tile Light Count";
                 case BurtShadingDebugMode.TileLightOccupancy:
                     return "Tile Light Occupancy";
+                case BurtShadingDebugMode.ClusterLightCount:
+                    return "Cluster Light Count";
+                case BurtShadingDebugMode.ClusterLightOccupancy:
+                    return "Cluster Light Occupancy";
                 case BurtShadingDebugMode.CameraDepth:
                     return "Camera Depth"; // 已有全屏深度调试。
                 case BurtShadingDebugMode.MainLightShadow:
@@ -173,6 +187,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSAO Depth Validity";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability:
                     return "SSAO Surface Stability";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare:
+                    return "SSAO Diagnostic Compare";
                 case BurtShadingDebugMode.BloomPrefilter:
                     return "Bloom Prefilter";
                 case BurtShadingDebugMode.BloomFinalBloom:
@@ -203,6 +219,40 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Atmosphere Aerial Transmittance";
                 case BurtShadingDebugMode.AtmosphereAerialInscatter:
                     return "Atmosphere Aerial Inscatter";
+                case BurtShadingDebugMode.AtmosphereAerialFogAmount:
+                    return "Atmosphere Aerial Fog Amount";
+                case BurtShadingDebugMode.AtmosphereAerialHeightFade:
+                    return "Atmosphere Aerial Height Fade";
+                case BurtShadingDebugMode.AtmosphereAerialSummary:
+                    return "Atmosphere Aerial Summary";
+                case BurtShadingDebugMode.AtmosphereSunDisk:
+                    return "Atmosphere Sun Disk";
+                case BurtShadingDebugMode.AtmosphereSunHalo:
+                    return "Atmosphere Sun Halo";
+                case BurtShadingDebugMode.AtmosphereHorizon:
+                    return "Atmosphere Horizon";
+                case BurtShadingDebugMode.AtmosphereGroundBlend:
+                    return "Atmosphere Ground Blend";
+                case BurtShadingDebugMode.AtmosphereViewDirection:
+                    return "Atmosphere View Direction";
+                case BurtShadingDebugMode.FogAmount:
+                    return "Fog Amount";
+                case BurtShadingDebugMode.FogTransmittance:
+                    return "Fog Transmittance";
+                case BurtShadingDebugMode.FogHeight:
+                    return "Fog Height";
+                case BurtShadingDebugMode.FogDistance:
+                    return "Fog Distance";
+                case BurtShadingDebugMode.VolumetricFogScattering:
+                    return "Volumetric Fog Scattering";
+                case BurtShadingDebugMode.VolumetricFogTransmittance:
+                    return "Volumetric Fog Transmittance";
+                case BurtShadingDebugMode.VolumetricFogDensity:
+                    return "Volumetric Fog Density";
+                case BurtShadingDebugMode.VolumetricFogDistance:
+                    return "Volumetric Fog Distance";
+                case BurtShadingDebugMode.VolumetricFogStepCount:
+                    return "Volumetric Fog Step Count";
                 case BurtShadingDebugMode.AutoExposureLuminance:
                     return "Auto Exposure Luminance";
                 case BurtShadingDebugMode.AutoExposureMeteringWeight:
@@ -399,8 +449,13 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.GBufferHairStrandDirection, // Hair 专用：GBuffer1.rg 解码后的 strand direction。
             BurtShadingDebugMode.GBufferHairScatter, // Hair 专用：GBuffer1.b material channel 解码后的 scatter。
             BurtShadingDebugMode.GBufferHairShift, // Hair 专用：GBuffer1.b material channel 解码后的 shift scale。
+            BurtShadingDebugMode.GBufferClearCoatMask,
             BurtShadingDebugMode.GBufferClearCoatNormalWS,
-            BurtShadingDebugMode.GBufferSubsurfaceStrength // Subsurface 专用：GBuffer1.b material channel 解码后的 strength。
+            BurtShadingDebugMode.GBufferClearCoatRoughness,
+            BurtShadingDebugMode.GBufferSubsurfaceStrength, // Subsurface 专用：GBuffer1.b material channel 解码后的 strength。
+            BurtShadingDebugMode.GBufferSubsurfaceThickness,
+            BurtShadingDebugMode.GBufferAnisotropy,
+            BurtShadingDebugMode.GBufferTangentWS
         });
 
         public static readonly BurtShadingDebugGroup SpecularAA = new BurtShadingDebugGroup("Specular AA / Normal Filtering", "Spec AA", new[] // 对应 XRender Normal Filtering / Anti Aliasing 方向。
@@ -453,7 +508,9 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.AdditionalDiffuse, // 追加光漫反射贡献。
             BurtShadingDebugMode.AdditionalSpecular, // 追加光高光贡献。
             BurtShadingDebugMode.TileLightCount, // Tiled debug：每个 tile 命中的追加光数量。
-            BurtShadingDebugMode.TileLightOccupancy // Tiled debug：tile list 使用率。
+            BurtShadingDebugMode.TileLightOccupancy, // Tiled debug：tile list 使用率。
+            BurtShadingDebugMode.ClusterLightCount,
+            BurtShadingDebugMode.ClusterLightOccupancy
         });
 
         public static readonly BurtShadingDebugGroup LightingIndirect = new BurtShadingDebugGroup("Indirect / Output", "Indirect", new[] // 间接光、AO、自发光和最终输出。
@@ -497,6 +554,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare,
             BurtShadingDebugMode.BloomPrefilter,
             BurtShadingDebugMode.BloomFinalBloom,
             BurtShadingDebugMode.BloomMip1,
@@ -580,7 +638,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionHistory,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity,
-            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability,
+            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare
         });
 
         public static readonly BurtShadingDebugGroup Bloom = new BurtShadingDebugGroup("Bloom", "Bloom", new[] // Bloom 后处理调试。
@@ -610,7 +669,32 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.AtmosphereMie,
             BurtShadingDebugMode.AtmosphereTransmittance,
             BurtShadingDebugMode.AtmosphereAerialTransmittance,
-            BurtShadingDebugMode.AtmosphereAerialInscatter
+            BurtShadingDebugMode.AtmosphereAerialInscatter,
+            BurtShadingDebugMode.AtmosphereAerialFogAmount,
+            BurtShadingDebugMode.AtmosphereAerialHeightFade,
+            BurtShadingDebugMode.AtmosphereAerialSummary,
+            BurtShadingDebugMode.AtmosphereSunDisk,
+            BurtShadingDebugMode.AtmosphereSunHalo,
+            BurtShadingDebugMode.AtmosphereHorizon,
+            BurtShadingDebugMode.AtmosphereGroundBlend,
+            BurtShadingDebugMode.AtmosphereViewDirection
+        });
+
+        public static readonly BurtShadingDebugGroup Fog = new BurtShadingDebugGroup("Fog", "Fog", new[]
+        {
+            BurtShadingDebugMode.FogAmount,
+            BurtShadingDebugMode.FogTransmittance,
+            BurtShadingDebugMode.FogHeight,
+            BurtShadingDebugMode.FogDistance
+        });
+
+        public static readonly BurtShadingDebugGroup VolumetricFog = new BurtShadingDebugGroup("Volumetric Fog", "Vol Fog", new[]
+        {
+            BurtShadingDebugMode.VolumetricFogScattering,
+            BurtShadingDebugMode.VolumetricFogTransmittance,
+            BurtShadingDebugMode.VolumetricFogDensity,
+            BurtShadingDebugMode.VolumetricFogDistance,
+            BurtShadingDebugMode.VolumetricFogStepCount
         });
 
         public static readonly BurtShadingDebugGroup ScreenSpaceReflections = new BurtShadingDebugGroup("Screen Space Reflections", "SSR", new[] // SSR 独立分类，避免挤在通用 Fullscreen 调试里。
@@ -689,7 +773,9 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public BurtShadingDebugOverlay() // Unity 创建 Overlay 时会调用这个构造函数。
             : base(
                 BurtShadingDebugFullscreenDropdown.Id,
-                BurtShadingDebugAtmosphereDropdown.Id) // 每个 ID 对应一个 EditorToolbarElement。
+                BurtShadingDebugAtmosphereDropdown.Id,
+                BurtShadingDebugFogDropdown.Id,
+                BurtShadingDebugVolumetricFogDropdown.Id) // 每个 ID 对应一个 EditorToolbarElement。
         {
         }
     }
@@ -980,10 +1066,35 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         }
     }
 
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugFogDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Fog";
+
+        public BurtShadingDebugFogDropdown()
+            : base(BurtShadingDebugGroups.Fog)
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugVolumetricFogDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/VolumetricFog";
+
+        public BurtShadingDebugVolumetricFogDropdown()
+            : base(BurtShadingDebugGroups.VolumetricFog)
+        {
+        }
+    }
+
     internal sealed class BurtShadingDebugPopup : PopupWindowContent // 每个分类按钮点击后弹出的菜单内容。
     {
         private const float ScrollMaxHeight = 320f; // 单个分类仍限制最大高度，后续模式增加时不会撑出屏幕。
-        private const float AutoExposureReadoutHeight = 128f;
+        private const float AtmosphereReadoutHeight = 350f;
+        private const float AutoExposureReadoutHeight = 184f;
+        private const float FogReadoutHeight = 210f;
+        private const float VolumetricFogReadoutHeight = 254f;
 
         private readonly BurtShadingDebugGroup group; // 当前弹窗展示的分类。
 
@@ -1001,6 +1112,21 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             if (IsAutoExposureGroup())
             {
                 contentHeight += AutoExposureReadoutHeight;
+            }
+
+            if (IsAtmosphereGroup())
+            {
+                contentHeight += AtmosphereReadoutHeight;
+            }
+
+            if (IsFogGroup())
+            {
+                contentHeight += FogReadoutHeight;
+            }
+
+            if (IsVolumetricFogGroup())
+            {
+                contentHeight += VolumetricFogReadoutHeight;
             }
 
             return new Vector2(320f, contentHeight); // 固定宽度，避免不同分类宽度跳变太大。
@@ -1027,6 +1153,24 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 EditorGUILayout.Space(4f);
             }
 
+            if (IsAtmosphereGroup())
+            {
+                DrawAtmosphereReadout();
+                EditorGUILayout.Space(4f);
+            }
+
+            if (IsFogGroup())
+            {
+                DrawFogReadout();
+                EditorGUILayout.Space(4f);
+            }
+
+            if (IsVolumetricFogGroup())
+            {
+                DrawVolumetricFogReadout();
+                EditorGUILayout.Space(4f);
+            }
+
             EditorGUILayout.HelpBox("参考 XRender Shader Debug 的分类 Toolbar；Material、Lighting、Post Process 分别在独立 Overlay 中按细分栏位展开。", MessageType.Info); // 说明分类来源和全局 Debug 行为。
         }
 
@@ -1047,6 +1191,144 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         private bool IsAutoExposureGroup()
         {
             return ReferenceEquals(group, BurtShadingDebugGroups.AutoExposure);
+        }
+
+        private bool IsAtmosphereGroup()
+        {
+            return ReferenceEquals(group, BurtShadingDebugGroups.Atmosphere);
+        }
+
+        private bool IsFogGroup()
+        {
+            return ReferenceEquals(group, BurtShadingDebugGroups.Fog);
+        }
+
+        private bool IsVolumetricFogGroup()
+        {
+            return ReferenceEquals(group, BurtShadingDebugGroups.VolumetricFog);
+        }
+
+        private static void DrawAtmosphereReadout()
+        {
+            var snapshot = BurtAtmosphereDebugUtility.GetSnapshot();
+            EditorGUILayout.LabelField("Atmosphere State", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Enabled", snapshot.Enabled.ToString());
+            EditorGUILayout.LabelField("Scattering", "Rayleigh " + Format(snapshot.RayleighIntensity) + "   Mie " + Format(snapshot.MieIntensity) + "   g " + Format(snapshot.MieAnisotropy));
+            EditorGUILayout.LabelField("Scale Height", "Rayleigh " + Format(snapshot.RayleighScaleHeight) + "km   Mie " + Format(snapshot.MieScaleHeight) + "km");
+            EditorGUILayout.LabelField("Planet", "Radius " + Format(snapshot.PlanetRadius) + "km   Atmosphere " + Format(snapshot.AtmosphereHeight) + "km");
+            EditorGUILayout.LabelField("Sun", snapshot.SunSource + "   Intensity " + Format(snapshot.SunIntensity) + "   Clamp " + Format(snapshot.TonemapSafeSunIntensity));
+            EditorGUILayout.LabelField("Sun Disk", "Size " + Format(snapshot.SunDiskSize) + "   Intensity " + Format(snapshot.SunDiskIntensity));
+            EditorGUILayout.LabelField("Sun Halo", "Size " + Format(snapshot.SunHaloSize) + "   Intensity " + Format(snapshot.SunHaloIntensity));
+            EditorGUILayout.LabelField("Horizon", "Intensity " + Format(snapshot.HorizonIntensity) + "   Falloff " + Format(snapshot.HorizonFalloff) + "   Sunset " + Format(snapshot.HorizonSunsetInfluence));
+            EditorGUILayout.LabelField("Horizon Color", FormatColor(snapshot.HorizonColor));
+            EditorGUILayout.LabelField("Sunset Color", FormatColor(snapshot.HorizonSunsetColor));
+            EditorGUILayout.LabelField("Ground", Format(snapshot.GroundContribution) + "   Blend " + Format(snapshot.GroundBlendStart) + " / " + Format(snapshot.GroundBlendEnd));
+            EditorGUILayout.LabelField("Sky Tint", FormatColor(snapshot.SkyTint));
+            EditorGUILayout.LabelField("Exposure EV", Format(snapshot.ExposureCompensation));
+            EditorGUILayout.LabelField("Aerial", snapshot.AerialPerspectiveEnabled + "   " + snapshot.AerialPerspectivePlacement + "   " + snapshot.FogInteraction);
+            EditorGUILayout.LabelField("Aerial Shape", "Intensity " + Format(snapshot.AerialPerspectiveIntensity) + "   Distance " + Format(snapshot.AerialPerspectiveDistance));
+            EditorGUILayout.LabelField("Aerial Fade", Format(snapshot.AerialPerspectiveNearFadeStart) + " / " + Format(snapshot.AerialPerspectiveNearFadeEnd) + "   Max " + Format(snapshot.AerialPerspectiveMaxOpacity));
+            EditorGUILayout.LabelField("Formula", snapshot.SkyFormula + " / " + snapshot.AerialFormula);
+
+            if (GUILayout.Button("Copy Atmosphere Readout"))
+            {
+                GUIUtility.systemCopyBuffer = FormatAtmosphereReadout(snapshot);
+            }
+        }
+
+        private static string FormatAtmosphereReadout(BurtAtmosphereDebugSnapshot snapshot)
+        {
+            return
+                "Burt Atmosphere Readout\n" +
+                "Enabled: " + snapshot.Enabled + "\n" +
+                "Scattering: rayleigh=" + Format(snapshot.RayleighIntensity) + " mie=" + Format(snapshot.MieIntensity) + " g=" + Format(snapshot.MieAnisotropy) + "\n" +
+                "ScaleHeightKm: rayleigh=" + Format(snapshot.RayleighScaleHeight) + " mie=" + Format(snapshot.MieScaleHeight) + "\n" +
+                "PlanetKm: radius=" + Format(snapshot.PlanetRadius) + " atmosphereHeight=" + Format(snapshot.AtmosphereHeight) + "\n" +
+                "Sun: source=" + snapshot.SunSource + " intensity=" + Format(snapshot.SunIntensity) + " clamp=" + Format(snapshot.TonemapSafeSunIntensity) + " customDirection=" + FormatVector(snapshot.CustomSunDirection) + "\n" +
+                "SunDisk: size=" + Format(snapshot.SunDiskSize) + " intensity=" + Format(snapshot.SunDiskIntensity) + "\n" +
+                "SunHalo: size=" + Format(snapshot.SunHaloSize) + " intensity=" + Format(snapshot.SunHaloIntensity) + "\n" +
+                "Art: horizonIntensity=" + Format(snapshot.HorizonIntensity) + " horizonFalloff=" + Format(snapshot.HorizonFalloff) + " horizonSunsetInfluence=" + Format(snapshot.HorizonSunsetInfluence) + " ground=" + Format(snapshot.GroundContribution) + " groundBlend=" + Format(snapshot.GroundBlendStart) + "/" + Format(snapshot.GroundBlendEnd) + " exposureEV=" + Format(snapshot.ExposureCompensation) + "\n" +
+                "Tint: sky=" + FormatColor(snapshot.SkyTint) + " horizon=" + FormatColor(snapshot.HorizonColor) + " sunset=" + FormatColor(snapshot.HorizonSunsetColor) + " ground=" + FormatColor(snapshot.GroundColor) + " aerial=" + FormatColor(snapshot.AerialPerspectiveTint) + "\n" +
+                "Aerial: enabled=" + snapshot.AerialPerspectiveEnabled + " intensity=" + Format(snapshot.AerialPerspectiveIntensity) + " distance=" + Format(snapshot.AerialPerspectiveDistance) + " heightFalloff=" + Format(snapshot.AerialPerspectiveHeightFalloff) + "\n" +
+                "AerialFade: near=" + Format(snapshot.AerialPerspectiveNearFadeStart) + "/" + Format(snapshot.AerialPerspectiveNearFadeEnd) + " maxOpacity=" + Format(snapshot.AerialPerspectiveMaxOpacity) + "\n" +
+                "AerialRouting: placement=" + snapshot.AerialPerspectivePlacement + " fogInteraction=" + snapshot.FogInteraction + "\n" +
+                "Formula: sky=" + snapshot.SkyFormula + " aerial=" + snapshot.AerialFormula;
+        }
+
+        private static void DrawFogReadout()
+        {
+            var snapshot = BurtFogDebugUtility.GetSnapshot();
+            EditorGUILayout.LabelField("Fog State", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Enabled", snapshot.Enabled.ToString());
+            EditorGUILayout.LabelField("Shape", "Height " + Format(snapshot.Height) + "   Density " + Format(snapshot.Density));
+            EditorGUILayout.LabelField("Falloff", Format(snapshot.HeightFalloff));
+            EditorGUILayout.LabelField("Distance", "Start " + Format(snapshot.StartDistance) + "   Cutoff " + Format(snapshot.CutoffDistance));
+            EditorGUILayout.LabelField("Max Opacity", Format(snapshot.MaxOpacity));
+            EditorGUILayout.LabelField("Albedo", FormatColor(snapshot.Albedo));
+            EditorGUILayout.LabelField("Lighting", "Directional " + Format(snapshot.DirectionalIntensity) + "   Ambient " + Format(snapshot.AmbientIntensity));
+            EditorGUILayout.LabelField("Anisotropy", Format(snapshot.Anisotropy));
+            EditorGUILayout.LabelField("Formula", snapshot.Formula);
+
+            if (GUILayout.Button("Copy Fog Readout"))
+            {
+                GUIUtility.systemCopyBuffer = FormatFogReadout(snapshot);
+            }
+        }
+
+        private static string FormatFogReadout(BurtFogDebugSnapshot snapshot)
+        {
+            return
+                "Burt Fog Readout\n" +
+                "Enabled: " + snapshot.Enabled + "\n" +
+                "Height: " + Format(snapshot.Height) + "\n" +
+                "Density: " + Format(snapshot.Density) + "\n" +
+                "Falloff: " + Format(snapshot.HeightFalloff) + "\n" +
+                "Distance: start=" + Format(snapshot.StartDistance) + " cutoff=" + Format(snapshot.CutoffDistance) + "\n" +
+                "MaxOpacity: " + Format(snapshot.MaxOpacity) + "\n" +
+                "Albedo: " + FormatColor(snapshot.Albedo) + "\n" +
+                "Scattering: directional=" + Format(snapshot.DirectionalIntensity) + " ambient=" + Format(snapshot.AmbientIntensity) + " anisotropy=" + Format(snapshot.Anisotropy) + "\n" +
+                "Formula: " + snapshot.Formula;
+        }
+
+        private static void DrawVolumetricFogReadout()
+        {
+            var snapshot = BurtVolumetricFogDebugUtility.GetSnapshot();
+            EditorGUILayout.LabelField("Volumetric Fog State", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Enabled", snapshot.Enabled.ToString());
+            EditorGUILayout.LabelField("Range", "Visible " + Format(snapshot.VisibleDistance) + "   Start " + Format(snapshot.StartDistance));
+            EditorGUILayout.LabelField("Marching", "Steps " + snapshot.StepCount + "   Jitter " + snapshot.Jitter);
+            EditorGUILayout.LabelField("Shape", "Height " + Format(snapshot.Height) + "   Density " + Format(snapshot.Density));
+            EditorGUILayout.LabelField("Falloff", Format(snapshot.HeightFalloff));
+            EditorGUILayout.LabelField("Extinction", Format(snapshot.ExtinctionScale));
+            EditorGUILayout.LabelField("Max Opacity", Format(snapshot.MaxOpacity));
+            EditorGUILayout.LabelField("Albedo", FormatColor(snapshot.Albedo));
+            EditorGUILayout.LabelField("Phase", "Anisotropy " + Format(snapshot.Anisotropy));
+            EditorGUILayout.LabelField("Lighting", "Direct " + Format(snapshot.DirectIntensity) + "   Ambient " + Format(snapshot.AmbientIntensity));
+            EditorGUILayout.LabelField("Formula", snapshot.Formula);
+
+            if (GUILayout.Button("Copy Volumetric Fog Readout"))
+            {
+                GUIUtility.systemCopyBuffer = FormatVolumetricFogReadout(snapshot);
+            }
+        }
+
+        private static string FormatVolumetricFogReadout(BurtVolumetricFogDebugSnapshot snapshot)
+        {
+            return
+                "Burt Volumetric Fog Readout\n" +
+                "Enabled: " + snapshot.Enabled + "\n" +
+                "VisibleDistance: " + Format(snapshot.VisibleDistance) + "\n" +
+                "StartDistance: " + Format(snapshot.StartDistance) + "\n" +
+                "StepCount: " + snapshot.StepCount + "\n" +
+                "Jitter: " + snapshot.Jitter + "\n" +
+                "Height: " + Format(snapshot.Height) + "\n" +
+                "Density: " + Format(snapshot.Density) + "\n" +
+                "Falloff: " + Format(snapshot.HeightFalloff) + "\n" +
+                "ExtinctionScale: " + Format(snapshot.ExtinctionScale) + "\n" +
+                "MaxOpacity: " + Format(snapshot.MaxOpacity) + "\n" +
+                "Albedo: " + FormatColor(snapshot.Albedo) + "\n" +
+                "Scattering: direct=" + Format(snapshot.DirectIntensity) + " ambient=" + Format(snapshot.AmbientIntensity) + " anisotropy=" + Format(snapshot.Anisotropy) + "\n" +
+                "Formula: " + snapshot.Formula;
         }
 
         private static void DrawAutoExposureReadout()
@@ -1070,14 +1352,46 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             EditorGUILayout.LabelField("Mode", snapshot.Mode.ToString());
             EditorGUILayout.LabelField("EV100", Format(snapshot.CurrentEV100) + " -> " + Format(snapshot.TargetEV100) + "   Range " + Format(snapshot.MinEV100) + " / " + Format(snapshot.MaxEV100));
             EditorGUILayout.LabelField("Average", "Luma " + Format(snapshot.AverageLuminance) + "   Log2 " + Format(snapshot.AverageLogLuminance));
+            EditorGUILayout.LabelField("Status", snapshot.SampleStatus + (snapshot.UsingFallbackSample ? " (fallback)" : string.Empty));
             EditorGUILayout.LabelField("Sample", "Has=" + snapshot.HasSample + " Count=" + snapshot.SampleCount + " Age=" + FormatFrameAge(snapshot.SampleAgeFrames));
-            EditorGUILayout.LabelField("Readback", "Pending=" + snapshot.ReadbackPending + " Age=" + FormatFrameAge(snapshot.ReadbackAgeFrames) + " Size=" + FormatReadbackSize(snapshot));
+            EditorGUILayout.LabelField("Readback", "Pending=" + snapshot.ReadbackPending + " RequestAge=" + FormatFrameAge(snapshot.ReadbackAgeFrames) + " DoneAge=" + FormatFrameAge(snapshot.ReadbackCompletedAgeFrames));
+            EditorGUILayout.LabelField("Readback Size", FormatReadbackSize(snapshot));
             EditorGUILayout.LabelField("Rejected", snapshot.SampleRejectedReason);
+
+            if (GUILayout.Button("Copy Readout"))
+            {
+                GUIUtility.systemCopyBuffer = FormatAutoExposureReadout(camera, snapshot);
+            }
+        }
+
+        private static string FormatAutoExposureReadout(Camera camera, BurtAutoExposureDebugSnapshot snapshot)
+        {
+            return
+                "Burt Auto Exposure Readout\n" +
+                "Camera: " + (camera != null ? camera.name : "n/a") + "\n" +
+                "Mode: " + snapshot.Mode + "\n" +
+                "EV100: current=" + Format(snapshot.CurrentEV100) + " target=" + Format(snapshot.TargetEV100) + " range=" + Format(snapshot.MinEV100) + "/" + Format(snapshot.MaxEV100) + "\n" +
+                "Average: luminance=" + Format(snapshot.AverageLuminance) + " log2=" + Format(snapshot.AverageLogLuminance) + "\n" +
+                "Status: " + snapshot.SampleStatus + " fallback=" + snapshot.UsingFallbackSample + "\n" +
+                "Sample: has=" + snapshot.HasSample + " count=" + snapshot.SampleCount + " age=" + FormatFrameAge(snapshot.SampleAgeFrames) + "\n" +
+                "Readback: pending=" + snapshot.ReadbackPending + " requestAge=" + FormatFrameAge(snapshot.ReadbackAgeFrames) + " doneAge=" + FormatFrameAge(snapshot.ReadbackCompletedAgeFrames) + " size=" + FormatReadbackSize(snapshot) + "\n" +
+                "Rejected: " + snapshot.SampleRejectedReason + "\n" +
+                "Metering: middleGrey=" + Format(snapshot.MiddleGrey) + " percentile=" + Format(snapshot.LowPercent) + "/" + Format(snapshot.HighPercent) + " histogramEV100=" + Format(snapshot.HistogramMinEV100) + "/" + Format(snapshot.HistogramMaxEV100);
         }
 
         private static string Format(float value)
         {
             return value.ToString("0.###");
+        }
+
+        private static string FormatColor(Color color)
+        {
+            return "(" + Format(color.r) + ", " + Format(color.g) + ", " + Format(color.b) + ")";
+        }
+
+        private static string FormatVector(Vector3 value)
+        {
+            return "(" + Format(value.x) + ", " + Format(value.y) + ", " + Format(value.z) + ")";
         }
 
         private static string FormatFrameAge(int age)
@@ -1177,51 +1491,24 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return BurtGBufferDebugViewMode.HairScatter; // 资产同步为 HairScatter。
                 case BurtShadingDebugMode.GBufferHairShift: // Overlay 选择 Hair longitudinal shift scale。
                     return BurtGBufferDebugViewMode.HairShift; // 资产同步为 HairShift。
+                case BurtShadingDebugMode.GBufferClearCoatMask:
+                    return BurtGBufferDebugViewMode.ClearCoatMask;
                 case BurtShadingDebugMode.GBufferClearCoatNormalWS:
                     return BurtGBufferDebugViewMode.ClearCoatNormalWS;
+                case BurtShadingDebugMode.GBufferClearCoatRoughness:
+                    return BurtGBufferDebugViewMode.ClearCoatRoughness;
                 case BurtShadingDebugMode.GBufferSubsurfaceStrength:
                     return BurtGBufferDebugViewMode.SubsurfaceStrength;
+                case BurtShadingDebugMode.GBufferSubsurfaceThickness:
+                    return BurtGBufferDebugViewMode.SubsurfaceThickness;
+                case BurtShadingDebugMode.GBufferAnisotropy:
+                    return BurtGBufferDebugViewMode.Anisotropy;
+                case BurtShadingDebugMode.GBufferTangentWS:
+                    return BurtGBufferDebugViewMode.TangentWS;
                 default: // 其他 Overlay 模式不应该显示真实 GBuffer。
                     return BurtGBufferDebugViewMode.Disabled; // 资产同步为 Disabled，避免切换到 Lighting/Material 后 GBuffer Debug 残留。
             }
         }
     }
 
-    internal sealed class BurtShadingDebugWindow : EditorWindow // Overlay 不可用时保留一个菜单窗口作为 fallback。
-    {
-        [MenuItem("Window/Rendering/BurtRP/Shading Debug")] // 提供 Window 菜单入口，方便没有打开 Overlay 的情况下切换。
-        private static void Open() // 打开 fallback 窗口。
-        {
-            GetWindow<BurtShadingDebugWindow>("Burt Shading Debug"); // 创建或聚焦窗口。
-        }
-
-        private void OnGUI() // 绘制 fallback 窗口内容。
-        {
-            EditorGUILayout.LabelField("Overlay Fallback", EditorStyles.boldLabel); // 标题提示这是备用入口。
-            EditorGUILayout.HelpBox("SceneView Overlay 会显示分类 Dropdown；这里保留完整 EnumPopup 作为备用入口。", MessageType.Info); // 说明推荐使用 Overlay。
-
-            EditorGUI.BeginChangeCheck(); // 开始监听 enum 修改。
-            var mode = (BurtShadingDebugMode)EditorGUILayout.EnumPopup("Mode", BurtShadingDebugSettings.Mode); // 备用入口仍显示完整 enum。
-
-            if (EditorGUI.EndChangeCheck()) // 用户切换了模式。
-            {
-                BurtShadingDebugSettings.Mode = mode; // 写入全局 shader debug 状态。
-                BurtShadingDebugOverlayUtility.SyncExistingDebugViews(mode); // 同步 Depth/Shadow 全屏 Debug 开关。
-                BurtShadingDebugGroupDropdown.UpdateAllVisualStates(); // 刷新 Overlay 上的分类按钮。
-                SceneView.RepaintAll(); // 刷新 SceneView。
-            }
-
-            EditorGUI.BeginChangeCheck();
-            var useTileLightCpuFallback = EditorGUILayout.Toggle("Tile CPU Fallback", BurtShadingDebugSettings.UseTileLightCpuDebugColorTextureFallback);
-            if (EditorGUI.EndChangeCheck())
-            {
-                BurtShadingDebugSettings.UseTileLightCpuDebugColorTextureFallback = useTileLightCpuFallback;
-                SceneView.RepaintAll();
-            }
-
-            EditorGUILayout.LabelField("Display", BurtShadingDebugDisplayNames.GetDisplayName(BurtShadingDebugSettings.Mode)); // 显示友好名，方便和 Overlay 对照。
-            EditorGUILayout.LabelField("Shader Mode", BurtShadingDebugSettings.ModeShaderName); // 显示 shader mode 全局变量名。
-            EditorGUILayout.LabelField("Shader Enabled", BurtShadingDebugSettings.EnabledShaderName); // 显示 shader enabled 全局变量名。
-        }
-    }
 }

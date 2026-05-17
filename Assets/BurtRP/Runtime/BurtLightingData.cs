@@ -32,7 +32,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public const int AdditionalLightBufferStride = 16; // StructuredBuffer<float4> stride in bytes.
 
-        public const string AdditionalLightShadingPathLabel = "ArrayFallback"; // Deferred/Forward shaders currently read global arrays; buffer is diagnostic/future tiled data.
+        public const string AdditionalLightShadingPathLabel = "DeferredTiledOrArrayFallback";
+        public const string AdditionalLightShadingPathClusteredLabel = "DeferredClustered";
+        public const string AdditionalLightShadingPathClusteredWithOverflowFallbackLabel = "DeferredClusteredWithOverflowFallback";
+        public const string AdditionalLightShadingPathTiledLabel = "DeferredTiled";
+        public const string AdditionalLightShadingPathTiledWithOverflowFallbackLabel = "DeferredTiledWithOverflowFallback";
+        public const string AdditionalLightShadingPathArrayFallbackLabel = "ArrayFallback";
 
         private const float AdditionalLightTypeDirectional = 0f;
         private const float AdditionalLightTypePoint = 1f;
@@ -63,6 +68,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public Vector4[] AdditionalLightSpotParams { get; } = new Vector4[MaxAdditionalLights]; // x=innerCos，y=outerCos，z=1/(inner-outer)，w=备用。
         public int ShadowedAdditionalLightCount { get; private set; } // ??? request ??????? atlas ?????
+        public float MainLightVolumetricScatteringIntensityScale { get; private set; } // XRender-style main light volumetric scattering scale.
         public bool HasShadowedAdditionalLights => ShadowedAdditionalLightCount > 0; // ? RenderGraph ? shadow pass ???????????? shadow atlas?
         public bool AdditionalLightShadowCacheValid { get; private set; } // ?? spot shadow ??? atlas rect ??????? request ?????
         public int AdditionalLightShadowTileResolution { get; private set; } // ?????? atlas ?? tile ???????? texel size ???
@@ -107,13 +113,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public bool AdditionalLightBufferUploaded { get; private set; } // True when packed additional-light rows were uploaded to a live GPU buffer.
 
-        public bool TileLightDebugBuildAttempted { get; private set; } // True once the tiled debug skeleton tried to build per-tile light data.
+        public bool TileLightDebugBuildAttempted { get; private set; } // True once the tiled list builder tried to build per-tile light data.
 
-        public bool TileLightDebugUploaded { get; private set; } // True when the tiled debug buffers were uploaded to live GPU buffers.
+        public bool TileLightDebugUploaded { get; private set; } // True when the tiled buffers were uploaded to live GPU buffers.
 
-        public string TileLightDebugBuildMode { get; private set; } // Label describing how the debug tile data was generated.
+        public string TileLightDebugBuildMode { get; private set; } // Label describing how the tile data was generated.
 
-        public int TileLightTileSize { get; private set; } // Pixel size of one debug tile.
+        public int TileLightTileSize { get; private set; } // Pixel size of one tile.
 
         public int TileLightGridX { get; private set; } // Tile grid width in tiles.
 
@@ -121,7 +127,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public int TileLightTileCount { get; private set; } // Total number of tiles generated for the current camera.
 
-        public int TileLightMaxLightsPerTile { get; private set; } // Per-tile list capacity used by the debug skeleton.
+        public int TileLightMaxLightsPerTile { get; private set; } // Per-tile list capacity used by the tiled builder.
 
         public int TileLightListCapacity { get; private set; } // Total number of uint light-index slots allocated for the list buffer.
 
@@ -135,11 +141,56 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public int TileLightMaxOverflowExtraCount { get; private set; } // Largest raw-count excess above the per-tile list capacity.
 
-        public string AdditionalLightShadingPath => AdditionalLightShadingPathLabel; // Reports the shader path currently used by lighting.
+        public bool ClusterLightUploaded { get; private set; }
+        public int ClusterLightDepthSliceCount { get; private set; }
+        public int ClusterLightClusterCount { get; private set; }
+        public int ClusterLightMaxLightsPerCluster { get; private set; }
+        public int ClusterLightListCapacity { get; private set; }
+        public int ClusterLightMinCount { get; private set; }
+        public int ClusterLightMaxCount { get; private set; }
+        public float ClusterLightAverageCount { get; private set; }
+        public int ClusterLightOverflowClusterCount { get; private set; }
+        public int ClusterLightMaxOverflowExtraCount { get; private set; }
+        public float ClusterLightNearPlane { get; private set; }
+        public float ClusterLightFarPlane { get; private set; }
+        public float ClusterLightInvDepthRange { get; private set; }
+        public Vector4 ClusterLightWorldToViewZ { get; private set; }
+
+        public string AdditionalLightShadingPath
+        {
+            get
+            {
+                if (ClusterLightUploaded && ClusterLightListCapacity > 0 && ClusterLightOverflowClusterCount <= 0)
+                {
+                    return AdditionalLightShadingPathClusteredLabel;
+                }
+
+                if (ClusterLightUploaded && ClusterLightListCapacity > 0)
+                {
+                    return AdditionalLightShadingPathClusteredWithOverflowFallbackLabel;
+                }
+
+                if (TileLightDebugUploaded && TileLightListCapacity > 0 && TileLightOverflowTileCount <= 0)
+                {
+                    return AdditionalLightShadingPathTiledLabel;
+                }
+
+                if (TileLightDebugUploaded && TileLightListCapacity > 0)
+                {
+                    return AdditionalLightShadingPathTiledWithOverflowFallbackLabel;
+                }
+
+                return AdditionalLightShadingPathArrayFallbackLabel;
+            }
+        }
 
         public uint[] TileLightDebugCountSnapshot { get; private set; } // CPU copy used by the debug view texture fallback.
 
         public int TileLightDebugCountSnapshotLength { get; private set; } // Valid tile count in TileLightDebugCountSnapshot.
+
+        public uint[] ClusterLightDebugCountSnapshot { get; private set; }
+
+        public int ClusterLightDebugCountSnapshotLength { get; private set; }
 
         private BurtLightingData() // 隐藏构造函数，强制调用方通过 Create 或 Default 获得已初始化的数据。
         {
@@ -343,6 +394,55 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             TileLightDebugCountSnapshotLength = safeCount;
         }
 
+        public void SetClusterLightDebugCountSnapshot(uint[] sourceCounts, int count)
+        {
+            var safeCount = sourceCounts != null ? Mathf.Min(Mathf.Max(0, count), sourceCounts.Length) : 0;
+            if (safeCount <= 0)
+            {
+                ClusterLightDebugCountSnapshotLength = 0;
+                return;
+            }
+
+            if (ClusterLightDebugCountSnapshot == null || ClusterLightDebugCountSnapshot.Length < safeCount)
+            {
+                ClusterLightDebugCountSnapshot = new uint[safeCount];
+            }
+
+            System.Array.Copy(sourceCounts, ClusterLightDebugCountSnapshot, safeCount);
+            ClusterLightDebugCountSnapshotLength = safeCount;
+        }
+
+        public void SetClusterLightState(
+            bool uploaded,
+            int depthSliceCount,
+            int clusterCount,
+            int maxLightsPerCluster,
+            int listCapacity,
+            int minCount,
+            int maxCount,
+            float averageCount,
+            int overflowClusterCount,
+            int maxOverflowExtraCount,
+            float nearPlane,
+            float farPlane,
+            Vector4 worldToViewZ)
+        {
+            ClusterLightUploaded = uploaded;
+            ClusterLightDepthSliceCount = depthSliceCount;
+            ClusterLightClusterCount = clusterCount;
+            ClusterLightMaxLightsPerCluster = maxLightsPerCluster;
+            ClusterLightListCapacity = listCapacity;
+            ClusterLightMinCount = minCount;
+            ClusterLightMaxCount = maxCount;
+            ClusterLightAverageCount = averageCount;
+            ClusterLightOverflowClusterCount = overflowClusterCount;
+            ClusterLightMaxOverflowExtraCount = maxOverflowExtraCount;
+            ClusterLightNearPlane = Mathf.Max(nearPlane, 0.0001f);
+            ClusterLightFarPlane = Mathf.Max(farPlane, ClusterLightNearPlane + 0.0001f);
+            ClusterLightInvDepthRange = BurtTiledLightData.CalculateClusterInvLogDepthRange(ClusterLightNearPlane, ClusterLightFarPlane);
+            ClusterLightWorldToViewZ = worldToViewZ;
+        }
+
         public static BurtLightingData Default() // 创建一个即使没有剔除结果也可用的默认灯光数据。
         {
             var data = new BurtLightingData(); // 创建灯光数据对象。
@@ -381,6 +481,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
             AmbientLightColor = RenderSettings.ambientLight; // 读取 Unity Lighting 面板里的环境光颜色，后续 SetupLightingPass 会原样上传给 Simple Lit 路径。
 
+            MainLightVolumetricScatteringIntensityScale = 1f;
             ShadowData = BurtShadowData.None(); // 初始化为无阴影状态，找到主光后再生成真正的阴影数据。
 
             AdditionalLightCount = 0; // 默认没有追加光源，SetupLightingPass 仍会上传清零数组来避免上一相机残留。
@@ -390,7 +491,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             SetAdditionalLightShadowCacheState(false, 0, 0);
             ResetAdditionalLightShadowDiagnostics();
             SetTileLightDebugState(false, false, "Disabled", 0, 0, 0, 0, 0, 0, 0, 0, 0f);
+            SetClusterLightState(false, 0, 0, 0, 0, 0, 0, 0f, 0, 0, 0f, 1f, Vector4.zero);
             TileLightDebugCountSnapshotLength = 0;
+            ClusterLightDebugCountSnapshotLength = 0;
 
             ClearAdditionalLightArrays(); // 清空数组全部槽位，保证数量变少时 shader 不会读到上一帧数据。
         }
@@ -423,6 +526,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
                 MainLightColor = visibleLight.finalColor; // 保存 Unity 已经乘过 light color 和 intensity 的最终颜色。
 
+                MainLightVolumetricScatteringIntensityScale = ResolveVolumetricLightScatteringScale(visibleLight);
                 ShadowData = BurtShadowData.CreateForMainLight(visibleLight, lightIndex); // 根据当前主光和索引创建主光阴影数据。
 
                 return; // 当前规则只取第一盏方向光，所以找到后直接结束。
@@ -468,8 +572,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             var slot = AdditionalLightCount++;
             var color = visibleLight.finalColor;
             var direction = directionTowardLight.normalized;
+            var volumetricScale = ResolveVolumetricLightScatteringScale(visibleLight);
             AdditionalLightColorAndType[slot] = new Vector4(color.r, color.g, color.b, AdditionalLightTypeDirectional);
-            AdditionalLightDirectionAndSpot[slot] = new Vector4(direction.x, direction.y, direction.z, 0f);
+            AdditionalLightDirectionAndSpot[slot] = new Vector4(direction.x, direction.y, direction.z, volumetricScale);
             PackAdditionalLightBufferSlot(slot);
             TryMarkUnsupportedAdditionalLightShadow(slot, visibleLight, visibleLightIndex, BurtAdditionalLightShadowStatus.UnsupportedLightType);
         }
@@ -512,11 +617,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             var positionColumn = visibleLight.localToWorldMatrix.GetColumn(3);
             var color = visibleLight.finalColor;
             var slot = AdditionalLightCount++;
+            var volumetricScale = ResolveVolumetricLightScatteringScale(visibleLight);
+            var volumetricNearCutoff = ResolveVolumetricLightNearCutoff(visibleLight);
 
             AdditionalLightPositionAndRange[slot] = new Vector4(positionColumn.x, positionColumn.y, positionColumn.z, range);
             AdditionalLightColorAndType[slot] = new Vector4(color.r, color.g, color.b, lightType);
-            AdditionalLightDirectionAndSpot[slot] = new Vector4(direction.x, direction.y, direction.z, 0f);
-            AdditionalLightSpotParams[slot] = new Vector4(innerCos, outerCos, invAngleRange, 0f);
+            AdditionalLightDirectionAndSpot[slot] = new Vector4(direction.x, direction.y, direction.z, volumetricScale);
+            AdditionalLightSpotParams[slot] = new Vector4(innerCos, outerCos, invAngleRange, volumetricNearCutoff);
             PackAdditionalLightBufferSlot(slot);
 
             if (canCastShadow)
@@ -538,6 +645,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             }
 
             return Mathf.Max(0.01f, outerAngle * 0.8f);
+        }
+
+        private static float ResolveVolumetricLightScatteringScale(VisibleLight visibleLight)
+        {
+            var component = ResolveVolumetricLightComponent(visibleLight);
+            return component != null ? component.EffectiveScatteringIntensityScale : 1f;
+        }
+
+        private static float ResolveVolumetricLightNearCutoff(VisibleLight visibleLight)
+        {
+            var component = ResolveVolumetricLightComponent(visibleLight);
+            return component != null ? component.EffectiveNearCutoffDistance : 0f;
+        }
+
+        private static BurtVolumetricLight ResolveVolumetricLightComponent(VisibleLight visibleLight)
+        {
+            var light = visibleLight.light;
+            if (light == null)
+            {
+                return null;
+            }
+
+            return light.TryGetComponent(out BurtVolumetricLight component) ? component : null;
         }
 
         private void ClearAdditionalLightArrays()

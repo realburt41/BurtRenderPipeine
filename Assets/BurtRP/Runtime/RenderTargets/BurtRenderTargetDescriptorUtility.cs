@@ -90,6 +90,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceColorDescriptor(Camera camera)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            return descriptor;
+        }
+
         public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
         {
             return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32); // GBuffer0 第一版保存 baseColor.rgb 和 occlusion.a，普通 8 位通道足够起步。
@@ -110,7 +120,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf);
         }
 
-        private static RenderTextureDescriptor CreateGBufferDescriptor( // 定义创建 GBuffer RT 描述的共用函数，保证三张 GBuffer 尺寸和采样设置一致。
+        public static RenderTextureDescriptor CreateGBuffer4Descriptor(Camera camera)
+        {
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf);
+        }
+
+        private static RenderTextureDescriptor CreateGBufferDescriptor( // 定义创建 GBuffer RT 描述的共用函数，保证五张 GBuffer 尺寸和采样设置一致。
             Camera camera, // 接收当前相机，用来匹配渲染尺寸和 targetTexture 尺寸。
             RenderTextureFormat format) // 接收当前 GBuffer 需要使用的颜色格式。
         {

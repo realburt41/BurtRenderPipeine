@@ -14,7 +14,11 @@ namespace Burt.RenderPipeline
         private static readonly int SkyTintId = Shader.PropertyToID("_BurtAtmosphereSkyTint");
         private static readonly int SunIntensityId = Shader.PropertyToID("_BurtAtmosphereSunIntensity");
         private static readonly int SunDirectionId = Shader.PropertyToID("_BurtAtmosphereSunDirection");
+        private static readonly int SunParamsId = Shader.PropertyToID("_BurtAtmosphereSunParams");
+        private static readonly int HorizonColorId = Shader.PropertyToID("_BurtAtmosphereHorizonColor");
+        private static readonly int HorizonSunsetColorId = Shader.PropertyToID("_BurtAtmosphereHorizonSunsetColor");
         private static readonly int HorizonParamsId = Shader.PropertyToID("_BurtAtmosphereHorizonParams");
+        private static readonly int GroundParamsId = Shader.PropertyToID("_BurtAtmosphereGroundParams");
         private static readonly int ExposureParamsId = Shader.PropertyToID("_BurtAtmosphereExposureParams");
         private static readonly int AerialPerspectiveParamsId = Shader.PropertyToID("_BurtAtmosphereAerialPerspectiveParams");
         private static readonly int AerialPerspectiveTintId = Shader.PropertyToID("_BurtAtmosphereAerialPerspectiveTint");
@@ -95,11 +99,17 @@ namespace Burt.RenderPipeline
             targetMaterial.SetColor(SkyTintId, settings.SkyTint);
             targetMaterial.SetFloat(SunIntensityId, settings.SunIntensity);
             targetMaterial.SetVector(SunDirectionId, ResolveSunDirection(request, settings));
-            targetMaterial.SetVector(HorizonParamsId, new Vector4(settings.HorizonIntensity, settings.HorizonFalloff, settings.GroundContribution, 0f));
+            targetMaterial.SetVector(SunParamsId, new Vector4(settings.SunDiskSize, settings.SunDiskIntensity, settings.SunHaloSize, settings.SunHaloIntensity));
+            targetMaterial.SetColor(HorizonColorId, settings.HorizonColor);
+            targetMaterial.SetColor(HorizonSunsetColorId, settings.HorizonSunsetColor);
+            targetMaterial.SetVector(HorizonParamsId, new Vector4(settings.HorizonIntensity, settings.HorizonFalloff, settings.HorizonSunsetInfluence, 0f));
+            targetMaterial.SetVector(GroundParamsId, new Vector4(settings.GroundContribution, settings.GroundBlendStart, settings.GroundBlendEnd, 0f));
             targetMaterial.SetVector(ExposureParamsId, new Vector4(Mathf.Pow(2f, settings.ExposureCompensation), settings.TonemapSafeSunIntensity, settings.ExposureCompensation, 0f));
             targetMaterial.SetVector(AerialPerspectiveParamsId, new Vector4(settings.AerialPerspectiveIntensity, settings.AerialPerspectiveDistance, settings.AerialPerspectiveHeightFalloff, settings.AerialPerspectiveEnabled ? 1f : 0f));
             targetMaterial.SetColor(AerialPerspectiveTintId, settings.AerialPerspectiveTint);
-            targetMaterial.SetVector(AerialPerspectiveFadeParamsId, new Vector4(settings.AerialPerspectiveNearFadeStart, settings.AerialPerspectiveNearFadeEnd, settings.AerialPerspectiveMaxOpacity, 0f));
+            var affectsSkyPixels = settings.AerialPerspectivePlacement == BurtAtmosphereAerialPerspectivePlacement.AfterSkyBeforeSSR
+                || settings.AerialPerspectivePlacement == BurtAtmosphereAerialPerspectivePlacement.BeforeTransparent;
+            targetMaterial.SetVector(AerialPerspectiveFadeParamsId, new Vector4(settings.AerialPerspectiveNearFadeStart, settings.AerialPerspectiveNearFadeEnd, settings.AerialPerspectiveMaxOpacity, affectsSkyPixels ? 1f : 0f));
             targetMaterial.SetMatrix(InverseViewProjectionId, ResolveInverseViewProjection(camera));
             targetMaterial.SetVector(CameraPositionWSId, camera.transform.position);
             targetMaterial.SetFloat(DebugModeId, ResolveDebugMode());
@@ -145,8 +155,24 @@ namespace Burt.RenderPipeline
                     return 4f;
                 case BurtShadingDebugMode.AtmosphereAerialInscatter:
                     return 5f;
-                case BurtShadingDebugMode.Atmosphere:
+                case BurtShadingDebugMode.AtmosphereAerialFogAmount:
                     return 6f;
+                case BurtShadingDebugMode.AtmosphereAerialHeightFade:
+                    return 7f;
+                case BurtShadingDebugMode.AtmosphereAerialSummary:
+                    return 8f;
+                case BurtShadingDebugMode.Atmosphere:
+                    return 9f;
+                case BurtShadingDebugMode.AtmosphereSunDisk:
+                    return 10f;
+                case BurtShadingDebugMode.AtmosphereSunHalo:
+                    return 11f;
+                case BurtShadingDebugMode.AtmosphereHorizon:
+                    return 12f;
+                case BurtShadingDebugMode.AtmosphereGroundBlend:
+                    return 13f;
+                case BurtShadingDebugMode.AtmosphereViewDirection:
+                    return 14f;
                 default:
                     return 0f;
             }

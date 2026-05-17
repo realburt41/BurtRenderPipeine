@@ -46,11 +46,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int GBuffer2Id = Shader.PropertyToID(GBuffer2ShaderName); // 把 GBuffer2 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
 
-        public const string GBuffer3Name = "GBuffer3"; // 定义 Deferred 第四张 GBuffer 的统一资源名，第一版用于保存 Clear Coat 独立法线。
+        public const string GBuffer3Name = "GBuffer3"; // 定义 Deferred 第四张 GBuffer 的统一资源名，用于保存 Clear Coat 独立法线、mask 和 roughness。
 
         public const string GBuffer3ShaderName = "_BurtGBuffer3"; // 定义 GBuffer3 暴露给 shader 的全局纹理名称，Deferred Lighting 会采样它。
 
         public static readonly int GBuffer3Id = Shader.PropertyToID(GBuffer3ShaderName); // 把 GBuffer3 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
+
+        public const string GBuffer4Name = "GBuffer4";
+
+        public const string GBuffer4ShaderName = "_BurtGBuffer4";
+
+        public static readonly int GBuffer4Id = Shader.PropertyToID(GBuffer4ShaderName);
 
         public const string HiZDepthName = "HiZDepth";
 
@@ -88,6 +94,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceAmbientOcclusionTextureId = Shader.PropertyToID(ScreenSpaceAmbientOcclusionTextureShaderName);
 
+        public const string ScreenSpaceSubsurfaceSourceName = "ScreenSpaceSubsurfaceSource";
+
+        public const string ScreenSpaceSubsurfaceSourceTextureShaderName = "_BurtScreenSpaceSubsurfaceSourceTexture";
+
+        public static readonly int ScreenSpaceSubsurfaceSourceTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceSourceTextureShaderName);
+
+        public const string ScreenSpaceSubsurfaceTempName = "ScreenSpaceSubsurfaceTemp";
+
+        public const string ScreenSpaceSubsurfaceTempTextureShaderName = "_BurtScreenSpaceSubsurfaceTempTexture";
+
+        public static readonly int ScreenSpaceSubsurfaceTempTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceTempTextureShaderName);
+
+        public const string ScreenSpaceSubsurfaceBlurName = "ScreenSpaceSubsurfaceBlur";
+
+        public const string ScreenSpaceSubsurfaceBlurTextureShaderName = "_BurtScreenSpaceSubsurfaceBlurTexture";
+
+        public static readonly int ScreenSpaceSubsurfaceBlurTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceBlurTextureShaderName);
+
         public const string MainLightShadowMapName = "MainLightShadowMap"; // 定义主光阴影图在 RenderGraph 里的统一资源名，后续阴影绘制和光照采样都通过它建立依赖。
 
         public const string MainLightShadowMapShaderName = "_BurtMainLightShadowMap"; // 定义主光阴影图暴露给 shader 的全局纹理名称，后续 Lit shader 会用这个名字采样阴影。
@@ -106,13 +130,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public const string AdditionalLightBufferName = "AdditionalLightBuffer"; // Future structured buffer for multi-light data when tiled/cluster lighting replaces global arrays.
 
-        public const string TileLightCountBufferName = "TileLightCountBuffer"; // Per-tile debug light count buffer used by the tiled-lighting skeleton.
+        public const string TileLightCountBufferName = "TileLightCountBuffer"; // Per-tile light count buffer used by tiled deferred lighting.
 
-        public const string TileLightListBufferName = "TileLightListBuffer"; // Future per-tile light index list buffer used by tiled lighting.
+        public const string TileLightListBufferName = "TileLightListBuffer"; // Per-tile light index list buffer used by tiled deferred lighting.
 
-        public const string TileLightOffsetBufferName = "TileLightOffsetBuffer"; // Future per-tile offset/count buffer used by tiled lighting.
+        public const string TileLightOffsetBufferName = "TileLightOffsetBuffer"; // Per-tile offset/count buffer used by tiled deferred lighting.
 
-        public const string ClusterLightListBufferName = "ClusterLightListBuffer"; // Future per-cluster light index list buffer used by clustered lighting.
+        public const string ClusterLightCountBufferName = "ClusterLightCountBuffer"; // Per-cluster light count buffer used by clustered deferred lighting.
+
+        public const string ClusterLightListBufferName = "ClusterLightListBuffer"; // Per-cluster light index list buffer used by clustered deferred lighting.
+
+        public const string ClusterLightOffsetBufferName = "ClusterLightOffsetBuffer"; // Per-cluster offset/count buffer used by clustered deferred lighting.
 
         private const string UnnamedRenderTargetName = "UnnamedRenderTarget"; // 定义空资源名的兜底名称，避免 Dictionary 接收 null 或空字符串。
 
@@ -466,6 +494,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(GBuffer3Name); // 使用统一名称从资源表读取 GBuffer3 目标。
         }
 
+        public BurtRenderTargetHandle RegisterGBuffer4Texture()
+        {
+            return RegisterGBuffer4(new RenderTargetIdentifier(GBuffer4Id));
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer4(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(GBuffer4Name, identifier);
+        }
+
+        public BurtRenderTargetHandle GetGBuffer4()
+        {
+            return GetRenderTarget(GBuffer4Name);
+        }
+
         public BurtRenderTargetHandle RegisterHiZDepthTexture()
         {
             return RegisterHiZDepth(new RenderTargetIdentifier(HiZDepthTextureId));
@@ -554,6 +597,51 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetScreenSpaceAmbientOcclusion()
         {
             return GetRenderTarget(ScreenSpaceAmbientOcclusionName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceSourceTexture()
+        {
+            return RegisterScreenSpaceSubsurfaceSource(new RenderTargetIdentifier(ScreenSpaceSubsurfaceSourceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceSource(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceSubsurfaceSourceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceSubsurfaceSource()
+        {
+            return GetRenderTarget(ScreenSpaceSubsurfaceSourceName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceTempTexture()
+        {
+            return RegisterScreenSpaceSubsurfaceTemp(new RenderTargetIdentifier(ScreenSpaceSubsurfaceTempTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceTemp(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceSubsurfaceTempName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceSubsurfaceTemp()
+        {
+            return GetRenderTarget(ScreenSpaceSubsurfaceTempName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceBlurTexture()
+        {
+            return RegisterScreenSpaceSubsurfaceBlur(new RenderTargetIdentifier(ScreenSpaceSubsurfaceBlurTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceBlur(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceSubsurfaceBlurName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceSubsurfaceBlur()
+        {
+            return GetRenderTarget(ScreenSpaceSubsurfaceBlurName);
         }
 
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。

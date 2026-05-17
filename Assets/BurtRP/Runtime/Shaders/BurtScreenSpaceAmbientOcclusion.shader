@@ -29,6 +29,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
             float4 _BurtSSAOParams1; // x power, y blur enabled, z frame salt, w unused.
             float4 _BurtSSAOParams2; // x fade distance, y fade radius, z thickness, w projected radius scale.
             float4 _BurtSSAOParams3; // x horizon search enabled, y direction count, z blur sharpness, w spatial denoise enabled.
+            float4 _BurtSSAOParams4; // x algorithm: 0 SSAO, 1 GTAO, 2 HBAO; y GTAO strength, z HBAO strength.
             float4 _BurtSSAOBlurDirection; // xy blur direction, z resolve final curve.
             float4 _BurtSSAOTemporalParams; // x feedback, y history valid, z depth rejection, w clamp scale.
             float _BurtSSAODebugMode;
@@ -326,8 +327,224 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 return saturate(1.0f - normalizedOcclusion * projectedRadiusFade);
             }
 
+            float BurtSSAOGTAOHorizonAngleSample(
+                float2 sampleUV,
+                float3 positionWS,
+                float3 normalWS,
+                float3 viewDirectionWS,
+                float radius,
+                float bias,
+                float thickness)
+            {
+                if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f))
+                {
+                    return 0.0f;
+                }
+
+                float sampleRawDepth = BurtSampleDeferredRawDepth(sampleUV);
+                if (BurtSSAOIsSkyDepth(sampleRawDepth))
+                {
+                    return 0.0f;
+                }
+
+                float3 samplePositionWS = BurtReconstructDeferredPositionWS(sampleUV, sampleRawDepth);
+                float3 deltaWS = samplePositionWS - positionWS;
+                float distanceWS = length(deltaWS);
+                if (distanceWS <= 0.0001f || distanceWS >= radius)
+                {
+                    return 0.0f;
+                }
+
+                float3 sampleDirectionWS = deltaWS / distanceWS;
+                float normalHorizon = dot(normalWS, sampleDirectionWS);
+                float viewFacing = saturate(1.0f - abs(dot(viewDirectionWS, sampleDirectionWS)) * 0.75f);
+                float biasAngle = bias / max(distanceWS, 0.0001f);
+                float horizon = saturate((normalHorizon - biasAngle) * 1.35f);
+                float thicknessStart = radius * lerp(0.2f, 0.8f, thickness);
+                float thicknessEnd = thicknessStart + max(radius * 0.45f, 0.005f);
+                float finiteThicknessWeight = 1.0f - smoothstep(thicknessStart, thicknessEnd, distanceWS);
+                float rangeWeight = saturate(1.0f - distanceWS / radius);
+                return horizon * horizon * viewFacing * finiteThicknessWeight * rangeWeight;
+            }
+
+            float BurtSSAOEvaluateGTAOWithDepthNormal(float2 screenUV, float rawDepth, float3 normalWS, float2 randomSize)
+            {
+                if (BurtSSAOIsSkyDepth(rawDepth))
+                {
+                    return 1.0f;
+                }
+
+                float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                normalWS = BurtSafeNormalize(normalWS);
+                float centerLinearDepth = LinearEyeDepth(rawDepth);
+                float radius = max(_BurtSSAOParams0.x, 0.0001f);
+                int stepCount = clamp((int)round(_BurtSSAOParams0.z), 1, 32);
+                int directionCount = clamp((int)round(_BurtSSAOParams3.y), 1, 8);
+                float bias = saturate(_BurtSSAOParams0.w);
+                float thickness = saturate(_BurtSSAOParams2.z);
+                float projectedRadiusPixels = radius * max(_BurtSSAOParams2.w, 1.0f) / max(centerLinearDepth, 0.0001f);
+                float projectedRadiusFade = saturate((projectedRadiusPixels - 0.5f) / 2.0f);
+                if (projectedRadiusFade <= 0.0001f)
+                {
+                    return 1.0f;
+                }
+
+                float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
+                float rotation = BurtSSAORand(screenUV * randomSize + 31.0f) * 6.2831853f;
+                float stepJitter = BurtSSAORand(screenUV * randomSize + 47.0f);
+                float occlusion = 0.0f;
+                float validDirections = 0.0f;
+
+                [loop]
+                for (int directionIndex = 0; directionIndex < 8; ++directionIndex)
+                {
+                    if (directionIndex >= directionCount)
+                    {
+                        break;
+                    }
+
+                    float angle = rotation + (float)directionIndex * 3.14159265f / (float)directionCount;
+                    float2 screenDirection = float2(cos(angle), sin(angle));
+                    float positiveHorizon = 0.0f;
+                    float negativeHorizon = 0.0f;
+
+                    [loop]
+                    for (int stepIndex = 1; stepIndex <= 32; ++stepIndex)
+                    {
+                        if (stepIndex > stepCount)
+                        {
+                            break;
+                        }
+
+                        float stepFraction = ((float)stepIndex - 0.5f + stepJitter) / (float)stepCount;
+                        float samplePixelRadius = max(projectedRadiusPixels * saturate(stepFraction * stepFraction), (float)stepIndex);
+                        float2 sampleOffsetUV = screenDirection * samplePixelRadius * _BurtSSAOFullScreenSize.zw;
+                        positiveHorizon = max(positiveHorizon, BurtSSAOGTAOHorizonAngleSample(screenUV + sampleOffsetUV, positionWS, normalWS, viewDirectionWS, radius, bias, thickness));
+                        negativeHorizon = max(negativeHorizon, BurtSSAOGTAOHorizonAngleSample(screenUV - sampleOffsetUV, positionWS, normalWS, viewDirectionWS, radius, bias, thickness));
+                    }
+
+                    occlusion += positiveHorizon + negativeHorizon;
+                    validDirections += 2.0f;
+                }
+
+                float strength = max(_BurtSSAOParams4.y, 0.0f);
+                float normalizedOcclusion = occlusion / max(validDirections, 1.0f);
+                return saturate(1.0f - normalizedOcclusion * projectedRadiusFade * 0.85f * strength);
+            }
+
+            float BurtSSAOEvaluateHBAOSample(
+                float2 sampleUV,
+                float3 positionWS,
+                float3 normalWS,
+                float radius,
+                float bias,
+                float thickness)
+            {
+                if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f))
+                {
+                    return 0.0f;
+                }
+
+                float sampleRawDepth = BurtSampleDeferredRawDepth(sampleUV);
+                if (BurtSSAOIsSkyDepth(sampleRawDepth))
+                {
+                    return 0.0f;
+                }
+
+                float3 samplePositionWS = BurtReconstructDeferredPositionWS(sampleUV, sampleRawDepth);
+                float3 deltaWS = samplePositionWS - positionWS;
+                float distanceWS = length(deltaWS);
+                if (distanceWS <= 0.0001f || distanceWS >= radius)
+                {
+                    return 0.0f;
+                }
+
+                float3 sampleDirectionWS = deltaWS / distanceWS;
+                float heightWS = dot(normalWS, deltaWS) - bias;
+                float horizonWeight = saturate(heightWS / max(distanceWS, 0.0001f));
+                float normalWeight = saturate(dot(normalWS, sampleDirectionWS));
+                float thicknessStart = radius * lerp(0.18f, 0.7f, thickness);
+                float thicknessEnd = thicknessStart + max(radius * 0.5f, 0.005f);
+                float finiteThicknessWeight = 1.0f - smoothstep(thicknessStart, thicknessEnd, max(heightWS, 0.0f));
+                float rangeWeight = saturate(1.0f - distanceWS / radius);
+                return horizonWeight * normalWeight * rangeWeight * rangeWeight * finiteThicknessWeight;
+            }
+
+            float BurtSSAOEvaluateHBAOWithDepthNormal(float2 screenUV, float rawDepth, float3 normalWS, float2 randomSize)
+            {
+                if (BurtSSAOIsSkyDepth(rawDepth))
+                {
+                    return 1.0f;
+                }
+
+                float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                normalWS = BurtSafeNormalize(normalWS);
+                float centerLinearDepth = LinearEyeDepth(rawDepth);
+                float radius = max(_BurtSSAOParams0.x, 0.0001f);
+                int stepCount = clamp((int)round(_BurtSSAOParams0.z), 1, 32);
+                int directionCount = clamp((int)round(_BurtSSAOParams3.y), 1, 8);
+                float bias = saturate(_BurtSSAOParams0.w);
+                float thickness = saturate(_BurtSSAOParams2.z);
+                float projectedRadiusPixels = radius * max(_BurtSSAOParams2.w, 1.0f) / max(centerLinearDepth, 0.0001f);
+                float projectedRadiusFade = saturate((projectedRadiusPixels - 0.5f) / 2.0f);
+                if (projectedRadiusFade <= 0.0001f)
+                {
+                    return 1.0f;
+                }
+
+                float rotation = BurtSSAORand(screenUV * randomSize + 73.0f) * 6.2831853f;
+                float stepJitter = BurtSSAORand(screenUV * randomSize + 91.0f);
+                float occlusion = 0.0f;
+                float validSamples = 0.0f;
+
+                [loop]
+                for (int directionIndex = 0; directionIndex < 8; ++directionIndex)
+                {
+                    if (directionIndex >= directionCount)
+                    {
+                        break;
+                    }
+
+                    float angle = rotation + (float)directionIndex * 6.2831853f / (float)directionCount;
+                    float2 screenDirection = float2(cos(angle), sin(angle));
+
+                    [loop]
+                    for (int stepIndex = 1; stepIndex <= 32; ++stepIndex)
+                    {
+                        if (stepIndex > stepCount)
+                        {
+                            break;
+                        }
+
+                        float stepFraction = ((float)stepIndex - 0.5f + stepJitter) / (float)stepCount;
+                        float samplePixelRadius = max(projectedRadiusPixels * saturate(stepFraction), (float)stepIndex);
+                        float2 sampleOffsetUV = screenDirection * samplePixelRadius * _BurtSSAOFullScreenSize.zw;
+                        float positiveOcclusion = BurtSSAOEvaluateHBAOSample(screenUV + sampleOffsetUV, positionWS, normalWS, radius, bias, thickness);
+                        float negativeOcclusion = BurtSSAOEvaluateHBAOSample(screenUV - sampleOffsetUV, positionWS, normalWS, radius, bias, thickness);
+                        occlusion += positiveOcclusion + negativeOcclusion;
+                        validSamples += positiveOcclusion > 0.0f ? 1.0f : 0.35f;
+                        validSamples += negativeOcclusion > 0.0f ? 1.0f : 0.35f;
+                    }
+                }
+
+                float strength = max(_BurtSSAOParams4.z, 0.0f);
+                float normalizedOcclusion = occlusion / max(validSamples, 1.0f);
+                return saturate(1.0f - normalizedOcclusion * projectedRadiusFade * 1.15f * strength);
+            }
+
             float BurtSSAOEvaluateWithDepthNormal(float2 screenUV, float rawDepth, float3 normalWS, float2 randomSize)
             {
+                float algorithm = round(_BurtSSAOParams4.x);
+                if (algorithm == 1.0f)
+                {
+                    return BurtSSAOEvaluateGTAOWithDepthNormal(screenUV, rawDepth, normalWS, randomSize);
+                }
+
+                if (algorithm == 2.0f)
+                {
+                    return BurtSSAOEvaluateHBAOWithDepthNormal(screenUV, rawDepth, normalWS, randomSize);
+                }
+
                 if (_BurtSSAOParams3.x > 0.5f)
                 {
                     return BurtSSAOEvaluateHorizonWithDepthNormal(screenUV, rawDepth, normalWS, randomSize);
@@ -833,8 +1050,114 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 return float4(rawDepth, rawDepth, rawDepth, 1.0f);
             }
 
+            void BurtSSAOSampleTemporalDebugState(
+                float2 screenUV,
+                out float historyAO,
+                out float depthValidity,
+                out float surfaceStability)
+            {
+                historyAO = saturate(tex2D(_BurtSSAOPreviousHistoryTexture, screenUV).r);
+                depthValidity = 0.0f;
+                surfaceStability = 0.0f;
+
+                float rawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (_BurtSSAOTemporalParams.y < 0.5f || BurtSSAOIsSkyDepth(rawDepth))
+                {
+                    return;
+                }
+
+                float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                float2 historyUV;
+                float projectedHistoryRawDepth;
+                if (!BurtSSAOProjectHistoryUV(positionWS, historyUV, projectedHistoryRawDepth))
+                {
+                    return;
+                }
+
+                float historyDepth = tex2D(_BurtSSAOPreviousHistoryDepthTexture, historyUV).r;
+                if (BurtSSAOIsSkyDepth(historyDepth))
+                {
+                    return;
+                }
+
+                float projectedHistoryLinearDepth = LinearEyeDepth(projectedHistoryRawDepth);
+                float historyLinearDepth = LinearEyeDepth(historyDepth);
+                float depthTolerance = max(projectedHistoryLinearDepth * max(_BurtSSAOTemporalParams.z, 0.0001f), 0.025f);
+                depthValidity = saturate(1.0f - abs(historyLinearDepth - projectedHistoryLinearDepth) / depthTolerance);
+
+                float3 centerNormalWS = BurtSSAOSampleNormalWS(screenUV);
+                float centerLinearDepth = LinearEyeDepth(rawDepth);
+                surfaceStability = BurtSSAOEvaluateCurrentSurfaceStability(historyUV, projectedHistoryLinearDepth, centerNormalWS, centerLinearDepth);
+                historyAO = saturate(tex2D(_BurtSSAOPreviousHistoryTexture, historyUV).r);
+            }
+
+            float3 BurtSSAOApplyDiagnosticChrome(float2 screenUV, float2 panelUV, float3 color, float3 gateColor, float3 panelColor)
+            {
+                float2 panelPixel = _BurtSSAOFullScreenSize.zw * 2.0f;
+                float separatorWidth = max(max(panelPixel.x, panelPixel.y) * 1.5f, 0.0015f);
+                if (abs(screenUV.x - 0.5f) < separatorWidth || abs(screenUV.y - 0.5f) < separatorWidth)
+                {
+                    return 0.02f.xxx;
+                }
+
+                float stripWidth = max(max(panelPixel.x, panelPixel.y) * 6.0f, 0.012f);
+                if (panelUV.y < stripWidth)
+                {
+                    return gateColor;
+                }
+
+                if (panelUV.x < stripWidth && panelUV.y > 1.0f - stripWidth * 1.75f)
+                {
+                    return panelColor;
+                }
+
+                return color;
+            }
+
+            float4 FragDiagnosticCompare(float2 screenUV)
+            {
+                float2 panelUV = frac(screenUV * 2.0f);
+                float rawAO = saturate(tex2D(_BurtScreenSpaceAmbientOcclusionRawTexture, panelUV).r);
+                float finalAO = saturate(tex2D(_BurtScreenSpaceAmbientOcclusionTexture, panelUV).r);
+                float historyAO;
+                float depthValidity;
+                float surfaceStability;
+                BurtSSAOSampleTemporalDebugState(panelUV, historyAO, depthValidity, surfaceStability);
+
+                bool rightPanel = screenUV.x >= 0.5f;
+                bool upperPanel = screenUV.y >= 0.5f;
+                float diagnosticValue = rawAO;
+                float3 panelColor = float3(0.1f, 0.35f, 1.0f);
+
+                if (upperPanel && rightPanel)
+                {
+                    diagnosticValue = finalAO;
+                    panelColor = float3(0.0f, 0.8f, 0.25f);
+                }
+                else if (!upperPanel && !rightPanel)
+                {
+                    diagnosticValue = historyAO;
+                    panelColor = float3(0.0f, 0.85f, 0.9f);
+                }
+                else if (!upperPanel && rightPanel)
+                {
+                    diagnosticValue = saturate(abs(finalAO - historyAO) * 4.0f);
+                    panelColor = float3(1.0f, 0.45f, 0.0f);
+                }
+
+                float3 gateColor = float3(1.0f - depthValidity, depthValidity, surfaceStability) * lerp(0.35f, 1.0f, saturate(_BurtSSAOTemporalParams.y));
+                float3 color = BurtSSAOApplyDiagnosticChrome(screenUV, panelUV, diagnosticValue.xxx, gateColor, panelColor);
+                return float4(color, 1.0f);
+            }
+
             float4 FragTemporalDepthValidity(Varyings input) : SV_Target
             {
+                float debugMode = round(_BurtSSAODebugMode);
+                if (debugMode == 8.0f)
+                {
+                    return FragDiagnosticCompare(input.screenUV);
+                }
+
                 float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
                 if (_BurtSSAOTemporalParams.y < 0.5f || BurtSSAOIsSkyDepth(rawDepth))
                 {
@@ -859,7 +1182,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 float historyLinearDepth = LinearEyeDepth(historyDepth);
                 float depthTolerance = max(projectedHistoryLinearDepth * max(_BurtSSAOTemporalParams.z, 0.0001f), 0.025f);
                 float depthValidity = saturate(1.0f - abs(historyLinearDepth - projectedHistoryLinearDepth) / depthTolerance);
-                if (round(_BurtSSAODebugMode) == 7.0f)
+                if (debugMode == 7.0f)
                 {
                     float3 centerNormalWS = BurtSSAOSampleNormalWS(input.screenUV);
                     float centerLinearDepth = LinearEyeDepth(rawDepth);

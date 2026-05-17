@@ -2,6 +2,7 @@
 #ifndef BURT_NORMAL_INCLUDED // 开始 include guard，防止同一个 shader 编译单元里重复定义法线工具函数。
 #define BURT_NORMAL_INCLUDED // 标记 BurtNormal.hlsl 已经被包含过，后续重复 include 会被跳过。
 
+#include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl" // 引入 BurtSafeNormalize，用来安全归一化切线、法线和最终结果。
 
 // 声明材质法线贴图，BurtLit 的 Forward pass 会用 mesh UV0 对它进行采样。

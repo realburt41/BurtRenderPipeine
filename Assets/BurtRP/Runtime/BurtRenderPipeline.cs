@@ -41,6 +41,7 @@ namespace Burt.RenderPipeline
 
             // 构造时先绑定一次，避免第一帧 shader 采样到未初始化的全局纹理。
             BindPreIntegratedFGLut();
+            BindSubsurfacePreIntegratedLut();
         }
 
 #pragma warning disable 0618
@@ -127,6 +128,13 @@ namespace Burt.RenderPipeline
             Shader.SetGlobalFloat(PreIntegratedFGEnabledId, lut != null ? 1.0f : 0.0f);
         }
 
+        private static void BindSubsurfacePreIntegratedLut()
+        {
+            var lut = BurtSubsurfaceLutUtility.GetOrCreatePreIntegratedLut();
+            Shader.SetGlobalTexture(BurtSubsurfaceLutUtility.TextureId, lut != null ? lut : Texture2D.whiteTexture);
+            Shader.SetGlobalFloat(BurtSubsurfaceLutUtility.EnabledId, lut != null ? 1.0f : 0.0f);
+        }
+
         private BurtRenderGraphAssembler ResolveGraphAssembler(BurtRenderRequest request) // 根据当前管线资产和 request 类型选择本次 request 使用的 RenderGraph 组装器。
         {
             if (request != null && (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection)) // Unity Inspector/Asset Preview 和 ReflectionProbe 捕获不适合走 Deferred GBuffer 路径。
@@ -152,6 +160,7 @@ namespace Burt.RenderPipeline
         {
             // 每帧同步一次 LUT，允许用户在 Inspector 中替换 PreintegratedFG 后立即生效。
             BindPreIntegratedFGLut();
+            BindSubsurfacePreIntegratedLut();
 
             // 按 request 的 SortLayer 从小到大排序，比较规则集中放在 BurtCameraSortUtility 里维护。
             requests.Sort(BurtCameraSortUtility.CompareRequests);

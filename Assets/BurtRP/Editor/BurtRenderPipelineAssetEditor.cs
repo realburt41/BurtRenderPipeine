@@ -15,6 +15,16 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private SerializedProperty depthDebugScale; // 缓存 Depth Debug 的显示缩放字段。
 
         private SerializedProperty preintegratedFGLut; // 缓存 PBR 预积分 FG LUT 字段。
+        private SerializedProperty enableScreenSpaceSubsurface;
+        private SerializedProperty screenSpaceSubsurfaceProfile;
+        private SerializedProperty screenSpaceSubsurfaceRadiusPixels;
+        private SerializedProperty screenSpaceSubsurfaceDepthSigma;
+        private SerializedProperty screenSpaceSubsurfaceNormalSigma;
+        private SerializedProperty screenSpaceSubsurfaceBlend;
+        private SerializedProperty screenSpaceSubsurfaceDistanceScale;
+        private SerializedProperty screenSpaceSubsurfaceBoundaryBleed;
+        private SerializedProperty screenSpaceSubsurfaceTintStrength;
+        private SerializedProperty screenSpaceSubsurfaceMinStrength;
 
         private SerializedProperty postProcessSettings; // 缓存后处理框架设置字段，具体效果参数会从 Global Volume 读取。
         private SerializedProperty postProcessVolumeLayerMask; // 缓存后处理 Volume 查询层字段，Global Volume 需要通过它参与后处理。
@@ -31,6 +41,16 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private static readonly GUIContent DepthDebugLabel = new("Depth Debug View", "开启后把 CameraDepth 可视化到 CameraColor。"); // 定义 Depth Debug 显示文本。
         private static readonly GUIContent DepthScaleLabel = new("Depth Debug Scale", "调整深度可视化亮度缩放，数值越大近处深度越明显。"); // 定义 Depth Debug 缩放显示文本。
         private static readonly GUIContent PreintegratedFGLutLabel = new("Preintegrated FG LUT", "用于 IBL 间接高光的 DFG/GGX 预积分查找表。"); // 定义 PBR 预积分 LUT 显示文本。
+        private static readonly GUIContent EnableScreenSpaceSubsurfaceLabel = new("Enable Screen Space 5S", "开启 Deferred 屏幕空间次表面散射。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceProfileLabel = new("5S Profile", "独立的 5S profile 文件；挂上后优先使用 profile 参数，未挂时使用下方 inline fallback。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceRadiusPixelsLabel = new("Fallback Radius Pixels", "未指定 profile 时使用的屏幕空间扩散半径。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceDepthSigmaLabel = new("Fallback Depth Sigma", "未指定 profile 时使用的深度边界保护。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceNormalSigmaLabel = new("Fallback Normal Sigma", "未指定 profile 时使用的法线边界保护。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceBlendLabel = new("Fallback Blend", "未指定 profile 时使用的最终混合强度。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceDistanceScaleLabel = new("Fallback Distance Scale", "未指定 profile 时使用的远距离衰减强度。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceBoundaryBleedLabel = new("Fallback Boundary Bleed", "未指定 profile 时使用的边界防串色强度。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceTintStrengthLabel = new("Fallback Tint Strength", "未指定 profile 时使用的材质 tint 混合强度。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceMinStrengthLabel = new("Fallback Min Strength", "未指定 profile 时过滤低强度次表面像素的阈值。");
         private static readonly GUIContent PostProcessSettingsLabel = new("Post Process Settings", "后处理框架设置，具体效果参数从 Global Volume 读取。"); // 定义后处理设置显示文本。
         private static readonly GUIContent PostProcessVolumeLayerMaskLabel = new("Post Process Volume Layer Mask", "后处理 Global Volume 查询层，Tonemapping 等效果参数从匹配的 Volume Profile 读取。"); // 定义后处理 Volume 层显示文本。
         private static readonly GUIContent UnsupportedShaderDebugLabel = new("Unsupported Shader Debug", "用 Unity 错误材质标记非 BurtRP Shader，方便发现错误材质。"); // 定义不支持 Shader 调试显示文本。
@@ -49,6 +69,16 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             depthDebugScale = FindProperty(nameof(depthDebugScale)); // 绑定深度调试缩放。
 
             preintegratedFGLut = FindProperty(nameof(preintegratedFGLut)); // 绑定 PBR 预积分 FG LUT。
+            enableScreenSpaceSubsurface = FindProperty(nameof(enableScreenSpaceSubsurface));
+            screenSpaceSubsurfaceProfile = FindProperty(nameof(screenSpaceSubsurfaceProfile));
+            screenSpaceSubsurfaceRadiusPixels = FindProperty(nameof(screenSpaceSubsurfaceRadiusPixels));
+            screenSpaceSubsurfaceDepthSigma = FindProperty(nameof(screenSpaceSubsurfaceDepthSigma));
+            screenSpaceSubsurfaceNormalSigma = FindProperty(nameof(screenSpaceSubsurfaceNormalSigma));
+            screenSpaceSubsurfaceBlend = FindProperty(nameof(screenSpaceSubsurfaceBlend));
+            screenSpaceSubsurfaceDistanceScale = FindProperty(nameof(screenSpaceSubsurfaceDistanceScale));
+            screenSpaceSubsurfaceBoundaryBleed = FindProperty(nameof(screenSpaceSubsurfaceBoundaryBleed));
+            screenSpaceSubsurfaceTintStrength = FindProperty(nameof(screenSpaceSubsurfaceTintStrength));
+            screenSpaceSubsurfaceMinStrength = FindProperty(nameof(screenSpaceSubsurfaceMinStrength));
 
             postProcessSettings = FindProperty(nameof(postProcessSettings)); // 绑定后处理设置，让现有自定义 Inspector 也能显示新配置。
             postProcessVolumeLayerMask = FindProperty(nameof(postProcessVolumeLayerMask)); // 绑定后处理 Volume 查询层，让 Global Volume 可以按 LayerMask 过滤。
@@ -67,6 +97,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             DrawGeneralGroup(); // 绘制 General 分组。
             DrawDepthGroup(); // 绘制 Depth 分组。
             DrawPBRGroup(); // 绘制 PBR 分组。
+            DrawSubsurfaceGroup();
             DrawPostProcessGroup(); // 绘制 Post Processing 分组。
             DrawDebugGroup(); // 绘制 Debug 分组。
             DrawCameraDebugGroup(); // 绘制 Camera Debug 分组。
@@ -87,6 +118,32 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             DrawSectionHeader("PBR / Shading"); // 显示 PBR 分组标题。
             DrawProperty(preintegratedFGLut, PreintegratedFGLutLabel); // 绘制预积分 FG LUT 引用。
             EditorGUILayout.HelpBox("PreintegratedFG.exr 用于 PBR IBL DFG。", MessageType.Info); // 提示 LUT 数据用途。
+        }
+
+        private void DrawSubsurfaceGroup()
+        {
+            DrawSectionHeader("Deferred 5S / 次表面");
+            DrawProperty(enableScreenSpaceSubsurface, EnableScreenSpaceSubsurfaceLabel);
+
+            using (new EditorGUI.DisabledScope(enableScreenSpaceSubsurface == null || !enableScreenSpaceSubsurface.boolValue))
+            {
+                DrawProperty(screenSpaceSubsurfaceProfile, ScreenSpaceSubsurfaceProfileLabel);
+
+                var usingProfile = screenSpaceSubsurfaceProfile != null && screenSpaceSubsurfaceProfile.objectReferenceValue != null;
+                using (new EditorGUI.DisabledScope(usingProfile))
+                {
+                    DrawProperty(screenSpaceSubsurfaceRadiusPixels, ScreenSpaceSubsurfaceRadiusPixelsLabel);
+                    DrawProperty(screenSpaceSubsurfaceDepthSigma, ScreenSpaceSubsurfaceDepthSigmaLabel);
+                    DrawProperty(screenSpaceSubsurfaceNormalSigma, ScreenSpaceSubsurfaceNormalSigmaLabel);
+                    DrawProperty(screenSpaceSubsurfaceBlend, ScreenSpaceSubsurfaceBlendLabel);
+                    DrawProperty(screenSpaceSubsurfaceDistanceScale, ScreenSpaceSubsurfaceDistanceScaleLabel);
+                    DrawProperty(screenSpaceSubsurfaceBoundaryBleed, ScreenSpaceSubsurfaceBoundaryBleedLabel);
+                    DrawProperty(screenSpaceSubsurfaceTintStrength, ScreenSpaceSubsurfaceTintStrengthLabel);
+                    DrawProperty(screenSpaceSubsurfaceMinStrength, ScreenSpaceSubsurfaceMinStrengthLabel);
+                }
+            }
+
+            EditorGUILayout.HelpBox("5S 会优先读取独立 profile 文件；没有指定 profile 时才使用 fallback 参数。", MessageType.Info);
         }
 
         private void DrawPostProcessGroup() // 绘制后处理框架设置；Tonemapping、Bloom 等具体效果参数走 Global Volume。

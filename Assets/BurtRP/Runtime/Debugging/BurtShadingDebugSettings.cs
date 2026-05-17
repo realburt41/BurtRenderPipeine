@@ -41,8 +41,13 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         GBufferHairStrandDirection = 138, // GBuffer 调试：只显示 Hair 像素复用 GBuffer1.rg 存储的 strand direction。
         GBufferHairScatter = 139, // GBuffer 调试：只显示 Hair 像素复用 GBuffer1.b material channel 存储的 scatter。
         GBufferHairShift = 140, // GBuffer 调试：只显示 Hair 像素复用 GBuffer1.b material channel 存储的 longitudinal shift scale。
+        GBufferClearCoatMask = 141, // GBuffer debug: Clear Coat mask stored in GBuffer3.b.
         GBufferSubsurfaceStrength = 142, // GBuffer 调试：只显示 Subsurface 像素复用 GBuffer1.b material channel 存储的 strength。
         GBufferClearCoatNormalWS = 143,
+        GBufferClearCoatRoughness = 144, // GBuffer debug: Clear Coat top-layer roughness stored in GBuffer3.a.
+        GBufferAnisotropy = 145, // GBuffer debug: signed anisotropy stored in GBuffer4.b.
+        GBufferTangentWS = 146, // GBuffer debug: base tangent stored in GBuffer4.rg as octahedral direction.
+        GBufferSubsurfaceThickness = 147, // GBuffer debug: Subsurface thickness stored in GBuffer4.a.
         DetailLighting = 200, // 光照调试：参考 XRender Detail Lighting，用 0.18 中灰 BaseColor 重新计算光照，方便只看明暗细节。
         IndirectLighting = 201, // 光照调试：只显示 PBR 间接光，方便检查 SH 漫反射和 Reflection Probe 镜面反射。
         DirectDiffuse = 202, // 光照调试：只显示直接漫反射，方便检查 NdotL、阴影和 1/PI。
@@ -69,6 +74,8 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         HairAdditionalLighting = 222, // Hair 调试：只显示 Hair 像素的追加光直接光，非 Hair 材质为黑。
         TileLightCount = 223, // Tiled light debug: full-screen per-tile additional light count.
         TileLightOccupancy = 224, // Tiled light debug: per-tile list occupancy versus max lights per tile.
+        ClusterLightCount = 232, // Clustered light debug: 3D per-cluster additional light count.
+        ClusterLightOccupancy = 233, // Clustered light debug: 3D cluster list occupancy.
         AdditionalShadowAttenuation = 226, // 阴影调试：只显示追加光阴影衰减，白色表示当前追加光未被阴影遮挡。
         AdditionalLightingUnshadowed = 227, // 光照调试：显示追加光不乘 additional shadow attenuation 时的直接光贡献。
         AdditionalShadowFace = 228,
@@ -159,10 +166,28 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         AtmosphereTransmittance = 381, // Atmosphere debug: sky optical transmittance.
         AtmosphereAerialTransmittance = 382, // Atmosphere debug: aerial perspective transmittance over opaque geometry.
         AtmosphereAerialInscatter = 383, // Atmosphere debug: aerial perspective inscattering over opaque geometry.
+        AtmosphereAerialFogAmount = 391, // Atmosphere debug: aerial perspective final fog opacity.
+        AtmosphereAerialHeightFade = 392, // Atmosphere debug: aerial perspective height fade.
+        AtmosphereAerialSummary = 393, // Atmosphere debug: aerial fog amount, height fade, and extinction summary.
+        AtmosphereSunDisk = 403, // Atmosphere debug: compact sun disk mask from the sky pass.
+        AtmosphereSunHalo = 404, // Atmosphere debug: wider Mie sun halo from the sky pass.
+        AtmosphereHorizon = 405, // Atmosphere debug: horizon blend weight used by the sky pass.
+        AtmosphereGroundBlend = 406, // Atmosphere debug: below-horizon ground contribution blend.
+        AtmosphereViewDirection = 407, // Atmosphere debug: reconstructed sky view direction encoded as RGB.
+        FogAmount = 394, // Fog debug: final screen-space fog opacity.
+        FogTransmittance = 395, // Fog debug: screen-space fog transmittance after height and distance gates.
+        FogHeight = 396, // Fog debug: reconstructed world height relative to the fog height plane.
+        FogDistance = 397, // Fog debug: reconstructed camera-to-surface distance used by the fog pass.
+        VolumetricFogScattering = 398, // Volumetric fog debug: accumulated single-scattering contribution.
+        VolumetricFogTransmittance = 399, // Volumetric fog debug: raymarched transmittance.
+        VolumetricFogDensity = 400, // Volumetric fog debug: average and peak sampled density.
+        VolumetricFogDistance = 401, // Volumetric fog debug: raymarch distance versus visible distance.
+        VolumetricFogStepCount = 402, // Volumetric fog debug: normalized raymarch step count.
         AutoExposureLuminance = 384, // Auto exposure debug: log luminance heatmap from current CameraColor.
         AutoExposureMeteringWeight = 385, // Auto exposure debug: center-weighted metering mask used by lightweight histogram.
         AutoExposureHistogramRange = 386, // Auto exposure debug: current histogram EV range and out-of-range colors.
-        ScreenSpaceAmbientOcclusionSurfaceStability = 387 // SSAO debug: current-frame depth/normal stability used to gate temporal history.
+        ScreenSpaceAmbientOcclusionSurfaceStability = 387, // SSAO debug: current-frame depth/normal stability used to gate temporal history.
+        ScreenSpaceAmbientOcclusionDiagnosticCompare = 388 // SSAO debug: quadrant compare for raw/final/history/difference with temporal gates.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -170,6 +195,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
     {
         public const string ModeShaderName = "_BurtShadingDebugMode"; // 定义 shader 侧读取 debug 模式的全局属性名。
         public const string EnabledShaderName = "_BurtShadingDebugEnabled"; // 定义 shader 侧读取 debug 是否开启的全局属性名。
+        public const string KeywordName = "BURT_SHADING_DEBUG";
 
         private static readonly int ModeShaderId = Shader.PropertyToID(ModeShaderName); // 缓存模式属性 ID，避免每帧字符串查找。
         private static readonly int EnabledShaderId = Shader.PropertyToID(EnabledShaderName); // 缓存开关属性 ID，避免每帧字符串查找。
@@ -219,6 +245,14 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         {
             Shader.SetGlobalInt(ModeShaderId, (int)currentMode); // 上传整数模式 ID，后续 shader 可以 switch 或 if 判断。
             Shader.SetGlobalFloat(EnabledShaderId, IsDebugging ? 1f : 0f); // 上传 0/1 开关，方便 shader 快速判断是否走调试分支。
+            if (IsDebugging)
+            {
+                Shader.EnableKeyword(KeywordName);
+            }
+            else
+            {
+                Shader.DisableKeyword(KeywordName);
+            }
         }
     }
 }

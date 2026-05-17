@@ -129,6 +129,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle GBuffer4Target
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+                }
+
+                return ResourceRegistry.GetGBuffer4();
+            }
+        }
+
         public BurtRenderTargetHandle HiZDepthTarget
         {
             get
@@ -207,6 +220,45 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceSourceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceSource();
+            }
+        }
+
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceTempTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceTemp();
+            }
+        }
+
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceBlurTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceBlur();
+            }
+        }
+
         public BurtRenderBufferHandle GetBuffer(string name)
         {
             if (ResourceRegistry == null)
@@ -238,7 +290,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
 
         public BurtRenderBufferHandle TileLightOffsetBuffer => GetBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
 
+        public BurtRenderBufferHandle ClusterLightCountBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName);
+
         public BurtRenderBufferHandle ClusterLightListBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName);
+
+        public BurtRenderBufferHandle ClusterLightOffsetBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName);
 
         public BurtRequestRenderOptions RenderOptions { get; } // 保存当前 request 的栈级执行选项，Pass 可以通过它判断 RT 生命周期策略。
 

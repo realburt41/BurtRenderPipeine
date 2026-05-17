@@ -91,6 +91,7 @@ namespace Burt.RenderPipeline
         private static readonly int SSAOParams1Id = Shader.PropertyToID("_BurtSSAOParams1");
         private static readonly int SSAOParams2Id = Shader.PropertyToID("_BurtSSAOParams2");
         private static readonly int SSAOParams3Id = Shader.PropertyToID("_BurtSSAOParams3");
+        private static readonly int SSAOParams4Id = Shader.PropertyToID("_BurtSSAOParams4");
 
         private Material screenSpaceAmbientOcclusionMaterial;
         private bool hasLoggedMissingShader;
@@ -270,6 +271,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalVector(SSAOParams1Id, new Vector4(settings.Power, settings.Blur ? 1f : 0f, Time.frameCount & 1023, 0f));
             cmd.SetGlobalVector(SSAOParams2Id, new Vector4(settings.FadeDistance, settings.FadeRadius, settings.Thickness, CalculateProjectionRadiusScale(camera, descriptor)));
             cmd.SetGlobalVector(SSAOParams3Id, new Vector4(settings.HorizonSearch ? 1f : 0f, settings.DirectionCount, settings.BlurSharpness, settings.SpatialDenoise ? 1f : 0f));
+            cmd.SetGlobalVector(SSAOParams4Id, new Vector4((float)settings.Algorithm, settings.GTAOStrength, settings.HBAOStrength, 0f));
         }
 
         private static float CalculateProjectionRadiusScale(Camera camera, RenderTextureDescriptor descriptor)
@@ -332,6 +334,7 @@ namespace Burt.RenderPipeline
         private static readonly int SSAOParams1Id = Shader.PropertyToID("_BurtSSAOParams1");
         private static readonly int SSAOParams2Id = Shader.PropertyToID("_BurtSSAOParams2");
         private static readonly int SSAOParams3Id = Shader.PropertyToID("_BurtSSAOParams3");
+        private static readonly int SSAOParams4Id = Shader.PropertyToID("_BurtSSAOParams4");
         private static readonly int SSAOTemporalParamsId = Shader.PropertyToID("_BurtSSAOTemporalParams");
         private static readonly int SSAOHistoryTextureId = Shader.PropertyToID("_BurtSSAOHistoryTexture");
         private static readonly int SSAOHistoryDepthTextureId = Shader.PropertyToID("_BurtSSAOHistoryDepthTexture");
@@ -517,6 +520,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalVector(SSAOParams1Id, new Vector4(settings.Power, settings.Blur ? 1f : 0f, Time.frameCount & 1023, 0f));
             cmd.SetGlobalVector(SSAOParams2Id, new Vector4(settings.FadeDistance, settings.FadeRadius, settings.Thickness, 1f));
             cmd.SetGlobalVector(SSAOParams3Id, new Vector4(settings.HorizonSearch ? 1f : 0f, settings.DirectionCount, settings.BlurSharpness, settings.SpatialDenoise ? 1f : 0f));
+            cmd.SetGlobalVector(SSAOParams4Id, new Vector4((float)settings.Algorithm, settings.GTAOStrength, settings.HBAOStrength, 0f));
         }
 
         private static bool TryGetTargets(
@@ -562,6 +566,7 @@ namespace Burt.RenderPipeline
     {
         private const string ScreenSpaceAmbientOcclusionShaderName = "Hidden/BurtRP/ScreenSpaceAmbientOcclusion";
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
+        private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
         private static readonly int AORawTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawTextureId;
         private static readonly int AOTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionTextureId;
         private static readonly int DebugCameraColorTextureId = Shader.PropertyToID("_BurtSSAODebugCameraColorTexture");
@@ -594,6 +599,7 @@ namespace Burt.RenderPipeline
             if (BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionDepthDiagnosticDebugMode(BurtShadingDebugSettings.Mode))
             {
                 builder.ReadCameraDepth();
+                builder.ReadGBuffer1();
             }
 
             if (BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionOverlayDebugMode(BurtShadingDebugSettings.Mode))
@@ -613,6 +619,7 @@ namespace Burt.RenderPipeline
 
             var cameraColorTarget = context.CameraColorTarget;
             var cameraDepthTarget = context.CameraDepthTarget;
+            var gbuffer1Target = context.GBuffer1Target;
             var aoRawTarget = context.ScreenSpaceAmbientOcclusionRawTarget;
             var aoTarget = context.ScreenSpaceAmbientOcclusionTarget;
             if (!cameraColorTarget.IsValid || !aoRawTarget.IsValid || !aoTarget.IsValid)
@@ -621,7 +628,7 @@ namespace Burt.RenderPipeline
             }
 
             var isDepthDiagnostic = BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionDepthDiagnosticDebugMode(BurtShadingDebugSettings.Mode);
-            if (isDepthDiagnostic && !cameraDepthTarget.IsValid)
+            if (isDepthDiagnostic && (!cameraDepthTarget.IsValid || !gbuffer1Target.IsValid))
             {
                 return;
             }
@@ -650,6 +657,7 @@ namespace Burt.RenderPipeline
             if (isDepthDiagnostic)
             {
                 cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+                cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
             }
 
             UploadTemporalDebugGlobals(cmd, context.Request, context.Asset);
@@ -773,12 +781,15 @@ namespace Burt.RenderPipeline
 
     internal readonly struct BurtScreenSpaceAmbientOcclusionSettings
     {
-        public static readonly BurtScreenSpaceAmbientOcclusionSettings Disabled = new BurtScreenSpaceAmbientOcclusionSettings(false, BurtScreenSpaceAmbientOcclusionQuality.Medium, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, true, 0.78f, 0.012f, 0.75f, 0.12f, 0.5f, 50f, 80f);
-        public static readonly BurtScreenSpaceAmbientOcclusionSettings DebugDefault = new BurtScreenSpaceAmbientOcclusionSettings(true, BurtScreenSpaceAmbientOcclusionQuality.Medium, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, true, 0.78f, 0.012f, 0.75f, 0.12f, 0.5f, 50f, 80f);
+        public static readonly BurtScreenSpaceAmbientOcclusionSettings Disabled = new BurtScreenSpaceAmbientOcclusionSettings(false, BurtScreenSpaceAmbientOcclusionQuality.Medium, BurtScreenSpaceAmbientOcclusionAlgorithm.SSAO, 1f, 1f, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, true, 0.78f, 0.012f, 0.75f, 0.12f, 0.5f, 50f, 80f);
+        public static readonly BurtScreenSpaceAmbientOcclusionSettings DebugDefault = new BurtScreenSpaceAmbientOcclusionSettings(true, BurtScreenSpaceAmbientOcclusionQuality.Medium, BurtScreenSpaceAmbientOcclusionAlgorithm.SSAO, 1f, 1f, 0.5f, 2f, 16, true, 2, 0.003f, 2f, true, true, true, true, 0.78f, 0.012f, 0.75f, 0.12f, 0.5f, 50f, 80f);
 
         public BurtScreenSpaceAmbientOcclusionSettings(
             bool enabled,
             BurtScreenSpaceAmbientOcclusionQuality quality,
+            BurtScreenSpaceAmbientOcclusionAlgorithm algorithm,
+            float gtaoStrength,
+            float hbaoStrength,
             float intensity,
             float radius,
             int sampleCount,
@@ -800,6 +811,9 @@ namespace Burt.RenderPipeline
         {
             Enabled = enabled;
             Quality = NormalizeQuality(quality);
+            Algorithm = NormalizeAlgorithm(algorithm);
+            GTAOStrength = Mathf.Clamp(gtaoStrength, 0f, 2f);
+            HBAOStrength = Mathf.Clamp(hbaoStrength, 0f, 2f);
             Intensity = Mathf.Clamp(intensity, 0f, 4f);
             Radius = Mathf.Clamp(radius, 0.01f, 8f);
             SampleCount = Mathf.Clamp(sampleCount, 1, 32);
@@ -823,6 +837,12 @@ namespace Burt.RenderPipeline
         public bool Enabled { get; }
 
         public BurtScreenSpaceAmbientOcclusionQuality Quality { get; }
+
+        public BurtScreenSpaceAmbientOcclusionAlgorithm Algorithm { get; }
+
+        public float GTAOStrength { get; }
+
+        public float HBAOStrength { get; }
 
         public float Intensity { get; }
 
@@ -867,6 +887,9 @@ namespace Burt.RenderPipeline
                 var hash = 17;
                 hash = hash * 31 + BoolToInt(Enabled);
                 hash = hash * 31 + (int)Quality;
+                hash = hash * 31 + (int)Algorithm;
+                hash = hash * 31 + Quantize(GTAOStrength, 1000f);
+                hash = hash * 31 + Quantize(HBAOStrength, 1000f);
                 hash = hash * 31 + Quantize(Intensity, 1000f);
                 hash = hash * 31 + Quantize(Radius, 1000f);
                 hash = hash * 31 + SampleCount;
@@ -909,6 +932,18 @@ namespace Burt.RenderPipeline
                     return quality;
                 default:
                     return BurtScreenSpaceAmbientOcclusionQuality.Custom;
+            }
+        }
+
+        private static BurtScreenSpaceAmbientOcclusionAlgorithm NormalizeAlgorithm(BurtScreenSpaceAmbientOcclusionAlgorithm algorithm)
+        {
+            switch (algorithm)
+            {
+                case BurtScreenSpaceAmbientOcclusionAlgorithm.GTAO:
+                case BurtScreenSpaceAmbientOcclusionAlgorithm.HBAO:
+                    return algorithm;
+                default:
+                    return BurtScreenSpaceAmbientOcclusionAlgorithm.SSAO;
             }
         }
     }
@@ -1613,7 +1648,8 @@ namespace Burt.RenderPipeline
             return mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionHistory ||
                 mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference ||
                 mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity ||
-                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability;
+                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability ||
+                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare;
         }
 
         public static bool IsScreenSpaceAmbientOcclusionDepthValidityDebugMode(BurtShadingDebugMode mode)
@@ -1624,7 +1660,8 @@ namespace Burt.RenderPipeline
         public static bool IsScreenSpaceAmbientOcclusionDepthDiagnosticDebugMode(BurtShadingDebugMode mode)
         {
             return mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity ||
-                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability;
+                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability ||
+                mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare;
         }
 
         public static int ResolveScreenSpaceAmbientOcclusionShaderDebugMode()
@@ -1645,6 +1682,8 @@ namespace Burt.RenderPipeline
                     return 6;
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability:
                     return 7;
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare:
+                    return 8;
                 default:
                     return 0;
             }
@@ -1658,7 +1697,8 @@ namespace Burt.RenderPipeline
             }
 
             return IsScreenSpaceAmbientOcclusionDepthValidityDebugMode(BurtShadingDebugSettings.Mode) ||
-                BurtShadingDebugSettings.Mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability ? 9 : 2;
+                BurtShadingDebugSettings.Mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability ||
+                BurtShadingDebugSettings.Mode == BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare ? 9 : 2;
         }
 
         public static string ResolveScreenSpaceAmbientOcclusionDebugModeLabel()
@@ -1679,6 +1719,8 @@ namespace Burt.RenderPipeline
                     return "DepthValidity";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability:
                     return "SurfaceStability";
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare:
+                    return "DiagnosticCompare";
                 default:
                     return "Disabled";
             }
@@ -1714,6 +1756,9 @@ namespace Burt.RenderPipeline
             }
 
             var quality = component.quality.value;
+            var algorithm = component.algorithm.value;
+            var gtaoStrength = component.gtaoStrength.value;
+            var hbaoStrength = component.hbaoStrength.value;
             var sampleCount = component.sampleCount.value;
             var horizonSearch = component.horizonSearch.value;
             var directionCount = component.directionCount.value;
@@ -1727,6 +1772,9 @@ namespace Burt.RenderPipeline
             var blurSharpness = component.blurSharpness.value;
             ApplyScreenSpaceAmbientOcclusionQualityPreset(
                 quality,
+                algorithm,
+                ref gtaoStrength,
+                ref hbaoStrength,
                 ref sampleCount,
                 ref horizonSearch,
                 ref directionCount,
@@ -1742,6 +1790,9 @@ namespace Burt.RenderPipeline
             return new BurtScreenSpaceAmbientOcclusionSettings(
                 true,
                 quality,
+                algorithm,
+                gtaoStrength,
+                hbaoStrength,
                 component.intensity.value,
                 component.radius.value,
                 sampleCount,
@@ -1764,6 +1815,9 @@ namespace Burt.RenderPipeline
 
         private static void ApplyScreenSpaceAmbientOcclusionQualityPreset(
             BurtScreenSpaceAmbientOcclusionQuality quality,
+            BurtScreenSpaceAmbientOcclusionAlgorithm algorithm,
+            ref float gtaoStrength,
+            ref float hbaoStrength,
             ref int sampleCount,
             ref bool horizonSearch,
             ref int directionCount,
@@ -1776,6 +1830,86 @@ namespace Burt.RenderPipeline
             ref float temporalClamp,
             ref float blurSharpness)
         {
+            if (quality == BurtScreenSpaceAmbientOcclusionQuality.Custom)
+            {
+                return;
+            }
+
+            algorithm = NormalizeScreenSpaceAmbientOcclusionAlgorithm(algorithm);
+            switch (algorithm)
+            {
+                case BurtScreenSpaceAmbientOcclusionAlgorithm.GTAO:
+                    ApplyGTAOQualityPreset(
+                        quality,
+                        ref gtaoStrength,
+                        ref hbaoStrength,
+                        ref sampleCount,
+                        ref horizonSearch,
+                        ref directionCount,
+                        ref halfResolution,
+                        ref blur,
+                        ref spatialDenoise,
+                        ref temporalAccumulation,
+                        ref temporalFeedback,
+                        ref temporalDepthRejection,
+                        ref temporalClamp,
+                        ref blurSharpness);
+                    break;
+                case BurtScreenSpaceAmbientOcclusionAlgorithm.HBAO:
+                    ApplyHBAOQualityPreset(
+                        quality,
+                        ref gtaoStrength,
+                        ref hbaoStrength,
+                        ref sampleCount,
+                        ref horizonSearch,
+                        ref directionCount,
+                        ref halfResolution,
+                        ref blur,
+                        ref spatialDenoise,
+                        ref temporalAccumulation,
+                        ref temporalFeedback,
+                        ref temporalDepthRejection,
+                        ref temporalClamp,
+                        ref blurSharpness);
+                    break;
+                default:
+                    ApplySSAOQualityPreset(
+                        quality,
+                        ref gtaoStrength,
+                        ref hbaoStrength,
+                        ref sampleCount,
+                        ref horizonSearch,
+                        ref directionCount,
+                        ref halfResolution,
+                        ref blur,
+                        ref spatialDenoise,
+                        ref temporalAccumulation,
+                        ref temporalFeedback,
+                        ref temporalDepthRejection,
+                        ref temporalClamp,
+                        ref blurSharpness);
+                    break;
+            }
+        }
+
+        private static void ApplySSAOQualityPreset(
+            BurtScreenSpaceAmbientOcclusionQuality quality,
+            ref float gtaoStrength,
+            ref float hbaoStrength,
+            ref int sampleCount,
+            ref bool horizonSearch,
+            ref int directionCount,
+            ref bool halfResolution,
+            ref bool blur,
+            ref bool spatialDenoise,
+            ref bool temporalAccumulation,
+            ref float temporalFeedback,
+            ref float temporalDepthRejection,
+            ref float temporalClamp,
+            ref float blurSharpness)
+        {
+            gtaoStrength = 1f;
+            hbaoStrength = 1f;
             switch (quality)
             {
                 case BurtScreenSpaceAmbientOcclusionQuality.Low:
@@ -1817,6 +1951,130 @@ namespace Burt.RenderPipeline
                     temporalClamp = 0.9f;
                     blurSharpness = 0.18f;
                     break;
+            }
+        }
+
+        private static void ApplyGTAOQualityPreset(
+            BurtScreenSpaceAmbientOcclusionQuality quality,
+            ref float gtaoStrength,
+            ref float hbaoStrength,
+            ref int sampleCount,
+            ref bool horizonSearch,
+            ref int directionCount,
+            ref bool halfResolution,
+            ref bool blur,
+            ref bool spatialDenoise,
+            ref bool temporalAccumulation,
+            ref float temporalFeedback,
+            ref float temporalDepthRejection,
+            ref float temporalClamp,
+            ref float blurSharpness)
+        {
+            hbaoStrength = 1f;
+            horizonSearch = true;
+            blur = true;
+            spatialDenoise = true;
+            temporalAccumulation = true;
+            switch (quality)
+            {
+                case BurtScreenSpaceAmbientOcclusionQuality.Low:
+                    gtaoStrength = 0.85f;
+                    sampleCount = 8;
+                    directionCount = 2;
+                    halfResolution = true;
+                    temporalFeedback = 0.74f;
+                    temporalDepthRejection = 0.016f;
+                    temporalClamp = 0.6f;
+                    blurSharpness = 0.1f;
+                    break;
+                case BurtScreenSpaceAmbientOcclusionQuality.Medium:
+                    gtaoStrength = 0.95f;
+                    sampleCount = 16;
+                    directionCount = 3;
+                    halfResolution = true;
+                    temporalFeedback = 0.8f;
+                    temporalDepthRejection = 0.012f;
+                    temporalClamp = 0.78f;
+                    blurSharpness = 0.14f;
+                    break;
+                case BurtScreenSpaceAmbientOcclusionQuality.High:
+                    gtaoStrength = 1f;
+                    sampleCount = 24;
+                    directionCount = 4;
+                    halfResolution = false;
+                    temporalFeedback = 0.84f;
+                    temporalDepthRejection = 0.009f;
+                    temporalClamp = 0.95f;
+                    blurSharpness = 0.2f;
+                    break;
+            }
+        }
+
+        private static void ApplyHBAOQualityPreset(
+            BurtScreenSpaceAmbientOcclusionQuality quality,
+            ref float gtaoStrength,
+            ref float hbaoStrength,
+            ref int sampleCount,
+            ref bool horizonSearch,
+            ref int directionCount,
+            ref bool halfResolution,
+            ref bool blur,
+            ref bool spatialDenoise,
+            ref bool temporalAccumulation,
+            ref float temporalFeedback,
+            ref float temporalDepthRejection,
+            ref float temporalClamp,
+            ref float blurSharpness)
+        {
+            gtaoStrength = 1f;
+            horizonSearch = true;
+            blur = true;
+            spatialDenoise = true;
+            temporalAccumulation = true;
+            switch (quality)
+            {
+                case BurtScreenSpaceAmbientOcclusionQuality.Low:
+                    hbaoStrength = 0.75f;
+                    sampleCount = 8;
+                    directionCount = 2;
+                    halfResolution = true;
+                    temporalFeedback = 0.7f;
+                    temporalDepthRejection = 0.02f;
+                    temporalClamp = 0.5f;
+                    blurSharpness = 0.08f;
+                    break;
+                case BurtScreenSpaceAmbientOcclusionQuality.Medium:
+                    hbaoStrength = 0.85f;
+                    sampleCount = 16;
+                    directionCount = 3;
+                    halfResolution = true;
+                    temporalFeedback = 0.76f;
+                    temporalDepthRejection = 0.014f;
+                    temporalClamp = 0.68f;
+                    blurSharpness = 0.12f;
+                    break;
+                case BurtScreenSpaceAmbientOcclusionQuality.High:
+                    hbaoStrength = 0.95f;
+                    sampleCount = 24;
+                    directionCount = 4;
+                    halfResolution = false;
+                    temporalFeedback = 0.8f;
+                    temporalDepthRejection = 0.011f;
+                    temporalClamp = 0.82f;
+                    blurSharpness = 0.18f;
+                    break;
+            }
+        }
+
+        private static BurtScreenSpaceAmbientOcclusionAlgorithm NormalizeScreenSpaceAmbientOcclusionAlgorithm(BurtScreenSpaceAmbientOcclusionAlgorithm algorithm)
+        {
+            switch (algorithm)
+            {
+                case BurtScreenSpaceAmbientOcclusionAlgorithm.GTAO:
+                case BurtScreenSpaceAmbientOcclusionAlgorithm.HBAO:
+                    return algorithm;
+                default:
+                    return BurtScreenSpaceAmbientOcclusionAlgorithm.SSAO;
             }
         }
 

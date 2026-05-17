@@ -44,39 +44,8 @@ Shader "BurtRP/UnlitColor"
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
 
-            // 定义深度 Pass 的顶点输入结构。
-            struct DepthAttributes
-            {
-                // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
-                float4 positionOS : POSITION;
-            };
-
-            // 定义深度 Pass 的顶点输出结构。
-            struct DepthVaryings
-            {
-                // 输出裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
-                float4 positionCS : SV_POSITION;
-            };
-
-            // 定义深度 Pass 的顶点 shader 函数。
-            DepthVaryings VertDepth(DepthAttributes input)
-            {
-                // 创建一个输出结构变量，用来保存顶点 shader 的输出结果。
-                DepthVaryings output;
-
-                // 把模型空间顶点位置转换到裁剪空间，让 GPU 能进行深度光栅化。
-                output.positionCS = UnityObjectToClipPos(input.positionOS);
-
-                // 返回顶点 shader 输出结果。
-                return output;
-            }
-
-            // 定义深度 Pass 的片元 shader 函数。
-            float4 FragDepth(DepthVaryings input) : SV_Target
-            {
-                // 返回任意颜色值，因为 ColorMask 0 会禁止实际颜色写入。
-                return 0;
-            }
+            #define BURT_DEPTH_ONLY_ALPHA_CLIP 0
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
 
             // 结束 HLSL shader 程序。
             ENDHLSL
@@ -114,111 +83,8 @@ Shader "BurtRP/UnlitColor"
             // 引入 Unity 的基础 shader 工具函数，UnityObjectToClipPos 会使用当前主光视图投影矩阵。
             #include "UnityCG.cginc"
 
-            // 保存当前 request 的主光方向，ShadowCaster 顶点偏移需要用它计算法线和光向夹角。
-            float4 _BurtMainLightDirection;
-            float4 _BurtShadowCasterLightPosition;
-            float _BurtCastingPunctualLightShadow;
-            float3 _LightDirection;
-            float3 _LightPosition;
-            float4 _ShadowBias;
-
-            // 保存 C# 已折算到世界单位的 normal bias，ShadowCaster 只在顶点阶段使用它。
-            float _BurtMainLightShadowDepthBias;
-            float _BurtMainLightShadowNormalBias;
-
-            // 定义阴影 Pass 的顶点输入结构。
-            struct ShadowAttributes
-            {
-                // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
-                float4 positionOS : POSITION;
-
-                // 读取模型空间法线，ShadowCaster normal bias 需要沿世界法线推开顶点。
-                float3 normalOS : NORMAL;
-            };
-
-            // 定义阴影 Pass 的顶点输出结构。
-            struct ShadowVaryings
-            {
-                // 输出主光裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
-                float4 positionCS : SV_POSITION;
-            };
-
-            // 根据法线和主光方向计算 ShadowCaster 顶点的世界空间 normal bias。
-            float3 ApplyBurtShadowCasterNormalBias(float4 positionOS, float3 normalOS)
-            {
-                // 先把顶点转到世界空间再偏移，避免非等比缩放时模型空间距离不一致。
-                float3 positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
-
-                // 法线和光向必须处在同一世界空间，才能正确判断表面是否处于掠射角。
-                float3 normalWS = UnityObjectToWorldNormal(normalOS);
-                normalWS *= rsqrt(max(dot(normalWS, normalWS), 0.000001f));
-
-                float3 lightDirectionWS = _LightDirection;
-                if (dot(lightDirectionWS, lightDirectionWS) <= 0.000001f)
-                {
-                    lightDirectionWS = _BurtMainLightDirection.xyz;
-                }
-
-#if defined(_CASTING_PUNCTUAL_LIGHT_SHADOW)
-                lightDirectionWS = _BurtShadowCasterLightPosition.xyz - positionWS;
-                if (dot(lightDirectionWS, lightDirectionWS) <= 0.000001f)
-                {
-                    lightDirectionWS = _LightPosition - positionWS;
-                }
-#else
-                if (_BurtCastingPunctualLightShadow > 0.5f)
-                {
-                    lightDirectionWS = _BurtShadowCasterLightPosition.xyz - positionWS;
-                }
-#endif
-
-                lightDirectionWS *= rsqrt(max(dot(lightDirectionWS, lightDirectionWS), 0.000001f));
-
-                float depthBias = _ShadowBias.x;
-                float normalBias = _ShadowBias.y;
-                if (abs(depthBias) <= 0.0000001f && abs(normalBias) <= 0.0000001f)
-                {
-                    depthBias = _BurtMainLightShadowDepthBias;
-                    normalBias = _BurtMainLightShadowNormalBias;
-                }
-
-                // 表面越接近掠射角越容易出现 self-shadow，所以用 1 - NdotL 放大法线偏移。
-                float normalBiasScale = (1.0f - saturate(dot(normalWS, lightDirectionWS))) * normalBias;
-
-                // 沿世界法线推出 caster 顶点，让 shadow map 深度和接收面错开一小段距离。
-                return positionWS + lightDirectionWS * depthBias + normalWS * normalBiasScale;
-            }
-
-            // 定义阴影 Pass 的顶点 shader 函数。
-            ShadowVaryings VertShadow(ShadowAttributes input)
-            {
-                // 创建一个输出结构变量，用来保存顶点 shader 的输出结果。
-                ShadowVaryings output;
-
-                // 在进入主光裁剪空间前先应用 normal bias，这样偏移会真实写进 shadow map 深度。
-                float3 biasedPositionWS = ApplyBurtShadowCasterNormalBias(input.positionOS, input.normalOS);
-
-                // 使用 BurtDrawMainLightShadowCasterPass 设置的主光 VP 矩阵，把偏移后的世界坐标写入 shadow map。
-                output.positionCS = mul(UNITY_MATRIX_VP, float4(biasedPositionWS, 1.0f));
-
-                #if !defined(_CASTING_PUNCTUAL_LIGHT_SHADOW)
-                    #if UNITY_REVERSED_Z
-                        output.positionCS.z = min(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
-                    #else
-                        output.positionCS.z = max(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
-                    #endif
-                #endif
-
-                // 返回顶点 shader 输出结果。
-                return output;
-            }
-
-            // 定义阴影 Pass 的片元 shader 函数。
-            float4 FragShadow(ShadowVaryings input) : SV_Target
-            {
-                // 返回任意颜色值，因为 ColorMask 0 会禁止实际颜色写入。
-                return 0;
-            }
+            #define BURT_SHADOW_CASTER_ALPHA_CLIP 0
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadowCasterPass.hlsl"
 
             // 结束 HLSL shader 程序。
             ENDHLSL
@@ -247,13 +113,16 @@ Shader "BurtRP/UnlitColor"
 
             // 声明片元 shader 函数名是 Frag。
             #pragma fragment Frag
+            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
+#if defined(BURT_SHADING_DEBUG)
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
+#endif
 
             // 定义材质常量缓冲区，SRP Batcher 要求每材质属性放在 UnityPerMaterial 里。
             CBUFFER_START(UnityPerMaterial)
@@ -299,6 +168,7 @@ Shader "BurtRP/UnlitColor"
             // 定义片元 shader 函数，输入插值后的顶点输出，返回屏幕像素颜色。
             float4 Frag(Varyings input) : SV_Target
             {
+#if defined(BURT_ENABLE_SHADING_DEBUG)
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
                 float3 normalWS = BurtSafeNormalize(input.normalWS);
                 float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
@@ -335,6 +205,7 @@ Shader "BurtRP/UnlitColor"
                 {
                     return float4(debugColor, surfaceData.alpha);
                 }
+#endif
 
                 // 返回材质颜色，不做光照计算，所以这是一个最简单的 Unlit shader。
                 return _BaseColor;
@@ -367,13 +238,16 @@ Shader "BurtRP/UnlitColor"
 
             // 声明片元 shader 函数名是 FragForwardOnly。
             #pragma fragment FragForwardOnly
+            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
+#if defined(BURT_SHADING_DEBUG)
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
+#endif
 
             // 定义材质常量缓冲区，SRP Batcher 要求每材质属性放在 UnityPerMaterial 里。
             CBUFFER_START(UnityPerMaterial)
@@ -419,6 +293,7 @@ Shader "BurtRP/UnlitColor"
             // 定义 Deferred ForwardOnly 片元 shader 函数，输入插值后的顶点输出，返回屏幕像素颜色。
             float4 FragForwardOnly(ForwardOnlyVaryings input) : SV_Target
             {
+#if defined(BURT_ENABLE_SHADING_DEBUG)
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
                 float3 normalWS = BurtSafeNormalize(input.normalWS);
                 float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
@@ -455,6 +330,7 @@ Shader "BurtRP/UnlitColor"
                 {
                     return float4(debugColor, surfaceData.alpha);
                 }
+#endif
 
                 // 返回材质颜色，不做光照计算，所以它适合作为不能写 GBuffer 的 Unlit 兜底路径。
                 return _BaseColor;

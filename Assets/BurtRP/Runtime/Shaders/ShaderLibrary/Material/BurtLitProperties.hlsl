@@ -3,6 +3,8 @@
 #define BURT_LIT_PROPERTIES_INCLUDED // 标记 BurtLitProperties.hlsl 已经被包含过，后续重复 include 会被跳过。
 
 // UnityPerMaterial 是 Unity SRP Batcher 识别材质常量的固定 CBUFFER 名称。
+#include "UnityCG.cginc"
+
 CBUFFER_START(UnityPerMaterial)
 
     // 保存材质基础颜色，Forward 用它参与 albedo，DepthOnly 和 ShadowCaster 用它参与 alpha clip。
@@ -32,6 +34,8 @@ CBUFFER_START(UnityPerMaterial)
     // 保存金属度标量，最终 metallic 会等于这个标量乘以 Mask Map 的 R 通道。
     float _Metallic;
 
+    float _Anisotropy;
+
     // 保存光滑度标量，最终 smoothness 会等于这个标量乘以 Mask Map 的 A 通道。
     float _Smoothness;
 
@@ -46,6 +50,16 @@ CBUFFER_START(UnityPerMaterial)
     float _ClearCoatNormalScale;
 
     float _SubsurfaceStrength;
+
+    float _SubsurfaceThickness;
+
+    float _SubsurfacePower;
+
+    float _SubsurfaceDistortion;
+
+    float _SubsurfaceAmbient;
+
+    float4 _SubsurfaceTint;
 
     // 保存自发光颜色，Forward 用它和 Emission Map 相乘。
     float4 _EmissionColor;

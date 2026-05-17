@@ -5,6 +5,8 @@ namespace Burt.RenderPipeline.Editor
 {
     internal static class BurtShaderGUIUtility
     {
+        public const string AlphaClipKeyword = "BURT_ALPHA_CLIP";
+        private const string LegacyAlphaClipKeyword = "_ALPHACLIP_ON";
         public static readonly string[] DoubleSidedNormalModeNames = { "None", "Flip", "Mirror" };
         private static GUIStyle sectionHeaderStyle;
         private static GUIStyle sectionBodyStyle;
@@ -162,6 +164,25 @@ namespace Burt.RenderPipeline.Editor
             material.globalIlluminationFlags = emission.maxColorComponent <= 0.0f
                 ? flags | MaterialGlobalIlluminationFlags.EmissiveIsBlack
                 : flags & ~MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+        }
+
+        public static void ApplyAlphaClipKeyword(Material material)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            bool enabled = material.HasProperty("_AlphaClip") && material.GetFloat("_AlphaClip") >= 0.5f;
+            material.DisableKeyword(LegacyAlphaClipKeyword);
+            if (enabled)
+            {
+                material.EnableKeyword(AlphaClipKeyword);
+            }
+            else
+            {
+                material.DisableKeyword(AlphaClipKeyword);
+            }
         }
 
         private static void EnsureStyles()

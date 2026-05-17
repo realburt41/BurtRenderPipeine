@@ -5,6 +5,22 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl" // 引入安全归一化和基础数学保护。
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl" // 引入 BurtSurfaceData，用来读取 baseColor、metallic、smoothness 等材质参数。
 
+#if !defined(BURT_ENABLE_CLEAR_COAT_SHADING)
+#if defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL) || defined(BURT_FORWARD_SINGLE_SHADING_MODEL)
+#define BURT_ENABLE_CLEAR_COAT_SHADING 0
+#else
+#define BURT_ENABLE_CLEAR_COAT_SHADING 1
+#endif
+#endif
+
+#if !defined(BURT_ENABLE_SUBSURFACE_SHADING)
+#if defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL) || defined(BURT_FORWARD_SINGLE_SHADING_MODEL)
+#define BURT_ENABLE_SUBSURFACE_SHADING 0
+#else
+#define BURT_ENABLE_SUBSURFACE_SHADING 1
+#endif
+#endif
+
 // 定义圆周率，PBR 漫反射和 GGX 分布项都会使用它。
 static const float BURT_PI = 3.14159265359f;
 
@@ -22,6 +38,9 @@ static const float BURT_SPECULAR_AA_THRESHOLD = 0.2f;
 
 // 定义 XRender / Frostbite 使用的最大介质 F0，reflectance=1 时非金属 F0 会达到 0.16。
 static const float BURT_MATERIAL_MAX_DIELECTRIC_F0 = 0.16f;
+static const float BURT_CLEAR_COAT_F0 = 0.04f;
+static const float BURT_CLEAR_COAT_IOR = 1.5f;
+static const float BURT_CLEAR_COAT_ETA = 1.0f / BURT_CLEAR_COAT_IOR;
 
 // 定义 GGX D 项分母的极小保护值，不能复用 1e-6 的通用 epsilon，否则极光滑时 D 项会被反向压低。
 static const float BURT_GGX_DISTRIBUTION_DENOMINATOR_EPSILON = 0.000000000001f;
@@ -29,10 +48,26 @@ static const float BURT_GGX_DISTRIBUTION_DENOMINATOR_EPSILON = 0.000000000001f;
 // 声明 BurtRP 预积分 FG LUT；C# 会绑定 Assets/Textures/PreintegratedFG.exr 或关闭开关走解析近似。
 sampler2D _BurtPreIntegratedFG;
 float _BurtPreIntegratedFGEnabled;
+#if BURT_ENABLE_SUBSURFACE_SHADING
+sampler2D _BurtSubsurfacePreIntegratedLut;
+float _BurtSubsurfacePreIntegratedLutEnabled;
+#endif
 
 // 定义预积分 FG LUT 的尺寸；当前资源按 XRender 默认 128x128 生成。
 static const float BURT_PREINTEGRATED_FG_LUT_SIZE = 128.0f;
 static const float BURT_PREINTEGRATED_FG_LUT_INV_SIZE = 1.0f / BURT_PREINTEGRATED_FG_LUT_SIZE;
+#if BURT_ENABLE_SUBSURFACE_SHADING
+static const float BURT_SUBSURFACE_PREINTEGRATED_LUT_SIZE = 256.0f;
+static const float BURT_SUBSURFACE_PREINTEGRATED_LUT_INV_SIZE = 1.0f / BURT_SUBSURFACE_PREINTEGRATED_LUT_SIZE;
+
+float3 BurtSampleSubsurfacePreIntegratedLut(float rawNoL, float curvature)
+{
+    float2 invSize = float2(BURT_SUBSURFACE_PREINTEGRATED_LUT_INV_SIZE, BURT_SUBSURFACE_PREINTEGRATED_LUT_INV_SIZE);
+    float2 uv = float2(saturate(rawNoL * 0.5f + 0.5f), saturate(curvature));
+    uv = uv * (1.0f - invSize) + 0.5f * invSize;
+    return max(tex2D(_BurtSubsurfacePreIntegratedLut, uv).rgb, float3(0.0f, 0.0f, 0.0f));
+}
+#endif
 
 // 出处：XRender/Shaders/Library/BRDF.hlsl::rcp_safe；用安全倒数保护 BRDF 分母，避免 0 产生 NaN。
 float rcp_safe(float value)
@@ -210,6 +245,8 @@ struct BurtPBRMaterialData
     // 保存金属度，既参与 diffuseColor，也参与 reflectance 到 F0 的重建。
     float metallic;
 
+    float anisotropy;
+
     // 保存 XRender 风格 reflectance；不直接暴露 F0，后续统一从 reflectance 还原。
     float reflectance;
 
@@ -242,6 +279,16 @@ struct BurtPBRMaterialData
     float clearCoatRoughness;
 
     float subsurfaceStrength;
+
+    float subsurfaceThickness;
+
+    float subsurfacePower;
+
+    float subsurfaceDistortion;
+
+    float subsurfaceAmbient;
+
+    float3 subsurfaceTint;
 };
 
 // 从 BurtSurfaceData 准备 PBR 材质数据；Deferred 后续可以做一个从 GBuffer 还原到同一结构的入口。
@@ -253,9 +300,28 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
     // 记录原始材质输入，避免后续光照函数再次依赖 SurfaceData 的字段布局。
     materialData.baseColor = surfaceData.baseColor.rgb;
     materialData.metallic = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? 0.0f : surfaceData.metallic;
+    materialData.anisotropy = clamp(surfaceData.anisotropy, -1.0f, 1.0f);
+#if BURT_ENABLE_CLEAR_COAT_SHADING
     materialData.clearCoatMask = BurtIsClearCoatShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.clearCoatMask) : 0.0f;
+#else
+    materialData.clearCoatMask = 0.0f;
+#endif
     materialData.clearCoatRoughness = ClampPerceptualRoughness(surfaceData.clearCoatRoughness);
+#if BURT_ENABLE_SUBSURFACE_SHADING
     materialData.subsurfaceStrength = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.subsurfaceStrength) : 0.0f;
+    materialData.subsurfaceThickness = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.subsurfaceThickness) : BURT_SUBSURFACE_DEFAULT_THICKNESS;
+    materialData.subsurfacePower = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? BurtClampSubsurfacePower(surfaceData.subsurfacePower) : BURT_SUBSURFACE_DEFAULT_POWER;
+    materialData.subsurfaceDistortion = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.subsurfaceDistortion) : BURT_SUBSURFACE_DEFAULT_DISTORTION;
+    materialData.subsurfaceAmbient = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.subsurfaceAmbient) : BURT_SUBSURFACE_DEFAULT_AMBIENT;
+    materialData.subsurfaceTint = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? max(surfaceData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f)) : BURT_SUBSURFACE_DEFAULT_TINT;
+#else
+    materialData.subsurfaceStrength = 0.0f;
+    materialData.subsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
+    materialData.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
+    materialData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
+    materialData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
+    materialData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
+#endif
     materialData.reflectance = surfaceData.reflectance;
     materialData.occlusion = surfaceData.occlusion;
     materialData.smoothness = surfaceData.smoothness;
@@ -280,6 +346,10 @@ struct BurtPBRGeometryData
     // 保存安全归一化后的世界空间法线。
     float3 normalWS;
 
+    float3 tangentWS;
+
+    float3 bitangentWS;
+
     // 保存安全归一化后的世界空间视线方向，约定从表面指向相机。
     float3 viewDirectionWS;
 
@@ -291,7 +361,20 @@ struct BurtPBRGeometryData
 };
 
 // 从世界空间法线和视线方向准备 PBR 几何数据，方便 Forward 和 Deferred 使用同一套几何约定。
-BurtPBRGeometryData BurtPreparePBRGeometryData(float3 normalWS, float3 viewDirectionWS)
+float3 BurtCreateFallbackTangentWS(float3 normalWS)
+{
+    float3 axis = abs(normalWS.y) < 0.95f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
+    return BurtSafeNormalize(cross(axis, normalWS));
+}
+
+float3 BurtOrthonormalizeTangentWS(float3 normalWS, float3 tangentWS)
+{
+    float3 tangent = tangentWS - normalWS * dot(normalWS, tangentWS);
+    float tangentLengthSquared = dot(tangent, tangent);
+    return tangentLengthSquared > 0.0001f ? tangent * rsqrt(tangentLengthSquared) : BurtCreateFallbackTangentWS(normalWS);
+}
+
+BurtPBRGeometryData BurtPreparePBRGeometryData(float3 normalWS, float4 tangentWS, float3 viewDirectionWS)
 {
     // 创建输出结构体，下面逐项写入安全归一化后的几何量。
     BurtPBRGeometryData geometryData;
@@ -299,6 +382,8 @@ BurtPBRGeometryData BurtPreparePBRGeometryData(float3 normalWS, float3 viewDirec
     // 法线和视线都做安全归一化，避免 Forward 插值或 Deferred 重建误差进入 BRDF。
     geometryData.normalWS = BurtSafeNormalize(normalWS);
     geometryData.viewDirectionWS = BurtSafeNormalize(viewDirectionWS);
+    geometryData.tangentWS = BurtOrthonormalizeTangentWS(geometryData.normalWS, tangentWS.xyz);
+    geometryData.bitangentWS = BurtSafeNormalize(cross(geometryData.normalWS, geometryData.tangentWS) * (tangentWS.w < 0.0f ? -1.0f : 1.0f));
 
     // NdotV 统一夹到 0..1，保持和现有 DFG、Energy Term 输入一致。
     geometryData.nDotV = saturate(dot(geometryData.normalWS, geometryData.viewDirectionWS));
@@ -308,6 +393,17 @@ BurtPBRGeometryData BurtPreparePBRGeometryData(float3 normalWS, float3 viewDirec
 
     // 返回准备好的几何数据，后续直接光和间接光都复用同一份。
     return geometryData;
+}
+
+BurtPBRGeometryData BurtPreparePBRGeometryData(float3 normalWS, float3 tangentWS, float3 viewDirectionWS)
+{
+    return BurtPreparePBRGeometryData(normalWS, float4(tangentWS, 1.0f), viewDirectionWS);
+}
+
+BurtPBRGeometryData BurtPreparePBRGeometryData(float3 normalWS, float3 viewDirectionWS)
+{
+    float3 safeNormalWS = BurtSafeNormalize(normalWS);
+    return BurtPreparePBRGeometryData(safeNormalWS, float4(BurtCreateFallbackTangentWS(safeNormalWS), 1.0f), viewDirectionWS);
 }
 
 // BurtRP 直接高光适配函数：使用已经准备好的材质/几何数据计算 Specular AA 后的感知粗糙度。
@@ -384,6 +480,42 @@ float3 F_Schlick_UE(float3 f0, float3 f90, float voH)
     return F_Schlick(f0, f90, voH);
 }
 
+float BurtRefractBlendClearCoatApprox(float voH)
+{
+    float safeVoH = saturate(voH);
+    return (0.63f - 0.22f * safeVoH) * safeVoH - 0.745f;
+}
+
+float3 BurtClearCoatFresnelTransmission(float3 clearCoatFresnel)
+{
+    float3 transmission = saturate(1.0f - clearCoatFresnel);
+    return transmission * transmission;
+}
+
+float3 BurtSimpleClearCoatTransmittance(float noL, float noV, float metallic, float3 baseColor)
+{
+    float3 transmittance = float3(1.0f, 1.0f, 1.0f);
+    float clearCoatCoverage = saturate(metallic);
+    if (clearCoatCoverage > 0.0001f)
+    {
+        const float layerThickness = 1.0f;
+        float thinDistance = layerThickness * (rcp_safe(max(noV, 0.001f)) + rcp_safe(max(noL, 0.001f)));
+        thinDistance = min(thinDistance, 4.0f);
+        float3 transmittanceColor = max(baseColor * Fd_Lambert(), float3(0.001f, 0.001f, 0.001f));
+        float3 extinctionCoefficient = -log(transmittanceColor) / (2.0f * layerThickness);
+        float3 opticalDepth = extinctionCoefficient * max(thinDistance - 2.0f * layerThickness, 0.0f);
+        transmittance = exp(-opticalDepth);
+        transmittance = lerp(float3(1.0f, 1.0f, 1.0f), transmittance, clearCoatCoverage);
+    }
+
+    return transmittance;
+}
+
+float3 BurtSimpleClearCoatTransmittanceFromView(float noV, float metallic, float3 baseColor)
+{
+    return BurtSimpleClearCoatTransmittance(noV, noV, metallic, baseColor);
+}
+
 // 出处：XRender/Shaders/Library/BRDF.hlsl::D_GGX；Unreal/Frostbite/Filament 使用的 GGX/Trowbridge-Reitz D 项。
 float D_GGX(float a2, float noH)
 {
@@ -395,6 +527,48 @@ float D_GGX(float a2, float noH)
 }
 
 // 出处：XRender/Shaders/Library/BRDF.hlsl::Vis_SmithJointApprox；返回 G / (4 * NoV * NoL)。
+float D_GGX_Anisotropic(float ax, float ay, float noH, float xoH, float yoH)
+{
+    float a2 = max(ax * ay, BURT_EPSILON);
+    float3 v = float3(ay * xoH, ax * yoH, a2 * noH);
+    float s = max(dot(v, v), BURT_GGX_DISTRIBUTION_DENOMINATOR_EPSILON);
+    float a2OverS = a2 / s;
+    return BURT_INV_PI * a2 * a2OverS * a2OverS;
+}
+
+float Vis_SmithJointAnisotropic(float ax, float ay, float noV, float noL, float xoV, float xoL, float yoV, float yoL)
+{
+    float visibilityV = noL * length(float3(ax * xoV, ay * yoV, noV));
+    float visibilityL = noV * length(float3(ax * xoL, ay * yoL, noL));
+    return 0.5f * rcp_safe(visibilityV + visibilityL);
+}
+
+void GetAnisotropicRoughness(float linearRoughness, float anisotropy, out float ax, out float ay)
+{
+    float safeRoughness = max(linearRoughness, 0.001f);
+    float safeAnisotropy = clamp(anisotropy, -0.99f, 0.99f);
+    ax = max(safeRoughness * (1.0f + safeAnisotropy), 0.001f);
+    ay = max(safeRoughness * (1.0f - safeAnisotropy), 0.001f);
+}
+
+float3 BurtGetAnisotropicIBLNormalWS(BurtPBRGeometryData geometryData, float anisotropy, float perceptualRoughness)
+{
+    float safeAnisotropy = clamp(anisotropy, -1.0f, 1.0f);
+    float3 grainDirectionWS = safeAnisotropy >= 0.0f ? geometryData.bitangentWS : geometryData.tangentWS;
+    float3 viewFacingTangentWS = cross(grainDirectionWS, geometryData.viewDirectionWS);
+    float3 anisotropicNormalCandidateWS = cross(viewFacingTangentWS, grainDirectionWS);
+    float anisotropicNormalLengthSquared = dot(anisotropicNormalCandidateWS, anisotropicNormalCandidateWS);
+    float3 anisotropicNormalWS = anisotropicNormalLengthSquared > 0.0001f ? anisotropicNormalCandidateWS * rsqrt(anisotropicNormalLengthSquared) : geometryData.normalWS;
+    float stretch = abs(safeAnisotropy) * saturate(5.0f * perceptualRoughness);
+    return BurtSafeNormalize(lerp(geometryData.normalWS, anisotropicNormalWS, stretch));
+}
+
+float3 BurtGetIndirectSpecularReflectionDirectionWS(BurtPBRGeometryData geometryData, float anisotropy, float perceptualRoughness)
+{
+    float3 iblNormalWS = BurtGetAnisotropicIBLNormalWS(geometryData, anisotropy, perceptualRoughness);
+    return reflect(-geometryData.viewDirectionWS, iblNormalWS);
+}
+
 float Vis_SmithJointApprox(float linearRoughness, float noV, float noL)
 {
     // 计算视线侧遮蔽对光照方向的影响。
@@ -665,8 +839,17 @@ BurtDirectBRDFTerms BurtEvaluateDirectBRDFTerms(
     terms.a2 = LinearRoughnessToA2(terms.linearRoughness);
 
     // XRender 的直接高光 lobe 拆项：D / V / F。
-    terms.d = D_GGX(terms.a2, terms.nDotH);
-    terms.visibility = Vis_SmithJointApprox(terms.linearRoughness, terms.nDotV, terms.nDotL);
+    float xoH = dot(geometryData.tangentWS, h);
+    float yoH = dot(geometryData.bitangentWS, h);
+    float xoV = dot(geometryData.tangentWS, v);
+    float yoV = dot(geometryData.bitangentWS, v);
+    float xoL = dot(geometryData.tangentWS, l);
+    float yoL = dot(geometryData.bitangentWS, l);
+    float ax;
+    float ay;
+    GetAnisotropicRoughness(terms.linearRoughness, materialData.anisotropy, ax, ay);
+    terms.d = D_GGX_Anisotropic(ax, ay, terms.nDotH, xoH, yoH);
+    terms.visibility = Vis_SmithJointAnisotropic(ax, ay, terms.nDotV, terms.nDotL, xoV, xoL, yoV, yoL);
     terms.fresnel = F_Schlick_UE(materialData.f0, materialData.f90, terms.vDotH);
 
     // XRender 的 diffuse lobe 当前默认 Lambert，后续可切 Burley 分支。
@@ -697,6 +880,54 @@ struct BurtDirectPBRComponents
     // 保存直接 BRDF 中间项，Debug View 可以拆开查看 D / V / F 和 diffuse/specular BRDF。
     BurtDirectBRDFTerms brdfTerms;
 };
+
+void BurtApplySubsurfaceDirectPBR(
+    inout BurtDirectPBRComponents components,
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    float3 lightColor,
+    float3 lightDirectionWS,
+    float shadowAttenuation)
+{
+#if BURT_ENABLE_SUBSURFACE_SHADING
+    float subsurfaceStrength = saturate(materialData.subsurfaceStrength);
+    if (subsurfaceStrength <= 0.0001f)
+    {
+        return;
+    }
+
+    float3 n = geometryData.normalWS;
+    float3 v = geometryData.viewDirectionWS;
+    float3 l = BurtSafeNormalize(lightDirectionWS);
+    float rawNoL = dot(n, l);
+    float wrappedNoL = saturate((rawNoL + materialData.subsurfaceDistortion) / (1.0f + materialData.subsurfaceDistortion));
+    float3 h = BurtSafeNormalize(l + v);
+    float vDotH = saturate(dot(v, h));
+    float wrappedDiffuseLobe = SlabLobe_Diffuse(materialData, geometryData.nDotV, wrappedNoL, vDotH);
+
+    float curvature = saturate(1.0f - materialData.subsurfaceThickness);
+    float3 subsurfaceTint = max(materialData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+    float3 diffuseTint = lerp(float3(1.0f, 1.0f, 1.0f), subsurfaceTint, 0.65f);
+    float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(rawNoL, curvature);
+    float lutWeight = saturate(_BurtSubsurfacePreIntegratedLutEnabled);
+    float3 wrappedDiffuseBRDF = materialData.diffuseColor * diffuseTint * lerp(wrappedDiffuseLobe, lutScatter * BURT_INV_PI, lutWeight) * components.energyPreservation;
+    float3 wrappedDiffuse = wrappedDiffuseBRDF * lightColor * lerp(wrappedNoL * shadowAttenuation, shadowAttenuation, lutWeight);
+
+    float thickness = saturate(materialData.subsurfaceThickness);
+    float backFacing = saturate(-rawNoL);
+    float3 distortedBackDirection = BurtSafeNormalize(-l + n * materialData.subsurfaceDistortion);
+    float transmissionFacing = pow(saturate(dot(v, distortedBackDirection)), BurtClampSubsurfacePower(materialData.subsurfacePower));
+    float transmissionVisibility = transmissionFacing * lerp(0.15f, 1.0f, thickness) * lerp(0.25f, 1.0f, backFacing);
+    float transmissionLobe = transmissionVisibility * BURT_INV_PI;
+    float transmissionShadow = lerp(shadowAttenuation, sqrt(saturate(shadowAttenuation)), 0.65f * thickness);
+    float3 transmissionBRDF = materialData.baseColor * subsurfaceTint * transmissionLobe * components.energyPreservation;
+    float3 transmission = transmissionBRDF * lightColor * transmissionShadow;
+
+    components.diffuse = lerp(components.diffuse, wrappedDiffuse + transmission, subsurfaceStrength);
+    components.brdfTerms.diffuseLobe = lerp(components.brdfTerms.diffuseLobe, max(wrappedDiffuseLobe, transmissionLobe), subsurfaceStrength);
+    components.brdfTerms.diffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, wrappedDiffuseBRDF + transmissionBRDF, subsurfaceStrength);
+#endif
+}
 
 // 使用已经准备好的 PBR 数据计算单个方向光贡献；Deferred 后续可以从 GBuffer 还原数据后直接复用这个入口。
 BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
@@ -734,6 +965,8 @@ BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
 
     // 输出直接镜面高光贡献，Debug View 可以直接显示这一项。
     components.specular = components.brdfTerms.specularBRDF * lightColor * lightVisibility;
+
+    BurtApplySubsurfaceDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation);
 
     // 返回拆分后的直接光结果。
     return components;

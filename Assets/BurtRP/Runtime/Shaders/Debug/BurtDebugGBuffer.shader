@@ -113,7 +113,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                     screenUV.y = 1.0f - screenUV.y;
                 }
 
-                // 读取四张 GBuffer 的原始编码值。
+                // 读取五张 GBuffer 的原始编码值。
                 BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
 
                 // 把原始 GBuffer 解码成语义化材质数据。
@@ -146,6 +146,11 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                 if (debugMode == 19)
                 {
                     return float4(saturate(encodedGBuffer.gbuffer3.rgb), 1.0f);
+                }
+
+                if (debugMode == 23)
+                {
+                    return float4(saturate(encodedGBuffer.gbuffer4.rgb), 1.0f);
                 }
 
                 // 模式 4：显示解码后的 baseColor。
@@ -260,10 +265,36 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                     return float4(shiftScale, shiftScale, shiftScale, 1.0f);
                 }
 
+                if (debugMode == 21)
+                {
+                    return BurtDebugScalar(BurtGetClearCoatMask(gbufferData));
+                }
+
+                if (debugMode == 22)
+                {
+                    return BurtDebugScalar(BurtGetClearCoatRoughness(gbufferData));
+                }
+
+                if (debugMode == 24)
+                {
+                    return BurtDebugScalar(gbufferData.anisotropy * 0.5f + 0.5f);
+                }
+
+                if (debugMode == 25)
+                {
+                    return BurtDebugNormal(gbufferData.tangentWS);
+                }
+
                 if (debugMode == 18)
                 {
                     float strength = BurtGetSubsurfaceStrength(gbufferData);
                     return float4(strength, strength, strength, 1.0f);
+                }
+
+                if (debugMode == 26)
+                {
+                    float thickness = BurtGetSubsurfaceThickness(gbufferData);
+                    return float4(thickness, thickness, thickness, 1.0f);
                 }
 
                 if (debugMode == 20)

@@ -1,6 +1,7 @@
 #ifndef BURT_SHADOWS_INCLUDED
 #define BURT_SHADOWS_INCLUDED
 
+#include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 
 UNITY_DECLARE_SHADOWMAP(_BurtMainLightShadowMap);

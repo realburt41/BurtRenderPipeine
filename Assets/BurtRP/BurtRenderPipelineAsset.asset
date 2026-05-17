@@ -23,6 +23,16 @@ MonoBehaviour:
   hiZDebugMip: 0
   hiZDebugScale: 50
   preintegratedFGLut: {fileID: 2800000, guid: 7bc59e552e7f6e74f893b90c1f15fc48, type: 3}
+  enableScreenSpaceSubsurface: 1
+  screenSpaceSubsurfaceProfile: {fileID: 11400000, guid: 7bd911dcc7284b5888779f12015db556, type: 2}
+  screenSpaceSubsurfaceRadiusPixels: 3.25
+  screenSpaceSubsurfaceDepthSigma: 0.08
+  screenSpaceSubsurfaceNormalSigma: 0.72
+  screenSpaceSubsurfaceBlend: 0.85
+  screenSpaceSubsurfaceDistanceScale: 2
+  screenSpaceSubsurfaceBoundaryBleed: 0.25
+  screenSpaceSubsurfaceTintStrength: 0.35
+  screenSpaceSubsurfaceMinStrength: 0.012
   postProcessSettings:
     enablePostProcessing: 1
     enableNoOpCopy: 1

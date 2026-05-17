@@ -32,7 +32,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         HairScatter = 16, // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 scatter，非 Hair 像素显示黑色。
         HairShift = 17, // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 longitudinal shift scale，非 Hair 像素显示黑色。
         SubsurfaceStrength = 18, // Subsurface 专用：显示复用 GBuffer1.b material channel 解码出的 strength。
-        ClearCoatNormalWS = 20
+        ClearCoatNormalWS = 20,
+        ClearCoatMask = 21,
+        ClearCoatRoughness = 22,
+        GBuffer4 = 23,
+        Anisotropy = 24,
+        TangentWS = 25,
+        SubsurfaceThickness = 26
     }
 
     [CreateAssetMenu(menuName = "Rendering/Burt Render Pipeline Asset", fileName = "BurtRenderPipelineAsset")] // 让 Unity 可以通过 Create 菜单创建 BurtRenderPipelineAsset。
@@ -72,6 +78,46 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [Header("PBR / Shading")] // 把 PBR 共享查找表集中显示，方便确认 BRDF 使用的全局资源。
         [SerializeField] private Texture2D preintegratedFGLut; // 保存预积分 FG LUT，默认指向 Assets/Textures/PreintegratedFG.exr。
 
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, LabelText("启用 5S")] private bool enableScreenSpaceSubsurface = true;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, LabelText("5S Profile")] private BurtSubsurfaceProfile screenSpaceSubsurfaceProfile;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Min(0.01f), LabelText("半径像素")] private float screenSpaceSubsurfaceRadiusPixels = 3.25f;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Min(0.0001f), LabelText("深度容差")] private float screenSpaceSubsurfaceDepthSigma = 0.08f;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Range(0.01f, 1f), LabelText("法线容差")] private float screenSpaceSubsurfaceNormalSigma = 0.72f;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Range(0f, 1f), LabelText("混合强度")] private float screenSpaceSubsurfaceBlend = 0.85f;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Min(0.01f), LabelText("距离缩放")] private float screenSpaceSubsurfaceDistanceScale = 2f;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Range(0f, 1f), LabelText("边界防串色")] private float screenSpaceSubsurfaceBoundaryBleed = 0.25f;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Range(0f, 1f), LabelText("染色强度")] private float screenSpaceSubsurfaceTintStrength = 0.35f;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, Range(0f, 0.2f), LabelText("最小有效强度")] private float screenSpaceSubsurfaceMinStrength = 0.012f;
+
         [TitleGroup("Post Processing - 后处理")] // 使用 Odin 给后处理配置建立独立分组；这里不用斜杠，避免 Odin 把斜杠解析成父子分组路径。
         [SerializeField, InlineProperty, HideLabel] private BurtPostProcessSettings postProcessSettings = new BurtPostProcessSettings(); // 保存 BurtRP 后处理框架设置；具体效果参数从 Global Volume 读取。
 
@@ -109,6 +155,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public float HiZDebugScale => Mathf.Max(0.0001f, hiZDebugScale);
 
         public Texture2D PreintegratedFGLut => preintegratedFGLut; // 暴露预积分 FG LUT，RenderPipeline 会把它绑定成全局 shader 纹理。
+
+        public bool EnableScreenSpaceSubsurface => enableScreenSpaceSubsurface;
+
+        public BurtSubsurfaceProfile ScreenSpaceSubsurfaceProfile => screenSpaceSubsurfaceProfile;
+
+        public BurtSubsurfaceProfileSettings ScreenSpaceSubsurfaceProfileSettings => ResolveScreenSpaceSubsurfaceSettings();
+
+        public float ScreenSpaceSubsurfaceRadiusPixels => ScreenSpaceSubsurfaceProfileSettings.RadiusPixels;
+
+        public float ScreenSpaceSubsurfaceDepthSigma => ScreenSpaceSubsurfaceProfileSettings.DepthSigma;
+
+        public float ScreenSpaceSubsurfaceNormalSigma => ScreenSpaceSubsurfaceProfileSettings.NormalSigma;
+
+        public float ScreenSpaceSubsurfaceBlend => ScreenSpaceSubsurfaceProfileSettings.Blend;
+
+        public float ScreenSpaceSubsurfaceDistanceScale => ScreenSpaceSubsurfaceProfileSettings.DistanceScale;
+
+        public float ScreenSpaceSubsurfaceBoundaryBleed => ScreenSpaceSubsurfaceProfileSettings.BoundaryBleed;
+
+        public float ScreenSpaceSubsurfaceTintStrength => ScreenSpaceSubsurfaceProfileSettings.TintStrength;
+
+        public float ScreenSpaceSubsurfaceMinStrength => ScreenSpaceSubsurfaceProfileSettings.MinStrength;
 
         public BurtPostProcessSettings PostProcessSettings => EnsurePostProcessSettings(); // 暴露后处理设置给 RenderGraph 和 ForwardGraph 使用，并确保旧资产缺失字段时也有安全默认值。
 
@@ -164,6 +232,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         }
 
         private bool IsDeferredRendererMode => rendererMode == BurtRendererMode.Deferred; // 提供给 Odin ShowIf 使用，让 Deferred 专属配置只在 Deferred 模式下显示。
+
+        private BurtSubsurfaceProfileSettings ResolveScreenSpaceSubsurfaceSettings()
+        {
+            return BurtSubsurfaceProfileSettings.Resolve(
+                screenSpaceSubsurfaceProfile,
+                screenSpaceSubsurfaceRadiusPixels,
+                screenSpaceSubsurfaceDepthSigma,
+                screenSpaceSubsurfaceNormalSigma,
+                screenSpaceSubsurfaceBlend,
+                screenSpaceSubsurfaceDistanceScale,
+                screenSpaceSubsurfaceBoundaryBleed,
+                screenSpaceSubsurfaceTintStrength,
+                screenSpaceSubsurfaceMinStrength);
+        }
 
         private BurtPostProcessSettings EnsurePostProcessSettings() // 定义后处理设置兜底函数，避免旧资产还没有序列化新字段时返回空引用。
         {

@@ -17,7 +17,7 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 3
   manualEV100:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0
   compensation:
     m_OverrideState: 0
@@ -35,16 +35,16 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 2.8
   autoMinEV100:
-    m_OverrideState: 0
-    m_Value: -10
+    m_OverrideState: 1
+    m_Value: -9.6
   autoMaxEV100:
-    m_OverrideState: 0
-    m_Value: 20
+    m_OverrideState: 1
+    m_Value: 19.1
   autoMiddleGrey:
     m_OverrideState: 0
     m_Value: 0.18
   autoSpeedUp:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 3
   autoSpeedDown:
     m_OverrideState: 0
@@ -137,6 +137,52 @@ MonoBehaviour:
   filter6Tint:
     m_OverrideState: 0
     m_Value: {r: 1, g: 1, b: 1, a: 1}
+--- !u!114 &-5376049901750720449
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5caaabf2eb9f4c7c9d0c7fe2dbff2fd8, type: 3}
+  m_Name: BurtFogVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  enabled:
+    m_OverrideState: 1
+    m_Value: 1
+  height:
+    m_OverrideState: 1
+    m_Value: 30
+  density:
+    m_OverrideState: 1
+    m_Value: 0.02
+  heightFalloff:
+    m_OverrideState: 1
+    m_Value: 0.05
+  startDistance:
+    m_OverrideState: 1
+    m_Value: 10
+  cutoffDistance:
+    m_OverrideState: 1
+    m_Value: 0
+  maxOpacity:
+    m_OverrideState: 1
+    m_Value: 0.856
+  albedo:
+    m_OverrideState: 0
+    m_Value: {r: 0.72, g: 0.8, b: 0.9, a: 1}
+  directionalIntensity:
+    m_OverrideState: 0
+    m_Value: 0.25
+  ambientIntensity:
+    m_OverrideState: 0
+    m_Value: 0.75
+  anisotropy:
+    m_OverrideState: 0
+    m_Value: 0.2
 --- !u!114 &-4438491104656152674
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -251,6 +297,12 @@ MonoBehaviour:
   sunIntensity:
     m_OverrideState: 0
     m_Value: 0.6
+  sunSource:
+    m_OverrideState: 0
+    m_Value: 0
+  customSunDirection:
+    m_OverrideState: 0
+    m_Value: {x: 0.3, y: 0.8, z: 0.4}
   planetRadius:
     m_OverrideState: 0
     m_Value: 6371
@@ -269,18 +321,51 @@ MonoBehaviour:
   skyTint:
     m_OverrideState: 0
     m_Value: {r: 0.65, g: 0.78, b: 1, a: 1}
-  aerialPerspective:
+  horizonIntensity:
+    m_OverrideState: 0
+    m_Value: 1
+  horizonFalloff:
+    m_OverrideState: 0
+    m_Value: 0.65
+  groundContribution:
+    m_OverrideState: 0
+    m_Value: 0.22
+  exposureCompensation:
     m_OverrideState: 0
     m_Value: 0
+  tonemapSafeSunIntensity:
+    m_OverrideState: 0
+    m_Value: 4
+  aerialPerspective:
+    m_OverrideState: 1
+    m_Value: 1
   aerialPerspectiveIntensity:
-    m_OverrideState: 0
-    m_Value: 0.35
+    m_OverrideState: 1
+    m_Value: 1
   aerialPerspectiveDistance:
-    m_OverrideState: 0
-    m_Value: 500
+    m_OverrideState: 1
+    m_Value: 50
   aerialPerspectiveHeightFalloff:
-    m_OverrideState: 0
-    m_Value: 0.08
+    m_OverrideState: 1
+    m_Value: 0.77
+  aerialPerspectiveTint:
+    m_OverrideState: 1
+    m_Value: {r: 0.7, g: 0.82, b: 1, a: 1}
+  aerialPerspectiveNearFadeStart:
+    m_OverrideState: 1
+    m_Value: 0
+  aerialPerspectiveNearFadeEnd:
+    m_OverrideState: 1
+    m_Value: 50
+  aerialPerspectiveMaxOpacity:
+    m_OverrideState: 1
+    m_Value: 0.65
+  aerialPerspectivePlacement:
+    m_OverrideState: 1
+    m_Value: 1
+  aerialFogInteraction:
+    m_OverrideState: 1
+    m_Value: 1
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -303,6 +388,8 @@ MonoBehaviour:
   - {fileID: 1128726436058786600}
   - {fileID: -7662446673525914430}
   - {fileID: -142477189715346804}
+  - {fileID: -5376049901750720449}
+  - {fileID: 9153360420279958332}
 --- !u!114 &1128726436058786600
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -318,6 +405,18 @@ MonoBehaviour:
   active: 1
   enabled:
     m_OverrideState: 1
+    m_Value: 1
+  quality:
+    m_OverrideState: 1
+    m_Value: 2
+  algorithm:
+    m_OverrideState: 1
+    m_Value: 2
+  gtaoStrength:
+    m_OverrideState: 0
+    m_Value: 1
+  hbaoStrength:
+    m_OverrideState: 0
     m_Value: 1
   intensity:
     m_OverrideState: 0
@@ -562,3 +661,58 @@ MonoBehaviour:
   debugJitterScale:
     m_OverrideState: 0
     m_Value: 1
+--- !u!114 &9153360420279958332
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5cbfa3db4bbb443fb84498eedf331abb, type: 3}
+  m_Name: BurtVolumetricFogVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 0
+  visibleDistance:
+    m_OverrideState: 0
+    m_Value: 300
+  startDistance:
+    m_OverrideState: 0
+    m_Value: 0
+  stepCount:
+    m_OverrideState: 0
+    m_Value: 24
+  jitter:
+    m_OverrideState: 0
+    m_Value: 1
+  height:
+    m_OverrideState: 0
+    m_Value: 0
+  density:
+    m_OverrideState: 0
+    m_Value: 0.01
+  heightFalloff:
+    m_OverrideState: 0
+    m_Value: 0.15
+  extinctionScale:
+    m_OverrideState: 0
+    m_Value: 1
+  maxOpacity:
+    m_OverrideState: 0
+    m_Value: 0.75
+  albedo:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  anisotropy:
+    m_OverrideState: 0
+    m_Value: 0.2
+  directIntensity:
+    m_OverrideState: 0
+    m_Value: 1
+  ambientIntensity:
+    m_OverrideState: 0
+    m_Value: 0.35

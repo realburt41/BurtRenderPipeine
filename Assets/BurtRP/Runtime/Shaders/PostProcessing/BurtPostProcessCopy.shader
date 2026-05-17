@@ -1434,6 +1434,12 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float2 rawHistoryValidity = tex2D(_BurtTAAParallaxRejectionTexture, uv).rg;
                 float rawParallaxValidity = rawHistoryValidity.r;
                 float rawCoverageValidity = rawHistoryValidity.g;
+                float historyUseCount = BurtTaaLoadPrevUseCount(historyUv) * historyValid * inBounds * velocityValid;
+                float historyUseCoverage = saturate(historyUseCount);
+                float historyUseCrowding = saturate(1.0 - max(0.0, historyUseCount - 1.0) * 0.55);
+                float historyUseStability = min(historyUseCoverage, historyUseCrowding);
+                float historyUseWarmup = smoothstep(0.42, 0.90, historyUseStability);
+                float historyUseInstability = saturate(1.0 - historyUseStability);
                 float parallaxValidity = rawParallaxValidity * historyValid * inBounds * velocityValid;
                 float coverageValidity = rawCoverageValidity * historyValid * inBounds * velocityValid;
                 float depthContinuity = BurtTaaHistoryDepthNeighborhoodValidity(safeHistoryUv, closestDepth, historyConfidence);
@@ -1450,9 +1456,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float edgeResponsive = max(max(depthEdgeResponsive, velocityEdgeResponsive), normalEdgeResponsive);
                 float lowMotionStability = saturate(1.0 - motionLength * 0.35);
                 float rawHistoryCoverage = rawParallaxValidity * rawCoverageValidity;
-                float stableAntiFlickerGuard = saturate(smoothstep(0.05, max(_BurtTAAXRenderParams.y, 0.051), temporalContrast) * historyConfidence * depthContinuity * rawHistoryCoverage * (1.0 - edgeResponsive) * lowMotionStability);
+                float stableAntiFlickerGuard = saturate(smoothstep(0.05, max(_BurtTAAXRenderParams.y, 0.051), temporalContrast) * historyConfidence * depthContinuity * rawHistoryCoverage * (1.0 - saturate(edgeResponsive * 1.25)) * lowMotionStability * historyUseWarmup);
                 float responsiveTemporalContrast = lerp(temporalContrast, temporalContrast * 0.35, stableAntiFlickerGuard);
-                float responsivePreMask = saturate(max(max(responsiveTemporalContrast, untrustedObjectMotion), max(velocityEdgeResponsive, normalEdgeResponsive)) * saturate(_BurtTAAResponsiveParams.x) * historyValid * inBounds * velocityValid * surfaceWeight);
+                float responsivePreMask = saturate(max(max(max(responsiveTemporalContrast, untrustedObjectMotion), max(velocityEdgeResponsive, normalEdgeResponsive)), historyUseInstability * 0.45) * saturate(_BurtTAAResponsiveParams.x) * historyValid * inBounds * velocityValid * surfaceWeight);
                 persistentAntiFlicker *= 1.0 - responsivePreMask;
                 float localizedAntiFlicker = lerp(_BurtTAAXRenderParams.x * 0.8, _BurtTAAXRenderParams.x * 2.25, saturate(1.0 - 2.0 * motionLength));
                 float antiFlickerBoost = lerp(0.0, localizedAntiFlicker, smoothstep(0.05, max(_BurtTAAXRenderParams.y, 0.051), temporalContrast));
@@ -1466,9 +1472,13 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 coverageValidity = dilatedCoverageValidity * historyValid * inBounds * velocityValid;
                 float disocclusionContinuity = saturate(min(depthContinuity, parallaxValidity));
                 disocclusionContinuity *= saturate(lerp(0.35, 1.0, coverageValidity));
-                antiFlickerBoost *= disocclusionContinuity;
-                float historyContinuity = saturate(disocclusionContinuity * (1.0 - edgeResponsive));
+                antiFlickerBoost *= disocclusionContinuity * lerp(0.55, 1.0, historyUseWarmup);
+                float historyContinuity = saturate(disocclusionContinuity * (1.0 - edgeResponsive) * lerp(0.55, 1.0, historyUseWarmup));
                 float historyCoverageEdge = BurtTaaHistoryCoverageEdge(uv) * historyValid * inBounds * velocityValid;
+                float stableGeometryGate = saturate(depthContinuity * parallaxValidity * coverageValidity * historyUseWarmup);
+                float stableEdgeGate = saturate(1.0 - max(max(edgeResponsive, historyCoverageEdge), max(velocityEdgeResponsive, depthEdgeResponsive)) * 1.35);
+                stableEdgeGate *= saturate(1.0 - normalEdgeResponsive * 1.15);
+                float stableHistoryGate = stableGeometryGate * stableEdgeGate * (1.0 - untrustedObjectMotion);
                 float coverageClampTighten = coverageBreak * saturate(_BurtTAAResponsiveParams.x);
                 float clampTighten = saturate(max(edgeResponsive * saturate(_BurtTAAResponsiveParams.x) * max(_BurtTAAEdgeParams.z, 0.0), max(coverageClampTighten, historyCoverageEdge * 0.85)));
                 float clampStrength = max((_BurtTAAParams.y + antiFlickerBoost) * lerp(1.0, 0.55, clampTighten), 0.18);
@@ -1515,12 +1525,14 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 normalWeight = max(normalWeight, lerp(normalWeight, 0.44, staticRelax));
                 float stableAntiFlickerRelax = saturate((persistentAntiFlicker + antiFlickerBoost * 0.18) * historyConfidence * historyContinuity * lowMotionStability);
                 stableAntiFlickerRelax *= smoothstep(0.05, max(_BurtTAAXRenderParams.y, 0.051), temporalContrast) * (1.0 - saturate(edgeResponsive * 1.5));
+                stableAntiFlickerRelax *= stableHistoryGate;
                 lumaWeight = max(lumaWeight, lerp(lumaWeight, 0.50, stableAntiFlickerRelax));
                 clipWeight = max(clipWeight, lerp(clipWeight, 0.48, stableAntiFlickerRelax));
                 float historySampleTrust = smoothstep(0.12, 0.88, historyConfidence);
                 historySampleTrust *= lerp(0.55, 1.0, coverageValidity);
+                historySampleTrust *= lerp(0.50, 1.0, historyUseWarmup);
                 float stableColorRecovery = saturate(max(persistentAntiFlicker, stableAntiFlickerGuard * 0.65) * historyConfidence * historyContinuity * lowMotionStability);
-                stableColorRecovery *= (1.0 - saturate(edgeResponsive * 1.25)) * (1.0 - untrustedObjectMotion);
+                stableColorRecovery *= stableHistoryGate;
                 stableColorRecovery *= smoothstep(0.08, max(_BurtTAAXRenderParams.y, 0.081), temporalContrast);
                 stableColorRecovery *= lerp(0.55, 1.0, historySampleTrust);
                 float stableColorFloor = lerp(0.56, 0.76, saturate(_BurtTAAXRenderParams.x * 0.22));
@@ -1545,6 +1557,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float feedback = baseFeedback * historyValid * velocityValid * inBounds * surfaceWeight * rejectionWeight * confidenceBoost;
                 feedback *= confidenceWeight;
                 feedback *= lerp(0.82, 1.04, historySampleTrust);
+                feedback *= lerp(0.86, 1.0, historyUseStability);
                 feedback *= lerp(1.0, saturate(_BurtTAAResponsiveParams.z), responsiveMask);
                 feedback *= lerp(1.0, saturate(_BurtTAAResponsiveParams.y), untrustedObjectMotion * historyValid * inBounds * velocityValid);
                 feedback *= lerp(1.0, 0.55, edgeFeedbackGuard);
@@ -1555,6 +1568,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 feedback = max(feedback, settledFeedbackFloor * stableColorRecovery * geometryFeedbackValidity);
                 feedback = min(feedback, lerp(0.86, 0.982, historyContinuity));
                 feedback = min(feedback, lerp(0.78, 0.982, saturate(coverageValidity)));
+                feedback = min(feedback, lerp(0.72, 0.982, saturate(historyUseStability)));
                 feedback = min(feedback, lerp(0.94, 0.982, saturate(historyConfidence)));
 
                 float edgeContrast = BurtTaaWorkingLuma(neighborhoodMax - neighborhoodMin);
@@ -1565,7 +1579,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 spatialWeight = max(spatialWeight, stableColorRecovery * subpixelFlicker * 0.34);
                 currentFilteredWorking = lerp(currentWorking, currentFilteredWorking, spatialWeight);
                 float toneBlendStrength = saturate(_BurtTAAXRenderParams.x * 0.12 + stableAntiFlickerRelax * 0.45);
-                toneBlendStrength *= saturate(historyConfidence * historyContinuity * lowMotionStability * (1.0 - edgeResponsive));
+                toneBlendStrength *= saturate(historyConfidence * historyContinuity * lowMotionStability * (1.0 - edgeResponsive) * lerp(0.55, 1.0, stableHistoryGate));
                 float finalFeedback = BurtTaaToneWeightedHistoryFeedback(
                     feedback,
                     BurtTaaFromWorkingPerceptualSpace(currentFilteredWorking),
@@ -1639,14 +1653,18 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     if (debugMode == 365)
                     {
                         float reasonAvailability = historyValid * inBounds * velocityValid * surfaceWeight;
-                        float depthRejectDebug = smoothstep(0.34, 0.92, 1.0 - depthContinuity) * reasonAvailability;
-                        float parallaxRejectSource = max(max(1.0 - rawParallaxValidity, parallaxDilationBreak), coverageBreak);
+                        float currentEdgeContext = saturate(max(max(depthEdgeResponsive, velocityEdgeResponsive), normalEdgeResponsive));
+                        float currentDepthRejectSource = max(saturate(1.0 - depthRangeWeight), depthEdgeResponsive);
+                        float depthRejectDebug = smoothstep(0.28, 0.82, currentDepthRejectSource) * reasonAvailability;
+                        float coverageRejectSource = max(untrustedObjectMotion, normalEdgeResponsive);
+                        coverageRejectSource = max(coverageRejectSource, depthEdgeResponsive * velocityEdgeResponsive);
+                        float parallaxRejectSource = saturate(coverageRejectSource);
                         float parallaxRejectDebug = smoothstep(0.36, 0.94, parallaxRejectSource) * reasonAvailability;
                         float velocityRejectDebug = smoothstep(0.22, 0.85, taaVelocityBreak) * reasonAvailability;
-                        float clampRejectDebug = smoothstep(0.36, 0.90, 1.0 - clipWeight) * reasonAvailability;
+                        float currentClampPressure = saturate(currentEdgeContext * saturate(_BurtTAAResponsiveParams.x) * max(_BurtTAAEdgeParams.z, 0.0));
+                        float clampRejectDebug = smoothstep(0.36, 0.90, currentClampPressure) * reasonAvailability;
                         float strongestRejectDebug = max(max(depthRejectDebug, parallaxRejectDebug), max(velocityRejectDebug, clampRejectDebug));
-                        float stableReasonSurface = saturate(reasonAvailability * historyContinuity * historySampleTrust * lowMotionStability * (1.0 - edgeResponsive));
-                        float3 reasonColor = lerp(float3(0.006, 0.006, 0.006), float3(0.028, 0.028, 0.028), stableReasonSurface) * reasonAvailability * (1.0 - strongestRejectDebug);
+                        float3 reasonColor = float3(0.012, 0.012, 0.012) * reasonAvailability * (1.0 - strongestRejectDebug);
                         reasonColor += depthRejectDebug * float3(1.0, 0.05, 0.02);
                         reasonColor += parallaxRejectDebug * float3(0.05, 1.0, 0.08);
                         reasonColor += velocityRejectDebug * float3(0.10, 0.35, 1.0);

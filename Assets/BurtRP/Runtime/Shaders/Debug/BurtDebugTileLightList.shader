@@ -23,7 +23,7 @@ Shader "Hidden/BurtRP/DebugTileLightList"
             StructuredBuffer<uint2> _BurtTileLightOffsetBuffer;
             float4 _BurtTileLightGridParams; // x=tilesX, y=tilesY, z=tileSize, w=maxLightsPerTile
             float4 _BurtTileLightDebugStats; // x=minCount, y=maxCount, z=averageCount, w=additionalLightCount
-            float _BurtTileLightDebugMode; // 1=integer count bands, 2=occupancy scaled by list capacity
+            float _BurtTileLightDebugMode; // 1=tile count, 2=tile occupancy
             float _BurtTileLightCountBufferEnabled;
             sampler2D _BurtTileLightDebugColorTexture;
             float _BurtTileLightDebugColorTextureEnabled;
@@ -154,16 +154,15 @@ Shader "Hidden/BurtRP/DebugTileLightList"
                     return float4(textureColor, 1.0f);
                 }
 
+                float debugMode = round(_BurtTileLightDebugMode);
                 uint lightCount = _BurtTileLightCountBuffer[tileIndex];
 
                 float count = (float)lightCount;
-                float debugMode = round(_BurtTileLightDebugMode);
                 float3 color = BurtTileCountBandColor(count);
                 if (debugMode == 2.0f)
                 {
                     color = BurtTileOccupancyColor((uint)tileIndex, lightCount, tileUV);
                 }
-
                 color = lerp(color, float3(1.0f, 1.0f, 1.0f), grid);
                 return float4(color, 1.0f);
             }

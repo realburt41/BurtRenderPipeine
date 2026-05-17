@@ -18,6 +18,14 @@ static const float BURT_SHADING_MODEL_CLEAR_COAT = 2.0f;
 static const float BURT_SHADING_MODEL_SUBSURFACE = 3.0f;
 static const float BURT_SHADING_MODEL_MAX_ENCODED = 3.0f;
 
+static const float BURT_SUBSURFACE_POWER_MIN = 0.5f;
+static const float BURT_SUBSURFACE_POWER_MAX = 8.0f;
+static const float BURT_SUBSURFACE_DEFAULT_THICKNESS = 0.5f;
+static const float BURT_SUBSURFACE_DEFAULT_POWER = 3.0f;
+static const float BURT_SUBSURFACE_DEFAULT_DISTORTION = 0.35f;
+static const float BURT_SUBSURFACE_DEFAULT_AMBIENT = 0.35f;
+static const float3 BURT_SUBSURFACE_DEFAULT_TINT = float3(1.0f, 0.45f, 0.32f);
+
 float BurtResolveSurfaceShadingModel(float shadingModelID)
 {
     // Keep the value integral before GBuffer packing so material sliders cannot land between lighting branches.
@@ -57,6 +65,8 @@ struct BurtSurfaceData
     // 保存材质金属度，0 表示非金属，1 表示金属。
     float metallic;
 
+    float anisotropy;
+
     // 保存材质环境遮蔽，1 表示不遮蔽环境光，0 表示完全遮蔽环境光。
     float occlusion;
 
@@ -71,7 +81,32 @@ struct BurtSurfaceData
     float clearCoatRoughness;
 
     float subsurfaceStrength;
+
+    float subsurfaceThickness;
+
+    float subsurfacePower;
+
+    float subsurfaceDistortion;
+
+    float subsurfaceAmbient;
+
+    float3 subsurfaceTint;
 };
+
+float BurtClampSubsurfacePower(float power)
+{
+    return clamp(power, BURT_SUBSURFACE_POWER_MIN, BURT_SUBSURFACE_POWER_MAX);
+}
+
+void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
+{
+    surfaceData.subsurfaceStrength = 0.0f;
+    surfaceData.subsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
+    surfaceData.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
+    surfaceData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
+    surfaceData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
+    surfaceData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
+}
 
 // 保存片元级几何输入，后续高光、雾效、附加光等功能会继续扩展这个结构。
 struct BurtInputData
@@ -138,14 +173,9 @@ float BurtResolveOcclusion(float4 maskMap, float occlusionStrength)
 // 应用 BurtRP 统一的 alpha clip 规则，让 Forward、DepthOnly、ShadowCaster 使用同一套镂空判定。
 void BurtApplyAlphaClip(float alpha, float alphaClip, float cutoff)
 {
-    // 当 _AlphaClip 大于等于 0.5 时认为开启裁剪，这和 Unity Toggle 类型 float 的常见用法一致。
-    float clipEnabled = step(0.5f, alphaClip);
-
-    // 未开启裁剪时使用 -1 作为阈值，让 0 到 1 范围内的 alpha 永远通过测试。
-    float activeCutoff = lerp(-1.0f, cutoff, clipEnabled);
-
-    // 当 alpha 小于有效阈值时丢弃当前片元，从而阻止颜色、深度或阴影写入。
-    clip(alpha - activeCutoff);
+#if defined(BURT_ALPHA_CLIP)
+    clip(alpha - cutoff);
+#endif
 }
 
 // 根据已经合并好的基础颜色创建 BurtSurfaceData。
@@ -168,6 +198,7 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor)
 
     // 默认金属度设为 0，保持旧材质按非金属介质处理。
     surfaceData.metallic = 0.0f;
+    surfaceData.anisotropy = 0.0f;
 
     // 默认环境遮蔽设为 1，表示不压暗环境光，保持旧材质亮度不变。
     surfaceData.occlusion = 1.0f;
@@ -177,7 +208,7 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor)
     surfaceData.height = 0.5f;
     surfaceData.clearCoatMask = 0.0f;
     surfaceData.clearCoatRoughness = 0.2f;
-    surfaceData.subsurfaceStrength = 0.0f;
+    BurtInitializeSubsurfaceSurfaceData(surfaceData);
 
     // 返回填充完成的表面数据。
     return surfaceData;
@@ -203,6 +234,7 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
 
     // 这个重载不传 metallic，所以默认按非金属处理。
     surfaceData.metallic = 0.0f;
+    surfaceData.anisotropy = 0.0f;
 
     // 这个重载不传 occlusion，所以默认不遮蔽环境光。
     surfaceData.occlusion = 1.0f;
@@ -212,7 +244,7 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
     surfaceData.height = 0.5f;
     surfaceData.clearCoatMask = 0.0f;
     surfaceData.clearCoatRoughness = 0.2f;
-    surfaceData.subsurfaceStrength = 0.0f;
+    BurtInitializeSubsurfaceSurfaceData(surfaceData);
 
     // 返回填充完成的表面数据。
     return surfaceData;
@@ -238,6 +270,7 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
 
     // 把金属度限制到 0 到 1，保证非金属到金属的插值范围稳定。
     surfaceData.metallic = saturate(metallic);
+    surfaceData.anisotropy = 0.0f;
 
     // 没有显式传入 Mask Map 时默认不遮蔽环境光，保持旧 PBR 路径亮度不变。
     surfaceData.occlusion = 1.0f;
@@ -247,7 +280,7 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
     surfaceData.height = 0.5f;
     surfaceData.clearCoatMask = 0.0f;
     surfaceData.clearCoatRoughness = 0.2f;
-    surfaceData.subsurfaceStrength = 0.0f;
+    BurtInitializeSubsurfaceSurfaceData(surfaceData);
 
     // 返回填充完成的表面数据。
     return surfaceData;
@@ -258,7 +291,7 @@ BurtSurfaceData BurtApplyClearCoatSurfaceSemantics(BurtSurfaceData surfaceData, 
 {
     surfaceData.clearCoatMask = saturate(clearCoatMask);
     surfaceData.clearCoatRoughness = saturate(clearCoatRoughness);
-    surfaceData.shadingModelID = surfaceData.clearCoatMask > 0.0001f ? BURT_SHADING_MODEL_CLEAR_COAT : BURT_SHADING_MODEL_DEFAULT_LIT;
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_CLEAR_COAT;
     return surfaceData;
 }
 
@@ -267,10 +300,40 @@ BurtSurfaceData BurtApplyClearCoatSurfaceSemantics(BurtSurfaceData surfaceData, 
     return BurtApplyClearCoatSurfaceSemantics(surfaceData, clearCoatMask, 0.2f);
 }
 
-BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(BurtSurfaceData surfaceData, float subsurfaceStrength)
+BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
+    BurtSurfaceData surfaceData,
+    float subsurfaceStrength,
+    float subsurfaceThickness,
+    float subsurfacePower,
+    float subsurfaceDistortion,
+    float subsurfaceAmbient,
+    float3 subsurfaceTint)
 {
     surfaceData.subsurfaceStrength = saturate(subsurfaceStrength);
-    surfaceData.shadingModelID = surfaceData.subsurfaceStrength > 0.0001f ? BURT_SHADING_MODEL_SUBSURFACE : BURT_SHADING_MODEL_DEFAULT_LIT;
+    surfaceData.subsurfaceThickness = saturate(subsurfaceThickness);
+    surfaceData.subsurfacePower = BurtClampSubsurfacePower(subsurfacePower);
+    surfaceData.subsurfaceDistortion = saturate(subsurfaceDistortion);
+    surfaceData.subsurfaceAmbient = saturate(subsurfaceAmbient);
+    surfaceData.subsurfaceTint = max(subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_SUBSURFACE;
+    return surfaceData;
+}
+
+BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(BurtSurfaceData surfaceData, float subsurfaceStrength)
+{
+    return BurtApplySubsurfaceSurfaceSemantics(
+        surfaceData,
+        subsurfaceStrength,
+        BURT_SUBSURFACE_DEFAULT_THICKNESS,
+        BURT_SUBSURFACE_DEFAULT_POWER,
+        BURT_SUBSURFACE_DEFAULT_DISTORTION,
+        BURT_SUBSURFACE_DEFAULT_AMBIENT,
+        BURT_SUBSURFACE_DEFAULT_TINT);
+}
+
+BurtSurfaceData BurtApplyAnisotropySurfaceSemantics(BurtSurfaceData surfaceData, float anisotropy)
+{
+    surfaceData.anisotropy = clamp(anisotropy, -1.0f, 1.0f);
     return surfaceData;
 }
 
@@ -293,6 +356,7 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
 
     // 标量 Metallic 与 Mask Map R 通道相乘，得到最终金属度。
     surfaceData.metallic = BurtResolveMetallic(metallic, maskMap);
+    surfaceData.anisotropy = 0.0f;
 
     // Mask Map G 通道经过强度混合后得到最终环境遮蔽，只用于环境光。
     surfaceData.occlusion = BurtResolveOcclusion(maskMap, occlusionStrength);
@@ -302,7 +366,7 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
     surfaceData.height = saturate(maskMap.b);
     surfaceData.clearCoatMask = 0.0f;
     surfaceData.clearCoatRoughness = 0.2f;
-    surfaceData.subsurfaceStrength = 0.0f;
+    BurtInitializeSubsurfaceSurfaceData(surfaceData);
 
     // 返回填充完成的表面数据。
     return surfaceData;

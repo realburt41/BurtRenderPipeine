@@ -12,6 +12,13 @@ namespace Burt.RenderPipeline
         High = 3
     }
 
+    public enum BurtScreenSpaceAmbientOcclusionAlgorithm
+    {
+        SSAO = 0,
+        GTAO = 1,
+        HBAO = 2
+    }
+
     [Serializable]
     public sealed class BurtScreenSpaceAmbientOcclusionQualityParameter : VolumeParameter<BurtScreenSpaceAmbientOcclusionQuality>, IEquatable<BurtScreenSpaceAmbientOcclusionQualityParameter>
     {
@@ -47,6 +54,40 @@ namespace Burt.RenderPipeline
     }
 
     [Serializable]
+    public sealed class BurtScreenSpaceAmbientOcclusionAlgorithmParameter : VolumeParameter<BurtScreenSpaceAmbientOcclusionAlgorithm>, IEquatable<BurtScreenSpaceAmbientOcclusionAlgorithmParameter>
+    {
+        public BurtScreenSpaceAmbientOcclusionAlgorithmParameter(BurtScreenSpaceAmbientOcclusionAlgorithm value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+
+        public static bool operator ==(BurtScreenSpaceAmbientOcclusionAlgorithmParameter lhs, BurtScreenSpaceAmbientOcclusionAlgorithm rhs)
+        {
+            return lhs != null && lhs.value == rhs;
+        }
+
+        public static bool operator !=(BurtScreenSpaceAmbientOcclusionAlgorithmParameter lhs, BurtScreenSpaceAmbientOcclusionAlgorithm rhs)
+        {
+            return !(lhs == rhs);
+        }
+
+        public override int GetHashCode()
+        {
+            return ((int)value * 31) + (overrideState ? 1 : 0);
+        }
+
+        public bool Equals(BurtScreenSpaceAmbientOcclusionAlgorithmParameter other)
+        {
+            return other != null && value == other.value && overrideState == other.overrideState;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return Equals(obj as BurtScreenSpaceAmbientOcclusionAlgorithmParameter);
+        }
+    }
+
+    [Serializable]
     [VolumeComponentMenu("BurtRP/Rendering/Screen Space Ambient Occlusion")]
     public sealed class BurtScreenSpaceAmbientOcclusionVolumeComponent : VolumeComponent
     {
@@ -55,8 +96,12 @@ namespace Burt.RenderPipeline
         [Title("BurtRP Screen Space Ambient Occlusion")]
         [InfoBox("Deferred SSAO reads CameraDepth + GBuffer normal and outputs a screen-space AO texture. Default is off.")]
         public BoolParameter enabled = new BoolParameter(false);
-        [InfoBox("Custom keeps the manual values below. Low/Medium/High apply conservative trace, denoise and temporal presets.")]
+        [InfoBox("Custom keeps the manual values below. Low/Medium/High apply conservative algorithm-aware trace, denoise and temporal presets.")]
         public BurtScreenSpaceAmbientOcclusionQualityParameter quality = new BurtScreenSpaceAmbientOcclusionQualityParameter(BurtScreenSpaceAmbientOcclusionQuality.Medium);
+        [InfoBox("SSAO preserves the existing trace path. GTAO and HBAO are optional experimental trace variants that reuse the same denoise and temporal resolve.")]
+        public BurtScreenSpaceAmbientOcclusionAlgorithmParameter algorithm = new BurtScreenSpaceAmbientOcclusionAlgorithmParameter(BurtScreenSpaceAmbientOcclusionAlgorithm.SSAO);
+        public ClampedFloatParameter gtaoStrength = new ClampedFloatParameter(1f, 0f, 2f);
+        public ClampedFloatParameter hbaoStrength = new ClampedFloatParameter(1f, 0f, 2f);
         public ClampedFloatParameter intensity = new ClampedFloatParameter(0.5f, 0f, 4f);
         public ClampedFloatParameter radius = new ClampedFloatParameter(2f, 0.01f, 8f);
         public ClampedIntParameter sampleCount = new ClampedIntParameter(16, 1, 32);

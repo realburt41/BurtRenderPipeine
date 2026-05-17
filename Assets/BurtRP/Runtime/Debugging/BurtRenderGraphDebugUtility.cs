@@ -273,6 +273,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.AppendLine();
             builder.Append("  AtmosphereAerialPass=").Append(BurtAtmosphereUtility.FormatAerialPassState(request));
             builder.AppendLine();
+            builder.Append("  Fog=").Append(BurtFogUtility.FormatDebugState(request));
+            builder.AppendLine();
+            builder.Append("  VolumetricFog=").Append(BurtVolumetricFogUtility.FormatDebugState(request));
+            builder.AppendLine();
             AppendTileLightDebugPipelineState(builder, request, asset, renderOptions);
 
             builder.Append("  DepthDebugView=").Append(asset.EnableDepthDebugView); // 写入 CameraDepth 全屏调试开关。
@@ -484,25 +488,45 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var countRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
             var listRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightListBufferName);
             var offsetRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+            var clusterCountRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName);
+            var clusterListRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName);
+            var clusterOffsetRegistered = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName);
             var countAllocated = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
             var listAllocated = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.TileLightListBufferName);
             var offsetAllocated = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+            var clusterCountAllocated = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName);
+            var clusterListAllocated = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.ClusterLightListBufferName);
+            var clusterOffsetAllocated = resourceRegistry != null && resourceRegistry.IsBufferAllocated(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName);
             var countDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
             var listDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightListBufferName);
             var offsetDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+            var clusterCountDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName);
+            var clusterListDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.ClusterLightListBufferName);
+            var clusterOffsetDescriptorValid = resourceRegistry != null && resourceRegistry.HasValidBufferDescriptor(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName);
             BurtRenderBufferDescriptor countDescriptor = default;
             BurtRenderBufferDescriptor listDescriptor = default;
             BurtRenderBufferDescriptor offsetDescriptor = default;
+            BurtRenderBufferDescriptor clusterCountDescriptor = default;
+            BurtRenderBufferDescriptor clusterListDescriptor = default;
+            BurtRenderBufferDescriptor clusterOffsetDescriptor = default;
             var hasCountDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightCountBufferName, out countDescriptor);
             var hasListDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightListBufferName, out listDescriptor);
             var hasOffsetDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName, out offsetDescriptor);
+            var hasClusterCountDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName, out clusterCountDescriptor);
+            var hasClusterListDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.ClusterLightListBufferName, out clusterListDescriptor);
+            var hasClusterOffsetDescriptor = resourceRegistry != null && resourceRegistry.TryGetBufferDescriptor(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName, out clusterOffsetDescriptor);
             var uploaded = lightingData != null && lightingData.TileLightDebugUploaded;
+            var clusterUploaded = lightingData != null && lightingData.ClusterLightUploaded;
             var requested = IsTileLightDebugRequested();
             var requiresListBuffers = requested && BurtShadingDebugSettings.Mode == BurtShadingDebugMode.TileLightOccupancy;
             var requiredBuffersRegistered = countRegistered && (!requiresListBuffers || (listRegistered && offsetRegistered));
             var requiredDescriptorsValid = countDescriptorValid && (!requiresListBuffers || (listDescriptorValid && offsetDescriptorValid));
             var requiredBuffersReleased = !countAllocated && (!requiresListBuffers || (!listAllocated && !offsetAllocated));
             var releasedBeforeDump = uploaded && requiredBuffersRegistered && requiredBuffersReleased;
+            var clusterBuffersRegistered = clusterCountRegistered && clusterListRegistered && clusterOffsetRegistered;
+            var clusterDescriptorsValid = clusterCountDescriptorValid && clusterListDescriptorValid && clusterOffsetDescriptorValid;
+            var clusterBuffersReleased = !clusterCountAllocated && !clusterListAllocated && !clusterOffsetAllocated;
+            var clusterReleasedBeforeDump = clusterUploaded && clusterBuffersRegistered && clusterBuffersReleased;
             var effectiveDeferred = IsDeferredRequest(request, asset);
             var hasLocalDeferredTargets = HasLocalDeferredTargets(renderOptions);
             var active = requested && effectiveDeferred && hasLocalDeferredTargets && requiredBuffersRegistered && requiredDescriptorsValid && uploaded;
@@ -552,6 +576,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TileMaxOverflowExtraCount=").Append(lightingData != null ? lightingData.TileLightMaxOverflowExtraCount : 0);
             builder.AppendLine();
 
+            builder.Append("  ClusterLightUploadedThisFrame=").Append(clusterUploaded);
+            builder.Append(" ClusterLightReleasedBeforeDump=").Append(clusterReleasedBeforeDump);
+            builder.Append(" ClusterDepthSlices=").Append(lightingData != null ? lightingData.ClusterLightDepthSliceCount : 0);
+            builder.Append(" ClusterCount=").Append(lightingData != null ? lightingData.ClusterLightClusterCount : 0);
+            builder.Append(" MaxLightsPerCluster=").Append(lightingData != null ? lightingData.ClusterLightMaxLightsPerCluster : BurtTiledLightData.MaxLightsPerCluster);
+            builder.Append(" ClusterListCapacity=").Append(lightingData != null ? lightingData.ClusterLightListCapacity : 0);
+            builder.Append(" ClusterMinLightCount=").Append(lightingData != null ? lightingData.ClusterLightMinCount : 0);
+            builder.Append(" ClusterMaxLightCount=").Append(lightingData != null ? lightingData.ClusterLightMaxCount : 0);
+            builder.Append(" ClusterAverageLightCount=").Append(lightingData != null ? FormatFloat(lightingData.ClusterLightAverageCount) : "0");
+            builder.Append(" ClusterOverflowClusters=").Append(lightingData != null ? lightingData.ClusterLightOverflowClusterCount : 0);
+            builder.Append(" ClusterMaxOverflowExtraCount=").Append(lightingData != null ? lightingData.ClusterLightMaxOverflowExtraCount : 0);
+            builder.Append(" ClusterNearFar=").Append(lightingData != null ? FormatFloat(lightingData.ClusterLightNearPlane) : "0");
+            builder.Append("/").Append(lightingData != null ? FormatFloat(lightingData.ClusterLightFarPlane) : "0");
+            builder.Append(" ClusterInvDepthRange=").Append(lightingData != null ? FormatFloat(lightingData.ClusterLightInvDepthRange) : "0");
+            builder.Append(" ClusterWorldToViewZ=").Append(lightingData != null ? FormatVector4(lightingData.ClusterLightWorldToViewZ) : "(0,0,0,0)");
+            builder.AppendLine();
+
             builder.Append("  TileLightCountBufferRegistered=").Append(countRegistered);
             builder.Append(" TileLightCountBufferAllocatedAtDumpTime=").Append(countAllocated);
             builder.Append(" TileLightCountBufferDescriptorValid=").Append(countDescriptorValid);
@@ -566,6 +607,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append("  TileLightBufferDescriptors: Count=(").Append(FormatBufferDescriptor(hasCountDescriptor, countDescriptor));
             builder.Append(") List=(").Append(FormatBufferDescriptor(hasListDescriptor, listDescriptor));
             builder.Append(") Offset=(").Append(FormatBufferDescriptor(hasOffsetDescriptor, offsetDescriptor));
+            builder.AppendLine(")");
+
+            builder.Append("  ClusterLightCountBufferRegistered=").Append(clusterCountRegistered);
+            builder.Append(" ClusterLightCountBufferAllocatedAtDumpTime=").Append(clusterCountAllocated);
+            builder.Append(" ClusterLightCountBufferDescriptorValid=").Append(clusterCountDescriptorValid);
+            builder.Append(" ClusterLightListBufferRegistered=").Append(clusterListRegistered);
+            builder.Append(" ClusterLightListBufferAllocatedAtDumpTime=").Append(clusterListAllocated);
+            builder.Append(" ClusterLightListBufferDescriptorValid=").Append(clusterListDescriptorValid);
+            builder.Append(" ClusterLightOffsetBufferRegistered=").Append(clusterOffsetRegistered);
+            builder.Append(" ClusterLightOffsetBufferAllocatedAtDumpTime=").Append(clusterOffsetAllocated);
+            builder.Append(" ClusterLightOffsetBufferDescriptorValid=").Append(clusterOffsetDescriptorValid);
+            builder.Append(" ClusterLightBuffersReady=").Append(clusterBuffersRegistered && clusterDescriptorsValid);
+            builder.AppendLine();
+
+            builder.Append("  ClusterLightBufferDescriptors: Count=(").Append(FormatBufferDescriptor(hasClusterCountDescriptor, clusterCountDescriptor));
+            builder.Append(") List=(").Append(FormatBufferDescriptor(hasClusterListDescriptor, clusterListDescriptor));
+            builder.Append(") Offset=(").Append(FormatBufferDescriptor(hasClusterOffsetDescriptor, clusterOffsetDescriptor));
             builder.AppendLine(")");
 
             if (requested || (lightingData != null && lightingData.TileLightDebugBuildAttempted))
@@ -721,6 +779,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" Position=").Append(FormatVector3(positionAndRange.x, positionAndRange.y, positionAndRange.z));
                 builder.Append(" Range=").Append(FormatFloat(positionAndRange.w));
                 builder.Append(" Direction=").Append(FormatVector3(directionAndSpot.x, directionAndSpot.y, directionAndSpot.z));
+                builder.Append(" VolumetricScale=").Append(FormatFloat(directionAndSpot.w));
+                builder.Append(" VolumetricNearCutoff=").Append(FormatFloat(spotParams.w));
                 builder.Append(" SpotParams=").Append(FormatSpotParams(spotParams));
                 builder.Append(" Shadow=").Append(FormatAdditionalLightShadowState(lightingData, lightIndex));
                 builder.AppendLine();
@@ -1480,6 +1540,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" GBuffer2Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name)); // 写入 GBuffer2 是否已注册。
 
+            builder.Append(" ClusterLightCountRegistered=").Append(resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName));
+            builder.Append(" ClusterLightListRegistered=").Append(resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName));
+            builder.Append(" ClusterLightOffsetRegistered=").Append(resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName));
+
             builder.Append(" SSAORawRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName));
 
             builder.Append(" SSAOFinalRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName));
@@ -1494,12 +1558,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" SSRTemporalColorRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName));
 
+            builder.Append(" SSSSourceRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName));
+            builder.Append(" SSSTempRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName));
+            builder.Append(" SSSBlurRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName));
+
             if (isDeferred)
             {
                 var ssrSettings = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionSettings(request, asset);
                 var ssrSuppressedByShadingDebug = BurtScreenSpaceReflectionPassUtility.IsScreenSpaceReflectionSuppressedByShadingDebug();
                 var ssrHistory = BurtScreenSpaceReflectionHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
                 var shouldUseHiZDepth = BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
+                var screenSpaceSubsurfaceEnabled = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset);
                 builder.Append(" HiZNeeded=").Append(shouldUseHiZDepth);
 
                 if (shouldUseHiZDepth)
@@ -1511,6 +1580,44 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
                 builder.Append(" HiZDebugView=").Append(asset != null && asset.EnableHiZDebugView);
                 builder.Append(" HiZDebugMip=").Append(asset != null ? asset.HiZDebugMip.ToString() : "<none>");
+                builder.Append(" SSSEnabled=").Append(screenSpaceSubsurfaceEnabled);
+                builder.Append(" SSSPassExpected=").Append(screenSpaceSubsurfaceEnabled);
+                builder.Append(" SSSKernel=ScreenSpaceSeparable25TapBurleyApprox");
+                if (asset != null)
+                {
+                    var sssProfile = asset.ScreenSpaceSubsurfaceProfileSettings;
+                    builder.Append(" SSSProfile=").Append(sssProfile.ProfileName);
+                    builder.Append(" SSSUsesProfile=").Append(sssProfile.UsesProfile);
+                    builder.Append(" SSSSurfaceAlbedo=").Append(FormatVector4(sssProfile.SurfaceAlbedoVector));
+                    builder.Append(" SSSMeanFreePath=").Append(FormatVector4(sssProfile.MeanFreePathVector));
+                    builder.Append(" SSSTint=").Append(FormatVector4(sssProfile.TintVector));
+                    builder.Append(" SSSBoundaryColorBleed=").Append(FormatVector4(sssProfile.BoundaryColorBleedVector));
+                    builder.Append(" SSSRadiusPixels=").Append(FormatFloat(sssProfile.RadiusPixels));
+                    builder.Append(" SSSDepthSigma=").Append(FormatFloat(sssProfile.DepthSigma));
+                    builder.Append(" SSSNormalSigma=").Append(FormatFloat(sssProfile.NormalSigma));
+                    builder.Append(" SSSBlend=").Append(FormatFloat(sssProfile.Blend));
+                    builder.Append(" SSSDistanceScale=").Append(FormatFloat(sssProfile.DistanceScale));
+                    builder.Append(" SSSBoundaryBleed=").Append(FormatFloat(sssProfile.BoundaryBleed));
+                    builder.Append(" SSSTintStrength=").Append(FormatFloat(sssProfile.TintStrength));
+                    builder.Append(" SSSMinStrength=").Append(FormatFloat(sssProfile.MinStrength));
+                }
+                else
+                {
+                    builder.Append(" SSSProfile=<none>");
+                    builder.Append(" SSSUsesProfile=False");
+                    builder.Append(" SSSSurfaceAlbedo=<none>");
+                    builder.Append(" SSSMeanFreePath=<none>");
+                    builder.Append(" SSSTint=<none>");
+                    builder.Append(" SSSBoundaryColorBleed=<none>");
+                    builder.Append(" SSSRadiusPixels=<none>");
+                    builder.Append(" SSSDepthSigma=<none>");
+                    builder.Append(" SSSNormalSigma=<none>");
+                    builder.Append(" SSSBlend=<none>");
+                    builder.Append(" SSSDistanceScale=<none>");
+                    builder.Append(" SSSBoundaryBleed=<none>");
+                    builder.Append(" SSSTintStrength=<none>");
+                    builder.Append(" SSSMinStrength=<none>");
+                }
                 builder.Append(" SSAOEnabled=").Append(ssaoSettings.Enabled);
                 builder.Append(" SSAODebugRequested=").Append(ssaoDebugRequested);
                 builder.Append(" SSAOTracePassExpected=").Append(ssaoEnabled);
@@ -1521,6 +1628,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSAORawTarget=ScreenSpaceAmbientOcclusionRaw");
                 builder.Append(" SSAORawSemantic=PreCurveVisibility");
                 builder.Append(" SSAOQuality=").Append(ssaoSettings.Quality);
+                builder.Append(" SSAOAlgorithm=").Append(ssaoSettings.Algorithm);
+                builder.Append(" SSAOPresetProfile=").Append(ssaoSettings.Algorithm).Append(".").Append(ssaoSettings.Quality);
+                builder.Append(" SSAOGTAOStrength=").Append(FormatFloat(ssaoSettings.GTAOStrength));
+                builder.Append(" SSAOHBAOStrength=").Append(FormatFloat(ssaoSettings.HBAOStrength));
                 builder.Append(" SSAORadius=").Append(FormatFloat(ssaoSettings.Radius));
                 builder.Append(" SSAOIntensity=").Append(FormatFloat(ssaoSettings.Intensity));
                 builder.Append(" SSAOSamples=").Append(ssaoSettings.SampleCount);

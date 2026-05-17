@@ -2,10 +2,43 @@
 #ifndef BURT_LIGHTING_INCLUDED // 开始 include guard，防止同一个 shader 编译单元里重复定义光照函数。
 #define BURT_LIGHTING_INCLUDED // 标记 BurtLighting.hlsl 已经被包含过，后续重复 include 会被跳过。
 
+#include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl" // 引入安全数学函数，例如 BurtSafeNormalize。
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl" // 引入 BurtSurfaceData，用来读取材质基础色、金属度、光滑度和环境遮蔽。
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtBRDF.hlsl" // 引入 PBR BRDF 函数，当前单主光和临时间接高光都会复用这里的 Fresnel/粗糙度工具。
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl" // 引入 shader-only GBuffer 编解码和 PBRData 桥接函数；这里不采样真实 RT，也不触碰 RenderTarget 生命周期。
+
+#if !defined(BURT_ENABLE_DEFAULT_LIT_SHADING)
+#if defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL) || defined(BURT_FORWARD_SINGLE_SHADING_MODEL)
+#define BURT_ENABLE_DEFAULT_LIT_SHADING 0
+#else
+#define BURT_ENABLE_DEFAULT_LIT_SHADING 1
+#endif
+#endif
+
+#if !defined(BURT_ENABLE_HAIR_SHADING)
+#if defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL) || defined(BURT_FORWARD_SINGLE_SHADING_MODEL)
+#define BURT_ENABLE_HAIR_SHADING 0
+#else
+#define BURT_ENABLE_HAIR_SHADING 1
+#endif
+#endif
+
+#if !defined(BURT_ENABLE_CLEAR_COAT_SHADING)
+#if defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL) || defined(BURT_FORWARD_SINGLE_SHADING_MODEL)
+#define BURT_ENABLE_CLEAR_COAT_SHADING 0
+#else
+#define BURT_ENABLE_CLEAR_COAT_SHADING 1
+#endif
+#endif
+
+#if !defined(BURT_ENABLE_SUBSURFACE_SHADING)
+#if defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL) || defined(BURT_FORWARD_SINGLE_SHADING_MODEL)
+#define BURT_ENABLE_SUBSURFACE_SHADING 0
+#else
+#define BURT_ENABLE_SUBSURFACE_SHADING 1
+#endif
+#endif
 
 // 保存从当前着色点指向主方向光的世界空间方向，由 Burt Setup Lighting Pass 上传。
 float4 _BurtMainLightDirection;
@@ -35,6 +68,13 @@ StructuredBuffer<uint> _BurtTileLightListBuffer;
 StructuredBuffer<uint2> _BurtTileLightOffsetBuffer;
 float4 _BurtTileLightGridParams;
 float _BurtTileLightCountBufferEnabled;
+StructuredBuffer<uint> _BurtClusterLightCountBuffer;
+StructuredBuffer<uint> _BurtClusterLightListBuffer;
+StructuredBuffer<uint2> _BurtClusterLightOffsetBuffer;
+float4 _BurtClusterLightGridParams;
+float4 _BurtClusterLightDepthParams;
+float4 _BurtClusterLightWorldToViewZ;
+float _BurtClusterLightBufferEnabled;
 #endif
 
 static const float BURT_LIGHT_TYPE_DIRECTIONAL = 0.0f;
@@ -234,6 +274,119 @@ bool BurtTileLightListOverflows(float2 screenUV)
 #endif
 }
 
+bool BurtUseClusterLightList()
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    int additionalLightCount = BurtGetAdditionalLightCount();
+    return _BurtClusterLightBufferEnabled > 0.5f &&
+        additionalLightCount > 0 &&
+        _BurtClusterLightGridParams.x > 0.5f &&
+        _BurtClusterLightGridParams.y > 0.5f &&
+        _BurtClusterLightGridParams.z > 0.5f &&
+        _BurtClusterLightGridParams.w > 0.5f &&
+        _BurtClusterLightDepthParams.z > 0.0f;
+#else
+    return false;
+#endif
+}
+
+uint BurtGetClusterLightIndex(float2 screenUV, float3 positionWS)
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    float2 tileUV = BurtGetTileLightLookupUV(screenUV);
+    uint tileCountX = (uint)max((int)round(_BurtClusterLightGridParams.x), 1);
+    uint tileCountY = (uint)max((int)round(_BurtClusterLightGridParams.y), 1);
+    uint depthSliceCount = (uint)max((int)round(_BurtClusterLightGridParams.z), 1);
+    uint tileX = (uint)floor(tileUV.x * (float)tileCountX);
+    uint tileY = (uint)floor(tileUV.y * (float)tileCountY);
+    tileX = min(tileX, tileCountX - 1u);
+    tileY = min(tileY, tileCountY - 1u);
+
+    float viewDepth = max(dot(float4(positionWS, 1.0f), _BurtClusterLightWorldToViewZ), _BurtClusterLightDepthParams.x);
+    float depth01 = saturate(log(viewDepth / max(_BurtClusterLightDepthParams.x, 0.0001f)) * _BurtClusterLightDepthParams.z);
+    uint depthSlice = (uint)floor(depth01 * (float)depthSliceCount);
+    depthSlice = min(depthSlice, depthSliceCount - 1u);
+    return depthSlice * tileCountX * tileCountY + tileY * tileCountX + tileX;
+#else
+    return 0u;
+#endif
+}
+
+uint2 BurtGetClusterLightRange(float2 screenUV, float3 positionWS)
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    if (!BurtUseClusterLightList())
+    {
+        return uint2(0u, 0u);
+    }
+
+    uint clusterIndex = BurtGetClusterLightIndex(screenUV, positionWS);
+    uint2 range = _BurtClusterLightOffsetBuffer[clusterIndex];
+    uint tileCountX = (uint)max((int)round(_BurtClusterLightGridParams.x), 1);
+    uint tileCountY = (uint)max((int)round(_BurtClusterLightGridParams.y), 1);
+    uint depthSliceCount = (uint)max((int)round(_BurtClusterLightGridParams.z), 1);
+    uint maxLightsPerCluster = (uint)max((int)round(_BurtClusterLightGridParams.w), 1);
+    uint listCapacity = max(tileCountX * tileCountY * depthSliceCount * maxLightsPerCluster, 1u);
+    uint additionalLightCount = (uint)BurtGetAdditionalLightCount();
+    uint countBufferCount = min(_BurtClusterLightCountBuffer[clusterIndex], maxLightsPerCluster);
+    range.x = min(range.x, listCapacity - 1u);
+    range.y = min(range.y, min(countBufferCount, min(maxLightsPerCluster, additionalLightCount)));
+    range.y = min(range.y, listCapacity - range.x);
+    return range;
+#else
+    return uint2(0u, 0u);
+#endif
+}
+
+bool BurtClusterLightListOverflows(float2 screenUV, float3 positionWS)
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    if (!BurtUseClusterLightList())
+    {
+        return false;
+    }
+
+    uint clusterIndex = BurtGetClusterLightIndex(screenUV, positionWS);
+    uint maxLightsPerCluster = (uint)max((int)round(_BurtClusterLightGridParams.w), 1);
+    uint additionalLightCount = (uint)BurtGetAdditionalLightCount();
+    uint storedCapacity = min(maxLightsPerCluster, additionalLightCount);
+    return _BurtClusterLightCountBuffer[clusterIndex] > storedCapacity;
+#else
+    return false;
+#endif
+}
+
+bool BurtTryGetAdditionalLightListRange(float2 screenUV, float3 positionWS, out uint2 range, out uint useClusterLightList)
+{
+    range = uint2(0u, 0u);
+    useClusterLightList = 0u;
+#if defined(BURT_USE_TILED_LIGHTING)
+    if (BurtUseClusterLightList() && !BurtClusterLightListOverflows(screenUV, positionWS))
+    {
+        range = BurtGetClusterLightRange(screenUV, positionWS);
+        useClusterLightList = 1u;
+        return true;
+    }
+
+    if (BurtUseTileLightList() && !BurtTileLightListOverflows(screenUV))
+    {
+        range = BurtGetTileLightRange(screenUV);
+        return true;
+    }
+#endif
+
+    return false;
+}
+
+uint BurtReadAdditionalLightListIndex(uint listIndex, uint useClusterLightList)
+{
+#if defined(BURT_USE_TILED_LIGHTING)
+    return useClusterLightList > 0u ? _BurtClusterLightListBuffer[listIndex] : _BurtTileLightListBuffer[listIndex];
+#else
+    return 0u;
+#endif
+}
+
 float4 BurtReadAdditionalLightPositionAndRange(int lightIndex)
 {
 #if defined(BURT_USE_ADDITIONAL_LIGHT_BUFFER)
@@ -390,18 +543,14 @@ float BurtEvaluateAdditionalShadowAttenuationDebug(float3 positionWS)
 float BurtEvaluateAdditionalShadowAttenuationDebug(float3 positionWS, float3 normalWS, float2 screenUV)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
-    if (!BurtUseTileLightList())
-    {
-        return BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, normalWS);
-    }
-
-    if (BurtTileLightListOverflows(screenUV))
+    uint2 range = uint2(0u, 0u);
+    uint useClusterLightList = 0u;
+    if (!BurtTryGetAdditionalLightListRange(screenUV, positionWS, range, useClusterLightList))
     {
         return BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, normalWS);
     }
 
     float attenuation = 1.0f;
-    uint2 range = BurtGetTileLightRange(screenUV);
     int additionalLightCount = BurtGetAdditionalLightCount();
 
     for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
@@ -411,7 +560,7 @@ float BurtEvaluateAdditionalShadowAttenuationDebug(float3 positionWS, float3 nor
             break;
         }
 
-        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        uint storedLightIndex = BurtReadAdditionalLightListIndex(range.x + localLightIndex, useClusterLightList);
         if (storedLightIndex >= (uint)additionalLightCount)
         {
             continue;
@@ -508,7 +657,9 @@ void BurtFillAdditionalLightShadowProjectionDebugData(
     out float3 depthDeltaColor)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
-    if (!BurtUseTileLightList() || BurtTileLightListOverflows(screenUV))
+    uint2 range = uint2(0u, 0u);
+    uint useClusterLightList = 0u;
+    if (!BurtTryGetAdditionalLightListRange(screenUV, positionWS, range, useClusterLightList))
     {
         BurtFillAdditionalLightShadowProjectionDebugData(positionWS, normalWS, faceColor, uvColor, depthColor, depthDeltaColor);
         return;
@@ -519,7 +670,6 @@ void BurtFillAdditionalLightShadowProjectionDebugData(
     depthColor = float3(0.0f, 0.0f, 0.0f);
     depthDeltaColor = float3(0.0f, 0.0f, 0.0f);
 
-    uint2 range = BurtGetTileLightRange(screenUV);
     int additionalLightCount = BurtGetAdditionalLightCount();
 
     for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
@@ -529,7 +679,7 @@ void BurtFillAdditionalLightShadowProjectionDebugData(
             break;
         }
 
-        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        uint storedLightIndex = BurtReadAdditionalLightListIndex(range.x + localLightIndex, useClusterLightList);
         if (storedLightIndex >= (uint)additionalLightCount)
         {
             continue;
@@ -793,11 +943,11 @@ float3 GetIndirectSpecularEnergyCompensation(BurtSurfaceData surfaceData, float3
 // 计算 PBR 间接镜面反射：Reflection Probe radiance 乘以视角 Fresnel 和 XRender EnergyCompensation_GGX。
 float3 BurtEvaluateIndirectSpecularPBR(BurtPBRMaterialData materialData, BurtPBRGeometryData geometryData, float3 indirectSpecularEnergyCompensation)
 {
-    // 从准备好的几何数据读取环境反射方向，Forward 和 Deferred 保持同一 reflect 约定。
-    float3 reflectionDirectionWS = geometryData.reflectionDirectionWS;
-
     // 间接高光使用材质 Base.Roughness，同时也用于选择 reflection probe 的模糊 mip。
     float roughness = materialData.perceptualRoughness;
+
+    // 对齐 XRender/UE 的近似：IBL 用各向异性修改后的法线求反射方向；anisotropy=0 时就是普通 reflect(N)。
+    float3 reflectionDirectionWS = BurtGetIndirectSpecularReflectionDirectionWS(geometryData, materialData.anisotropy, roughness);
 
     // 采样 Unity 当前 reflection probe / sky reflection，得到已经按 roughness 预过滤过的环境高光。
     float3 specularRadiance = SampleIndirectSpecularRadiance(reflectionDirectionWS, roughness);
@@ -853,6 +1003,55 @@ struct BurtIndirectPBRComponents
 
 BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData baseMaterialData);
 
+#if BURT_ENABLE_CLEAR_COAT_SHADING
+float3 BurtEvaluateClearCoatLayerTransmission(
+    BurtPBRMaterialData baseMaterialData,
+    BurtPBRMaterialData clearCoatMaterialData,
+    BurtPBRGeometryData clearCoatGeometryData)
+{
+    float2 clearCoatDFG = GetSpecularDFGTerms(clearCoatMaterialData.perceptualRoughness, clearCoatGeometryData.nDotV);
+    float3 clearCoatEnvFresnel = EvalSpecularDFG(clearCoatMaterialData.f0, clearCoatMaterialData.f90, clearCoatDFG);
+    return BurtClearCoatFresnelTransmission(clearCoatEnvFresnel) * BurtSimpleClearCoatTransmittanceFromView(clearCoatGeometryData.nDotV, baseMaterialData.metallic, baseMaterialData.baseColor);
+}
+
+float3 BurtClearCoatLayerCombine(
+    BurtPBRMaterialData baseMaterialData,
+    BurtPBRGeometryData baseGeometryData,
+    float3 baseIndirectSpecularEnergyCompensation,
+    BurtPBRMaterialData clearCoatMaterialData,
+    BurtPBRGeometryData clearCoatGeometryData,
+    float clearCoatMask)
+{
+    float baseRoughness = baseMaterialData.perceptualRoughness;
+    float3 bottomLayerReflectionDirectionWS = BurtGetIndirectSpecularReflectionDirectionWS(baseGeometryData, baseMaterialData.anisotropy, baseRoughness);
+    float3 bottomLayerRadiance = SampleIndirectSpecularRadiance(bottomLayerReflectionDirectionWS, baseRoughness);
+    float2 bottomLayerDFG = GetSpecularDFGTerms(baseRoughness, baseGeometryData.nDotV);
+    float3 bottomLayerEnvBRDF = baseMaterialData.f0 * bottomLayerDFG.x + bottomLayerDFG.y * saturate(50.0f * baseMaterialData.f0.g) * (1.0f - clearCoatMask);
+    float bottomLayerSpecularOcclusion = GetIndirectSpecularOcclusion(baseGeometryData.nDotV, baseMaterialData.occlusion, baseRoughness);
+    float3 bottomLayerReflections = bottomLayerRadiance * bottomLayerEnvBRDF * baseIndirectSpecularEnergyCompensation * bottomLayerSpecularOcclusion;
+
+    float clearCoatRoughness = clearCoatMaterialData.perceptualRoughness;
+    float3 topLayerReflectionDirectionWS = BurtGetIndirectSpecularReflectionDirectionWS(clearCoatGeometryData, 0.0f, clearCoatRoughness);
+    float3 topLayerReflections = SampleIndirectSpecularRadiance(topLayerReflectionDirectionWS, clearCoatRoughness);
+    float2 clearCoatDFG = GetSpecularDFGTerms(clearCoatRoughness, clearCoatGeometryData.nDotV);
+    float clearCoatF = EvalSpecularDFG(clearCoatMaterialData.f0, clearCoatMaterialData.f90, clearCoatDFG).x;
+    clearCoatF = saturate(clearCoatF * clearCoatMask);
+
+    return bottomLayerReflections * (1.0f - clearCoatF) + topLayerReflections * clearCoatF;
+}
+
+float3 BurtEvaluateClearCoatLayerCombinedSpecular(
+    BurtPBRMaterialData baseMaterialData,
+    BurtPBRGeometryData baseGeometryData,
+    float3 baseIndirectSpecularEnergyCompensation,
+    BurtPBRMaterialData clearCoatMaterialData,
+    BurtPBRGeometryData clearCoatGeometryData,
+    float clearCoatMask)
+{
+    return BurtClearCoatLayerCombine(baseMaterialData, baseGeometryData, baseIndirectSpecularEnergyCompensation, clearCoatMaterialData, clearCoatGeometryData, clearCoatMask);
+}
+#endif
+
 // 计算 PBR 间接光拆分结果，让 Forward 和未来 Deferred 都能拿到一致的间接漫反射与间接高光。
 BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData materialData, BurtPBRGeometryData geometryData, BurtPBRGeometryData clearCoatGeometryData, BurtPBREnergyTerms energyTerms)
 {
@@ -868,16 +1067,17 @@ BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData 
     // 计算来自 Unity Reflection Probe / Sky Reflection 的镜面环境光。
     components.specular = BurtEvaluateIndirectSpecularPBR(materialData, geometryData, components.specularEnergyCompensation);
 
+#if BURT_ENABLE_CLEAR_COAT_SHADING
     float clearCoatMask = saturate(materialData.clearCoatMask);
     if (clearCoatMask > 0.0001f)
     {
         BurtPBRMaterialData clearCoatMaterialData = BurtCreateClearCoatMaterialData(materialData);
-        BurtPBREnergyTerms clearCoatEnergyTerms = BurtPreparePBREnergyTerms(clearCoatMaterialData, clearCoatGeometryData, clearCoatMaterialData.perceptualRoughness);
-        float3 clearCoatSpecular = BurtEvaluateIndirectSpecularPBR(clearCoatMaterialData, clearCoatGeometryData, clearCoatEnergyTerms.indirectSpecularEnergyCompensation);
-        float baseLayerVisibility = 1.0f - clearCoatMask * 0.25f;
-        components.diffuse *= baseLayerVisibility;
-        components.specular = components.specular * baseLayerVisibility + clearCoatSpecular * clearCoatMask;
+        float3 layerTransmission = BurtEvaluateClearCoatLayerTransmission(materialData, clearCoatMaterialData, clearCoatGeometryData);
+
+        components.diffuse = lerp(components.diffuse, components.diffuse * layerTransmission, clearCoatMask);
+        components.specular = BurtEvaluateClearCoatLayerCombinedSpecular(materialData, geometryData, components.specularEnergyCompensation, clearCoatMaterialData, clearCoatGeometryData, clearCoatMask);
     }
+#endif
 
     // 返回拆分后的间接光，Debug View 和 Deferred 光照都可以直接读取。
     return components;
@@ -949,6 +1149,12 @@ struct BurtPBRShadingCoreData
     float3 clearCoatNormalWS;
 
     BurtPBRGeometryData clearCoatGeometryData;
+
+    BurtSpecularAATerms clearCoatSpecularAATerms;
+
+    float clearCoatDirectSpecularPerceptualRoughness;
+
+    float3 clearCoatDirectSpecularEnergyCompensation;
 };
 
 BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData baseMaterialData)
@@ -956,6 +1162,7 @@ BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData baseMate
     BurtPBRMaterialData clearCoatMaterialData = baseMaterialData;
     clearCoatMaterialData.baseColor = float3(1.0f, 1.0f, 1.0f);
     clearCoatMaterialData.metallic = 0.0f;
+    clearCoatMaterialData.anisotropy = 0.0f;
     clearCoatMaterialData.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
     clearCoatMaterialData.diffuseColor = float3(0.0f, 0.0f, 0.0f);
     clearCoatMaterialData.f0 = float3(0.04f, 0.04f, 0.04f);
@@ -965,7 +1172,34 @@ BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData baseMate
     clearCoatMaterialData.a2 = LinearRoughnessToA2(clearCoatMaterialData.linearRoughness);
     clearCoatMaterialData.clearCoatMask = 0.0f;
     clearCoatMaterialData.subsurfaceStrength = 0.0f;
+    clearCoatMaterialData.subsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
+    clearCoatMaterialData.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
+    clearCoatMaterialData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
+    clearCoatMaterialData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
+    clearCoatMaterialData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
     return clearCoatMaterialData;
+}
+
+BurtPBRShadingCoreData BurtApplyClearCoatTopLayerCoreData(BurtPBRShadingCoreData coreData)
+{
+    coreData.clearCoatSpecularAATerms = coreData.specularAATerms;
+    coreData.clearCoatDirectSpecularPerceptualRoughness = coreData.directSpecularPerceptualRoughness;
+    coreData.clearCoatDirectSpecularEnergyCompensation = coreData.energyTerms.directSpecularEnergyCompensation;
+
+#if BURT_ENABLE_CLEAR_COAT_SHADING
+    if (saturate(coreData.materialData.clearCoatMask) <= 0.0001f)
+    {
+        return coreData;
+    }
+
+    BurtPBRMaterialData clearCoatMaterialData = BurtCreateClearCoatMaterialData(coreData.materialData);
+    coreData.clearCoatSpecularAATerms = BurtEvaluateSpecularAATerms(clearCoatMaterialData, coreData.clearCoatGeometryData);
+    coreData.clearCoatDirectSpecularPerceptualRoughness = coreData.clearCoatSpecularAATerms.filteredPerceptualRoughness;
+
+    BurtPBREnergyTerms clearCoatEnergyTerms = BurtPreparePBREnergyTerms(clearCoatMaterialData, coreData.clearCoatGeometryData, coreData.clearCoatDirectSpecularPerceptualRoughness);
+    coreData.clearCoatDirectSpecularEnergyCompensation = clearCoatEnergyTerms.directSpecularEnergyCompensation;
+#endif
+    return coreData;
 }
 
 // Prepare 阶段：集中准备材质、几何、Specular AA 和能量项；后续 Direct / Indirect 都只消费这份 core data。
@@ -990,6 +1224,7 @@ BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtPBRMaterialData materia
     coreData.energyTerms = BurtPreparePBREnergyTerms(materialData, geometryData, coreData.directSpecularPerceptualRoughness);
     coreData.clearCoatNormalWS = geometryData.normalWS;
     coreData.clearCoatGeometryData = geometryData;
+    coreData = BurtApplyClearCoatTopLayerCoreData(coreData);
 
     // 返回完整核心准备数据，Direct / Indirect / Compose 都从这里取依赖。
     return coreData;
@@ -1008,11 +1243,28 @@ BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtSurfaceData surfaceData
     return BurtPreparePBRShadingCoreData(materialData, geometryData);
 }
 
+BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 viewDirectionWS)
+{
+    BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(surfaceData);
+    BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(normalWS, tangentWS, viewDirectionWS);
+    return BurtPreparePBRShadingCoreData(materialData, geometryData);
+}
+
 BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtSurfaceData surfaceData, float3 normalWS, float3 clearCoatNormalWS, float3 viewDirectionWS)
 {
     BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(surfaceData, normalWS, viewDirectionWS);
     coreData.clearCoatNormalWS = BurtSafeNormalize(clearCoatNormalWS);
     coreData.clearCoatGeometryData = BurtPreparePBRGeometryData(coreData.clearCoatNormalWS, viewDirectionWS);
+    coreData = BurtApplyClearCoatTopLayerCoreData(coreData);
+    return coreData;
+}
+
+BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 clearCoatNormalWS, float3 viewDirectionWS)
+{
+    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(surfaceData, normalWS, tangentWS, viewDirectionWS);
+    coreData.clearCoatNormalWS = BurtSafeNormalize(clearCoatNormalWS);
+    coreData.clearCoatGeometryData = BurtPreparePBRGeometryData(coreData.clearCoatNormalWS, tangentWS, viewDirectionWS);
+    coreData = BurtApplyClearCoatTopLayerCoreData(coreData);
     return coreData;
 }
 
@@ -1028,11 +1280,12 @@ BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtGBufferData gbufferData
     // 复用主 Prepare 入口，Deferred 不维护第二套 Specular AA、Energy Terms 或 BRDF 输入。
     BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(materialData, geometryData);
     coreData.clearCoatNormalWS = BurtGetClearCoatNormalWS(gbufferData);
-    coreData.clearCoatGeometryData = BurtPreparePBRGeometryData(coreData.clearCoatNormalWS, viewDirectionWS);
+    coreData.clearCoatGeometryData = BurtPreparePBRGeometryData(coreData.clearCoatNormalWS, gbufferData.tangentWS, viewDirectionWS);
+    coreData = BurtApplyClearCoatTopLayerCoreData(coreData);
     return coreData;
 }
 
-// Prepare 阶段的 EncodedGBuffer 入口：Deferred Pass 从四张 RT 采样得到 float4 后，可先填成 BurtEncodedGBuffer 再调用这里。
+// Prepare 阶段的 EncodedGBuffer 入口：Deferred Pass 从五张 RT 采样得到 float4 后，可先填成 BurtEncodedGBuffer 再调用这里。
 BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtEncodedGBuffer encodedGBuffer, float3 viewDirectionWS)
 {
     // 只做 shader 侧解码，不绑定 _BurtGBuffer0/1/2/3 的采样方式，避免和主 agent 的 Deferred Pass 接入工作冲突。
@@ -1161,14 +1414,16 @@ BurtDirectPBRComponents BurtEvaluatePBRDirectFromCore(BurtPBRShadingCoreData cor
         light.shadowAttenuation);
 
     float clearCoatMask = saturate(coreData.materialData.clearCoatMask);
+#if BURT_ENABLE_CLEAR_COAT_SHADING
     if (clearCoatMask <= 0.0001f)
     {
         return components;
     }
 
-    // Clear Coat top-layer specular follows _ClearCoatNormalMap / GBuffer3, while the base layer keeps coreData.geometryData.
     BurtPBRGeometryData clearCoatGeometryData = coreData.clearCoatGeometryData;
+    BurtPBRGeometryData baseGeometryData = coreData.geometryData;
     float3 n = clearCoatGeometryData.normalWS;
+    float3 baseN = baseGeometryData.normalWS;
     float3 v = clearCoatGeometryData.viewDirectionWS;
     float3 l = BurtSafeNormalize(light.directionWS);
     float3 h = BurtSafeNormalize(l + v);
@@ -1176,19 +1431,52 @@ BurtDirectPBRComponents BurtEvaluatePBRDirectFromCore(BurtPBRShadingCoreData cor
     float clearCoatNdotH = saturate(dot(n, h));
     float clearCoatVdotH = saturate(dot(v, h));
     float clearCoatNoV = clearCoatGeometryData.nDotV;
-    float clearCoatRoughness = ClampPerceptualRoughness(coreData.materialData.clearCoatRoughness);
+    float clearCoatRoughness = ClampPerceptualRoughness(coreData.clearCoatDirectSpecularPerceptualRoughness);
     float clearCoatLinearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatRoughness);
     float clearCoatA2 = LinearRoughnessToA2(clearCoatLinearRoughness);
     float clearCoatD = D_GGX(clearCoatA2, clearCoatNdotH);
     float clearCoatVisibility = Vis_SmithJointApprox(clearCoatLinearRoughness, clearCoatNoV, clearCoatNdotL);
-    float3 clearCoatFresnel = F_Schlick_UE(float3(0.04f, 0.04f, 0.04f), float3(1.0f, 1.0f, 1.0f), clearCoatVdotH);
-    float3 clearCoatSpecularBRDF = clearCoatD * clearCoatVisibility * clearCoatFresnel;
+    float3 clearCoatFresnel = F_Schlick_UE(float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0), float3(1.0f, 1.0f, 1.0f), clearCoatVdotH);
+    float3 clearCoatSpecularBRDF = clearCoatD * clearCoatVisibility * clearCoatFresnel * coreData.clearCoatDirectSpecularEnergyCompensation;
     float3 clearCoatSpecular = clearCoatSpecularBRDF * light.color * clearCoatNdotL * light.shadowAttenuation;
 
-    float baseLayerVisibility = 1.0f - clearCoatMask * 0.25f;
-    components.diffuse *= baseLayerVisibility;
-    components.specular = components.specular * baseLayerVisibility + clearCoatSpecular * clearCoatMask;
-    components.brdfTerms.specularBRDF = components.brdfTerms.specularBRDF * baseLayerVisibility + clearCoatSpecularBRDF * clearCoatMask;
+    float baseNdotL = saturate(dot(baseN, l));
+    float baseNdotV = baseGeometryData.nDotV;
+    float baseNdotH = saturate(dot(baseN, h));
+    float baseXdotH = dot(baseGeometryData.tangentWS, h);
+    float baseYdotH = dot(baseGeometryData.bitangentWS, h);
+    float baseXdotV = dot(baseGeometryData.tangentWS, v);
+    float baseYdotV = dot(baseGeometryData.bitangentWS, v);
+    float baseXdotL = dot(baseGeometryData.tangentWS, l);
+    float baseYdotL = dot(baseGeometryData.bitangentWS, l);
+    float refractionBlend = BurtRefractBlendClearCoatApprox(clearCoatVdotH);
+    float refractionProjection = refractionBlend * baseNdotH;
+    float refractedNdotV = clamp(BURT_CLEAR_COAT_ETA * baseNdotV - refractionProjection, 0.001f, 1.0f);
+    float refractedNdotL = clamp(BURT_CLEAR_COAT_ETA * baseNdotL - refractionProjection, 0.001f, 1.0f);
+    float refractedVdotH = saturate(BURT_CLEAR_COAT_ETA * clearCoatVdotH - refractionBlend);
+    float3 layerTransmission = BurtClearCoatFresnelTransmission(clearCoatFresnel) * BurtSimpleClearCoatTransmittance(refractedNdotL, refractedNdotV, coreData.materialData.metallic, coreData.materialData.baseColor);
+    float bottomLayerLightNoL = clearCoatNdotL;
+
+    float bottomDiffuseLobe = SlabLobe_Diffuse(coreData.materialData, refractedNdotV, refractedNdotL, refractedVdotH);
+    float3 refractedDiffuseBRDF = coreData.materialData.diffuseColor * bottomDiffuseLobe * coreData.energyTerms.energyPreservation * layerTransmission;
+    float3 refractedDiffuse = refractedDiffuseBRDF * light.color * bottomLayerLightNoL * light.shadowAttenuation;
+
+    float bottomLinearRoughness = PerceptualRoughnessToLinearRoughness(coreData.directSpecularPerceptualRoughness);
+    float bottomA2 = LinearRoughnessToA2(bottomLinearRoughness);
+    float bottomAx;
+    float bottomAy;
+    GetAnisotropicRoughness(bottomLinearRoughness, coreData.materialData.anisotropy, bottomAx, bottomAy);
+    float bottomD = D_GGX_Anisotropic(bottomAx, bottomAy, baseNdotH, baseXdotH, baseYdotH);
+    float bottomVisibility = Vis_SmithJointAnisotropic(bottomAx, bottomAy, refractedNdotV, bottomLayerLightNoL, baseXdotV, baseXdotL, baseYdotV, baseYdotL);
+    float3 bottomFresnel = F_Schlick_UE(coreData.materialData.f0, coreData.materialData.f90, refractedVdotH);
+    float3 refractedSpecularBRDF = bottomD * bottomVisibility * bottomFresnel * coreData.energyTerms.directSpecularEnergyCompensation * layerTransmission;
+    float3 refractedSpecular = refractedSpecularBRDF * light.color * bottomLayerLightNoL * light.shadowAttenuation;
+
+    components.diffuse = lerp(components.diffuse, refractedDiffuse, clearCoatMask);
+    components.specular = lerp(components.specular, refractedSpecular, clearCoatMask) + clearCoatSpecular * clearCoatMask;
+    components.brdfTerms.diffuseLobe = lerp(components.brdfTerms.diffuseLobe, bottomDiffuseLobe, clearCoatMask);
+    components.brdfTerms.diffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, refractedDiffuseBRDF, clearCoatMask);
+    components.brdfTerms.specularBRDF = lerp(components.brdfTerms.specularBRDF, refractedSpecularBRDF, clearCoatMask) + clearCoatSpecularBRDF * clearCoatMask;
     components.brdfTerms.nDotL = lerp(components.brdfTerms.nDotL, clearCoatNdotL, clearCoatMask);
     components.brdfTerms.nDotV = lerp(components.brdfTerms.nDotV, clearCoatNoV, clearCoatMask);
     components.brdfTerms.nDotH = lerp(components.brdfTerms.nDotH, clearCoatNdotH, clearCoatMask);
@@ -1199,6 +1487,7 @@ BurtDirectPBRComponents BurtEvaluatePBRDirectFromCore(BurtPBRShadingCoreData cor
     components.brdfTerms.d = lerp(components.brdfTerms.d, clearCoatD, clearCoatMask);
     components.brdfTerms.visibility = lerp(components.brdfTerms.visibility, clearCoatVisibility, clearCoatMask);
     components.brdfTerms.fresnel = lerp(components.brdfTerms.fresnel, clearCoatFresnel, clearCoatMask);
+#endif
     return components;
 }
 
@@ -1272,18 +1561,14 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
 BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRShadingCoreData coreData, float3 positionWS, float2 screenUV)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
-    if (!BurtUseTileLightList())
-    {
-        return BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS);
-    }
-
-    if (BurtTileLightListOverflows(screenUV))
+    uint2 range = uint2(0u, 0u);
+    uint useClusterLightList = 0u;
+    if (!BurtTryGetAdditionalLightListRange(screenUV, positionWS, range, useClusterLightList))
     {
         return BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS);
     }
 
     BurtDirectPBRComponents additionalDirectComponents = BurtCreateZeroPBRDirectComponents();
-    uint2 range = BurtGetTileLightRange(screenUV);
     int additionalLightCount = BurtGetAdditionalLightCount();
 
     for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
@@ -1293,7 +1578,7 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
             break;
         }
 
-        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        uint storedLightIndex = BurtReadAdditionalLightListIndex(range.x + localLightIndex, useClusterLightList);
         if (storedLightIndex >= (uint)additionalLightCount)
         {
             continue;
@@ -1312,18 +1597,14 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
 BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRShadingCoreData coreData, float3 positionWS, float3 shadowPositionWS, float2 screenUV)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
-    if (!BurtUseTileLightList())
-    {
-        return BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS, shadowPositionWS);
-    }
-
-    if (BurtTileLightListOverflows(screenUV))
+    uint2 range = uint2(0u, 0u);
+    uint useClusterLightList = 0u;
+    if (!BurtTryGetAdditionalLightListRange(screenUV, positionWS, range, useClusterLightList))
     {
         return BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS, shadowPositionWS);
     }
 
     BurtDirectPBRComponents additionalDirectComponents = BurtCreateZeroPBRDirectComponents();
-    uint2 range = BurtGetTileLightRange(screenUV);
     int additionalLightCount = BurtGetAdditionalLightCount();
 
     for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
@@ -1333,7 +1614,7 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
             break;
         }
 
-        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        uint storedLightIndex = BurtReadAdditionalLightListIndex(range.x + localLightIndex, useClusterLightList);
         if (storedLightIndex >= (uint)additionalLightCount)
         {
             continue;
@@ -1371,18 +1652,14 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCor
 BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(BurtPBRShadingCoreData coreData, float3 positionWS, float2 screenUV)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
-    if (!BurtUseTileLightList())
-    {
-        return BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS);
-    }
-
-    if (BurtTileLightListOverflows(screenUV))
+    uint2 range = uint2(0u, 0u);
+    uint useClusterLightList = 0u;
+    if (!BurtTryGetAdditionalLightListRange(screenUV, positionWS, range, useClusterLightList))
     {
         return BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS);
     }
 
     BurtDirectPBRComponents additionalDirectComponents = BurtCreateZeroPBRDirectComponents();
-    uint2 range = BurtGetTileLightRange(screenUV);
     int additionalLightCount = BurtGetAdditionalLightCount();
 
     for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
@@ -1392,7 +1669,7 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCor
             break;
         }
 
-        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        uint storedLightIndex = BurtReadAdditionalLightListIndex(range.x + localLightIndex, useClusterLightList);
         if (storedLightIndex >= (uint)additionalLightCount)
         {
             continue;
@@ -1431,13 +1708,20 @@ BurtIndirectPBRComponents BurtEvaluatePBRIndirectFromCore(BurtPBRShadingCoreData
 {
     // 间接光继续复用统一 energy terms，保证 diffuse preservation 和 specular compensation 口径一致。
     BurtIndirectPBRComponents components = BurtEvaluateIndirectPBRComponents(coreData.materialData, coreData.geometryData, coreData.clearCoatGeometryData, coreData.energyTerms);
+#if BURT_ENABLE_SUBSURFACE_SHADING
     float subsurfaceStrength = saturate(coreData.materialData.subsurfaceStrength);
     if (subsurfaceStrength > 0.0001f)
     {
-        float3 wrappedIrradiance = _BurtSkyDiffuseCubemapEnabled > 0.5f ? BurtSampleSkyDiffuseCubemap(-coreData.geometryData.normalWS) : BurtGetAmbientLightColor();
-        float3 subsurfaceDiffuse = coreData.materialData.baseColor * wrappedIrradiance * (0.5f * subsurfaceStrength) * coreData.materialData.occlusion;
+        float3 frontIrradiance = BurtSampleIndirectDiffuseIrradiance(coreData.geometryData.normalWS);
+        float3 backIrradiance = _BurtSkyDiffuseCubemapEnabled > 0.5f ? BurtSampleSkyDiffuseCubemap(-coreData.geometryData.normalWS) : BurtGetAmbientLightColor();
+        float thickness = saturate(coreData.materialData.subsurfaceThickness);
+        float ambientWrap = saturate(coreData.materialData.subsurfaceAmbient);
+        float3 wrappedIrradiance = lerp(frontIrradiance, backIrradiance, ambientWrap);
+        float3 subsurfaceTint = max(coreData.materialData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+        float3 subsurfaceDiffuse = coreData.materialData.baseColor * subsurfaceTint * wrappedIrradiance * lerp(0.25f, 0.75f, thickness) * coreData.materialData.occlusion;
         components.diffuse = lerp(components.diffuse, max(components.diffuse, subsurfaceDiffuse), subsurfaceStrength);
     }
+#endif
     return components;
 }
 
@@ -1459,23 +1743,61 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     // 保存 F90，当前 XRender DefaultLit 路径使用默认 1。
     components.f90 = coreData.materialData.f90;
 
+    float debugSpecularAARoughness = coreData.directSpecularPerceptualRoughness;
+    float debugSpecularAANormalVariance = coreData.specularAATerms.normalVariance;
+    float debugSpecularAARoughnessDelta = coreData.specularAATerms.roughnessDelta;
+    float clearCoatMask = saturate(coreData.materialData.clearCoatMask);
+#if BURT_ENABLE_CLEAR_COAT_SHADING
+    if (clearCoatMask > 0.0001f)
+    {
+        debugSpecularAARoughness = lerp(debugSpecularAARoughness, coreData.clearCoatDirectSpecularPerceptualRoughness, clearCoatMask);
+        debugSpecularAANormalVariance = lerp(debugSpecularAANormalVariance, coreData.clearCoatSpecularAATerms.normalVariance, clearCoatMask);
+        debugSpecularAARoughnessDelta = lerp(debugSpecularAARoughnessDelta, coreData.clearCoatSpecularAATerms.roughnessDelta, clearCoatMask);
+    }
+#endif
+
     // 保存直接高光使用的 AA 后粗糙度，用来观察极光滑高光是否被屏幕空间法线变化拓宽。
-    components.specularAARoughness = coreData.directSpecularPerceptualRoughness;
+    components.specularAARoughness = debugSpecularAARoughness;
 
     // 保存屏幕空间法线方差，Debug View 会放大显示以便定位 Normal Filtering 是否生效。
-    components.specularAANormalVariance = coreData.specularAATerms.normalVariance;
+    components.specularAANormalVariance = debugSpecularAANormalVariance;
 
     // 保存 Specular AA 增加的 roughness，Deferred 后续也可以用它检查法线过滤成本和效果。
-    components.specularAARoughnessDelta = coreData.specularAATerms.roughnessDelta;
+    components.specularAARoughnessDelta = debugSpecularAARoughnessDelta;
 
-    // 保存直接高光能量补偿，使用和直接 BRDF 一致的 F0、AA 后粗糙度和 NdotV。
-    components.specularEnergyCompensation = coreData.energyTerms.directSpecularEnergyCompensation;
-
-    // 保存间接高光能量补偿，使用材质 Base.Roughness，对齐 XRender Sky/EnvProbe Specular。
-    components.indirectSpecularEnergyCompensation = coreData.energyTerms.indirectSpecularEnergyCompensation;
+    float3 debugDirectSpecularEnergyCompensation = coreData.energyTerms.directSpecularEnergyCompensation;
+    float3 debugIndirectSpecularEnergyCompensation = coreData.energyTerms.indirectSpecularEnergyCompensation;
 
     // 保存 XRender EnergyPreservation，让 Debug 和 diffuse 层都读取同一个保能比例。
     components.energyPreservation = coreData.energyTerms.energyPreservation;
+    float debugIndirectNoV = coreData.geometryData.nDotV;
+    float debugIndirectRoughness = coreData.materialData.perceptualRoughness;
+    float2 debugIndirectDFG = GetSpecularDFGTerms(debugIndirectRoughness, debugIndirectNoV);
+    float3 debugIndirectEnvBRDF = EvalSpecularDFG(coreData.materialData.f0, coreData.materialData.f90, debugIndirectDFG);
+#if BURT_ENABLE_CLEAR_COAT_SHADING
+    if (clearCoatMask > 0.0001f)
+    {
+        BurtPBRMaterialData clearCoatMaterialData = BurtCreateClearCoatMaterialData(coreData.materialData);
+        BurtPBREnergyTerms clearCoatEnergyTerms = BurtPreparePBREnergyTerms(clearCoatMaterialData, coreData.clearCoatGeometryData, coreData.clearCoatDirectSpecularPerceptualRoughness);
+        float2 clearCoatDFG = GetSpecularDFGTerms(clearCoatMaterialData.perceptualRoughness, coreData.clearCoatGeometryData.nDotV);
+        float3 clearCoatEnvBRDF = EvalSpecularDFG(clearCoatMaterialData.f0, clearCoatMaterialData.f90, clearCoatDFG);
+        float3 bottomLayerEnvBRDF = coreData.materialData.f0 * debugIndirectDFG.x + debugIndirectDFG.y * saturate(50.0f * coreData.materialData.f0.g) * (1.0f - clearCoatMask);
+        float clearCoatF = saturate(clearCoatEnvBRDF.x * clearCoatMask);
+
+        debugDirectSpecularEnergyCompensation = lerp(debugDirectSpecularEnergyCompensation, clearCoatEnergyTerms.directSpecularEnergyCompensation, clearCoatMask);
+        debugIndirectSpecularEnergyCompensation = lerp(debugIndirectSpecularEnergyCompensation, clearCoatEnergyTerms.indirectSpecularEnergyCompensation, clearCoatMask);
+        debugIndirectNoV = lerp(debugIndirectNoV, coreData.clearCoatGeometryData.nDotV, clearCoatMask);
+        debugIndirectRoughness = lerp(debugIndirectRoughness, clearCoatMaterialData.perceptualRoughness, clearCoatMask);
+        debugIndirectDFG = lerp(debugIndirectDFG, clearCoatDFG, clearCoatMask);
+        debugIndirectEnvBRDF = lerp(debugIndirectEnvBRDF, bottomLayerEnvBRDF * (1.0f - clearCoatF) + clearCoatEnvBRDF * clearCoatF, clearCoatMask);
+    }
+#endif
+
+    // 保存直接高光能量补偿。Clear Coat 像素显示顶层 coat 的补偿，和 direct BRDF debug 的 top lobe 保持一致。
+    components.specularEnergyCompensation = debugDirectSpecularEnergyCompensation;
+
+    // 保存间接高光能量补偿。Clear Coat 像素显示顶层 coat roughness / normal 对 IBL lobe 的影响。
+    components.indirectSpecularEnergyCompensation = debugIndirectSpecularEnergyCompensation;
 
     // 记录直接 BRDF 的 D 项，后续 Deferred 可以复用同一套拆项做诊断。
     components.directBRDFD = directComponents.brdfTerms.d;
@@ -1522,13 +1844,13 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     components.lighting = components.directLighting + components.indirectLighting;
 
     // 保存间接高光遮蔽，使用材质 AO、NdotV 和未 AA 的感知粗糙度，与间接高光路径保持一致。
-    components.specularOcclusion = GetIndirectSpecularOcclusion(coreData.geometryData.nDotV, coreData.materialData.occlusion, coreData.materialData.perceptualRoughness);
+    components.specularOcclusion = GetIndirectSpecularOcclusion(debugIndirectNoV, coreData.materialData.occlusion, debugIndirectRoughness);
 
     // 记录间接高光使用的 DFG.xy；出处同 BurtEvaluateIndirectSpecularPBR，便于检查 LUT 采样或 fallback。
-    components.indirectSpecularDFG = GetSpecularDFGTerms(coreData.materialData.perceptualRoughness, coreData.geometryData.nDotV);
+    components.indirectSpecularDFG = debugIndirectDFG;
 
     // 记录 F0/F90 经过 DFG 后得到的环境 BRDF，Reflection Probe 最终会乘这一项。
-    components.indirectSpecularEnvBRDF = EvalSpecularDFG(coreData.materialData.f0, coreData.materialData.f90, components.indirectSpecularDFG);
+    components.indirectSpecularEnvBRDF = debugIndirectEnvBRDF;
 
     // Default Lit 不写 Hair 专用拆项，保持 Hair Debug 在非 Hair 像素为黑。
     components.hairPrimaryLobe = 0.0f;
@@ -1616,9 +1938,29 @@ BurtPBRShadingComponents BurtEvaluatePBRShadingComponents(BurtSurfaceData surfac
     return BurtComposePBRShadingComponentsWithAdditional(coreData, directComponents, indirectComponents, additionalDirectComponents);
 }
 
+BurtPBRShadingComponents BurtEvaluatePBRShadingComponents(BurtSurfaceData surfaceData, BurtLight mainLight, float3 normalWS, float4 tangentWS, float3 viewDirectionWS, float3 positionWS)
+{
+    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(surfaceData, normalWS, tangentWS, viewDirectionWS);
+    BurtDirectPBRComponents mainDirectComponents = BurtEvaluatePBRDirectFromCore(coreData, mainLight);
+    BurtDirectPBRComponents additionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS);
+    BurtDirectPBRComponents directComponents = BurtAddPBRDirectComponents(mainDirectComponents, additionalDirectComponents);
+    BurtIndirectPBRComponents indirectComponents = BurtEvaluatePBRIndirectFromCore(coreData);
+    return BurtComposePBRShadingComponentsWithAdditional(coreData, directComponents, indirectComponents, additionalDirectComponents);
+}
+
 BurtPBRShadingComponents BurtEvaluatePBRShadingComponents(BurtSurfaceData surfaceData, BurtLight mainLight, float3 normalWS, float3 clearCoatNormalWS, float3 viewDirectionWS, float3 positionWS)
 {
     BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(surfaceData, normalWS, clearCoatNormalWS, viewDirectionWS);
+    BurtDirectPBRComponents mainDirectComponents = BurtEvaluatePBRDirectFromCore(coreData, mainLight);
+    BurtDirectPBRComponents additionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS);
+    BurtDirectPBRComponents directComponents = BurtAddPBRDirectComponents(mainDirectComponents, additionalDirectComponents);
+    BurtIndirectPBRComponents indirectComponents = BurtEvaluatePBRIndirectFromCore(coreData);
+    return BurtComposePBRShadingComponentsWithAdditional(coreData, directComponents, indirectComponents, additionalDirectComponents);
+}
+
+BurtPBRShadingComponents BurtEvaluatePBRShadingComponents(BurtSurfaceData surfaceData, BurtLight mainLight, float3 normalWS, float4 tangentWS, float3 clearCoatNormalWS, float3 viewDirectionWS, float3 positionWS)
+{
+    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(surfaceData, normalWS, tangentWS, clearCoatNormalWS, viewDirectionWS);
     BurtDirectPBRComponents mainDirectComponents = BurtEvaluatePBRDirectFromCore(coreData, mainLight);
     BurtDirectPBRComponents additionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS);
     BurtDirectPBRComponents directComponents = BurtAddPBRDirectComponents(mainDirectComponents, additionalDirectComponents);
@@ -1682,7 +2024,7 @@ BurtPBRShadingComponents BurtEvaluatePBRShadingComponentsFromGBuffer(BurtGBuffer
     return BurtComposePBRShadingComponentsWithAdditional(coreData, directComponents, indirectComponents, additionalDirectComponents);
 }
 
-// EncodedGBuffer 入口：Deferred Lighting Pass 从四张 RT 采样后可直接把采样值打包进 BurtEncodedGBuffer 调用。
+// EncodedGBuffer 入口：Deferred Lighting Pass 从五张 RT 采样后可直接把采样值打包进 BurtEncodedGBuffer 调用。
 BurtPBRShadingComponents BurtEvaluatePBRShadingComponentsFromGBuffer(BurtEncodedGBuffer encodedGBuffer, BurtLight mainLight, float3 viewDirectionWS)
 {
     // 解码 GBuffer0/1/2 的逻辑仍集中在 BurtGBuffer.hlsl，保证 Debug roundtrip 和真实 Deferred Pass 使用同一套布局。
@@ -1704,6 +2046,7 @@ BurtPBRShadingComponents BurtEvaluatePBRShadingComponentsFromGBuffer(BurtEncoded
     return BurtEvaluatePBRShadingComponentsFromGBuffer(gbufferData, mainLight, viewDirectionWS, positionWS, screenUV);
 }
 
+#if BURT_ENABLE_HAIR_SHADING
 // Hair 第一版参考 UE5 HairBsdf.ush / ShadingModels.ush：BaseColor 作为毛发吸收色，Reflectance 近似 Specular，Hair material channel 解包为 Scatter/Shift。
 float BurtHairGaussian(float width, float theta)
 {
@@ -1948,18 +2291,14 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
 BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(BurtGBufferData gbufferData, BurtPBRGeometryData geometryData, float3 positionWS, float2 screenUV)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
-    if (!BurtUseTileLightList())
-    {
-        return BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS);
-    }
-
-    if (BurtTileLightListOverflows(screenUV))
+    uint2 range = uint2(0u, 0u);
+    uint useClusterLightList = 0u;
+    if (!BurtTryGetAdditionalLightListRange(screenUV, positionWS, range, useClusterLightList))
     {
         return BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS);
     }
 
     BurtHairDirectComponents additionalDirectComponents = BurtCreateZeroHairDirectComponents();
-    uint2 range = BurtGetTileLightRange(screenUV);
     int additionalLightCount = BurtGetAdditionalLightCount();
 
     for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
@@ -1969,7 +2308,7 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
             break;
         }
 
-        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        uint storedLightIndex = BurtReadAdditionalLightListIndex(range.x + localLightIndex, useClusterLightList);
         if (storedLightIndex >= (uint)additionalLightCount)
         {
             continue;
@@ -1988,18 +2327,14 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
 BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(BurtGBufferData gbufferData, BurtPBRGeometryData geometryData, float3 positionWS, float3 shadowPositionWS, float2 screenUV)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
-    if (!BurtUseTileLightList())
-    {
-        return BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS, shadowPositionWS);
-    }
-
-    if (BurtTileLightListOverflows(screenUV))
+    uint2 range = uint2(0u, 0u);
+    uint useClusterLightList = 0u;
+    if (!BurtTryGetAdditionalLightListRange(screenUV, positionWS, range, useClusterLightList))
     {
         return BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS, shadowPositionWS);
     }
 
     BurtHairDirectComponents additionalDirectComponents = BurtCreateZeroHairDirectComponents();
-    uint2 range = BurtGetTileLightRange(screenUV);
     int additionalLightCount = BurtGetAdditionalLightCount();
 
     for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
@@ -2009,7 +2344,7 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
             break;
         }
 
-        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        uint storedLightIndex = BurtReadAdditionalLightListIndex(range.x + localLightIndex, useClusterLightList);
         if (storedLightIndex >= (uint)additionalLightCount)
         {
             continue;
@@ -2047,18 +2382,14 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingUnshadowedCompo
 BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(BurtGBufferData gbufferData, BurtPBRGeometryData geometryData, float3 positionWS, float2 screenUV)
 {
 #if defined(BURT_USE_TILED_LIGHTING)
-    if (!BurtUseTileLightList())
-    {
-        return BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, geometryData, positionWS);
-    }
-
-    if (BurtTileLightListOverflows(screenUV))
+    uint2 range = uint2(0u, 0u);
+    uint useClusterLightList = 0u;
+    if (!BurtTryGetAdditionalLightListRange(screenUV, positionWS, range, useClusterLightList))
     {
         return BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, geometryData, positionWS);
     }
 
     BurtHairDirectComponents additionalDirectComponents = BurtCreateZeroHairDirectComponents();
-    uint2 range = BurtGetTileLightRange(screenUV);
     int additionalLightCount = BurtGetAdditionalLightCount();
 
     for (uint localLightIndex = 0u; localLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; localLightIndex++)
@@ -2068,7 +2399,7 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingUnshadowedCompo
             break;
         }
 
-        uint storedLightIndex = _BurtTileLightListBuffer[range.x + localLightIndex];
+        uint storedLightIndex = BurtReadAdditionalLightListIndex(range.x + localLightIndex, useClusterLightList);
         if (storedLightIndex >= (uint)additionalLightCount)
         {
             continue;
@@ -2322,7 +2653,9 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     components.clearCoatMask = 0.0f;
     return components;
 }
+#endif
 
+#if !defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL) && !defined(BURT_FORWARD_SINGLE_SHADING_MODEL)
 // Shading-model dispatch used by Forward and Deferred. More models can join this switch without changing pass wiring.
 BurtPBRShadingComponents BurtEvaluateShadingModelComponents(BurtSurfaceData surfaceData, BurtLight mainLight, float3 normalWS, float3 viewDirectionWS)
 {
@@ -2480,6 +2813,7 @@ BurtPBRShadingComponents BurtEvaluateShadingModelComponentsFromGBuffer(BurtEncod
     BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
     return BurtEvaluateShadingModelComponentsFromGBuffer(gbufferData, mainLight, viewDirectionWS, positionWS, screenUV);
 }
+#endif
 
 // 计算 Blinn-Phong 高光项，用来给旧 Simple Lit 路径保留第一版 specular。
 float3 BurtEvaluateSpecular(BurtSurfaceData surfaceData, BurtLight light, float3 normalWS, float3 viewDirectionWS)
