@@ -1,242 +1,313 @@
+﻿
 # BurtRenderPipeine
 
-BurtRenderPipeine 是一个面向实时渲染质量的 Unity 自定义渲染管线。
+BurtRenderPipeine 是一个面向实时画面质量的 Unity 自定义 SRP。当前实现以相机 request 和 RenderGraph 为主干，Forward 负责稳定兼容路径，Deferred 负责五张 GBuffer、不透明材质分支、屏幕空间效果和后处理链路。
 
-## 已做内容
+## 当前管线概览
 
-- 搭建了 SRP 渲染入口、相机 request、相机栈和最终输出流程。
-- 实现了 Forward / Deferred 双路径，包括不透明、透明、天空盒、Depth Prepass、Gizmos、GBuffer、Deferred Lighting、Hair Lighting 和 ForwardOnly 兜底。
-- 实现了 RenderGraph 风格的 Pass 编排、资源注册、生命周期追踪、资源校验和调试 dump。
-- 接入了 PBR Lit、Clear Coat、Subsurface、Hair、Unlit 材质，以及 GBuffer 编码、解码和材质调试。
-- Clear Coat 和 Subsurface 已拆成独立 shader；Clear Coat 支持 mask / roughness，Subsurface 已有第一版 strength 近似。
-- 接入了 SkyLight、IBL、Atmosphere Scattering、主光阴影和 additional point light shadow atlas。
-- Atmosphere 已支持 Sky + Aerial Perspective、sun source、自定义太阳方向、horizon / ground、曝光兼容、Aerial tint / near fade / max opacity 和 Rayleigh / Mie / transmittance / aerial debug。
-- additional point shadow 已修正 face / split culling sphere 稳定性问题，并增加 stable key、slice、rect、matrix hash、bias 等诊断信息。
-- 接入了 additional light buffer、additional light shading 和 tile light debug。
-- 接入了 HiZ Depth、SSAO 和 SSR。
-- SSAO 已有质量预设、可选 SSAO/GTAO/HBAO trace 算法、空间降噪、RHalf 时域历史、边缘感知时域累积、历史深度校验和 Surface Stability 诊断视图。
-- SSR 已有质量预设、全/半分辨率、时域历史和 HiZ 实验诊断。
-- 接入了后处理链路，包括 TAA、Bloom、Tonemapping、Color Adjustments、物理曝光和自动曝光。
-- Bloom 已有质量档、mip/stage 诊断、threshold / soft knee、scatter、tint、alpha 和 debug view。
-- TAA 已有 Halton jitter、Motion Vector、颜色/深度/置信度历史、抗闪烁、响应式拒绝，以及覆盖率/深度/运动边缘的历史压制。
-- 自动曝光已支持 per-camera EV 状态、log-luminance reduce、轻量 histogram、AsyncGPUReadback timeout 恢复和 RenderGraph debug 字段。
-- 接入了 Shading Debug Overlay，并拆分为 Burt Material Debug、Burt Lighting Debug、Burt Post Process Debug；debug 按钮支持再次点击回到正常画面。
+- 渲染入口：`BurtRenderPipeline` 为每个 Unity Camera 创建 `BurtRenderRequest`，排序后构建 `BurtRenderFrame` / 相机栈，再把 request 交给对应的图组装器执行。
+- 路径选择：普通 SceneView / GameView 可走 Forward 或 Deferred；Preview 和 Reflection request 当前固定走 Forward，避免预览和反射捕获被 Deferred 中间资源影响。
+- 相机栈：Base / Overlay request 由 `BurtRequestRenderOptions` 决定 CameraColor / CameraDepth 的申请、共享、FinalBlit 和释放时机。
+- RenderGraph：负责 pass 编排、资源注册、读写声明、生命周期追踪、校验、风险诊断和 debug dump。当前 pass culling 仍以诊断为主，实际 pass 默认执行。
+- Forward 路径：覆盖不透明、透明、天空盒、Depth Prepass、主光阴影、后处理、Gizmos、Unsupported Shader debug 和最终输出。
+- Deferred 路径：覆盖 Camera RT、五张 GBuffer、HiZ、SSAO、Deferred Lighting、Clear Coat、Hair、Subsurface、ForwardOnly 不透明兜底、Fog、Atmosphere、SSR、透明、后处理和最终输出。
 
-## 当前管线情况
+## Deferred Pass 顺序
 
-- 核心渲染：Forward / Deferred、RenderGraph 资源生命周期和 SceneView / GameView 输出链路已经成形。
-- 材质：Default Lit、Hair、Clear Coat、Subsurface、Unlit 已接入；Clear Coat / Subsurface 仍是第一版质量，需要继续做 profile、thickness、transmission 等扩展。
-- 光照：SkyLight、IBL、主光阴影、additional point light shadow 和 tiled additional light 已接入；point shadow 稳定性已修正，仍需更多动态场景回归。
-- 后处理：TAA、Bloom、SSAO、SSR、物理曝光、自动曝光、Tonemapping 和 Color Adjustments 已接入，当前重点是默认效果标定和稳定性回归。
-- 调试：RenderGraph dump、Shading Debug Overlay、GBuffer / Shadow / Atmosphere / SSAO / SSR / TAA / Bloom / Auto Exposure debug view 已覆盖主要排查入口。
+当前 Deferred request 的主要执行链如下：
 
-## GBuffer 通道规划
+1. 申请 CameraColor / CameraDepth。
+2. 申请 GBuffer0-4、HiZDepth、灯光 buffer、阴影图、SSAO/SSR/5S 所需临时资源。
+3. 上传 LightingGlobals / ShadowGlobals，构建 tiled / clustered additional light list。
+4. 绘制主光阴影和 additional light shadow atlas。
+5. 设置并清理 Camera RT，执行 Depth Prepass。
+6. 绑定并清理 GBuffer MRT，绘制 `BurtGBuffer` 不透明材质。
+7. 执行 SSAO trace / blur / temporal。
+8. 清理 Deferred lighting target，并按材质 id 分别执行 Default Lit、Hair、Clear Coat、Subsurface lighting。
+9. 绘制 `BurtForwardOnly` 不透明兜底。
+10. 执行 screen-space 5S：copy source、水平 blur、垂直 blur、写回 CameraColor。
+11. 构建 HiZ Depth。
+12. 执行 Fog、Skybox、Atmosphere、Aerial Perspective。
+13. 执行 SSR trace / denoise / temporal / composite。
+14. 绘制透明物体和 unsupported shader debug。
+15. 执行后处理、FinalBlit，并按资源生命周期反向释放临时资源。
 
-当前 Deferred 路径使用四张 GBuffer，并用 GBuffer pass 写入的 Stencil 低 2 bit 标记 shading model：`0 = Default Lit`、`1 = Hair`、`2 = Clear Coat`、`3 = Subsurface`，材质 pass 使用 `ReadMask/WriteMask = 3`。Deferred Lighting 已按这四个 id 拆成 Default Lit / Hair / Clear Coat / Subsurface pass，并保留与 Stencil Ref 相同的 GBuffer model id 作为 shader 内过滤兜底。位数口径按当前 RT 申请方式记录：`GBuffer0 = ARGB32`，每通道 8-bit UNorm；`GBuffer1 = ARGBHalf`，每通道 16-bit float；`GBuffer2 = DefaultHDR`，实际位宽由 Unity / 平台 HDR 格式决定；`GBuffer3 = ARGBHalf`，当前用于 Clear Coat 独立法线，其他模型先写默认/占位值。表格按 Stencil model tag + GBuffer payload 规划计位；当前 HLSL 里 `GBuffer1.b` 仍临时镜像 `shadingModelID`，用于现有 decode / debug / shader 内过滤过渡，后续完全切到 Stencil 分 pass 后可以释放这部分冗余。
+## 资源状态
+
+- 相机资源：`CameraColor`、`CameraDepth`、`FinalCameraTarget`。
+- GBuffer：`GBuffer0`、`GBuffer1`、`GBuffer2`、`GBuffer3`、`GBuffer4`。
+- 光照资源：`LightingGlobals`、`ShadowGlobals`、`MainLightShadowMap`、additional light buffer、tile light count/list/offset buffer、cluster light count/list/offset buffer。
+- 屏幕空间资源：`HiZDepth`、`ScreenSpaceAmbientOcclusionRaw`、`ScreenSpaceAmbientOcclusion`、`ScreenSpaceSubsurfaceSource`、`ScreenSpaceSubsurfaceTemp`、`ScreenSpaceSubsurfaceBlur`、`ScreenSpaceReflectionColor`、`ScreenSpaceReflectionDenoisedColor`、`ScreenSpaceReflectionTemporalColor`。
+- 后处理资源：`PostProcessColor` 作为后处理链路中间 RT，最终结果回写 `CameraColor` 后再 blit 到外部目标。
+
+## 材质与 GBuffer
+
+Deferred 使用 Stencil 低 2 bit 标记材质分支：`0 = Default Lit`、`1 = Hair`、`2 = Clear Coat`、`3 = Subsurface`。Deferred lighting pass 使用相同 Ref 过滤像素，shader 内也保留 GBuffer 解码 id 作为兜底判断。
 
 ### Default Lit (0) / `BurtRP/Lit`
+
+Stencil：Depth/Stencil 的低 2 bit 写入 Model ID 0，Deferred Lit lighting pass 使用 Ref 0 过滤；不占用 GBuffer RGBA 通道。
 
 <table>
 <thead>
 <tr>
-<th>GBuffer 通道</th>
-<th>R</th>
-<th>G</th>
-<th>B</th>
-<th>A</th>
-<th>备注</th>
+<th align="center">通道</th>
+<th align="center">R</th>
+<th align="center">G</th>
+<th align="center">B</th>
+<th align="center">A</th>
+<th align="center">备注</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Stencil<br/>Depth/Stencil</td>
-<td colspan="4">shading model = 0<br/>2 bit，Ref 0，ReadMask/WriteMask 3</td>
-<td>Deferred Lit lighting pass 使用 Stencil Ref 0 / model id 0 过滤</td>
+<td align="center">GBuffer0 / ARGB32</td>
+<td colspan="3" align="center">BaseColor.rgb / 24 bit</td>
+<td align="center">Occlusion / 8 bit</td>
+<td align="center">基础色和环境遮蔽</td>
 </tr>
 <tr>
-<td>GBuffer0<br/>ARGB32</td>
-<td colspan="3">baseColor<br/>24 bit, 8x3</td>
-<td>occlusion<br/>8 bit</td>
-<td>基础颜色 + AO</td>
+<td align="center">GBuffer1 / ARGBHalf</td>
+<td colspan="2" align="center">NormalWS Octa / 32 bit</td>
+<td align="center">Packed Model + Metallic / 16f</td>
+<td align="center">Smoothness / 16f</td>
+<td align="center"><code>GBuffer1.b</code> 位于 Default Lit bucket 时表示 Metallic</td>
 </tr>
 <tr>
-<td>GBuffer1<br/>ARGBHalf</td>
-<td colspan="2">normalWS octa<br/>32 bit, 16f x2</td>
-<td>metallic<br/>16f material scalar</td>
-<td>smoothness<br/>16f</td>
-<td>Default Lit 的 material channel 为 metallic</td>
+<td align="center">GBuffer2 / DefaultHDR</td>
+<td colspan="3" align="center">Emission.rgb / DefaultHDR</td>
+<td align="center">Reflectance / DefaultHDR</td>
+<td align="center">HDR 格式由 Unity / 平台决定</td>
 </tr>
 <tr>
-<td>GBuffer2<br/>DefaultHDR</td>
-<td colspan="3">emission<br/>DefaultHDR RGB</td>
-<td>reflectance<br/>DefaultHDR A</td>
-<td>实际位宽由 Unity / 平台 HDR 格式决定</td>
+<td align="center">GBuffer3 / ARGBHalf</td>
+<td colspan="2" align="center">Reserved Normal Mirror / 32 bit</td>
+<td colspan="2" align="center">Reserved / 32 bit</td>
+<td align="center">写入安全默认值，避免未绑定采样</td>
 </tr>
 <tr>
-<td>GBuffer3<br/>ARGBHalf</td>
-<td colspan="2">reserved normal mirror<br/>32 bit, 16f x2</td>
-<td>reserved<br/>16f</td>
-<td>reserved<br/>16f</td>
-<td>Default Lit 当前不消费；写入默认 normal，避免未绑定采样</td>
+<td align="center">GBuffer4 / ARGBHalf</td>
+<td colspan="2" align="center">TangentWS Octa / 32 bit</td>
+<td align="center">Signed Anisotropy, Encoded 0..1 / 16f</td>
+<td align="center">Reserved / 16f</td>
+<td align="center">直接光使用 anisotropic GGX，anisotropy 为 0 时退化为普通 GGX</td>
 </tr>
 </tbody>
 </table>
 
 ### Hair (1) / `BurtRP/Hair`
 
+Stencil：Depth/Stencil 的低 2 bit 写入 Model ID 1，Deferred Hair lighting pass 使用 Ref 1 过滤；不占用 GBuffer RGBA 通道。
+
 <table>
 <thead>
 <tr>
-<th>GBuffer 通道</th>
-<th>R</th>
-<th>G</th>
-<th>B</th>
-<th>A</th>
-<th>备注</th>
+<th align="center">通道</th>
+<th align="center">R</th>
+<th align="center">G</th>
+<th align="center">B</th>
+<th align="center">A</th>
+<th align="center">备注</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Stencil<br/>Depth/Stencil</td>
-<td colspan="4">shading model = 1<br/>2 bit，Ref 1，ReadMask/WriteMask 3</td>
-<td>Deferred Hair lighting pass 使用 Stencil Ref 1 过滤</td>
+<td align="center">GBuffer0 / ARGB32</td>
+<td colspan="3" align="center">BaseColor.rgb / 24 bit</td>
+<td align="center">Occlusion / 8 bit</td>
+<td align="center">基础色和环境遮蔽</td>
 </tr>
 <tr>
-<td>GBuffer0<br/>ARGB32</td>
-<td colspan="3">baseColor<br/>24 bit, 8x3</td>
-<td>occlusion<br/>8 bit</td>
-<td>基础颜色 + AO</td>
+<td align="center">GBuffer1 / ARGBHalf</td>
+<td colspan="2" align="center">StrandDirectionWS Octa / 32 bit</td>
+<td align="center">Packed Model + Hair Payload / 16f</td>
+<td align="center">Smoothness / 16f</td>
+<td align="center">Hair Payload 打包 Scatter 和 Longitudinal Shift Scale</td>
 </tr>
 <tr>
-<td>GBuffer1<br/>ARGBHalf</td>
-<td colspan="2">strandDirectionWS octa<br/>32 bit, 16f x2</td>
-<td>hairScatter + longitudinalShiftScale<br/>5 bit + 4 bit material payload</td>
-<td>smoothness<br/>16f</td>
-<td>metallic 不占 GBuffer；Deferred 按非金属处理</td>
+<td align="center">GBuffer2 / DefaultHDR</td>
+<td colspan="3" align="center">Emission.rgb / DefaultHDR</td>
+<td align="center">Reflectance / DefaultHDR</td>
+<td align="center">Reflectance 包含 Hair Specular Scale</td>
 </tr>
 <tr>
-<td>GBuffer2<br/>DefaultHDR</td>
-<td colspan="3">emission<br/>DefaultHDR RGB</td>
-<td>reflectance<br/>DefaultHDR A</td>
-<td>reflectance 写入前已包含 _HairSpecularScale</td>
+<td align="center">GBuffer3 / ARGBHalf</td>
+<td colspan="4" align="center">Reserved / 64 bit</td>
+<td align="center">预留给后续覆盖率、第二方向或深度不透明度</td>
 </tr>
 <tr>
-<td>GBuffer3<br/>ARGBHalf</td>
-<td colspan="2">reserved strand/normal mirror<br/>32 bit, 16f x2</td>
-<td>reserved<br/>16f</td>
-<td>reserved<br/>16f</td>
-<td>Hair 当前不消费；保留给未来 deep opacity / second direction / coverage 等扩展</td>
+<td align="center">GBuffer4 / ARGBHalf</td>
+<td colspan="2" align="center">Fallback Tangent Octa / 32 bit</td>
+<td colspan="2" align="center">Reserved / 32 bit</td>
+<td align="center">Hair 不使用 Lit anisotropy 标量，方向性由 strand/lobe 表达</td>
 </tr>
 </tbody>
 </table>
 
 ### Clear Coat (2) / `BurtRP/Clear Coat`
 
+Stencil：Depth/Stencil 的低 2 bit 写入 Model ID 2，Deferred Clear Coat lighting pass 使用 Ref 2 过滤；不占用 GBuffer RGBA 通道。
+
 <table>
 <thead>
 <tr>
-<th>GBuffer 通道</th>
-<th>R</th>
-<th>G</th>
-<th>B</th>
-<th>A</th>
-<th>备注</th>
+<th align="center">通道</th>
+<th align="center">R</th>
+<th align="center">G</th>
+<th align="center">B</th>
+<th align="center">A</th>
+<th align="center">备注</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Stencil<br/>Depth/Stencil</td>
-<td colspan="4">shading model = 2<br/>2 bit，Ref 2，ReadMask/WriteMask 3</td>
-<td>Deferred Clear Coat lighting pass 使用 Stencil Ref 2 / model id 2 过滤</td>
+<td align="center">GBuffer0 / ARGB32</td>
+<td colspan="3" align="center">BaseColor.rgb / 24 bit</td>
+<td align="center">Occlusion / 8 bit</td>
+<td align="center">基础色和环境遮蔽</td>
 </tr>
 <tr>
-<td>GBuffer0<br/>ARGB32</td>
-<td colspan="3">baseColor<br/>24 bit, 8x3</td>
-<td>occlusion<br/>8 bit</td>
-<td>基础颜色 + AO</td>
+<td align="center">GBuffer1 / ARGBHalf</td>
+<td colspan="2" align="center">Base NormalWS Octa / 32 bit</td>
+<td align="center">Packed Model + Metallic / 16f</td>
+<td align="center">Smoothness / 16f</td>
+<td align="center">底层材质保留 Default Lit 语义</td>
 </tr>
 <tr>
-<td>GBuffer1<br/>ARGBHalf</td>
-<td colspan="2">base normalWS octa<br/>32 bit, 16f x2</td>
-<td>metallic + clearCoatMask + clearCoatRoughness<br/>3 bit + 3 bit + 3 bit material payload</td>
-<td>smoothness<br/>16f</td>
-<td>base layer normal 保留给底层 diffuse/specular；material 参数当前各 8 档量化</td>
+<td align="center">GBuffer2 / DefaultHDR</td>
+<td colspan="3" align="center">Emission.rgb / DefaultHDR</td>
+<td align="center">Reflectance / DefaultHDR</td>
+<td align="center">HDR 格式由 Unity / 平台决定</td>
 </tr>
 <tr>
-<td>GBuffer2<br/>DefaultHDR</td>
-<td colspan="3">emission<br/>DefaultHDR RGB</td>
-<td>reflectance<br/>DefaultHDR A</td>
-<td>实际位宽由 Unity / 平台 HDR 格式决定</td>
+<td align="center">GBuffer3 / ARGBHalf</td>
+<td colspan="2" align="center">ClearCoatNormalWS Octa / 32 bit</td>
+<td align="center">ClearCoatMask / 16f</td>
+<td align="center">ClearCoatRoughness / 16f</td>
+<td align="center">顶层 coat 的直接高光、IBL、SSR 读取该法线和粗糙度</td>
 </tr>
 <tr>
-<td>GBuffer3<br/>ARGBHalf</td>
-<td colspan="2">clearCoatNormalWS octa<br/>32 bit, 16f x2</td>
-<td>reserved<br/>16f</td>
-<td>reserved<br/>16f</td>
-<td>Clear Coat 顶层 direct specular 和 IBL reflection 使用该法线；对照 XRender：GBufferOut0 存 Geometry.NormalWS 供顶层 coat 高光，Coat.ButtomNormal 另存给底层。Burt 当前把顶层 _ClearCoatNormalMap 存到专用 GBuffer3，GBuffer1.rg 保留底层/base normal</td>
+<td align="center">GBuffer4 / ARGBHalf</td>
+<td colspan="2" align="center">Base TangentWS Octa / 32 bit</td>
+<td align="center">Base Signed Anisotropy, Encoded 0..1 / 16f</td>
+<td align="center">Reserved / 16f</td>
+<td align="center">顶层 coat 保持 isotropic，底层继续使用 tangent / anisotropy</td>
 </tr>
 </tbody>
 </table>
 
 ### Subsurface (3) / `BurtRP/Subsurface`
 
+Stencil：Depth/Stencil 的低 2 bit 写入 Model ID 3，Deferred Subsurface lighting pass 使用 Ref 3 过滤；不占用 GBuffer RGBA 通道。
+
 <table>
 <thead>
 <tr>
-<th>GBuffer 通道</th>
-<th>R</th>
-<th>G</th>
-<th>B</th>
-<th>A</th>
-<th>备注</th>
+<th align="center">通道</th>
+<th align="center">R</th>
+<th align="center">G</th>
+<th align="center">B</th>
+<th align="center">A</th>
+<th align="center">备注</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Stencil<br/>Depth/Stencil</td>
-<td colspan="4">shading model = 3<br/>2 bit，Ref 3，ReadMask/WriteMask 3</td>
-<td>Deferred Subsurface lighting pass 使用 Stencil Ref 3 / model id 3 过滤</td>
+<td align="center">GBuffer0 / ARGB32</td>
+<td colspan="3" align="center">BaseColor.rgb / 24 bit</td>
+<td align="center">Occlusion / 8 bit</td>
+<td align="center">基础色和环境遮蔽</td>
 </tr>
 <tr>
-<td>GBuffer0<br/>ARGB32</td>
-<td colspan="3">baseColor<br/>24 bit, 8x3</td>
-<td>occlusion<br/>8 bit</td>
-<td>基础颜色 + AO</td>
+<td align="center">GBuffer1 / ARGBHalf</td>
+<td colspan="2" align="center">NormalWS Octa / 32 bit</td>
+<td align="center">Packed Model + SubsurfaceStrength / 16f</td>
+<td align="center">Smoothness / 16f</td>
+<td align="center">Subsurface 按非金属处理，Material Scalar 表示 Strength</td>
 </tr>
 <tr>
-<td>GBuffer1<br/>ARGBHalf</td>
-<td colspan="2">normalWS octa<br/>32 bit, 16f x2</td>
-<td>subsurfaceStrength<br/>16f material scalar</td>
-<td>smoothness<br/>16f</td>
-<td>metallic 不占 GBuffer；Deferred 按非金属处理</td>
+<td align="center">GBuffer2 / DefaultHDR</td>
+<td colspan="3" align="center">Emission.rgb / DefaultHDR</td>
+<td align="center">Reflectance / DefaultHDR</td>
+<td align="center">Profile Index 不占用 GBuffer2</td>
 </tr>
 <tr>
-<td>GBuffer2<br/>DefaultHDR</td>
-<td colspan="3">emission<br/>DefaultHDR RGB</td>
-<td>reflectance<br/>DefaultHDR A</td>
-<td>thickness / profile / diffusion 需要额外通道、profile 索引或后处理资源</td>
+<td align="center">GBuffer3 / ARGBHalf</td>
+<td colspan="3" align="center">SubsurfaceTint.rgb / 48 bit</td>
+<td align="center">Packed Power + Ambient / 16f</td>
+<td align="center">直射 LUT、transmission 和 5S blur 共享这些控制量</td>
 </tr>
 <tr>
-<td>GBuffer3<br/>ARGBHalf</td>
-<td colspan="2">reserved normal mirror<br/>32 bit, 16f x2</td>
-<td>reserved<br/>16f</td>
-<td>reserved<br/>16f</td>
-<td>Subsurface 当前不消费；后续可评估 thickness / bent normal / profile index 是否需要占用</td>
+<td align="center">GBuffer4 / ARGBHalf</td>
+<td colspan="2" align="center">TangentWS Octa / 32 bit</td>
+<td align="center">SubsurfaceDistortion / 16f</td>
+<td align="center">Packed Thickness + ProfileIndex / 16f</td>
+<td align="center">Profile Index 映射到管线资产的 0-7 Profile Palette</td>
 </tr>
 </tbody>
 </table>
 
-新增 shading model 必须先明确 Stencil Ref、`GBuffer1.rg` 的方向语义和 `GBuffer1.b` 的 `materialChannel` 打包规则；只有模型确实需要稳定的多参数存储时，再扩展 GBuffer RT 或拆出专用 buffer。
+当前材质分支：
 
-## 后续 TODO
+- Default Lit：基于 BaseColor、Metallic、Smoothness、Reflectance、AO、Tangent 和 Anisotropy 计算直接光、IBL 与 SSR。
+- Hair：`GBuffer1.rg` 存 Strand Direction，Material Scalar 打包 Scatter 和 Longitudinal Shift Scale，Deferred Hair lighting 单独处理，按非金属材质计算。
+- Clear Coat：底层保留 Base Normal / Metallic / Smoothness / Tangent / Anisotropy，顶层 Coat 使用独立 Normal / Mask / Roughness；直接高光、IBL、SSR 和 Debug 反射粗糙度读取顶层数据。
+- Subsurface：材质引用 `BurtSubsurfaceProfile`，管线资产维护最多 8 个 Profile；`GBuffer4.a` 打包 Thickness 和 Profile Index，直射光按 Profile 采样 Burley LUT atlas，并使用 Profile 内双 GGX 高光参数；屏幕空间 5S 只扩散 Diffuse Lighting，保留 Specular 和 Emission。
+- Unlit 与 ForwardOnly：不进入 Deferred lighting 主分支，按 Forward pass 或 Deferred 后的兜底 pass 绘制。
 
-- 自动曝光：已加入亮度热力图、测光权重、直方图范围调试和 latest-ready readout 状态，并限制直方图 readback 采样规模；后续继续验证真实场景稳定性，再决定是否需要 compute histogram。
-- 在 Unity 场景中继续验证 additional point shadow 多光源稳定性，重点看 point light face 边界、slot / atlas slice 是否还跳变，以及 slice culling sphere 是否不再出现无效半径。
-- 继续用固定动态场景标定 TAA 的拖影、闪烁和锐度平衡。
-- 标定 Bloom、SSR、SSAO、PBR、SkyLight、IBL、物理曝光、自动曝光和 Tonemapping 的默认效果。
-- 补充固定测试场景，用于回归检查灯光、阴影、反射、大气、材质和后处理效果。
-- 材质模型：Subsurface 后续继续做 thickness / profile / diffusion；Transmission、Fuzz / Fabric / Foliage、Eye、Fur 待接入。
-- 环境效果：Atmosphere 后续可继续做 LUT、IBL 烘焙联动、透明物体策略和更完整 aerial perspective；Fog / Volumetric / Weather 待接入。
-- 反射与 GI：Probe 系统、Reflection Probe 选择/混合、Lumen 类动态 GI。
-- 场景：Terrain / Vegetation / Ocean。
-- 其他：Decal、Refraction。
+## 5S 皮肤
+
+- Profile 文件：`BurtSubsurfaceProfile` 是独立 ScriptableObject，包含 surface albedo、mean free path、tint、边界串色、双 GGX 高光参数和 5S blur 参数。
+- Profile Palette：`BurtRenderPipelineAsset` 提供默认 profile 和附加 profile 列表，运行时解析为 0-7 槽位；材质通过 profile index 选择槽位。
+- LUT：`BurtSubsurfaceLutUtility` 按 profile palette 生成预积分 LUT atlas，并在管线每帧绑定全局纹理。
+- 直射光：Subsurface lighting 根据 profile index 读取 LUT 和双 GGX 高光参数，结合 thickness、distortion、power、ambient、tint 计算 wrapped diffuse、transmission 和 specular。
+- 屏幕空间：Deferred Subsurface lighting 可输出 diffuse luminance 信息，后续 5S pass 使用 Subsurface stencil、depth、normal、GBuffer 和 profile 参数做 separable blur，再写回 CameraColor。
+- Inspector：Profile editor 已提供 LUT 和 RGB diffusion curve 可视化，便于单独调 profile 文件。
+
+## 光照
+
+- 主光：支持主方向光、阴影图、阴影矩阵上传和 receiver 全局参数。
+- Additional Light：收集可见 additional lights，上传 structured buffer；Deferred 支持 tile / cluster 两套索引 buffer，shader 端按运行时可用状态启用。
+- Additional Shadow：支持 additional light shadow atlas 的申请、绘制、receiver 绑定和诊断信息。
+- SkyLight / IBL：支持指定 cubemap、diffuse 近似、specular mip 采样、强度、tint、上下半球策略和反射粗糙度选择。
+- Clear Coat 与 SSR：反射 normal 和 roughness 会按材质分支读取，Clear Coat 使用顶层 coat 数据。
+
+## 环境效果
+
+- Atmosphere：包含天空绘制和 Aerial Perspective，参数来自 Volume component，支持主光作为太阳方向。
+- Fog：屏幕空间高度雾，读取 CameraColor / CameraDepth 后写回 CameraColor，可与 Aerial Perspective 配合。
+- Volumetric Fog：屏幕空间 raymarch，当前作为独立 pass 插入天空/aerial 后、透明前。
+
+## 屏幕空间效果
+
+- HiZ Depth：按需申请并构建 mip，用于 SSR HiZ trace 和 HiZ debug。
+- SSAO：支持 SSAO / GTAO / HBAO 算法、质量预设、半分辨率 trace、空间 blur、temporal accumulation、history/depth history 和多种 debug view。
+- SSR：支持质量预设、半分辨率、max steps、max distance、thickness、roughness fade、temporal accumulation、denoise、HiZ experimental trace 和 HiZ diagnostics。
+- Screen Space Subsurface：只在 Deferred 且开启 5S 时运行，Preview / Reflection request 会跳过。
+
+## 后处理
+
+- TAA：支持 camera/object motion vector、history、depth history、confidence history、anti-flicker history、jitter、clamp、feedback、motion/depth rejection 和 debug view。
+- Bloom：支持 threshold、soft knee、firefly clamp、多 mip、高斯核缓存、stage tint、debug source 和 alpha 输出开关。
+- Tonemapping / Color：支持 ACES/Film 曲线、post exposure、color adjustments。
+- Exposure：支持物理曝光、自动曝光、log luminance reduce、轻量 histogram、AsyncGPUReadback 状态和 debug view。
+
+## 调试与诊断
+
+- Shading Debug Overlay 拆分材质、光照、后处理调试入口。
+- RenderGraph dump 会输出 request、相机、RT plan、pipeline state、lighting state、post process state、deferred state、pass 列表、资源生命周期、资源风险和校验结果。
+- GBuffer debug 支持 raw RT、base color、normal、roughness、metallic/material scalar、occlusion、emission、reflectance、材质 id、Hair、Clear Coat、Subsurface、tangent、anisotropy 等视图。
+- Lighting debug 覆盖主光阴影、tile light、cluster light、additional light buffer 和 shadow atlas。
+- 屏幕空间 debug 覆盖 Depth、HiZ、SSAO、SSR、TAA、Bloom、Auto Exposure、Atmosphere、Fog 和 Volumetric Fog。
+
+## TODO
+
+- SSDO：规划屏幕空间方向性遮蔽，复用 depth / normal / GBuffer，并与现有 SSAO、间接漫反射和 debug view 对齐。
+
+## 当前边界
+
+- Deferred 只对 SceneView / GameView 等普通 request 启用；Preview 和 Reflection 使用 Forward。
+- RenderGraph 已有资源声明、生命周期和 culling readiness 诊断，但 pass culling 仍未作为默认执行策略启用。
+- GBuffer 材质分支当前固定使用 Stencil 低 2 bit，新增不透明材质分支需要重新规划 id 和存储位。
+- Subsurface profile palette 当前最多 8 个槽位，材质侧 profile index 会映射到该范围内。
+- 部分调试信息依赖当前帧扫描可见 renderer 或 shader availability，属于诊断辅助，不参与最终画面判定。

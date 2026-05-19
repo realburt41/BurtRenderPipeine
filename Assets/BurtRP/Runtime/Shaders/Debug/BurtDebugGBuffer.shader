@@ -297,6 +297,13 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                     return float4(thickness, thickness, thickness, 1.0f);
                 }
 
+                if (debugMode == 27)
+                {
+                    float profileIndex = BurtGetSubsurfaceProfileIndex(gbufferData);
+                    float visibleProfileIndex = saturate(profileIndex / max(BURT_SUBSURFACE_PROFILE_COUNT - 1.0f, 1.0f));
+                    return float4(visibleProfileIndex, visibleProfileIndex, visibleProfileIndex, 1.0f);
+                }
+
                 if (debugMode == 20)
                 {
                     if (!BurtIsClearCoatShadingModel(gbufferData.shadingModelID))

@@ -2,42 +2,19 @@
 #ifndef BURT_FORWARD_PASS_INCLUDED
 #define BURT_FORWARD_PASS_INCLUDED
 
-#if !defined(BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT) && !defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE)
-    #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
-#endif
-
 #define BURT_FORWARD_SINGLE_SHADING_MODEL 1
-
-#if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
-    #define BURT_ENABLE_HAIR_SHADING 1
-    #define BURT_ENABLE_CLEAR_COAT_SHADING 0
-    #define BURT_ENABLE_SUBSURFACE_SHADING 0
-#elif defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT)
-    #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
-    #define BURT_ENABLE_HAIR_SHADING 0
-    #define BURT_ENABLE_CLEAR_COAT_SHADING 1
-    #define BURT_ENABLE_SUBSURFACE_SHADING 0
-#elif defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE)
-    #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
-    #define BURT_ENABLE_HAIR_SHADING 0
-    #define BURT_ENABLE_CLEAR_COAT_SHADING 0
-    #define BURT_ENABLE_SUBSURFACE_SHADING 1
-#else
-    #define BURT_ENABLE_DEFAULT_LIT_SHADING 1
-    #define BURT_ENABLE_HAIR_SHADING 0
-    #define BURT_ENABLE_CLEAR_COAT_SHADING 0
-    #define BURT_ENABLE_SUBSURFACE_SHADING 0
-#endif
 
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelMacros.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtNormal.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEmission.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMaterialShadingModelPassCommon.hlsl"
 
 struct Attributes
 {
@@ -74,57 +51,26 @@ Varyings Vert(Attributes input)
     return output;
 }
 
-BurtSurfaceData BurtCreateForwardSurfaceData(float4 baseColor, float4 maskMap)
-{
-#if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    float hairReflectance = saturate(_Reflectance * _HairSpecularScale);
-    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, hairReflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
-    surfaceData.smoothness = saturate(surfaceData.smoothness - _HairRoughnessOffset);
-    float hairShiftScale = saturate(_HairShiftScale * maskMap.b);
-    return BurtApplyHairGBufferSurfaceSemantics(surfaceData, (_HairScatter + _HairScatterBoost) * maskMap.r, hairShiftScale);
-#else
-    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
-    surfaceData = BurtApplyAnisotropySurfaceSemantics(surfaceData, _Anisotropy);
-
-    #if defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT)
-        surfaceData = BurtApplyClearCoatSurfaceSemantics(surfaceData, _ClearCoatMask, _ClearCoatRoughness);
-    #elif defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE)
-        surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceStrength, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, _SubsurfaceTint.rgb);
-    #endif
-
-    return surfaceData;
-#endif
-}
-
 float3 BurtGetForwardNormalWS(Varyings input, float facing)
 {
-    return BurtSampleNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, _NormalScale, facing, _DoubleSidedNormalModeConstants);
+    return BurtGetMaterialPassNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, facing);
 }
 
 float3 BurtGetForwardShadingDirectionWS(Varyings input, float3 normalWS)
 {
-#if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    float strandDirectionSign = lerp(1.0f, -1.0f, saturate(_HairTangentFlip));
-    return BurtSafeNormalize(input.tangentWS.xyz * strandDirectionSign);
-#else
-    return normalWS;
-#endif
+    return BurtGetMaterialPassShadingDirectionWS(normalWS, input.tangentWS);
 }
 
 float3 BurtGetForwardDebugNormalWS(float3 normalWS, float3 shadingDirectionWS)
 {
-#if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    return shadingDirectionWS;
-#else
-    return normalWS;
-#endif
+    return BurtGetMaterialPassDebugNormalWS(normalWS, shadingDirectionWS);
 }
 
 BurtPBRShadingComponents BurtEvaluateForwardShadingComponents(BurtSurfaceData surfaceData, BurtLight mainLight, Varyings input, float3 normalWS, float3 shadingDirectionWS, float3 viewDirectionWS, float facing)
 {
-#if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     return BurtEvaluateHairShadingComponentsFromGBuffer(BurtCreateHairGBufferData(surfaceData, shadingDirectionWS, float3(0.0f, 0.0f, 0.0f)), mainLight, viewDirectionWS, input.positionWS);
-#elif defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT)
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_CLEAR_COAT)
     float3 clearCoatNormalWS = BurtSampleClearCoatNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, _ClearCoatNormalScale, facing, _DoubleSidedNormalModeConstants);
     return BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, input.tangentWS, clearCoatNormalWS, viewDirectionWS, input.positionWS);
 #else
@@ -135,21 +81,12 @@ BurtPBRShadingComponents BurtEvaluateForwardShadingComponents(BurtSurfaceData su
 #if defined(BURT_ENABLE_SHADING_DEBUG)
 BurtGBufferData BurtCreateForwardDebugGBufferData(BurtSurfaceData surfaceData, Varyings input, float3 normalWS, float3 shadingDirectionWS, float facing)
 {
-#if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    return BurtCreateHairGBufferData(surfaceData, shadingDirectionWS, float3(0.0f, 0.0f, 0.0f));
-#elif defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT)
-    float3 clearCoatNormalWS = BurtSampleClearCoatNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, _ClearCoatNormalScale, facing, _DoubleSidedNormalModeConstants);
-    return BurtCreateClearCoatGBufferData(surfaceData, normalWS, input.tangentWS, clearCoatNormalWS, float3(0.0f, 0.0f, 0.0f));
-#elif defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE)
-    return BurtCreateSubsurfaceGBufferData(surfaceData, normalWS, input.tangentWS, float3(0.0f, 0.0f, 0.0f));
-#else
-    return BurtCreateGBufferData(surfaceData, normalWS, input.tangentWS, float3(0.0f, 0.0f, 0.0f));
-#endif
+    return BurtCreateMaterialPassGBufferData(surfaceData, input.baseMapUV, input.normalWS, normalWS, input.tangentWS, shadingDirectionWS, facing, float3(0.0f, 0.0f, 0.0f));
 }
 
 float3 BurtEvaluateForwardAdditionalUnshadowedDebug(BurtSurfaceData surfaceData, float3 normalWS, float3 shadingDirectionWS, float3 viewDirectionWS, float3 positionWS)
 {
-#if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     BurtGBufferData hairGBufferData = BurtCreateHairGBufferData(surfaceData, shadingDirectionWS, float3(0.0f, 0.0f, 0.0f));
     float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(shadingDirectionWS, viewDirectionWS);
     BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
@@ -227,6 +164,10 @@ void BurtFillForwardShadingDebugData(
     debugData.specularAARoughnessDelta = pbrComponents.specularAARoughnessDelta;
     debugData.indirectSpecularDFG = pbrComponents.indirectSpecularDFG;
     debugData.indirectSpecularEnvBRDF = pbrComponents.indirectSpecularEnvBRDF;
+    debugData.subsurfaceProfileIndex = pbrComponents.subsurfaceProfileIndex;
+    debugData.subsurfaceTransmission = pbrComponents.subsurfaceTransmission;
+    debugData.subsurfaceKernelWeight = pbrComponents.subsurfaceKernelWeight;
+    debugData.subsurfaceIndirect = pbrComponents.subsurfaceIndirect;
     debugData.hairPrimaryLobe = pbrComponents.hairPrimaryLobe;
     debugData.hairSecondaryLobe = pbrComponents.hairSecondaryLobe;
     debugData.hairTransmissionLobe = pbrComponents.hairTransmissionLobe;
@@ -239,6 +180,7 @@ void BurtFillForwardShadingDebugData(
     debugData.gbufferClearCoatRoughness = BurtGetClearCoatRoughness(debugDecodedGBufferData);
     debugData.gbufferSubsurfaceStrength = BurtGetSubsurfaceStrength(debugDecodedGBufferData);
     debugData.gbufferSubsurfaceThickness = BurtGetSubsurfaceThickness(debugDecodedGBufferData);
+    debugData.gbufferSubsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(debugDecodedGBufferData);
     debugData.gbufferAnisotropy = debugDecodedGBufferData.anisotropy;
     debugData.gbufferTangentWS = debugDecodedGBufferData.tangentWS;
     debugData.gbufferSmoothness = debugDecodedGBufferData.smoothness;
@@ -258,7 +200,7 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
     float3 shadingDirectionWS = BurtGetForwardShadingDirectionWS(input, normalWS);
     float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
     float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
-    BurtSurfaceData surfaceData = BurtCreateForwardSurfaceData(baseColor, maskMap);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
     float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
     BurtSurfaceData shadingSurfaceData = surfaceData;
@@ -277,14 +219,14 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
 #if defined(BURT_ENABLE_SHADING_DEBUG)
     if (!BurtIsShadingDebugEnabled())
     {
-        return float4(finalColor, surfaceData.alpha);
+        return float4(BurtApplyPreExposure(finalColor), surfaceData.alpha);
     }
 
     BurtGBufferData debugGBufferSourceData = BurtCreateForwardDebugGBufferData(surfaceData, input, normalWS, shadingDirectionWS, facing);
     BurtEncodedGBuffer debugEncodedGBuffer = BurtEncodeGBuffer(debugGBufferSourceData);
     BurtGBufferData debugDecodedGBufferData = BurtDecodeGBuffer(debugEncodedGBuffer);
     BurtPBRMaterialData debugGBufferMaterialData = BurtPreparePBRMaterialData(debugDecodedGBufferData);
-    BurtShadingDebugData debugData;
+    BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
     BurtFillForwardShadingDebugData(
         debugData,
         surfaceData,
@@ -307,7 +249,7 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
     }
 #endif
 
-    return float4(finalColor, surfaceData.alpha);
+    return float4(BurtApplyPreExposure(finalColor), surfaceData.alpha);
 }
 
 #endif // BURT_FORWARD_PASS_INCLUDED

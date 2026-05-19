@@ -100,6 +100,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceSubsurfaceSourceTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceSourceTextureShaderName);
 
+        public const string ScreenSpaceSubsurfaceSetupName = "ScreenSpaceSubsurfaceSetup";
+
+        public const string ScreenSpaceSubsurfaceSetupTextureShaderName = "_BurtScreenSpaceSubsurfaceSetupTexture";
+
+        public static readonly int ScreenSpaceSubsurfaceSetupTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceSetupTextureShaderName);
+
+        public const string ScreenSpaceSubsurfaceTileName = "ScreenSpaceSubsurfaceTile";
+
+        public const string ScreenSpaceSubsurfaceTileTextureShaderName = "_BurtScreenSpaceSubsurfaceTileTexture";
+
+        public static readonly int ScreenSpaceSubsurfaceTileTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceTileTextureShaderName);
+
         public const string ScreenSpaceSubsurfaceTempName = "ScreenSpaceSubsurfaceTemp";
 
         public const string ScreenSpaceSubsurfaceTempTextureShaderName = "_BurtScreenSpaceSubsurfaceTempTexture";
@@ -111,6 +123,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string ScreenSpaceSubsurfaceBlurTextureShaderName = "_BurtScreenSpaceSubsurfaceBlurTexture";
 
         public static readonly int ScreenSpaceSubsurfaceBlurTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceBlurTextureShaderName);
+
+        public const string ScreenSpaceSubsurfaceCombineName = "ScreenSpaceSubsurfaceCombine";
+
+        public const string ScreenSpaceSubsurfaceCombineTextureShaderName = "_BurtScreenSpaceSubsurfaceCombineTexture";
+
+        public static readonly int ScreenSpaceSubsurfaceCombineTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceCombineTextureShaderName);
 
         public const string MainLightShadowMapName = "MainLightShadowMap"; // 定义主光阴影图在 RenderGraph 里的统一资源名，后续阴影绘制和光照采样都通过它建立依赖。
 
@@ -614,6 +632,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(ScreenSpaceSubsurfaceSourceName);
         }
 
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceSetupTexture()
+        {
+            return RegisterScreenSpaceSubsurfaceSetup(new RenderTargetIdentifier(ScreenSpaceSubsurfaceSetupTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceSetup(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceSubsurfaceSetupName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceSubsurfaceSetup()
+        {
+            return GetRenderTarget(ScreenSpaceSubsurfaceSetupName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceTileTexture()
+        {
+            return RegisterScreenSpaceSubsurfaceTile(new RenderTargetIdentifier(ScreenSpaceSubsurfaceTileTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceTile(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceSubsurfaceTileName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceSubsurfaceTile()
+        {
+            return GetRenderTarget(ScreenSpaceSubsurfaceTileName);
+        }
+
         public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceTempTexture()
         {
             return RegisterScreenSpaceSubsurfaceTemp(new RenderTargetIdentifier(ScreenSpaceSubsurfaceTempTextureId));
@@ -642,6 +690,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetScreenSpaceSubsurfaceBlur()
         {
             return GetRenderTarget(ScreenSpaceSubsurfaceBlurName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceCombineTexture()
+        {
+            return RegisterScreenSpaceSubsurfaceCombine(new RenderTargetIdentifier(ScreenSpaceSubsurfaceCombineTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceCombine(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceSubsurfaceCombineName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceSubsurfaceCombine()
+        {
+            return GetRenderTarget(ScreenSpaceSubsurfaceCombineName);
         }
 
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。

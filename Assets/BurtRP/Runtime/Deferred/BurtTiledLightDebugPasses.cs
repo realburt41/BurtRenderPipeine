@@ -64,6 +64,7 @@ namespace Burt.RenderPipeline
         private uint[] clusterLightCountData;
         private uint[] clusterLightListData;
         private BurtTileLightOffsetRange[] clusterLightOffsetData;
+        private int clusterLightListUploadCount;
 
         public override string Name => "Burt Build Tile Light List";
 
@@ -76,10 +77,15 @@ namespace Burt.RenderPipeline
                 return;
             }
 
+            var shouldBuildTileData = ShouldBuildTileData(builder.Request, builder.Asset, builder.ResourceRegistry);
             var shouldBuildListData = ShouldBuildListData(builder.Request, builder.Asset, builder.ResourceRegistry);
             var shouldBuildClusterData = ShouldBuildClusterData(builder.Request, builder.Asset, builder.ResourceRegistry);
             builder.ReadLightingGlobals();
-            builder.WriteTileLightCountBuffer();
+            if (shouldBuildTileData)
+            {
+                builder.WriteTileLightCountBuffer();
+            }
+
             if (shouldBuildListData)
             {
                 builder.WriteTileLightListBuffer();
@@ -111,31 +117,32 @@ namespace Burt.RenderPipeline
 
             var layout = BurtTiledLightData.CalculateLayout(request.Camera);
             var clusterLayout = BurtTiledLightData.CalculateClusterLayout(request.Camera);
+            var shouldBuildTileData = ShouldBuildTileData(request, context.Asset, context.ResourceRegistry);
             var shouldBuildListData = ShouldBuildListData(request, context.Asset, context.ResourceRegistry);
             var shouldBuildClusterData = ShouldBuildClusterData(request, context.Asset, context.ResourceRegistry);
             var useRuntimeTileList = BurtTiledLightData.ShouldUseRuntimeTiledLightingResources(request, context.Asset, shouldBuildListData);
             var maxLightsPerTile = BurtTiledLightData.ResolveMaxLightsPerTile(useRuntimeTileList);
-            var maxLightsPerCluster = BurtTiledLightData.ResolveRuntimeMaxLightsPerCluster();
-            EnsureCapacity(layout, shouldBuildListData, maxLightsPerTile, clusterLayout, shouldBuildClusterData, maxLightsPerCluster);
-            ClearWorkingData(layout, shouldBuildListData, maxLightsPerTile, clusterLayout, shouldBuildClusterData, maxLightsPerCluster);
-            BuildCpuTileLightLists(request.Camera, lightingData, layout, shouldBuildListData, maxLightsPerTile, shouldBuildClusterData, clusterLayout, maxLightsPerCluster);
-            var stats = FinalizeTileMetadata(layout, shouldBuildListData, maxLightsPerTile);
+            var maxLightsPerCluster = ResolveMaxLightsPerCluster(lightingData);
+            EnsureCapacity(layout, shouldBuildTileData, shouldBuildListData, maxLightsPerTile, clusterLayout, shouldBuildClusterData, maxLightsPerCluster);
+            ClearWorkingData(layout, shouldBuildTileData, shouldBuildListData, clusterLayout, shouldBuildClusterData);
+            BuildCpuTileLightLists(request.Camera, lightingData, layout, shouldBuildTileData, shouldBuildListData, maxLightsPerTile, shouldBuildClusterData, clusterLayout, maxLightsPerCluster);
+            var stats = FinalizeTileMetadata(layout, shouldBuildTileData, shouldBuildListData, maxLightsPerTile);
             var clusterStats = FinalizeClusterMetadata(clusterLayout, shouldBuildClusterData, maxLightsPerCluster);
 
             var countBuffer = context.TileLightCountBuffer;
             var listBuffer = context.TileLightListBuffer;
             var offsetBuffer = context.TileLightOffsetBuffer;
-            var uploaded = UploadBuffers(countBuffer, listBuffer, offsetBuffer, layout, shouldBuildListData, maxLightsPerTile);
+            var uploaded = UploadBuffers(countBuffer, listBuffer, offsetBuffer, layout, shouldBuildTileData, shouldBuildListData, maxLightsPerTile);
             var clusterUploaded = UploadClusterBuffers(context.ClusterLightCountBuffer, context.ClusterLightListBuffer, context.ClusterLightOffsetBuffer, clusterLayout, shouldBuildClusterData, maxLightsPerCluster);
 
             lightingData.SetTileLightDebugState(
-                true,
+                shouldBuildTileData,
                 uploaded,
                 useRuntimeTileList ? BurtTiledLightData.RuntimeBuildModeLabel : BurtTiledLightData.DebugBuildModeLabel,
-                layout.TileSize,
-                layout.TileCountX,
-                layout.TileCountY,
-                layout.TileCount,
+                shouldBuildTileData ? layout.TileSize : 0,
+                shouldBuildTileData ? layout.TileCountX : 0,
+                shouldBuildTileData ? layout.TileCountY : 0,
+                shouldBuildTileData ? layout.TileCount : 0,
                 maxLightsPerTile,
                 shouldBuildListData ? layout.TileCount * maxLightsPerTile : 0,
                 stats.MinCount,
@@ -143,14 +150,17 @@ namespace Burt.RenderPipeline
                 stats.AverageCount,
                 stats.OverflowTileCount,
                 stats.MaxOverflowExtraCount);
-            lightingData.SetTileLightDebugCountSnapshot(tileLightCountData, layout.TileCount);
+            lightingData.SetTileLightDebugCountSnapshot(shouldBuildTileData ? tileLightCountData : null, shouldBuildTileData ? layout.TileCount : 0);
             lightingData.SetClusterLightDebugCountSnapshot(shouldBuildClusterData ? clusterLightCountData : null, shouldBuildClusterData ? clusterLayout.ClusterCount : 0);
             lightingData.SetClusterLightState(
                 clusterUploaded,
+                clusterLayout.TileSize,
+                clusterLayout.TileCountX,
+                clusterLayout.TileCountY,
                 clusterLayout.DepthSliceCount,
                 clusterLayout.ClusterCount,
                 maxLightsPerCluster,
-                shouldBuildClusterData ? clusterLayout.ClusterCount * maxLightsPerCluster : 0,
+                clusterUploaded ? clusterLightListUploadCount : 0,
                 clusterStats.MinCount,
                 clusterStats.MaxCount,
                 clusterStats.AverageCount,
@@ -160,11 +170,17 @@ namespace Burt.RenderPipeline
                 request.Camera != null ? request.Camera.farClipPlane : 1f,
                 CreateWorldToViewZRow(request.Camera));
 
-            UploadGlobals(context, countBuffer, listBuffer, offsetBuffer, layout, stats, uploaded, shouldBuildListData, maxLightsPerTile);
+            UploadGlobals(context, countBuffer, listBuffer, offsetBuffer, layout, stats, uploaded, shouldBuildTileData, shouldBuildListData, maxLightsPerTile);
             UploadClusterGlobals(context, clusterLayout, clusterUploaded, shouldBuildClusterData, maxLightsPerCluster);
         }
 
         private static bool ShouldBuild(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            return ShouldBuildTileData(request, asset, resourceRegistry) ||
+                ShouldBuildClusterData(request, asset, resourceRegistry);
+        }
+
+        private static bool ShouldBuildTileData(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRenderGraphResourceRegistry resourceRegistry)
         {
             var hasTileResources = resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName);
             return BurtTiledLightData.ShouldUseTiledLightResources(request, asset, hasTileResources);
@@ -189,6 +205,7 @@ namespace Burt.RenderPipeline
 
         private void EnsureCapacity(
             BurtTileLightLayout layout,
+            bool includeTileData,
             bool includeListData,
             int maxLightsPerTile,
             BurtClusterLightLayout clusterLayout,
@@ -197,7 +214,7 @@ namespace Burt.RenderPipeline
         {
             var tileCount = Mathf.Max(1, layout.TileCount);
 
-            if (tileLightCountData == null || tileLightCountData.Length < tileCount)
+            if (includeTileData && (tileLightCountData == null || tileLightCountData.Length < tileCount))
             {
                 tileLightCountData = new uint[tileCount];
             }
@@ -227,7 +244,7 @@ namespace Burt.RenderPipeline
                 clusterLightCountData = new uint[clusterCount];
             }
 
-            var clusterListCapacity = clusterCount * maxLightsPerCluster;
+            var clusterListCapacity = Mathf.Max(1, clusterCount * maxLightsPerCluster);
             if (clusterLightListData == null || clusterLightListData.Length < clusterListCapacity)
             {
                 clusterLightListData = new uint[clusterListCapacity];
@@ -239,33 +256,48 @@ namespace Burt.RenderPipeline
             }
         }
 
+        private static int ResolveMaxLightsPerCluster(BurtLightingData lightingData)
+        {
+            var additionalLightCount = lightingData != null ? Mathf.Clamp(lightingData.AdditionalLightCount, 0, BurtLightingData.MaxAdditionalLights) : BurtLightingData.MaxAdditionalLights;
+            if (additionalLightCount <= 0)
+            {
+                return 1;
+            }
+
+            return Mathf.Max(1, Mathf.Min(BurtTiledLightData.ResolveRuntimeMaxLightsPerCluster(), additionalLightCount));
+        }
+
         private void ClearWorkingData(
             BurtTileLightLayout layout,
+            bool includeTileData,
             bool includeListData,
-            int maxLightsPerTile,
             BurtClusterLightLayout clusterLayout,
-            bool includeClusterData,
-            int maxLightsPerCluster)
+            bool includeClusterData)
         {
-            Array.Clear(tileLightCountData, 0, layout.TileCount);
+            if (includeTileData)
+            {
+                Array.Clear(tileLightCountData, 0, layout.TileCount);
+            }
+
             if (includeListData)
             {
-                Array.Clear(tileLightListData, 0, layout.TileCount * maxLightsPerTile);
                 Array.Clear(tileLightOffsetData, 0, layout.TileCount);
             }
 
             if (includeClusterData)
             {
                 Array.Clear(clusterLightCountData, 0, clusterLayout.ClusterCount);
-                Array.Clear(clusterLightListData, 0, clusterLayout.ClusterCount * maxLightsPerCluster);
                 Array.Clear(clusterLightOffsetData, 0, clusterLayout.ClusterCount);
             }
+
+            clusterLightListUploadCount = 0;
         }
 
         private void BuildCpuTileLightLists(
             Camera camera,
             BurtLightingData lightingData,
             BurtTileLightLayout layout,
+            bool includeTileData,
             bool includeListData,
             int maxLightsPerTile,
             bool includeClusterData,
@@ -279,7 +311,7 @@ namespace Burt.RenderPipeline
                 var colorAndType = lightingData.AdditionalLightColorAndType[lightIndex];
                 if (IsDirectionalLight(colorAndType.w))
                 {
-                    AddLightToTileRect(lightIndex, 0, 0, layout.TileCountX - 1, layout.TileCountY - 1, layout, includeListData, maxLightsPerTile);
+                    AddLightToTileRect(lightIndex, 0, 0, layout.TileCountX - 1, layout.TileCountY - 1, layout, includeTileData, includeListData, maxLightsPerTile);
                     AddLightToClusterBounds(lightIndex, 0, 0, 0, clusterLayout.TileCountX - 1, clusterLayout.TileCountY - 1, clusterLayout.DepthSliceCount - 1, clusterLayout, includeClusterData, maxLightsPerCluster);
                     continue;
                 }
@@ -290,7 +322,7 @@ namespace Burt.RenderPipeline
                     continue;
                 }
 
-                AddLocalLightToCandidateTiles(lightIndex, positionAndRange, minTileX, minTileY, maxTileX, maxTileY, layout, cullingContext, includeListData, maxLightsPerTile);
+                AddLocalLightToCandidateTiles(lightIndex, positionAndRange, minTileX, minTileY, maxTileX, maxTileY, layout, cullingContext, includeTileData, includeListData, maxLightsPerTile);
                 if (includeClusterData && TryGetViewSphere(positionAndRange, cullingContext, out var viewSphere))
                 {
                     var spotCone = default(BurtViewSpotCone);
@@ -310,12 +342,18 @@ namespace Burt.RenderPipeline
             int maxTileY,
             BurtTileLightLayout layout,
             BurtTileLightCullingContext cullingContext,
+            bool includeTileData,
             bool includeListData,
             int maxLightsPerTile)
         {
+            if (!includeTileData)
+            {
+                return;
+            }
+
             if (!TryGetViewSphere(positionAndRange, cullingContext, out var viewSphere))
             {
-                AddLightToTileRect(lightIndex, minTileX, minTileY, maxTileX, maxTileY, layout, includeListData, maxLightsPerTile);
+                AddLightToTileRect(lightIndex, minTileX, minTileY, maxTileX, maxTileY, layout, includeTileData, includeListData, maxLightsPerTile);
                 return;
             }
 
@@ -328,24 +366,34 @@ namespace Burt.RenderPipeline
                         continue;
                     }
 
-                    AddLightToTile(lightIndex, tileX, tileY, layout, includeListData, maxLightsPerTile);
+                    AddLightToTile(lightIndex, tileX, tileY, layout, includeTileData, includeListData, maxLightsPerTile);
                 }
             }
         }
 
-        private void AddLightToTileRect(int lightIndex, int minTileX, int minTileY, int maxTileX, int maxTileY, BurtTileLightLayout layout, bool includeListData, int maxLightsPerTile)
+        private void AddLightToTileRect(int lightIndex, int minTileX, int minTileY, int maxTileX, int maxTileY, BurtTileLightLayout layout, bool includeTileData, bool includeListData, int maxLightsPerTile)
         {
+            if (!includeTileData)
+            {
+                return;
+            }
+
             for (var tileY = minTileY; tileY <= maxTileY; tileY++)
             {
                 for (var tileX = minTileX; tileX <= maxTileX; tileX++)
                 {
-                    AddLightToTile(lightIndex, tileX, tileY, layout, includeListData, maxLightsPerTile);
+                    AddLightToTile(lightIndex, tileX, tileY, layout, includeTileData, includeListData, maxLightsPerTile);
                 }
             }
         }
 
-        private void AddLightToTile(int lightIndex, int tileX, int tileY, BurtTileLightLayout layout, bool includeListData, int maxLightsPerTile)
+        private void AddLightToTile(int lightIndex, int tileX, int tileY, BurtTileLightLayout layout, bool includeTileData, bool includeListData, int maxLightsPerTile)
         {
+            if (!includeTileData)
+            {
+                return;
+            }
+
             var tileIndex = tileY * layout.TileCountX + tileX;
             var currentCount = tileLightCountData[tileIndex];
             if (includeListData && currentCount < (uint)maxLightsPerTile)
@@ -495,13 +543,18 @@ namespace Burt.RenderPipeline
             clusterLightCountData[clusterIndex] = currentCount + 1u;
         }
 
-        private BurtTileLightStats FinalizeTileMetadata(BurtTileLightLayout layout, bool includeListData, int maxLightsPerTile)
+        private BurtTileLightStats FinalizeTileMetadata(BurtTileLightLayout layout, bool includeTileData, bool includeListData, int maxLightsPerTile)
         {
             var minCount = int.MaxValue;
             var maxCount = 0;
             var sumCount = 0L;
             var overflowTileCount = 0;
             var maxOverflowExtraCount = 0;
+
+            if (!includeTileData || tileLightCountData == null)
+            {
+                return new BurtTileLightStats(0, 0, 0f, 0, 0);
+            }
 
             for (var tileIndex = 0; tileIndex < layout.TileCount; tileIndex++)
             {
@@ -543,9 +596,11 @@ namespace Burt.RenderPipeline
             var sumCount = 0L;
             var overflowClusterCount = 0;
             var maxOverflowExtraCount = 0;
+            var packedWriteOffset = 0;
 
             if (!includeClusterData || clusterLightCountData == null)
             {
+                clusterLightListUploadCount = 0;
                 return new BurtTileLightStats(0, 0, 0f, 0, 0);
             }
 
@@ -553,11 +608,22 @@ namespace Burt.RenderPipeline
             {
                 var rawCount = (int)clusterLightCountData[clusterIndex];
                 var clampedCount = Mathf.Min(rawCount, maxLightsPerCluster);
+                var sourceOffset = clusterIndex * maxLightsPerCluster;
                 clusterLightOffsetData[clusterIndex] = new BurtTileLightOffsetRange
                 {
-                    Offset = (uint)(clusterIndex * maxLightsPerCluster),
+                    Offset = (uint)packedWriteOffset,
                     Count = (uint)clampedCount
                 };
+
+                if (clampedCount > 0)
+                {
+                    if (sourceOffset != packedWriteOffset)
+                    {
+                        Array.Copy(clusterLightListData, sourceOffset, clusterLightListData, packedWriteOffset, clampedCount);
+                    }
+
+                    packedWriteOffset += clampedCount;
+                }
 
                 if (rawCount > maxLightsPerCluster)
                 {
@@ -570,6 +636,7 @@ namespace Burt.RenderPipeline
                 sumCount += rawCount;
             }
 
+            clusterLightListUploadCount = Mathf.Max(1, packedWriteOffset);
             var averageCount = layout.ClusterCount > 0 ? (float)sumCount / layout.ClusterCount : 0f;
             return new BurtTileLightStats(minCount == int.MaxValue ? 0 : minCount, maxCount, averageCount, overflowClusterCount, maxOverflowExtraCount);
         }
@@ -579,9 +646,15 @@ namespace Burt.RenderPipeline
             BurtRenderBufferHandle listBuffer,
             BurtRenderBufferHandle offsetBuffer,
             BurtTileLightLayout layout,
+            bool includeTileData,
             bool includeListData,
             int maxLightsPerTile)
         {
+            if (!includeTileData)
+            {
+                return false;
+            }
+
             var countUploaded = countBuffer.IsValid && countBuffer.HasBuffer;
 
             if (countUploaded)
@@ -633,7 +706,15 @@ namespace Burt.RenderPipeline
 
             if (listUploaded)
             {
-                listBuffer.Buffer.SetData(clusterLightListData, 0, 0, layout.ClusterCount * maxLightsPerCluster);
+                var listUploadCount = Mathf.Min(clusterLightListUploadCount, clusterLightListData != null ? clusterLightListData.Length : 0);
+                if (listUploadCount > 0)
+                {
+                    listBuffer.Buffer.SetData(clusterLightListData, 0, 0, listUploadCount);
+                }
+                else
+                {
+                    listUploaded = false;
+                }
             }
 
             if (offsetUploaded)
@@ -652,6 +733,7 @@ namespace Burt.RenderPipeline
             BurtTileLightLayout layout,
             BurtTileLightStats stats,
             bool uploaded,
+            bool includeTileData,
             bool includeListData,
             int maxLightsPerTile)
         {
@@ -661,10 +743,12 @@ namespace Burt.RenderPipeline
                 ? context.Request.LightingData.AdditionalLightCount
                 : 0;
             cmd.SetGlobalFloat(BurtTiledLightData.TileLightCountBufferEnabledId, tileListUsable ? 1f : 0f);
-            cmd.SetGlobalVector(BurtTiledLightData.TileLightGridParamsId, new Vector4(layout.TileCountX, layout.TileCountY, layout.TileSize, maxLightsPerTile));
+            cmd.SetGlobalVector(
+                BurtTiledLightData.TileLightGridParamsId,
+                includeTileData ? new Vector4(layout.TileCountX, layout.TileCountY, layout.TileSize, maxLightsPerTile) : Vector4.zero);
             cmd.SetGlobalVector(BurtTiledLightData.TileLightDebugStatsId, new Vector4(stats.MinCount, stats.MaxCount, stats.AverageCount, additionalLightCount));
 
-            if (countBuffer.IsValid && countBuffer.HasBuffer)
+            if (includeTileData && countBuffer.IsValid && countBuffer.HasBuffer)
             {
                 cmd.SetGlobalBuffer(BurtTiledLightData.TileLightCountBufferId, countBuffer.Buffer);
             }
@@ -1884,8 +1968,9 @@ namespace Burt.RenderPipeline
         {
             var counts = lightingData.ClusterLightDebugCountSnapshot;
             var validCount = Mathf.Min(lightingData.ClusterLightDebugCountSnapshotLength, lightingData.ClusterLightClusterCount);
-            var tileCountX = lightingData.TileLightGridX > 0 ? lightingData.TileLightGridX : BurtTiledLightData.CalculateLayout(camera).TileCountX;
-            var tileCountY = lightingData.TileLightGridY > 0 ? lightingData.TileLightGridY : BurtTiledLightData.CalculateLayout(camera).TileCountY;
+            var fallbackLayout = BurtTiledLightData.CalculateLayout(camera);
+            var tileCountX = lightingData.ClusterLightGridX > 0 ? lightingData.ClusterLightGridX : fallbackLayout.TileCountX;
+            var tileCountY = lightingData.ClusterLightGridY > 0 ? lightingData.ClusterLightGridY : fallbackLayout.TileCountY;
             var depthSliceCount = lightingData.ClusterLightDepthSliceCount > 0 ? lightingData.ClusterLightDepthSliceCount : BurtTiledLightData.ClusterDepthSliceCount;
             var tileCount = tileCountX * tileCountY;
             if (counts == null || validCount <= 0 || tileCountX <= 0 || tileCountY <= 0 || depthSliceCount <= 0 || tileCount <= 0)

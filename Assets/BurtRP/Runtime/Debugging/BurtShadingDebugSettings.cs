@@ -30,6 +30,10 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         SpecularAARoughnessDelta = 122, // 材质调试：显示 Specular AA 额外增加的感知粗糙度。
         IndirectSpecularDFG = 123, // 材质调试：显示间接高光使用的 PreIntegratedFG DFG.xy。
         IndirectSpecularEnvBRDF = 124, // 材质调试：显示 F0/F90 套用 DFG 后的环境 BRDF。
+        SubsurfaceProfileId = 125, // Material debug: resolved Subsurface profile slot.
+        SubsurfaceTransmission = 126, // Material debug: profile-driven Subsurface transmission color.
+        SubsurfaceKernelWeight = 127, // Material debug: profile-driven Subsurface kernel center weight.
+        SubsurfaceIndirect = 128, // Material debug: SH / ambient Subsurface contribution.
         GBufferBaseColor = 130, // GBuffer 调试：显示按 BurtGBuffer 约定编码再解码后的 BaseColor。
         GBufferNormalWS = 131, // GBuffer 调试：显示按 octahedron 编码再解码后的世界空间向量槽。
         GBufferMetallic = 132, // GBuffer 调试：显示 GBuffer 材质通道；Default Lit=metallic，Hair=scatter。
@@ -48,6 +52,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         GBufferAnisotropy = 145, // GBuffer debug: signed anisotropy stored in GBuffer4.b.
         GBufferTangentWS = 146, // GBuffer debug: base tangent stored in GBuffer4.rg as octahedral direction.
         GBufferSubsurfaceThickness = 147, // GBuffer debug: Subsurface thickness stored in GBuffer4.a.
+        GBufferSubsurfaceProfileIndex = 148, // GBuffer debug: Subsurface profile index packed with thickness in GBuffer4.a.
         DetailLighting = 200, // 光照调试：参考 XRender Detail Lighting，用 0.18 中灰 BaseColor 重新计算光照，方便只看明暗细节。
         IndirectLighting = 201, // 光照调试：只显示 PBR 间接光，方便检查 SH 漫反射和 Reflection Probe 镜面反射。
         DirectDiffuse = 202, // 光照调试：只显示直接漫反射，方便检查 NdotL、阴影和 1/PI。
@@ -174,6 +179,16 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         AtmosphereHorizon = 405, // Atmosphere debug: horizon blend weight used by the sky pass.
         AtmosphereGroundBlend = 406, // Atmosphere debug: below-horizon ground contribution blend.
         AtmosphereViewDirection = 407, // Atmosphere debug: reconstructed sky view direction encoded as RGB.
+        ScreenSpaceSubsurfaceSetup = 408, // 5S debug: setup mask, strength, and profile slice.
+        ScreenSpaceSubsurfaceTileMask = 409, // 5S debug: low-resolution tile activity mask.
+        ScreenSpaceSubsurfaceBlur = 410, // 5S debug: blurred Subsurface color before combine.
+        ScreenSpaceSubsurfaceCombine = 411, // 5S debug: combined color before copying to CameraColor.
+        ScreenSpaceSubsurfaceThickness = 412, // 5S debug: decoded thickness from setup / GBuffer data.
+        ScreenSpaceSubsurfaceProfileIndex = 413, // 5S debug: resolved subsurface profile slot.
+        ScreenSpaceSubsurfaceTransmission = 414, // 5S debug: profile transmission contribution.
+        ScreenSpaceSubsurfaceDiffuse = 415, // 5S debug: diffuse lighting source used by the blur.
+        ScreenSpaceSubsurfaceSpecular = 416, // 5S debug: non-diffuse source preserved by the combine.
+        ScreenSpaceSubsurfaceStability = 417, // 5S debug: depth/normal stability gate used by the blur.
         FogAmount = 394, // Fog debug: final screen-space fog opacity.
         FogTransmittance = 395, // Fog debug: screen-space fog transmittance after height and distance gates.
         FogHeight = 396, // Fog debug: reconstructed world height relative to the fog height plane.

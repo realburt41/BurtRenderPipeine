@@ -371,6 +371,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName);
         }
 
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceSetup()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceSetup()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceTile()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceTile()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName);
+        }
+
         public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceTemp()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName);
@@ -389,6 +409,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceBlur()
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceCombine()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceCombine()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName);
         }
 
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。

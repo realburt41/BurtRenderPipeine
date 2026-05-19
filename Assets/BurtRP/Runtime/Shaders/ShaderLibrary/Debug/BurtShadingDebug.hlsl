@@ -10,6 +10,7 @@
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl" // 引入 BurtSafeNormalize，用来安全归一化世界空间法线。
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl" // 引入 BurtSurfaceData，让调试函数可以读取基础色、光滑度、金属度和环境遮蔽。
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelMacros.hlsl"
 
 float _BurtShadingDebugMode; // 保存 C# 侧 BurtShadingDebugSettings 上传的当前调试模式编号。
 float _BurtShadingDebugEnabled; // 保存 C# 侧上传的调试开关，0 表示关闭，1 表示开启。
@@ -38,6 +39,10 @@ static const float BURT_SHADING_DEBUG_MODE_SPECULAR_AA_NORMAL_VARIANCE = 121.0f;
 static const float BURT_SHADING_DEBUG_MODE_SPECULAR_AA_ROUGHNESS_DELTA = 122.0f; // 对应 C# BurtShadingDebugMode.SpecularAARoughnessDelta，用来显示 Specular AA 增加的 roughness。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_DFG = 123.0f; // 对应 C# BurtShadingDebugMode.IndirectSpecularDFG，用来显示间接高光 DFG.xy。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR_ENV_BRDF = 124.0f; // 对应 C# BurtShadingDebugMode.IndirectSpecularEnvBRDF，用来显示 DFG 应用到 F0/F90 后的环境 BRDF。
+static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_PROFILE_ID = 125.0f;
+static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION = 126.0f;
+static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_KERNEL_WEIGHT = 127.0f;
+static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_INDIRECT = 128.0f;
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_BASE_COLOR = 130.0f; // 对应 C# BurtShadingDebugMode.GBufferBaseColor，用来显示 GBuffer 解码 BaseColor。
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_NORMAL_WS = 131.0f; // 对应 C# BurtShadingDebugMode.GBufferNormalWS，用来显示 GBuffer 解码向量槽。
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_METALLIC = 132.0f; // 对应 C# BurtShadingDebugMode.GBufferMetallic，用来显示 GBuffer 解码材质通道。
@@ -53,6 +58,7 @@ static const float BURT_SHADING_DEBUG_MODE_GBUFFER_CLEAR_COAT_ROUGHNESS = 144.0f
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_ANISOTROPY = 145.0f;
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_TANGENT_WS = 146.0f;
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_SUBSURFACE_THICKNESS = 147.0f;
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_SUBSURFACE_PROFILE_INDEX = 148.0f;
 static const float BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING = 200.0f; // 对应 C# BurtShadingDebugMode.DetailLighting，用 0.18 中灰 BaseColor 显示光照细节。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_LIGHTING = 201.0f; // 对应 C# BurtShadingDebugMode.IndirectLighting，用来显示 PBR 间接光。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE = 202.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuse，用来显示直接漫反射。
@@ -83,6 +89,7 @@ static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_FACE = 228.0f;
 static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_UV = 229.0f;
 static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH = 230.0f;
 static const float BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH_DELTA = 231.0f;
+static const float BURT_SHADING_DEBUG_SUBSURFACE_PROFILE_SLOT_COUNT = 8.0f;
 
 // 保存片元已经算好的调试数据，避免 Debug View 重新计算一套和正常渲染不一致的光照。
 struct BurtShadingDebugData
@@ -237,6 +244,8 @@ struct BurtShadingDebugData
 
     float gbufferSubsurfaceThickness;
 
+    float gbufferSubsurfaceProfileIndex;
+
     float gbufferAnisotropy;
 
     float3 gbufferTangentWS;
@@ -255,6 +264,14 @@ struct BurtShadingDebugData
 
     // 保存从 GBuffer 转成 PBRMaterialData 后的 DiffuseColor。
     float3 gbufferDiffuseColor;
+
+    float subsurfaceProfileIndex;
+
+    float3 subsurfaceTransmission;
+
+    float3 subsurfaceKernelWeight;
+
+    float3 subsurfaceIndirect;
 
 };
 
@@ -276,7 +293,7 @@ float3 BurtEncodeNormalWSForDebug(float3 normalWS) // 把世界空间法线编�
 
 BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为不走完整 PBR 路径的 shader 生成一份可安全覆盖的调试数据默认值。
 {
-    BurtShadingDebugData data;
+    BurtShadingDebugData data = (BurtShadingDebugData)0;
     float3 safeNormalWS = BurtSafeNormalize(normalWS);
 
     data.normalWS = safeNormalWS;
@@ -333,6 +350,7 @@ BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为�
     data.gbufferClearCoatRoughness = 0.0f;
     data.gbufferSubsurfaceStrength = 0.0f;
     data.gbufferSubsurfaceThickness = 0.0f;
+    data.gbufferSubsurfaceProfileIndex = 0.0f;
     data.gbufferAnisotropy = 0.0f;
     data.gbufferTangentWS = BurtSafeNormalize(abs(safeNormalWS.y) < 0.999f ? cross(float3(0.0f, 1.0f, 0.0f), safeNormalWS) : cross(float3(1.0f, 0.0f, 0.0f), safeNormalWS));
     data.gbufferSmoothness = 0.5f;
@@ -340,6 +358,10 @@ BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为�
     data.gbufferReflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
     data.gbufferRoughness = 0.5f;
     data.gbufferDiffuseColor = float3(0.0f, 0.0f, 0.0f);
+    data.subsurfaceProfileIndex = 0.0f;
+    data.subsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
+    data.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
+    data.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     return data;
 }
 
@@ -569,6 +591,31 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_PROFILE_ID))
+    {
+        float visibleProfileIndex = saturate(data.subsurfaceProfileIndex / max(BURT_SHADING_DEBUG_SUBSURFACE_PROFILE_SLOT_COUNT - 1.0f, 1.0f));
+        debugColor = float3(visibleProfileIndex, visibleProfileIndex, visibleProfileIndex);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION))
+    {
+        debugColor = saturate(data.subsurfaceTransmission);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_KERNEL_WEIGHT))
+    {
+        debugColor = saturate(data.subsurfaceKernelWeight * 4.0f);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_INDIRECT))
+    {
+        debugColor = max(data.subsurfaceIndirect, float3(0.0f, 0.0f, 0.0f));
+        return true;
+    }
+
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_BASE_COLOR)) // GBufferBaseColor 模式显示编码再解码后的 BaseColor。
     {
         debugColor = saturate(data.gbufferBaseColor); // 观察 GBuffer0.rgb 是否能还原材质基础色。
@@ -614,6 +661,13 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_SUBSURFACE_THICKNESS))
     {
         debugColor = float3(data.gbufferSubsurfaceThickness, data.gbufferSubsurfaceThickness, data.gbufferSubsurfaceThickness);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_SUBSURFACE_PROFILE_INDEX))
+    {
+        float visibleProfileIndex = saturate(data.gbufferSubsurfaceProfileIndex / max(BURT_SHADING_DEBUG_SUBSURFACE_PROFILE_SLOT_COUNT - 1.0f, 1.0f));
+        debugColor = float3(visibleProfileIndex, visibleProfileIndex, visibleProfileIndex);
         return true;
     }
 
@@ -710,8 +764,14 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_HAIR_ADDITIONAL_LIGHTING)) // HairAdditionalLighting 模式只显示 Hair 追加光。
     {
+#if BURT_ACTIVE_HAIR_SHADING_MODEL
+        debugColor = max(data.additionalDiffuseColor + data.additionalSpecularColor, float3(0.0f, 0.0f, 0.0f));
+#elif BURT_ENABLE_HAIR_SHADING
         float3 hairAdditionalLighting = max(data.additionalDiffuseColor + data.additionalSpecularColor, float3(0.0f, 0.0f, 0.0f));
-        debugColor = BurtIsHairShadingModel(surfaceData.shadingModelID) ? hairAdditionalLighting : float3(0.0f, 0.0f, 0.0f);
+        debugColor = BurtIsActiveHairShadingModel(surfaceData.shadingModelID) ? hairAdditionalLighting : float3(0.0f, 0.0f, 0.0f);
+#else
+        debugColor = float3(0.0f, 0.0f, 0.0f);
+#endif
         return true;
     }
 
@@ -821,5 +881,4 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
 }
 
 #endif // BURT_ENABLE_SHADING_DEBUG
-
 #endif // BURT_SHADING_DEBUG_INCLUDED // 结束 BurtShadingDebug.hlsl 的 include guard。

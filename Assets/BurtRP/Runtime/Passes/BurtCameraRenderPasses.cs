@@ -2220,6 +2220,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var tileResolution = hasMainLightShadow ? cascadeCache.TileResolution : 0;
 
             var cmd = CommandBufferPool.Get(Name);
+            BurtPreExposureUtility.UploadGlobals(cmd, BurtPreExposureUtility.ResolveForFrame(request, asset));
             cmd.SetGlobalVector(MainLightDirectionId, new Vector4(mainLightDirection.x, mainLightDirection.y, mainLightDirection.z, 0f));
             cmd.SetGlobalColor(MainLightColorId, mainLightColor);
             cmd.SetGlobalColor(AmbientLightColorId, ambientLightColor);
@@ -2229,7 +2230,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             cmd.SetGlobalVectorArray(AdditionalLightDirectionAndSpotId, lightingData.AdditionalLightDirectionAndSpot);
             cmd.SetGlobalVectorArray(AdditionalLightSpotParamsId, lightingData.AdditionalLightSpotParams);
             UploadAdditionalLightBuffer(cmd, context, lightingData);
-            BurtIndirectLightingUtility.UploadGlobalIndirectLighting(cmd, request != null ? request.Camera : null);
+            BurtIndirectLightingUtility.UploadGlobalIndirectLighting(cmd, request);
 
             if (hasMainLightShadow)
             {

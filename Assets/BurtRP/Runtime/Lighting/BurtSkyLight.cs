@@ -23,17 +23,17 @@ namespace Burt.RenderPipeline
     [AddComponentMenu("Rendering/Burt Sky Light")]
     public sealed class BurtSkyLight : MonoBehaviour
     {
-        [Tooltip("RenderSettings keeps the current ambient/reflection path, SpecifiedCubemap overrides specular, ConstantColor only drives diffuse fallback, CapturedScene is reserved.")]
+        [Tooltip("RenderSettings keeps the current ambient/reflection path, SpecifiedCubemap explicitly overrides sky diffuse/specular with the assigned cubemap, ConstantColor only drives diffuse fallback, CapturedScene is reserved.")]
         public BurtSkyLightSourceType sourceType = BurtSkyLightSourceType.RenderSettings;
         [Tooltip("Global multiplier applied to both diffuse and specular SkyLight outputs.")]
         [Min(0f)] public float intensity = 1f;
-        [Tooltip("Multiplier for ambient SH / simple ambient color. In SpecifiedCubemap mode diffuse still uses RenderSettings.ambientProbe.")]
+        [Tooltip("Multiplier for ambient SH / diffuse cubemap output.")]
         [Min(0f)] public float diffuseIntensity = 1f;
         [Tooltip("Multiplier for the sky/specular cubemap. ConstantColor disables specular in this first version.")]
         [Min(0f)] public float specularIntensity = 1f;
         [Tooltip("Non-negative color tint applied to diffuse and specular SkyLight output.")]
         public Color tint = Color.white;
-        [Tooltip("Used only by SpecifiedCubemap source. The cubemap must already contain suitable mip/prefilter data; BurtRP will not convolve it at runtime.")]
+        [Tooltip("Used only by SpecifiedCubemap source. BurtRP builds runtime diffuse irradiance and specular LD prefilter data from this cubemap.")]
         public Cubemap cubemap;
         [Tooltip("Yaw rotation in degrees for SpecifiedCubemap sampling, matching XRender's source cubemap angle.")]
         [Range(0f, 360f)] public float cubemapAngle;

@@ -304,6 +304,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" SSRShaderStatus=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderStatusLabel());
 
             builder.Append(" SSRTraceMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionTraceModeLabel(request, asset));
+            builder.Append(" SSRComposite=ManualCameraColorLerp");
+            builder.Append(" SSRFallback=CameraIBLPreserved");
+            builder.Append(" SSRApply=XRenderPureReflectMip0Alpha");
+            builder.Append(" SSRClearCoat=DualLayerTrace");
             builder.Append(" SSRHiZTraceExperimental=").Append(ssrSettings.ExperimentalHiZTrace);
 
             builder.Append(" SSRHiZDiagnostics=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionHiZDiagnosticsStatusLabel());
@@ -344,7 +348,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.AppendLine();
 
-            BurtIndirectLightingUtility.AppendDebugState(builder, request != null ? request.Camera : null); // 写入 BurtRP 全局间接光数据源状态，方便确认 Deferred 不再依赖 Forward DrawRenderers 副作用。
+            AppendPreIntegratedFGDebugState(builder, asset);
+            BurtIndirectLightingUtility.AppendDebugState(builder, request); // 写入 BurtRP 全局间接光数据源状态，方便确认 Deferred 不再依赖 Forward DrawRenderers 副作用。
+            BurtIndirectLightingUtility.AppendXRenderComparisonReport(builder, request, asset);
+        }
+
+        private static void AppendPreIntegratedFGDebugState(StringBuilder builder, BurtRenderPipelineAsset asset)
+        {
+            var lut = asset != null ? asset.PreintegratedFGLut : null;
+            builder.Append("  PreIntegratedFG=").Append(lut != null);
+            builder.Append(" PreIntegratedFGName=").Append(lut != null ? FormatTextureName(lut) : "<none>");
+            builder.Append(" PreIntegratedFGSize=").Append(lut != null ? lut.width + "x" + lut.height : "<none>");
+            builder.Append(" PreIntegratedFGFormat=").Append(lut != null ? lut.format.ToString() : "<none>");
+            builder.Append(" PreIntegratedFGGraphicsFormat=").Append(lut != null ? lut.graphicsFormat.ToString() : "<none>");
+            builder.Append(" PreIntegratedFGMipCount=").Append(lut != null ? lut.mipmapCount : 0);
+            builder.Append(" PreIntegratedFGReadable=").Append(lut != null && lut.isReadable);
+            builder.Append(" PreIntegratedFGParity=").Append(lut != null ? BurtImageBasedFilterUtility.PreIntegratedFGParity : "FallbackApprox");
+            builder.Append(" PreIntegratedFGValidation=").Append(BurtImageBasedFilterUtility.ValidatePreIntegratedFGLut(lut));
+            builder.AppendLine();
         }
 
         private static void AppendTileLightDebugPipelineState(StringBuilder builder, BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions)
@@ -578,6 +599,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append("  ClusterLightUploadedThisFrame=").Append(clusterUploaded);
             builder.Append(" ClusterLightReleasedBeforeDump=").Append(clusterReleasedBeforeDump);
+            builder.Append(" ClusterTileSize=").Append(lightingData != null ? lightingData.ClusterLightTileSize : BurtTiledLightData.TileSize);
+            builder.Append(" ClusterGrid=").Append(lightingData != null ? lightingData.ClusterLightGridX : 0).Append("x").Append(lightingData != null ? lightingData.ClusterLightGridY : 0);
             builder.Append(" ClusterDepthSlices=").Append(lightingData != null ? lightingData.ClusterLightDepthSliceCount : 0);
             builder.Append(" ClusterCount=").Append(lightingData != null ? lightingData.ClusterLightClusterCount : 0);
             builder.Append(" MaxLightsPerCluster=").Append(lightingData != null ? lightingData.ClusterLightMaxLightsPerCluster : BurtTiledLightData.MaxLightsPerCluster);
@@ -1162,6 +1185,31 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 + ")";
         }
 
+        private static string FormatSubsurfaceProfiles(BurtSubsurfaceProfilePalette palette)
+        {
+            var count = Mathf.Clamp(palette.Count, 1, BurtSubsurfaceProfilePalette.MaxProfiles);
+            var builder = new StringBuilder();
+            for (var i = 0; i < BurtSubsurfaceProfilePalette.MaxProfiles; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(",");
+                }
+
+                builder.Append(i).Append(":");
+                if (i < count)
+                {
+                    builder.Append(palette.GetName(i));
+                }
+                else
+                {
+                    builder.Append("<fallback:").Append(palette.GetName(0)).Append(">");
+                }
+            }
+
+            return builder.ToString();
+        }
+
         private static string FormatAdditionalLightShadowFirstSliceMatrixHash(BurtLightingData lightingData, Vector4 lightParams)
         {
             if (lightingData == null)
@@ -1357,6 +1405,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var exposureSettings = BurtPostProcessUtility.ResolvePhysicalExposureSettings(request, asset);
             var postExposureMultiplier = exposureSettings.Multiplier; // 解析当前 Volume 中 Tonemapping 前曝光倍率。
+            var preExposureState = BurtPreExposureUtility.ResolveForFrame(request, asset);
+            var residualPostExposureMultiplier = BurtPreExposureUtility.ResolveResidualPostExposure(exposureSettings, preExposureState);
 
             var useColorAdjustments = BurtPostProcessUtility.ShouldUseColorAdjustments(request, asset); // 判断当前 Volume 是否启用基础颜色调整。
 
@@ -1375,9 +1425,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var bloomMipPixels = BurtPostProcessUtility.CalculateBloomMipPixelCount(request != null ? request.Camera : null, bloomMipCount);
             var bloomStages = BurtPostProcessUtility.FormatBloomStageDiagnostics(request != null ? request.Camera : null, bloomSettings, bloomMipCount);
             var bloomDebugTarget = BurtPostProcessUtility.FormatBloomDebugTarget(request != null ? request.Camera : null, bloomDebugView, bloomMipCount);
-            var bloomPrefilterPostExposure = BurtPostProcessUtility.ResolveBloomPrefilterPostExposure(postExposureMultiplier);
+            var bloomPrefilterPostExposure = BurtPostProcessUtility.ResolveBloomPrefilterPostExposure(residualPostExposureMultiplier);
             var bloomPrefilterKnee = BurtPostProcessUtility.ResolveBloomPrefilterKnee(bloomSettings);
-            var bloomPrefilterSourceThreshold = BurtPostProcessUtility.FormatBloomPrefilterSourceThreshold(bloomSettings, postExposureMultiplier);
+            var bloomPrefilterSourceThreshold = BurtPostProcessUtility.FormatBloomPrefilterSourceThreshold(bloomSettings, residualPostExposureMultiplier);
             var bloomPrefilterBypassThreshold = BurtPostProcessUtility.ShouldBypassBloomPrefilterThreshold(bloomSettings);
 
             var temporalAA = request != null ? request.TemporalAA : null;
@@ -1409,6 +1459,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" ExposureCompensationEV=").Append(exposureSettings.Compensation.ToString("0.###"));
 
             builder.Append(" PostExposureMul=").Append(postExposureMultiplier.ToString("0.###")); // 写入 EV 转换后的线性曝光倍率。
+            builder.Append(" PreExposure=").Append(preExposureState.PreExposure.ToString("0.###"));
+            builder.Append(" InvPreExposure=").Append(preExposureState.InvPreExposure.ToString("0.###"));
+            builder.Append(" ResidualPostExposure=").Append(residualPostExposureMultiplier.ToString("0.###"));
+            builder.Append(" PreExposureEnabled=").Append(preExposureState.Enabled);
+            builder.Append(" PreExposureTAAInvalidationEV=").Append(BurtPreExposureUtility.TemporalAAInvalidationEVThreshold.ToString("0.###"));
 
             builder.Append(" AutoAvgLuma=").Append(exposureSettings.AutoAverageLuminance.ToString("0.###"));
             builder.Append(" AutoAvgLogLum=").Append(exposureSettings.AutoAverageLogLuminance.ToString("0.###"));
@@ -1559,8 +1614,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" SSRTemporalColorRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName));
 
             builder.Append(" SSSSourceRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName));
+            builder.Append(" SSSSetupRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName));
+            builder.Append(" SSSTileRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName));
             builder.Append(" SSSTempRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName));
             builder.Append(" SSSBlurRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName));
+            builder.Append(" SSSCombineRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName));
 
             if (isDeferred)
             {
@@ -1582,14 +1640,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" HiZDebugMip=").Append(asset != null ? asset.HiZDebugMip.ToString() : "<none>");
                 builder.Append(" SSSEnabled=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSPassExpected=").Append(screenSpaceSubsurfaceEnabled);
-                builder.Append(" SSSKernel=ScreenSpaceSeparable25TapBurleyApprox");
+                builder.Append(" SSSPath=").Append(screenSpaceSubsurfaceEnabled ? "SetupTileSeparableCombine" : "Disabled");
+                builder.Append(" SSSKernel=ProfileLut66Separable25TapBurleyApprox");
+                builder.Append(" SSSProfileLut=").Append(screenSpaceSubsurfaceEnabled ? "Enabled" : "Disabled");
+                builder.Append(" SSSSetupPassExpected=").Append(screenSpaceSubsurfaceEnabled);
+                builder.Append(" SSSTilePassExpected=").Append(screenSpaceSubsurfaceEnabled);
+                builder.Append(" SSSCombinePassExpected=").Append(screenSpaceSubsurfaceEnabled);
+                builder.Append(" SSSIndirect=").Append(screenSpaceSubsurfaceEnabled ? "ProfileSHWrapped" : "Disabled");
+                builder.Append(" SSSDebugMode=").Append(BurtScreenSpaceSubsurfacePassUtility.IsScreenSpaceSubsurfaceDebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
+                builder.Append(" SSSDiffuseSpecularSplit=").Append(screenSpaceSubsurfaceEnabled);
+                builder.Append(" SSSDiffuseLuminanceSource=").Append(screenSpaceSubsurfaceEnabled ? "DeferredSubsurfaceAlpha" : "Disabled");
+                builder.Append(" SSSStencilGated=").Append(screenSpaceSubsurfaceEnabled);
                 if (asset != null)
                 {
                     var sssProfile = asset.ScreenSpaceSubsurfaceProfileSettings;
                     builder.Append(" SSSProfile=").Append(sssProfile.ProfileName);
                     builder.Append(" SSSUsesProfile=").Append(sssProfile.UsesProfile);
+                    var sssProfilePalette = asset.ScreenSpaceSubsurfaceProfilePalette;
+                    builder.Append(" SSSProfileCount=").Append(sssProfilePalette.Count);
+                    builder.Append(" SSSProfiles=").Append(FormatSubsurfaceProfiles(sssProfilePalette));
                     builder.Append(" SSSSurfaceAlbedo=").Append(FormatVector4(sssProfile.SurfaceAlbedoVector));
                     builder.Append(" SSSMeanFreePath=").Append(FormatVector4(sssProfile.MeanFreePathVector));
+                    builder.Append(" SSSDualSpecular=").Append(FormatVector4(sssProfile.DualSpecularVector));
                     builder.Append(" SSSTint=").Append(FormatVector4(sssProfile.TintVector));
                     builder.Append(" SSSBoundaryColorBleed=").Append(FormatVector4(sssProfile.BoundaryColorBleedVector));
                     builder.Append(" SSSRadiusPixels=").Append(FormatFloat(sssProfile.RadiusPixels));
@@ -1605,8 +1677,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 {
                     builder.Append(" SSSProfile=<none>");
                     builder.Append(" SSSUsesProfile=False");
+                    builder.Append(" SSSProfileCount=0");
+                    builder.Append(" SSSProfiles=<none>");
                     builder.Append(" SSSSurfaceAlbedo=<none>");
                     builder.Append(" SSSMeanFreePath=<none>");
+                    builder.Append(" SSSDualSpecular=<none>");
                     builder.Append(" SSSTint=<none>");
                     builder.Append(" SSSBoundaryColorBleed=<none>");
                     builder.Append(" SSSRadiusPixels=<none>");
@@ -1665,6 +1740,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());
                 builder.Append(" SSRShaderStatus=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderStatusLabel());
                 builder.Append(" SSRTraceMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionTraceModeLabel(request, asset));
+                builder.Append(" SSRComposite=ManualCameraColorLerp");
+                builder.Append(" SSRFallback=CameraIBLPreserved");
+                builder.Append(" SSRApply=XRenderPureReflectMip0Alpha");
+                builder.Append(" SSRClearCoat=DualLayerTrace");
                 builder.Append(" SSRHiZTraceExperimental=").Append(ssrSettings.ExperimentalHiZTrace);
                 builder.Append(" SSRHiZDiagnostics=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionHiZDiagnosticsStatusLabel());
                 builder.Append(" SSRMaxSteps=").Append(ssrSettings.MaxSteps);
@@ -1775,6 +1854,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             }
 
             return string.IsNullOrEmpty(renderTexture.name) ? "InstanceID " + renderTexture.GetInstanceID() : renderTexture.name; // 有名称时输出名称，没有名称时输出 InstanceID。
+        }
+
+        private static string FormatTextureName(Texture texture)
+        {
+            if (texture == null)
+            {
+                return "<none>";
+            }
+
+            return string.IsNullOrEmpty(texture.name) ? "InstanceID " + texture.GetInstanceID() : texture.name;
         }
 
         private static bool IsRegistered( // 判断资源表里是否注册了某个逻辑资源。

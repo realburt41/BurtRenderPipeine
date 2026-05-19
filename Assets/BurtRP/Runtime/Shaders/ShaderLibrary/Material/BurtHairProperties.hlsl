@@ -3,6 +3,7 @@
 #define BURT_HAIR_PROPERTIES_INCLUDED
 
 #include "UnityCG.cginc"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 
 CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;

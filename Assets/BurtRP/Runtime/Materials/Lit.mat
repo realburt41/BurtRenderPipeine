@@ -51,11 +51,11 @@ Material:
     - _DoubleSidedEnable: 0
     - _DoubleSidedNormalMode: 0
     - _DstBlend: 0
-    - _Metallic: 0.215
+    - _Metallic: 1
     - _NormalScale: 0
     - _OcclusionStrength: 1
     - _Reflectance: 0.5
-    - _Smoothness: 1
+    - _Smoothness: 0.804
     - _SrcBlend: 1
     - _Surface: 0
     - _ZTest: 4

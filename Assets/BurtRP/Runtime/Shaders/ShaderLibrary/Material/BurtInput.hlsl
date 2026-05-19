@@ -25,6 +25,8 @@ static const float BURT_SUBSURFACE_DEFAULT_POWER = 3.0f;
 static const float BURT_SUBSURFACE_DEFAULT_DISTORTION = 0.35f;
 static const float BURT_SUBSURFACE_DEFAULT_AMBIENT = 0.35f;
 static const float3 BURT_SUBSURFACE_DEFAULT_TINT = float3(1.0f, 0.45f, 0.32f);
+static const float BURT_SUBSURFACE_PROFILE_COUNT = 8.0f;
+static const float BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX = 0.0f;
 
 float BurtResolveSurfaceShadingModel(float shadingModelID)
 {
@@ -91,11 +93,18 @@ struct BurtSurfaceData
     float subsurfaceAmbient;
 
     float3 subsurfaceTint;
+
+    float subsurfaceProfileIndex;
 };
 
 float BurtClampSubsurfacePower(float power)
 {
     return clamp(power, BURT_SUBSURFACE_POWER_MIN, BURT_SUBSURFACE_POWER_MAX);
+}
+
+float BurtClampSubsurfaceProfileIndex(float profileIndex)
+{
+    return clamp(floor(profileIndex + 0.5f), 0.0f, BURT_SUBSURFACE_PROFILE_COUNT - 1.0f);
 }
 
 void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
@@ -106,6 +115,7 @@ void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
     surfaceData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
     surfaceData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
     surfaceData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
+    surfaceData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
 }
 
 // 保存片元级几何输入，后续高光、雾效、附加光等功能会继续扩展这个结构。
@@ -307,7 +317,8 @@ BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
     float subsurfacePower,
     float subsurfaceDistortion,
     float subsurfaceAmbient,
-    float3 subsurfaceTint)
+    float3 subsurfaceTint,
+    float subsurfaceProfileIndex)
 {
     surfaceData.subsurfaceStrength = saturate(subsurfaceStrength);
     surfaceData.subsurfaceThickness = saturate(subsurfaceThickness);
@@ -315,8 +326,29 @@ BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
     surfaceData.subsurfaceDistortion = saturate(subsurfaceDistortion);
     surfaceData.subsurfaceAmbient = saturate(subsurfaceAmbient);
     surfaceData.subsurfaceTint = max(subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+    surfaceData.subsurfaceProfileIndex = BurtClampSubsurfaceProfileIndex(subsurfaceProfileIndex);
     surfaceData.shadingModelID = BURT_SHADING_MODEL_SUBSURFACE;
     return surfaceData;
+}
+
+BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
+    BurtSurfaceData surfaceData,
+    float subsurfaceStrength,
+    float subsurfaceThickness,
+    float subsurfacePower,
+    float subsurfaceDistortion,
+    float subsurfaceAmbient,
+    float3 subsurfaceTint)
+{
+    return BurtApplySubsurfaceSurfaceSemantics(
+        surfaceData,
+        subsurfaceStrength,
+        subsurfaceThickness,
+        subsurfacePower,
+        subsurfaceDistortion,
+        subsurfaceAmbient,
+        subsurfaceTint,
+        BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX);
 }
 
 BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(BurtSurfaceData surfaceData, float subsurfaceStrength)

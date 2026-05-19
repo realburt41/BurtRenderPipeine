@@ -727,6 +727,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
         private static readonly int SSRTemporalColorTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorTextureId;
+        private static readonly int SSRCameraColorCopyTextureId = Shader.PropertyToID("_BurtSSRCameraColorCopyTexture");
         private static readonly int SSRSourceTexelSizeId = Shader.PropertyToID("_BurtSSRSourceTexelSize");
         private static readonly int SSRParams0Id = Shader.PropertyToID("_BurtSSRParams0");
         private static readonly int SSRParams1Id = Shader.PropertyToID("_BurtSSRParams1");
@@ -782,18 +783,23 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var descriptor = BurtScreenSpaceReflectionPassUtility.CreateScreenSpaceReflectionTemporalColorDescriptor(camera, settings);
-            var width = Mathf.Max(1, descriptor.width);
-            var height = Mathf.Max(1, descriptor.height);
-            var maxMip = Mathf.Max(0, descriptor.mipCount - 1);
+            var ssrDescriptor = BurtScreenSpaceReflectionPassUtility.CreateScreenSpaceReflectionTemporalColorDescriptor(camera, settings);
+            var width = Mathf.Max(1, ssrDescriptor.width);
+            var height = Mathf.Max(1, ssrDescriptor.height);
+            var maxMip = Mathf.Max(0, ssrDescriptor.mipCount - 1);
+            var cameraColorDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
             var cmd = CommandBufferPool.Get(Name);
+            cmd.GetTemporaryRT(SSRCameraColorCopyTextureId, cameraColorDescriptor, FilterMode.Bilinear);
+            cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(SSRCameraColorCopyTextureId));
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BindInputs(cmd, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, ssrTemporalColorTarget);
+            cmd.SetGlobalTexture(SSRCameraColorCopyTextureId, new RenderTargetIdentifier(SSRCameraColorCopyTextureId));
             UploadCameraGlobals(cmd, camera, width, height);
             UploadSettings(cmd, settings, maxMip);
             cmd.SetGlobalVector(SSRSourceTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
             cmd.DrawProcedural(Matrix4x4.identity, material, 2, MeshTopology.Triangles, 3, 1);
+            cmd.ReleaseTemporaryRT(SSRCameraColorCopyTextureId);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -2147,7 +2153,7 @@ namespace Burt.RenderPipeline
                 return "StableMip0+HiZStepSavedDebug";
             }
 
-            return hiZTrace ? "HiZExperimentalGuarded" : "StableMip0";
+            return (hiZTrace ? "HiZExperimentalGuarded" : "StableMip0") + "+XRenderManualCameraIBLFallback+PureReflectMipApply+DualLayerClearCoat";
         }
 
         public static bool IsScreenSpaceReflectionSuppressedByShadingDebug()

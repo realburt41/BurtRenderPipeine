@@ -43,6 +43,7 @@ Shader "BurtRP/UnlitColor"
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
             #define BURT_DEPTH_ONLY_ALPHA_CLIP 0
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
@@ -114,10 +115,13 @@ Shader "BurtRP/UnlitColor"
             // 声明片元 shader 函数名是 Frag。
             #pragma fragment Frag
             #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
 #if defined(BURT_SHADING_DEBUG)
+            #define BURT_FORWARD_SINGLE_SHADING_MODEL 1
+            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
@@ -208,7 +212,7 @@ Shader "BurtRP/UnlitColor"
 #endif
 
                 // 返回材质颜色，不做光照计算，所以这是一个最简单的 Unlit shader。
-                return _BaseColor;
+                return float4(BurtApplyPreExposure(_BaseColor.rgb), _BaseColor.a);
             }
 
             // 结束 HLSL shader 程序。
@@ -242,7 +246,10 @@ Shader "BurtRP/UnlitColor"
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 #if defined(BURT_SHADING_DEBUG)
+            #define BURT_FORWARD_SINGLE_SHADING_MODEL 1
+            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
@@ -333,7 +340,7 @@ Shader "BurtRP/UnlitColor"
 #endif
 
                 // 返回材质颜色，不做光照计算，所以它适合作为不能写 GBuffer 的 Unlit 兜底路径。
-                return _BaseColor;
+                return float4(BurtApplyPreExposure(_BaseColor.rgb), _BaseColor.a);
             }
 
             // 结束 HLSL shader 程序。

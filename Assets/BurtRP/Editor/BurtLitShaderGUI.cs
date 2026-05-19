@@ -1,3 +1,4 @@
+using Burt.RenderPipeline;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -20,6 +21,8 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent ClearCoatNormalMapLabel = new GUIContent("Clear Coat Normal Map");
         private static readonly GUIContent EmissionMapLabel = new GUIContent("Emission Map");
         private static readonly GUIContent ShadingModelLabel = new GUIContent("Shading Model");
+        private static readonly GUIContent SubsurfaceProfileLabel = new GUIContent("Subsurface Profile", "Drag a BurtSubsurfaceProfile asset here. The material stores the resolved profile slot for the shader.");
+        private static readonly GUIContent SubsurfaceProfileIndexLabel = new GUIContent("Subsurface Profile Index", "Runtime slot used by the shader. 0 is the default profile, 1-7 are the pipeline profile list.");
         private static readonly GUIContent DoubleSidedLabel = new GUIContent("Double Sided", "Render both front and back faces by switching culling off.");
         private static readonly GUIContent DoubleSidedNormalModeLabel = new GUIContent("Double Sided Normal Mode", "Back-face normal mode, matching XRender: None, Flip, or Mirror in tangent space.");
         private static readonly GUIContent SurfaceTypeLabel = new GUIContent("Surface Type");
@@ -31,6 +34,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent EnabledPassesLabel = new GUIContent("Enabled Passes");
         private static readonly string[] SurfaceTypeNames = { "Opaque", "Transparent" };
         private static readonly string[] DoubleSidedNormalModeNames = { "None", "Flip", "Mirror" };
+        private const string SubsurfaceProfileGuidTag = "BurtSubsurfaceProfileGuid";
         private static bool showSurfaceOptions = true;
         private static bool showBaseInputs = true;
         private static bool showPbrMaskInputs = true;
@@ -59,6 +63,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty subsurfacePower;
         private MaterialProperty subsurfaceDistortion;
         private MaterialProperty subsurfaceAmbient;
+        private MaterialProperty subsurfaceProfileIndex;
         private MaterialProperty subsurfaceTint;
         private MaterialProperty normalMap;
         private MaterialProperty normalScale;
@@ -127,6 +132,7 @@ namespace Burt.RenderPipeline.Editor
             subsurfacePower = Find("_SubsurfacePower");
             subsurfaceDistortion = Find("_SubsurfaceDistortion");
             subsurfaceAmbient = Find("_SubsurfaceAmbient");
+            subsurfaceProfileIndex = Find("_SubsurfaceProfileIndex");
             subsurfaceTint = Find("_SubsurfaceTint");
             normalMap = Find("_NormalMap");
             normalScale = Find("_NormalScale");
@@ -359,9 +365,153 @@ namespace Burt.RenderPipeline.Editor
             DrawProperty(subsurfacePower);
             DrawProperty(subsurfaceDistortion);
             DrawProperty(subsurfaceAmbient);
+            DrawSubsurfaceProfilePicker();
             DrawProperty(subsurfaceTint);
-            EditorGUILayout.HelpBox("Subsurface writes shading model 3, stores strength in GBuffer1.b, tint/power/ambient in GBuffer3, and thickness/distortion in GBuffer4 for the PC skin lobe.", MessageType.None);
+            EditorGUILayout.HelpBox("Materials pick a BurtSubsurfaceProfile asset. BurtRP resolves it to the pipeline profile slots used by deferred SSS and profile-driven skin specular.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
+        }
+
+        private void DrawSubsurfaceProfilePicker()
+        {
+            if (subsurfaceProfileIndex == null)
+            {
+                return;
+            }
+
+            var pipelineAsset = GetActiveBurtAsset();
+            if (pipelineAsset == null)
+            {
+                materialEditor.ShaderProperty(subsurfaceProfileIndex, SubsurfaceProfileIndexLabel);
+                EditorGUILayout.HelpBox("No active BurtRenderPipelineAsset was found, so the material shows the raw profile slot.", MessageType.None);
+                return;
+            }
+
+            var currentIndex = Mathf.Clamp(Mathf.RoundToInt(subsurfaceProfileIndex.floatValue), 0, BurtSubsurfaceProfilePalette.MaxProfiles - 1);
+            var material = materialEditor.target as Material;
+            var currentProfile = subsurfaceProfileIndex.hasMixedValue ? null : ResolveMaterialSubsurfaceProfile(material, pipelineAsset, currentIndex);
+            var profileCanResolve = SyncMaterialSubsurfaceProfileSlot(material, pipelineAsset, currentProfile);
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUI.showMixedValue = subsurfaceProfileIndex.hasMixedValue;
+            var selectedProfile = (BurtSubsurfaceProfile)EditorGUILayout.ObjectField(SubsurfaceProfileLabel, currentProfile, typeof(BurtSubsurfaceProfile), false);
+            EditorGUI.showMixedValue = false;
+            if (EditorGUI.EndChangeCheck())
+            {
+                materialEditor.RegisterPropertyChangeUndo(SubsurfaceProfileLabel.text);
+                Undo.RecordObject(pipelineAsset, "Register Burt SSS Profile");
+                var resolvedIndex = pipelineAsset.EnsureScreenSpaceSubsurfaceProfileSlot(selectedProfile);
+                if (selectedProfile != null && resolvedIndex == 0 && selectedProfile != pipelineAsset.ScreenSpaceSubsurfaceProfile)
+                {
+                    EditorUtility.DisplayDialog("BurtRP Subsurface Profile", "The active pipeline profile list is full. Remove or replace a slot in the BurtRenderPipelineAsset before assigning another profile.", "OK");
+                    return;
+                }
+
+                subsurfaceProfileIndex.floatValue = resolvedIndex;
+                foreach (Object target in materialEditor.targets)
+                {
+                    if (target is Material targetMaterial && targetMaterial.HasProperty("_SubsurfaceProfileIndex"))
+                    {
+                        Undo.RecordObject(targetMaterial, SubsurfaceProfileLabel.text);
+                        targetMaterial.SetFloat("_SubsurfaceProfileIndex", resolvedIndex);
+                        StoreMaterialSubsurfaceProfileGuid(targetMaterial, resolvedIndex == 0 ? null : selectedProfile);
+                        EditorUtility.SetDirty(targetMaterial);
+                    }
+                }
+
+                EditorUtility.SetDirty(pipelineAsset);
+            }
+
+            using (new EditorGUI.DisabledScope(true))
+            {
+                EditorGUILayout.IntField(SubsurfaceProfileIndexLabel, Mathf.Clamp(Mathf.RoundToInt(subsurfaceProfileIndex.floatValue), 0, BurtSubsurfaceProfilePalette.MaxProfiles - 1));
+            }
+
+            if (!profileCanResolve && currentProfile != null)
+            {
+                EditorGUILayout.HelpBox("This material keeps a stored profile file, but it is not resolved to a slot in the active pipeline yet.", MessageType.Warning);
+                if (GUILayout.Button("Register Profile In Active Pipeline"))
+                {
+                    RegisterSubsurfaceProfileForCurrentMaterial(material, pipelineAsset, currentProfile);
+                }
+            }
+        }
+
+        private static BurtSubsurfaceProfile ResolveMaterialSubsurfaceProfile(Material material, BurtRenderPipelineAsset pipelineAsset, int profileIndex)
+        {
+            var storedProfile = LoadStoredMaterialSubsurfaceProfile(material);
+            return storedProfile != null ? storedProfile : pipelineAsset.GetScreenSpaceSubsurfaceProfileAsset(profileIndex);
+        }
+
+        private static BurtSubsurfaceProfile LoadStoredMaterialSubsurfaceProfile(Material material)
+        {
+            if (material == null)
+            {
+                return null;
+            }
+
+            var guid = material.GetTag(SubsurfaceProfileGuidTag, false, string.Empty);
+            if (string.IsNullOrEmpty(guid))
+            {
+                return null;
+            }
+
+            var path = AssetDatabase.GUIDToAssetPath(guid);
+            return string.IsNullOrEmpty(path) ? null : AssetDatabase.LoadAssetAtPath<BurtSubsurfaceProfile>(path);
+        }
+
+        private static void StoreMaterialSubsurfaceProfileGuid(Material material, BurtSubsurfaceProfile profile)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            var path = profile != null ? AssetDatabase.GetAssetPath(profile) : string.Empty;
+            material.SetOverrideTag(SubsurfaceProfileGuidTag, string.IsNullOrEmpty(path) ? string.Empty : AssetDatabase.AssetPathToGUID(path));
+        }
+
+        private static bool SyncMaterialSubsurfaceProfileSlot(Material material, BurtRenderPipelineAsset pipelineAsset, BurtSubsurfaceProfile profile)
+        {
+            if (material == null || pipelineAsset == null || profile == null || !material.HasProperty("_SubsurfaceProfileIndex"))
+            {
+                return true;
+            }
+
+            var resolvedIndex = pipelineAsset.GetScreenSpaceSubsurfaceProfileIndex(profile);
+            if (resolvedIndex == 0 && profile != pipelineAsset.ScreenSpaceSubsurfaceProfile)
+            {
+                return false;
+            }
+
+            if (Mathf.RoundToInt(material.GetFloat("_SubsurfaceProfileIndex")) != resolvedIndex)
+            {
+                material.SetFloat("_SubsurfaceProfileIndex", resolvedIndex);
+                EditorUtility.SetDirty(material);
+            }
+
+            return true;
+        }
+
+        private static void RegisterSubsurfaceProfileForCurrentMaterial(Material material, BurtRenderPipelineAsset pipelineAsset, BurtSubsurfaceProfile profile)
+        {
+            if (material == null || pipelineAsset == null || profile == null || !material.HasProperty("_SubsurfaceProfileIndex"))
+            {
+                return;
+            }
+
+            Undo.RecordObject(pipelineAsset, "Register Burt SSS Profile");
+            Undo.RecordObject(material, SubsurfaceProfileLabel.text);
+            var resolvedIndex = pipelineAsset.EnsureScreenSpaceSubsurfaceProfileSlot(profile);
+            if (resolvedIndex == 0 && profile != pipelineAsset.ScreenSpaceSubsurfaceProfile)
+            {
+                EditorUtility.DisplayDialog("BurtRP Subsurface Profile", "The active pipeline profile list is full. Remove or replace a slot in the BurtRenderPipelineAsset before assigning another profile.", "OK");
+                return;
+            }
+
+            material.SetFloat("_SubsurfaceProfileIndex", resolvedIndex);
+            StoreMaterialSubsurfaceProfileGuid(material, resolvedIndex == 0 ? null : profile);
+            EditorUtility.SetDirty(material);
+            EditorUtility.SetDirty(pipelineAsset);
         }
 
         private void DrawNormalInputs()
@@ -489,6 +639,12 @@ namespace Burt.RenderPipeline.Editor
             return material != null &&
                 material.shader != null &&
                 material.shader.name.IndexOf("Subsurface", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static BurtRenderPipelineAsset GetActiveBurtAsset()
+        {
+            var asset = GraphicsSettings.currentRenderPipeline as BurtRenderPipelineAsset;
+            return asset != null ? asset : QualitySettings.renderPipeline as BurtRenderPipelineAsset;
         }
 
         private static bool IsDoubleSidedMaterial(Material material)

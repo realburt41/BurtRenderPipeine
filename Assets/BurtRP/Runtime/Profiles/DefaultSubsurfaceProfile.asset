@@ -11,14 +11,22 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5a7352dbebde4b548a6001117f6a4cc3, type: 3}
   m_Name: DefaultSubsurfaceProfile
-  m_EditorClassIdentifier:
+  m_EditorClassIdentifier: 
   profileName: Default Skin
   surfaceAlbedo: {r: 0.78, g: 0.52, b: 0.42, a: 1}
   meanFreePathColor: {r: 1, g: 0.42, b: 0.24, a: 1}
-  meanFreePathDistance: 1
+  meanFreePathDistance: 0.1
   worldUnitScale: 1
   tint: {r: 1, g: 1, b: 1, a: 1}
   boundaryColorBleed: {r: 1, g: 1, b: 1, a: 1}
+  extinctionScale: 1
+  transmissionNormalScale: 0.08
+  scatteringDistribution: 0.93
+  ior: 1.55
+  transmissionTintColor: {r: 1, g: 1, b: 1, a: 1}
+  dualSpecularRoughness0: 0.75
+  dualSpecularRoughness1: 1.3
+  dualSpecularLobeMix: 0.85
   radiusPixels: 3.25
   depthSigma: 0.08
   normalSigma: 0.72

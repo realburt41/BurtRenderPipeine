@@ -368,7 +368,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             var filteringSettings = new FilteringSettings(RenderQueueRange.opaque); // 创建过滤设置，只允许 opaque 渲染队列进入 GBuffer。
 
+            var drawScopeCmd = CommandBufferPool.Get(Name + " Draw Scope");
+            drawScopeCmd.BeginSample(Name);
+            renderContext.ExecuteCommandBuffer(drawScopeCmd);
+            CommandBufferPool.Release(drawScopeCmd);
+
             renderContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings); // 使用剔除结果绘制所有支持 BurtGBuffer pass 的不透明物体。
+
+            drawScopeCmd = CommandBufferPool.Get(Name + " Draw Scope");
+            drawScopeCmd.EndSample(Name);
+            renderContext.ExecuteCommandBuffer(drawScopeCmd);
+            CommandBufferPool.Release(drawScopeCmd);
         }
     }
 

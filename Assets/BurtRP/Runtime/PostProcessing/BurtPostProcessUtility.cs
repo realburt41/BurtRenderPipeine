@@ -966,6 +966,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             BurtRenderGraphContext context, // 接收当前 RenderGraph 执行上下文，用来读取相机和资产设置。
             BurtTonemappingMode tonemappingMode, // 接收本次执行使用的 Tonemapping 模式。
             float postExposureMultiplier, // 接收本次执行使用的线性曝光倍率。
+            BurtPreExposureState preExposureState,
             bool useColorAdjustments, // 接收本次执行是否启用了 Color Adjustments。
             BurtBloomSettings bloomSettings, // 接收本次执行使用的 Bloom 参数。
             int bloomMipCount) // 接收本次实际使用的 Bloom mip 数。
@@ -998,13 +999,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             var bloomMipPixels = CalculateBloomMipPixelCount(camera, bloomMipCount);
             var bloomStages = FormatBloomStageDiagnostics(camera, bloomSettings, bloomMipCount);
             var bloomDebugTarget = FormatBloomDebugTarget(camera, bloomDebugView, bloomMipCount);
-            var bloomPrefilterPostExposure = ResolveBloomPrefilterPostExposure(postExposureMultiplier);
+            var residualPostExposureMultiplier = BurtPreExposureUtility.SanitizeExposure(postExposureMultiplier, 1f) * preExposureState.InvPreExposure;
+            var bloomPrefilterPostExposure = ResolveBloomPrefilterPostExposure(residualPostExposureMultiplier);
             var bloomPrefilterKnee = ResolveBloomPrefilterKnee(bloomSettings);
-            var bloomPrefilterSourceThreshold = FormatBloomPrefilterSourceThreshold(bloomSettings, postExposureMultiplier);
+            var bloomPrefilterSourceThreshold = FormatBloomPrefilterSourceThreshold(bloomSettings, residualPostExposureMultiplier);
             var bloomPrefilterBypassThreshold = ShouldBypassBloomPrefilterThreshold(bloomSettings);
             var temporalHistory = BurtTemporalAAUtility.GetHistoryStatus(camera);
             var exposure = ResolvePhysicalExposureSettings(context.Request, context.Asset);
-            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMode=" + exposure.Mode + " EV100=" + exposure.EV100.ToString("0.###") + " ISO=" + exposure.ISO.ToString("0.###") + " Shutter=" + exposure.ShutterTime.ToString("0.######") + " Aperture=" + exposure.Aperture.ToString("0.###") + " ExposureCalibration=" + exposure.Calibration.ToString("0.###") + " ExposureCompensationEV=" + exposure.Compensation.ToString("0.###") + " ExposureMul=" + postExposureMultiplier + " AutoAvgLuma=" + exposure.AutoAverageLuminance.ToString("0.###") + " AutoAvgLogLum=" + exposure.AutoAverageLogLuminance.ToString("0.###") + " AutoTargetEV100=" + exposure.AutoTargetEV100.ToString("0.###") + " AutoMinMaxEV100=" + exposure.AutoMinEV100.ToString("0.###") + "/" + exposure.AutoMaxEV100.ToString("0.###") + " AutoSpeedUpDown=" + exposure.AutoSpeedUp.ToString("0.###") + "/" + exposure.AutoSpeedDown.ToString("0.###") + " AutoLowHighPercent=" + exposure.AutoLowPercent.ToString("0.###") + "/" + exposure.AutoHighPercent.ToString("0.###") + " AutoHistogramMinMaxEV100=" + exposure.AutoHistogramMinEV100.ToString("0.###") + "/" + exposure.AutoHistogramMaxEV100.ToString("0.###") + " AutoSample=" + exposure.AutoHasSample + " AutoSampleCount=" + exposure.AutoSampleCount + " AutoSampleAgeFrames=" + exposure.AutoSampleAgeFrames + " AutoSampleRejectedReason=" + exposure.AutoSampleRejectedReason + " AutoReadbackPending=" + exposure.AutoReadbackPending + " AutoReadbackAgeFrames=" + exposure.AutoReadbackAgeFrames + " ColorAdjustments=" + useColorAdjustments + " Bloom=" + bloomSettings.Enabled + " BloomMips=" + bloomMipCount + " BloomMipSizes=" + bloomMipSizes + " BloomMipPixels=" + bloomMipPixels + " BloomStages=" + bloomStages + " BloomQuality=" + bloomSettings.Quality + " BloomMaxMips=" + bloomSettings.MaxMipCount + " BloomThreshold=" + bloomSettings.Threshold + " BloomSoftKnee=" + bloomSettings.SoftKnee + " BloomPrefilterPostExposure=" + bloomPrefilterPostExposure.ToString("0.###") + " BloomPrefilterKnee=" + bloomPrefilterKnee.ToString("0.###") + " BloomPrefilterSourceThreshold=" + bloomPrefilterSourceThreshold + " BloomPrefilterBypassThreshold=" + bloomPrefilterBypassThreshold + " BloomPrefilterFireflyClamp=" + BloomPrefilterFireflyClamp.ToString("0.###") + " BloomIntensity=" + bloomSettings.Intensity + " BloomScatter=" + bloomSettings.Scatter + " BloomSizeScale=" + bloomSettings.SizeScale + " BloomAlpha=" + bloomSettings.BloomAlphaChannel + " BloomAlphaRT=" + preserveBloomAlpha + " BloomAlphaReason=" + bloomAlphaReason + " BloomRTFormat=" + bloomRenderTextureFormat + " BloomRTFormatReason=" + bloomRenderTextureFormatReason + " BloomDebug=" + bloomDebugView + " BloomDebugSource=" + (bloomDebugRequested ? "ShadingDebug" : "Volume") + " BloomDebugTarget=" + bloomDebugTarget + " TAA=" + (temporalAA != null && temporalAA.Enabled) + " TAAHistoryValid=" + (temporalAA != null && temporalAA.HistoryValid) + " TAAHistoryAge=" + temporalHistory.HistoryAge + " TAAHistoryReason=" + temporalHistory.LastInvalidationReason + " TAAVelocity=" + (temporalAA != null ? temporalAA.VelocityMode.ToString() : BurtTemporalAAVelocityMode.Disabled.ToString()) + " TAAObjectMVPass=" + (temporalAA != null && temporalAA.ObjectMotionVectorPassDrawn) + " TAASharpness=" + (temporalAA != null ? temporalAA.Settings.Sharpness.ToString("0.###") : BurtTemporalAASettings.Default.Sharpness.ToString("0.###")) + " TAAStaticRelax=" + (temporalAA != null ? temporalAA.Settings.StaticEdgeRelaxation.ToString("0.###") : BurtTemporalAASettings.Default.StaticEdgeRelaxation.ToString("0.###")) + " TAALumaReject=" + (temporalAA != null ? temporalAA.Settings.LumaRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.LumaRejectionStrength.ToString("0.###")) + " TAADepthReject=" + (temporalAA != null ? temporalAA.Settings.DepthRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.DepthRejectionStrength.ToString("0.###")) + " TAAMotionReject=" + (temporalAA != null ? (temporalAA.Settings.MotionRejectionStart.ToString("0.###") + "/" + temporalAA.Settings.MotionRejectionRange.ToString("0.###")) : (BurtTemporalAASettings.Default.MotionRejectionStart.ToString("0.###") + "/" + BurtTemporalAASettings.Default.MotionRejectionRange.ToString("0.###"))) + " TAAAntiFlicker=" + (temporalAA != null ? temporalAA.Settings.AntiFlickering.ToString("0.###") : BurtTemporalAASettings.Default.AntiFlickering.ToString("0.###")) + " TAAMVReject=" + (temporalAA != null ? temporalAA.Settings.MotionVectorRejection.ToString("0.###") : BurtTemporalAASettings.Default.MotionVectorRejection.ToString("0.###")) + " TAAResponsive=" + (temporalAA != null ? temporalAA.Settings.ResponsiveRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.ResponsiveRejectionStrength.ToString("0.###")) + " TAAUntrustedMVScale=" + (temporalAA != null ? temporalAA.Settings.UntrustedMotionFeedbackScale.ToString("0.###") : BurtTemporalAASettings.Default.UntrustedMotionFeedbackScale.ToString("0.###")) + " TAADisocclusionScale=" + (temporalAA != null ? temporalAA.Settings.DisocclusionFeedbackScale.ToString("0.###") : BurtTemporalAASettings.Default.DisocclusionFeedbackScale.ToString("0.###")) + " TAAMotionEdge=" + (temporalAA != null ? temporalAA.Settings.MotionEdgeResponsiveStrength.ToString("0.###") : BurtTemporalAASettings.Default.MotionEdgeResponsiveStrength.ToString("0.###")) + " TAADepthEdge=" + (temporalAA != null ? temporalAA.Settings.DepthEdgeResponsiveStrength.ToString("0.###") : BurtTemporalAASettings.Default.DepthEdgeResponsiveStrength.ToString("0.###")) + " TAAClampTight=" + (temporalAA != null ? temporalAA.Settings.HistoryClampTightness.ToString("0.###") : BurtTemporalAASettings.Default.HistoryClampTightness.ToString("0.###")) + " TAADepthFilterFloor=" + (temporalAA != null ? temporalAA.Settings.DepthWeightedFilterFloor.ToString("0.###") : BurtTemporalAASettings.Default.DepthWeightedFilterFloor.ToString("0.###")) + " TAADebugMode=" + (temporalAADebugRequested ? BurtShadingDebugSettings.Mode.ToString() : "Disabled") + " TAADebugActive=" + (temporalAADebugRequested && temporalAA != null && temporalAA.Enabled) + " TAANote=XRenderTSRStyleVelocityDepthClampV7"); // 输出后处理执行摘要，说明当前模式、曝光倍率、颜色调整、Bloom 和 TAA 状态。
+            Debug.Log("[BurtRP][PostProcess] Executed. Camera=" + cameraName + " Tonemapping=" + tonemappingMode + " ExposureMode=" + exposure.Mode + " EV100=" + exposure.EV100.ToString("0.###") + " ISO=" + exposure.ISO.ToString("0.###") + " Shutter=" + exposure.ShutterTime.ToString("0.######") + " Aperture=" + exposure.Aperture.ToString("0.###") + " ExposureCalibration=" + exposure.Calibration.ToString("0.###") + " ExposureCompensationEV=" + exposure.Compensation.ToString("0.###") + " ExposureMul=" + postExposureMultiplier + " PreExposure=" + preExposureState.PreExposure.ToString("0.###") + " InvPreExposure=" + preExposureState.InvPreExposure.ToString("0.###") + " ResidualExposure=" + residualPostExposureMultiplier.ToString("0.###") + " PreExposureEnabled=" + preExposureState.Enabled + " AutoAvgLuma=" + exposure.AutoAverageLuminance.ToString("0.###") + " AutoAvgLogLum=" + exposure.AutoAverageLogLuminance.ToString("0.###") + " AutoTargetEV100=" + exposure.AutoTargetEV100.ToString("0.###") + " AutoMinMaxEV100=" + exposure.AutoMinEV100.ToString("0.###") + "/" + exposure.AutoMaxEV100.ToString("0.###") + " AutoSpeedUpDown=" + exposure.AutoSpeedUp.ToString("0.###") + "/" + exposure.AutoSpeedDown.ToString("0.###") + " AutoLowHighPercent=" + exposure.AutoLowPercent.ToString("0.###") + "/" + exposure.AutoHighPercent.ToString("0.###") + " AutoHistogramMinMaxEV100=" + exposure.AutoHistogramMinEV100.ToString("0.###") + "/" + exposure.AutoHistogramMaxEV100.ToString("0.###") + " AutoSample=" + exposure.AutoHasSample + " AutoSampleCount=" + exposure.AutoSampleCount + " AutoSampleAgeFrames=" + exposure.AutoSampleAgeFrames + " AutoSampleRejectedReason=" + exposure.AutoSampleRejectedReason + " AutoReadbackPending=" + exposure.AutoReadbackPending + " AutoReadbackAgeFrames=" + exposure.AutoReadbackAgeFrames + " ColorAdjustments=" + useColorAdjustments + " Bloom=" + bloomSettings.Enabled + " BloomMips=" + bloomMipCount + " BloomMipSizes=" + bloomMipSizes + " BloomMipPixels=" + bloomMipPixels + " BloomStages=" + bloomStages + " BloomQuality=" + bloomSettings.Quality + " BloomMaxMips=" + bloomSettings.MaxMipCount + " BloomThreshold=" + bloomSettings.Threshold + " BloomSoftKnee=" + bloomSettings.SoftKnee + " BloomPrefilterPostExposure=" + bloomPrefilterPostExposure.ToString("0.###") + " BloomPrefilterKnee=" + bloomPrefilterKnee.ToString("0.###") + " BloomPrefilterSourceThreshold=" + bloomPrefilterSourceThreshold + " BloomPrefilterBypassThreshold=" + bloomPrefilterBypassThreshold + " BloomPrefilterFireflyClamp=" + BloomPrefilterFireflyClamp.ToString("0.###") + " BloomIntensity=" + bloomSettings.Intensity + " BloomScatter=" + bloomSettings.Scatter + " BloomSizeScale=" + bloomSettings.SizeScale + " BloomAlpha=" + bloomSettings.BloomAlphaChannel + " BloomAlphaRT=" + preserveBloomAlpha + " BloomAlphaReason=" + bloomAlphaReason + " BloomRTFormat=" + bloomRenderTextureFormat + " BloomRTFormatReason=" + bloomRenderTextureFormatReason + " BloomDebug=" + bloomDebugView + " BloomDebugSource=" + (bloomDebugRequested ? "ShadingDebug" : "Volume") + " BloomDebugTarget=" + bloomDebugTarget + " TAA=" + (temporalAA != null && temporalAA.Enabled) + " TAAHistoryValid=" + (temporalAA != null && temporalAA.HistoryValid) + " TAAHistoryAge=" + temporalHistory.HistoryAge + " TAAHistoryReason=" + temporalHistory.LastInvalidationReason + " TAAVelocity=" + (temporalAA != null ? temporalAA.VelocityMode.ToString() : BurtTemporalAAVelocityMode.Disabled.ToString()) + " TAAObjectMVPass=" + (temporalAA != null && temporalAA.ObjectMotionVectorPassDrawn) + " TAASharpness=" + (temporalAA != null ? temporalAA.Settings.Sharpness.ToString("0.###") : BurtTemporalAASettings.Default.Sharpness.ToString("0.###")) + " TAAStaticRelax=" + (temporalAA != null ? temporalAA.Settings.StaticEdgeRelaxation.ToString("0.###") : BurtTemporalAASettings.Default.StaticEdgeRelaxation.ToString("0.###")) + " TAALumaReject=" + (temporalAA != null ? temporalAA.Settings.LumaRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.LumaRejectionStrength.ToString("0.###")) + " TAADepthReject=" + (temporalAA != null ? temporalAA.Settings.DepthRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.DepthRejectionStrength.ToString("0.###")) + " TAAMotionReject=" + (temporalAA != null ? (temporalAA.Settings.MotionRejectionStart.ToString("0.###") + "/" + temporalAA.Settings.MotionRejectionRange.ToString("0.###")) : (BurtTemporalAASettings.Default.MotionRejectionStart.ToString("0.###") + "/" + BurtTemporalAASettings.Default.MotionRejectionRange.ToString("0.###"))) + " TAAAntiFlicker=" + (temporalAA != null ? temporalAA.Settings.AntiFlickering.ToString("0.###") : BurtTemporalAASettings.Default.AntiFlickering.ToString("0.###")) + " TAAMVReject=" + (temporalAA != null ? temporalAA.Settings.MotionVectorRejection.ToString("0.###") : BurtTemporalAASettings.Default.MotionVectorRejection.ToString("0.###")) + " TAAResponsive=" + (temporalAA != null ? temporalAA.Settings.ResponsiveRejectionStrength.ToString("0.###") : BurtTemporalAASettings.Default.ResponsiveRejectionStrength.ToString("0.###")) + " TAAUntrustedMVScale=" + (temporalAA != null ? temporalAA.Settings.UntrustedMotionFeedbackScale.ToString("0.###") : BurtTemporalAASettings.Default.UntrustedMotionFeedbackScale.ToString("0.###")) + " TAADisocclusionScale=" + (temporalAA != null ? temporalAA.Settings.DisocclusionFeedbackScale.ToString("0.###") : BurtTemporalAASettings.Default.DisocclusionFeedbackScale.ToString("0.###")) + " TAAMotionEdge=" + (temporalAA != null ? temporalAA.Settings.MotionEdgeResponsiveStrength.ToString("0.###") : BurtTemporalAASettings.Default.MotionEdgeResponsiveStrength.ToString("0.###")) + " TAADepthEdge=" + (temporalAA != null ? temporalAA.Settings.DepthEdgeResponsiveStrength.ToString("0.###") : BurtTemporalAASettings.Default.DepthEdgeResponsiveStrength.ToString("0.###")) + " TAAClampTight=" + (temporalAA != null ? temporalAA.Settings.HistoryClampTightness.ToString("0.###") : BurtTemporalAASettings.Default.HistoryClampTightness.ToString("0.###")) + " TAADepthFilterFloor=" + (temporalAA != null ? temporalAA.Settings.DepthWeightedFilterFloor.ToString("0.###") : BurtTemporalAASettings.Default.DepthWeightedFilterFloor.ToString("0.###")) + " TAADebugMode=" + (temporalAADebugRequested ? BurtShadingDebugSettings.Mode.ToString() : "Disabled") + " TAADebugActive=" + (temporalAADebugRequested && temporalAA != null && temporalAA.Enabled) + " TAANote=XRenderTSRStyleVelocityDepthClampV7"); // 输出后处理执行摘要，说明当前模式、曝光倍率、颜色调整、Bloom 和 TAA 状态。
         }
 
         private static bool IsPostProcessEnabled(BurtRenderPipelineAsset asset) // 定义判断资产是否允许后处理运行的统一辅助函数。
@@ -1152,6 +1154,118 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             return stack.GetComponent<BurtTemporalAAVolumeComponent>();
+        }
+    }
+
+    internal readonly struct BurtPreExposureState
+    {
+        public static readonly BurtPreExposureState Default = new BurtPreExposureState(1f, 1f);
+
+        public float PreExposure { get; }
+        public float InvPreExposure { get; }
+        public float ResidualPostExposure { get; }
+        public float PostExposure { get; }
+        public float ExposureRatio { get; }
+        public bool Enabled { get; }
+
+        public BurtPreExposureState(float preExposure, float postExposure)
+        {
+            PreExposure = BurtPreExposureUtility.SanitizeExposure(preExposure, 1f);
+            InvPreExposure = 1f / PreExposure;
+            PostExposure = BurtPreExposureUtility.SanitizeExposure(postExposure, 1f);
+            ResidualPostExposure = PostExposure / PreExposure;
+            ExposureRatio = 1f;
+            Enabled = Mathf.Abs(PreExposure - 1f) > 0.0001f;
+        }
+    }
+
+    internal static class BurtPreExposureUtility
+    {
+        public const float MinExposure = 0.0001f;
+        public const float MaxExposure = 65504f;
+        public const float TemporalAAInvalidationEVThreshold = 0.25f;
+
+        public static readonly int PreExposureId = Shader.PropertyToID("_BurtPreExposure");
+        public static readonly int InvPreExposureId = Shader.PropertyToID("_BurtInvPreExposure");
+        public static readonly int PreExposureParamsId = Shader.PropertyToID("_BurtPreExposureParams");
+
+        private static readonly System.Collections.Generic.Dictionary<int, float> CameraPreExposureHistory = new System.Collections.Generic.Dictionary<int, float>();
+
+        public static BurtPreExposureState ResolveForFrame(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (!BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset))
+            {
+                return BurtPreExposureState.Default;
+            }
+
+            var exposureSettings = BurtPostProcessUtility.ResolvePhysicalExposureSettings(request, asset);
+            return ResolveForFrame(exposureSettings);
+        }
+
+        public static BurtPreExposureState ResolveForFrame(BurtPhysicalExposureSettings exposureSettings)
+        {
+            var postExposure = SanitizeExposure(exposureSettings.Multiplier, 1f);
+            return new BurtPreExposureState(postExposure, postExposure);
+        }
+
+        public static float ResolveResidualPostExposure(BurtPhysicalExposureSettings exposureSettings)
+        {
+            return ResolveForFrame(exposureSettings).ResidualPostExposure;
+        }
+
+        public static float ResolveResidualPostExposure(BurtPhysicalExposureSettings exposureSettings, BurtPreExposureState preExposureState)
+        {
+            return SanitizeExposure(exposureSettings.Multiplier, 1f) * preExposureState.InvPreExposure;
+        }
+
+        public static bool ShouldInvalidateTemporalAAHistory(Camera camera, BurtPreExposureState state, out string reason)
+        {
+            reason = null;
+            if (camera == null)
+            {
+                return false;
+            }
+
+            var cameraId = camera.GetInstanceID();
+            var current = SanitizeExposure(state.PreExposure, 1f);
+            if (!CameraPreExposureHistory.TryGetValue(cameraId, out var previous))
+            {
+                CameraPreExposureHistory[cameraId] = current;
+                return false;
+            }
+
+            CameraPreExposureHistory[cameraId] = current;
+            previous = SanitizeExposure(previous, 1f);
+            var ratio = current / previous;
+            if (Mathf.Abs(Mathf.Log(ratio, 2f)) <= TemporalAAInvalidationEVThreshold)
+            {
+                return false;
+            }
+
+            reason = "PreExposureChanged";
+            return true;
+        }
+
+        public static void UploadGlobals(UnityEngine.Rendering.CommandBuffer cmd, BurtPreExposureState state)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            cmd.SetGlobalFloat(PreExposureId, state.PreExposure);
+            cmd.SetGlobalFloat(InvPreExposureId, state.InvPreExposure);
+            cmd.SetGlobalVector(PreExposureParamsId, new Vector4(state.PreExposure, state.InvPreExposure, state.PostExposure, state.ResidualPostExposure));
+        }
+
+        public static float SanitizeExposure(float value, float fallback)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                value = fallback;
+            }
+
+            return Mathf.Clamp(value, MinExposure, MaxExposure);
         }
     }
 }

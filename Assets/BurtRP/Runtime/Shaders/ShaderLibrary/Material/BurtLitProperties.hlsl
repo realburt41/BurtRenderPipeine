@@ -4,6 +4,7 @@
 
 // UnityPerMaterial 是 Unity SRP Batcher 识别材质常量的固定 CBUFFER 名称。
 #include "UnityCG.cginc"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 
 CBUFFER_START(UnityPerMaterial)
 
@@ -58,6 +59,8 @@ CBUFFER_START(UnityPerMaterial)
     float _SubsurfaceDistortion;
 
     float _SubsurfaceAmbient;
+
+    float _SubsurfaceProfileIndex;
 
     float4 _SubsurfaceTint;
 

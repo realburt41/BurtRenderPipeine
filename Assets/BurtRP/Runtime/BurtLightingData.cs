@@ -142,6 +142,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
         public int TileLightMaxOverflowExtraCount { get; private set; } // Largest raw-count excess above the per-tile list capacity.
 
         public bool ClusterLightUploaded { get; private set; }
+        public int ClusterLightTileSize { get; private set; }
+        public int ClusterLightGridX { get; private set; }
+        public int ClusterLightGridY { get; private set; }
         public int ClusterLightDepthSliceCount { get; private set; }
         public int ClusterLightClusterCount { get; private set; }
         public int ClusterLightMaxLightsPerCluster { get; private set; }
@@ -414,6 +417,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public void SetClusterLightState(
             bool uploaded,
+            int tileSize,
+            int gridX,
+            int gridY,
             int depthSliceCount,
             int clusterCount,
             int maxLightsPerCluster,
@@ -428,6 +434,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             Vector4 worldToViewZ)
         {
             ClusterLightUploaded = uploaded;
+            ClusterLightTileSize = tileSize;
+            ClusterLightGridX = gridX;
+            ClusterLightGridY = gridY;
             ClusterLightDepthSliceCount = depthSliceCount;
             ClusterLightClusterCount = clusterCount;
             ClusterLightMaxLightsPerCluster = maxLightsPerCluster;
@@ -437,6 +446,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             ClusterLightAverageCount = averageCount;
             ClusterLightOverflowClusterCount = overflowClusterCount;
             ClusterLightMaxOverflowExtraCount = maxOverflowExtraCount;
+            if (!uploaded || depthSliceCount <= 0 || clusterCount <= 0)
+            {
+                ClusterLightNearPlane = 0f;
+                ClusterLightFarPlane = 1f;
+                ClusterLightInvDepthRange = 0f;
+                ClusterLightWorldToViewZ = Vector4.zero;
+                return;
+            }
+
             ClusterLightNearPlane = Mathf.Max(nearPlane, 0.0001f);
             ClusterLightFarPlane = Mathf.Max(farPlane, ClusterLightNearPlane + 0.0001f);
             ClusterLightInvDepthRange = BurtTiledLightData.CalculateClusterInvLogDepthRange(ClusterLightNearPlane, ClusterLightFarPlane);
@@ -491,7 +509,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             SetAdditionalLightShadowCacheState(false, 0, 0);
             ResetAdditionalLightShadowDiagnostics();
             SetTileLightDebugState(false, false, "Disabled", 0, 0, 0, 0, 0, 0, 0, 0, 0f);
-            SetClusterLightState(false, 0, 0, 0, 0, 0, 0, 0f, 0, 0, 0f, 1f, Vector4.zero);
+            SetClusterLightState(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0f, 0, 0, 0f, 1f, Vector4.zero);
             TileLightDebugCountSnapshotLength = 0;
             ClusterLightDebugCountSnapshotLength = 0;
 

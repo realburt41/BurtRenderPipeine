@@ -428,4 +428,156 @@ namespace Burt.RenderPipeline
                 ")");
         }
     }
+
+    internal static class BurtAtmosphereReflectionUtility
+    {
+        private const int CubemapSize = 256;
+        private const int CubemapFaceCount = 6;
+        private const int AtmosphereCubemapPass = 2;
+
+        private static readonly int FaceId = Shader.PropertyToID("_BurtAtmosphereCubemapFace");
+        private static readonly Vector4 DefaultHDRDecodeValues = new Vector4(1f, 1f, 0f, 0f);
+
+        private static RenderTexture atmosphereCubemap;
+        private static Material material;
+        private static bool hasLoggedMissingShader;
+        private static int lastRenderedFrame = -1;
+
+        public static bool TryGetReflection(CommandBuffer cmd, BurtRenderRequest request, out Texture texture, out Vector4 hdrDecodeValues, out string source)
+        {
+            texture = null;
+            hdrDecodeValues = DefaultHDRDecodeValues;
+            source = "BurtAtmosphereReflectionUnavailable";
+
+            if (cmd == null || request == null || !BurtAtmosphereUtility.ShouldUseAtmosphere(request))
+            {
+                return false;
+            }
+
+            var camera = request.Camera;
+            if (camera == null)
+            {
+                return false;
+            }
+
+            var settings = BurtAtmosphereUtility.ResolveSettings();
+            if (!settings.Enabled)
+            {
+                return false;
+            }
+
+            var drawMaterial = BurtDrawAtmospherePass.CreateMaterial(ref material, ref hasLoggedMissingShader);
+            if (drawMaterial == null)
+            {
+                source = "BurtAtmosphereReflectionMissingShader";
+                return false;
+            }
+
+            EnsureTexture();
+            if (atmosphereCubemap == null)
+            {
+                source = "BurtAtmosphereReflectionAllocationFailed";
+                return false;
+            }
+
+            var currentFrame = Time.frameCount;
+            if (lastRenderedFrame != currentFrame)
+            {
+                BurtDrawAtmospherePass.UploadMaterialProperties(drawMaterial, camera, request, settings);
+                for (var face = 0; face < CubemapFaceCount; face++)
+                {
+                    cmd.SetRenderTarget(new RenderTargetIdentifier(atmosphereCubemap, 0, (CubemapFace)face));
+                    cmd.SetViewport(new Rect(0f, 0f, CubemapSize, CubemapSize));
+                    cmd.SetGlobalFloat(FaceId, face);
+                    cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, AtmosphereCubemapPass, MeshTopology.Triangles, 3, 1);
+                }
+
+                lastRenderedFrame = currentFrame;
+            }
+
+            texture = atmosphereCubemap;
+            source = "BurtAtmosphereCubemap";
+            return true;
+        }
+
+        public static bool HasReadyReflection(BurtRenderRequest request, out Texture texture, out Vector4 hdrDecodeValues, out string source)
+        {
+            hdrDecodeValues = DefaultHDRDecodeValues;
+            source = "BurtAtmosphereReflectionUnavailable";
+            texture = BurtAtmosphereUtility.ShouldUseAtmosphere(request) ? atmosphereCubemap : null;
+            if (texture == null)
+            {
+                return false;
+            }
+
+            source = "BurtAtmosphereCubemap";
+            return true;
+        }
+
+        public static void Release()
+        {
+            ReleaseTexture(atmosphereCubemap);
+            atmosphereCubemap = null;
+            lastRenderedFrame = -1;
+
+            if (material != null)
+            {
+                DestroyUnityObject(material);
+                material = null;
+            }
+
+            hasLoggedMissingShader = false;
+        }
+
+        private static void EnsureTexture()
+        {
+            if (atmosphereCubemap != null && atmosphereCubemap.IsCreated())
+            {
+                return;
+            }
+
+            ReleaseTexture(atmosphereCubemap);
+            atmosphereCubemap = new RenderTexture(CubemapSize, CubemapSize, 0, RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear)
+            {
+                name = "Burt Atmosphere Reflection Cubemap",
+                dimension = TextureDimension.Cube,
+                volumeDepth = CubemapFaceCount,
+                useMipMap = false,
+                autoGenerateMips = false,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            atmosphereCubemap.Create();
+            lastRenderedFrame = -1;
+        }
+
+        private static void ReleaseTexture(RenderTexture texture)
+        {
+            if (texture == null)
+            {
+                return;
+            }
+
+            texture.Release();
+            DestroyUnityObject(texture);
+        }
+
+        private static void DestroyUnityObject(Object unityObject)
+        {
+            if (unityObject == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                Object.Destroy(unityObject);
+            }
+            else
+            {
+                Object.DestroyImmediate(unityObject);
+            }
+        }
+    }
 }

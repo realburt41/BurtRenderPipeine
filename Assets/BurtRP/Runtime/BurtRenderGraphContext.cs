@@ -233,6 +233,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceSetupTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceSetup();
+            }
+        }
+
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceTileTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceTile();
+            }
+        }
+
         public BurtRenderTargetHandle ScreenSpaceSubsurfaceTempTarget
         {
             get
@@ -256,6 +282,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetScreenSpaceSubsurfaceBlur();
+            }
+        }
+
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceCombineTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceCombine();
             }
         }
 

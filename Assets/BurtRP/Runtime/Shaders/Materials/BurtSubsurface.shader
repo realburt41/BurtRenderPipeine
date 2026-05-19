@@ -37,6 +37,7 @@ Shader "BurtRP/Subsurface"
         _SubsurfacePower ("Subsurface Power", Range(0.5, 8)) = 3
         _SubsurfaceDistortion ("Subsurface Distortion", Range(0, 1)) = 0.35
         _SubsurfaceAmbient ("Subsurface Ambient", Range(0, 1)) = 0.35
+        _SubsurfaceProfileIndex ("Subsurface Profile Index", Range(0, 7)) = 0
         [HDR]_SubsurfaceTint ("Subsurface Tint", Color) = (1, 0.45, 0.32, 1)
 
         // 定义自发光贴图，Forward 光照会把它作为不受灯光影响的颜色叠加到最终结果。
@@ -195,7 +196,7 @@ Shader "BurtRP/Subsurface"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
 
             // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
-            #pragma target 3.0
+            #pragma target 3.5
 
             // 引入 Lit 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
@@ -239,7 +240,7 @@ Shader "BurtRP/Subsurface"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
 
             // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
-            #pragma target 3.0
+            #pragma target 3.5
             #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
 
             // Selects the shared Forward shading model before BurtLighting.hlsl is included.
@@ -260,5 +261,3 @@ Shader "BurtRP/Subsurface"
     // Disables fallback so BurtRP shader errors do not silently use another pipeline shader.
     Fallback Off
 }
-
-

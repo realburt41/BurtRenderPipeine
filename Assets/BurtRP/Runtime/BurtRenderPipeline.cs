@@ -62,6 +62,13 @@ namespace Burt.RenderPipeline
             RenderCameras(context, cameras);
         }
 
+        protected override void Dispose(bool disposing)
+        {
+            BurtAtmosphereReflectionUtility.Release();
+            BurtImageBasedFilterUtility.Release();
+            base.Dispose(disposing);
+        }
+
         private void RenderCameras(ScriptableRenderContext context, Camera[] cameras)
         {
             // 清空上一帧的 request 列表。
@@ -128,11 +135,16 @@ namespace Burt.RenderPipeline
             Shader.SetGlobalFloat(PreIntegratedFGEnabledId, lut != null ? 1.0f : 0.0f);
         }
 
-        private static void BindSubsurfacePreIntegratedLut()
+        private void BindSubsurfacePreIntegratedLut()
         {
-            var lut = BurtSubsurfaceLutUtility.GetOrCreatePreIntegratedLut();
-            Shader.SetGlobalTexture(BurtSubsurfaceLutUtility.TextureId, lut != null ? lut : Texture2D.whiteTexture);
+            BurtSubsurfaceLutUtility.BeginPaletteBinding();
+            var palette = asset != null
+                ? asset.ScreenSpaceSubsurfaceProfilePalette
+                : BurtSubsurfaceProfilePalette.Resolve(BurtSubsurfaceProfileSettings.Default, null);
+            var lut = BurtSubsurfaceLutUtility.GetOrCreatePreIntegratedLut(palette);
+            Shader.SetGlobalTexture(BurtSubsurfaceLutUtility.TextureId, lut != null ? lut : BurtSubsurfaceLutUtility.GetFallbackPreIntegratedLut());
             Shader.SetGlobalFloat(BurtSubsurfaceLutUtility.EnabledId, lut != null ? 1.0f : 0.0f);
+            BurtSubsurfaceProfileShaderUtility.BindGlobals(asset);
         }
 
         private BurtRenderGraphAssembler ResolveGraphAssembler(BurtRenderRequest request) // 根据当前管线资产和 request 类型选择本次 request 使用的 RenderGraph 组装器。

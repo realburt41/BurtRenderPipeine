@@ -5,8 +5,12 @@
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
 
-#ifndef BURT_DEPTH_ONLY_ALPHA_CLIP
-#define BURT_DEPTH_ONLY_ALPHA_CLIP 1
+#if !defined(BURT_DEPTH_ONLY_ALPHA_CLIP)
+    #if defined(BURT_ALPHA_CLIP)
+        #define BURT_DEPTH_ONLY_ALPHA_CLIP 1
+    #else
+        #define BURT_DEPTH_ONLY_ALPHA_CLIP 0
+    #endif
 #endif
 
 struct DepthAttributes

@@ -2,6 +2,23 @@
 #ifndef BURT_COMMON_INCLUDED // 开始 include guard，防止同一个 shader 编译单元里重复定义这些工具函数。
 #define BURT_COMMON_INCLUDED // 标记 BurtCommon.hlsl 已经被包含过，后续重复 include 会被跳过。
 
+// UnityCG does not consistently expose these helpers in every HLSLPROGRAM path, so keep BurtRP shaders self-contained.
+#ifndef CBUFFER_START
+    #define CBUFFER_START(name) cbuffer name {
+#endif
+
+#ifndef CBUFFER_END
+    #define CBUFFER_END };
+#endif
+
+#ifndef UNITY_DECLARE_TEXCUBE
+    #define UNITY_DECLARE_TEXCUBE(tex) samplerCUBE tex
+#endif
+
+#ifndef UNITY_SAMPLE_TEXCUBE_LOD
+    #define UNITY_SAMPLE_TEXCUBE_LOD(tex, coord, lod) texCUBElod(tex, float4(coord, lod))
+#endif
+
 // 定义一个很小的正数，用来避免除以 0 或 rsqrt 输入 0 导致 NaN。
 static const float BURT_EPSILON = 0.000001f;
 

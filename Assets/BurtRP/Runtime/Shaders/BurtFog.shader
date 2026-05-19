@@ -18,6 +18,7 @@ Shader "Hidden/BurtRP/Fog"
             #pragma fragment Frag
 
             #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
             sampler2D _BurtCameraColorTexture;
             UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -220,7 +221,7 @@ Shader "Hidden/BurtRP/Fog"
                 float phase = HenyeyGreensteinPhase(lDotV, _BurtFogScatteringParams.z);
                 float directional = max(_BurtFogScatteringParams.x, 0.0f) * phase * 4.0f;
                 float ambient = max(_BurtFogScatteringParams.y, 0.0f);
-                float3 fogColor = max(_BurtFogAlbedo.rgb, 0.0f) * (ambient + directional * lightColor);
+                float3 fogColor = BurtApplyPreExposure(max(_BurtFogAlbedo.rgb, 0.0f) * (ambient + directional * lightColor));
 
                 return float4(lerp(sourceColor, fogColor, fogAmount), 1.0f);
             }

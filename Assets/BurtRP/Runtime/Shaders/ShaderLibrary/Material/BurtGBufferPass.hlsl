@@ -2,16 +2,16 @@
 #ifndef BURT_GBUFFER_PASS_INCLUDED
 #define BURT_GBUFFER_PASS_INCLUDED
 
-#if !defined(BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT) && !defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE)
-    #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
-#endif
+#define BURT_MATERIAL_GBUFFER_SINGLE_SHADING_MODEL 1
 
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelMacros.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtNormal.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEmission.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMaterialShadingModelPassCommon.hlsl"
 
 struct GBufferAttributes
 {
@@ -63,45 +63,15 @@ GBufferFragmentOutput BurtPackGBufferOutput(BurtEncodedGBuffer encodedGBuffer)
     return output;
 }
 
-BurtSurfaceData BurtCreateGBufferSurfaceData(float4 baseColor, float4 maskMap)
-{
-#if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    float hairReflectance = saturate(_Reflectance * _HairSpecularScale);
-    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, hairReflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
-    surfaceData.smoothness = saturate(surfaceData.smoothness - _HairRoughnessOffset);
-    float hairShiftScale = saturate(_HairShiftScale * maskMap.b);
-    return BurtApplyHairGBufferSurfaceSemantics(surfaceData, (_HairScatter + _HairScatterBoost) * maskMap.r, hairShiftScale);
-#else
-    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
-    surfaceData = BurtApplyAnisotropySurfaceSemantics(surfaceData, _Anisotropy);
-
-    #if defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT)
-        surfaceData = BurtApplyClearCoatSurfaceSemantics(surfaceData, _ClearCoatMask, _ClearCoatRoughness);
-    #elif defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE)
-        surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceStrength, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, _SubsurfaceTint.rgb);
-    #endif
-
-    return surfaceData;
-#endif
-}
-
 BurtGBufferData BurtCreateMaterialGBufferData(GBufferVaryings input, float facing, BurtSurfaceData surfaceData, float3 emissionColor)
 {
-#if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    float strandDirectionSign = lerp(1.0f, -1.0f, saturate(_HairTangentFlip));
-    float3 strandDirectionWS = BurtSafeNormalize(input.tangentWS.xyz * strandDirectionSign);
-    return BurtCreateHairGBufferData(surfaceData, strandDirectionWS, emissionColor);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    float3 shadingDirectionWS = BurtGetMaterialPassShadingDirectionWS(input.normalWS, input.tangentWS);
+    return BurtCreateMaterialPassGBufferData(surfaceData, input.baseMapUV, input.normalWS, input.normalWS, input.tangentWS, shadingDirectionWS, facing, emissionColor);
 #else
-    float3 normalWS = BurtSampleNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, _NormalScale, facing, _DoubleSidedNormalModeConstants);
-
-    #if defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT)
-        float3 clearCoatNormalWS = BurtSampleClearCoatNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, _ClearCoatNormalScale, facing, _DoubleSidedNormalModeConstants);
-        return BurtCreateClearCoatGBufferData(surfaceData, normalWS, input.tangentWS, clearCoatNormalWS, emissionColor);
-    #elif defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE)
-        return BurtCreateSubsurfaceGBufferData(surfaceData, normalWS, input.tangentWS, emissionColor);
-    #else
-        return BurtCreateGBufferData(surfaceData, normalWS, input.tangentWS, emissionColor);
-    #endif
+    float3 baseNormalWS = BurtGetMaterialPassNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, facing);
+    float3 shadingDirectionWS = BurtGetMaterialPassShadingDirectionWS(baseNormalWS, input.tangentWS);
+    return BurtCreateMaterialPassGBufferData(surfaceData, input.baseMapUV, input.normalWS, baseNormalWS, input.tangentWS, shadingDirectionWS, facing, emissionColor);
 #endif
 }
 
@@ -111,7 +81,7 @@ GBufferFragmentOutput FragGBuffer(GBufferVaryings input, fixed facing : VFACE)
     BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
 
     float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
-    BurtSurfaceData surfaceData = BurtCreateGBufferSurfaceData(baseColor, maskMap);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
     float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
     BurtGBufferData gbufferData = BurtCreateMaterialGBufferData(input, facing, surfaceData, emissionColor);
 

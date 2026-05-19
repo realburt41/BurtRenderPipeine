@@ -18,6 +18,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
             #pragma fragment Frag
 
             #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
             UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
 
@@ -250,7 +251,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 float4 farWS = mul(_BurtAtmosphereInverseViewProjection, clip);
                 farWS.xyz /= max(abs(farWS.w), 1.0e-6f);
                 float3 viewDirWS = SafeNormalize(farWS.xyz - _BurtAtmosphereCameraPositionWS, float3(0.0f, 0.0f, 1.0f));
-                return float4(EvaluateAtmosphere(viewDirWS), 1.0f);
+                return float4(BurtApplyPreExposure(EvaluateAtmosphere(viewDirWS)), 1.0f);
             }
             ENDHLSL
         }
@@ -269,6 +270,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
             #pragma fragment Frag
 
             #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
             sampler2D _BurtCameraColorTexture;
             UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -448,7 +450,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 float3 inScatter = EvaluateAerialInscatter(viewDirWS, scatterFade, heightFade);
                 float3 aerialTint = max(_BurtAtmosphereAerialPerspectiveTint.rgb, 0.0f) * max(_BurtAtmosphereSkyTint.rgb, 0.0f);
                 float3 foggedColor = lerp(sourceColor, aerialTint, fogAmount);
-                float3 color = foggedColor * transmittance + inScatter;
+                float3 color = foggedColor * transmittance + BurtApplyPreExposure(inScatter);
 
                 if (_BurtAtmosphereDebugMode > 3.5f && _BurtAtmosphereDebugMode < 4.5f)
                 {
@@ -476,6 +478,175 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 }
 
                 return float4(max(color, 0.0f), 1.0f);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Atmosphere Reflection Cubemap"
+
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+
+            #include "UnityCG.cginc"
+
+            float4 _BurtMainLightDirection;
+            float4 _BurtMainLightColor;
+            float _BurtAtmosphereRayleighIntensity;
+            float _BurtAtmosphereMieIntensity;
+            float _BurtAtmosphereMieAnisotropy;
+            float4 _BurtAtmospherePlanetParams;
+            float4 _BurtAtmosphereGroundColor;
+            float4 _BurtAtmosphereSkyTint;
+            float _BurtAtmosphereSunIntensity;
+            float4 _BurtAtmosphereSunDirection;
+            float4 _BurtAtmosphereSunParams;
+            float4 _BurtAtmosphereHorizonColor;
+            float4 _BurtAtmosphereHorizonSunsetColor;
+            float4 _BurtAtmosphereHorizonParams;
+            float4 _BurtAtmosphereGroundParams;
+            float4 _BurtAtmosphereExposureParams;
+            float _BurtAtmosphereDebugMode;
+            float _BurtAtmosphereCubemapFace;
+
+            static const float PI = 3.14159265359f;
+
+            struct Attributes
+            {
+                uint vertexID : SV_VertexID;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float2 uv : TEXCOORD0;
+            };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                output.positionCS = float4((input.vertexID == 2 ? 3.0f : -1.0f), (input.vertexID == 1 ? 3.0f : -1.0f), 0.0f, 1.0f);
+                output.uv = float2((input.vertexID == 2 ? 2.0f : 0.0f), (input.vertexID == 1 ? 2.0f : 0.0f));
+                return output;
+            }
+
+            float3 SafeNormalize(float3 value, float3 fallback)
+            {
+                float lengthSq = dot(value, value);
+                return lengthSq > 1.0e-8f ? value * rsqrt(lengthSq) : fallback;
+            }
+
+            float RayleighPhase(float cosTheta)
+            {
+                return (3.0f / (16.0f * PI)) * (1.0f + cosTheta * cosTheta);
+            }
+
+            float MiePhase(float cosTheta, float g)
+            {
+                float g2 = g * g;
+                float denom = max(0.05f, pow(abs(1.0f + g2 - 2.0f * g * cosTheta), 1.5f));
+                return (1.0f / (4.0f * PI)) * ((1.0f - g2) / denom);
+            }
+
+            float EstimateAirMass(float viewUp, float scaleHeight, float atmosphereHeight)
+            {
+                float horizonBoost = rcp(max(abs(viewUp) + 0.16f, 0.16f));
+                float heightRatio = saturate(atmosphereHeight / max(scaleHeight * 12.0f, 0.001f));
+                return saturate(heightRatio * horizonBoost * 0.16f);
+            }
+
+            float3 NormalizeLightColor(float3 lightColor)
+            {
+                float peak = max(max(lightColor.r, lightColor.g), lightColor.b);
+                return peak > 0.001f ? lightColor / peak : 1.0f;
+            }
+
+            float SmoothRange(float edge0, float edge1, float value)
+            {
+                float range = edge1 - edge0;
+                float safeRange = abs(range) > 1.0e-5f ? range : (range < 0.0f ? -1.0e-5f : 1.0e-5f);
+                float t = saturate((value - edge0) / safeRange);
+                return t * t * (3.0f - 2.0f * t);
+            }
+
+            float3 AtmosphereFaceUVToDirection(float face, float2 uv)
+            {
+                float2 st = uv * 2.0f - 1.0f;
+                st.y = -st.y;
+                if (face < 0.5f) return SafeNormalize(float3(1.0f, st.y, -st.x), float3(1.0f, 0.0f, 0.0f));
+                if (face < 1.5f) return SafeNormalize(float3(-1.0f, st.y, st.x), float3(-1.0f, 0.0f, 0.0f));
+                if (face < 2.5f) return SafeNormalize(float3(st.x, 1.0f, -st.y), float3(0.0f, 1.0f, 0.0f));
+                if (face < 3.5f) return SafeNormalize(float3(st.x, -1.0f, st.y), float3(0.0f, -1.0f, 0.0f));
+                if (face < 4.5f) return SafeNormalize(float3(st.x, st.y, 1.0f), float3(0.0f, 0.0f, 1.0f));
+                return SafeNormalize(float3(-st.x, st.y, -1.0f), float3(0.0f, 0.0f, -1.0f));
+            }
+
+            float3 EvaluateAtmosphere(float3 viewDirWS)
+            {
+                float3 lightDirWS = SafeNormalize(_BurtAtmosphereSunDirection.xyz, SafeNormalize(_BurtMainLightDirection.xyz, float3(0.0f, 1.0f, 0.0f)));
+                float3 lightColor = NormalizeLightColor(max(_BurtMainLightColor.rgb, 0.0f));
+                float cosTheta = dot(viewDirWS, lightDirWS);
+                float viewUp = viewDirWS.y;
+                float up01 = saturate(viewUp * 0.5f + 0.5f);
+
+                float atmosphereHeight = max(_BurtAtmospherePlanetParams.y, 1.0f);
+                float rayleighScaleHeight = max(_BurtAtmospherePlanetParams.z, 0.1f);
+                float mieScaleHeight = max(_BurtAtmospherePlanetParams.w, 0.1f);
+                float rayleighAir = EstimateAirMass(viewUp, rayleighScaleHeight, atmosphereHeight);
+                float mieAir = EstimateAirMass(viewUp, mieScaleHeight, atmosphereHeight);
+
+                float3 skyTint = max(_BurtAtmosphereSkyTint.rgb, 0.0f);
+                float3 groundColor = max(_BurtAtmosphereGroundColor.rgb, 0.0f);
+                float rayleighIntensity = max(_BurtAtmosphereRayleighIntensity, 0.0f);
+                float mieIntensity = max(_BurtAtmosphereMieIntensity, 0.0f);
+                float3 zenithColor = float3(0.18f, 0.36f, 0.75f) * skyTint;
+                float3 horizonBaseColor = max(_BurtAtmosphereHorizonColor.rgb, 0.0f) * skyTint;
+                float3 horizonSunsetColor = max(_BurtAtmosphereHorizonSunsetColor.rgb, 0.0f) * lightColor;
+                float horizonIntensity = max(_BurtAtmosphereHorizonParams.x, 0.0f);
+                float horizonFalloff = max(_BurtAtmosphereHorizonParams.y, 0.1f);
+                float horizonSunsetInfluence = saturate(_BurtAtmosphereHorizonParams.z);
+                float groundContribution = max(_BurtAtmosphereGroundParams.x, 0.0f);
+                float groundBlendStart = _BurtAtmosphereGroundParams.y;
+                float groundBlendEnd = _BurtAtmosphereGroundParams.z;
+                float3 horizonColor = lerp(horizonBaseColor, horizonSunsetColor, saturate(1.0f - lightDirWS.y) * horizonSunsetInfluence);
+                float3 baseSky = lerp(horizonColor * horizonIntensity, zenithColor, pow(up01, horizonFalloff));
+
+                float3 rayleighBeta = float3(0.32f, 0.58f, 1.0f) * (rayleighIntensity * 0.45f);
+                float3 mieBeta = float3(1.0f, 0.92f, 0.78f) * (mieIntensity * 0.16f);
+                float3 transmittance = exp(-(rayleighBeta * rayleighAir + mieBeta * mieAir) * 0.45f);
+                float3 inScatter = rayleighBeta * RayleighPhase(cosTheta) * rayleighAir;
+                inScatter += mieBeta * MiePhase(cosTheta, _BurtAtmosphereMieAnisotropy) * mieAir;
+
+                float sunDiskSize = max(_BurtAtmosphereSunParams.x, 0.05f);
+                float sunDiskIntensity = max(_BurtAtmosphereSunParams.y, 0.0f);
+                float sunHaloSize = max(_BurtAtmosphereSunParams.z, 0.05f);
+                float sunHaloIntensity = max(_BurtAtmosphereSunParams.w, 0.0f);
+                float sunDiskPower = max(4.0f, 384.0f / sunDiskSize);
+                float sunHaloPower = max(1.0f, 12.0f / sunHaloSize);
+                float sunDisk = pow(saturate(cosTheta), sunDiskPower) * mieIntensity;
+                float sunHalo = pow(saturate(cosTheta), sunHaloPower) * mieIntensity * 0.18f;
+                float exposureScale = max(_BurtAtmosphereExposureParams.x, 0.0f);
+                float exposureSafeSun = min(_BurtAtmosphereSunIntensity, max(_BurtAtmosphereExposureParams.y, 0.1f));
+                float3 skyColor = baseSky * (0.16f + rayleighIntensity * 0.18f);
+                skyColor += inScatter * skyTint * lightColor * exposureSafeSun;
+                skyColor += (sunDisk * sunDiskIntensity + sunHalo * sunHaloIntensity) * lightColor * exposureSafeSun;
+
+                float groundBlend = SmoothRange(groundBlendStart, groundBlendEnd, viewUp);
+                skyColor = lerp(skyColor, groundColor * groundContribution, groundBlend);
+                return max(skyColor * transmittance * exposureScale, 0.0f);
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float3 viewDirWS = AtmosphereFaceUVToDirection(_BurtAtmosphereCubemapFace, input.uv);
+                return float4(EvaluateAtmosphere(viewDirWS), 1.0f);
             }
             ENDHLSL
         }

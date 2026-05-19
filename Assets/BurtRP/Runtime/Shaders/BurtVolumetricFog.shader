@@ -18,6 +18,7 @@ Shader "Hidden/BurtRP/VolumetricFog"
             #pragma fragment Frag
 
             #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
             sampler2D _BurtCameraColorTexture;
             UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -345,7 +346,7 @@ Shader "Hidden/BurtRP/VolumetricFog"
                     return float4(saturate((float)stepCount / 96.0f).xxx, 1.0f);
                 }
 
-                return float4(sourceColor * transmittance + scattering, 1.0f);
+                return float4(sourceColor * transmittance + BurtApplyPreExposure(scattering), 1.0f);
             }
             ENDHLSL
         }

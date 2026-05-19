@@ -100,6 +100,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceSetupDescriptor(Camera camera)
+        {
+            var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceTileDescriptor(Camera camera)
+        {
+            var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.R8;
+            descriptor.width = Mathf.Max(1, Mathf.CeilToInt(descriptor.width / 16f));
+            descriptor.height = Mathf.Max(1, Mathf.CeilToInt(descriptor.height / 16f));
+            descriptor.depthBufferBits = 0;
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceCombineDescriptor(Camera camera)
+        {
+            return CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+        }
+
         public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
         {
             return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32); // GBuffer0 第一版保存 baseColor.rgb 和 occlusion.a，普通 8 位通道足够起步。

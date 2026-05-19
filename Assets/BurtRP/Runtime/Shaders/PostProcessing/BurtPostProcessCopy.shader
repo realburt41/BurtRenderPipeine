@@ -2703,6 +2703,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             sampler2D _BurtPostProcessSourceTexture;
             float4 _BurtAutoExposureTexelSize;
+            float _BurtInvPreExposure;
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -2729,10 +2730,11 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float2 texel = _BurtAutoExposureTexelSize.xy;
                 float2 uv = input.uv;
                 float sum = 0.0;
-                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(-0.5, -0.5))).rgb));
-                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(0.5, -0.5))).rgb));
-                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(-0.5, 0.5))).rgb));
-                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(0.5, 0.5))).rgb));
+                float invPreExposure = max(_BurtInvPreExposure, 0.0);
+                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(-0.5, -0.5))).rgb * invPreExposure));
+                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(0.5, -0.5))).rgb * invPreExposure));
+                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(-0.5, 0.5))).rgb * invPreExposure));
+                sum += log2(BurtAutoExposureLuminance(tex2D(_BurtPostProcessSourceTexture, saturate(uv + texel * float2(0.5, 0.5))).rgb * invPreExposure));
                 return float4(sum * 0.25, 0.0, 0.0, 1.0);
             }
             ENDHLSL
@@ -2797,6 +2799,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float4 _BurtAutoExposureTexelSize;
             float _BurtAutoExposureDebugMode;
             float4 _BurtAutoExposureDebugParams;
+            float _BurtInvPreExposure;
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -2845,7 +2848,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float3 color = tex2D(_BurtPostProcessSourceTexture, input.uv).rgb;
+                float3 color = tex2D(_BurtPostProcessSourceTexture, input.uv).rgb * max(_BurtInvPreExposure, 0.0);
                 float logLum = clamp(log2(BurtAutoExposureDebugLuminance(color)), -20.0, 16.0);
                 float minLogLum = _BurtAutoExposureDebugParams.x;
                 float maxLogLum = max(minLogLum + 0.001, _BurtAutoExposureDebugParams.y);

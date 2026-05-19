@@ -198,8 +198,20 @@ namespace Burt.RenderPipeline
 
         public static BurtRenderBufferDescriptor CreateClusterLightListBufferDescriptor(Camera camera)
         {
+            return CreateClusterLightListBufferDescriptor(camera, null);
+        }
+
+        public static BurtRenderBufferDescriptor CreateClusterLightListBufferDescriptor(Camera camera, BurtLightingData lightingData)
+        {
             var layout = CalculateClusterLayout(camera);
-            return new BurtRenderBufferDescriptor(layout.ClusterCount * ResolveRuntimeMaxLightsPerCluster(), TileLightIndexStride, GraphicsBuffer.Target.Structured, ClusterLightListBufferShaderName);
+            var additionalLightCount = lightingData != null ? Mathf.Clamp(lightingData.AdditionalLightCount, 0, BurtLightingData.MaxAdditionalLights) : BurtLightingData.MaxAdditionalLights;
+            if (additionalLightCount <= 0)
+            {
+                return new BurtRenderBufferDescriptor(1, TileLightIndexStride, GraphicsBuffer.Target.Structured, ClusterLightListBufferShaderName);
+            }
+
+            var maxLightsPerCluster = Mathf.Max(1, Mathf.Min(ResolveRuntimeMaxLightsPerCluster(), additionalLightCount));
+            return new BurtRenderBufferDescriptor(Mathf.Max(1, layout.ClusterCount * maxLightsPerCluster), TileLightIndexStride, GraphicsBuffer.Target.Structured, ClusterLightListBufferShaderName);
         }
 
         public static BurtRenderBufferDescriptor CreateClusterLightOffsetBufferDescriptor(Camera camera)
@@ -227,6 +239,11 @@ namespace Burt.RenderPipeline
 
         public static bool ShouldUseRuntimeTiledLightingResources(BurtRenderRequest request, BurtRenderPipelineAsset asset, bool hasLocalDeferredTargets)
         {
+            return false;
+        }
+
+        private static bool ShouldUseRuntimeLocalLightingResources(BurtRenderRequest request, BurtRenderPipelineAsset asset, bool hasLocalDeferredTargets)
+        {
             if (!hasLocalDeferredTargets || request == null || !request.IsValid || asset == null)
             {
                 return false;
@@ -242,7 +259,9 @@ namespace Burt.RenderPipeline
 
         public static bool ShouldUseRuntimeClusteredLightingResources(BurtRenderRequest request, BurtRenderPipelineAsset asset, bool hasLocalDeferredTargets)
         {
-            return ShouldUseRuntimeTiledLightingResources(request, asset, hasLocalDeferredTargets);
+            return ShouldUseRuntimeLocalLightingResources(request, asset, hasLocalDeferredTargets) &&
+                request.LightingData != null &&
+                request.LightingData.AdditionalLightCount > 0;
         }
 
         public static bool ShouldUseTiledLightResources(BurtRenderRequest request, BurtRenderPipelineAsset asset, bool hasLocalDeferredTargets)

@@ -17,6 +17,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private SerializedProperty preintegratedFGLut; // 缓存 PBR 预积分 FG LUT 字段。
         private SerializedProperty enableScreenSpaceSubsurface;
         private SerializedProperty screenSpaceSubsurfaceProfile;
+        private SerializedProperty screenSpaceSubsurfaceProfiles;
         private SerializedProperty screenSpaceSubsurfaceRadiusPixels;
         private SerializedProperty screenSpaceSubsurfaceDepthSigma;
         private SerializedProperty screenSpaceSubsurfaceNormalSigma;
@@ -42,7 +43,8 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private static readonly GUIContent DepthScaleLabel = new("Depth Debug Scale", "调整深度可视化亮度缩放，数值越大近处深度越明显。"); // 定义 Depth Debug 缩放显示文本。
         private static readonly GUIContent PreintegratedFGLutLabel = new("Preintegrated FG LUT", "用于 IBL 间接高光的 DFG/GGX 预积分查找表。"); // 定义 PBR 预积分 LUT 显示文本。
         private static readonly GUIContent EnableScreenSpaceSubsurfaceLabel = new("Enable Screen Space 5S", "开启 Deferred 屏幕空间次表面散射。");
-        private static readonly GUIContent ScreenSpaceSubsurfaceProfileLabel = new("5S Profile", "独立的 5S profile 文件；挂上后优先使用 profile 参数，未挂时使用下方 inline fallback。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceProfileLabel = new("5S Default Profile (Slot 0)", "默认 5S profile 文件，也是材质 Profile Index 为 0 时使用的 profile；未挂时使用下方 inline fallback。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceProfilesLabel = new("5S Profile List (Slots 1-7)", "材质 Profile Index 1 到 7 会依次读取这里的 profile。列表为空或槽位为空时回退到 Slot 0。");
         private static readonly GUIContent ScreenSpaceSubsurfaceRadiusPixelsLabel = new("Fallback Radius Pixels", "未指定 profile 时使用的屏幕空间扩散半径。");
         private static readonly GUIContent ScreenSpaceSubsurfaceDepthSigmaLabel = new("Fallback Depth Sigma", "未指定 profile 时使用的深度边界保护。");
         private static readonly GUIContent ScreenSpaceSubsurfaceNormalSigmaLabel = new("Fallback Normal Sigma", "未指定 profile 时使用的法线边界保护。");
@@ -71,6 +73,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             preintegratedFGLut = FindProperty(nameof(preintegratedFGLut)); // 绑定 PBR 预积分 FG LUT。
             enableScreenSpaceSubsurface = FindProperty(nameof(enableScreenSpaceSubsurface));
             screenSpaceSubsurfaceProfile = FindProperty(nameof(screenSpaceSubsurfaceProfile));
+            screenSpaceSubsurfaceProfiles = FindProperty(nameof(screenSpaceSubsurfaceProfiles));
             screenSpaceSubsurfaceRadiusPixels = FindProperty(nameof(screenSpaceSubsurfaceRadiusPixels));
             screenSpaceSubsurfaceDepthSigma = FindProperty(nameof(screenSpaceSubsurfaceDepthSigma));
             screenSpaceSubsurfaceNormalSigma = FindProperty(nameof(screenSpaceSubsurfaceNormalSigma));
@@ -128,6 +131,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             using (new EditorGUI.DisabledScope(enableScreenSpaceSubsurface == null || !enableScreenSpaceSubsurface.boolValue))
             {
                 DrawProperty(screenSpaceSubsurfaceProfile, ScreenSpaceSubsurfaceProfileLabel);
+                DrawProfileListProperty();
 
                 var usingProfile = screenSpaceSubsurfaceProfile != null && screenSpaceSubsurfaceProfile.objectReferenceValue != null;
                 using (new EditorGUI.DisabledScope(usingProfile))
@@ -143,7 +147,22 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
                 }
             }
 
-            EditorGUILayout.HelpBox("5S 会优先读取独立 profile 文件；没有指定 profile 时才使用 fallback 参数。", MessageType.Info);
+            EditorGUILayout.HelpBox("材质里的 Subsurface Profile Index 会查这张表：0 使用 Default Profile，1-7 使用 Profile List 的第 1-7 个槽。", MessageType.Info);
+        }
+
+        private void DrawProfileListProperty()
+        {
+            if (screenSpaceSubsurfaceProfiles == null)
+            {
+                return;
+            }
+
+            if (screenSpaceSubsurfaceProfiles.arraySize > BurtSubsurfaceProfilePalette.MaxProfiles - 1)
+            {
+                screenSpaceSubsurfaceProfiles.arraySize = BurtSubsurfaceProfilePalette.MaxProfiles - 1;
+            }
+
+            DrawProperty(screenSpaceSubsurfaceProfiles, ScreenSpaceSubsurfaceProfilesLabel);
         }
 
         private void DrawPostProcessGroup() // 绘制后处理框架设置；Tonemapping、Bloom 等具体效果参数走 Global Volume。

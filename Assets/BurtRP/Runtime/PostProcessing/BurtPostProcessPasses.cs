@@ -307,6 +307,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var tonemappingMode = BurtPostProcessUtility.ResolveTonemappingMode(context.Asset); // 从当前 VolumeStack 安全解析本次后处理应该使用的 Tonemapping 模式。
 
             var exposureSettings = BurtPostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
+            var preExposureState = BurtPreExposureUtility.ResolveForFrame(exposureSettings);
+            var residualPostExposureMultiplier = preExposureState.ResidualPostExposure;
             var postExposureMultiplier = exposureSettings.Multiplier; // 把 Global Volume 中的 EV 曝光转换成本次 shader 使用的线性倍率。
 
             var filmSettings = BurtPostProcessUtility.ResolveTonemappingFilmSettings(context.Asset); // 从 Global Volume 读取 UE/XRender Filmic 曲线参数，缺失时回退到默认值。
@@ -327,12 +329,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var bloomDebugView = BurtPostProcessUtility.ResolveBloomDebugView(bloomSettings); // Shading Debug 的 Bloom Prefilter 会覆盖 Volume 内的 Bloom debug 下拉。
 
             var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取 CommandBuffer，并用 Pass 名称命名。
+            BurtPreExposureUtility.UploadGlobals(cmd, preExposureState);
+            if (useTemporalAA &&
+                BurtPreExposureUtility.ShouldInvalidateTemporalAAHistory(context.Request.Camera, preExposureState, out var preExposureInvalidationReason))
+            {
+                BurtTemporalAAUtility.InvalidateHistory(context.Request.Camera, preExposureInvalidationReason);
+            }
+
             if (temporalAADebugRequested && !useTemporalAA)
             {
                 ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
                 renderContext.ExecuteCommandBuffer(cmd);
                 CommandBufferPool.Release(cmd);
-                BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments, bloomSettings, 0);
+                BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, preExposureState, useColorAdjustments, bloomSettings, 0);
                 return;
             }
 
@@ -346,7 +355,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
                     renderContext.ExecuteCommandBuffer(cmd);
                     CommandBufferPool.Release(cmd);
-                    BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments, bloomSettings, 0);
+                    BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, preExposureState, useColorAdjustments, bloomSettings, 0);
                     return;
                 }
             }
@@ -355,13 +364,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             {
                 renderContext.ExecuteCommandBuffer(cmd);
                 CommandBufferPool.Release(cmd);
-                BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments, bloomSettings, 0);
+                BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, preExposureState, useColorAdjustments, bloomSettings, 0);
                 return;
             }
 
             if (bloomMipCount > 0) // 如果 Bloom 启用，就在同一个 Pass 内部管理临时 mip 链。
             {
-                ExecuteBloom(cmd, context.Request.Camera, cameraColorTarget, material, bloomSettings, bloomDebugView, bloomMipCount, postExposureMultiplier); // 先对 HDR CameraColor 做 prefilter/downsample/upsample。
+                ExecuteBloom(cmd, context.Request.Camera, cameraColorTarget, material, bloomSettings, bloomDebugView, bloomMipCount, residualPostExposureMultiplier); // 先对 HDR CameraColor 做 prefilter/downsample/upsample。
             }
 
             if (BurtAutoExposureUtility.ShouldCapture(exposureSettings, context.Request.Camera))
@@ -379,6 +388,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     AutoExposureTexelSizeId);
                 exposureSettings = BurtPostProcessUtility.ResolvePhysicalExposureSettingsForFrame(context.Request, context.Asset, Time.deltaTime);
                 postExposureMultiplier = exposureSettings.Multiplier;
+                residualPostExposureMultiplier = BurtPreExposureUtility.ResolveResidualPostExposure(exposureSettings, preExposureState);
             }
 
             cmd.SetRenderTarget(postProcessColorTarget.Identifier); // 先绑定 PostProcessColor，让第一段全屏拷贝写入后处理中间目标。
@@ -387,7 +397,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var useBloomDebug = ShouldUseBloomDebugView(bloomDebugView, bloomMipCount); // Bloom debug 只在 Bloom 实际执行且没有其他 shading debug 抢占时显示。
             if (useBloomDebug)
             {
-                SetBloomDebugSource(cmd, context.Request.Camera, cameraColorTarget.Identifier, bloomSettings, bloomDebugView, bloomMipCount, postExposureMultiplier); // 把选中的 Bloom 中间纹理绑定到 debug pass。
+                SetBloomDebugSource(cmd, context.Request.Camera, cameraColorTarget.Identifier, bloomSettings, bloomDebugView, bloomMipCount, residualPostExposureMultiplier); // 把选中的 Bloom 中间纹理绑定到 debug pass。
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomDebug), MeshTopology.Triangles, 3, 1); // 直接把 Bloom debug 画到 PostProcessColor。
             }
             else if (autoExposureDebugMode > 0)
@@ -409,7 +419,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
                 cmd.SetGlobalFloat(TonemappingModeId, (float)tonemappingMode); // 上传 Tonemapping 模式，None 会让 shader 原样输出，其他模式会执行对应曲线。
 
-                cmd.SetGlobalFloat(PostExposureId, postExposureMultiplier); // 上传线性曝光倍率，让 Tonemapping 前可以整体调整 HDR 亮度。
+                cmd.SetGlobalFloat(PostExposureId, residualPostExposureMultiplier); // 上传线性曝光倍率，让 Tonemapping 前可以整体调整 HDR 亮度。
 
                 cmd.SetGlobalFloat(FilmSlopeId, filmSettings.Slope); // 上传 Film Slope，让 shader 的 UE/XRender 曲线和 Volume 参数一致。
 
@@ -463,7 +473,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             CommandBufferPool.Release(cmd); // 释放 CommandBuffer，避免每帧产生 GC。
 
-            BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, useColorAdjustments, bloomSettings, bloomMipCount); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
+            BurtPostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, preExposureState, useColorAdjustments, bloomSettings, bloomMipCount); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
         }
 
         private static void InvalidateTemporalAAIfEnabled(BurtRenderGraphContext context, string reason)
@@ -831,6 +841,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static void DisablePostProcessEffects(CommandBuffer cmd)
         {
+            BurtPreExposureUtility.UploadGlobals(cmd, BurtPreExposureState.Default);
             cmd.SetGlobalFloat(UseBloomId, 0f);
             cmd.SetGlobalFloat(UseBloomAlphaId, 0f);
             cmd.SetGlobalFloat(TonemappingModeId, 0f);

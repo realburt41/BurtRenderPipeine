@@ -1,4 +1,5 @@
 using Sirenix.OdinInspector; // 引入 Odin Inspector 命名空间，用来给新配置提供更清晰的分组显示。
+using System.Collections.Generic;
 using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Color、SerializeField、CreateAssetMenu 等 Unity 类型。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来继承 RenderPipelineAsset。
 
@@ -38,7 +39,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         GBuffer4 = 23,
         Anisotropy = 24,
         TangentWS = 25,
-        SubsurfaceThickness = 26
+        SubsurfaceThickness = 26,
+        SubsurfaceProfileIndex = 27
     }
 
     [CreateAssetMenu(menuName = "Rendering/Burt Render Pipeline Asset", fileName = "BurtRenderPipelineAsset")] // 让 Unity 可以通过 Create 菜单创建 BurtRenderPipelineAsset。
@@ -85,6 +87,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [TitleGroup("Deferred - 屏幕空间次表面 5S")]
         [ShowIf(nameof(IsDeferredRendererMode))]
         [SerializeField, LabelText("5S Profile")] private BurtSubsurfaceProfile screenSpaceSubsurfaceProfile;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, LabelText("5S Profile List")] private List<BurtSubsurfaceProfile> screenSpaceSubsurfaceProfiles = new List<BurtSubsurfaceProfile>();
 
         [TitleGroup("Deferred - 屏幕空间次表面 5S")]
         [ShowIf(nameof(IsDeferredRendererMode))]
@@ -162,6 +168,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         public BurtSubsurfaceProfileSettings ScreenSpaceSubsurfaceProfileSettings => ResolveScreenSpaceSubsurfaceSettings();
 
+        public int ScreenSpaceSubsurfaceProfileMaxCount => BurtSubsurfaceProfilePalette.MaxProfiles;
+
+        public int ScreenSpaceSubsurfaceProfileCount => ResolveScreenSpaceSubsurfaceProfilePalette().Count;
+
+        public IReadOnlyList<BurtSubsurfaceProfileSettings> ScreenSpaceSubsurfaceProfileSettingsList => ResolveScreenSpaceSubsurfaceProfilePalette().Settings;
+
+        public BurtSubsurfaceProfilePalette ScreenSpaceSubsurfaceProfilePalette => ResolveScreenSpaceSubsurfaceProfilePalette();
+
         public float ScreenSpaceSubsurfaceRadiusPixels => ScreenSpaceSubsurfaceProfileSettings.RadiusPixels;
 
         public float ScreenSpaceSubsurfaceDepthSigma => ScreenSpaceSubsurfaceProfileSettings.DepthSigma;
@@ -231,6 +245,77 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
             BurtRenderGraphDebugClipboardUtility.ClearLatestDump(); // 复用剪切板工具清空完整文本、摘要和一次性请求。
         }
 
+        public string GetScreenSpaceSubsurfaceProfileName(int index)
+        {
+            return ResolveScreenSpaceSubsurfaceProfilePalette().GetName(index);
+        }
+
+        public BurtSubsurfaceProfile GetScreenSpaceSubsurfaceProfileAsset(int index)
+        {
+            if (index <= 0)
+            {
+                return screenSpaceSubsurfaceProfile;
+            }
+
+            EnsureScreenSpaceSubsurfaceProfileList();
+            var listIndex = index - 1;
+            return listIndex >= 0 && listIndex < screenSpaceSubsurfaceProfiles.Count
+                ? screenSpaceSubsurfaceProfiles[listIndex]
+                : null;
+        }
+
+        public int GetScreenSpaceSubsurfaceProfileIndex(BurtSubsurfaceProfile profile)
+        {
+            if (profile == null || profile == screenSpaceSubsurfaceProfile)
+            {
+                return 0;
+            }
+
+            EnsureScreenSpaceSubsurfaceProfileList();
+            for (var i = 0; i < Mathf.Min(screenSpaceSubsurfaceProfiles.Count, BurtSubsurfaceProfilePalette.MaxProfiles - 1); i++)
+            {
+                if (screenSpaceSubsurfaceProfiles[i] == profile)
+                {
+                    return i + 1;
+                }
+            }
+
+            return 0;
+        }
+
+        public int EnsureScreenSpaceSubsurfaceProfileSlot(BurtSubsurfaceProfile profile)
+        {
+            if (profile == null || profile == screenSpaceSubsurfaceProfile)
+            {
+                return 0;
+            }
+
+            EnsureScreenSpaceSubsurfaceProfileList();
+            var existingIndex = GetScreenSpaceSubsurfaceProfileIndex(profile);
+            if (existingIndex > 0)
+            {
+                return existingIndex;
+            }
+
+            var maxAdditionalProfiles = BurtSubsurfaceProfilePalette.MaxProfiles - 1;
+            for (var i = 0; i < Mathf.Min(screenSpaceSubsurfaceProfiles.Count, maxAdditionalProfiles); i++)
+            {
+                if (screenSpaceSubsurfaceProfiles[i] == null)
+                {
+                    screenSpaceSubsurfaceProfiles[i] = profile;
+                    return i + 1;
+                }
+            }
+
+            if (screenSpaceSubsurfaceProfiles.Count < maxAdditionalProfiles)
+            {
+                screenSpaceSubsurfaceProfiles.Add(profile);
+                return screenSpaceSubsurfaceProfiles.Count;
+            }
+
+            return 0;
+        }
+
         private bool IsDeferredRendererMode => rendererMode == BurtRendererMode.Deferred; // 提供给 Odin ShowIf 使用，让 Deferred 专属配置只在 Deferred 模式下显示。
 
         private BurtSubsurfaceProfileSettings ResolveScreenSpaceSubsurfaceSettings()
@@ -247,6 +332,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
                 screenSpaceSubsurfaceMinStrength);
         }
 
+        private BurtSubsurfaceProfilePalette ResolveScreenSpaceSubsurfaceProfilePalette()
+        {
+            EnsureScreenSpaceSubsurfaceProfileList();
+            return BurtSubsurfaceProfilePalette.Resolve(
+                ResolveScreenSpaceSubsurfaceSettings(),
+                screenSpaceSubsurfaceProfiles);
+        }
+
         private BurtPostProcessSettings EnsurePostProcessSettings() // 定义后处理设置兜底函数，避免旧资产还没有序列化新字段时返回空引用。
         {
             if (postProcessSettings == null) // 如果 Unity 还没有给旧资产创建后处理设置对象，就在访问时补一个默认实例。
@@ -261,6 +354,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         {
             base.OnValidate(); // 先执行 Unity 管线资产自己的校验逻辑，保持 RenderPipelineAsset 内部刷新行为不丢失。
             EnsurePostProcessSettings(); // 确保后处理设置对象存在，避免旧资产在 Inspector 中显示为空。
+            EnsureScreenSpaceSubsurfaceProfileList();
+            if (screenSpaceSubsurfaceProfiles.Count > BurtSubsurfaceProfilePalette.MaxProfiles - 1)
+            {
+                screenSpaceSubsurfaceProfiles.RemoveRange(
+                    BurtSubsurfaceProfilePalette.MaxProfiles - 1,
+                    screenSpaceSubsurfaceProfiles.Count - (BurtSubsurfaceProfilePalette.MaxProfiles - 1));
+            }
+        }
+
+        private void EnsureScreenSpaceSubsurfaceProfileList()
+        {
+            if (screenSpaceSubsurfaceProfiles == null)
+            {
+                screenSpaceSubsurfaceProfiles = new List<BurtSubsurfaceProfile>();
+            }
         }
 
         protected override UnityEngine.Rendering.RenderPipeline CreatePipeline() // Unity 会调用这个函数来创建真正运行时的 RenderPipeline 实例。

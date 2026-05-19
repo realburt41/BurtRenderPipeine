@@ -5,8 +5,12 @@
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
 
-#ifndef BURT_SHADOW_CASTER_ALPHA_CLIP
-#define BURT_SHADOW_CASTER_ALPHA_CLIP 1
+#if !defined(BURT_SHADOW_CASTER_ALPHA_CLIP)
+    #if defined(BURT_ALPHA_CLIP)
+        #define BURT_SHADOW_CASTER_ALPHA_CLIP 1
+    #else
+        #define BURT_SHADOW_CASTER_ALPHA_CLIP 0
+    #endif
 #endif
 
 float4 _BurtMainLightDirection;

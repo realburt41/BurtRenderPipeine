@@ -36,13 +36,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass deferredClearCoatLightingPass = new BurtDeferredClearCoatLightingPass();
         private readonly BurtRenderPass deferredSubsurfaceLightingPass = new BurtDeferredSubsurfaceLightingPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceSourcePass = new BurtAllocateScreenSpaceSubsurfaceSourcePass();
+        private readonly BurtRenderPass allocateScreenSpaceSubsurfaceSetupPass = new BurtAllocateScreenSpaceSubsurfaceSetupPass();
+        private readonly BurtRenderPass allocateScreenSpaceSubsurfaceTilePass = new BurtAllocateScreenSpaceSubsurfaceTilePass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceTempPass = new BurtAllocateScreenSpaceSubsurfaceTempPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceBlurPass = new BurtAllocateScreenSpaceSubsurfaceBlurPass();
+        private readonly BurtRenderPass allocateScreenSpaceSubsurfaceCombinePass = new BurtAllocateScreenSpaceSubsurfaceCombinePass();
         private readonly BurtRenderPass screenSpaceSubsurfaceCopySourcePass = new BurtScreenSpaceSubsurfaceCopySourcePass();
+        private readonly BurtRenderPass screenSpaceSubsurfaceSetupPass = new BurtScreenSpaceSubsurfaceSetupPass();
+        private readonly BurtRenderPass screenSpaceSubsurfaceTilePass = new BurtScreenSpaceSubsurfaceTilePass();
         private readonly BurtRenderPass screenSpaceSubsurfaceBlurHorizontalPass = new BurtScreenSpaceSubsurfaceBlurHorizontalPass();
         private readonly BurtRenderPass screenSpaceSubsurfaceBlurVerticalPass = new BurtScreenSpaceSubsurfaceBlurVerticalPass();
         private readonly BurtRenderPass screenSpaceSubsurfaceCopyToCameraColorPass = new BurtScreenSpaceSubsurfaceCopyToCameraColorPass();
+        private readonly BurtRenderPass releaseScreenSpaceSubsurfaceCombinePass = new BurtReleaseScreenSpaceSubsurfaceCombinePass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceSourcePass = new BurtReleaseScreenSpaceSubsurfaceSourcePass();
+        private readonly BurtRenderPass releaseScreenSpaceSubsurfaceSetupPass = new BurtReleaseScreenSpaceSubsurfaceSetupPass();
+        private readonly BurtRenderPass releaseScreenSpaceSubsurfaceTilePass = new BurtReleaseScreenSpaceSubsurfaceTilePass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceTempPass = new BurtReleaseScreenSpaceSubsurfaceTempPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceBlurPass = new BurtReleaseScreenSpaceSubsurfaceBlurPass();
         private readonly BurtRenderPass setRenderTargetPass = new BurtSetRenderTargetPass(); // 创建 CameraColor/CameraDepth 绑定 Pass，GBuffer 阶段前后都会用它切回正常颜色目标。
@@ -80,6 +88,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass debugTileLightViewPass = new BurtDebugTileLightViewPass();
         private readonly BurtRenderPass debugClusterLightVolumePass = new BurtDebugClusterLightVolumePass();
         private readonly BurtRenderPass debugScreenSpaceAmbientOcclusionPass = new BurtDebugScreenSpaceAmbientOcclusionPass();
+        private readonly BurtRenderPass debugScreenSpaceSubsurfacePass = new BurtDebugScreenSpaceSubsurfacePass();
         private readonly BurtRenderPass debugScreenSpaceReflectionHiZDiagnosticsPass = new BurtScreenSpaceReflectionHiZDiagnosticsPass();
         private readonly BurtRenderPass finalBlitPass = new BurtFinalBlitPass(); // 创建最终拷贝 Pass，把 CameraColor 输出到 request 指定的最终目标。
         private readonly BurtRenderPass releaseMainLightShadowMapPass = new BurtReleaseMainLightShadowMapPass(); // 创建主光阴影图释放 Pass，结束 MainLightShadowMap 生命周期。
@@ -154,7 +163,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             AddReturnToCameraColorPass(graph, useLocalGBufferTargets); // GBuffer 阶段完成后重新绑定 CameraColor，避免 Forward fallback 继续画进 GBuffer。
 
             AddScreenSpaceAmbientOcclusionPasses(graph, request, asset, useLocalGBufferTargets);
-            AddDeferredLightingPass(graph, useLocalGBufferTargets); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
+            AddDeferredLightingPass(graph, request, asset, useLocalGBufferTargets); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
             AddDeferredForwardOnlyOpaqueFallback(graph, asset); // 根据资产开关决定是否绘制不能写入 GBuffer 的前向专用不透明物体。
             AddScreenSpaceSubsurfacePasses(graph, request, asset, useLocalGBufferTargets);
             AddHiZBuildPass(graph, useHiZDepth);
@@ -299,7 +308,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             BurtRenderPipelineAsset asset,
             bool useLocalGBufferTargets)
         {
-            if (!BurtTiledLightData.ShouldUseTiledLightResources(request, asset, useLocalGBufferTargets))
+            if (!BurtTiledLightData.ShouldUseTiledLightResources(request, asset, useLocalGBufferTargets) &&
+                !BurtTiledLightData.ShouldUseClusterLightResources(request, asset, useLocalGBufferTargets))
             {
                 return;
             }
@@ -459,19 +469,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(allocateScreenSpaceSubsurfaceSourcePass);
+            graph.AddPass(allocateScreenSpaceSubsurfaceSetupPass);
+            graph.AddPass(allocateScreenSpaceSubsurfaceTilePass);
             graph.AddPass(allocateScreenSpaceSubsurfaceTempPass);
             graph.AddPass(allocateScreenSpaceSubsurfaceBlurPass);
+            graph.AddPass(allocateScreenSpaceSubsurfaceCombinePass);
             graph.AddPass(screenSpaceSubsurfaceCopySourcePass);
+            graph.AddPass(screenSpaceSubsurfaceSetupPass);
+            graph.AddPass(screenSpaceSubsurfaceTilePass);
             graph.AddPass(screenSpaceSubsurfaceBlurHorizontalPass);
             graph.AddPass(screenSpaceSubsurfaceBlurVerticalPass);
             graph.AddPass(screenSpaceSubsurfaceCopyToCameraColorPass);
+            graph.AddPass(releaseScreenSpaceSubsurfaceCombinePass);
             graph.AddPass(releaseScreenSpaceSubsurfaceBlurPass);
             graph.AddPass(releaseScreenSpaceSubsurfaceTempPass);
+            graph.AddPass(releaseScreenSpaceSubsurfaceTilePass);
+            graph.AddPass(releaseScreenSpaceSubsurfaceSetupPass);
             graph.AddPass(releaseScreenSpaceSubsurfaceSourcePass);
         }
 
         private void AddDeferredLightingPass( // 添加 Deferred Lighting 全屏合成 Pass。
             BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
             bool useLocalGBufferTargets) // 接收当前 request 是否拥有本地图内 GBuffer。
         {
             if (!useLocalGBufferTargets) // 没有本地 GBuffer 生命周期时不能执行 Deferred Lighting。
@@ -482,7 +502,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.AddPass(clearDeferredLightingTargetPass); // 先把 lighting target 清黑；后续 stencil pass 跳过的像素不会继承相机 clear color。
             graph.AddPass(deferredLitLightingPass); // 先写入 Default Lit 像素；后续 shading model pass 以 additive 方式补齐专用模型。
             graph.AddPass(deferredHairLightingPass); // 叠加 Hair 像素；shader pass 和 GBuffer model id 都使用 1。
-            graph.AddPass(deferredClearCoatLightingPass);
+            if (ShouldUseDeferredClearCoatLighting(request, asset, useLocalGBufferTargets))
+            {
+                graph.AddPass(deferredClearCoatLightingPass);
+            }
             graph.AddPass(deferredSubsurfaceLightingPass);
         }
 
@@ -590,6 +613,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             if (ShouldUseScreenSpaceAmbientOcclusionDebugView(request, asset, useLocalGBufferTargets))
             {
                 graph.AddPass(debugScreenSpaceAmbientOcclusionPass);
+            }
+
+            if (ShouldUseScreenSpaceSubsurfaceDebugView(request, asset, useLocalGBufferTargets))
+            {
+                graph.AddPass(debugScreenSpaceSubsurfacePass);
             }
 
             if (ShouldUseScreenSpaceReflectionHiZDiagnosticView(request, asset, useLocalGBufferTargets))
@@ -773,6 +801,165 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             return asset.EnableDeferredForwardOpaqueFallback; // 使用资产上的 Deferred ForwardOnly 不透明兜底开关。
         }
 
+        private const int OpaqueRenderQueueMax = 2500;
+        private const string ClearCoatShaderName = "BurtRP/Clear Coat";
+        private const string GBufferPassName = "BurtGBuffer";
+        private static int cachedClearCoatFeatureFrame = -1;
+        private static int cachedClearCoatFeatureCameraId;
+        private static int cachedClearCoatFeatureCullingMask;
+        private static bool cachedHasVisibleClearCoat;
+
+        private static bool ShouldUseDeferredClearCoatLighting(BurtRenderRequest request, BurtRenderPipelineAsset asset, bool useLocalGBufferTargets)
+        {
+            if (!useLocalGBufferTargets)
+            {
+                return false;
+            }
+
+            if (asset != null && asset.RendererMode != BurtRendererMode.Deferred)
+            {
+                return false;
+            }
+
+            var camera = request != null ? request.Camera : null;
+            if (request == null || !request.IsValid || camera == null)
+            {
+                return true;
+            }
+
+            var frame = UnityEngine.Time.frameCount;
+            var cameraId = camera.GetInstanceID();
+            if (cachedClearCoatFeatureFrame == frame &&
+                cachedClearCoatFeatureCameraId == cameraId &&
+                cachedClearCoatFeatureCullingMask == camera.cullingMask)
+            {
+                return cachedHasVisibleClearCoat;
+            }
+
+            cachedClearCoatFeatureFrame = frame;
+            cachedClearCoatFeatureCameraId = cameraId;
+            cachedClearCoatFeatureCullingMask = camera.cullingMask;
+            cachedHasVisibleClearCoat = TryScanVisibleOpaqueClearCoatMaterial(camera, out var hasVisibleClearCoat)
+                ? hasVisibleClearCoat
+                : true;
+
+            return cachedHasVisibleClearCoat;
+        }
+
+        private static bool TryScanVisibleOpaqueClearCoatMaterial(UnityEngine.Camera camera, out bool hasVisibleClearCoat)
+        {
+            hasVisibleClearCoat = false;
+            UnityEngine.Renderer[] renderers;
+            UnityEngine.Plane[] frustumPlanes;
+            try
+            {
+                renderers = FindActiveRenderers();
+                frustumPlanes = UnityEngine.GeometryUtility.CalculateFrustumPlanes(camera);
+            }
+            catch (System.Exception)
+            {
+                return false;
+            }
+
+            if (renderers == null)
+            {
+                return true;
+            }
+
+            for (var rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+            {
+                var renderer = renderers[rendererIndex];
+                if (!IsActiveRenderer(renderer) ||
+                    !IsRendererInCameraLayer(renderer, camera) ||
+                    !IsRendererInFrustum(renderer, frustumPlanes))
+                {
+                    continue;
+                }
+
+                if (RendererHasOpaqueClearCoatMaterial(renderer))
+                {
+                    hasVisibleClearCoat = true;
+                    return true;
+                }
+            }
+
+            return true;
+        }
+
+        private static UnityEngine.Renderer[] FindActiveRenderers()
+        {
+#if UNITY_2022_2_OR_NEWER
+            return UnityEngine.Object.FindObjectsByType<UnityEngine.Renderer>(UnityEngine.FindObjectsSortMode.None);
+#else
+            return UnityEngine.Object.FindObjectsOfType<UnityEngine.Renderer>();
+#endif
+        }
+
+        private static bool IsActiveRenderer(UnityEngine.Renderer renderer)
+        {
+            return renderer != null &&
+                renderer.enabled &&
+                renderer.gameObject != null &&
+                renderer.gameObject.activeInHierarchy;
+        }
+
+        private static bool IsRendererInCameraLayer(UnityEngine.Renderer renderer, UnityEngine.Camera camera)
+        {
+            var gameObject = renderer != null ? renderer.gameObject : null;
+            return gameObject != null && camera != null && (camera.cullingMask & (1 << gameObject.layer)) != 0;
+        }
+
+        private static bool IsRendererInFrustum(UnityEngine.Renderer renderer, UnityEngine.Plane[] frustumPlanes)
+        {
+            if (frustumPlanes == null || frustumPlanes.Length == 0)
+            {
+                return true;
+            }
+
+            return renderer != null && UnityEngine.GeometryUtility.TestPlanesAABB(frustumPlanes, renderer.bounds);
+        }
+
+        private static bool RendererHasOpaqueClearCoatMaterial(UnityEngine.Renderer renderer)
+        {
+            var materials = renderer != null ? renderer.sharedMaterials : null;
+            if (materials == null)
+            {
+                return false;
+            }
+
+            for (var materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                if (IsOpaqueClearCoatGBufferMaterial(materials[materialIndex]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsOpaqueClearCoatGBufferMaterial(UnityEngine.Material material)
+        {
+            return material != null &&
+                material.shader != null &&
+                material.shader.name == ClearCoatShaderName &&
+                IsOpaqueMaterial(material) &&
+                material.GetShaderPassEnabled(GBufferPassName);
+        }
+
+        private static bool IsOpaqueMaterial(UnityEngine.Material material)
+        {
+            var renderQueue = material.renderQueue;
+            if (renderQueue >= 0)
+            {
+                return renderQueue <= OpaqueRenderQueueMax;
+            }
+
+            var queueTag = material.GetTag("Queue", true, "Geometry");
+            return !queueTag.StartsWith("Transparent", System.StringComparison.OrdinalIgnoreCase) &&
+                !queueTag.StartsWith("Overlay", System.StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool ShouldUseUnsupportedShaderDebug(BurtRenderPipelineAsset asset) // 判断是否插入不支持 Shader 调试 Pass。
         {
             if (asset == null) // asset 为空时没有 Inspector 配置来源。
@@ -843,6 +1030,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             bool useLocalGBufferTargets)
         {
             return useLocalGBufferTargets && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusionDebugView(request, asset);
+        }
+
+        private static bool ShouldUseScreenSpaceSubsurfaceDebugView(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            return useLocalGBufferTargets && BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceDebugView(request, asset);
         }
 
         private static bool ShouldUseScreenSpaceReflectionHiZDiagnosticView(

@@ -65,6 +65,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Indirect Specular DFG"; // 显示 PreIntegratedFG 采样得到的 DFG.xy。
                 case BurtShadingDebugMode.IndirectSpecularEnvBRDF:
                     return "Indirect Specular Env BRDF"; // 显示 DFG 作用到 F0/F90 后的环境 BRDF。
+                case BurtShadingDebugMode.SubsurfaceProfileId:
+                    return "Subsurface Profile ID";
+                case BurtShadingDebugMode.SubsurfaceTransmission:
+                    return "Subsurface Transmission";
+                case BurtShadingDebugMode.SubsurfaceKernelWeight:
+                    return "Subsurface Kernel Weight";
+                case BurtShadingDebugMode.SubsurfaceIndirect:
+                    return "Subsurface Indirect";
                 case BurtShadingDebugMode.GBufferBaseColor:
                     return "GBuffer Base Color"; // 显示 GBuffer0.rgb 解码后的 BaseColor。
                 case BurtShadingDebugMode.GBufferNormalWS:
@@ -97,6 +105,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "GBuffer Subsurface";
                 case BurtShadingDebugMode.GBufferSubsurfaceThickness:
                     return "GBuffer Subsurface Thickness";
+                case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
+                    return "GBuffer Subsurface Profile";
                 case BurtShadingDebugMode.GBufferAnisotropy:
                     return "GBuffer Anisotropy";
                 case BurtShadingDebugMode.GBufferTangentWS:
@@ -189,6 +199,26 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSAO Surface Stability";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare:
                     return "SSAO Diagnostic Compare";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
+                    return "5S Setup";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceTileMask:
+                    return "5S Tile Mask";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:
+                    return "5S Blur";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine:
+                    return "5S Combine";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness:
+                    return "5S Thickness";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex:
+                    return "5S Profile Index";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission:
+                    return "5S Transmission";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse:
+                    return "5S Diffuse";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular:
+                    return "5S Specular";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceStability:
+                    return "5S Stability";
                 case BurtShadingDebugMode.BloomPrefilter:
                     return "Bloom Prefilter";
                 case BurtShadingDebugMode.BloomFinalBloom:
@@ -454,6 +484,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.GBufferClearCoatRoughness,
             BurtShadingDebugMode.GBufferSubsurfaceStrength, // Subsurface 专用：GBuffer1.b material channel 解码后的 strength。
             BurtShadingDebugMode.GBufferSubsurfaceThickness,
+            BurtShadingDebugMode.GBufferSubsurfaceProfileIndex,
             BurtShadingDebugMode.GBufferAnisotropy,
             BurtShadingDebugMode.GBufferTangentWS
         });
@@ -482,6 +513,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.HairTransmissionLobe, // Hair 背光透射近似 lobe。
             BurtShadingDebugMode.HairScatter, // Hair 当前参与 lighting 的 scatter。
             BurtShadingDebugMode.HairAdditionalLighting // Hair 追加光直接贡献。
+        });
+
+        public static readonly BurtShadingDebugGroup Subsurface = new BurtShadingDebugGroup("Subsurface", "5S", new[]
+        {
+            BurtShadingDebugMode.SubsurfaceProfileId,
+            BurtShadingDebugMode.SubsurfaceTransmission,
+            BurtShadingDebugMode.SubsurfaceKernelWeight,
+            BurtShadingDebugMode.SubsurfaceIndirect
         });
 
         public static readonly BurtShadingDebugGroup IBL = new BurtShadingDebugGroup("IBL / Energy / Occlusion", "IBL", new[] // 归档环境光、能量守恒和 specular occlusion 相关调试。
@@ -642,6 +681,20 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare
         });
 
+        public static readonly BurtShadingDebugGroup ScreenSpaceSubsurface = new BurtShadingDebugGroup("Screen Space Subsurface", "5S", new[]
+        {
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceTileMask,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceStability
+        });
+
         public static readonly BurtShadingDebugGroup Bloom = new BurtShadingDebugGroup("Bloom", "Bloom", new[] // Bloom 后处理调试。
         {
             BurtShadingDebugMode.BloomPrefilter,
@@ -790,6 +843,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 BurtShadingDebugSpecularAADropdown.Id,
                 BurtShadingDebugBRDFDropdown.Id,
                 BurtShadingDebugHairDropdown.Id,
+                BurtShadingDebugSubsurfaceDropdown.Id,
                 BurtShadingDebugIBLDropdown.Id)
         {
         }
@@ -814,6 +868,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public BurtPostProcessDebugOverlay()
             : base(
                 BurtShadingDebugSSAODropdown.Id,
+                BurtShadingDebugSSSDropdown.Id,
                 BurtShadingDebugBloomDropdown.Id,
                 BurtShadingDebugAutoExposureDropdown.Id,
                 BurtShadingDebugSSRDropdown.Id,
@@ -934,6 +989,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         }
     }
 
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugSubsurfaceDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Subsurface";
+
+        public BurtShadingDebugSubsurfaceDropdown()
+            : base(BurtShadingDebugGroups.Subsurface)
+        {
+        }
+    }
+
     [EditorToolbarElement(Id, typeof(SceneView))] // 注册 IBL 分类按钮。
     internal sealed class BurtShadingDebugIBLDropdown : BurtShadingDebugGroupDropdown
     {
@@ -1007,6 +1073,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public BurtShadingDebugSSAODropdown() // Unity 通过无参构造创建 ToolbarElement。
             : base(BurtShadingDebugGroups.ScreenSpaceAmbientOcclusion) // 绑定 SSAO 后处理调试分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugSSSDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/ScreenSpaceSubsurface";
+
+        public BurtShadingDebugSSSDropdown()
+            : base(BurtShadingDebugGroups.ScreenSpaceSubsurface)
         {
         }
     }
@@ -1501,6 +1578,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return BurtGBufferDebugViewMode.SubsurfaceStrength;
                 case BurtShadingDebugMode.GBufferSubsurfaceThickness:
                     return BurtGBufferDebugViewMode.SubsurfaceThickness;
+                case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
+                    return BurtGBufferDebugViewMode.SubsurfaceProfileIndex;
                 case BurtShadingDebugMode.GBufferAnisotropy:
                     return BurtGBufferDebugViewMode.Anisotropy;
                 case BurtShadingDebugMode.GBufferTangentWS:

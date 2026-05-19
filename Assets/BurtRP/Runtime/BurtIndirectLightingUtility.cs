@@ -24,10 +24,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
         private static readonly int SkyReflectionOverrideId = Shader.PropertyToID("_BurtSkyReflectionOverride"); // 标记 SkyLight 是否显式接管 specular，避免关闭时回落到 Unity legacy probe。
         private static readonly int SkyReflectionMaxMipId = Shader.PropertyToID("_BurtSkyReflectionMaxMip"); // 缓存 BurtRP 全局天空反射真实最大 mip 属性 ID，shader 会再限制到反射预过滤有效范围。
         private static readonly int SkyReflectionRotationId = Shader.PropertyToID("_BurtSkyReflectionRotation"); // 缓存 SkyLight 指定 cubemap 的水平旋转参数，xy 分别是 cos/sin。
+        private static readonly int SkyReflectionSourceTextureId = Shader.PropertyToID("_BurtSkyReflectionSourceTexture");
+        private static readonly int SkyReflectionSourceHDRId = Shader.PropertyToID("_BurtSkyReflectionSourceHDR");
+        private static readonly int SkyReflectionSourceEnabledId = Shader.PropertyToID("_BurtSkyReflectionSourceEnabled");
+        private static readonly int SkyReflectionSourceMaxMipId = Shader.PropertyToID("_BurtSkyReflectionSourceMaxMip");
+        private static readonly int SkyDiffuseCubemapTextureId = Shader.PropertyToID("_BurtSkyDiffuseCubemapTexture");
+        private static readonly int SkyDiffuseCubemapHDRId = Shader.PropertyToID("_BurtSkyDiffuseCubemapHDR");
         private static readonly int SkyDiffuseCubemapEnabledId = Shader.PropertyToID("_BurtSkyDiffuseCubemapEnabled"); // 缓存 SpecifiedCubemap 是否同时驱动 diffuse 环境光。
         private static readonly int SkyDiffuseCubemapIntensityId = Shader.PropertyToID("_BurtSkyDiffuseCubemapIntensity"); // 缓存 diffuse cubemap 近似采样强度。
         private static readonly int SkyDiffuseCubemapTintId = Shader.PropertyToID("_BurtSkyDiffuseCubemapTint"); // 缓存 diffuse cubemap tint。
         private static readonly int SkyDiffuseCubemapMipId = Shader.PropertyToID("_BurtSkyDiffuseCubemapMip"); // 缓存 diffuse cubemap 近似采样 mip。
+        private static readonly int SkyDiffuseSHTextureId = Shader.PropertyToID("_BurtSkyDiffuseSHTexture");
+        private static readonly int SkyDiffuseSHEnabledId = Shader.PropertyToID("_BurtSkyDiffuseSHEnabled");
         private static readonly int SkyLowerHemisphereEnabledId = Shader.PropertyToID("_BurtSkyLowerHemisphereEnabled"); // 缓存 SkyLight 下半球覆盖开关。
         private static readonly int SkyLowerHemisphereDiffuseColorId = Shader.PropertyToID("_BurtSkyLowerHemisphereDiffuseColor"); // 缓存下半球 diffuse 覆盖颜色。
         private static readonly int SkyLowerHemisphereSpecularColorId = Shader.PropertyToID("_BurtSkyLowerHemisphereSpecularColor"); // 缓存下半球 specular 覆盖颜色。
@@ -58,24 +66,97 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             public bool Enabled;
             public Color DiffuseColor;
             public Color SpecularColor;
+            public Color BakeColor;
             public string Source;
         }
 
         private struct ResolvedSkyDiffuseCubemap // 保存 SpecifiedCubemap 驱动 diffuse 的近似采样参数。
         {
             public bool Enabled;
+            public Texture Texture;
+            public Texture SHTexture;
+            public Vector4 HDRDecodeValues;
             public float Intensity;
             public Color Tint;
             public float Mip;
             public string Source;
         }
 
+        private readonly struct IBLDiagnosticSnapshot
+        {
+            public readonly bool SkyLightActive;
+            public readonly string SkyLightSource;
+            public readonly string SkyLightName;
+            public readonly int SkyLightPriority;
+            public readonly bool AffectDiffuse;
+            public readonly bool AffectSpecular;
+            public readonly float EffectiveDiffuseIntensity;
+            public readonly float EffectiveSpecularIntensity;
+            public readonly Color Tint;
+            public readonly float CubemapAngle;
+            public readonly ResolvedSkyReflection SkyReflection;
+            public readonly BurtImageBasedFilterResult ImageBasedFilter;
+            public readonly ResolvedSkyDiffuseCubemap SkyDiffuseCubemap;
+            public readonly ResolvedLowerHemisphere LowerHemisphere;
+            public readonly float RenderSettingsReflectionIntensity;
+            public readonly string EffectiveDiffuseSource;
+            public readonly int SkyReflectionMipCount;
+
+            public IBLDiagnosticSnapshot(
+                bool skyLightActive,
+                string skyLightSource,
+                string skyLightName,
+                int skyLightPriority,
+                bool affectDiffuse,
+                bool affectSpecular,
+                float effectiveDiffuseIntensity,
+                float effectiveSpecularIntensity,
+                Color tint,
+                float cubemapAngle,
+                ResolvedSkyReflection skyReflection,
+                BurtImageBasedFilterResult imageBasedFilter,
+                ResolvedSkyDiffuseCubemap skyDiffuseCubemap,
+                ResolvedLowerHemisphere lowerHemisphere,
+                float renderSettingsReflectionIntensity,
+                string effectiveDiffuseSource,
+                int skyReflectionMipCount)
+            {
+                SkyLightActive = skyLightActive;
+                SkyLightSource = skyLightSource;
+                SkyLightName = skyLightName;
+                SkyLightPriority = skyLightPriority;
+                AffectDiffuse = affectDiffuse;
+                AffectSpecular = affectSpecular;
+                EffectiveDiffuseIntensity = effectiveDiffuseIntensity;
+                EffectiveSpecularIntensity = effectiveSpecularIntensity;
+                Tint = tint;
+                CubemapAngle = cubemapAngle;
+                SkyReflection = skyReflection;
+                ImageBasedFilter = imageBasedFilter;
+                SkyDiffuseCubemap = skyDiffuseCubemap;
+                LowerHemisphere = lowerHemisphere;
+                RenderSettingsReflectionIntensity = renderSettingsReflectionIntensity;
+                EffectiveDiffuseSource = effectiveDiffuseSource;
+                SkyReflectionMipCount = skyReflectionMipCount;
+            }
+        }
+
         public static void UploadGlobalIndirectLighting(CommandBuffer cmd) // 保留旧入口，旧调用没有相机上下文时只能解析全局自定义/默认反射。
         {
-            UploadGlobalIndirectLighting(cmd, null); // 转发到新入口，让所有上传逻辑保持同一套实现。
+            UploadGlobalIndirectLighting(cmd, (Camera)null); // 转发到新入口，让所有上传逻辑保持同一套实现。
         }
 
         public static void UploadGlobalIndirectLighting(CommandBuffer cmd, Camera camera) // 上传当前帧/当前 request 使用的全局间接光数据。
+        {
+            UploadGlobalIndirectLighting(cmd, null, camera);
+        }
+
+        public static void UploadGlobalIndirectLighting(CommandBuffer cmd, BurtRenderRequest request) // 上传当前 request 使用的全局间接光数据；带 request 时可解析 Burt fullscreen 天空反射源。
+        {
+            UploadGlobalIndirectLighting(cmd, request, request != null ? request.Camera : null);
+        }
+
+        private static void UploadGlobalIndirectLighting(CommandBuffer cmd, BurtRenderRequest request, Camera camera)
         {
             if (cmd == null) // 如果命令缓冲为空，就没有可写入的 GPU 状态。
             {
@@ -84,11 +165,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
 
             var skyLightActive = TryResolveActiveSkyLight(camera, out var skyLight);
             var ambientProbe = skyLightActive ? ResolveSkyLightAmbientProbe(skyLight) : RenderSettings.ambientProbe;
-            var skyReflection = skyLightActive ? ResolveSkyLightReflection(camera, skyLight) : ResolveSkyReflection(camera);
-            var skyDiffuseCubemap = skyLightActive ? ResolveSkyLightDiffuseCubemap(skyLight, skyReflection.Texture) : CreateDisabledSkyDiffuseCubemap();
+            var skyReflection = skyLightActive ? ResolveSkyLightReflection(cmd, request, camera, skyLight) : ResolveSkyReflection(cmd, request, camera);
             var lowerHemisphere = skyLightActive ? ResolveSkyLightLowerHemisphere(skyLight) : CreateDisabledLowerHemisphere();
             var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity);
             var skyReflectionIntensity = skyLightActive ? skyReflection.IntensityMultiplier : renderSettingsReflectionIntensity * Mathf.Max(0f, skyReflection.IntensityMultiplier);
+            var skyDiffuseIntensity = skyLightActive && skyLight != null && skyLight.affectDiffuse ? skyLight.EffectiveDiffuseIntensity : 0f;
+            var imageBasedFilterBakeIntensity = skyLightActive ? Mathf.Max(skyReflectionIntensity, skyDiffuseIntensity) : skyReflectionIntensity;
+            var bakeSettings = CreateImageBasedFilterBakeSettings(skyReflection, imageBasedFilterBakeIntensity, lowerHemisphere);
+            var imageBasedFilter = BurtImageBasedFilterUtility.Filter(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflection.Source, bakeSettings);
+            var skyDiffuseCubemap = skyLightActive ? ResolveSkyLightDiffuseCubemap(skyLight, skyReflection, imageBasedFilter) : CreateDisabledSkyDiffuseCubemap();
+            var runtimeLowerHemisphere = imageBasedFilter.Filtered ? CreateDisabledLowerHemisphere() : lowerHemisphere;
+            var runtimeSkyReflectionIntensity = imageBasedFilter.Filtered ? ResolveBakedIntensityScale(skyReflectionIntensity, imageBasedFilter.BakedIntensity) : skyReflectionIntensity;
+            var runtimeSkyReflectionTint = imageBasedFilter.Filtered ? Color.white : skyReflection.Tint;
+            var runtimeSkyReflectionRotation = imageBasedFilter.Filtered ? DefaultSkyReflectionRotation : skyReflection.Rotation;
 
             UploadAmbientProbe(cmd, ambientProbe);
             if (skyLightActive)
@@ -96,61 +185,231 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 cmd.SetGlobalColor(AmbientLightColorId, ResolveSkyLightAmbientColor(skyLight));
             }
 
-            UploadSkyLowerHemisphere(cmd, lowerHemisphere);
+            UploadSkyLowerHemisphere(cmd, runtimeLowerHemisphere);
             UploadSkyDiffuseCubemap(cmd, skyDiffuseCubemap);
-            UploadSkyReflection(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflectionIntensity, skyReflection.Tint, skyReflection.ForceOverride, skyReflection.Rotation);
+            UploadSkyReflection(
+                cmd,
+                imageBasedFilter.SpecularTexture,
+                imageBasedFilter.SpecularHDRDecodeValues,
+                imageBasedFilter.SpecularMaxMip,
+                skyReflection.Texture,
+                skyReflection.HDRDecodeValues,
+                CalculateSkyReflectionSpecularMipMax(skyReflection.Texture),
+                runtimeSkyReflectionIntensity,
+                runtimeSkyReflectionTint,
+                skyReflection.ForceOverride,
+                runtimeSkyReflectionRotation);
         }
 
         public static void AppendDebugState(StringBuilder builder) // 保留旧入口，旧调用没有相机上下文时只输出全局自定义/默认反射。
         {
-            AppendDebugState(builder, null); // 转发到新入口，避免 Debug 文本和上传逻辑分叉。
+            AppendDebugState(builder, (Camera)null); // 转发到新入口，避免 Debug 文本和上传逻辑分叉。
         }
 
         public static void AppendDebugState(StringBuilder builder, Camera camera) // 把当前间接光数据源状态写入 RenderGraph Debug。
+        {
+            AppendDebugState(builder, null, camera);
+        }
+
+        public static void AppendDebugState(StringBuilder builder, BurtRenderRequest request) // 把当前 request 的间接光数据源状态写入 RenderGraph Debug。
+        {
+            AppendDebugState(builder, request, request != null ? request.Camera : null);
+        }
+
+        private static void AppendDebugState(StringBuilder builder, BurtRenderRequest request, Camera camera)
         {
             if (builder == null) // 如果没有字符串构建器，就没有安全输出目标。
             {
                 return; // 直接返回，保持 Debug 工具空值安全。
             }
 
+            var snapshot = CreateIBLDiagnosticSnapshot(request, camera);
+
+            builder.Append("  SkyLightActive=").Append(snapshot.SkyLightActive);
+            builder.Append(" Source=").Append(snapshot.SkyLightSource);
+            builder.Append(" Name=").Append(snapshot.SkyLightName);
+            builder.Append(" Priority=").Append(snapshot.SkyLightActive ? snapshot.SkyLightPriority.ToString() : "<none>");
+            builder.Append(" AffectDiffuse=").Append(snapshot.AffectDiffuse);
+            builder.Append(" AffectSpecular=").Append(snapshot.AffectSpecular);
+            builder.Append(" DiffuseIntensity=").Append(snapshot.EffectiveDiffuseIntensity.ToString("0.###"));
+            builder.Append(" SpecularIntensity=").Append(snapshot.EffectiveSpecularIntensity.ToString("0.###"));
+            builder.Append(" Tint=").Append(FormatColor(snapshot.Tint));
+            builder.Append(" Cubemap=").Append(snapshot.SkyReflection.Texture != null ? snapshot.SkyReflection.Texture.name : "<none>");
+            builder.Append(" CubemapMipCount=").Append(snapshot.SkyReflectionMipCount);
+            builder.Append(" CubemapMipHealth=").Append(ResolveSkyReflectionMipHealth(snapshot.SkyReflection.Texture));
+            builder.Append(" MaxMip=").Append(CalculateSkyReflectionMaxMip(snapshot.SkyReflection.Texture).ToString("0.###"));
+            builder.Append(" CubemapAngle=").Append(snapshot.CubemapAngle.ToString("0.###"));
+            builder.Append(" SpecularOverride=").Append(snapshot.SkyReflection.ForceOverride);
+            builder.AppendLine();
+
+            builder.Append("  IndirectDiffuseSource=").Append(snapshot.EffectiveDiffuseSource);
+            builder.Append(" DiffuseCubemap=").Append(snapshot.SkyDiffuseCubemap.Source);
+            builder.Append(" DiffuseCubemapMip=").Append(snapshot.SkyDiffuseCubemap.Mip.ToString("0.###"));
+            builder.Append(" DiffuseSH=").Append(snapshot.SkyDiffuseCubemap.Enabled && snapshot.ImageBasedFilter.DiffuseSHTexture != null);
+            builder.Append(" DiffuseSHFormat=").Append(snapshot.ImageBasedFilter.DiffuseSHFormat);
+            builder.Append(" DiffuseSHSize=").Append(snapshot.ImageBasedFilter.DiffuseSHTexture != null ? snapshot.ImageBasedFilter.DiffuseSHTexture.width + "x" + snapshot.ImageBasedFilter.DiffuseSHTexture.height : "<none>");
+            builder.Append(" DiffuseSHLayout=").Append(BurtImageBasedFilterUtility.DiffuseSHLayout);
+            builder.Append(" DiffuseSHSamples=").Append(BurtImageBasedFilterUtility.DiffuseSHDiagnosticSampleCount);
+            builder.Append(" DiffuseSHParity=").Append(BurtImageBasedFilterUtility.DiffuseSHParity);
+            builder.Append(" DiffuseSHValidation=").Append(snapshot.ImageBasedFilter.DiffuseSHTexture != null ? BurtImageBasedFilterUtility.DiffuseSHValidationStatus : "Unavailable");
+            builder.Append(" IBLNumericValidation=").Append(BurtImageBasedFilterUtility.NumericValidationStatus);
+            builder.Append(" IndirectSpecularSource=").Append(snapshot.SkyReflection.Source);
+            builder.Append(" LowerHemisphere=").Append(snapshot.LowerHemisphere.Source);
+            builder.Append(" LowerDiffuse=").Append(FormatColor(snapshot.LowerHemisphere.DiffuseColor));
+            builder.Append(" LowerSpecular=").Append(FormatColor(snapshot.LowerHemisphere.SpecularColor));
+            builder.Append(" ReflectionIntensity=").Append((snapshot.SkyLightActive ? 1f : snapshot.RenderSettingsReflectionIntensity).ToString("0.###"));
+            builder.Append(" SourceIntensity=").Append(Mathf.Max(0f, snapshot.SkyReflection.IntensityMultiplier).ToString("0.###"));
+            builder.Append(" SkyReflectionMaxMip=").Append(CalculateSkyReflectionMaxMip(snapshot.SkyReflection.Texture).ToString("0.###"));
+            builder.Append(" SpecularMipMax=").Append(snapshot.ImageBasedFilter.SpecularMaxMip.ToString("0.###"));
+            builder.Append(" ImageBasedFilter=").Append(snapshot.ImageBasedFilter.Status);
+            builder.AppendLine();
+        }
+
+        public static void AppendXRenderComparisonReport(StringBuilder builder, BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            AppendXRenderComparisonReport(builder, request, request != null ? request.Camera : null, asset);
+        }
+
+        public static void AppendXRenderComparisonReport(StringBuilder builder, Camera camera, BurtRenderPipelineAsset asset)
+        {
+            AppendXRenderComparisonReport(builder, null, camera, asset);
+        }
+
+        private static void AppendXRenderComparisonReport(StringBuilder builder, BurtRenderRequest request, Camera camera, BurtRenderPipelineAsset asset)
+        {
+            if (builder == null)
+            {
+                return;
+            }
+
+            var snapshot = CreateIBLDiagnosticSnapshot(request, camera);
+            var fgLut = asset != null ? asset.PreintegratedFGLut : null;
+            var sourceName = snapshot.SkyReflection.Texture != null ? snapshot.SkyReflection.Texture.name : "<none>";
+            builder.AppendLine("  IBL/XRender Compare:");
+            AppendComparisonRow(builder, "SourceCube", sourceName + " mips=" + snapshot.SkyReflectionMipCount + " maxMip=" + FormatFloat(CalculateSkyReflectionMaxMip(snapshot.SkyReflection.Texture)), "Cube source with valid mip chain", ResolveSourceCubeStatus(snapshot.SkyReflection.Texture), "XRender expects cubemap source before LD/SH filtering.");
+            AppendComparisonRow(builder, "SpecularLD", FormatTextureSummary(snapshot.ImageBasedFilter.SpecularTexture, snapshot.ImageBasedFilter.SpecularMaxMip, snapshot.ImageBasedFilter.Status), "BakeEnvironment -> Filtered GGX LD cube 256 mips 0..8", snapshot.ImageBasedFilter.Filtered && snapshot.ImageBasedFilter.SpecularTexture != null ? "OK" : "Fallback", "XRender bake rotation/tint/intensity/lower before LD, mip0 CopyTexture, Smith GGX weighted samples 21/34/55/89, runtime samples filtered LD directly.");
+            AppendComparisonRow(builder, "DiffuseSH9", FormatDiffuseSummary(snapshot), "UnitySH9 layout from cubemap convolution", ResolveDiffuseStatus(snapshot), "Diffuse path uses SH texture when filtered; otherwise ambientProbe/fallback is visible here.");
+            AppendComparisonRow(builder, "PreIntegratedFG", FormatFGLutSummary(fgLut), BurtImageBasedFilterUtility.PreIntegratedFGParity, fgLut != null ? "OK" : "FallbackApprox", BurtImageBasedFilterUtility.ValidatePreIntegratedFGLut(fgLut));
+            AppendComparisonRow(builder, "LowerHemisphere", snapshot.LowerHemisphere.Source + " diffuse=" + FormatColor(snapshot.LowerHemisphere.DiffuseColor) + " specular=" + FormatColor(snapshot.LowerHemisphere.SpecularColor), "Preserve/Black/Color split diffuse+specular", snapshot.LowerHemisphere.Enabled ? "Override" : "Preserve", "Burt keeps diffuse/specular lower hemisphere separately.");
+            AppendComparisonRow(builder, "IntensityTint", "diffuse=" + FormatFloat(snapshot.EffectiveDiffuseIntensity) + " specular=" + FormatFloat(snapshot.EffectiveSpecularIntensity), "SkyLight intensity/tint baked before convolution", ResolveIntensityStatus(snapshot), "Filtered path bakes tint/intensity into LD/SH; RenderSettings reflection intensity is only used on legacy fallback.");
+            AppendComparisonRow(builder, "Numeric", BurtImageBasedFilterUtility.NumericValidationStatus, "Spec/Diffuse/SH/FG constants match XRender policy", "Info", "Use this row as the golden signature when comparing dumps.");
+        }
+
+        private static IBLDiagnosticSnapshot CreateIBLDiagnosticSnapshot(BurtRenderRequest request, Camera camera)
+        {
             var skyLightActive = TryResolveActiveSkyLight(camera, out var skyLight);
-            var skyReflection = skyLightActive ? ResolveSkyLightReflection(camera, skyLight) : ResolveSkyReflection(camera);
-            var skyDiffuseCubemap = skyLightActive ? ResolveSkyLightDiffuseCubemap(skyLight, skyReflection.Texture) : CreateDisabledSkyDiffuseCubemap();
+            var skyReflection = skyLightActive ? ResolveSkyLightReflection(null, request, camera, skyLight) : ResolveSkyReflection(null, request, camera);
             var lowerHemisphere = skyLightActive ? ResolveSkyLightLowerHemisphere(skyLight) : CreateDisabledLowerHemisphere();
             var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity);
+            var skyReflectionIntensity = skyLightActive ? skyReflection.IntensityMultiplier : renderSettingsReflectionIntensity * Mathf.Max(0f, skyReflection.IntensityMultiplier);
+            var skyDiffuseIntensity = skyLightActive && skyLight != null && skyLight.affectDiffuse ? skyLight.EffectiveDiffuseIntensity : 0f;
+            var imageBasedFilterBakeIntensity = skyLightActive ? Mathf.Max(skyReflectionIntensity, skyDiffuseIntensity) : skyReflectionIntensity;
+            var imageBasedFilter = CreateDebugImageBasedFilterResult(skyReflection, imageBasedFilterBakeIntensity, lowerHemisphere);
+            var skyDiffuseCubemap = skyLightActive ? ResolveSkyLightDiffuseCubemap(skyLight, skyReflection, imageBasedFilter) : CreateDisabledSkyDiffuseCubemap();
             var effectiveDiffuseIntensity = skyLightActive && skyLight.affectDiffuse ? skyLight.EffectiveDiffuseIntensity : 1f;
             var effectiveSpecularIntensity = skyLightActive && skyLight.affectSpecular ? skyLight.EffectiveSpecularIntensity : Mathf.Max(0f, skyReflection.IntensityMultiplier);
             var skyReflectionMipCount = skyReflection.Texture != null ? skyReflection.Texture.mipmapCount : 0;
+            var effectiveDiffuseSource = skyDiffuseCubemap.Enabled ? skyDiffuseCubemap.Source : skyLightActive ? ResolveSkyLightDiffuseSource(skyLight) : "RenderSettings.ambientProbe";
+            return new IBLDiagnosticSnapshot(
+                skyLightActive,
+                skyLightActive ? skyLight.sourceType.ToString() : "LegacyRenderSettings",
+                skyLightActive ? skyLight.name : "<none>",
+                skyLightActive ? skyLight.priority : 0,
+                skyLightActive && skyLight.affectDiffuse,
+                skyLightActive && skyLight.affectSpecular,
+                effectiveDiffuseIntensity,
+                effectiveSpecularIntensity,
+                skyLightActive ? skyLight.SafeTint : Color.white,
+                skyLightActive ? skyLight.cubemapAngle : 0f,
+                skyReflection,
+                imageBasedFilter,
+                skyDiffuseCubemap,
+                lowerHemisphere,
+                renderSettingsReflectionIntensity,
+                effectiveDiffuseSource,
+                skyReflectionMipCount);
+        }
 
-            builder.Append("  SkyLightActive=").Append(skyLightActive);
-            builder.Append(" Source=").Append(skyLightActive ? skyLight.sourceType.ToString() : "LegacyRenderSettings");
-            builder.Append(" Name=").Append(skyLightActive ? skyLight.name : "<none>");
-            builder.Append(" Priority=").Append(skyLightActive ? skyLight.priority.ToString() : "<none>");
-            builder.Append(" AffectDiffuse=").Append(skyLightActive && skyLight.affectDiffuse);
-            builder.Append(" AffectSpecular=").Append(skyLightActive && skyLight.affectSpecular);
-            builder.Append(" DiffuseIntensity=").Append(effectiveDiffuseIntensity.ToString("0.###"));
-            builder.Append(" SpecularIntensity=").Append(effectiveSpecularIntensity.ToString("0.###"));
-            builder.Append(" Tint=").Append(skyLightActive ? FormatColor(skyLight.SafeTint) : "(1,1,1,1)");
-            builder.Append(" Cubemap=").Append(skyReflection.Texture != null ? skyReflection.Texture.name : "<none>");
-            builder.Append(" CubemapMipCount=").Append(skyReflectionMipCount);
-            builder.Append(" CubemapMipHealth=").Append(ResolveSkyReflectionMipHealth(skyReflection.Texture));
-            builder.Append(" MaxMip=").Append(CalculateSkyReflectionMaxMip(skyReflection.Texture).ToString("0.###"));
-            builder.Append(" CubemapAngle=").Append(skyLightActive ? skyLight.cubemapAngle.ToString("0.###") : "0");
-            builder.Append(" SpecularOverride=").Append(skyReflection.ForceOverride);
+        private static void AppendComparisonRow(StringBuilder builder, string item, string burt, string xrender, string status, string delta)
+        {
+            builder.Append("    ").Append(item);
+            builder.Append(" | Burt=").Append(burt);
+            builder.Append(" | XRender=").Append(xrender);
+            builder.Append(" | Status=").Append(status);
+            builder.Append(" | Delta=").Append(delta);
             builder.AppendLine();
+        }
 
-            builder.Append("  IndirectDiffuseSource=").Append(skyLightActive ? ResolveSkyLightDiffuseSource(skyLight) : "RenderSettings.ambientProbe");
-            builder.Append(" DiffuseCubemap=").Append(skyDiffuseCubemap.Source);
-            builder.Append(" DiffuseCubemapMip=").Append(skyDiffuseCubemap.Mip.ToString("0.###"));
-            builder.Append(" IndirectSpecularSource=").Append(skyReflection.Source);
-            builder.Append(" LowerHemisphere=").Append(lowerHemisphere.Source);
-            builder.Append(" LowerDiffuse=").Append(FormatColor(lowerHemisphere.DiffuseColor));
-            builder.Append(" LowerSpecular=").Append(FormatColor(lowerHemisphere.SpecularColor));
-            builder.Append(" ReflectionIntensity=").Append((skyLightActive ? 1f : renderSettingsReflectionIntensity).ToString("0.###"));
-            builder.Append(" SourceIntensity=").Append(Mathf.Max(0f, skyReflection.IntensityMultiplier).ToString("0.###"));
-            builder.Append(" SkyReflectionMaxMip=").Append(CalculateSkyReflectionMaxMip(skyReflection.Texture).ToString("0.###"));
-            builder.Append(" SpecularMipMax=").Append(CalculateSkyReflectionSpecularMipMax(skyReflection.Texture).ToString("0.###"));
-            builder.AppendLine();
+        private static string FormatTextureSummary(Texture texture, float maxMip, string status)
+        {
+            if (texture == null)
+            {
+                return "<none> status=" + status;
+            }
+
+            return texture.name + " " + texture.width + "x" + texture.height + " mips=" + texture.mipmapCount + " maxMip=" + FormatFloat(maxMip) + " status=" + status;
+        }
+
+        private static string FormatDiffuseSummary(IBLDiagnosticSnapshot snapshot)
+        {
+            var sh = snapshot.ImageBasedFilter.DiffuseSHTexture;
+            var shSize = sh != null ? sh.width + "x" + sh.height : "<none>";
+            return snapshot.EffectiveDiffuseSource + " enabled=" + snapshot.SkyDiffuseCubemap.Enabled + " cube=" + FormatTextureName(snapshot.SkyDiffuseCubemap.Texture) + " sh=" + shSize + " layout=" + BurtImageBasedFilterUtility.DiffuseSHLayout + " readback=" + (sh != null ? BurtImageBasedFilterUtility.DiffuseSHValidationStatus : "Unavailable");
+        }
+
+        private static string FormatFGLutSummary(Texture2D lut)
+        {
+            if (lut == null)
+            {
+                return "FallbackApprox";
+            }
+
+            return lut.name + " " + lut.width + "x" + lut.height + " format=" + lut.format + " readable=" + lut.isReadable;
+        }
+
+        private static string ResolveSourceCubeStatus(Texture texture)
+        {
+            if (texture == null)
+            {
+                return "Missing";
+            }
+
+            if (texture.mipmapCount <= 1)
+            {
+                return "NoMips";
+            }
+
+            return texture.mipmapCount - 1 < ReflectionCaptureSpecularMipMax ? "LimitedMips" : "OK";
+        }
+
+        private static string ResolveDiffuseStatus(IBLDiagnosticSnapshot snapshot)
+        {
+            if (!snapshot.SkyDiffuseCubemap.Enabled)
+            {
+                return snapshot.SkyLightActive && snapshot.AffectDiffuse ? "DisabledByIntensityOrSource" : "Fallback";
+            }
+
+            return snapshot.ImageBasedFilter.DiffuseSHTexture != null ? "OK" : "CubeFallback";
+        }
+
+        private static string ResolveIntensityStatus(IBLDiagnosticSnapshot snapshot)
+        {
+            if (snapshot.EffectiveDiffuseIntensity <= 0f && snapshot.EffectiveSpecularIntensity <= 0f)
+            {
+                return "Zero";
+            }
+
+            return "OK";
+        }
+
+        private static string FormatFloat(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static string FormatTextureName(Texture texture)
+        {
+            return texture != null ? texture.name : "<none>";
         }
 
         private static void UploadAmbientProbe(CommandBuffer cmd, SphericalHarmonicsL2 ambientProbe) // 上传 ambient probe 的 SH 常量。
@@ -189,15 +448,39 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
 
         private static void UploadSkyDiffuseCubemap(CommandBuffer cmd, ResolvedSkyDiffuseCubemap skyDiffuseCubemap) // 上传 SpecifiedCubemap diffuse 近似采样参数。
         {
+            if (skyDiffuseCubemap.Texture != null)
+            {
+                cmd.SetGlobalTexture(SkyDiffuseCubemapTextureId, skyDiffuseCubemap.Texture);
+            }
+
+            if (skyDiffuseCubemap.SHTexture != null)
+            {
+                cmd.SetGlobalTexture(SkyDiffuseSHTextureId, skyDiffuseCubemap.SHTexture);
+            }
+
+            cmd.SetGlobalVector(SkyDiffuseCubemapHDRId, skyDiffuseCubemap.HDRDecodeValues);
             cmd.SetGlobalFloat(SkyDiffuseCubemapEnabledId, skyDiffuseCubemap.Enabled ? 1f : 0f);
+            cmd.SetGlobalFloat(SkyDiffuseSHEnabledId, skyDiffuseCubemap.Enabled && skyDiffuseCubemap.SHTexture != null ? 1f : 0f);
             cmd.SetGlobalFloat(SkyDiffuseCubemapIntensityId, Mathf.Max(0f, skyDiffuseCubemap.Intensity));
             cmd.SetGlobalVector(SkyDiffuseCubemapTintId, SanitizeTint(skyDiffuseCubemap.Tint));
             cmd.SetGlobalFloat(SkyDiffuseCubemapMipId, Mathf.Max(0f, skyDiffuseCubemap.Mip));
         }
 
-        private static void UploadSkyReflection(CommandBuffer cmd, Texture skyReflection, Vector4 skyReflectionHDR, float intensity, Color tint, bool forceOverride, Vector4 rotation) // 上传全局天空/场景反射纹理。
+        private static void UploadSkyReflection(
+            CommandBuffer cmd,
+            Texture skyReflection,
+            Vector4 skyReflectionHDR,
+            float skyReflectionMaxMip,
+            Texture sourceSkyReflection,
+            Vector4 sourceSkyReflectionHDR,
+            float sourceSkyReflectionMaxMip,
+            float intensity,
+            Color tint,
+            bool forceOverride,
+            Vector4 rotation) // 上传全局天空/场景反射纹理。
         {
             var safeRotation = SanitizeSkyReflectionRotation(rotation); // 没有显式旋转时使用 identity，避免默认 Vector4.zero 把方向压扁。
+            UploadSkyReflectionSourceFallback(cmd, sourceSkyReflection, sourceSkyReflectionHDR, sourceSkyReflectionMaxMip);
             if (skyReflection == null) // 如果项目没有可用的天空反射纹理。
             {
                 cmd.SetGlobalFloat(SkyReflectionEnabledId, 0f); // 标记天空反射无效，shader 会回退到环境色兜底。
@@ -210,8 +493,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 return; // 没有纹理时不绑定 samplerCUBE，避免 2D fallback 误绑定到 cube 采样器。
             }
 
-            var skyReflectionMaxMip = CalculateSkyReflectionMaxMip(skyReflection); // 根据实际 cubemap mip 数计算真实最大可采样 mip，Debug 和 shader 会据此再推导有效高光 LOD。
-
             cmd.SetGlobalTexture(SkyReflectionTextureId, skyReflection); // 绑定当前全局 sky/custom/scene probe reflection cubemap。
             cmd.SetGlobalVector(SkyReflectionHDRId, skyReflectionHDR); // 上传 HDR 解码参数，ReflectionProbe 纹理需要用它还原真实亮度。
             cmd.SetGlobalFloat(SkyReflectionIntensityId, intensity); // 上传反射强度，让 Lighting 面板的 Reflection Intensity 影响 Deferred IBL。
@@ -220,6 +501,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             cmd.SetGlobalFloat(SkyReflectionOverrideId, forceOverride ? 1f : 0f);
             cmd.SetGlobalFloat(SkyReflectionMaxMipId, skyReflectionMaxMip); // 上传真实 mip 上限；shader 内部会限制到 reflection capture 的有效预过滤 LOD，避免镜面端变糊。
             cmd.SetGlobalVector(SkyReflectionRotationId, safeRotation);
+        }
+
+        private static void UploadSkyReflectionSourceFallback(CommandBuffer cmd, Texture sourceSkyReflection, Vector4 sourceSkyReflectionHDR, float sourceSkyReflectionMaxMip)
+        {
+            if (sourceSkyReflection != null)
+            {
+                cmd.SetGlobalTexture(SkyReflectionSourceTextureId, sourceSkyReflection);
+                cmd.SetGlobalFloat(SkyReflectionSourceEnabledId, 1f);
+                cmd.SetGlobalVector(SkyReflectionSourceHDRId, sourceSkyReflectionHDR);
+                cmd.SetGlobalFloat(SkyReflectionSourceMaxMipId, Mathf.Max(0f, sourceSkyReflectionMaxMip));
+                return;
+            }
+
+            cmd.SetGlobalFloat(SkyReflectionSourceEnabledId, 0f);
+            cmd.SetGlobalVector(SkyReflectionSourceHDRId, DefaultSkyReflectionHDR);
+            cmd.SetGlobalFloat(SkyReflectionSourceMaxMipId, 0f);
         }
 
 
@@ -277,7 +574,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             return MultiplyColor(sourceColor, skyLight.SafeTint, skyLight.EffectiveDiffuseIntensity);
         }
 
-        private static ResolvedSkyReflection ResolveSkyLightReflection(Camera camera, BurtSkyLight skyLight)
+        private static ResolvedSkyReflection ResolveSkyLightReflection(CommandBuffer cmd, BurtRenderRequest request, Camera camera, BurtSkyLight skyLight)
         {
             if (skyLight == null)
             {
@@ -305,7 +602,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                         return CreateDisabledSkyReflection(skyLight, "SkyLight.SpecularDisabled");
                     }
 
-                    var capturedFallback = ResolveSkyReflection(camera);
+                    var capturedFallback = ResolveSkyReflection(cmd, request, camera);
                     capturedFallback.Source = "SkyLight.CapturedSceneUnimplemented->" + capturedFallback.Source;
                     capturedFallback.IntensityMultiplier *= skyLight.EffectiveSpecularIntensity;
                     capturedFallback.Tint = skyLight.SafeTint;
@@ -318,7 +615,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                         return CreateDisabledSkyReflection(skyLight, "SkyLight.SpecularDisabled");
                     }
 
-                    var renderSettingsReflection = ResolveSkyReflection(camera);
+                    var renderSettingsReflection = ResolveSkyReflection(cmd, request, camera);
                     renderSettingsReflection.Source = "SkyLight.RenderSettings->" + renderSettingsReflection.Source;
                     renderSettingsReflection.IntensityMultiplier *= skyLight.EffectiveSpecularIntensity;
                     renderSettingsReflection.Tint = skyLight.SafeTint;
@@ -347,6 +644,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 Enabled = diffuseBlend > 0f || specularBlend > 0f,
                 DiffuseColor = MultiplyColor(sourceColor, skyLight.SafeTint, diffuseIntensity, diffuseBlend),
                 SpecularColor = MultiplyColor(sourceColor, skyLight.SafeTint, specularIntensity, specularBlend),
+                BakeColor = new Color(Mathf.Max(0f, sourceColor.r), Mathf.Max(0f, sourceColor.g), Mathf.Max(0f, sourceColor.b), blend),
                 Source = skyLight.lowerHemisphereMode.ToString()
             };
         }
@@ -358,13 +656,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 Enabled = false,
                 DiffuseColor = Color.clear,
                 SpecularColor = Color.clear,
+                BakeColor = Color.clear,
                 Source = "Preserve"
             };
         }
 
-        private static ResolvedSkyDiffuseCubemap ResolveSkyLightDiffuseCubemap(BurtSkyLight skyLight, Texture skyReflectionTexture)
+        private static ResolvedSkyDiffuseCubemap ResolveSkyLightDiffuseCubemap(BurtSkyLight skyLight, ResolvedSkyReflection skyReflection, BurtImageBasedFilterResult imageBasedFilter)
         {
-            if (skyLight == null || !skyLight.affectDiffuse || skyLight.sourceType != BurtSkyLightSourceType.SpecifiedCubemap || skyReflectionTexture == null)
+            if (skyLight == null || !skyLight.affectDiffuse || imageBasedFilter.DiffuseTexture == null)
+            {
+                return CreateDisabledSkyDiffuseCubemap();
+            }
+
+            var source = ResolveSkyLightDiffuseCubemapSource(skyLight, skyReflection, imageBasedFilter);
+            if (string.IsNullOrEmpty(source))
             {
                 return CreateDisabledSkyDiffuseCubemap();
             }
@@ -372,11 +677,40 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             return new ResolvedSkyDiffuseCubemap
             {
                 Enabled = skyLight.EffectiveDiffuseIntensity > 0f,
-                Intensity = skyLight.EffectiveDiffuseIntensity,
-                Tint = skyLight.SafeTint,
-                Mip = CalculateSkyReflectionSpecularMipMax(skyReflectionTexture),
-                Source = "SkyLight.SpecifiedCubemapApprox"
+                Texture = imageBasedFilter.DiffuseTexture,
+                SHTexture = imageBasedFilter.DiffuseSHTexture,
+                HDRDecodeValues = imageBasedFilter.DiffuseHDRDecodeValues,
+                Intensity = imageBasedFilter.Filtered ? ResolveBakedIntensityScale(skyLight.EffectiveDiffuseIntensity, imageBasedFilter.BakedIntensity) : skyLight.EffectiveDiffuseIntensity,
+                Tint = imageBasedFilter.Filtered ? Color.white : skyLight.SafeTint,
+                Mip = imageBasedFilter.DiffuseMip,
+                Source = source
             };
+        }
+
+        private static string ResolveSkyLightDiffuseCubemapSource(BurtSkyLight skyLight, ResolvedSkyReflection skyReflection, BurtImageBasedFilterResult imageBasedFilter)
+        {
+            if (skyLight == null)
+            {
+                return null;
+            }
+
+            var suffix = imageBasedFilter.Filtered ? (imageBasedFilter.DiffuseSHTexture != null ? "FilteredIrradianceSH9" : "FilteredIrradiance") : "Approx";
+            if (skyLight.sourceType == BurtSkyLightSourceType.SpecifiedCubemap && skyLight.cubemap != null)
+            {
+                return "SkyLight.SpecifiedCubemap" + suffix;
+            }
+
+            if (IsAtmosphereReflectionSource(skyReflection.Source))
+            {
+                return "BurtAtmosphere" + suffix;
+            }
+
+            return null;
+        }
+
+        private static bool IsAtmosphereReflectionSource(string source)
+        {
+            return !string.IsNullOrEmpty(source) && source.IndexOf("BurtAtmosphereCubemap", StringComparison.Ordinal) >= 0;
         }
 
         private static ResolvedSkyDiffuseCubemap CreateDisabledSkyDiffuseCubemap()
@@ -384,6 +718,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             return new ResolvedSkyDiffuseCubemap
             {
                 Enabled = false,
+                Texture = null,
+                SHTexture = null,
+                HDRDecodeValues = DefaultSkyReflectionHDR,
                 Intensity = 0f,
                 Tint = Color.white,
                 Mip = 0f,
@@ -413,6 +750,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
         private static Color MultiplyColor(Color color, Color tint, float intensity, float alpha)
         {
             return new Color(Mathf.Max(0f, color.r * tint.r * intensity), Mathf.Max(0f, color.g * tint.g * intensity), Mathf.Max(0f, color.b * tint.b * intensity), Mathf.Clamp01(alpha));
+        }
+
+        private static BurtImageBasedFilterBakeSettings CreateImageBasedFilterBakeSettings(ResolvedSkyReflection skyReflection, float intensity, ResolvedLowerHemisphere lowerHemisphere)
+        {
+            var lowerColor = lowerHemisphere.Enabled ? lowerHemisphere.BakeColor : Color.clear;
+            return new BurtImageBasedFilterBakeSettings(
+                skyReflection.Rotation,
+                skyReflection.Tint,
+                intensity,
+                lowerHemisphere.Enabled,
+                lowerColor);
+        }
+
+        private static float ResolveBakedIntensityScale(float targetIntensity, float bakedIntensity)
+        {
+            if (targetIntensity <= 0f || bakedIntensity <= 0f)
+            {
+                return 0f;
+            }
+
+            return Mathf.Clamp(targetIntensity / bakedIntensity, 0f, 1024f);
         }
 
         private static Vector4 SanitizeTint(Color tint)
@@ -462,11 +820,37 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             return result;
         }
 
-        private static ResolvedSkyReflection ResolveSkyReflection(Camera camera) // 解析当前 BurtRP 全局反射纹理和 HDR 解码参数。
+        private static ResolvedSkyReflection ResolveSkyReflection(CommandBuffer cmd, BurtRenderRequest request, Camera camera) // 解析当前 BurtRP 全局反射纹理和 HDR 解码参数。
         {
             if (IsPreviewCamera(camera)) // Inspector 的 Cubemap / ReflectionProbe 预览没有场景语义，不能被当前场景 Probe 或 Lighting Custom Reflection 污染。
             {
                 return ResolvePreviewReflectionFallback(); // 预览窗口只使用 Unity 默认反射兜底，避免资产预览被场景 IBL 覆盖。
+            }
+
+            if (cmd != null && BurtAtmosphereReflectionUtility.TryGetReflection(cmd, request, out var atmosphereReflection, out var atmosphereHDR, out var atmosphereSource))
+            {
+                return new ResolvedSkyReflection
+                {
+                    Texture = atmosphereReflection,
+                    HDRDecodeValues = atmosphereHDR,
+                    IntensityMultiplier = 1f,
+                    Tint = Color.white,
+                    Source = atmosphereSource,
+                    Rotation = DefaultSkyReflectionRotation
+                };
+            }
+
+            if (cmd == null && BurtAtmosphereReflectionUtility.HasReadyReflection(request, out var readyAtmosphereReflection, out var readyAtmosphereHDR, out var readyAtmosphereSource))
+            {
+                return new ResolvedSkyReflection
+                {
+                    Texture = readyAtmosphereReflection,
+                    HDRDecodeValues = readyAtmosphereHDR,
+                    IntensityMultiplier = 1f,
+                    Tint = Color.white,
+                    Source = readyAtmosphereSource,
+                    Rotation = DefaultSkyReflectionRotation
+                };
             }
 
             if (camera != null && TryResolveSceneReflectionProbe(camera, out var sceneProbe, out var sceneReflectionTexture)) // ReflectionProbe 是 per-object 覆盖源，Deferred 先选一盏场景 Probe 做全局近似。
@@ -639,6 +1023,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
         private static float CalculateSkyReflectionSpecularMipMax(Texture skyReflection) // 根据纹理真实 mip 链推导 shader 实际使用的反射高光 LOD 上限。
         {
             return Mathf.Min(CalculateSkyReflectionMaxMip(skyReflection), ReflectionCaptureSpecularMipMax); // XRender/Unity reflection capture 的预过滤范围按 0..8 处理，不直接使用 512/1024 cubemap 的全部 mip。
+        }
+
+        private static BurtImageBasedFilterResult CreateDebugImageBasedFilterResult(ResolvedSkyReflection skyReflection, float intensity, ResolvedLowerHemisphere lowerHemisphere)
+        {
+            var bakeSettings = CreateImageBasedFilterBakeSettings(skyReflection, intensity, lowerHemisphere);
+            return BurtImageBasedFilterUtility.CreateDebugResult(skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflection.Source, bakeSettings);
         }
 
         private static string ResolveSkyReflectionMipHealth(Texture skyReflection)

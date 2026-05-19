@@ -74,6 +74,14 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float visibilityWeight;
             };
 
+            struct BurtSSRLayerSample
+            {
+                BurtSSRHit hit;
+                BurtSSRTraceQuality quality;
+                float3 color;
+                float visibility;
+            };
+
             BurtSSRHit BurtSSRCreateEmptyHit()
             {
                 BurtSSRHit result;
@@ -1584,6 +1592,34 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 #endif
             }
 
+            BurtSSRLayerSample BurtSSRTraceLayer(
+                float3 positionWS,
+                float3 viewDirectionWS,
+                float3 normalWS,
+                float perceptualRoughness,
+                float thickness,
+                float nDotV,
+                float roughnessIntensity)
+            {
+                BurtSSRLayerSample layer;
+                BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(normalWS, viewDirectionWS);
+                float3 reflectionDirectionWS = BurtGetIndirectSpecularReflectionDirectionWS(geometryData, 0.0, perceptualRoughness);
+                float originBias = min(thickness * 0.08, 0.025);
+                float3 originWS = positionWS + normalWS * originBias + reflectionDirectionWS * originBias;
+                layer.hit = BurtSSRCreateEmptyHit();
+                if (roughnessIntensity > 0.0001)
+                {
+                    layer.hit = BurtSSRMarch(originWS, reflectionDirectionWS);
+                }
+                layer.quality = BurtSSREvaluateTraceQuality(layer.hit, reflectionDirectionWS, nDotV, thickness);
+                BurtSSRTraceQuality validatedQuality;
+                layer.hit = BurtSSRValidateHiZHit(originWS, reflectionDirectionWS, nDotV, thickness, layer.hit, layer.quality, validatedQuality);
+                layer.quality = validatedQuality;
+                layer.color = tex2D(_BurtSSRSourceColorTexture, layer.hit.uv).rgb * layer.hit.hit;
+                layer.visibility = layer.quality.visibilityWeight;
+                return layer;
+            }
+
             float4 FragSSR(Varyings input) : SV_Target
             {
                 float2 screenUV = input.screenUV;
@@ -1620,17 +1656,10 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                     }
                 }
 
-                float3 reflectionDirectionWS = BurtSafeNormalize(reflect(-viewDirectionWS, normalWS));
                 float thickness = max(_BurtSSRParams0.y, 0.0001);
-                float originBias = min(thickness * 0.08, 0.025);
-                float3 originWS = positionWS + normalWS * originBias + reflectionDirectionWS * originBias;
-                BurtSSRHit hit = BurtSSRCreateEmptyHit();
-                if (roughnessIntensity > 0.0001)
-                {
-                    hit = BurtSSRMarch(originWS, reflectionDirectionWS);
-                }
-
-                BurtSSRTraceQuality traceQuality = BurtSSREvaluateTraceQuality(hit, reflectionDirectionWS, nDotV, thickness);
+                BurtSSRLayerSample baseLayer = BurtSSRTraceLayer(positionWS, viewDirectionWS, normalWS, reflectionRoughness, thickness, nDotV, roughnessIntensity);
+                BurtSSRHit hit = baseLayer.hit;
+                BurtSSRTraceQuality traceQuality = baseLayer.quality;
                 float edgeFade = traceQuality.edgeFade;
                 float hitNormalWeight = traceQuality.hitNormalWeight;
                 float screenParallelWeight = traceQuality.screenParallelWeight;
@@ -1642,6 +1671,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float resolveQuality = traceQuality.resolveQuality;
                 float validHit = traceQuality.validHit;
                 float visibilityWeight = traceQuality.visibilityWeight;
+                float3 reflectionColor = baseLayer.color;
 
                 if (debugMode == 1)
                 {
@@ -1662,7 +1692,6 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 if (debugMode == 4)
                 {
-                    float3 reflectionColor = tex2D(_BurtSSRSourceColorTexture, hit.uv).rgb;
                     return float4(reflectionColor * validHit, 1.0);
                 }
 
@@ -1733,12 +1762,42 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                     return float4(max(divergence, probeBlocked), skipUsed * (1.0 - divergence), skipCandidate, 1.0);
                 }
 
-                BurtSSRTraceQuality validatedQuality;
-                hit = BurtSSRValidateHiZHit(originWS, reflectionDirectionWS, nDotV, thickness, hit, traceQuality, validatedQuality);
-                traceQuality = validatedQuality;
-                visibilityWeight = traceQuality.visibilityWeight;
-                float3 reflectionColor = tex2D(_BurtSSRSourceColorTexture, hit.uv).rgb;
-                return float4(reflectionColor * hit.hit, visibilityWeight);
+                #if BURT_ENABLE_CLEAR_COAT_SHADING
+                    BurtPBRMaterialData clearCoatMaterialData = BurtPreparePBRMaterialData(gbufferData);
+                    float clearCoatMask = saturate(clearCoatMaterialData.clearCoatMask);
+                    if (clearCoatMask > 0.0001)
+                    {
+                        float3 clearCoatNormalWS = BurtGetClearCoatNormalWS(gbufferData);
+                        float clearCoatRoughness = ClampPerceptualRoughness(clearCoatMaterialData.clearCoatRoughness);
+                        float clearCoatNoV = saturate(dot(clearCoatNormalWS, viewDirectionWS));
+                        float clearCoatRoughnessIntensity = saturate((_BurtSSRParams0.w - clearCoatRoughness) / max(_BurtSSRParams0.w, 0.0001)) * saturate(_BurtSSRParams0.z);
+                        BurtSSRLayerSample topLayer = BurtSSRTraceLayer(positionWS, viewDirectionWS, clearCoatNormalWS, clearCoatRoughness, thickness, clearCoatNoV, clearCoatRoughnessIntensity);
+
+                        BurtPBRMaterialData topMaterialData = clearCoatMaterialData;
+                        topMaterialData.baseColor = float3(1.0, 1.0, 1.0);
+                        topMaterialData.metallic = 0.0;
+                        topMaterialData.anisotropy = 0.0;
+                        topMaterialData.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
+                        topMaterialData.diffuseColor = float3(0.0, 0.0, 0.0);
+                        topMaterialData.f0 = float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0);
+                        topMaterialData.f90 = float3(1.0, 1.0, 1.0);
+                        topMaterialData.perceptualRoughness = clearCoatRoughness;
+                        topMaterialData.linearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatRoughness);
+                        topMaterialData.a2 = LinearRoughnessToA2(topMaterialData.linearRoughness);
+                        topMaterialData.clearCoatMask = 0.0;
+
+                        float2 topDFG = GetSpecularDFGTerms(clearCoatRoughness, clearCoatNoV);
+                        float3 topEnvBRDF = EvalSpecularDFG(topMaterialData.f0, topMaterialData.f90, topDFG);
+                        float3 layerTransmission = BurtClearCoatFresnelTransmission(topEnvBRDF) * BurtSimpleClearCoatTransmittanceFromView(clearCoatNoV, clearCoatMaterialData.metallic, clearCoatMaterialData.baseColor);
+                        float transmissionWeight = saturate(max(max(layerTransmission.r, layerTransmission.g), layerTransmission.b));
+                        float3 dualLayerColor = baseLayer.color * layerTransmission + topLayer.color * clearCoatMask;
+                        float dualLayerVisibility = saturate(max(baseLayer.visibility * transmissionWeight, topLayer.visibility * clearCoatMask));
+                        reflectionColor = lerp(baseLayer.color, dualLayerColor, clearCoatMask);
+                        visibilityWeight = lerp(baseLayer.visibility, dualLayerVisibility, clearCoatMask);
+                    }
+                #endif
+
+                return float4(reflectionColor, visibilityWeight);
             }
             ENDHLSL
         }
@@ -1909,7 +1968,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             Cull Off
             ZWrite Off
             ZTest Always
-            Blend SrcAlpha OneMinusSrcAlpha, Zero One
+            Blend One Zero
 
             HLSLPROGRAM
             #pragma target 3.5
@@ -1919,6 +1978,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             #include "UnityCG.cginc"
             #include "ShaderLibrary/BurtDeferred.hlsl"
 
+            sampler2D _BurtSSRCameraColorCopyTexture;
             sampler2D _BurtScreenSpaceReflectionTemporalColorTexture;
             sampler2D _BurtSSRHistoryMomentTexture;
             float4 _BurtSSRSourceTexelSize;
@@ -2035,7 +2095,9 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             {
                 float pureSpecularRoughness = 0.06;
                 float roughnessRange = max(_BurtSSRParams0.w - pureSpecularRoughness, 0.0001);
-                return saturate((perceptualRoughness - pureSpecularRoughness) / roughnessRange) * min(_BurtSSRParams1.y, 4.0);
+                float maxMip = max(min(_BurtSSRParams1.y, 4.0), 0.0);
+                float roughnessMip = perceptualRoughness < pureSpecularRoughness ? 0.0 : saturate((perceptualRoughness - pureSpecularRoughness) / roughnessRange) * maxMip;
+                return clamp(roughnessMip, 0.0, maxMip);
             }
 
             float BurtSSRComputeRoughnessMip(float2 screenUV)
@@ -2131,7 +2193,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                     return centerSSR;
                 }
 
-                float upscaledAlpha = accumulatedAlpha / totalWeight;
+                float upscaledAlpha = max(centerSSR.a, accumulatedAlpha / totalWeight);
                 float3 upscaledColor = accumulatedAlpha > 0.0001 ? accumulatedColor / accumulatedAlpha : centerSSR.rgb;
                 float4 upscaledSSR = float4(upscaledColor, upscaledAlpha);
                 float centerLock = smoothstep(0.12, 0.35, saturate(centerSSR.a));
@@ -2202,7 +2264,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float3 filteredColor = accumulatedColor / max(totalWeight, 0.0001);
                 float mipBlend = roughnessGate * smoothstep(0.04, 0.18, resolvedVisibility) * (1.0 - holeGate * 0.65);
-                filteredColor = lerp(filteredColor, mipColor, mipBlend * 0.55);
+                filteredColor = lerp(filteredColor, mipColor, mipBlend * 0.75);
                 float mirrorLock = (1.0 - roughnessGate) * smoothstep(0.05, 0.2, centerAlpha) * (1.0 - holeGate);
                 mirrorLock *= 1.0 - varianceGate * roughnessGate * 0.5;
                 return lerp(filteredColor, centerSSR.rgb, mirrorLock);
@@ -2218,8 +2280,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
-                float3 centerNormal = BurtSafeNormalize(centerGBuffer.normalWS);
-                float centerRoughness = centerGBuffer.perceptualRoughness;
+                float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
+                float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
                 float2 texel = _BurtSSRSourceTexelSize.xy;
                 float alphaRight = BurtSSRCompositeNeighborAlpha(screenUV + float2(texel.x, 0.0), centerLinearDepth, centerNormal, centerRoughness);
                 float alphaLeft = BurtSSRCompositeNeighborAlpha(screenUV - float2(texel.x, 0.0), centerLinearDepth, centerNormal, centerRoughness);
@@ -2253,6 +2315,26 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 return saturate(resolvedCenterAlpha * lowAlphaGate * isolatedFade * edgeAlphaFade);
             }
 
+            float BurtSSRComputeMaterialVisibilityWeight(float reflectionRoughness)
+            {
+                float roughnessFade = saturate((_BurtSSRParams0.w - reflectionRoughness) / max(_BurtSSRParams0.w, 0.0001));
+                return roughnessFade * saturate(_BurtSSRParams0.z);
+            }
+
+            float BurtSSRComputeCompositeFallbackAlphaScale(float2 screenUV, float resolvedVisibility, float centerAlpha, float materialWeight)
+            {
+                float edgeFade = BurtSSRCompositeEdgeFade(screenUV);
+                float roughnessMip = BurtSSRComputeRoughnessMip(screenUV);
+                float roughnessMipMax = max(min(_BurtSSRParams1.y, 4.0), 0.0001);
+                float roughnessFallback = smoothstep(0.65, 1.0, roughnessMip / roughnessMipMax);
+                float lowValidityFallback = 1.0 - smoothstep(0.03, 0.18, resolvedVisibility);
+                float centerHoleFallback = smoothstep(0.01, 0.08, saturate(resolvedVisibility - centerAlpha));
+                float edgeFallback = 1.0 - smoothstep(0.18, 0.85, edgeFade);
+                float materialFallback = 1.0 - saturate(materialWeight);
+                float fallback = saturate(max(max(roughnessFallback, lowValidityFallback), max(max(centerHoleFallback, edgeFallback), materialFallback)));
+                return saturate(1.0 - fallback * 0.82);
+            }
+
             float BurtSSRComputeMaterialWeight(float2 screenUV)
             {
                 float rawDepth = BurtSampleDeferredRawDepth(screenUV);
@@ -2263,19 +2345,70 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
                 float reflectionRoughness = BurtGetReflectionRoughness(gbufferData);
-                float roughnessFade = saturate((_BurtSSRParams0.w - reflectionRoughness) / max(_BurtSSRParams0.w, 0.0001));
-                if (roughnessFade <= 0.0 || _BurtSSRParams0.z <= 0.0)
+                return BurtSSRComputeMaterialVisibilityWeight(reflectionRoughness);
+            }
+
+            float3 BurtSSRComputeBaseMaterialSpecularScale(BurtPBRMaterialData materialData, float reflectionRoughness, float nDotV)
+            {
+                float2 dfg = GetSpecularDFGTerms(reflectionRoughness, nDotV);
+                float3 envBRDF = EvalSpecularDFG(materialData.f0, materialData.f90, dfg);
+                float3 energyCompensation = GetSpecularEnergyCompensation(materialData.f0, reflectionRoughness, nDotV);
+                float specularOcclusion = GetIndirectSpecularOcclusion(nDotV, materialData.occlusion, reflectionRoughness);
+                return envBRDF * energyCompensation * specularOcclusion;
+            }
+
+            float3 BurtSSRComputeMaterialSpecularScale(float2 screenUV)
+            {
+                float rawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (BurtSSRCompositeIsSkyDepth(rawDepth))
                 {
-                    return 0.0;
+                    return float3(0.0, 0.0, 0.0);
+                }
+
+                BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                float reflectionRoughness = BurtGetReflectionRoughness(gbufferData);
+                if (BurtSSRComputeMaterialVisibilityWeight(reflectionRoughness) <= 0.0)
+                {
+                    return float3(0.0, 0.0, 0.0);
                 }
 
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
-                float3 normalWS = BurtGetReflectionNormalWS(gbufferData);
-                float nDotV = saturate(dot(normalWS, viewDirectionWS));
+                float3 baseNormalWS = BurtSafeNormalize(gbufferData.normalWS);
+                float baseRoughness = ClampPerceptualRoughness(gbufferData.perceptualRoughness);
+                float baseNoV = saturate(dot(baseNormalWS, viewDirectionWS));
                 BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
-                float3 fresnel = F_Schlick(materialData.f0, materialData.f90, nDotV);
-                return saturate(max(max(fresnel.r, fresnel.g), fresnel.b) * roughnessFade * _BurtSSRParams0.z);
+                float3 baseSpecularScale = BurtSSRComputeBaseMaterialSpecularScale(materialData, baseRoughness, baseNoV);
+
+                #if BURT_ENABLE_CLEAR_COAT_SHADING
+                    float clearCoatMask = saturate(materialData.clearCoatMask);
+                    if (clearCoatMask > 0.0001)
+                    {
+                        BurtPBRMaterialData clearCoatMaterialData = materialData;
+                        clearCoatMaterialData.baseColor = float3(1.0, 1.0, 1.0);
+                        clearCoatMaterialData.metallic = 0.0;
+                        clearCoatMaterialData.anisotropy = 0.0;
+                        clearCoatMaterialData.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
+                        clearCoatMaterialData.diffuseColor = float3(0.0, 0.0, 0.0);
+                        clearCoatMaterialData.f0 = float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0);
+                        clearCoatMaterialData.f90 = float3(1.0, 1.0, 1.0);
+                        clearCoatMaterialData.perceptualRoughness = ClampPerceptualRoughness(materialData.clearCoatRoughness);
+                        clearCoatMaterialData.linearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatMaterialData.perceptualRoughness);
+                        clearCoatMaterialData.a2 = LinearRoughnessToA2(clearCoatMaterialData.linearRoughness);
+                        clearCoatMaterialData.clearCoatMask = 0.0;
+                        float3 clearCoatNormalWS = BurtGetClearCoatNormalWS(gbufferData);
+                        float clearCoatNoV = saturate(dot(clearCoatNormalWS, viewDirectionWS));
+                        float2 clearCoatDFG = GetSpecularDFGTerms(clearCoatMaterialData.perceptualRoughness, clearCoatNoV);
+                        float3 clearCoatEnvBRDF = EvalSpecularDFG(clearCoatMaterialData.f0, clearCoatMaterialData.f90, clearCoatDFG);
+                        float3 clearCoatEnergyCompensation = GetSpecularEnergyCompensation(clearCoatMaterialData.f0, clearCoatMaterialData.perceptualRoughness, clearCoatNoV);
+                        float clearCoatSpecularOcclusion = GetIndirectSpecularOcclusion(clearCoatNoV, clearCoatMaterialData.occlusion, clearCoatMaterialData.perceptualRoughness);
+                        float3 clearCoatSpecularScale = clearCoatEnvBRDF * clearCoatEnergyCompensation * clearCoatSpecularOcclusion;
+                        float3 layerTransmission = BurtClearCoatFresnelTransmission(clearCoatEnvBRDF) * BurtSimpleClearCoatTransmittanceFromView(clearCoatNoV, materialData.metallic, materialData.baseColor);
+                        return lerp(baseSpecularScale, baseSpecularScale * layerTransmission + clearCoatSpecularScale, clearCoatMask);
+                    }
+                #endif
+
+                return baseSpecularScale;
             }
 
             float4 FragComposite(Varyings input) : SV_Target
@@ -2305,13 +2438,16 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 if (debugMode == 0 && materialWeight <= 0.0001)
                 {
-                    return float4(0.0, 0.0, 0.0, 0.0);
+                    return tex2D(_BurtSSRCameraColorCopyTexture, screenUV);
                 }
 
                 float4 ssrColor = BurtSSRCompositeSampleTemporalUpscaled(screenUV);
-                float resolvedVisibility = BurtSSRResolveCompositeAlpha(screenUV, saturate(ssrColor.a));
-                float3 resolvedColor = BurtSSRResolveCompositeColor(screenUV, ssrColor, resolvedVisibility);
-                float resolvedAlpha = saturate(resolvedVisibility * materialWeight);
+                float centerAlpha = saturate(ssrColor.a);
+                float resolvedVisibility = BurtSSRResolveCompositeAlpha(screenUV, centerAlpha);
+                float3 materialSpecularScale = BurtSSRComputeMaterialSpecularScale(screenUV);
+                float3 resolvedColor = BurtSSRResolveCompositeColor(screenUV, ssrColor, resolvedVisibility) * materialSpecularScale;
+                float fallbackAlphaScale = BurtSSRComputeCompositeFallbackAlphaScale(screenUV, resolvedVisibility, centerAlpha, materialWeight);
+                float resolvedAlpha = saturate(resolvedVisibility * materialWeight * fallbackAlphaScale);
 
                 if (debugMode == 10)
                 {
@@ -2334,7 +2470,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                     return float4(resolvedColor, 1.0);
                 }
 
-                return float4(resolvedColor, resolvedAlpha);
+                float4 sourceColor = tex2D(_BurtSSRCameraColorCopyTexture, screenUV);
+                return float4(lerp(sourceColor.rgb, resolvedColor, resolvedAlpha), sourceColor.a);
             }
             ENDHLSL
         }
