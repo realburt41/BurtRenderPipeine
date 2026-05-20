@@ -731,6 +731,7 @@ namespace Burt.RenderPipeline.Editor
             material.renderQueue = transparent ? (int)RenderQueue.Transparent : (int)RenderQueue.Geometry;
             material.SetShaderPassEnabled("BurtDepthOnly", !transparent);
             material.SetShaderPassEnabled("BurtGBuffer", !transparent);
+            material.SetShaderPassEnabled("BurtSubsurfaceForward", !transparent && material.shader != null && material.shader.name == "BurtRP/Subsurface");
             material.SetShaderPassEnabled("ShadowCaster", !transparent);
             material.SetShaderPassEnabled("BurtForward", true);
         }

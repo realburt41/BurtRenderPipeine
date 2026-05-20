@@ -199,6 +199,16 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSAO Surface Stability";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare:
                     return "SSAO Diagnostic Compare";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw:
+                    return "XGI Raw";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal:
+                    return "XGI Final";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio:
+                    return "XGI Hit Ratio";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay:
+                    return "XGI Overlay";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
+                    return "XGI Composite";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
                     return "5S Setup";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
@@ -602,6 +612,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite,
             BurtShadingDebugMode.BloomPrefilter,
             BurtShadingDebugMode.BloomFinalBloom,
             BurtShadingDebugMode.BloomMip1,
@@ -687,6 +702,15 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare
+        });
+
+        public static readonly BurtShadingDebugGroup ScreenSpaceGlobalIllumination = new BurtShadingDebugGroup("Screen Space Global Illumination", "XGI", new[]
+        {
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite
         });
 
         public static readonly BurtShadingDebugGroup ScreenSpaceSubsurface = new BurtShadingDebugGroup("Screen Space Subsurface", "5S", new[]
@@ -880,6 +904,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public BurtPostProcessDebugOverlay()
             : base(
                 BurtShadingDebugSSAODropdown.Id,
+                BurtShadingDebugXGIDropdown.Id,
                 BurtShadingDebugSSSDropdown.Id,
                 BurtShadingDebugBloomDropdown.Id,
                 BurtShadingDebugAutoExposureDropdown.Id,
@@ -1085,6 +1110,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public BurtShadingDebugSSAODropdown() // Unity 通过无参构造创建 ToolbarElement。
             : base(BurtShadingDebugGroups.ScreenSpaceAmbientOcclusion) // 绑定 SSAO 后处理调试分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugXGIDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/XGI";
+
+        public BurtShadingDebugXGIDropdown()
+            : base(BurtShadingDebugGroups.ScreenSpaceGlobalIllumination)
         {
         }
     }

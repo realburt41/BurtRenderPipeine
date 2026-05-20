@@ -42,6 +42,7 @@
             if (IsDeferredLightingPass(passName) ||
                 Contains(passName, "HiZ") ||
                 Contains(passName, "Screen Space Reflections") ||
+                Contains(passName, "Screen Space Global Illumination") ||
                 Contains(passName, "Screen Space Subsurface"))
             {
                 return BurtRenderPassKind.FullScreen;

@@ -94,6 +94,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceAmbientOcclusionTextureId = Shader.PropertyToID(ScreenSpaceAmbientOcclusionTextureShaderName);
 
+        public const string ScreenSpaceGlobalIlluminationRawName = "ScreenSpaceGlobalIlluminationRaw";
+
+        public const string ScreenSpaceGlobalIlluminationRawTextureShaderName = "_BurtScreenSpaceGlobalIlluminationRawTexture";
+
+        public static readonly int ScreenSpaceGlobalIlluminationRawTextureId = Shader.PropertyToID(ScreenSpaceGlobalIlluminationRawTextureShaderName);
+
+        public const string ScreenSpaceGlobalIlluminationName = "ScreenSpaceGlobalIllumination";
+
+        public const string ScreenSpaceGlobalIlluminationTextureShaderName = "_BurtScreenSpaceGlobalIlluminationTexture";
+
+        public static readonly int ScreenSpaceGlobalIlluminationTextureId = Shader.PropertyToID(ScreenSpaceGlobalIlluminationTextureShaderName);
+
         public const string ScreenSpaceSubsurfaceSourceName = "ScreenSpaceSubsurfaceSource";
 
         public const string ScreenSpaceSubsurfaceSourceTextureShaderName = "_BurtScreenSpaceSubsurfaceSourceTexture";
@@ -661,6 +673,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetScreenSpaceAmbientOcclusion()
         {
             return GetRenderTarget(ScreenSpaceAmbientOcclusionName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceGlobalIlluminationRawTexture()
+        {
+            return RegisterScreenSpaceGlobalIlluminationRaw(new RenderTargetIdentifier(ScreenSpaceGlobalIlluminationRawTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceGlobalIlluminationRaw(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceGlobalIlluminationRawName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceGlobalIlluminationRaw()
+        {
+            return GetRenderTarget(ScreenSpaceGlobalIlluminationRawName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceGlobalIlluminationTexture()
+        {
+            return RegisterScreenSpaceGlobalIllumination(new RenderTargetIdentifier(ScreenSpaceGlobalIlluminationTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceGlobalIllumination(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceGlobalIlluminationName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceGlobalIllumination()
+        {
+            return GetRenderTarget(ScreenSpaceGlobalIlluminationName);
         }
 
         public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceSourceTexture()

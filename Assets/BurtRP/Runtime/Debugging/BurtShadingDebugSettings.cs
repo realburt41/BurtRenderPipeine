@@ -206,7 +206,12 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         AutoExposureMeteringWeight = 385, // Auto exposure debug: center-weighted metering mask used by lightweight histogram.
         AutoExposureHistogramRange = 386, // Auto exposure debug: current histogram EV range and out-of-range colors.
         ScreenSpaceAmbientOcclusionSurfaceStability = 387, // SSAO debug: current-frame depth/normal stability used to gate temporal history.
-        ScreenSpaceAmbientOcclusionDiagnosticCompare = 388 // SSAO debug: quadrant compare for raw/final/history/difference with temporal gates.
+        ScreenSpaceAmbientOcclusionDiagnosticCompare = 388, // SSAO debug: quadrant compare for raw/final/history/difference with temporal gates.
+        ScreenSpaceGlobalIlluminationRaw = 389, // XGI debug: raw screen-space diffuse GI before the depth/normal bilateral blur.
+        ScreenSpaceGlobalIlluminationFinal = 390, // XGI debug: blurred diffuse GI texture consumed by composite.
+        ScreenSpaceGlobalIlluminationHitRatio = 422, // XGI debug: trace hit confidence in alpha, with sky fallback shown as low values.
+        ScreenSpaceGlobalIlluminationOverlay = 423, // XGI debug: final diffuse GI added over the current camera color.
+        ScreenSpaceGlobalIlluminationComposite = 424 // XGI debug: isolated final composite contribution.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。

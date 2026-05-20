@@ -101,6 +101,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     resources.RegisterScreenSpaceAmbientOcclusionTexture();
                 }
 
+                if (ShouldRegisterScreenSpaceGlobalIllumination(request, asset))
+                {
+                    resources.RegisterScreenSpaceGlobalIlluminationRawTexture();
+                    resources.RegisterScreenSpaceGlobalIlluminationTexture();
+                }
+
                 if (ShouldRegisterScreenSpaceSubsurface(request, asset))
                 {
                     resources.RegisterScreenSpaceSubsurfaceSourceTexture();
@@ -186,7 +192,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderRequest request,
             BurtRenderPipelineAsset asset)
         {
-            return ShouldRegisterGBufferTargets(request, asset) && BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
+            return ShouldRegisterGBufferTargets(request, asset) &&
+                (BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset) ||
+                    BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset));
         }
 
         private static bool ShouldRegisterTileLightBuffers(
@@ -225,6 +233,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderPipelineAsset asset)
         {
             return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(request, asset);
+        }
+
+        private static bool ShouldRegisterScreenSpaceGlobalIllumination(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset);
         }
 
         private static bool ShouldRegisterScreenSpaceSubsurface(

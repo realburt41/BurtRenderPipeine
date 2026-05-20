@@ -297,6 +297,18 @@ MonoBehaviour:
   sunIntensity:
     m_OverrideState: 0
     m_Value: 0.6
+  sunDiskSize:
+    m_OverrideState: 0
+    m_Value: 1
+  sunDiskIntensity:
+    m_OverrideState: 0
+    m_Value: 1.2
+  sunHaloSize:
+    m_OverrideState: 0
+    m_Value: 1
+  sunHaloIntensity:
+    m_OverrideState: 0
+    m_Value: 1
   sunSource:
     m_OverrideState: 0
     m_Value: 0
@@ -321,15 +333,30 @@ MonoBehaviour:
   skyTint:
     m_OverrideState: 0
     m_Value: {r: 0.65, g: 0.78, b: 1, a: 1}
+  horizonColor:
+    m_OverrideState: 0
+    m_Value: {r: 0.48, g: 0.66, b: 0.92, a: 1}
+  horizonSunsetColor:
+    m_OverrideState: 0
+    m_Value: {r: 0.95, g: 0.82, b: 0.58, a: 1}
   horizonIntensity:
     m_OverrideState: 0
     m_Value: 1
   horizonFalloff:
     m_OverrideState: 0
     m_Value: 0.65
+  horizonSunsetInfluence:
+    m_OverrideState: 0
+    m_Value: 0.35
   groundContribution:
     m_OverrideState: 0
     m_Value: 0.22
+  groundBlendStart:
+    m_OverrideState: 0
+    m_Value: -0.02
+  groundBlendEnd:
+    m_OverrideState: 0
+    m_Value: -0.2
   exposureCompensation:
     m_OverrideState: 0
     m_Value: 0
@@ -390,6 +417,7 @@ MonoBehaviour:
   - {fileID: -142477189715346804}
   - {fileID: -5376049901750720449}
   - {fileID: 9153360420279958332}
+  - {fileID: 2718075953073365877}
 --- !u!114 &1128726436058786600
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -524,6 +552,61 @@ MonoBehaviour:
   temporalClamp:
     m_OverrideState: 0
     m_Value: 1
+--- !u!114 &2718075953073365877
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b209dc77435b44698410251b02aaa798, type: 3}
+  m_Name: BurtScreenSpaceGlobalIlluminationVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 0
+  quality:
+    m_OverrideState: 0
+    m_Value: 2
+  resolution:
+    m_OverrideState: 0
+    m_Value: 1
+  intensity:
+    m_OverrideState: 0
+    m_Value: 0.6
+  radius:
+    m_OverrideState: 0
+    m_Value: 2
+  sampleCount:
+    m_OverrideState: 0
+    m_Value: 12
+  maxSteps:
+    m_OverrideState: 0
+    m_Value: 8
+  thickness:
+    m_OverrideState: 0
+    m_Value: 0.35
+  skyFallback:
+    m_OverrideState: 0
+    m_Value: 1
+  radianceClamp:
+    m_OverrideState: 0
+    m_Value: 8
+  normalWeight:
+    m_OverrideState: 0
+    m_Value: 0.65
+  distanceFade:
+    m_OverrideState: 0
+    m_Value: 80
+  blur:
+    m_OverrideState: 0
+    m_Value: 1
+  blurSharpness:
+    m_OverrideState: 0
+    m_Value: 0.18
 --- !u!114 &3971589225541114367
 MonoBehaviour:
   m_ObjectHideFlags: 3

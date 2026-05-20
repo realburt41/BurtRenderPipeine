@@ -14,6 +14,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
         private const int MaxCullCandidateDumpLines = 16; // Keep future-culling diagnostics compact in large graphs.
 
         private const int MaxCullReadinessDumpLines = 24; // Limit per-pass why-not-cull rows so full dumps stay readable.
+        private const float SubsurfaceDiagnosticKernelSize = 3f;
+        private const float SubsurfaceMetersToMillimeters = 1000f;
+        private const float SubsurfaceProfileParamWorldUnitEncodeScale = 0.02f;
+        private const float SubsurfaceProfileParamMeanFreePathEncodeScale = 0.002f;
+        private const int SubsurfaceBurleyMinSampleCount = 8;
+        private static readonly float[] SubsurfaceDiagnosticDepths = { 1f, 2f, 5f };
 
         public static string BuildDump( // 保留旧签名，兼容只需要 Pass 资源声明的调用方。
             BurtRenderRequest request, // 接收当前渲染请求，用来输出 Request 类型和 Camera 名称。
@@ -1210,6 +1216,247 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             return builder.ToString();
         }
 
+        private static string FormatScreenSpaceSubsurfaceBurleyDiagnostics(BurtRenderRequest request, BurtSubsurfaceProfilePalette palette)
+        {
+            var count = Mathf.Clamp(palette.Count, 1, BurtSubsurfaceProfilePalette.MaxProfiles);
+            var camera = request != null ? request.Camera : null;
+            var width = camera != null ? Mathf.Max(1, camera.pixelWidth) : 1;
+            var height = camera != null ? Mathf.Max(1, camera.pixelHeight) : 1;
+            var projection = ResolveSubsurfaceDiagnosticProjection(request);
+            var projectionScale = Mathf.Max(0.0001f, Mathf.Abs(projection.m00) / 6f);
+            var profileParamLutEnabled = true;
+            var builder = new StringBuilder();
+
+            builder.Append("ProjectionM00=").Append(FormatFloat(Mathf.Abs(projection.m00)));
+            builder.Append(" ProjectionScale=").Append(FormatFloat(projectionScale));
+            builder.Append(" Screen=").Append(width).Append("x").Append(height);
+            builder.Append(" KernelSize=").Append(FormatFloat(SubsurfaceDiagnosticKernelSize));
+            builder.Append(" SampleCount=").Append(SubsurfaceBurleyMinSampleCount).Append("/").Append(BurtScreenSpaceSubsurfaceHistoryUtility.MaxBurleySampleCount);
+            builder.Append(" HistoryVarianceTarget=").Append(FormatFloat(BurtScreenSpaceSubsurfaceHistoryUtility.HistoryVarianceTarget));
+            builder.Append(" HistoryWeight=").Append(FormatFloat(BurtScreenSpaceSubsurfaceHistoryUtility.ExponentialWeight));
+            builder.Append(" Pdf=BurleyNormalized");
+            builder.Append(" Root=Approx");
+            builder.Append(" ProfileParamLut=").Append(profileParamLutEnabled ? "Enabled" : "Disabled");
+
+            for (var i = 0; i < count; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(";");
+                }
+
+                AppendScreenSpaceSubsurfaceProfileDiagnostics(builder, i, palette.GetSettings(i), projectionScale, width, height, profileParamLutEnabled);
+            }
+
+            return builder.ToString();
+        }
+
+        private static void AppendScreenSpaceSubsurfaceProfileDiagnostics(
+            StringBuilder builder,
+            int profileIndex,
+            BurtSubsurfaceProfileSettings profile,
+            float projectionScale,
+            int width,
+            int height,
+            bool profileParamLutEnabled)
+        {
+            var surfaceAlbedo = GetSubsurfaceSurfaceAlbedoForLut(profile);
+            var diffuseMeanFreePathMillimeters = GetSubsurfaceDiffuseMeanFreePathMillimeters(profile, surfaceAlbedo);
+            ResolveSubsurfaceSamplingComponents(surfaceAlbedo, diffuseMeanFreePathMillimeters, out var samplingAlbedo, out var samplingDiffuseMeanFreePathMillimeters);
+            var encodedMeanFreePath = diffuseMeanFreePathMillimeters * SubsurfaceProfileParamMeanFreePathEncodeScale;
+            var encodedDominant = samplingDiffuseMeanFreePathMillimeters * SubsurfaceProfileParamMeanFreePathEncodeScale;
+            var decodedMeanFreePath = profileParamLutEnabled
+                ? encodedMeanFreePath / SubsurfaceProfileParamMeanFreePathEncodeScale
+                : new Vector3(profile.MeanFreePathVector.x, profile.MeanFreePathVector.y, profile.MeanFreePathVector.z);
+            var decodedSamplingMeanFreePath = profileParamLutEnabled
+                ? encodedDominant / SubsurfaceProfileParamMeanFreePathEncodeScale
+                : Mathf.Max(profile.MeanFreePathVector.w, Mathf.Max(decodedMeanFreePath.x, Mathf.Max(decodedMeanFreePath.y, decodedMeanFreePath.z)));
+            var encodedWorldUnitScale = profile.WorldUnitScale * SubsurfaceProfileParamWorldUnitEncodeScale;
+            var decodedWorldUnitScale = profileParamLutEnabled
+                ? encodedWorldUnitScale / SubsurfaceProfileParamWorldUnitEncodeScale
+                : profile.TintVector.w * 10f;
+            var samplingSearchLightScale = GetSubsurfaceSearchLightScale(samplingAlbedo);
+            var lDivS = Mathf.Max(decodedSamplingMeanFreePath / Mathf.Max(samplingSearchLightScale, 0.0001f), 0.0001f);
+
+            builder.Append(" P").Append(profileIndex).Append("[");
+            builder.Append("Name=").Append(profile.ProfileName);
+            builder.Append(" SurfaceAlbedo=").Append(FormatVector3(surfaceAlbedo.x, surfaceAlbedo.y, surfaceAlbedo.z));
+            builder.Append(" DiffuseMFPmm=").Append(FormatVector3(decodedMeanFreePath.x, decodedMeanFreePath.y, decodedMeanFreePath.z));
+            builder.Append(" EncodedMFP=").Append(FormatVector4(new Vector4(encodedMeanFreePath.x, encodedMeanFreePath.y, encodedMeanFreePath.z, encodedDominant)));
+            builder.Append(" SamplingAlbedo=").Append(FormatFloat(samplingAlbedo));
+            builder.Append(" SamplingMFPmm=").Append(FormatFloat(decodedSamplingMeanFreePath));
+            builder.Append(" WorldUnitScale=").Append(FormatFloat(decodedWorldUnitScale));
+            builder.Append(" EncodedWorldUnit=").Append(FormatFloat(encodedWorldUnitScale));
+            builder.Append(" SamplingSearchLightScale=").Append(FormatFloat(samplingSearchLightScale));
+            builder.Append(" LDivS=").Append(FormatFloat(lDivS));
+            builder.Append(" Depths=");
+            AppendSubsurfaceDepthDiagnostics(builder, decodedWorldUnitScale, projectionScale, width, height, lDivS);
+            builder.Append("]");
+        }
+
+        private static void AppendSubsurfaceDepthDiagnostics(
+            StringBuilder builder,
+            float worldUnitScale,
+            float projectionScale,
+            int width,
+            int height,
+            float lDivS)
+        {
+            for (var depthIndex = 0; depthIndex < SubsurfaceDiagnosticDepths.Length; depthIndex++)
+            {
+                if (depthIndex > 0)
+                {
+                    builder.Append("|");
+                }
+
+                var depthMeters = Mathf.Max(0.0001f, SubsurfaceDiagnosticDepths[depthIndex]);
+                var scale = CalculateSubsurfaceBurleyScale(depthMeters, worldUnitScale, projectionScale, width, height);
+                var centerSampleRadius = GetSubsurfaceCenterSampleRadius(scale, width, height);
+                var centerSampleCdf = Mathf.Clamp01(GetSubsurfaceBurleyCdf(lDivS, centerSampleRadius));
+                var medianRadius = GetSubsurfaceRadiusRootApprox(lDivS, 0.5f);
+                var p95Radius = GetSubsurfaceRadiusRootApprox(lDivS, 0.95f);
+
+                builder.Append(FormatFloat(depthMeters)).Append("m:");
+                builder.Append("Scale=").Append(FormatVector2(scale));
+                builder.Append(",CenterRadius=").Append(FormatFloat(centerSampleRadius));
+                builder.Append(",CenterCDF=").Append(FormatFloat(centerSampleCdf));
+                builder.Append(",R50=").Append(FormatFloat(medianRadius));
+                builder.Append(",R95=").Append(FormatFloat(p95Radius));
+            }
+        }
+
+        private static Matrix4x4 ResolveSubsurfaceDiagnosticProjection(BurtRenderRequest request)
+        {
+            var camera = request != null ? request.Camera : null;
+            var temporalAA = request != null ? request.TemporalAA : null;
+            if (temporalAA != null && temporalAA.Enabled)
+            {
+                return temporalAA.NonJitteredProjectionMatrix;
+            }
+
+            return camera != null ? camera.projectionMatrix : Matrix4x4.identity;
+        }
+
+        private static Vector2 CalculateSubsurfaceBurleyScale(
+            float centerSceneDepth,
+            float worldUnitScale,
+            float projectionScale,
+            int width,
+            int height)
+        {
+            var depthInMillimeters = Mathf.Max(centerSceneDepth * SubsurfaceMetersToMillimeters, 0.0001f);
+            var scale = Mathf.Max(worldUnitScale, 0.01f) * projectionScale / depthInMillimeters;
+            scale *= SubsurfaceDiagnosticKernelSize;
+            return new Vector2(
+                scale,
+                scale * Mathf.Max(1, width) / Mathf.Max(1, height));
+        }
+
+        private static float GetSubsurfaceCenterSampleRadius(Vector2 burleyScale, int width, int height)
+        {
+            return 0.5f * (
+                (1f / Mathf.Max(1, width)) / Mathf.Max(burleyScale.x, 0.000001f) +
+                (1f / Mathf.Max(1, height)) / Mathf.Max(burleyScale.y, 0.000001f));
+        }
+
+        private static float GetSubsurfaceBurleyCdf(float d, float x)
+        {
+            var safeD = Mathf.Max(d, 0.0001f);
+            return 1f - 0.25f * Mathf.Exp(-x / safeD) - 0.75f * Mathf.Exp(-x / (3f * safeD));
+        }
+
+        private static float GetSubsurfaceRadiusRootApprox(float d, float random)
+        {
+            var safeRandom = Mathf.Clamp(random, 0.0001f, 0.99999f);
+            return Mathf.Max(d * ((2f - 2.6f) * safeRandom - 2f) * Mathf.Log(1f - safeRandom), 0.00001f);
+        }
+
+        private static Vector3 GetSubsurfaceSurfaceAlbedoForLut(BurtSubsurfaceProfileSettings profile)
+        {
+            return ClampVector3(ToVector3(profile.SurfaceAlbedo), 0.009f, 1f);
+        }
+
+        private static Vector3 GetSubsurfaceDiffuseMeanFreePathMillimeters(BurtSubsurfaceProfileSettings profile, Vector3 surfaceAlbedo)
+        {
+            var meanFreePathColor = ClampVector3(ToVector3(profile.MeanFreePathColor), 0.009f, 1f);
+            var meanFreePath = meanFreePathColor * profile.MeanFreePathDistance;
+            var searchLightScale = BurtSubsurfaceLutUtility.GetSearchLightDiffuseScalingFactor(surfaceAlbedo);
+            var perpendicularScale = GetSubsurfacePerpendicularScalingFactor(surfaceAlbedo);
+            var diffuseMeanFreePath = ComponentMultiply(meanFreePath, ComponentDivide(searchLightScale, perpendicularScale));
+            return ClampVector3(diffuseMeanFreePath * (10f / 0.6f), 0f, 500f);
+        }
+
+        private static void ResolveSubsurfaceSamplingComponents(
+            Vector3 surfaceAlbedo,
+            Vector3 diffuseMeanFreePath,
+            out float samplingAlbedo,
+            out float samplingDiffuseMeanFreePath)
+        {
+            var searchLightScale = BurtSubsurfaceLutUtility.GetSearchLightDiffuseScalingFactor(surfaceAlbedo);
+            var perpendicularScale = GetSubsurfacePerpendicularScalingFactor(surfaceAlbedo);
+            var meanFreePath = ComponentMultiply(diffuseMeanFreePath, ComponentDivide(perpendicularScale, searchLightScale));
+            var maxComponent = Mathf.Max(meanFreePath.x, Mathf.Max(meanFreePath.y, meanFreePath.z));
+            if (Mathf.Abs(meanFreePath.x - maxComponent) < float.Epsilon)
+            {
+                samplingAlbedo = surfaceAlbedo.x;
+                samplingDiffuseMeanFreePath = diffuseMeanFreePath.x;
+                return;
+            }
+
+            if (Mathf.Abs(meanFreePath.y - maxComponent) < float.Epsilon)
+            {
+                samplingAlbedo = surfaceAlbedo.y;
+                samplingDiffuseMeanFreePath = diffuseMeanFreePath.y;
+                return;
+            }
+
+            samplingAlbedo = surfaceAlbedo.z;
+            samplingDiffuseMeanFreePath = diffuseMeanFreePath.z;
+        }
+
+        private static Vector3 GetSubsurfacePerpendicularScalingFactor(Vector3 surfaceAlbedo)
+        {
+            var value = AbsVector3(surfaceAlbedo - new Vector3(0.8f, 0.8f, 0.8f));
+            return new Vector3(1.85f, 1.85f, 1.85f) - surfaceAlbedo + 7f * ComponentMultiply(ComponentMultiply(value, value), value);
+        }
+
+        private static float GetSubsurfaceSearchLightScale(float surfaceAlbedo)
+        {
+            var value = surfaceAlbedo - 0.33f;
+            return 3.5f + 100f * value * value * value * value;
+        }
+
+        private static Vector3 ToVector3(Color value)
+        {
+            return new Vector3(value.r, value.g, value.b);
+        }
+
+        private static Vector3 AbsVector3(Vector3 value)
+        {
+            return new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
+        }
+
+        private static Vector3 ClampVector3(Vector3 value, float minimum, float maximum)
+        {
+            return new Vector3(
+                Mathf.Clamp(value.x, minimum, maximum),
+                Mathf.Clamp(value.y, minimum, maximum),
+                Mathf.Clamp(value.z, minimum, maximum));
+        }
+
+        private static Vector3 ComponentMultiply(Vector3 lhs, Vector3 rhs)
+        {
+            return new Vector3(lhs.x * rhs.x, lhs.y * rhs.y, lhs.z * rhs.z);
+        }
+
+        private static Vector3 ComponentDivide(Vector3 lhs, Vector3 rhs)
+        {
+            return new Vector3(
+                lhs.x / Mathf.Max(rhs.x, 0.0001f),
+                lhs.y / Mathf.Max(rhs.y, 0.0001f),
+                lhs.z / Mathf.Max(rhs.z, 0.0001f));
+        }
+
         private static string ResolveScreenSpaceSubsurfacePath(bool enabled, bool usesMaskTexture)
         {
             if (!enabled)
@@ -1258,6 +1505,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
         private static string FormatVector3(float x, float y, float z)
         {
             return "(" + FormatFloat(x) + "," + FormatFloat(y) + "," + FormatFloat(z) + ")";
+        }
+
+        private static string FormatVector2(Vector2 value)
+        {
+            return "(" + FormatFloat(value.x) + "," + FormatFloat(value.y) + ")";
         }
 
         private static string FormatFloat(float value)
@@ -1346,6 +1598,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionFinal", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
                 }
 
+                if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset))
+                {
+                    var xgiSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
+                    AppendDescriptorLine(builder, "ScreenSpaceGlobalIlluminationRaw", BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, xgiSettings), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName);
+                    AppendDescriptorLine(builder, "ScreenSpaceGlobalIllumination", BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, xgiSettings), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
+                }
+                else
+                {
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceGlobalIlluminationRaw", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceGlobalIllumination", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
+                }
+
                 if (BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset))
                 {
                     AppendDescriptorLine(builder, "HiZDepth", BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
@@ -1414,6 +1678,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionRaw", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName);
 
                 AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionFinal", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
+
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceGlobalIlluminationRaw", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName);
+
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceGlobalIllumination", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
 
                 AppendSkippedRenderTargetLine(builder, "HiZDepth", resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
 
@@ -1663,6 +1931,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" SSAODebugMode=").Append(BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionDebugModeLabel());
 
+            builder.Append(" XGIRawRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName));
+
+            builder.Append(" XGIFinalRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName));
+
+            builder.Append(" XGIDebugMode=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationDebugModeLabel());
+
             builder.Append(" HiZDepthRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName));
 
             builder.Append(" SSRColorRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName));
@@ -1683,8 +1957,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             if (isDeferred)
             {
                 var ssrSettings = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionSettings(request, asset);
+                var xgiSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
                 var ssrSuppressedByShadingDebug = BurtScreenSpaceReflectionPassUtility.IsScreenSpaceReflectionSuppressedByShadingDebug();
                 var ssrHistory = BurtScreenSpaceReflectionHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
+                var xgiHistory = BurtScreenSpaceGlobalIlluminationHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
                 var shouldUseHiZDepth = BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
                 var screenSpaceSubsurfaceEnabled = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset);
                 var screenSpaceSubsurfaceUsesStencilTexture = screenSpaceSubsurfaceEnabled && BurtScreenSpaceSubsurfacePassUtility.ShouldUseStencilTexture(request);
@@ -1736,6 +2012,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     builder.Append(" SSSBoundaryBleed=").Append(FormatFloat(sssProfile.BoundaryBleed));
                     builder.Append(" SSSTintStrength=").Append(FormatFloat(sssProfile.TintStrength));
                     builder.Append(" SSSMinStrength=").Append(FormatFloat(sssProfile.MinStrength));
+                    builder.Append(" SSSBurleyDiagnostics=").Append(FormatScreenSpaceSubsurfaceBurleyDiagnostics(request, sssProfilePalette));
                 }
                 else
                 {
@@ -1756,6 +2033,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     builder.Append(" SSSBoundaryBleed=<none>");
                     builder.Append(" SSSTintStrength=<none>");
                     builder.Append(" SSSMinStrength=<none>");
+                    builder.Append(" SSSBurleyDiagnostics=<none>");
                 }
                 builder.Append(" SSAOEnabled=").Append(ssaoSettings.Enabled);
                 builder.Append(" SSAODebugRequested=").Append(ssaoDebugRequested);
@@ -1799,6 +2077,43 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSAOFirstValidFrame=").Append(ssaoHistory.FirstValidFrameIndex);
                 builder.Append(" SSAOLastInvalidationFrame=").Append(ssaoHistory.LastInvalidationFrameIndex);
                 builder.Append(" SSAOHistoryReason=").Append(ssaoHistory.LastInvalidationReason);
+                builder.Append(" XGIEnabled=").Append(xgiSettings.Enabled);
+                builder.Append(" XGISuppressedByShadingDebug=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationSuppressedByShadingDebug());
+                builder.Append(" XGIDebugPassRequested=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationDebugView(request, asset));
+                builder.Append(" XGIShaderStatus=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationShaderStatusLabel());
+                builder.Append(" XGITraceMode=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationTraceModeLabel(xgiSettings));
+                builder.Append(" XGIPlacement=AfterDeferredLightingBeforeSSS");
+                builder.Append(" XGIComposite=AddDiffuseGI");
+                builder.Append(" XGIOutputTarget=ScreenSpaceGlobalIllumination");
+                builder.Append(" XGIRawTarget=ScreenSpaceGlobalIlluminationRaw");
+                builder.Append(" XGIQuality=").Append(xgiSettings.Quality);
+                builder.Append(" XGIResolution=").Append(xgiSettings.Resolution);
+                builder.Append(" XGIIntensity=").Append(FormatFloat(xgiSettings.Intensity));
+                builder.Append(" XGIRadius=").Append(FormatFloat(xgiSettings.Radius));
+                builder.Append(" XGISamples=").Append(xgiSettings.SampleCount);
+                builder.Append(" XGIMaxSteps=").Append(xgiSettings.MaxSteps);
+                builder.Append(" XGIThickness=").Append(FormatFloat(xgiSettings.Thickness));
+                builder.Append(" XGISkyFallback=").Append(FormatFloat(xgiSettings.SkyFallback));
+                builder.Append(" XGIRadianceClamp=").Append(FormatFloat(xgiSettings.RadianceClamp));
+                builder.Append(" XGINormalWeight=").Append(FormatFloat(xgiSettings.NormalWeight));
+                builder.Append(" XGIDistanceFade=").Append(FormatFloat(xgiSettings.DistanceFade));
+                builder.Append(" XGIBlur=").Append(xgiSettings.Blur);
+                builder.Append(" XGIBlurSharpness=").Append(FormatFloat(xgiSettings.BlurSharpness));
+                builder.Append(" XGITemporal=").Append(xgiSettings.TemporalAccumulation);
+                builder.Append(" XGITemporalFeedback=").Append(FormatFloat(xgiSettings.TemporalFeedback));
+                builder.Append(" XGITemporalDepthRejection=").Append(FormatFloat(xgiSettings.TemporalDepthRejection));
+                builder.Append(" XGITemporalNormalRejection=").Append(FormatFloat(xgiSettings.TemporalNormalRejection));
+                builder.Append(" XGITemporalClamp=").Append(FormatFloat(xgiSettings.TemporalClamp));
+                builder.Append(" XGIHistoryValid=").Append(xgiHistory.HasHistory);
+                builder.Append(" XGIHistoryAllocated=").Append(xgiHistory.HasHistory || xgiHistory.HasDepthNormalHistory);
+                builder.Append(" XGIHistoryMatches=").Append(xgiHistory.DescriptorMatches);
+                builder.Append(" XGIDepthNormalHistoryAllocated=").Append(xgiHistory.HasDepthNormalHistory);
+                builder.Append(" XGIDepthNormalHistoryMatches=").Append(xgiHistory.DepthNormalDescriptorMatches);
+                builder.Append(" XGIHistoryAge=").Append(xgiHistory.HistoryAge);
+                builder.Append(" XGIFrame=").Append(xgiHistory.FrameIndex);
+                builder.Append(" XGIFirstValidFrame=").Append(xgiHistory.FirstValidFrameIndex);
+                builder.Append(" XGILastInvalidationFrame=").Append(xgiHistory.LastInvalidationFrameIndex);
+                builder.Append(" XGIHistoryReason=").Append(xgiHistory.LastInvalidationReason);
                 builder.Append(" SSREnabled=").Append(ssrSettings.Enabled);
                 builder.Append(" SSRSuppressedByShadingDebug=").Append(ssrSuppressedByShadingDebug);
                 builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());
