@@ -1977,6 +1977,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
             #include "UnityCG.cginc"
             #include "ShaderLibrary/BurtDeferred.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 
             sampler2D _BurtSSRCameraColorCopyTexture;
             sampler2D _BurtScreenSpaceReflectionTemporalColorTexture;
@@ -2411,6 +2412,22 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 return baseSpecularScale;
             }
 
+            float3 BurtSSRComputeCameraIBLSpecularFallback(float2 screenUV)
+            {
+                float rawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (BurtSSRCompositeIsSkyDepth(rawDepth))
+                {
+                    return float3(0.0, 0.0, 0.0);
+                }
+
+                BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
+                BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(gbufferData, viewDirectionWS);
+                BurtIndirectPBRComponents indirectComponents = BurtEvaluatePBRIndirectFromCore(coreData);
+                return max(indirectComponents.specular, float3(0.0, 0.0, 0.0));
+            }
+
             float4 FragComposite(Varyings input) : SV_Target
             {
                 float2 screenUV = input.screenUV;
@@ -2446,6 +2463,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 float resolvedVisibility = BurtSSRResolveCompositeAlpha(screenUV, centerAlpha);
                 float3 materialSpecularScale = BurtSSRComputeMaterialSpecularScale(screenUV);
                 float3 resolvedColor = BurtSSRResolveCompositeColor(screenUV, ssrColor, resolvedVisibility) * materialSpecularScale;
+                float3 fallbackSpecular = BurtSSRComputeCameraIBLSpecularFallback(screenUV);
                 float fallbackAlphaScale = BurtSSRComputeCompositeFallbackAlphaScale(screenUV, resolvedVisibility, centerAlpha, materialWeight);
                 float resolvedAlpha = saturate(resolvedVisibility * materialWeight * fallbackAlphaScale);
 
@@ -2471,7 +2489,8 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 float4 sourceColor = tex2D(_BurtSSRCameraColorCopyTexture, screenUV);
-                return float4(lerp(sourceColor.rgb, resolvedColor, resolvedAlpha), sourceColor.a);
+                float3 finalColor = sourceColor.rgb + (resolvedColor - fallbackSpecular) * resolvedAlpha;
+                return float4(max(finalColor, float3(0.0, 0.0, 0.0)), sourceColor.a);
             }
             ENDHLSL
         }

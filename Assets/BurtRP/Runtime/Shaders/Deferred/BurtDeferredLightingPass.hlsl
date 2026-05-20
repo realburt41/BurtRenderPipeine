@@ -176,8 +176,9 @@ float4 Frag(Varyings input) : SV_Target
 
     BurtPBRMaterialData debugGBufferMaterialData = BurtPreparePBRMaterialData(gbufferData);
 
+    float3 deferredAONormalWS = BurtGetGBufferDirectionWS(gbufferData);
     BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(BurtGetGBufferDirectionWS(gbufferData));
-    debugData.normalWS = BurtGetGBufferDirectionWS(gbufferData);
+    debugData.normalWS = deferredAONormalWS;
     debugData.detailLightingColor = pbrComponents.lighting;
     debugData.directDiffuseColor = pbrComponents.directDiffuse;
     debugData.directSpecularColor = pbrComponents.directSpecular;

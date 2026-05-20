@@ -560,7 +560,7 @@ namespace Burt.RenderPipeline
             Shader.SetGlobalVectorArray(ProfileTransmissionTintsId, ProfileTransmissionTints);
 
             var profileParamLut = BurtSubsurfaceLutUtility.GetOrCreateProfileParamLut(palette);
-            Shader.SetGlobalTexture(ProfileParamLutId, profileParamLut);
+            Shader.SetGlobalTexture(ProfileParamLutId, profileParamLut != null ? profileParamLut : BurtSubsurfaceLutUtility.GetFallbackProfileParamLut());
             Shader.SetGlobalFloat(ProfileParamLutEnabledId, profileParamLut != null ? 1f : 0f);
             Shader.SetGlobalVector(ProfileParamLutSizeId, BurtSubsurfaceLutUtility.ProfileParamLutSizeVector);
         }

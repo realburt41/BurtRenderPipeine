@@ -16,6 +16,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         private static readonly ShaderTagId BurtDepthOnly = new ShaderTagId("BurtDepthOnly"); // 定义 BurtRP Depth Prepass 使用的深度专用 LightMode 名称。
 
         private static readonly ShaderTagId BurtGBuffer = new ShaderTagId("BurtGBuffer"); // 定义 Deferred GBuffer 绘制使用的 LightMode 名称，shader 侧需要提供同名 Pass。
+        private static readonly ShaderTagId BurtSubsurfaceForward = new ShaderTagId("BurtSubsurfaceForward");
 
         private static readonly PerObjectData ForwardPerObjectData = // 定义前向颜色绘制需要 Unity 为每个 Renderer 绑定的内置间接光数据。
             PerObjectData.ReflectionProbes | // 请求 Unity 绑定 unity_SpecCube0 / unity_SpecCube0_HDR，让 Reflection Probe 间接高光能生效。
@@ -193,6 +194,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             drawingSettings.perObjectData = PerObjectData.None; // GBuffer 只负责写材质属性，不再请求 SH/ReflectionProbe，避免 Deferred 间接光继续依赖 DrawRenderers 的 per-object 副作用。
 
             return drawingSettings; // 返回配置好的 GBuffer 绘制设置，供 Draw GBuffer Opaque Pass 使用。
+        }
+
+        public static DrawingSettings CreateSubsurfaceForwardDrawingSettings(SortingSettings sortingSettings)
+        {
+            var drawingSettings = new DrawingSettings(BurtSubsurfaceForward, sortingSettings);
+            drawingSettings.perObjectData = PerObjectData.None;
+            return drawingSettings;
         }
     }
 

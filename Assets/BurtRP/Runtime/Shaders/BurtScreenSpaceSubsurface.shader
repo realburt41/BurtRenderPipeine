@@ -13,12 +13,16 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         sampler2D _BurtSSSSourceTexture;
         sampler2D _BurtSSSOriginalTexture;
         sampler2D _BurtSSSSetupTexture;
+        sampler2D _BurtSSSProfileIDAndTypeTexture;
+        sampler2D _BurtSSSMaskTexture;
         sampler2D _BurtSSSTileTexture;
         sampler2D _BurtSSSBlurTexture;
         sampler2D _BurtSSSCombineTexture;
+        sampler2D _BurtSSSHistoryDebugTexture;
         float4 _BurtSSSScreenSize;
         float4 _BurtSSSTileSize;
         float _BurtSSSDebugMode;
+        float4 _BurtSSSHistoryDebugParams; // x=valid, y=age, z=max samples, w=variance target.
         float4 _BurtSSSParams; // x=radiusPx, y=depthSigma, z=normalSigma, w=minStrength
         float4 _BurtSSSParams2; // x=blend, y=distanceScale, z=boundaryBleed, w=tintStrength
         float4 _BurtSSSSurfaceAlbedo; // rgb=profile surface albedo
@@ -35,7 +39,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         float4 _BurtSSSProfileTransmissions[8];
         float4 _BurtSSSProfileTransmissionTints[8];
         static const float3 BURT_5S_KERNEL_CENTER = float3(0.204f, 0.236f, 0.290f);
-        static const float3 BURT_LUMINANCE_WEIGHTS = float3(0.2126f, 0.7152f, 0.0722f);
+        static const float3 BURT_LUMINANCE_WEIGHTS = float3(0.3f, 0.59f, 0.11f);
         static const float BURT_SSS_EXTINCTION_DECODE_SCALE = 100.0f;
         static const float BURT_SSS_PROFILE_PARAM_SURFACE_ALBEDO_OFFSET = 0.0f;
         static const float BURT_SSS_PROFILE_PARAM_MEAN_FREE_PATH_OFFSET = 1.0f;
@@ -48,6 +52,9 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         static const float BURT_SSS_PROFILE_PARAM_KERNEL1_SIZE = 9.0f;
         static const float BURT_SSS_PROFILE_PARAM_KERNEL2_OFFSET = 60.0f;
         static const float BURT_SSS_PROFILE_PARAM_KERNEL2_SIZE = 6.0f;
+        static const uint BURT_SSS_PROFILE_TYPE_BURLEY = 0x40u;
+        static const uint BURT_SSS_PROFILE_TYPE_MASK = 0xC0u;
+        static const uint BURT_SSS_PROFILE_ID_MASK = 0x3Fu;
 
         struct Attributes
         {
@@ -85,6 +92,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             float3 normalWS;
             float3 tint;
             float profileIndex;
+            uint profileType;
             float rawDepth;
             float linearEyeDepth;
         };
@@ -104,6 +112,18 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         int BurtSSSResolveProfileIndex(float profileIndex)
         {
             return _BurtSSSProfileCount > 0.5f ? clamp((int)floor(profileIndex + 0.5f), 0, 7) : 0;
+        }
+
+        void BurtSSSDecodeProfileIDAndType(float encodedData, out uint profileIndex, out uint type)
+        {
+            uint encoded = (uint)floor(saturate(encodedData) * 255.0f + 0.5f);
+            profileIndex = encoded & BURT_SSS_PROFILE_ID_MASK;
+            type = encoded & BURT_SSS_PROFILE_TYPE_MASK;
+        }
+
+        float BurtSSSLoadProfileIDAndType(float2 uv)
+        {
+            return tex2D(_BurtSSSProfileIDAndTypeTexture, uv).r;
         }
 
         bool BurtSSSUseProfileParamLut()
@@ -179,7 +199,21 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             surface.tint = BurtGetSubsurfaceTint(data);
             surface.profileIndex = BurtGetSubsurfaceProfileIndex(data);
             BurtSSSProfile profile = BurtSSSLoadProfile(surface.profileIndex);
-            surface.valid = BurtIsSubsurfaceShadingModel(data.shadingModelID) && !BurtSSSIsSkyDepth(surface.rawDepth) && surface.strength > profile.params.w ? 1.0f : 0.0f;
+            bool gbufferValid = BurtIsSubsurfaceShadingModel(data.shadingModelID) && !BurtSSSIsSkyDepth(surface.rawDepth) && surface.strength > profile.params.w;
+            uint profileIDFromTexture;
+            uint profileTypeFromTexture;
+            BurtSSSDecodeProfileIDAndType(BurtSSSLoadProfileIDAndType(uv), profileIDFromTexture, profileTypeFromTexture);
+            if ((profileTypeFromTexture & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u)
+            {
+                surface.profileIndex = (float)clamp((int)profileIDFromTexture, 0, 7);
+                surface.profileType = profileTypeFromTexture;
+                surface.valid = gbufferValid ? 1.0f : 0.0f;
+            }
+            else
+            {
+                surface.profileType = gbufferValid ? BURT_SSS_PROFILE_TYPE_BURLEY : 0u;
+                surface.valid = gbufferValid ? 1.0f : 0.0f;
+            }
             return surface;
         }
 
@@ -204,7 +238,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         float2 BurtSSSGetTileUV(float2 uv)
         {
             float2 tileSize = max(_BurtSSSTileSize.xy, float2(1.0f, 1.0f));
-            float2 tileCoord = floor(saturate(uv) * _BurtSSSScreenSize.xy / 16.0f);
+            float2 tileCoord = floor(saturate(uv) * _BurtSSSScreenSize.xy / 8.0f);
             return (clamp(tileCoord, float2(0.0f, 0.0f), tileSize - 1.0f) + 0.5f) * _BurtSSSTileSize.zw;
         }
 
@@ -548,14 +582,26 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             return float4(mask, mask, mask, 1.0f);
         }
 
+        float4 FragMask(Varyings input) : SV_Target
+        {
+            return float4(1.0f, 1.0f, 1.0f, 1.0f);
+        }
+
         float4 FragCombine(Varyings input) : SV_Target
         {
             float4 originalLit = tex2D(_BurtSSSOriginalTexture, input.screenUV);
-            float4 blurredLit = tex2D(_BurtCameraColorTexture, input.screenUV);
+            float3 subsurfaceDiffuse = tex2D(_BurtCameraColorTexture, input.screenUV).rgb;
             float setupMask = BurtSSSLoadSetup(input.screenUV).r;
             float tileMask = BurtSSSLoadTileMask(input.screenUV);
             float mixWeight = saturate(setupMask * tileMask);
-            return float4(lerp(originalLit.rgb, blurredLit.rgb, mixWeight), 1.0f);
+            float3 originalDiffuse = BurtSSSSplitDiffuseLighting(originalLit);
+            float3 specularAndEmission = max(originalLit.rgb - originalDiffuse, float3(0.0f, 0.0f, 0.0f));
+            float profileIndex = BurtSSSLoadSetup(input.screenUV).b * 7.0f;
+            BurtSSSProfile profile = BurtSSSLoadProfile(profileIndex);
+            float3 profileTint = saturate(profile.tint.rgb);
+            float3 subsurfaceLighting = lerp(originalDiffuse, subsurfaceDiffuse, profileTint);
+            float3 finalDiffuse = lerp(originalDiffuse, subsurfaceLighting, mixWeight);
+            return float4(finalDiffuse + specularAndEmission, 1.0f);
         }
 
         float4 FragDebug(Varyings input) : SV_Target
@@ -568,26 +614,32 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
             if (_BurtSSSDebugMode < 2.5f)
             {
-                float tileMask = BurtSSSLoadTileMask(input.screenUV);
-                return float4(tileMask, tileMask, tileMask, 1.0f);
+                float mask = tex2D(_BurtSSSMaskTexture, input.screenUV).r;
+                return float4(mask, mask, mask, 1.0f);
             }
 
             if (_BurtSSSDebugMode < 3.5f)
             {
-                return float4(max(tex2D(_BurtSSSBlurTexture, input.screenUV).rgb, float3(0.0f, 0.0f, 0.0f)), 1.0f);
+                float tileMask = BurtSSSLoadTileMask(input.screenUV);
+                return float4(tileMask, tileMask, tileMask, 1.0f);
             }
 
             if (_BurtSSSDebugMode < 4.5f)
             {
-                return float4(max(tex2D(_BurtSSSCombineTexture, input.screenUV).rgb, float3(0.0f, 0.0f, 0.0f)), 1.0f);
+                return float4(max(tex2D(_BurtSSSBlurTexture, input.screenUV).rgb, float3(0.0f, 0.0f, 0.0f)), 1.0f);
             }
 
             if (_BurtSSSDebugMode < 5.5f)
             {
-                return float4(setup.a, setup.a, setup.a, 1.0f);
+                return float4(max(tex2D(_BurtSSSCombineTexture, input.screenUV).rgb, float3(0.0f, 0.0f, 0.0f)), 1.0f);
             }
 
             if (_BurtSSSDebugMode < 6.5f)
+            {
+                return float4(setup.a, setup.a, setup.a, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode < 7.5f)
             {
                 float profileIndex = saturate(setup.b);
                 return float4(profileIndex, profileIndex, profileIndex, 1.0f);
@@ -598,24 +650,44 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             float4 originalLit = tex2D(_BurtSSSOriginalTexture, input.screenUV);
             float3 diffuse = BurtSSSSplitDiffuseLighting(originalLit);
 
-            if (_BurtSSSDebugMode < 7.5f)
+            if (_BurtSSSDebugMode < 8.5f)
             {
                 float3 transmission = max(profile.transmissionTint.rgb, float3(0.0f, 0.0f, 0.0f)) * saturate(profile.transmission.y) * saturate(center.thickness);
                 return float4(transmission * setup.r, 1.0f);
             }
 
-            if (_BurtSSSDebugMode < 8.5f)
+            if (_BurtSSSDebugMode < 9.5f)
             {
                 return float4(diffuse, 1.0f);
             }
 
-            if (_BurtSSSDebugMode < 9.5f)
+            if (_BurtSSSDebugMode < 10.5f)
             {
                 return float4(max(originalLit.rgb - diffuse, float3(0.0f, 0.0f, 0.0f)), 1.0f);
             }
 
             float stability = BurtSSSSurfaceStability(center, profile, input.screenUV);
-            return float4(stability, stability, stability, 1.0f);
+            if (_BurtSSSDebugMode < 11.5f)
+            {
+                return float4(stability, stability, stability, 1.0f);
+            }
+
+            float4 history = tex2D(_BurtSSSHistoryDebugTexture, input.screenUV);
+            float historyValid = saturate(_BurtSSSHistoryDebugParams.x);
+            if (_BurtSSSDebugMode < 12.5f)
+            {
+                float sampleRatio = saturate(history.r) * historyValid;
+                return float4(sampleRatio, sampleRatio, sampleRatio, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode < 13.5f)
+            {
+                float variance = saturate(history.b / max(_BurtSSSHistoryDebugParams.w * 32.0f, 0.000001f)) * historyValid;
+                return float4(variance, variance, variance, 1.0f);
+            }
+
+            float historyAge = saturate(_BurtSSSHistoryDebugParams.y / 64.0f) * historyValid;
+            return float4(historyValid, historyAge, saturate(history.a * 16.0f), 1.0f);
         }
         ENDHLSL
 
@@ -742,6 +814,26 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment FragDebug
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Screen Space Subsurface Mask"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+            Stencil
+            {
+                Ref 3
+                ReadMask 3
+                Comp Equal
+                Pass Keep
+            }
+
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment FragMask
             ENDHLSL
         }
     }

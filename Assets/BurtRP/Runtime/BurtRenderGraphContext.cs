@@ -233,6 +233,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceBaseColorTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBaseColorName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceBaseColor();
+            }
+        }
+
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceEmissionTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceEmissionName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceEmission();
+            }
+        }
+
         public BurtRenderTargetHandle ScreenSpaceSubsurfaceSetupTarget
         {
             get
@@ -246,6 +272,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceProfileIDAndTypeTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceProfileIDAndTypeName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceProfileIDAndType();
+            }
+        }
+
         public BurtRenderTargetHandle ScreenSpaceSubsurfaceTileTarget
         {
             get
@@ -256,6 +295,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetScreenSpaceSubsurfaceTile();
+            }
+        }
+
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceMaskTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceMask();
             }
         }
 
@@ -298,6 +350,45 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceHistoryTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceHistory();
+            }
+        }
+
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceVelocityTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceVelocity();
+            }
+        }
+
+        public BurtRenderTargetHandle ScreenSpaceSubsurfaceDilatedVelocityTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceDilatedVelocityName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceSubsurfaceDilatedVelocity();
+            }
+        }
+
         public BurtRenderBufferHandle GetBuffer(string name)
         {
             if (ResourceRegistry == null)
@@ -334,6 +425,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
         public BurtRenderBufferHandle ClusterLightListBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName);
 
         public BurtRenderBufferHandle ClusterLightOffsetBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName);
+
+        public BurtRenderBufferHandle ScreenSpaceSubsurfaceBurleyArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName);
+
+        public BurtRenderBufferHandle ScreenSpaceSubsurfaceBurleyGroupBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName);
 
         public BurtRequestRenderOptions RenderOptions { get; } // 保存当前 request 的栈级执行选项，Pass 可以通过它判断 RT 生命周期策略。
 

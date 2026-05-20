@@ -201,6 +201,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSAO Diagnostic Compare";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
                     return "5S Setup";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
+                    return "5S Mask";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceTileMask:
                     return "5S Tile Mask";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:
@@ -219,6 +221,12 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "5S Specular";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceStability:
                     return "5S Stability";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount:
+                    return "5S Sample Count";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceVariance:
+                    return "5S Variance";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory:
+                    return "5S History";
                 case BurtShadingDebugMode.BloomPrefilter:
                     return "Bloom Prefilter";
                 case BurtShadingDebugMode.BloomFinalBloom:
@@ -684,6 +692,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public static readonly BurtShadingDebugGroup ScreenSpaceSubsurface = new BurtShadingDebugGroup("Screen Space Subsurface", "5S", new[]
         {
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceMask,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceTileMask,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine,
@@ -692,7 +701,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceStability
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceStability,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceVariance,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory
         });
 
         public static readonly BurtShadingDebugGroup Bloom = new BurtShadingDebugGroup("Bloom", "Bloom", new[] // Bloom 后处理调试。

@@ -208,6 +208,28 @@ Shader "BurtRP/Subsurface"
             ENDHLSL
         }
 
+        Pass
+        {
+            Name "Burt Subsurface Forward"
+            Tags { "LightMode" = "BurtSubsurfaceForward" }
+
+            ZWrite Off
+            ZTest Equal
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertGBuffer
+            #pragma fragment FragSubsurfaceForward
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma target 3.5
+
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+
+            #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
+            ENDHLSL
+        }
+
         // Defines the forward color pass used by Burt Draw Opaque and Burt Draw Transparent.
         Pass
         {

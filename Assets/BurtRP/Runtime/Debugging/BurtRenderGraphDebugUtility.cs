@@ -304,7 +304,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" SSRShaderStatus=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderStatusLabel());
 
             builder.Append(" SSRTraceMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionTraceModeLabel(request, asset));
-            builder.Append(" SSRComposite=ManualCameraColorLerp");
+            builder.Append(" SSRComposite=SpecularReplaceCameraIBL");
             builder.Append(" SSRFallback=CameraIBLPreserved");
             builder.Append(" SSRApply=XRenderPureReflectMip0Alpha");
             builder.Append(" SSRClearCoat=DualLayerTrace");
@@ -1210,6 +1210,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             return builder.ToString();
         }
 
+        private static string ResolveScreenSpaceSubsurfacePath(bool enabled, bool usesMaskTexture)
+        {
+            if (!enabled)
+            {
+                return "Disabled";
+            }
+
+            return usesMaskTexture
+                ? "CopySourceBuildVelocityBuildMaskSetupTilesBurleyCombine"
+                : "CopySourceBuildVelocitySetupTilesBurleyCombineStencil";
+        }
+
         private static string FormatAdditionalLightShadowFirstSliceMatrixHash(BurtLightingData lightingData, Vector4 lightParams)
         {
             if (lightingData == null)
@@ -1355,6 +1367,41 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionDenoisedColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName);
                     AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionTemporalColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
                 }
+
+                if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset))
+                {
+                    AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceSource", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName);
+                    AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceSetup", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceSetupDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
+                    AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceProfileIDAndType", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceProfileIDAndTypeDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceProfileIDAndTypeName);
+                    if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(request, asset))
+                    {
+                        AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceMask", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceMaskDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
+                    }
+                    else
+                    {
+                        AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceMask", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
+                    }
+
+                    AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceTile", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceTileDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName);
+                    AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceTemp", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName);
+                    AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceBlur", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName);
+                    AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceCombine", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceCombineDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName);
+                    AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceVelocity", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceVelocityDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName);
+                    AppendDescriptorLine(builder, "ScreenSpaceSubsurfaceDilatedVelocity", BurtRenderTargetDescriptorUtility.CreateScreenSpaceSubsurfaceVelocityDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceDilatedVelocityName);
+                }
+                else
+                {
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceSource", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceSetup", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceProfileIDAndType", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceProfileIDAndTypeName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceMask", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceTile", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceTemp", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceBlur", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceCombine", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceVelocity", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName);
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceDilatedVelocity", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceDilatedVelocityName);
+                }
             }
             else // Forward 模式不注册 GBuffer。
             {
@@ -1375,6 +1422,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionDenoisedColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName);
 
                 AppendSkippedRenderTargetLine(builder, "ScreenSpaceReflectionTemporalColor", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
+
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceSource", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName);
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceSetup", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceProfileIDAndType", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceProfileIDAndTypeName);
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceMask", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceTile", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName);
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceTemp", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName);
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceBlur", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName);
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceCombine", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName);
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceVelocity", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName);
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceSubsurfaceDilatedVelocity", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceDilatedVelocityName);
             }
 
             builder.Append("  FinalCameraTarget Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.FinalCameraTargetName)); // 写入最终输出目标是否已注册。
@@ -1615,6 +1673,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" SSSSourceRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName));
             builder.Append(" SSSSetupRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName));
+            builder.Append(" SSSProfileIDAndTypeRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceProfileIDAndTypeName));
+            builder.Append(" SSSMaskRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName));
             builder.Append(" SSSTileRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName));
             builder.Append(" SSSTempRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName));
             builder.Append(" SSSBlurRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName));
@@ -1627,6 +1687,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 var ssrHistory = BurtScreenSpaceReflectionHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
                 var shouldUseHiZDepth = BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
                 var screenSpaceSubsurfaceEnabled = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset);
+                var screenSpaceSubsurfaceUsesStencilTexture = screenSpaceSubsurfaceEnabled && BurtScreenSpaceSubsurfacePassUtility.ShouldUseStencilTexture(request);
+                var screenSpaceSubsurfaceUsesMaskTexture = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(request, asset);
                 builder.Append(" HiZNeeded=").Append(shouldUseHiZDepth);
 
                 if (shouldUseHiZDepth)
@@ -1640,8 +1702,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" HiZDebugMip=").Append(asset != null ? asset.HiZDebugMip.ToString() : "<none>");
                 builder.Append(" SSSEnabled=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSPassExpected=").Append(screenSpaceSubsurfaceEnabled);
-                builder.Append(" SSSPath=").Append(screenSpaceSubsurfaceEnabled ? "SetupTileSeparableCombine" : "Disabled");
-                builder.Append(" SSSKernel=ProfileLut66Separable25TapBurleyApprox");
+                builder.Append(" SSSPath=").Append(ResolveScreenSpaceSubsurfacePath(screenSpaceSubsurfaceEnabled, screenSpaceSubsurfaceUsesMaskTexture));
+                builder.Append(" SSSKernel=").Append(screenSpaceSubsurfaceEnabled ? "ProfileLut66TiledIndirectBurleyAdaptiveHistory" : "Disabled");
                 builder.Append(" SSSProfileLut=").Append(screenSpaceSubsurfaceEnabled ? "Enabled" : "Disabled");
                 builder.Append(" SSSSetupPassExpected=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSTilePassExpected=").Append(screenSpaceSubsurfaceEnabled);
@@ -1651,6 +1713,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSSDiffuseSpecularSplit=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSDiffuseLuminanceSource=").Append(screenSpaceSubsurfaceEnabled ? "DeferredSubsurfaceAlpha" : "Disabled");
                 builder.Append(" SSSStencilGated=").Append(screenSpaceSubsurfaceEnabled);
+                builder.Append(" SSSStencilTexture=").Append(screenSpaceSubsurfaceUsesStencilTexture);
+                builder.Append(" SSSMaskFallback=").Append(screenSpaceSubsurfaceUsesMaskTexture);
                 if (asset != null)
                 {
                     var sssProfile = asset.ScreenSpaceSubsurfaceProfileSettings;
@@ -1740,7 +1804,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());
                 builder.Append(" SSRShaderStatus=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderStatusLabel());
                 builder.Append(" SSRTraceMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionTraceModeLabel(request, asset));
-                builder.Append(" SSRComposite=ManualCameraColorLerp");
+                builder.Append(" SSRComposite=SpecularReplaceCameraIBL");
                 builder.Append(" SSRFallback=CameraIBLPreserved");
                 builder.Append(" SSRApply=XRenderPureReflectMip0Alpha");
                 builder.Append(" SSRClearCoat=DualLayerTrace");

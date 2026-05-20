@@ -40,6 +40,12 @@ struct GBufferFragmentOutput
     float4 gbuffer4 : SV_Target4;
 };
 
+struct SubsurfaceForwardFragmentOutput
+{
+    float4 gbuffer0 : SV_Target0;
+    float4 gbuffer2 : SV_Target1;
+};
+
 GBufferVaryings VertGBuffer(GBufferAttributes input)
 {
     GBufferVaryings output;
@@ -86,6 +92,21 @@ GBufferFragmentOutput FragGBuffer(GBufferVaryings input, fixed facing : VFACE)
     BurtGBufferData gbufferData = BurtCreateMaterialGBufferData(input, facing, surfaceData, emissionColor);
 
     return BurtPackGBufferOutput(BurtEncodeGBuffer(gbufferData));
+}
+
+SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings input, fixed facing : VFACE)
+{
+    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
+    BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
+
+    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
+    float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
+
+    SubsurfaceForwardFragmentOutput output;
+    output.gbuffer0 = float4(saturate(surfaceData.baseColor.rgb), saturate(surfaceData.occlusion));
+    output.gbuffer2 = float4(max(emissionColor, float3(0.0f, 0.0f, 0.0f)), saturate(surfaceData.reflectance));
+    return output;
 }
 
 #endif // BURT_GBUFFER_PASS_INCLUDED

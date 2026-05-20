@@ -104,11 +104,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 if (ShouldRegisterScreenSpaceSubsurface(request, asset))
                 {
                     resources.RegisterScreenSpaceSubsurfaceSourceTexture();
+                    resources.RegisterScreenSpaceSubsurfaceBaseColorTexture();
+                    resources.RegisterScreenSpaceSubsurfaceEmissionTexture();
                     resources.RegisterScreenSpaceSubsurfaceSetupTexture();
+                    resources.RegisterScreenSpaceSubsurfaceProfileIDAndTypeTexture();
+                    if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(request, asset))
+                    {
+                        resources.RegisterScreenSpaceSubsurfaceMaskTexture();
+                    }
+
                     resources.RegisterScreenSpaceSubsurfaceTileTexture();
                     resources.RegisterScreenSpaceSubsurfaceTempTexture();
                     resources.RegisterScreenSpaceSubsurfaceBlurTexture();
                     resources.RegisterScreenSpaceSubsurfaceCombineTexture();
+                    resources.RegisterScreenSpaceSubsurfaceHistoryTexture();
+                    resources.RegisterScreenSpaceSubsurfaceVelocityTexture();
+                    resources.RegisterScreenSpaceSubsurfaceDilatedVelocityTexture();
+                    resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateBurleyArgsBufferDescriptor());
+                    resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateBurleyGroupBufferDescriptor(request.Camera));
                 }
             }
 

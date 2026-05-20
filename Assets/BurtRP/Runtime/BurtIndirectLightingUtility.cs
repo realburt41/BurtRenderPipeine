@@ -254,6 +254,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             builder.Append(" DiffuseSHValidation=").Append(snapshot.ImageBasedFilter.DiffuseSHTexture != null ? BurtImageBasedFilterUtility.DiffuseSHValidationStatus : "Unavailable");
             builder.Append(" IBLNumericValidation=").Append(BurtImageBasedFilterUtility.NumericValidationStatus);
             builder.Append(" IndirectSpecularSource=").Append(snapshot.SkyReflection.Source);
+            builder.Append(" IndirectSpecularTexture=").Append(FormatTextureName(snapshot.ImageBasedFilter.SpecularTexture));
             builder.Append(" LowerHemisphere=").Append(snapshot.LowerHemisphere.Source);
             builder.Append(" LowerDiffuse=").Append(FormatColor(snapshot.LowerHemisphere.DiffuseColor));
             builder.Append(" LowerSpecular=").Append(FormatColor(snapshot.LowerHemisphere.SpecularColor));

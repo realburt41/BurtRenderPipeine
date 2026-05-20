@@ -2153,7 +2153,7 @@ namespace Burt.RenderPipeline
                 return "StableMip0+HiZStepSavedDebug";
             }
 
-            return (hiZTrace ? "HiZExperimentalGuarded" : "StableMip0") + "+XRenderManualCameraIBLFallback+PureReflectMipApply+DualLayerClearCoat";
+            return (hiZTrace ? "HiZExperimentalGuarded" : "StableMip0") + "+XRenderSpecularReplaceCameraIBL+PureReflectMipApply+DualLayerClearCoat";
         }
 
         public static bool IsScreenSpaceReflectionSuppressedByShadingDebug()

@@ -189,6 +189,10 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceSubsurfaceDiffuse = 415, // 5S debug: diffuse lighting source used by the blur.
         ScreenSpaceSubsurfaceSpecular = 416, // 5S debug: non-diffuse source preserved by the combine.
         ScreenSpaceSubsurfaceStability = 417, // 5S debug: depth/normal stability gate used by the blur.
+        ScreenSpaceSubsurfaceSampleCount = 418, // 5S debug: adaptive Burley sample count stored in history.
+        ScreenSpaceSubsurfaceVariance = 419, // 5S debug: history variance used to choose adaptive samples.
+        ScreenSpaceSubsurfaceHistory = 420, // 5S debug: history validity, age, and residual summary.
+        ScreenSpaceSubsurfaceMask = 421, // 5S debug: full-resolution stencil-derived surface mask.
         FogAmount = 394, // Fog debug: final screen-space fog opacity.
         FogTransmittance = 395, // Fog debug: screen-space fog transmittance after height and distance gates.
         FogHeight = 396, // Fog debug: reconstructed world height relative to the fog height plane.

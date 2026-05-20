@@ -13,6 +13,7 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
             float4 _BurtIBLFilterSourceHDR;
             float4 _BurtIBLFilterParams; // x roughness, y source max mip, z sample count, w source width.
             float4 _BurtIBLFilterFaceMip; // x face index, y mip, z mip size, w output max mip.
+            float4x4 _BurtIBLFilterPixelCoordToViewDirWS;
             float4 _BurtIBLFilterBakeRotation; // xy = cos/sin around world up.
             float4 _BurtIBLFilterBakeTintIntensity; // rgb = tint, a = intensity.
             float4 _BurtIBLFilterBakeLowerHemisphere; // rgb = solid color, a = blend.
@@ -56,6 +57,12 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
                 if (face < 3.5f) return BurtSafeNormalize(float3(st.x, -1.0f, -st.y));
                 if (face < 4.5f) return BurtSafeNormalize(float3(st.x, -st.y, 1.0f));
                 return BurtSafeNormalize(float3(-st.x, -st.y, -1.0f));
+            }
+
+            float3 BurtIBLPixelCoordToXRenderDirection(float2 pixelCoord)
+            {
+                float3 viewDirWS = normalize(mul(float3(pixelCoord, 1.0f), (float3x3)_BurtIBLFilterPixelCoordToViewDirWS));
+                return -viewDirWS;
             }
 
             float2 BurtIBLClampFaceUV(float2 uv, float faceSize)
@@ -253,8 +260,7 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
 
             float4 FragSpecular(Varyings input) : SV_Target
             {
-                float2 faceUV = BurtIBLClampFaceUV(input.uv, _BurtIBLFilterFaceMip.z);
-                float3 normalWS = BurtIBLFaceUVToDirection(_BurtIBLFilterFaceMip.x, faceUV);
+                float3 normalWS = BurtIBLPixelCoordToXRenderDirection(input.positionCS.xy);
                 float3 viewWS = normalWS;
                 float perceptualRoughness = max(_BurtIBLFilterParams.x, 0.0f);
                 float linearRoughness = max(perceptualRoughness * perceptualRoughness, 0.0001f);
@@ -314,8 +320,7 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
 
             float4 FragDiffuse(Varyings input) : SV_Target
             {
-                float2 faceUV = BurtIBLClampFaceUV(input.uv, _BurtIBLFilterFaceMip.z);
-                float3 normalWS = BurtIBLFaceUVToDirection(_BurtIBLFilterFaceMip.x, faceUV);
+                float3 normalWS = BurtIBLPixelCoordToXRenderDirection(input.positionCS.xy);
                 uint sampleCount = (uint)clamp(round(_BurtIBLFilterParams.z), 1.0f, 512.0f);
                 float sourceMaxMip = max(_BurtIBLFilterParams.y, 0.0f);
                 float3 tangentWS;
@@ -349,8 +354,7 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
 
             float4 FragBakeSource(Varyings input) : SV_Target
             {
-                float2 faceUV = BurtIBLClampFaceUV(input.uv, _BurtIBLFilterFaceMip.z);
-                float3 directionWS = BurtIBLFaceUVToDirection(_BurtIBLFilterFaceMip.x, faceUV);
+                float3 directionWS = BurtIBLPixelCoordToXRenderDirection(input.positionCS.xy);
                 float3 sampleDirectionWS = BurtIBLRotateBakeDirection(directionWS);
                 float bakeIntensity = max(_BurtIBLFilterBakeTintIntensity.a, 0.0f);
                 float3 color = BurtIBLSampleSource(sampleDirectionWS, 0.0f) *

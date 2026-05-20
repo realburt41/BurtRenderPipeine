@@ -93,7 +93,7 @@ namespace Burt.RenderPipeline
         private const int CubemapFaceCount = 6;
         private const int BakeSourcePassIndex = 2;
         private const int DiffuseSHPassIndex = 3;
-        private const int FilterVersion = 13;
+        private const int FilterVersion = 14;
 
         public const string DiffuseSHLayout = "UnitySHArAgAbBrBgBbC";
         public const string DiffuseSHParity = "XRenderAmbientConvolveToUnitySH9";
@@ -112,11 +112,32 @@ namespace Burt.RenderPipeline
         private static readonly int SourceHDRId = Shader.PropertyToID("_BurtIBLFilterSourceHDR");
         private static readonly int FilterParamsId = Shader.PropertyToID("_BurtIBLFilterParams");
         private static readonly int FilterFaceMipId = Shader.PropertyToID("_BurtIBLFilterFaceMip");
+        private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_BurtIBLFilterPixelCoordToViewDirWS");
         private static readonly int BakeRotationId = Shader.PropertyToID("_BurtIBLFilterBakeRotation");
         private static readonly int BakeTintIntensityId = Shader.PropertyToID("_BurtIBLFilterBakeTintIntensity");
         private static readonly int BakeLowerHemisphereId = Shader.PropertyToID("_BurtIBLFilterBakeLowerHemisphere");
 
         private static readonly Vector4 DefaultHDRDecodeValues = new Vector4(1f, 1f, 0f, 0f);
+        private static readonly Vector3[] CubemapLookAtList =
+        {
+            new Vector3(1f, 0f, 0f),
+            new Vector3(-1f, 0f, 0f),
+            new Vector3(0f, 1f, 0f),
+            new Vector3(0f, -1f, 0f),
+            new Vector3(0f, 0f, 1f),
+            new Vector3(0f, 0f, -1f)
+        };
+
+        private static readonly Vector3[] CubemapUpVectorList =
+        {
+            new Vector3(0f, 1f, 0f),
+            new Vector3(0f, 1f, 0f),
+            new Vector3(0f, 0f, -1f),
+            new Vector3(0f, 0f, 1f),
+            new Vector3(0f, 1f, 0f),
+            new Vector3(0f, 1f, 0f)
+        };
+
         private static readonly FilterCache Cache = new FilterCache();
         private static Material filterMaterial;
 
@@ -369,6 +390,7 @@ namespace Burt.RenderPipeline
                     cmd.SetViewport(new Rect(0f, 0f, mipSize, mipSize));
                     cmd.SetGlobalVector(FilterParamsId, new Vector4(roughness, specularSourceMaxMip, sampleCount, filterSourceTexture.width));
                     cmd.SetGlobalVector(FilterFaceMipId, new Vector4(face, mip, mipSize, SpecularMaxMip));
+                    cmd.SetGlobalMatrix(PixelCoordToViewDirWSId, GetFacePixelCoordToViewDirMatrix(face, mipSize));
                     cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
                 }
             }
@@ -379,6 +401,7 @@ namespace Burt.RenderPipeline
                 cmd.SetViewport(new Rect(0f, 0f, DiffuseSize, DiffuseSize));
                 cmd.SetGlobalVector(FilterParamsId, new Vector4(1f, diffuseSourceMaxMip, DiffuseSampleCount, filterSourceTexture.width));
                 cmd.SetGlobalVector(FilterFaceMipId, new Vector4(face, 0f, DiffuseSize, 0f));
+                cmd.SetGlobalMatrix(PixelCoordToViewDirWSId, GetFacePixelCoordToViewDirMatrix(face, DiffuseSize));
                 cmd.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1);
             }
 
@@ -408,10 +431,48 @@ namespace Burt.RenderPipeline
                 cmd.SetRenderTarget(new RenderTargetIdentifier(cache.RuntimeSource, 0, (CubemapFace)face));
                 cmd.SetViewport(new Rect(0f, 0f, SpecularSize, SpecularSize));
                 cmd.SetGlobalVector(FilterFaceMipId, new Vector4(face, 0f, SpecularSize, SpecularMaxMip));
+                cmd.SetGlobalMatrix(PixelCoordToViewDirWSId, GetFacePixelCoordToViewDirMatrix(face, SpecularSize));
                 cmd.DrawProcedural(Matrix4x4.identity, material, BakeSourcePassIndex, MeshTopology.Triangles, 3, 1);
             }
 
             cmd.GenerateMips(cache.RuntimeSource);
+        }
+
+        private static Matrix4x4 GetFacePixelCoordToViewDirMatrix(int face, int textureSize)
+        {
+            var safeFace = Mathf.Clamp(face, 0, CubemapFaceCount - 1);
+            var safeTextureSize = Mathf.Max(textureSize, 1);
+            // Matches XRender/HDUtils cubemap bake rays; the shader samples with -ViewDirWS.
+            var lookAt = Matrix4x4.LookAt(Vector3.zero, CubemapLookAtList[safeFace], CubemapUpVectorList[safeFace]);
+            var worldToView = lookAt * Matrix4x4.Scale(new Vector3(1f, 1f, -1f));
+            var screenSize = new Vector4(safeTextureSize, safeTextureSize, 1f / safeTextureSize, 1f / safeTextureSize);
+            return ComputePixelCoordToWorldSpaceViewDirectionMatrix(0.5f * Mathf.PI, Vector2.zero, screenSize, worldToView, true);
+        }
+
+        private static Matrix4x4 ComputePixelCoordToWorldSpaceViewDirectionMatrix(float verticalFoV, Vector2 lensShift, Vector4 screenSize, Matrix4x4 worldToViewMatrix, bool renderToCubemap)
+        {
+            var aspectRatio = screenSize.x * screenSize.w;
+            var tanHalfVertFoV = Mathf.Tan(0.5f * verticalFoV);
+            var m21 = (1f - 2f * lensShift.y) * tanHalfVertFoV;
+            var m11 = -2f * screenSize.w * tanHalfVertFoV;
+            var m20 = (1f - 2f * lensShift.x) * tanHalfVertFoV * aspectRatio;
+            var m00 = -2f * screenSize.z * tanHalfVertFoV * aspectRatio;
+
+            if (renderToCubemap)
+            {
+                m11 = -m11;
+                m21 = -m21;
+            }
+
+            var viewSpaceRasterTransform = new Matrix4x4(
+                new Vector4(m00, 0f, 0f, 0f),
+                new Vector4(0f, m11, 0f, 0f),
+                new Vector4(m20, m21, -1f, 0f),
+                new Vector4(0f, 0f, 0f, 1f));
+
+            worldToViewMatrix.SetColumn(3, new Vector4(0f, 0f, 0f, 1f));
+            worldToViewMatrix.SetRow(2, -worldToViewMatrix.GetRow(2));
+            return Matrix4x4.Transpose(worldToViewMatrix.transpose * viewSpaceRasterTransform);
         }
 
         private static int SpecularSampleCountForMip(int mip)
@@ -437,7 +498,7 @@ namespace Burt.RenderPipeline
         private static string GetFilterStatus(string prefix)
         {
             var shFormat = Cache.DiffuseSHFormat == RenderTextureFormat.Default ? SelectDiffuseSHFormat() : Cache.DiffuseSHFormat;
-            return prefix + "v" + FilterVersion + "+XRenderBakeEnvironment+RuntimeSourceMip0GenerateMips+SourceDirectLOD+SpecularXRenderSmithGGX+SpecMip0Copy+SpecRoughnessUnclamped+FilteredLDDirectRuntime+DiffuseMipFiltered" + DiffuseSampleCount + "NoPi+DiffuseSH9XRender" + DiffuseSHSampleCount + "+DiffuseSHSeamSafe+" + DiffuseSHLayout + "+" + shFormat + "+Numeric:" + GetNumericValidationStatus() + "+SHReadback:" + Cache.GetDiffuseSHValidationStatus();
+            return prefix + "v" + FilterVersion + "+XRenderBakeEnvironment+XRenderFaceMatrixMinusViewDir+RuntimeSourceMip0GenerateMips+SourceDirectLOD+SpecularXRenderSmithGGX+SpecMip0Copy+SpecRoughnessUnclamped+FilteredLDDirectRuntime+DiffuseMipFiltered" + DiffuseSampleCount + "NoPi+DiffuseSH9XRender" + DiffuseSHSampleCount + "+DiffuseSHSeamSafe+" + DiffuseSHLayout + "+" + shFormat + "+Numeric:" + GetNumericValidationStatus() + "+SHReadback:" + Cache.GetDiffuseSHValidationStatus();
         }
 
         private static string GetNumericValidationStatus()
@@ -446,6 +507,7 @@ namespace Burt.RenderPipeline
                 ",SpecSamples=1/21/34/55/89" +
                 ",SpecRoughness=UnclampedXRenderMipInverse" +
                 ",Bake=XRenderBakeEnvironment" +
+                ",Face=XRenderPixelCoordMinusViewDir" +
                 ",DiffuseSamples=" + DiffuseSampleCount +
                 ",SHSamples=" + DiffuseSHSampleCount +
                 ",RuntimeSource=" + SpecularSize +

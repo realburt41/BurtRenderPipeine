@@ -27,8 +27,11 @@ namespace Burt.RenderPipeline
         private const float DiffuseMeanFreePathToMeanFreePathMagicNumber = 0.6f;
         private const float CentimetersToMillimeters = 10f;
         private const float MillimetersToCentimeters = 0.1f;
+        private const float EncodeWorldUnitScaleInCentimetersToUnit = 0.02f;
+        private const float EncodeDiffuseMeanFreePathInMillimetersToUnit = 0.002f;
         private const float MaxDiffuseMeanFreePathInMillimeters = 500f;
-        private const int LutFormulaVersion = 2;
+        private const float SubsurfaceRadiusScale = 1024f;
+        private const int LutFormulaVersion = 3;
         private const int ProfileSlotCount = BurtSubsurfaceProfilePalette.MaxProfiles;
         public const int ProfileParamLutWidth = 66;
         public const int ProfileParamLutHeight = ProfileSlotCount;
@@ -48,32 +51,11 @@ namespace Burt.RenderPipeline
         public const int ProfileParamKernel2Size = 6;
         public const float MaxTransmissionProfileDistance = 10f;
 
-        private static readonly float[] Kernel0Offsets =
-        {
-            0f, 0.22f, 0.46f, 0.78f, 1.16f, 1.60f, 2.12f, 2.74f, 3.48f, 4.36f, 5.42f, 6.68f, 8.16f
-        };
-
-        private static readonly Vector3[] Kernel0Weights =
-        {
-            new Vector3(0.204f, 0.236f, 0.290f),
-            new Vector3(0.150f, 0.165f, 0.168f),
-            new Vector3(0.118f, 0.123f, 0.114f),
-            new Vector3(0.090f, 0.088f, 0.074f),
-            new Vector3(0.066f, 0.058f, 0.043f),
-            new Vector3(0.047f, 0.036f, 0.023f),
-            new Vector3(0.032f, 0.021f, 0.012f),
-            new Vector3(0.021f, 0.012f, 0.006f),
-            new Vector3(0.013f, 0.006f, 0.003f),
-            new Vector3(0.008f, 0.003f, 0.0015f),
-            new Vector3(0.0045f, 0.0015f, 0.0007f),
-            new Vector3(0.0025f, 0.0007f, 0.0003f),
-            new Vector3(0.0015f, 0.0003f, 0.0001f)
-        };
-
         private static Texture2DArray preIntegratedLut;
         private static Texture2DArray fallbackPreIntegratedLut;
         private static int preIntegratedLutHash;
         private static Texture2D profileParamLut;
+        private static Texture2D fallbackProfileParamLut;
         private static int profileParamLutHash;
         private static readonly int[] preIntegratedProfileHashes = new int[ProfileSlotCount];
         private static readonly int[] profileParamRowHashes = new int[ProfileSlotCount];
@@ -154,6 +136,27 @@ namespace Burt.RenderPipeline
         public static Texture2D GetOrCreateProfileParamLut()
         {
             return GetOrCreateProfileParamLut(BurtSubsurfaceProfilePalette.Resolve(BurtSubsurfaceProfileSettings.Default, null));
+        }
+
+        public static Texture2D GetFallbackProfileParamLut()
+        {
+            if (fallbackProfileParamLut != null)
+            {
+                return fallbackProfileParamLut;
+            }
+
+            fallbackProfileParamLut = new Texture2D(1, 1, SelectProfileParamLutFormat(), false, true)
+            {
+                name = "Burt Subsurface Profile Param LUT Fallback",
+                hideFlags = HideFlags.HideAndDontSave,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Point,
+                anisoLevel = 0
+            };
+
+            fallbackProfileParamLut.SetPixel(0, 0, Color.black);
+            fallbackProfileParamLut.Apply(false, true);
+            return fallbackProfileParamLut;
         }
 
         public static Texture2D GetOrCreateProfileParamLut(BurtSubsurfaceProfilePalette palette)
@@ -266,6 +269,13 @@ namespace Burt.RenderPipeline
             var searchLightScale = GetSearchLightDiffuseScalingFactor(surfaceAlbedo);
             var perpendicularScale = GetPerpendicularScalingFactor(surfaceAlbedo);
             return Multiply(meanFreePath, Divide(searchLightScale, perpendicularScale));
+        }
+
+        private static Vector3 GetMeanFreePathFromDiffuseMeanFreePath(Vector3 surfaceAlbedo, Vector3 diffuseMeanFreePath)
+        {
+            var searchLightScale = GetSearchLightDiffuseScalingFactor(surfaceAlbedo);
+            var perpendicularScale = GetPerpendicularScalingFactor(surfaceAlbedo);
+            return Multiply(diffuseMeanFreePath, Divide(perpendicularScale, searchLightScale));
         }
 
         private static void EnsurePreIntegratedLutTexture()
@@ -392,26 +402,70 @@ namespace Burt.RenderPipeline
         {
             var rowOffset = profileIndex * ProfileParamLutWidth;
             var surfaceAlbedo = GetSurfaceAlbedoForLut(settings);
-            var diffuseMeanFreePath = GetEffectiveDiffuseMeanFreePathForLut(settings);
-            var samplingChannel = GetSamplingChannel(diffuseMeanFreePath);
+            var diffuseMeanFreePath = GetDiffuseMeanFreePathInMillimetersForProfileParam(settings, surfaceAlbedo);
+            ResolveProfileSamplingComponents(surfaceAlbedo, diffuseMeanFreePath, out var samplingAlbedo, out var samplingDiffuseMeanFreePath);
 
-            pixels[rowOffset + ProfileParamSurfaceAlbedoOffset] = ToColor(surfaceAlbedo, samplingChannel);
-            pixels[rowOffset + ProfileParamMeanFreePathOffset] = ToColor(diffuseMeanFreePath, settings.MeanFreePathScreenScale);
-            pixels[rowOffset + ProfileParamTintOffset] = new Color(settings.Tint.r, settings.Tint.g, settings.Tint.b, settings.WorldUnitScale);
-            pixels[rowOffset + ProfileParamBoundaryColorBleedOffset] = new Color(settings.BoundaryColorBleed.r, settings.BoundaryColorBleed.g, settings.BoundaryColorBleed.b, settings.BoundaryColorBleed.a);
+            pixels[rowOffset + ProfileParamSurfaceAlbedoOffset] = ToColor(surfaceAlbedo, samplingAlbedo);
+            pixels[rowOffset + ProfileParamMeanFreePathOffset] = ToColor(
+                Multiply(diffuseMeanFreePath, EncodeDiffuseMeanFreePathInMillimetersToUnit),
+                samplingDiffuseMeanFreePath * EncodeDiffuseMeanFreePathInMillimetersToUnit);
+            pixels[rowOffset + ProfileParamTintOffset] = new Color(settings.Tint.r, settings.Tint.g, settings.Tint.b, settings.WorldUnitScale * EncodeWorldUnitScaleInCentimetersToUnit);
+            pixels[rowOffset + ProfileParamBoundaryColorBleedOffset] = new Color(settings.BoundaryColorBleed.r, settings.BoundaryColorBleed.g, settings.BoundaryColorBleed.b, 0f);
             pixels[rowOffset + ProfileParamDualSpecularOffset] = ToColor(settings.DualSpecularVector);
             pixels[rowOffset + ProfileParamTransmissionParamsOffset] = ToColor(settings.TransmissionVector);
 
+            var worldUnitToMillimeters = 1f / Mathf.Max(settings.WorldUnitScale * CentimetersToMillimeters, 0.0001f);
+            var scalingFactor = GetSearchLightDiffuseScalingFactor(surfaceAlbedo);
             for (var i = 0; i < ProfileParamTransmissionProfileSize; i++)
             {
-                var normalizedDistance = i / (float)(ProfileParamTransmissionProfileSize - 1);
-                var transmission = EvaluateTransmissionProfile(settings, diffuseMeanFreePath, normalizedDistance);
-                pixels[rowOffset + ProfileParamTransmissionProfileOffset + i] = ToColor(transmission, 1f);
+                var normalizedDistance = i / (float)ProfileParamTransmissionProfileSize;
+                var distanceInMillimeters = normalizedDistance * MaxTransmissionProfileDistance * worldUnitToMillimeters;
+                var radiusOffsetInMillimeters = 0.06f * worldUnitToMillimeters;
+                var transmission = EvaluateTransmissionProfile(
+                    distanceInMillimeters + radiusOffsetInMillimeters,
+                    surfaceAlbedo,
+                    scalingFactor,
+                    diffuseMeanFreePath,
+                    settings.TransmissionTintColor);
+                pixels[rowOffset + ProfileParamTransmissionProfileOffset + i] = ToColor(transmission, Mathf.Exp(-distanceInMillimeters * settings.ExtinctionScale));
             }
 
-            FillKernel(pixels, rowOffset + ProfileParamKernel0Offset, ProfileParamKernel0Size, settings, diffuseMeanFreePath, Kernel0Offsets, Kernel0Weights);
-            FillKernel(pixels, rowOffset + ProfileParamKernel1Offset, ProfileParamKernel1Size, settings, diffuseMeanFreePath, null, null);
-            FillKernel(pixels, rowOffset + ProfileParamKernel2Offset, ProfileParamKernel2Size, settings, diffuseMeanFreePath, null, null);
+            var scatterRadius = Mathf.Max(diffuseMeanFreePath.z * MillimetersToCentimeters, 0.1f);
+            FillKernel(pixels, rowOffset + ProfileParamKernel0Offset, ProfileParamKernel0Size, settings, surfaceAlbedo, diffuseMeanFreePath, scatterRadius);
+            FillKernel(pixels, rowOffset + ProfileParamKernel1Offset, ProfileParamKernel1Size, settings, surfaceAlbedo, diffuseMeanFreePath, scatterRadius);
+            FillKernel(pixels, rowOffset + ProfileParamKernel2Offset, ProfileParamKernel2Size, settings, surfaceAlbedo, diffuseMeanFreePath, scatterRadius);
+        }
+
+        private static Vector3 GetDiffuseMeanFreePathInMillimetersForProfileParam(BurtSubsurfaceProfileSettings settings, Vector3 surfaceAlbedo)
+        {
+            var meanFreePathColor = Clamp(ToRgb(settings.MeanFreePathColor), MeanFreePathBias, 1f);
+            var meanFreePath = Multiply(meanFreePathColor, settings.MeanFreePathDistance);
+            return Clamp(
+                Multiply(GetDiffuseMeanFreePathFromMeanFreePath(surfaceAlbedo, meanFreePath), CentimetersToMillimeters / DiffuseMeanFreePathToMeanFreePathMagicNumber),
+                0f,
+                MaxDiffuseMeanFreePathInMillimeters);
+        }
+
+        private static void ResolveProfileSamplingComponents(Vector3 surfaceAlbedo, Vector3 diffuseMeanFreePath, out float samplingAlbedo, out float samplingDiffuseMeanFreePath)
+        {
+            var meanFreePath = GetMeanFreePathFromDiffuseMeanFreePath(surfaceAlbedo, diffuseMeanFreePath);
+            var maxComponent = Mathf.Max(meanFreePath.x, Mathf.Max(meanFreePath.y, meanFreePath.z));
+            if (Mathf.Abs(meanFreePath.x - maxComponent) < float.Epsilon)
+            {
+                samplingAlbedo = surfaceAlbedo.x;
+                samplingDiffuseMeanFreePath = diffuseMeanFreePath.x;
+                return;
+            }
+
+            if (Mathf.Abs(meanFreePath.y - maxComponent) < float.Epsilon)
+            {
+                samplingAlbedo = surfaceAlbedo.y;
+                samplingDiffuseMeanFreePath = diffuseMeanFreePath.y;
+                return;
+            }
+
+            samplingAlbedo = surfaceAlbedo.z;
+            samplingDiffuseMeanFreePath = diffuseMeanFreePath.z;
         }
 
         private static void FillKernel(
@@ -419,62 +473,105 @@ namespace Burt.RenderPipeline
             int startIndex,
             int kernelSize,
             BurtSubsurfaceProfileSettings settings,
+            Vector3 surfaceAlbedo,
             Vector3 diffuseMeanFreePath,
-            float[] baseOffsets,
-            Vector3[] baseWeights)
+            float scatterRadius)
         {
-            var surfaceAlbedo = ToRgb(settings.SurfaceAlbedo);
-            var maxMeanFreePath = Mathf.Max(diffuseMeanFreePath.x, Mathf.Max(diffuseMeanFreePath.y, diffuseMeanFreePath.z));
-            var normalizedMeanFreePath = Divide(diffuseMeanFreePath, Mathf.Max(maxMeanFreePath, 0.0001f));
+            var kernel = ComputeMirroredKernel(kernelSize, surfaceAlbedo, diffuseMeanFreePath, scatterRadius);
+            RemapKernelValue(scatterRadius * settings.WorldUnitScale * CentimetersToMillimeters, kernel);
             for (var i = 0; i < kernelSize; i++)
             {
-                var normalizedIndex = kernelSize > 1 ? i / (float)(kernelSize - 1) : 0f;
-                var offset = baseOffsets != null && i < baseOffsets.Length
-                    ? baseOffsets[i]
-                    : Mathf.Pow(normalizedIndex, 1.35f) * Kernel0Offsets[Kernel0Offsets.Length - 1];
-                var baseWeight = baseWeights != null && i < baseWeights.Length
-                    ? baseWeights[i]
-                    : EvaluateKernelWeight(settings, diffuseMeanFreePath, offset);
-                var profileWeight = Multiply(baseWeight, Vector3.Lerp(Vector3.one, normalizedMeanFreePath, 0.65f));
-                profileWeight = Multiply(profileWeight, Vector3.Lerp(Vector3.one, surfaceAlbedo, 0.35f));
-                pixels[startIndex + i] = ToColor(Max(profileWeight, 0.0001f), offset);
+                pixels[startIndex + i] = kernel[i];
             }
         }
 
-        private static Vector3 EvaluateKernelWeight(
-            BurtSubsurfaceProfileSettings settings,
-            Vector3 diffuseMeanFreePath,
-            float offset)
+        private static Color[] ComputeMirroredKernel(int kernelSize, Vector3 surfaceAlbedo, Vector3 diffuseMeanFreePath, float scatterRadius)
         {
-            var surfaceAlbedo = GetSurfaceAlbedoForLut(settings);
-            var searchLightScale = GetSearchLightDiffuseScalingFactor(surfaceAlbedo);
-            var distance = Max(diffuseMeanFreePath, 0.0001f);
-            var extinctionScale = settings.ExtinctionScale;
-            var a = Exp(Multiply(Divide(Multiply(searchLightScale, distance), Mathf.Max(extinctionScale, 0.01f)), -Mathf.Abs(offset)));
-            var b = Exp(Multiply(Divide(Multiply(searchLightScale, distance * 3f), Mathf.Max(extinctionScale, 0.01f)), -Mathf.Abs(offset)));
-            return Max(Multiply(surfaceAlbedo, a + b) * 0.5f, 0.0001f);
+            var singleEdgeSamples = Mathf.Max(1, kernelSize);
+            var totalSamples = singleEdgeSamples * 2 - 1;
+            var kernel = new Color[totalSamples];
+            var scalingFactor = GetSearchLightDiffuseScalingFactor(surfaceAlbedo);
+            var range = totalSamples > 20 ? 3f : 2f;
+            var step = 2f * range / Mathf.Max(totalSamples - 1, 1);
+
+            for (var i = 0; i < totalSamples; i++)
+            {
+                var offset = -range + i * step;
+                var sign = offset < 0f ? -1f : 1f;
+                var remapped = range * sign * Mathf.Abs(Mathf.Pow(offset, 2f)) / Mathf.Pow(range, 2f);
+                kernel[i] = new Color(0f, 0f, 0f, remapped);
+            }
+
+            kernel[totalSamples / 2] = Color.clear;
+
+            var spaceScale = scatterRadius * CentimetersToMillimeters;
+            for (var i = 0; i < totalSamples; i++)
+            {
+                var previousWidth = i > 0 ? Mathf.Abs(kernel[i].a - kernel[i - 1].a) : 0f;
+                var nextWidth = i < totalSamples - 1 ? Mathf.Abs(kernel[i].a - kernel[i + 1].a) : 0f;
+                var area = (previousWidth + nextWidth) * 0.5f;
+                var weight = Multiply(EvaluateBurleyScatteringProfile(Mathf.Abs(kernel[i].a) * spaceScale, surfaceAlbedo, scalingFactor, diffuseMeanFreePath), area);
+                kernel[i] = ToColor(weight, kernel[i].a * 2f);
+            }
+
+            var center = kernel[totalSamples / 2];
+            for (var i = totalSamples / 2; i > 0; i--)
+            {
+                kernel[i] = kernel[i - 1];
+            }
+
+            kernel[0] = center;
+
+            var sum = Vector3.zero;
+            for (var i = 0; i < totalSamples; i++)
+            {
+                sum += ToRgb(kernel[i]);
+            }
+
+            for (var i = 0; i < totalSamples; i++)
+            {
+                var weight = Divide(ToRgb(kernel[i]), Max(sum, 0.0001f));
+                kernel[i] = ToColor(weight, kernel[i].a);
+            }
+
+            var result = new Color[singleEdgeSamples];
+            result[0] = kernel[0];
+            for (var i = 1; i < singleEdgeSamples; i++)
+            {
+                result[i] = kernel[i + singleEdgeSamples - 1];
+            }
+
+            return result;
+        }
+
+        private static void RemapKernelValue(float scatterRadius, Color[] kernel)
+        {
+            var alphaScale = scatterRadius / (3f * SubsurfaceRadiusScale);
+            for (var i = 0; i < kernel.Length; i++)
+            {
+                kernel[i] = new Color(kernel[i].r, kernel[i].g, kernel[i].b, kernel[i].a * alphaScale);
+            }
         }
 
         private static Vector3 EvaluateTransmissionProfile(
-            BurtSubsurfaceProfileSettings settings,
+            float radiusInMillimeters,
+            Vector3 surfaceAlbedo,
+            Vector3 scalingFactor,
             Vector3 diffuseMeanFreePath,
-            float normalizedDistance)
+            Color transmissionTint)
         {
-            var transmissionTint = ToRgb(settings.TransmissionTintColor);
-            var distance = normalizedDistance * MaxTransmissionProfileDistance;
-            var extinction = Mathf.Max(settings.ExtinctionScale, 0.01f);
-            var opticalDepth = Divide(new Vector3(distance, distance, distance), Max(Multiply(diffuseMeanFreePath, MaxTransmissionProfileDistance), 0.01f));
-            return Multiply(Exp(Multiply(opticalDepth, -extinction)), transmissionTint);
+            return Multiply(
+                new Vector3(
+                    EvaluateBurleyTransmissionProfile(radiusInMillimeters, surfaceAlbedo.x, scalingFactor.x, diffuseMeanFreePath.x),
+                    EvaluateBurleyTransmissionProfile(radiusInMillimeters, surfaceAlbedo.y, scalingFactor.y, diffuseMeanFreePath.y),
+                    EvaluateBurleyTransmissionProfile(radiusInMillimeters, surfaceAlbedo.z, scalingFactor.z, diffuseMeanFreePath.z)),
+                ToRgb(transmissionTint));
         }
 
-        private static float GetSamplingChannel(Vector3 value)
+        private static float EvaluateBurleyTransmissionProfile(float radius, float surfaceAlbedo, float scalingFactor, float diffuseMeanFreePath)
         {
-            if (value.y >= value.x && value.y >= value.z)
-            {
-                return 1f;
-            }
-
-            return value.z >= value.x && value.z >= value.y ? 2f : 0f;
+            var safeDistance = Mathf.Max(diffuseMeanFreePath, 0.01f);
+            return 0.25f * surfaceAlbedo * (Mathf.Exp(-scalingFactor * radius / safeDistance) + 3f * Mathf.Exp(-scalingFactor * radius / (3f * safeDistance)));
         }
 
         private static TextureFormat SelectProfileParamLutFormat()
@@ -801,14 +898,6 @@ namespace Burt.RenderPipeline
         private static Color ToColor(Vector3 value, float alpha)
         {
             return new Color(value.x, value.y, value.z, alpha);
-        }
-
-        private static Vector3 Exp(Vector3 value)
-        {
-            return new Vector3(
-                Mathf.Exp(value.x),
-                Mathf.Exp(value.y),
-                Mathf.Exp(value.z));
         }
 
         private static Vector3 Multiply(Vector3 lhs, Vector3 rhs)

@@ -289,10 +289,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让诊断工具
                     var write = writes[writeIndex];
                     if (CanTrackBuffer(write, write.Name) && read.Name == write.Name)
                     {
+                        if (IsKnownIntentionalSamePassBufferReadWrite(usage, read.Name))
+                        {
+                            continue;
+                        }
+
                         usage.AddValidationMessage("同一 Pass 同时 Read/Write Buffer: " + read.Name + "，请确认这是有意的 in-place 操作。");
                     }
                 }
             }
+        }
+
+        private static bool IsKnownIntentionalSamePassBufferReadWrite(BurtRenderPassResourceUsage usage, string resourceName)
+        {
+            return usage != null &&
+                usage.PassName == "Burt Screen Space Subsurface Setup Tiles" &&
+                resourceName == BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName;
         }
 
         private static void ValidateSamePassGlobalReadWrite(BurtRenderPassResourceUsage usage) // Checks same-pass logical global read/write declarations.

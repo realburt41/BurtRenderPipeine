@@ -183,7 +183,7 @@ Shader "BurtRP/UnlitColor"
                 debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
                 debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
                 debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
-                debugData.additionalUnshadowedColor = BurtEvaluateAdditionalLightingUnshadowedDebug(surfaceData, normalWS, viewDirectionWS, input.positionWS);
+                debugData.additionalUnshadowedColor = pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular;
                 debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS);
                 BurtFillAdditionalLightShadowProjectionDebugData(
                     input.positionWS,
@@ -311,7 +311,7 @@ Shader "BurtRP/UnlitColor"
                 debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
                 debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
                 debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
-                debugData.additionalUnshadowedColor = BurtEvaluateAdditionalLightingUnshadowedDebug(surfaceData, normalWS, viewDirectionWS, input.positionWS);
+                debugData.additionalUnshadowedColor = pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular;
                 debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS);
                 BurtFillAdditionalLightShadowProjectionDebugData(
                     input.positionWS,

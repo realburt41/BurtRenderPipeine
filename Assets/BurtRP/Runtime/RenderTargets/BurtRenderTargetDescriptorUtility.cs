@@ -100,26 +100,88 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceBaseColorDescriptor(Camera camera)
+        {
+            var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.ARGB32;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceEmissionDescriptor(Camera camera)
+        {
+            var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.DefaultHDR;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
         public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceSetupDescriptor(Camera camera)
         {
             var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
             descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            descriptor.enableRandomWrite = true;
             return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceProfileIDAndTypeDescriptor(Camera camera)
+        {
+            var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+            descriptor.colorFormat = SelectScreenSpaceSubsurfaceScalarFormat(true);
+            descriptor.enableRandomWrite = true;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceMaskDescriptor(Camera camera)
+        {
+            var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+            descriptor.colorFormat = SelectScreenSpaceSubsurfaceScalarFormat(false);
+            descriptor.depthBufferBits = 0;
+            descriptor.enableRandomWrite = false;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
+        private static RenderTextureFormat SelectScreenSpaceSubsurfaceScalarFormat(bool randomWrite)
+        {
+            if (SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.R8) &&
+                (!randomWrite || SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.R8)))
+            {
+                return RenderTextureFormat.R8;
+            }
+
+            return RenderTextureFormat.RFloat;
         }
 
         public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceTileDescriptor(Camera camera)
         {
             var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
-            descriptor.colorFormat = RenderTextureFormat.R8;
-            descriptor.width = Mathf.Max(1, Mathf.CeilToInt(descriptor.width / 16f));
-            descriptor.height = Mathf.Max(1, Mathf.CeilToInt(descriptor.height / 16f));
+            descriptor.colorFormat = RenderTextureFormat.RFloat;
+            descriptor.width = Mathf.Max(1, Mathf.CeilToInt(descriptor.width / 8f));
+            descriptor.height = Mathf.Max(1, Mathf.CeilToInt(descriptor.height / 8f));
             descriptor.depthBufferBits = 0;
+            descriptor.enableRandomWrite = true;
             return descriptor;
         }
 
         public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceCombineDescriptor(Camera camera)
         {
-            return CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+            var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+            descriptor.enableRandomWrite = true;
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceVelocityDescriptor(Camera camera)
+        {
+            var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
         }
 
         public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
@@ -186,8 +248,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 }
             }
 
-            var descriptor = new RenderTextureDescriptor(width, height, RenderTextureFormat.Depth, 24); // 创建 depth/stencil RT 描述；24 位深度换取 8 位 stencil，供 Deferred lighting pass 过滤 shading model。
-            descriptor.depthStencilFormat = SelectCameraDepthStencilFormat(); // 明确请求 stencil attachment，让 GBuffer 写入、Deferred Lighting 硬件测试使用同一份 CameraDepth。
+            var descriptor = new RenderTextureDescriptor(width, height, GraphicsFormat.None, SelectCameraDepthStencilFormat()); // 显式创建 depth/stencil RT，避免 RenderTextureFormat.Depth 被平台回落成无 stencil 的 DepthAuto。
 
             descriptor.msaaSamples = 1; // 当前阶段先关闭 MSAA，避免深度 RT 和相机颜色目标采样数不匹配。
 

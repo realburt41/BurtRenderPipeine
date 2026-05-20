@@ -371,6 +371,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName);
         }
 
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceBaseColor()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBaseColorName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceBaseColor()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBaseColorName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceEmission()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceEmissionName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceEmission()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceEmissionName);
+        }
+
         public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceSetup()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
@@ -419,6 +439,56 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceCombine()
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceHistory()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceHistory()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceProfileIDAndType()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceProfileIDAndTypeName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceProfileIDAndType()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceProfileIDAndTypeName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceMask()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceMask()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceVelocity()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceVelocity()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName);
+        }
+
+        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceDilatedVelocity()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceDilatedVelocityName);
+        }
+
+        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceDilatedVelocity()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceDilatedVelocityName);
         }
 
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。
