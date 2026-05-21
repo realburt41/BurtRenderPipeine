@@ -246,6 +246,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle BurtGITemporalDiagnosticsTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
+                }
+
+                return ResourceRegistry.GetBurtGITemporalDiagnostics();
+            }
+        }
+
         public BurtRenderTargetHandle ScreenSpaceSubsurfaceSourceTarget
         {
             get
@@ -308,19 +321,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetScreenSpaceSubsurfaceProfileIDAndType();
-            }
-        }
-
-        public BurtRenderTargetHandle ScreenSpaceSubsurfaceTileTarget
-        {
-            get
-            {
-                if (ResourceRegistry == null)
-                {
-                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName);
-                }
-
-                return ResourceRegistry.GetScreenSpaceSubsurfaceTile();
             }
         }
 
@@ -399,19 +399,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetScreenSpaceSubsurfaceVelocity();
-            }
-        }
-
-        public BurtRenderTargetHandle ScreenSpaceSubsurfaceDilatedVelocityTarget
-        {
-            get
-            {
-                if (ResourceRegistry == null)
-                {
-                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceDilatedVelocityName);
-                }
-
-                return ResourceRegistry.GetScreenSpaceSubsurfaceDilatedVelocity();
             }
         }
 

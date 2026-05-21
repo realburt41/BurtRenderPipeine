@@ -60,6 +60,8 @@ CBUFFER_START(UnityPerMaterial)
 
     float _SubsurfaceAmbient;
 
+    float _SubsurfaceScatteringMode;
+
     float _SubsurfaceProfileIndex;
 
     float4 _SubsurfaceTint;

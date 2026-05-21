@@ -17,7 +17,7 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, floa
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_CLEAR_COAT)
         surfaceData = BurtApplyClearCoatSurfaceSemantics(surfaceData, _ClearCoatMask, _ClearCoatRoughness);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
-        surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceStrength, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, _SubsurfaceTint.rgb, _SubsurfaceProfileIndex);
+        surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceStrength, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, _SubsurfaceTint.rgb, _SubsurfaceProfileIndex, _SubsurfaceScatteringMode);
     #endif
 
     return surfaceData;

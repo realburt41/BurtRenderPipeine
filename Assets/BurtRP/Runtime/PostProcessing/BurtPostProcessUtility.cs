@@ -1059,7 +1059,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             return bloom != null && bloom.IsEnabled(); // 只有组件存在、激活且强度大于 0 时，才认为 Bloom 需要运行。
         }
 
-        private static bool HasActiveTemporalAAVolume()
+        internal static bool HasActiveTemporalAAVolume()
         {
             var temporalAA = GetTemporalAAVolumeComponent();
             return temporalAA != null && temporalAA.IsEnabled();

@@ -71,6 +71,40 @@ namespace Burt.RenderPipeline
         }
     }
 
+    internal sealed class BurtAllocateBurtGITemporalDiagnosticsPass : BurtRenderPass
+    {
+        public override string Name => "Burt Allocate BurtGI Temporal Diagnostics";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.WriteBurtGITemporalDiagnostics();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var target = context.BurtGITemporalDiagnosticsTarget;
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(context.Request, context.Asset);
+            var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDiagnosticsDescriptor(camera, settings);
+            BurtScreenSpaceGlobalIlluminationRenderTargetUtility.Allocate(context, Name, BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsTextureId, target, descriptor, FilterMode.Bilinear);
+        }
+    }
+
     internal abstract class BurtScreenSpaceGlobalIlluminationPass : BurtRenderPass
     {
         protected const string ScreenSpaceGlobalIlluminationShaderName = BurtScreenSpaceGlobalIlluminationPassUtility.ScreenSpaceGlobalIlluminationShaderName;
@@ -81,19 +115,22 @@ namespace Burt.RenderPipeline
         protected static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         protected static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         protected static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
-        protected static readonly int XGIRawTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawTextureId;
-        protected static readonly int XGITextureId = BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationTextureId;
-        protected static readonly int XGISourceColorTextureId = Shader.PropertyToID("_BurtXGISourceColorTexture");
-        protected static readonly int XGICameraColorCopyTextureId = Shader.PropertyToID("_BurtXGICameraColorCopyTexture");
-        protected static readonly int XGIDebugCameraColorTextureId = Shader.PropertyToID("_BurtXGIDebugCameraColorTexture");
-        protected static readonly int XGIDebugCameraColorCopyTextureId = Shader.PropertyToID("_BurtXGIDebugCameraColorCopyTexture");
-        protected static readonly int XGISourceTexelSizeId = Shader.PropertyToID("_BurtXGISourceTexelSize");
-        protected static readonly int XGIViewMatrixId = Shader.PropertyToID("_BurtXGIViewMatrix");
-        protected static readonly int XGIViewProjectionMatrixId = Shader.PropertyToID("_BurtXGIViewProjectionMatrix");
-        protected static readonly int XGIParams0Id = Shader.PropertyToID("_BurtXGIParams0");
-        protected static readonly int XGIParams1Id = Shader.PropertyToID("_BurtXGIParams1");
-        protected static readonly int XGIParams2Id = Shader.PropertyToID("_BurtXGIParams2");
-        protected static readonly int XGIDebugModeId = Shader.PropertyToID("_BurtXGIDebugMode");
+        protected static readonly int BurtGIRawTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawTextureId;
+        protected static readonly int BurtGITextureId = BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationTextureId;
+        protected static readonly int BurtGITemporalDiagnosticsTextureId = BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsTextureId;
+        protected static readonly int BurtGISourceColorTextureId = Shader.PropertyToID("_BurtGISourceColorTexture");
+        protected static readonly int BurtGICameraColorCopyTextureId = Shader.PropertyToID("_BurtGICameraColorCopyTexture");
+        protected static readonly int BurtGIDebugCameraColorTextureId = Shader.PropertyToID("_BurtGIDebugCameraColorTexture");
+        protected static readonly int BurtGIDebugCameraColorCopyTextureId = Shader.PropertyToID("_BurtGIDebugCameraColorCopyTexture");
+        protected static readonly int BurtGISourceTexelSizeId = Shader.PropertyToID("_BurtGISourceTexelSize");
+        protected static readonly int BurtGIViewMatrixId = Shader.PropertyToID("_BurtGIViewMatrix");
+        protected static readonly int BurtGIViewProjectionMatrixId = Shader.PropertyToID("_BurtGIViewProjectionMatrix");
+        protected static readonly int BurtGIParams0Id = Shader.PropertyToID("_BurtGIParams0");
+        protected static readonly int BurtGIParams1Id = Shader.PropertyToID("_BurtGIParams1");
+        protected static readonly int BurtGIParams2Id = Shader.PropertyToID("_BurtGIParams2");
+        protected static readonly int BurtGIParams3Id = Shader.PropertyToID("_BurtGIParams3");
+        protected static readonly int BurtGIParams4Id = Shader.PropertyToID("_BurtGIParams4");
+        protected static readonly int BurtGIDebugModeId = Shader.PropertyToID("_BurtGIDebugMode");
         protected static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseViewProjectionMatrix");
         protected static readonly int CameraWorldPositionId = Shader.PropertyToID("_BurtDeferredCameraWorldPosition");
         protected static readonly int DeferredScreenSizeId = Shader.PropertyToID("_BurtDeferredScreenSize");
@@ -140,30 +177,37 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
         }
 
-        protected static void UploadCameraGlobals(CommandBuffer cmd, Camera camera, RenderTextureDescriptor descriptor)
+        protected static void UploadCameraGlobals(CommandBuffer cmd, BurtRenderRequest request, Camera camera, RenderTextureDescriptor descriptor)
         {
-            var viewMatrix = camera.worldToCameraMatrix;
-            var projectionMatrix = GL.GetGPUProjectionMatrix(camera.projectionMatrix, true);
-            var viewProjectionMatrix = projectionMatrix * viewMatrix;
-            var inverseViewProjectionMatrix = viewProjectionMatrix.inverse;
+            var temporalAA = request != null ? request.TemporalAA : null;
+            var useTemporalAA = temporalAA != null && temporalAA.Enabled;
+            var viewMatrix = useTemporalAA ? temporalAA.ViewMatrix : camera.worldToCameraMatrix;
+            var viewProjectionMatrix = useTemporalAA
+                ? temporalAA.CurrentViewProjectionMatrix
+                : GL.GetGPUProjectionMatrix(camera.projectionMatrix, true) * viewMatrix;
+            var inverseViewProjectionMatrix = useTemporalAA
+                ? temporalAA.InverseCurrentViewProjectionMatrix
+                : viewProjectionMatrix.inverse;
             var width = Mathf.Max(1, descriptor.width);
             var height = Mathf.Max(1, descriptor.height);
             var cameraPosition = camera.transform.position;
 
             BurtScreenSpaceGlobalIlluminationPassUtility.GetCameraTargetSize(camera, out var cameraWidth, out var cameraHeight);
-            cmd.SetGlobalMatrix(XGIViewMatrixId, viewMatrix);
-            cmd.SetGlobalMatrix(XGIViewProjectionMatrixId, viewProjectionMatrix);
+            cmd.SetGlobalMatrix(BurtGIViewMatrixId, viewMatrix);
+            cmd.SetGlobalMatrix(BurtGIViewProjectionMatrixId, viewProjectionMatrix);
             cmd.SetGlobalMatrix(InverseViewProjectionMatrixId, inverseViewProjectionMatrix);
             cmd.SetGlobalVector(CameraWorldPositionId, new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1f));
             cmd.SetGlobalVector(DeferredScreenSizeId, new Vector4(cameraWidth, cameraHeight, 1f / cameraWidth, 1f / cameraHeight));
-            cmd.SetGlobalVector(XGISourceTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
+            cmd.SetGlobalVector(BurtGISourceTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
         }
 
         protected static void UploadSettings(CommandBuffer cmd, BurtScreenSpaceGlobalIlluminationSettings settings)
         {
-            cmd.SetGlobalVector(XGIParams0Id, new Vector4(settings.Radius, settings.SampleCount, settings.MaxSteps, settings.Thickness));
-            cmd.SetGlobalVector(XGIParams1Id, new Vector4(settings.Intensity, settings.SkyFallback, settings.Blur ? 1f : 0f, settings.BlurSharpness));
-            cmd.SetGlobalVector(XGIParams2Id, new Vector4(Time.frameCount & 1023, settings.NormalWeight, settings.DistanceFade, settings.RadianceClamp));
+            cmd.SetGlobalVector(BurtGIParams0Id, new Vector4(settings.Radius, settings.SampleCount, settings.MaxSteps, settings.Thickness));
+            cmd.SetGlobalVector(BurtGIParams1Id, new Vector4(settings.Intensity, settings.SkyFallback, settings.Blur ? 1f : 0f, settings.BlurSharpness));
+            cmd.SetGlobalVector(BurtGIParams2Id, new Vector4(Time.frameCount & 1023, settings.NormalWeight, settings.DistanceFade, settings.RadianceClamp));
+            cmd.SetGlobalVector(BurtGIParams3Id, new Vector4(settings.SpatialDenoiseRadius, settings.SpatialDenoiseStrength, settings.TemporalVarianceClamp, settings.TemporalHitRejection));
+            cmd.SetGlobalVector(BurtGIParams4Id, new Vector4(settings.LeakGuardStrength, settings.EdgeFadeStrength, settings.NormalConeTightness, settings.SkyEdgeSuppression));
         }
     }
 
@@ -213,13 +257,13 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(rawTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(CameraColorTextureId, cameraColorTarget.Identifier);
-            cmd.SetGlobalTexture(XGISourceColorTextureId, cameraColorTarget.Identifier);
+            cmd.SetGlobalTexture(BurtGISourceColorTextureId, cameraColorTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             BindGBufferInputs(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target);
-            UploadCameraGlobals(cmd, camera, descriptor);
+            UploadCameraGlobals(cmd, context.Request, camera, descriptor);
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
-            cmd.SetGlobalTexture(XGIRawTextureId, rawTarget.Identifier);
+            cmd.SetGlobalTexture(BurtGIRawTextureId, rawTarget.Identifier);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -261,16 +305,19 @@ namespace Burt.RenderPipeline
         private const int TemporalPassIndex = 4;
         private const int CopyDepthNormalPassIndex = 5;
         private const int CopyTemporalFinalPassIndex = 6;
-        private static readonly int XGISpatialFinalTextureId = Shader.PropertyToID("_BurtScreenSpaceGlobalIlluminationSpatialFinalTexture");
-        private static readonly int XGISpatialFinalInputTextureId = Shader.PropertyToID("_BurtXGISpatialFinalTexture");
-        private static readonly int XGITemporalFinalTextureId = Shader.PropertyToID("_BurtScreenSpaceGlobalIlluminationTemporalFinalTexture");
-        private static readonly int XGITemporalFinalInputTextureId = Shader.PropertyToID("_BurtXGITemporalFinalTexture");
-        private static readonly int XGIDepthNormalTextureId = Shader.PropertyToID("_BurtXGIDepthNormalTexture");
-        private static readonly int XGIHistoryTextureId = Shader.PropertyToID("_BurtXGIHistoryTexture");
-        private static readonly int XGIHistoryDepthNormalTextureId = Shader.PropertyToID("_BurtXGIHistoryDepthNormalTexture");
-        private static readonly int XGIPreviousViewProjectionMatrixId = Shader.PropertyToID("_BurtXGIPreviousViewProjectionMatrix");
-        private static readonly int XGITemporalParamsId = Shader.PropertyToID("_BurtXGITemporalParams");
-        private static readonly int XGITemporalParams1Id = Shader.PropertyToID("_BurtXGITemporalParams1");
+        private const int CopyTemporalDiagnosticsPassIndex = 7;
+        private static readonly int BurtGISpatialFinalTextureId = Shader.PropertyToID("_BurtScreenSpaceGlobalIlluminationSpatialFinalTexture");
+        private static readonly int BurtGISpatialFinalInputTextureId = Shader.PropertyToID("_BurtGISpatialFinalTexture");
+        private static readonly int BurtGITemporalFinalTextureId = Shader.PropertyToID("_BurtScreenSpaceGlobalIlluminationTemporalFinalTexture");
+        private static readonly int BurtGITemporalFinalInputTextureId = Shader.PropertyToID("_BurtGITemporalFinalTexture");
+        private static readonly int BurtGIDepthNormalTextureId = Shader.PropertyToID("_BurtGIDepthNormalTexture");
+        private static readonly int BurtGIHistoryTextureId = Shader.PropertyToID("_BurtGIHistoryTexture");
+        private static readonly int BurtGIHistoryDepthNormalTextureId = Shader.PropertyToID("_BurtGIHistoryDepthNormalTexture");
+        private static readonly int BurtGIPreviousHistoryTextureId = Shader.PropertyToID("_BurtGIPreviousHistoryTexture");
+        private static readonly int BurtGIPreviousHistoryDepthNormalTextureId = Shader.PropertyToID("_BurtGIPreviousHistoryDepthNormalTexture");
+        private static readonly int BurtGIPreviousViewProjectionMatrixId = Shader.PropertyToID("_BurtGIPreviousViewProjectionMatrix");
+        private static readonly int BurtGITemporalParamsId = Shader.PropertyToID("_BurtGITemporalParams");
+        private static readonly int BurtGITemporalParams1Id = Shader.PropertyToID("_BurtGITemporalParams1");
 
         public override string Name => "Burt Screen Space Global Illumination Blur";
 
@@ -285,11 +332,15 @@ namespace Burt.RenderPipeline
             builder.ReadCameraDepth();
             builder.ReadGBuffer1();
             builder.WriteScreenSpaceGlobalIllumination();
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(builder.Request, builder.Asset))
+            {
+                builder.WriteBurtGITemporalDiagnostics();
+            }
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var rawTarget, out var cameraDepthTarget, out var gbuffer1Target, out var target))
+            if (!TryGetTargets(context, out var rawTarget, out var cameraDepthTarget, out var gbuffer1Target, out var target, out var temporalDiagnosticsTarget))
             {
                 return;
             }
@@ -309,26 +360,26 @@ namespace Burt.RenderPipeline
 
             var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
             var outputTarget = target.Identifier;
-            var spatialFinalIdentifier = new RenderTargetIdentifier(XGISpatialFinalTextureId);
-            var temporalFinalIdentifier = new RenderTargetIdentifier(XGITemporalFinalTextureId);
-            var depthNormalIdentifier = new RenderTargetIdentifier(XGIDepthNormalTextureId);
+            var spatialFinalIdentifier = new RenderTargetIdentifier(BurtGISpatialFinalTextureId);
+            var temporalFinalIdentifier = new RenderTargetIdentifier(BurtGITemporalFinalTextureId);
+            var depthNormalIdentifier = new RenderTargetIdentifier(BurtGIDepthNormalTextureId);
             var cmd = CommandBufferPool.Get(Name);
-            cmd.SetGlobalTexture(XGIRawTextureId, rawTarget.Identifier);
+            cmd.SetGlobalTexture(BurtGIRawTextureId, rawTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
-            UploadCameraGlobals(cmd, camera, descriptor);
+            UploadCameraGlobals(cmd, context.Request, camera, descriptor);
             UploadSettings(cmd, settings);
 
             var shouldUseTemporal = settings.TemporalAccumulation;
             if (shouldUseTemporal)
             {
-                cmd.GetTemporaryRT(XGISpatialFinalTextureId, descriptor, FilterMode.Bilinear);
-                cmd.GetTemporaryRT(XGITemporalFinalTextureId, BurtScreenSpaceGlobalIlluminationHistoryUtility.CreateColorHistoryDescriptor(camera, settings), FilterMode.Bilinear);
+                cmd.GetTemporaryRT(BurtGISpatialFinalTextureId, descriptor, FilterMode.Bilinear);
+                cmd.GetTemporaryRT(BurtGITemporalFinalTextureId, BurtScreenSpaceGlobalIlluminationHistoryUtility.CreateColorHistoryDescriptor(camera, settings), FilterMode.Bilinear);
                 outputTarget = spatialFinalIdentifier;
             }
             else
             {
-                BurtScreenSpaceGlobalIlluminationHistoryUtility.InvalidateHistory(camera, "TemporalDisabled");
+                BurtScreenSpaceGlobalIlluminationHistoryUtility.InvalidateHistory(camera, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationTemporalDisabledReason(context.Request, settings));
             }
 
             cmd.SetRenderTarget(outputTarget);
@@ -337,12 +388,12 @@ namespace Burt.RenderPipeline
 
             if (shouldUseTemporal)
             {
-                ResolveTemporal(cmd, material, context.Request, context.Asset, settings, camera, descriptor, spatialFinalIdentifier, temporalFinalIdentifier, target.Identifier, depthNormalIdentifier);
-                cmd.ReleaseTemporaryRT(XGITemporalFinalTextureId);
-                cmd.ReleaseTemporaryRT(XGISpatialFinalTextureId);
+                ResolveTemporal(cmd, material, context.Request, context.Asset, settings, camera, descriptor, spatialFinalIdentifier, temporalFinalIdentifier, target.Identifier, temporalDiagnosticsTarget, depthNormalIdentifier);
+                cmd.ReleaseTemporaryRT(BurtGITemporalFinalTextureId);
+                cmd.ReleaseTemporaryRT(BurtGISpatialFinalTextureId);
             }
 
-            cmd.SetGlobalTexture(XGITextureId, target.Identifier);
+            cmd.SetGlobalTexture(BurtGITextureId, target.Identifier);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -358,42 +409,55 @@ namespace Burt.RenderPipeline
             RenderTargetIdentifier spatialFinal,
             RenderTargetIdentifier temporalFinalTarget,
             RenderTargetIdentifier finalTarget,
+            BurtRenderTargetHandle temporalDiagnosticsTarget,
             RenderTargetIdentifier depthNormalTarget)
         {
             var history = BurtScreenSpaceGlobalIlluminationHistoryUtility.EnsureHistoryTextures(request, asset, settings, out var historyValid);
             var width = Mathf.Max(1, descriptor.width);
             var height = Mathf.Max(1, descriptor.height);
-            cmd.SetGlobalTexture(XGISpatialFinalInputTextureId, spatialFinal);
-            cmd.SetGlobalTexture(XGIHistoryTextureId, history.Color != null ? (Texture)history.Color : Texture2D.blackTexture);
-            cmd.SetGlobalTexture(XGIHistoryDepthNormalTextureId, history.DepthNormal != null ? (Texture)history.DepthNormal : Texture2D.blackTexture);
-            cmd.SetGlobalMatrix(XGIPreviousViewProjectionMatrixId, history.PreviousViewProjectionMatrix);
+            cmd.SetGlobalTexture(BurtGISpatialFinalInputTextureId, spatialFinal);
+            cmd.SetGlobalTexture(BurtGIHistoryTextureId, history.Color != null ? (Texture)history.Color : Texture2D.blackTexture);
+            cmd.SetGlobalTexture(BurtGIHistoryDepthNormalTextureId, history.DepthNormal != null ? (Texture)history.DepthNormal : Texture2D.blackTexture);
+            cmd.SetGlobalTexture(BurtGIPreviousHistoryTextureId, history.Color != null ? (Texture)history.Color : Texture2D.blackTexture);
+            cmd.SetGlobalTexture(BurtGIPreviousHistoryDepthNormalTextureId, history.DepthNormal != null ? (Texture)history.DepthNormal : Texture2D.blackTexture);
+            cmd.SetGlobalMatrix(BurtGIPreviousViewProjectionMatrixId, history.PreviousViewProjectionMatrix);
             cmd.SetGlobalMatrix(InverseViewProjectionMatrixId, history.CurrentInverseViewProjectionMatrix);
-            cmd.SetGlobalVector(XGISourceTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
-            cmd.SetGlobalVector(XGITemporalParamsId, new Vector4(settings.TemporalFeedback, historyValid ? 1f : 0f, settings.TemporalDepthRejection, settings.TemporalNormalRejection));
-            cmd.SetGlobalVector(XGITemporalParams1Id, new Vector4(settings.TemporalClamp, 0f, 0f, 0f));
+            cmd.SetGlobalVector(BurtGISourceTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
+            cmd.SetGlobalVector(BurtGITemporalParamsId, new Vector4(settings.TemporalFeedback, historyValid ? 1f : 0f, settings.TemporalDepthRejection, settings.TemporalNormalRejection));
+            cmd.SetGlobalVector(BurtGITemporalParams1Id, new Vector4(settings.TemporalClamp, settings.TemporalVarianceClamp, settings.TemporalHitRejection, settings.SpatialDenoiseStrength));
 
             cmd.SetRenderTarget(temporalFinalTarget);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.DrawProcedural(Matrix4x4.identity, material, TemporalPassIndex, MeshTopology.Triangles, 3, 1);
 
-            cmd.SetGlobalTexture(XGITemporalFinalInputTextureId, temporalFinalTarget);
+            cmd.SetGlobalTexture(BurtGITemporalFinalInputTextureId, temporalFinalTarget);
             cmd.SetRenderTarget(finalTarget);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.DrawProcedural(Matrix4x4.identity, material, CopyTemporalFinalPassIndex, MeshTopology.Triangles, 3, 1);
+
+            if (temporalDiagnosticsTarget.IsValid)
+            {
+                cmd.SetGlobalTexture(BurtGITemporalFinalInputTextureId, temporalFinalTarget);
+                cmd.SetRenderTarget(temporalDiagnosticsTarget.Identifier);
+                BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
+                cmd.DrawProcedural(Matrix4x4.identity, material, CopyTemporalDiagnosticsPassIndex, MeshTopology.Triangles, 3, 1);
+                cmd.SetGlobalTexture(BurtGITemporalDiagnosticsTextureId, temporalDiagnosticsTarget.Identifier);
+            }
 
             if (history.Color == null || history.DepthNormal == null)
             {
                 return;
             }
 
+            BurtScreenSpaceGlobalIlluminationHistoryUtility.CopyHistoryToDebugSnapshot(cmd, camera);
             cmd.CopyTexture(temporalFinalTarget, new RenderTargetIdentifier(history.Color));
             var depthNormalDescriptor = BurtScreenSpaceGlobalIlluminationHistoryUtility.CreateDepthNormalHistoryDescriptor(camera, settings);
-            cmd.GetTemporaryRT(XGIDepthNormalTextureId, depthNormalDescriptor, FilterMode.Point);
+            cmd.GetTemporaryRT(BurtGIDepthNormalTextureId, depthNormalDescriptor, FilterMode.Point);
             cmd.SetRenderTarget(depthNormalTarget);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.DrawProcedural(Matrix4x4.identity, material, CopyDepthNormalPassIndex, MeshTopology.Triangles, 3, 1);
             cmd.CopyTexture(depthNormalTarget, new RenderTargetIdentifier(history.DepthNormal));
-            cmd.ReleaseTemporaryRT(XGIDepthNormalTextureId);
+            cmd.ReleaseTemporaryRT(BurtGIDepthNormalTextureId);
             BurtScreenSpaceGlobalIlluminationHistoryUtility.MarkHistoryValid(camera);
         }
 
@@ -402,12 +466,14 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle rawTarget,
             out BurtRenderTargetHandle cameraDepthTarget,
             out BurtRenderTargetHandle gbuffer1Target,
-            out BurtRenderTargetHandle target)
+            out BurtRenderTargetHandle target,
+            out BurtRenderTargetHandle temporalDiagnosticsTarget)
         {
             rawTarget = context != null ? context.ScreenSpaceGlobalIlluminationRawTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName);
             cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
             gbuffer1Target = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name);
             target = context != null ? context.ScreenSpaceGlobalIlluminationTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
+            temporalDiagnosticsTarget = context != null ? context.BurtGITemporalDiagnosticsTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
 
             return rawTarget.IsValid && cameraDepthTarget.IsValid && gbuffer1Target.IsValid && target.IsValid;
         }
@@ -432,7 +498,7 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var xgiTarget))
+            if (!TryGetTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var burtGITarget))
             {
                 return;
             }
@@ -450,20 +516,20 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var xgiDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
+            var burtGIDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
             var cameraColorDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
             var cmd = CommandBufferPool.Get(Name);
-            cmd.GetTemporaryRT(XGICameraColorCopyTextureId, cameraColorDescriptor, FilterMode.Bilinear);
-            cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(XGICameraColorCopyTextureId));
+            cmd.GetTemporaryRT(BurtGICameraColorCopyTextureId, cameraColorDescriptor, FilterMode.Bilinear);
+            cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(BurtGICameraColorCopyTextureId));
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.SetGlobalTexture(XGICameraColorCopyTextureId, new RenderTargetIdentifier(XGICameraColorCopyTextureId));
+            cmd.SetGlobalTexture(BurtGICameraColorCopyTextureId, new RenderTargetIdentifier(BurtGICameraColorCopyTextureId));
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
-            cmd.SetGlobalTexture(XGITextureId, xgiTarget.Identifier);
-            UploadCameraGlobals(cmd, camera, xgiDescriptor);
+            cmd.SetGlobalTexture(BurtGITextureId, burtGITarget.Identifier);
+            UploadCameraGlobals(cmd, context.Request, camera, burtGIDescriptor);
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, 2, MeshTopology.Triangles, 3, 1);
-            cmd.ReleaseTemporaryRT(XGICameraColorCopyTextureId);
+            cmd.ReleaseTemporaryRT(BurtGICameraColorCopyTextureId);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -472,18 +538,22 @@ namespace Burt.RenderPipeline
             BurtRenderGraphContext context,
             out BurtRenderTargetHandle cameraColorTarget,
             out BurtRenderTargetHandle cameraDepthTarget,
-            out BurtRenderTargetHandle xgiTarget)
+            out BurtRenderTargetHandle burtGITarget)
         {
             cameraColorTarget = context != null ? context.CameraColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraColorName);
             cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
-            xgiTarget = context != null ? context.ScreenSpaceGlobalIlluminationTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
-            return cameraColorTarget.IsValid && cameraDepthTarget.IsValid && xgiTarget.IsValid;
+            burtGITarget = context != null ? context.ScreenSpaceGlobalIlluminationTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
+            return cameraColorTarget.IsValid && cameraDepthTarget.IsValid && burtGITarget.IsValid;
         }
     }
 
     internal sealed class BurtDebugScreenSpaceGlobalIlluminationPass : BurtScreenSpaceGlobalIlluminationPass
     {
         private const int DebugPassIndex = 3;
+        private static readonly int BurtGIPreviousHistoryTextureId = Shader.PropertyToID("_BurtGIPreviousHistoryTexture");
+        private static readonly int BurtGIPreviousHistoryDepthNormalTextureId = Shader.PropertyToID("_BurtGIPreviousHistoryDepthNormalTexture");
+        private static readonly int BurtGIPreviousViewProjectionMatrixId = Shader.PropertyToID("_BurtGIPreviousViewProjectionMatrix");
+        private static readonly int BurtGITemporalParamsId = Shader.PropertyToID("_BurtGITemporalParams");
 
         public override string Name => "Burt Debug Screen Space Global Illumination";
 
@@ -496,6 +566,13 @@ namespace Burt.RenderPipeline
 
             builder.ReadScreenSpaceGlobalIlluminationRaw();
             builder.ReadScreenSpaceGlobalIllumination();
+            builder.ReadCameraDepth();
+            builder.ReadGBuffer1();
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(BurtShadingDebugSettings.Mode))
+            {
+                builder.ReadBurtGITemporalDiagnostics();
+            }
+
             if (BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationOverlayDebugMode(BurtShadingDebugSettings.Mode))
             {
                 builder.ReadCameraColor();
@@ -512,9 +589,17 @@ namespace Burt.RenderPipeline
             }
 
             var cameraColorTarget = context.CameraColorTarget;
+            var cameraDepthTarget = context.CameraDepthTarget;
+            var gbuffer1Target = context.GBuffer1Target;
             var rawTarget = context.ScreenSpaceGlobalIlluminationRawTarget;
-            var xgiTarget = context.ScreenSpaceGlobalIlluminationTarget;
-            if (!cameraColorTarget.IsValid || !rawTarget.IsValid || !xgiTarget.IsValid)
+            var burtGITarget = context.ScreenSpaceGlobalIlluminationTarget;
+            var temporalDiagnosticsTarget = context.BurtGITemporalDiagnosticsTarget;
+            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid || !gbuffer1Target.IsValid || !rawTarget.IsValid || !burtGITarget.IsValid)
+            {
+                return;
+            }
+
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(BurtShadingDebugSettings.Mode) && !temporalDiagnosticsTarget.IsValid)
             {
                 return;
             }
@@ -538,26 +623,79 @@ namespace Burt.RenderPipeline
             if (isOverlay)
             {
                 var cameraColorDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
-                cmd.GetTemporaryRT(XGIDebugCameraColorCopyTextureId, cameraColorDescriptor, FilterMode.Bilinear);
-                cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(XGIDebugCameraColorCopyTextureId));
-                cmd.SetGlobalTexture(XGIDebugCameraColorTextureId, new RenderTargetIdentifier(XGIDebugCameraColorCopyTextureId));
+                cmd.GetTemporaryRT(BurtGIDebugCameraColorCopyTextureId, cameraColorDescriptor, FilterMode.Bilinear);
+                cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(BurtGIDebugCameraColorCopyTextureId));
+                cmd.SetGlobalTexture(BurtGIDebugCameraColorTextureId, new RenderTargetIdentifier(BurtGIDebugCameraColorCopyTextureId));
             }
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.SetGlobalTexture(XGIRawTextureId, rawTarget.Identifier);
-            cmd.SetGlobalTexture(XGITextureId, xgiTarget.Identifier);
-            cmd.SetGlobalFloat(XGIDebugModeId, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationShaderDebugMode());
-            UploadCameraGlobals(cmd, camera, descriptor);
+            cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+            cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
+            cmd.SetGlobalTexture(BurtGIRawTextureId, rawTarget.Identifier);
+            cmd.SetGlobalTexture(BurtGITextureId, burtGITarget.Identifier);
+            if (temporalDiagnosticsTarget.IsValid)
+            {
+                cmd.SetGlobalTexture(BurtGITemporalDiagnosticsTextureId, temporalDiagnosticsTarget.Identifier);
+            }
+            else
+            {
+                cmd.SetGlobalTexture(BurtGITemporalDiagnosticsTextureId, Texture2D.blackTexture);
+            }
+
+            UploadTemporalDebugGlobals(cmd, context.Request, settings);
+            cmd.SetGlobalFloat(BurtGIDebugModeId, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationShaderDebugMode());
+            UploadCameraGlobals(cmd, context.Request, camera, descriptor);
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, DebugPassIndex, MeshTopology.Triangles, 3, 1);
             if (isOverlay)
             {
-                cmd.ReleaseTemporaryRT(XGIDebugCameraColorCopyTextureId);
+                cmd.ReleaseTemporaryRT(BurtGIDebugCameraColorCopyTextureId);
             }
 
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
+        }
+
+        private static void UploadTemporalDebugGlobals(CommandBuffer cmd, BurtRenderRequest request, BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            var history = BurtScreenSpaceGlobalIlluminationHistoryUtility.GetDebugSnapshotTextures(request);
+            var status = BurtScreenSpaceGlobalIlluminationHistoryUtility.GetHistoryStatus(request, settings);
+            cmd.SetGlobalTexture(BurtGIPreviousHistoryTextureId, history.Color != null ? (Texture)history.Color : Texture2D.blackTexture);
+            cmd.SetGlobalTexture(BurtGIPreviousHistoryDepthNormalTextureId, history.DepthNormal != null ? (Texture)history.DepthNormal : Texture2D.blackTexture);
+            cmd.SetGlobalMatrix(BurtGIPreviousViewProjectionMatrixId, history.PreviousViewProjectionMatrix);
+            cmd.SetGlobalVector(BurtGITemporalParamsId, new Vector4(settings.TemporalFeedback, status.HasHistory ? 1f : 0f, settings.TemporalDepthRejection, settings.TemporalNormalRejection));
+        }
+    }
+
+    internal sealed class BurtReleaseBurtGITemporalDiagnosticsPass : BurtRenderPass
+    {
+        public override string Name => "Burt Release BurtGI Temporal Diagnostics";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadBurtGITemporalDiagnostics();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var target = context.BurtGITemporalDiagnosticsTarget;
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            BurtScreenSpaceGlobalIlluminationRenderTargetUtility.Release(context, Name, BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsTextureId);
         }
     }
 
@@ -625,7 +763,7 @@ namespace Burt.RenderPipeline
 
     internal readonly struct BurtScreenSpaceGlobalIlluminationSettings
     {
-        public static readonly BurtScreenSpaceGlobalIlluminationSettings Disabled = new BurtScreenSpaceGlobalIlluminationSettings(false, BurtScreenSpaceGlobalIlluminationQuality.Medium, BurtScreenSpaceGlobalIlluminationResolution.Half, 0.6f, 2f, 12, 8, 0.35f, 1f, 8f, 0.65f, 80f, true, 0.18f, true, 0.86f, 0.02f, 0.65f, 1f);
+        public static readonly BurtScreenSpaceGlobalIlluminationSettings Disabled = new BurtScreenSpaceGlobalIlluminationSettings(false, BurtScreenSpaceGlobalIlluminationQuality.Medium, BurtScreenSpaceGlobalIlluminationResolution.Half, 0.6f, 2f, 12, 8, 0.35f, 1f, 8f, 0.65f, 80f, true, 0.18f, 1.25f, 0.75f, 0.65f, 0.5f, 0.55f, 0.6f, true, 0.86f, 0.02f, 0.65f, 1f, 1.25f, 0.55f);
 
         public BurtScreenSpaceGlobalIlluminationSettings(
             bool enabled,
@@ -642,11 +780,19 @@ namespace Burt.RenderPipeline
             float distanceFade,
             bool blur,
             float blurSharpness,
+            float spatialDenoiseRadius,
+            float spatialDenoiseStrength,
+            float leakGuardStrength,
+            float edgeFadeStrength,
+            float normalConeTightness,
+            float skyEdgeSuppression,
             bool temporalAccumulation,
             float temporalFeedback,
             float temporalDepthRejection,
             float temporalNormalRejection,
-            float temporalClamp)
+            float temporalClamp,
+            float temporalVarianceClamp,
+            float temporalHitRejection)
         {
             Enabled = enabled;
             Quality = NormalizeQuality(quality);
@@ -662,11 +808,19 @@ namespace Burt.RenderPipeline
             DistanceFade = Mathf.Clamp(distanceFade, 1f, 800f);
             Blur = blur;
             BlurSharpness = Mathf.Clamp01(blurSharpness);
+            SpatialDenoiseRadius = Mathf.Clamp(spatialDenoiseRadius, 0.5f, 3f);
+            SpatialDenoiseStrength = Mathf.Clamp01(spatialDenoiseStrength);
+            LeakGuardStrength = Mathf.Clamp01(leakGuardStrength);
+            EdgeFadeStrength = Mathf.Clamp01(edgeFadeStrength);
+            NormalConeTightness = Mathf.Clamp01(normalConeTightness);
+            SkyEdgeSuppression = Mathf.Clamp01(skyEdgeSuppression);
             TemporalAccumulation = temporalAccumulation;
             TemporalFeedback = Mathf.Clamp(temporalFeedback, 0f, 0.98f);
             TemporalDepthRejection = Mathf.Clamp(temporalDepthRejection, 0.001f, 0.2f);
             TemporalNormalRejection = Mathf.Clamp01(temporalNormalRejection);
             TemporalClamp = Mathf.Clamp(temporalClamp, 0.25f, 4f);
+            TemporalVarianceClamp = Mathf.Clamp(temporalVarianceClamp, 0f, 4f);
+            TemporalHitRejection = Mathf.Clamp01(temporalHitRejection);
         }
 
         public bool Enabled { get; }
@@ -683,11 +837,19 @@ namespace Burt.RenderPipeline
         public float DistanceFade { get; }
         public bool Blur { get; }
         public float BlurSharpness { get; }
+        public float SpatialDenoiseRadius { get; }
+        public float SpatialDenoiseStrength { get; }
+        public float LeakGuardStrength { get; }
+        public float EdgeFadeStrength { get; }
+        public float NormalConeTightness { get; }
+        public float SkyEdgeSuppression { get; }
         public bool TemporalAccumulation { get; }
         public float TemporalFeedback { get; }
         public float TemporalDepthRejection { get; }
         public float TemporalNormalRejection { get; }
         public float TemporalClamp { get; }
+        public float TemporalVarianceClamp { get; }
+        public float TemporalHitRejection { get; }
 
         public int CreateHistorySignature()
         {
@@ -708,11 +870,19 @@ namespace Burt.RenderPipeline
                 hash = hash * 31 + Quantize(DistanceFade, 100f);
                 hash = hash * 31 + (Blur ? 1 : 0);
                 hash = hash * 31 + Quantize(BlurSharpness, 1000f);
+                hash = hash * 31 + Quantize(SpatialDenoiseRadius, 1000f);
+                hash = hash * 31 + Quantize(SpatialDenoiseStrength, 1000f);
+                hash = hash * 31 + Quantize(LeakGuardStrength, 1000f);
+                hash = hash * 31 + Quantize(EdgeFadeStrength, 1000f);
+                hash = hash * 31 + Quantize(NormalConeTightness, 1000f);
+                hash = hash * 31 + Quantize(SkyEdgeSuppression, 1000f);
                 hash = hash * 31 + (TemporalAccumulation ? 1 : 0);
                 hash = hash * 31 + Quantize(TemporalFeedback, 1000f);
                 hash = hash * 31 + Quantize(TemporalDepthRejection, 10000f);
                 hash = hash * 31 + Quantize(TemporalNormalRejection, 1000f);
                 hash = hash * 31 + Quantize(TemporalClamp, 1000f);
+                hash = hash * 31 + Quantize(TemporalVarianceClamp, 1000f);
+                hash = hash * 31 + Quantize(TemporalHitRejection, 1000f);
                 return hash;
             }
         }
@@ -830,7 +1000,7 @@ namespace Burt.RenderPipeline
 
     internal static class BurtScreenSpaceGlobalIlluminationHistoryUtility
     {
-        private const int HistoryAlgorithmVersion = 1;
+        private const int HistoryAlgorithmVersion = 5;
         private const int CameraStatePruneInterval = 128;
         private const float ProjectionChangeEpsilon = 0.0001f;
 
@@ -839,8 +1009,12 @@ namespace Burt.RenderPipeline
             public Camera Camera;
             public RenderTexture ColorHistory;
             public RenderTexture DepthNormalHistory;
+            public RenderTexture DebugPreviousColorHistory;
+            public RenderTexture DebugPreviousDepthNormalHistory;
             public RenderTextureDescriptor ColorDescriptor;
             public RenderTextureDescriptor DepthNormalDescriptor;
+            public RenderTextureDescriptor DebugPreviousColorDescriptor;
+            public RenderTextureDescriptor DebugPreviousDepthNormalDescriptor;
             public int AlgorithmVersion;
             public bool HasValidHistory;
             public bool HasPreviousCameraState;
@@ -854,6 +1028,7 @@ namespace Burt.RenderPipeline
             public Matrix4x4 CurrentNonJitteredProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredProjectionMatrix = Matrix4x4.identity;
+            public Matrix4x4 DebugPreviousViewProjectionMatrix = Matrix4x4.identity;
             public BurtRendererMode CurrentRendererMode = BurtRendererMode.Forward;
             public BurtRendererMode PreviousRendererMode = BurtRendererMode.Forward;
             public Vector3 CurrentCameraPosition;
@@ -911,6 +1086,8 @@ namespace Burt.RenderPipeline
             var depthNormalDescriptor = CreateDepthNormalHistoryDescriptor(camera, settings);
             var colorMatches = state.ColorHistory != null && Matches(state.ColorDescriptor, colorDescriptor);
             var depthNormalMatches = state.DepthNormalHistory != null && Matches(state.DepthNormalDescriptor, depthNormalDescriptor);
+            var debugColorMatches = state.DebugPreviousColorHistory != null && Matches(state.DebugPreviousColorDescriptor, colorDescriptor);
+            var debugDepthNormalMatches = state.DebugPreviousDepthNormalHistory != null && Matches(state.DebugPreviousDepthNormalDescriptor, depthNormalDescriptor);
             var descriptorsMatch = colorMatches && depthNormalMatches;
             GetTargetSize(camera, out var targetWidth, out var targetHeight);
             var rendererMode = asset != null ? asset.RendererMode : BurtRendererMode.Forward;
@@ -925,19 +1102,45 @@ namespace Burt.RenderPipeline
             {
                 ReleaseHistory(state);
             }
+            else
+            {
+                if (!debugColorMatches)
+                {
+                    ReleaseTexture(state.DebugPreviousColorHistory);
+                    state.DebugPreviousColorHistory = null;
+                }
+
+                if (!debugDepthNormalMatches)
+                {
+                    ReleaseTexture(state.DebugPreviousDepthNormalHistory);
+                    state.DebugPreviousDepthNormalHistory = null;
+                }
+            }
 
             if (state.ColorHistory == null)
             {
                 state.ColorDescriptor = colorDescriptor;
-                state.ColorHistory = CreateHistoryTexture(colorDescriptor, "Burt XGI Color History " + camera.GetInstanceID(), FilterMode.Bilinear);
+                state.ColorHistory = CreateHistoryTexture(colorDescriptor, "BurtGI Color History " + camera.GetInstanceID(), FilterMode.Bilinear);
                 SetAllocationInvalidationReason(state, "HistoryAllocated");
             }
 
             if (state.DepthNormalHistory == null)
             {
                 state.DepthNormalDescriptor = depthNormalDescriptor;
-                state.DepthNormalHistory = CreateHistoryTexture(depthNormalDescriptor, "Burt XGI Depth Normal History " + camera.GetInstanceID(), FilterMode.Point);
+                state.DepthNormalHistory = CreateHistoryTexture(depthNormalDescriptor, "BurtGI Depth Normal History " + camera.GetInstanceID(), FilterMode.Point);
                 SetAllocationInvalidationReason(state, "DepthNormalHistoryAllocated");
+            }
+
+            if (state.DebugPreviousColorHistory == null)
+            {
+                state.DebugPreviousColorDescriptor = colorDescriptor;
+                state.DebugPreviousColorHistory = CreateHistoryTexture(colorDescriptor, "BurtGI Previous Color History Debug " + camera.GetInstanceID(), FilterMode.Bilinear);
+            }
+
+            if (state.DebugPreviousDepthNormalHistory == null)
+            {
+                state.DebugPreviousDepthNormalDescriptor = depthNormalDescriptor;
+                state.DebugPreviousDepthNormalHistory = CreateHistoryTexture(depthNormalDescriptor, "BurtGI Previous Depth Normal History Debug " + camera.GetInstanceID(), FilterMode.Point);
             }
 
             if (!string.IsNullOrEmpty(invalidationReason))
@@ -1017,12 +1220,47 @@ namespace Burt.RenderPipeline
 
         public static BurtScreenSpaceGlobalIlluminationHistoryStatus GetHistoryStatus(Camera camera)
         {
+            return GetHistoryStatus(camera, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationHistorySettings(camera));
+        }
+
+        public static BurtScreenSpaceGlobalIlluminationHistoryStatus GetHistoryStatus(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
+            return GetHistoryStatus(request, settings);
+        }
+
+        public static BurtScreenSpaceGlobalIlluminationHistoryStatus GetHistoryStatus(BurtRenderRequest request, BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            if (!settings.Enabled)
+            {
+                return CreateInactiveHistoryStatus("Disabled");
+            }
+
+            if (!settings.TemporalAccumulation)
+            {
+                return CreateInactiveHistoryStatus(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationTemporalDisabledReason(request, settings));
+            }
+
+            return GetHistoryStatus(request != null ? request.Camera : null, settings);
+        }
+
+        public static BurtScreenSpaceGlobalIlluminationHistoryStatus GetHistoryStatus(Camera camera, BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            if (!settings.Enabled)
+            {
+                return CreateInactiveHistoryStatus("Disabled");
+            }
+
+            if (!settings.TemporalAccumulation)
+            {
+                return CreateInactiveHistoryStatus("TemporalDisabled");
+            }
+
             if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
             {
                 return new BurtScreenSpaceGlobalIlluminationHistoryStatus(false, false, false, false, 0, 0, RenderTextureFormat.Default, 0, 0, 0, 0, "NoCameraOrHistory");
             }
 
-            var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationHistorySettings(camera);
             var colorDescriptor = CreateColorHistoryDescriptor(camera, settings);
             var depthNormalDescriptor = CreateDepthNormalHistoryDescriptor(camera, settings);
             var hasColor = state.ColorHistory != null;
@@ -1041,6 +1279,43 @@ namespace Burt.RenderPipeline
                 state.FirstValidFrameIndex,
                 state.LastInvalidationFrameIndex,
                 state.LastInvalidationReason);
+        }
+
+        public static void CopyHistoryToDebugSnapshot(CommandBuffer cmd, Camera camera)
+        {
+            if (cmd == null || camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
+            {
+                return;
+            }
+
+            if (state.ColorHistory == null || state.DepthNormalHistory == null || state.DebugPreviousColorHistory == null || state.DebugPreviousDepthNormalHistory == null)
+            {
+                return;
+            }
+
+            cmd.CopyTexture(new RenderTargetIdentifier(state.ColorHistory), new RenderTargetIdentifier(state.DebugPreviousColorHistory));
+            cmd.CopyTexture(new RenderTargetIdentifier(state.DepthNormalHistory), new RenderTargetIdentifier(state.DebugPreviousDepthNormalHistory));
+            state.DebugPreviousViewProjectionMatrix = state.HasPreviousCameraState ? state.PreviousViewProjectionMatrix : state.CurrentViewProjectionMatrix;
+        }
+
+        public static BurtScreenSpaceGlobalIlluminationHistoryTextures GetDebugSnapshotTextures(BurtRenderRequest request)
+        {
+            var matrices = CreateCurrentMatrices(request);
+            var camera = request != null ? request.Camera : null;
+            if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
+            {
+                return BurtScreenSpaceGlobalIlluminationHistoryTextures.CreateInvalid(matrices);
+            }
+
+            var previousViewProjectionMatrix = state.DebugPreviousColorHistory != null && state.DebugPreviousDepthNormalHistory != null
+                ? state.DebugPreviousViewProjectionMatrix
+                : (state.HasPreviousCameraState ? state.PreviousViewProjectionMatrix : matrices.ViewProjectionMatrix);
+            return new BurtScreenSpaceGlobalIlluminationHistoryTextures(state.DebugPreviousColorHistory, state.DebugPreviousDepthNormalHistory, previousViewProjectionMatrix, matrices.InverseViewProjectionMatrix);
+        }
+
+        private static BurtScreenSpaceGlobalIlluminationHistoryStatus CreateInactiveHistoryStatus(string reason)
+        {
+            return new BurtScreenSpaceGlobalIlluminationHistoryStatus(false, false, false, false, 0, 0, RenderTextureFormat.Default, 0, 0, 0, 0, reason);
         }
 
         public static RenderTextureDescriptor CreateColorHistoryDescriptor(Camera camera, BurtScreenSpaceGlobalIlluminationSettings settings)
@@ -1269,8 +1544,12 @@ namespace Burt.RenderPipeline
 
             ReleaseTexture(state.ColorHistory);
             ReleaseTexture(state.DepthNormalHistory);
+            ReleaseTexture(state.DebugPreviousColorHistory);
+            ReleaseTexture(state.DebugPreviousDepthNormalHistory);
             state.ColorHistory = null;
             state.DepthNormalHistory = null;
+            state.DebugPreviousColorHistory = null;
+            state.DebugPreviousDepthNormalHistory = null;
             state.HasValidHistory = false;
             state.HasSettingsSignature = false;
         }
@@ -1289,7 +1568,7 @@ namespace Burt.RenderPipeline
 
     internal static class BurtScreenSpaceGlobalIlluminationPassUtility
     {
-        public const string ScreenSpaceGlobalIlluminationShaderName = "Hidden/BurtRP/ScreenSpaceGlobalIllumination";
+        public const string ScreenSpaceGlobalIlluminationShaderName = "Hidden/BurtRP/BurtGI";
         private static int shaderAvailabilityFrame = -1;
         private static bool shaderAvailable;
 
@@ -1300,7 +1579,28 @@ namespace Burt.RenderPipeline
 
         public static bool ShouldUseScreenSpaceGlobalIlluminationDebugView(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
-            return IsScreenSpaceGlobalIlluminationDebugMode(BurtShadingDebugSettings.Mode) && ShouldUseScreenSpaceGlobalIllumination(request, asset);
+            if (!IsScreenSpaceGlobalIlluminationDebugMode(BurtShadingDebugSettings.Mode))
+            {
+                return false;
+            }
+
+            if (IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(BurtShadingDebugSettings.Mode))
+            {
+                return ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(request, asset);
+            }
+
+            return ShouldUseScreenSpaceGlobalIllumination(request, asset);
+        }
+
+        public static bool ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (!IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(BurtShadingDebugSettings.Mode))
+            {
+                return false;
+            }
+
+            var settings = ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
+            return settings.Enabled && settings.TemporalAccumulation;
         }
 
         public static bool IsScreenSpaceGlobalIlluminationDebugMode(BurtShadingDebugMode mode)
@@ -1309,7 +1609,19 @@ namespace Burt.RenderPipeline
                 mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal ||
                 mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio ||
                 mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay ||
-                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite;
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite ||
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHistory ||
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDifference ||
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard ||
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare ||
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence ||
+                IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(mode);
+        }
+
+        public static bool IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(BurtShadingDebugMode mode)
+        {
+            return mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalConfidence ||
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalRejection;
         }
 
         public static bool IsScreenSpaceGlobalIlluminationOverlayDebugMode(BurtShadingDebugMode mode)
@@ -1326,37 +1638,55 @@ namespace Burt.RenderPipeline
 
             if (request.Type == BurtRenderRequestType.Preview || request.Type == BurtRenderRequestType.Reflection)
             {
-                return BurtScreenSpaceGlobalIlluminationSettings.Disabled;
+                return DisableAndInvalidateHistory(request, "PreviewOrReflection");
             }
 
             if (asset == null || asset.RendererMode != BurtRendererMode.Deferred)
             {
-                return BurtScreenSpaceGlobalIlluminationSettings.Disabled;
+                return DisableAndInvalidateHistory(request, "RendererNotDeferred");
             }
 
             if (IsScreenSpaceGlobalIlluminationSuppressedByShadingDebug())
             {
-                return BurtScreenSpaceGlobalIlluminationSettings.Disabled;
+                return DisableAndInvalidateHistory(request, "ShadingDebug");
             }
 
             var component = GetScreenSpaceGlobalIlluminationVolumeComponent();
             if (component == null || !component.IsEnabled())
             {
-                return BurtScreenSpaceGlobalIlluminationSettings.Disabled;
+                return DisableAndInvalidateHistory(request, "BurtGIDisabled");
             }
 
             if (!IsScreenSpaceGlobalIlluminationShaderAvailable())
             {
-                return BurtScreenSpaceGlobalIlluminationSettings.Disabled;
+                return DisableAndInvalidateHistory(request, "ShaderMissing");
             }
 
-            return CreateScreenSpaceGlobalIlluminationSettings(component);
+            return ApplyTemporalAACompatibilityOverrides(CreateScreenSpaceGlobalIlluminationSettings(component), request);
+        }
+
+        private static BurtScreenSpaceGlobalIlluminationSettings DisableAndInvalidateHistory(BurtRenderRequest request, string reason)
+        {
+            BurtScreenSpaceGlobalIlluminationHistoryUtility.InvalidateHistory(request != null ? request.Camera : null, reason);
+            return BurtScreenSpaceGlobalIlluminationSettings.Disabled;
         }
 
         public static RenderTextureDescriptor CreateScreenSpaceGlobalIlluminationDescriptor(Camera camera, BurtScreenSpaceGlobalIlluminationSettings settings)
         {
             var descriptor = BurtRenderTargetDescriptorUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera);
             ApplyScreenSpaceGlobalIlluminationResolution(ref descriptor, settings);
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceGlobalIlluminationDiagnosticsDescriptor(Camera camera, BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            var descriptor = CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
+            descriptor.colorFormat = RenderTextureFormat.ARGB32;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
             return descriptor;
         }
 
@@ -1398,9 +1728,46 @@ namespace Burt.RenderPipeline
 
         public static string ResolveScreenSpaceGlobalIlluminationTraceModeLabel(BurtScreenSpaceGlobalIlluminationSettings settings)
         {
-            return settings.Enabled
-                ? "ScreenSpaceDiffuseBounce+DiffuseSourceFiltered+SkySHFallback+DepthNormalBilateral+TemporalOptional"
-                : "Disabled";
+            if (!settings.Enabled)
+            {
+                return "Disabled";
+            }
+
+            var label = "ScreenSpaceDiffuseBounce+DiffuseSourceFiltered+SkySHFallback+V2.2LeakGuardEdgeFadeNormalCone+GrazingPlaneReject+PerSampleJitter";
+            if (settings.Resolution == BurtScreenSpaceGlobalIlluminationResolution.Full && !settings.TemporalAccumulation)
+            {
+                label += "+TAAFullResCurrent+StabilizedLeakGuard";
+            }
+
+            return label;
+        }
+
+        public static string ResolveScreenSpaceGlobalIlluminationTemporalStatusLabel(BurtRenderRequest request, BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            if (!settings.Enabled)
+            {
+                return "Disabled";
+            }
+
+            return settings.TemporalAccumulation
+                ? "Enabled"
+                : "Disabled(" + ResolveScreenSpaceGlobalIlluminationTemporalDisabledReason(request, settings) + ")";
+        }
+
+        public static string ResolveScreenSpaceGlobalIlluminationTemporalDisabledReason(BurtRenderRequest request, BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            if (!settings.Enabled)
+            {
+                return "Disabled";
+            }
+
+            var component = GetScreenSpaceGlobalIlluminationVolumeComponent();
+            if (component != null && component.temporalAccumulation.value && ShouldUseTemporalAACompatibility(request))
+            {
+                return "TAACompatibilityFullResCurrent";
+            }
+
+            return "TemporalDisabled";
         }
 
         public static BurtScreenSpaceGlobalIlluminationSettings ResolveScreenSpaceGlobalIlluminationHistorySettings(Camera camera)
@@ -1426,11 +1793,19 @@ namespace Burt.RenderPipeline
                 80f,
                 true,
                 0.18f,
+                1.25f,
+                0.75f,
+                0.65f,
+                0.5f,
+                0.55f,
+                0.6f,
                 true,
                 0.86f,
                 0.02f,
                 0.65f,
-                1f);
+                1f,
+                1.25f,
+                0.55f);
         }
 
         public static int ResolveScreenSpaceGlobalIlluminationShaderDebugMode()
@@ -1447,6 +1822,20 @@ namespace Burt.RenderPipeline
                     return 4;
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
                     return 5;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalConfidence:
+                    return 6;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalRejection:
+                    return 7;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHistory:
+                    return 8;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDifference:
+                    return 9;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard:
+                    return 10;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare:
+                    return 11;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
+                    return 12;
                 default:
                     return 0;
             }
@@ -1466,6 +1855,20 @@ namespace Burt.RenderPipeline
                     return "Overlay";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
                     return "Composite";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalConfidence:
+                    return "TemporalConfidence";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalRejection:
+                    return "TemporalRejection";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHistory:
+                    return "History";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDifference:
+                    return "Difference";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard:
+                    return "LeakGuard";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare:
+                    return "DiagnosticCompare";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
+                    return "Confidence";
                 default:
                     return "Disabled";
             }
@@ -1481,6 +1884,14 @@ namespace Burt.RenderPipeline
             var thickness = component.thickness.value;
             var blur = component.blur.value;
             var blurSharpness = component.blurSharpness.value;
+            var spatialDenoiseRadius = component.spatialDenoiseRadius.value;
+            var spatialDenoiseStrength = component.spatialDenoiseStrength.value;
+            var leakGuardStrength = component.leakGuardStrength.value;
+            var edgeFadeStrength = component.edgeFadeStrength.value;
+            var normalConeTightness = component.normalConeTightness.value;
+            var skyEdgeSuppression = component.skyEdgeSuppression.value;
+            var temporalVarianceClamp = component.temporalVarianceClamp.value;
+            var temporalHitRejection = component.temporalHitRejection.value;
             ApplyScreenSpaceGlobalIlluminationQualityPreset(
                 quality,
                 ref resolution,
@@ -1489,7 +1900,15 @@ namespace Burt.RenderPipeline
                 ref radius,
                 ref thickness,
                 ref blur,
-                ref blurSharpness);
+                ref blurSharpness,
+                ref spatialDenoiseRadius,
+                ref spatialDenoiseStrength,
+                ref leakGuardStrength,
+                ref edgeFadeStrength,
+                ref normalConeTightness,
+                ref skyEdgeSuppression,
+                ref temporalVarianceClamp,
+                ref temporalHitRejection);
 
             return new BurtScreenSpaceGlobalIlluminationSettings(
                 true,
@@ -1506,11 +1925,71 @@ namespace Burt.RenderPipeline
                 component.distanceFade.value,
                 blur,
                 blurSharpness,
+                spatialDenoiseRadius,
+                spatialDenoiseStrength,
+                leakGuardStrength,
+                edgeFadeStrength,
+                normalConeTightness,
+                skyEdgeSuppression,
                 component.temporalAccumulation.value,
                 component.temporalFeedback.value,
                 component.temporalDepthRejection.value,
                 component.temporalNormalRejection.value,
-                component.temporalClamp.value);
+                component.temporalClamp.value,
+                temporalVarianceClamp,
+                temporalHitRejection);
+        }
+
+        private static BurtScreenSpaceGlobalIlluminationSettings ApplyTemporalAACompatibilityOverrides(
+            BurtScreenSpaceGlobalIlluminationSettings settings,
+            BurtRenderRequest request)
+        {
+            if (!settings.Enabled || !ShouldUseTemporalAACompatibility(request))
+            {
+                return settings;
+            }
+
+            return new BurtScreenSpaceGlobalIlluminationSettings(
+                true,
+                settings.Quality,
+                BurtScreenSpaceGlobalIlluminationResolution.Full,
+                settings.Intensity,
+                settings.Radius,
+                settings.SampleCount,
+                settings.MaxSteps,
+                settings.Thickness,
+                settings.SkyFallback,
+                settings.RadianceClamp,
+                settings.NormalWeight,
+                settings.DistanceFade,
+                settings.Blur,
+                Mathf.Max(settings.BlurSharpness, 0.22f),
+                settings.SpatialDenoiseRadius,
+                Mathf.Max(settings.SpatialDenoiseStrength, 0.82f),
+                Mathf.Max(settings.LeakGuardStrength, 0.72f),
+                Mathf.Max(settings.EdgeFadeStrength, 0.6f),
+                Mathf.Max(settings.NormalConeTightness, 0.62f),
+                Mathf.Max(settings.SkyEdgeSuppression, 0.7f),
+                false,
+                settings.TemporalFeedback,
+                settings.TemporalDepthRejection,
+                settings.TemporalNormalRejection,
+                settings.TemporalClamp,
+                settings.TemporalVarianceClamp,
+                settings.TemporalHitRejection);
+        }
+
+        private static bool ShouldUseTemporalAACompatibility(BurtRenderRequest request)
+        {
+            var temporalAA = request != null ? request.TemporalAA : null;
+            if (temporalAA != null && temporalAA.Enabled)
+            {
+                return true;
+            }
+
+            return IsScreenSpaceGlobalIlluminationDebugMode(BurtShadingDebugSettings.Mode) &&
+                !IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(BurtShadingDebugSettings.Mode) &&
+                BurtPostProcessUtility.HasActiveTemporalAAVolume();
         }
 
         private static void ApplyScreenSpaceGlobalIlluminationQualityPreset(
@@ -1521,7 +2000,15 @@ namespace Burt.RenderPipeline
             ref float radius,
             ref float thickness,
             ref bool blur,
-            ref float blurSharpness)
+            ref float blurSharpness,
+            ref float spatialDenoiseRadius,
+            ref float spatialDenoiseStrength,
+            ref float leakGuardStrength,
+            ref float edgeFadeStrength,
+            ref float normalConeTightness,
+            ref float skyEdgeSuppression,
+            ref float temporalVarianceClamp,
+            ref float temporalHitRejection)
         {
             switch (quality)
             {
@@ -1533,6 +2020,14 @@ namespace Burt.RenderPipeline
                     thickness = Mathf.Max(thickness, 0.45f);
                     blur = true;
                     blurSharpness = 0.12f;
+                    spatialDenoiseRadius = 1f;
+                    spatialDenoiseStrength = 0.65f;
+                    leakGuardStrength = 0.55f;
+                    edgeFadeStrength = 0.45f;
+                    normalConeTightness = 0.45f;
+                    skyEdgeSuppression = 0.5f;
+                    temporalVarianceClamp = 1f;
+                    temporalHitRejection = 0.65f;
                     break;
                 case BurtScreenSpaceGlobalIlluminationQuality.Medium:
                     resolution = BurtScreenSpaceGlobalIlluminationResolution.Half;
@@ -1542,6 +2037,14 @@ namespace Burt.RenderPipeline
                     thickness = Mathf.Max(thickness, 0.35f);
                     blur = true;
                     blurSharpness = 0.18f;
+                    spatialDenoiseRadius = 1.25f;
+                    spatialDenoiseStrength = 0.75f;
+                    leakGuardStrength = 0.65f;
+                    edgeFadeStrength = 0.5f;
+                    normalConeTightness = 0.55f;
+                    skyEdgeSuppression = 0.6f;
+                    temporalVarianceClamp = 1.25f;
+                    temporalHitRejection = 0.55f;
                     break;
                 case BurtScreenSpaceGlobalIlluminationQuality.High:
                     resolution = BurtScreenSpaceGlobalIlluminationResolution.Full;
@@ -1551,6 +2054,14 @@ namespace Burt.RenderPipeline
                     thickness = Mathf.Max(thickness, 0.28f);
                     blur = true;
                     blurSharpness = 0.24f;
+                    spatialDenoiseRadius = 1.5f;
+                    spatialDenoiseStrength = 0.85f;
+                    leakGuardStrength = 0.75f;
+                    edgeFadeStrength = 0.6f;
+                    normalConeTightness = 0.68f;
+                    skyEdgeSuppression = 0.72f;
+                    temporalVarianceClamp = 1.5f;
+                    temporalHitRejection = 0.45f;
                     break;
             }
         }

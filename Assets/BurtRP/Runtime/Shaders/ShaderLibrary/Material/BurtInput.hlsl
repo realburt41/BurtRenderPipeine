@@ -27,6 +27,9 @@ static const float BURT_SUBSURFACE_DEFAULT_AMBIENT = 0.35f;
 static const float3 BURT_SUBSURFACE_DEFAULT_TINT = float3(1.0f, 0.45f, 0.32f);
 static const float BURT_SUBSURFACE_PROFILE_COUNT = 8.0f;
 static const float BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX = 0.0f;
+static const float BURT_SUBSURFACE_SCATTERING_MODE_5S_BURLEY = 0.0f;
+static const float BURT_SUBSURFACE_SCATTERING_MODE_4S_SEPARABLE = 1.0f;
+static const float BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE = BURT_SUBSURFACE_SCATTERING_MODE_5S_BURLEY;
 
 float BurtResolveSurfaceShadingModel(float shadingModelID)
 {
@@ -92,6 +95,8 @@ struct BurtSurfaceData
 
     float subsurfaceAmbient;
 
+    float subsurfaceScatteringMode;
+
     float3 subsurfaceTint;
 
     float subsurfaceProfileIndex;
@@ -107,6 +112,11 @@ float BurtClampSubsurfaceProfileIndex(float profileIndex)
     return clamp(floor(profileIndex + 0.5f), 0.0f, BURT_SUBSURFACE_PROFILE_COUNT - 1.0f);
 }
 
+float BurtClampSubsurfaceScatteringMode(float scatteringMode)
+{
+    return clamp(floor(scatteringMode + 0.5f), BURT_SUBSURFACE_SCATTERING_MODE_5S_BURLEY, BURT_SUBSURFACE_SCATTERING_MODE_4S_SEPARABLE);
+}
+
 void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
 {
     surfaceData.subsurfaceStrength = 0.0f;
@@ -114,6 +124,7 @@ void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
     surfaceData.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
     surfaceData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
     surfaceData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
+    surfaceData.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
     surfaceData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
     surfaceData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
 }
@@ -318,7 +329,8 @@ BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
     float subsurfaceDistortion,
     float subsurfaceAmbient,
     float3 subsurfaceTint,
-    float subsurfaceProfileIndex)
+    float subsurfaceProfileIndex,
+    float subsurfaceScatteringMode)
 {
     surfaceData.subsurfaceStrength = saturate(subsurfaceStrength);
     surfaceData.subsurfaceThickness = saturate(subsurfaceThickness);
@@ -327,8 +339,31 @@ BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
     surfaceData.subsurfaceAmbient = saturate(subsurfaceAmbient);
     surfaceData.subsurfaceTint = max(subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
     surfaceData.subsurfaceProfileIndex = BurtClampSubsurfaceProfileIndex(subsurfaceProfileIndex);
+    surfaceData.subsurfaceScatteringMode = BurtClampSubsurfaceScatteringMode(subsurfaceScatteringMode);
     surfaceData.shadingModelID = BURT_SHADING_MODEL_SUBSURFACE;
     return surfaceData;
+}
+
+BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
+    BurtSurfaceData surfaceData,
+    float subsurfaceStrength,
+    float subsurfaceThickness,
+    float subsurfacePower,
+    float subsurfaceDistortion,
+    float subsurfaceAmbient,
+    float3 subsurfaceTint,
+    float subsurfaceProfileIndex)
+{
+    return BurtApplySubsurfaceSurfaceSemantics(
+        surfaceData,
+        subsurfaceStrength,
+        subsurfaceThickness,
+        subsurfacePower,
+        subsurfaceDistortion,
+        subsurfaceAmbient,
+        subsurfaceTint,
+        subsurfaceProfileIndex,
+        BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE);
 }
 
 BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(

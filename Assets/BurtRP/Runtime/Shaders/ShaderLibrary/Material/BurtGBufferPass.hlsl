@@ -46,6 +46,23 @@ struct SubsurfaceForwardFragmentOutput
     float4 gbuffer2 : SV_Target1;
 };
 
+static const float BURT_SUBSURFACE_PROFILE_TYPE_BURLEY = 64.0f;
+static const float BURT_SUBSURFACE_PROFILE_TYPE_SEPARABLE = 128.0f;
+
+float BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(BurtSurfaceData surfaceData)
+{
+    if (saturate(surfaceData.subsurfaceStrength) <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    float profileID = BurtClampSubsurfaceProfileIndex(surfaceData.subsurfaceProfileIndex);
+    float profileType = abs(BurtClampSubsurfaceScatteringMode(surfaceData.subsurfaceScatteringMode) - BURT_SUBSURFACE_SCATTERING_MODE_4S_SEPARABLE) < 0.5f
+        ? BURT_SUBSURFACE_PROFILE_TYPE_SEPARABLE
+        : BURT_SUBSURFACE_PROFILE_TYPE_BURLEY;
+    return (profileType + profileID) / 255.0f;
+}
+
 GBufferVaryings VertGBuffer(GBufferAttributes input)
 {
     GBufferVaryings output;
@@ -104,7 +121,7 @@ SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings input, fix
     float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
 
     SubsurfaceForwardFragmentOutput output;
-    output.gbuffer0 = float4(saturate(surfaceData.baseColor.rgb), saturate(surfaceData.occlusion));
+    output.gbuffer0 = float4(saturate(surfaceData.baseColor.rgb), BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(surfaceData));
     output.gbuffer2 = float4(max(emissionColor, float3(0.0f, 0.0f, 0.0f)), saturate(surfaceData.reflectance));
     return output;
 }

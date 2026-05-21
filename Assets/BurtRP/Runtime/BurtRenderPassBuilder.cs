@@ -381,6 +381,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
         }
 
+        public BurtRenderTargetHandle ReadBurtGITemporalDiagnostics()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGITemporalDiagnostics()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
+        }
+
         public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceSource()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName);
@@ -419,16 +429,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceSetup()
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
-        }
-
-        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceTile()
-        {
-            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName);
-        }
-
-        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceTile()
-        {
-            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTileName);
         }
 
         public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceTemp()
@@ -499,16 +499,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceVelocity()
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName);
-        }
-
-        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceDilatedVelocity()
-        {
-            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceDilatedVelocityName);
-        }
-
-        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceDilatedVelocity()
-        {
-            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceDilatedVelocityName);
         }
 
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。

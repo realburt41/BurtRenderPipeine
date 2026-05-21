@@ -32,6 +32,7 @@ Shader "BurtRP/Clear Coat"
 
         // 定义环境遮蔽强度，0 表示忽略 Mask Map 的 G 通道，1 表示完全使用 G 通道。
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
+        [HideInInspector] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
         _ClearCoatMask ("Clear Coat Mask", Range(0, 1)) = 0
         _ClearCoatRoughness ("Clear Coat Roughness", Range(0, 1)) = 0.2
         [Normal] _ClearCoatNormalMap ("Clear Coat Normal Map", 2D) = "bump" {}
@@ -258,5 +259,4 @@ Shader "BurtRP/Clear Coat"
     // Disables fallback so BurtRP shader errors do not silently use another pipeline shader.
     Fallback Off
 }
-
 

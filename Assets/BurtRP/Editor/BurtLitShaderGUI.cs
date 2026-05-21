@@ -21,6 +21,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent ClearCoatNormalMapLabel = new GUIContent("Clear Coat Normal Map");
         private static readonly GUIContent EmissionMapLabel = new GUIContent("Emission Map");
         private static readonly GUIContent ShadingModelLabel = new GUIContent("Shading Model");
+        private static readonly GUIContent SubsurfaceScatteringModeLabel = new GUIContent("SSS Algorithm", "Choose 5S Burley or 4S Separable screen-space skin scattering.");
         private static readonly GUIContent SubsurfaceProfileLabel = new GUIContent("Subsurface Profile", "Drag a BurtSubsurfaceProfile asset here. The material stores the resolved profile slot for the shader.");
         private static readonly GUIContent SubsurfaceProfileIndexLabel = new GUIContent("Subsurface Profile Index", "Runtime slot used by the shader. 0 is the default profile, 1-7 are the pipeline profile list.");
         private static readonly GUIContent DoubleSidedLabel = new GUIContent("Double Sided", "Render both front and back faces by switching culling off.");
@@ -34,6 +35,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent EnabledPassesLabel = new GUIContent("Enabled Passes");
         private static readonly string[] SurfaceTypeNames = { "Opaque", "Transparent" };
         private static readonly string[] DoubleSidedNormalModeNames = { "None", "Flip", "Mirror" };
+        private static readonly string[] SubsurfaceScatteringModeNames = { "5S Burley", "4S Separable" };
         private const string SubsurfaceProfileGuidTag = "BurtSubsurfaceProfileGuid";
         private static bool showSurfaceOptions = true;
         private static bool showBaseInputs = true;
@@ -63,6 +65,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty subsurfacePower;
         private MaterialProperty subsurfaceDistortion;
         private MaterialProperty subsurfaceAmbient;
+        private MaterialProperty subsurfaceScatteringMode;
         private MaterialProperty subsurfaceProfileIndex;
         private MaterialProperty subsurfaceTint;
         private MaterialProperty normalMap;
@@ -110,6 +113,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             BurtShaderGUIUtility.UpdateEmissionFlag(material);
+            ClampSubsurfaceScatteringMode(material);
             ApplySurfaceOptions(material);
         }
 
@@ -132,6 +136,7 @@ namespace Burt.RenderPipeline.Editor
             subsurfacePower = Find("_SubsurfacePower");
             subsurfaceDistortion = Find("_SubsurfaceDistortion");
             subsurfaceAmbient = Find("_SubsurfaceAmbient");
+            subsurfaceScatteringMode = Find("_SubsurfaceScatteringMode");
             subsurfaceProfileIndex = Find("_SubsurfaceProfileIndex");
             subsurfaceTint = Find("_SubsurfaceTint");
             normalMap = Find("_NormalMap");
@@ -360,6 +365,7 @@ namespace Burt.RenderPipeline.Editor
                 return;
             }
 
+            DrawSubsurfaceScatteringMode();
             DrawProperty(subsurfaceStrength);
             DrawProperty(subsurfaceThickness);
             DrawProperty(subsurfacePower);
@@ -369,6 +375,38 @@ namespace Burt.RenderPipeline.Editor
             DrawProperty(subsurfaceTint);
             EditorGUILayout.HelpBox("Materials pick a BurtSubsurfaceProfile asset. BurtRP resolves it to the pipeline profile slots used by deferred SSS and profile-driven skin specular.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
+        }
+
+        private void DrawSubsurfaceScatteringMode()
+        {
+            if (subsurfaceScatteringMode == null)
+            {
+                return;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUI.showMixedValue = subsurfaceScatteringMode.hasMixedValue;
+            var mode = EditorGUILayout.Popup(SubsurfaceScatteringModeLabel, Mathf.Clamp(Mathf.RoundToInt(subsurfaceScatteringMode.floatValue), 0, SubsurfaceScatteringModeNames.Length - 1), SubsurfaceScatteringModeNames);
+            EditorGUI.showMixedValue = false;
+            if (EditorGUI.EndChangeCheck())
+            {
+                materialEditor.RegisterPropertyChangeUndo(SubsurfaceScatteringModeLabel.text);
+                subsurfaceScatteringMode.floatValue = mode;
+                foreach (Object target in materialEditor.targets)
+                {
+                    ClampSubsurfaceScatteringMode(target as Material);
+                }
+            }
+        }
+
+        private static void ClampSubsurfaceScatteringMode(Material material)
+        {
+            if (material == null || !material.HasProperty("_SubsurfaceScatteringMode"))
+            {
+                return;
+            }
+
+            material.SetFloat("_SubsurfaceScatteringMode", Mathf.Clamp(Mathf.RoundToInt(material.GetFloat("_SubsurfaceScatteringMode")), 0, SubsurfaceScatteringModeNames.Length - 1));
         }
 
         private void DrawSubsurfaceProfilePicker()

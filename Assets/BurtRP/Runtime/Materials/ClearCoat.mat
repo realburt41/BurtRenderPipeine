@@ -80,7 +80,7 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
-    - _Anisotropy: 0
+    - _Anisotropy: 0.385
     - _BumpScale: 1
     - _ClearCoatMask: 1
     - _ClearCoatNormalScale: 0
@@ -100,7 +100,7 @@ Material:
     - _OcclusionStrength: 1
     - _Parallax: 0.02
     - _Reflectance: 0.5
-    - _Smoothness: 0.507
+    - _Smoothness: 0.47
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SrcBlend: 1

@@ -106,6 +106,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceGlobalIlluminationTextureId = Shader.PropertyToID(ScreenSpaceGlobalIlluminationTextureShaderName);
 
+        public const string BurtGITemporalDiagnosticsName = "BurtGITemporalDiagnostics";
+
+        public const string BurtGITemporalDiagnosticsTextureShaderName = "_BurtGITemporalDiagnosticsTexture";
+
+        public static readonly int BurtGITemporalDiagnosticsTextureId = Shader.PropertyToID(BurtGITemporalDiagnosticsTextureShaderName);
+
         public const string ScreenSpaceSubsurfaceSourceName = "ScreenSpaceSubsurfaceSource";
 
         public const string ScreenSpaceSubsurfaceSourceTextureShaderName = "_BurtScreenSpaceSubsurfaceSourceTexture";
@@ -142,12 +148,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceSubsurfaceMaskTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceMaskTextureShaderName);
 
-        public const string ScreenSpaceSubsurfaceTileName = "ScreenSpaceSubsurfaceTile";
-
-        public const string ScreenSpaceSubsurfaceTileTextureShaderName = "_BurtScreenSpaceSubsurfaceTileTexture";
-
-        public static readonly int ScreenSpaceSubsurfaceTileTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceTileTextureShaderName);
-
         public const string ScreenSpaceSubsurfaceTempName = "ScreenSpaceSubsurfaceTemp";
 
         public const string ScreenSpaceSubsurfaceTempTextureShaderName = "_BurtScreenSpaceSubsurfaceTempTexture";
@@ -168,6 +168,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public const string ScreenSpaceSubsurfaceHistoryName = "ScreenSpaceSubsurfaceHistory";
 
+        public const string ScreenSpaceSubsurfacePersistentHistoryName = "ScreenSpaceSubsurfacePersistentHistory";
+
         public const string ScreenSpaceSubsurfaceHistoryTextureShaderName = "_BurtScreenSpaceSubsurfaceHistoryTexture";
 
         public static readonly int ScreenSpaceSubsurfaceHistoryTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceHistoryTextureShaderName);
@@ -177,12 +179,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string ScreenSpaceSubsurfaceVelocityTextureShaderName = "_BurtScreenSpaceSubsurfaceVelocityTexture";
 
         public static readonly int ScreenSpaceSubsurfaceVelocityTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceVelocityTextureShaderName);
-
-        public const string ScreenSpaceSubsurfaceDilatedVelocityName = "ScreenSpaceSubsurfaceDilatedVelocity";
-
-        public const string ScreenSpaceSubsurfaceDilatedVelocityTextureShaderName = "_BurtScreenSpaceSubsurfaceDilatedVelocityTexture";
-
-        public static readonly int ScreenSpaceSubsurfaceDilatedVelocityTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceDilatedVelocityTextureShaderName);
 
         public const string ScreenSpaceSubsurfaceBurleyArgsBufferName = "ScreenSpaceSubsurfaceBurleyArgsBuffer";
 
@@ -705,6 +701,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(ScreenSpaceGlobalIlluminationName);
         }
 
+        public BurtRenderTargetHandle RegisterBurtGITemporalDiagnosticsTexture()
+        {
+            return RegisterBurtGITemporalDiagnostics(new RenderTargetIdentifier(BurtGITemporalDiagnosticsTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITemporalDiagnostics(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGITemporalDiagnosticsName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGITemporalDiagnostics()
+        {
+            return GetRenderTarget(BurtGITemporalDiagnosticsName);
+        }
+
         public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceSourceTexture()
         {
             return RegisterScreenSpaceSubsurfaceSource(new RenderTargetIdentifier(ScreenSpaceSubsurfaceSourceTextureId));
@@ -795,21 +806,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(ScreenSpaceSubsurfaceMaskName);
         }
 
-        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceTileTexture()
-        {
-            return RegisterScreenSpaceSubsurfaceTile(new RenderTargetIdentifier(ScreenSpaceSubsurfaceTileTextureId));
-        }
-
-        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceTile(RenderTargetIdentifier identifier)
-        {
-            return RegisterRenderTarget(ScreenSpaceSubsurfaceTileName, identifier);
-        }
-
-        public BurtRenderTargetHandle GetScreenSpaceSubsurfaceTile()
-        {
-            return GetRenderTarget(ScreenSpaceSubsurfaceTileName);
-        }
-
         public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceTempTexture()
         {
             return RegisterScreenSpaceSubsurfaceTemp(new RenderTargetIdentifier(ScreenSpaceSubsurfaceTempTextureId));
@@ -883,21 +879,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetScreenSpaceSubsurfaceVelocity()
         {
             return GetRenderTarget(ScreenSpaceSubsurfaceVelocityName);
-        }
-
-        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceDilatedVelocityTexture()
-        {
-            return RegisterScreenSpaceSubsurfaceDilatedVelocity(new RenderTargetIdentifier(ScreenSpaceSubsurfaceDilatedVelocityTextureId));
-        }
-
-        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceDilatedVelocity(RenderTargetIdentifier identifier)
-        {
-            return RegisterRenderTarget(ScreenSpaceSubsurfaceDilatedVelocityName, identifier);
-        }
-
-        public BurtRenderTargetHandle GetScreenSpaceSubsurfaceDilatedVelocity()
-        {
-            return GetRenderTarget(ScreenSpaceSubsurfaceDilatedVelocityName);
         }
 
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。

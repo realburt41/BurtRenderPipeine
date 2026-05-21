@@ -566,16 +566,16 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   active: 1
   enabled:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 1
   quality:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 2
   resolution:
     m_OverrideState: 0
     m_Value: 1
   intensity:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0.6
   radius:
     m_OverrideState: 0
@@ -607,6 +607,33 @@ MonoBehaviour:
   blurSharpness:
     m_OverrideState: 0
     m_Value: 0.18
+  spatialDenoiseRadius:
+    m_OverrideState: 0
+    m_Value: 1.25
+  spatialDenoiseStrength:
+    m_OverrideState: 0
+    m_Value: 0.75
+  temporalAccumulation:
+    m_OverrideState: 0
+    m_Value: 1
+  temporalFeedback:
+    m_OverrideState: 0
+    m_Value: 0.86
+  temporalDepthRejection:
+    m_OverrideState: 0
+    m_Value: 0.02
+  temporalNormalRejection:
+    m_OverrideState: 0
+    m_Value: 0.65
+  temporalClamp:
+    m_OverrideState: 0
+    m_Value: 1
+  temporalVarianceClamp:
+    m_OverrideState: 0
+    m_Value: 1.25
+  temporalHitRejection:
+    m_OverrideState: 0
+    m_Value: 0.55
 --- !u!114 &3971589225541114367
 MonoBehaviour:
   m_ObjectHideFlags: 3

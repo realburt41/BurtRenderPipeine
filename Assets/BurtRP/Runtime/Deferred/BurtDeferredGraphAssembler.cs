@@ -15,9 +15,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass screenSpaceAmbientOcclusionBlurPass = new BurtScreenSpaceAmbientOcclusionBlurPass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRawPass = new BurtAllocateScreenSpaceGlobalIlluminationRawPass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationPass = new BurtAllocateScreenSpaceGlobalIlluminationPass();
+        private readonly BurtRenderPass allocateBurtGITemporalDiagnosticsPass = new BurtAllocateBurtGITemporalDiagnosticsPass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationTracePass = new BurtScreenSpaceGlobalIlluminationTracePass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationBlurPass = new BurtScreenSpaceGlobalIlluminationBlurPass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationCompositePass = new BurtScreenSpaceGlobalIlluminationCompositePass();
+        private readonly BurtRenderPass releaseBurtGITemporalDiagnosticsPass = new BurtReleaseBurtGITemporalDiagnosticsPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRawPass = new BurtReleaseScreenSpaceGlobalIlluminationRawPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationPass = new BurtReleaseScreenSpaceGlobalIlluminationPass();
         private readonly BurtRenderPass allocateHiZDepthPass = new BurtAllocateHiZDepthPass();
@@ -48,13 +50,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceSetupPass = new BurtAllocateScreenSpaceSubsurfaceSetupPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceProfileIDAndTypePass = new BurtAllocateScreenSpaceSubsurfaceProfileIDAndTypePass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceMaskPass = new BurtAllocateScreenSpaceSubsurfaceMaskPass();
-        private readonly BurtRenderPass allocateScreenSpaceSubsurfaceTilePass = new BurtAllocateScreenSpaceSubsurfaceTilePass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceTempPass = new BurtAllocateScreenSpaceSubsurfaceTempPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceBlurPass = new BurtAllocateScreenSpaceSubsurfaceBlurPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceCombinePass = new BurtAllocateScreenSpaceSubsurfaceCombinePass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceHistoryPass = new BurtAllocateScreenSpaceSubsurfaceHistoryPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceVelocityPass = new BurtAllocateScreenSpaceSubsurfaceVelocityPass();
-        private readonly BurtRenderPass allocateScreenSpaceSubsurfaceDilatedVelocityPass = new BurtAllocateScreenSpaceSubsurfaceDilatedVelocityPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceBurleyArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName);
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceBurleyGroupBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName);
         private readonly BurtRenderPass screenSpaceSubsurfaceCopySourcePass = new BurtScreenSpaceSubsurfaceCopySourcePass();
@@ -62,9 +62,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass screenSpaceSubsurfaceBuildVelocityPass = new BurtScreenSpaceSubsurfaceBuildVelocityPass();
         private readonly BurtRenderPass screenSpaceSubsurfaceBuildMaskPass = new BurtScreenSpaceSubsurfaceBuildMaskPass();
         private readonly BurtRenderPass screenSpaceSubsurfaceInitBurleyArgsPass = new BurtScreenSpaceSubsurfaceInitBurleyArgsPass();
-        private readonly BurtRenderPass screenSpaceSubsurfaceSetupTilesPass = new BurtScreenSpaceSubsurfaceSetupTilesPass();
+        private readonly BurtRenderPass screenSpaceSubsurfaceSetupPass = new BurtScreenSpaceSubsurfaceSetupPass();
         private readonly BurtRenderPass screenSpaceSubsurfaceBurleyPass = new BurtScreenSpaceSubsurfaceBurleyPass();
-        private readonly BurtRenderPass screenSpaceSubsurfaceHistoryBlitPass = new BurtScreenSpaceSubsurfaceHistoryBlitPass();
+        private readonly BurtRenderPass screenSpaceSubsurfaceSeparableHorizontalPass = new BurtScreenSpaceSubsurfaceSeparableHorizontalPass();
+        private readonly BurtRenderPass screenSpaceSubsurfaceSeparableVerticalPass = new BurtScreenSpaceSubsurfaceSeparableVerticalPass();
+        private readonly BurtRenderPass screenSpaceSubsurfaceStoreHistoryPass = new BurtScreenSpaceSubsurfaceStoreHistoryPass();
         private readonly BurtRenderPass screenSpaceSubsurfaceCombinePass = new BurtScreenSpaceSubsurfaceCombinePass();
         private readonly BurtRenderPass screenSpaceSubsurfaceFinalCopyPass = new BurtScreenSpaceSubsurfaceFinalCopyPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceCombinePass = new BurtReleaseScreenSpaceSubsurfaceCombinePass();
@@ -74,11 +76,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceSetupPass = new BurtReleaseScreenSpaceSubsurfaceSetupPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceProfileIDAndTypePass = new BurtReleaseScreenSpaceSubsurfaceProfileIDAndTypePass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceMaskPass = new BurtReleaseScreenSpaceSubsurfaceMaskPass();
-        private readonly BurtRenderPass releaseScreenSpaceSubsurfaceTilePass = new BurtReleaseScreenSpaceSubsurfaceTilePass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceTempPass = new BurtReleaseScreenSpaceSubsurfaceTempPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceBlurPass = new BurtReleaseScreenSpaceSubsurfaceBlurPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceHistoryPass = new BurtReleaseScreenSpaceSubsurfaceHistoryPass();
-        private readonly BurtRenderPass releaseScreenSpaceSubsurfaceDilatedVelocityPass = new BurtReleaseScreenSpaceSubsurfaceDilatedVelocityPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceVelocityPass = new BurtReleaseScreenSpaceSubsurfaceVelocityPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceBurleyGroupBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName);
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceBurleyArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName);
@@ -499,13 +499,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return;
             }
 
+            var useBurtGITemporalDiagnostics = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(request, asset);
+            var useBurtGIDebugView = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationDebugView(request, asset);
+
             graph.AddPass(allocateScreenSpaceGlobalIlluminationRawPass);
             graph.AddPass(allocateScreenSpaceGlobalIlluminationPass);
+            if (useBurtGITemporalDiagnostics)
+            {
+                graph.AddPass(allocateBurtGITemporalDiagnosticsPass);
+            }
+
             graph.AddPass(screenSpaceGlobalIlluminationTracePass);
             graph.AddPass(screenSpaceGlobalIlluminationBlurPass);
             graph.AddPass(screenSpaceGlobalIlluminationCompositePass);
-            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationDebugView(request, asset))
+            if (!useBurtGIDebugView)
             {
+                if (useBurtGITemporalDiagnostics)
+                {
+                    graph.AddPass(releaseBurtGITemporalDiagnosticsPass);
+                }
+
                 graph.AddPass(releaseScreenSpaceGlobalIlluminationPass);
                 graph.AddPass(releaseScreenSpaceGlobalIlluminationRawPass);
             }
@@ -523,6 +536,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             var useScreenSpaceSubsurfaceMaskTexture = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(request, asset);
+            var useScreenSpaceSubsurfaceBurley = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(request, asset);
+            var useScreenSpaceSubsurfaceSeparable = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceSeparable(request, asset);
 
             graph.AddPass(allocateScreenSpaceSubsurfaceSourcePass);
             graph.AddPass(allocateScreenSpaceSubsurfaceBaseColorPass);
@@ -534,34 +549,61 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(allocateScreenSpaceSubsurfaceMaskPass);
             }
 
-            graph.AddPass(allocateScreenSpaceSubsurfaceTilePass);
             graph.AddPass(allocateScreenSpaceSubsurfaceTempPass);
             graph.AddPass(allocateScreenSpaceSubsurfaceBlurPass);
             graph.AddPass(allocateScreenSpaceSubsurfaceCombinePass);
-            graph.AddPass(allocateScreenSpaceSubsurfaceHistoryPass);
-            graph.AddPass(allocateScreenSpaceSubsurfaceVelocityPass);
-            graph.AddPass(allocateScreenSpaceSubsurfaceDilatedVelocityPass);
-            graph.AddPass(allocateScreenSpaceSubsurfaceBurleyArgsBufferPass);
-            graph.AddPass(allocateScreenSpaceSubsurfaceBurleyGroupBufferPass);
+            if (useScreenSpaceSubsurfaceBurley)
+            {
+                graph.AddPass(allocateScreenSpaceSubsurfaceBurleyArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceSubsurfaceBurleyGroupBufferPass);
+                graph.AddPass(allocateScreenSpaceSubsurfaceHistoryPass);
+                graph.AddPass(allocateScreenSpaceSubsurfaceVelocityPass);
+            }
+
             graph.AddPass(screenSpaceSubsurfaceCopySourcePass);
             graph.AddPass(screenSpaceSubsurfaceForwardPass);
-            graph.AddPass(screenSpaceSubsurfaceBuildVelocityPass);
+            if (useScreenSpaceSubsurfaceBurley)
+            {
+                graph.AddPass(screenSpaceSubsurfaceBuildVelocityPass);
+            }
+
             if (useScreenSpaceSubsurfaceMaskTexture)
             {
                 graph.AddPass(screenSpaceSubsurfaceBuildMaskPass);
             }
 
-            graph.AddPass(screenSpaceSubsurfaceInitBurleyArgsPass);
-            graph.AddPass(screenSpaceSubsurfaceSetupTilesPass);
-            graph.AddPass(screenSpaceSubsurfaceBurleyPass);
-            graph.AddPass(screenSpaceSubsurfaceHistoryBlitPass);
+            if (useScreenSpaceSubsurfaceBurley)
+            {
+                graph.AddPass(screenSpaceSubsurfaceInitBurleyArgsPass);
+            }
+
+            graph.AddPass(screenSpaceSubsurfaceSetupPass);
+            if (useScreenSpaceSubsurfaceBurley)
+            {
+                graph.AddPass(screenSpaceSubsurfaceBurleyPass);
+            }
+
+            if (useScreenSpaceSubsurfaceSeparable)
+            {
+                graph.AddPass(screenSpaceSubsurfaceSeparableHorizontalPass);
+                graph.AddPass(screenSpaceSubsurfaceSeparableVerticalPass);
+            }
+
+            if (useScreenSpaceSubsurfaceBurley)
+            {
+                graph.AddPass(screenSpaceSubsurfaceStoreHistoryPass);
+            }
+
             graph.AddPass(screenSpaceSubsurfaceCombinePass);
             graph.AddPass(screenSpaceSubsurfaceFinalCopyPass);
             graph.AddPass(releaseScreenSpaceSubsurfaceCombinePass);
-            graph.AddPass(releaseScreenSpaceSubsurfaceHistoryPass);
+            if (useScreenSpaceSubsurfaceBurley)
+            {
+                graph.AddPass(releaseScreenSpaceSubsurfaceHistoryPass);
+            }
+
             graph.AddPass(releaseScreenSpaceSubsurfaceBlurPass);
             graph.AddPass(releaseScreenSpaceSubsurfaceTempPass);
-            graph.AddPass(releaseScreenSpaceSubsurfaceTilePass);
             if (useScreenSpaceSubsurfaceMaskTexture)
             {
                 graph.AddPass(releaseScreenSpaceSubsurfaceMaskPass);
@@ -569,13 +611,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
             graph.AddPass(releaseScreenSpaceSubsurfaceProfileIDAndTypePass);
             graph.AddPass(releaseScreenSpaceSubsurfaceSetupPass);
-            graph.AddPass(releaseScreenSpaceSubsurfaceDilatedVelocityPass);
-            graph.AddPass(releaseScreenSpaceSubsurfaceVelocityPass);
+            if (useScreenSpaceSubsurfaceBurley)
+            {
+                graph.AddPass(releaseScreenSpaceSubsurfaceVelocityPass);
+            }
+
             graph.AddPass(releaseScreenSpaceSubsurfaceEmissionPass);
             graph.AddPass(releaseScreenSpaceSubsurfaceBaseColorPass);
             graph.AddPass(releaseScreenSpaceSubsurfaceSourcePass);
-            graph.AddPass(releaseScreenSpaceSubsurfaceBurleyGroupBufferPass);
-            graph.AddPass(releaseScreenSpaceSubsurfaceBurleyArgsBufferPass);
+            if (useScreenSpaceSubsurfaceBurley)
+            {
+                graph.AddPass(releaseScreenSpaceSubsurfaceBurleyGroupBufferPass);
+                graph.AddPass(releaseScreenSpaceSubsurfaceBurleyArgsBufferPass);
+            }
         }
 
         private void AddDeferredLightingPass( // 添加 Deferred Lighting 全屏合成 Pass。
@@ -708,6 +756,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             if (ShouldUseScreenSpaceGlobalIlluminationDebugView(request, asset, useLocalGBufferTargets))
             {
                 graph.AddPass(debugScreenSpaceGlobalIlluminationPass);
+                if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(request, asset))
+                {
+                    graph.AddPass(releaseBurtGITemporalDiagnosticsPass);
+                }
+
                 graph.AddPass(releaseScreenSpaceGlobalIlluminationPass);
                 graph.AddPass(releaseScreenSpaceGlobalIlluminationRawPass);
             }

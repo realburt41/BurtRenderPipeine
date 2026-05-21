@@ -102,6 +102,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateBurtGITemporalDiagnosticsDescriptor(Camera camera)
+        {
+            var descriptor = CreateScreenSpaceGlobalIlluminationDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.ARGB32;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
         public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceColorDescriptor(Camera camera)
         {
             var descriptor = CreateCameraColorDescriptor(camera);
@@ -164,17 +172,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             }
 
             return RenderTextureFormat.RFloat;
-        }
-
-        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceTileDescriptor(Camera camera)
-        {
-            var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);
-            descriptor.colorFormat = RenderTextureFormat.RFloat;
-            descriptor.width = Mathf.Max(1, Mathf.CeilToInt(descriptor.width / 8f));
-            descriptor.height = Mathf.Max(1, Mathf.CeilToInt(descriptor.height / 8f));
-            descriptor.depthBufferBits = 0;
-            descriptor.enableRandomWrite = true;
-            return descriptor;
         }
 
         public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceCombineDescriptor(Camera camera)

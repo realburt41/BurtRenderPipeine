@@ -32,6 +32,7 @@ Shader "BurtRP/Lit"
 
         // 定义环境遮蔽强度，0 表示忽略 Mask Map 的 G 通道，1 表示完全使用 G 通道。
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
+        [HideInInspector] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
 
         // 定义自发光贴图，Forward 光照会把它作为不受灯光影响的颜色叠加到最终结果。
         _EmissionMap ("Emission Map", 2D) = "white" {}
@@ -254,5 +255,4 @@ Shader "BurtRP/Lit"
     // Disables fallback so BurtRP shader errors do not silently use another pipeline shader.
     Fallback Off
 }
-
 

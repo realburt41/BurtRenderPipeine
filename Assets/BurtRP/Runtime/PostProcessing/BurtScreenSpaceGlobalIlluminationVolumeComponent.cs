@@ -87,13 +87,13 @@ namespace Burt.RenderPipeline
     }
 
     [Serializable]
-    [VolumeComponentMenu("BurtRP/Rendering/Screen Space Global Illumination")]
+    [VolumeComponentMenu("BurtRP/Rendering/BurtGI")]
     public sealed class BurtScreenSpaceGlobalIlluminationVolumeComponent : VolumeComponent
     {
         private const float Epsilon = 0.0001f;
 
-        [Title("BurtRP Screen Space Global Illumination")]
-        [InfoBox("Deferred v0 diffuse GI. It traces against the current screen color and falls back to SkyLight diffuse SH on misses.")]
+        [Title("BurtRP BurtGI")]
+        [InfoBox("Deferred v2.2 diffuse GI. It traces against the current screen color, temporally denoises the result, and guards thin edges against sky/surface leaks.")]
         public BoolParameter enabled = new BoolParameter(false);
         [InfoBox("Custom keeps the manual values below. Low/Medium/High apply conservative presets for resolution, trace and blur.")]
         public BurtScreenSpaceGlobalIlluminationQualityParameter quality = new BurtScreenSpaceGlobalIlluminationQualityParameter(BurtScreenSpaceGlobalIlluminationQuality.Medium);
@@ -108,8 +108,16 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter radianceClamp = new ClampedFloatParameter(8f, 0.1f, 64f);
         public ClampedFloatParameter normalWeight = new ClampedFloatParameter(0.65f, 0f, 1f);
         public ClampedFloatParameter distanceFade = new ClampedFloatParameter(80f, 1f, 800f);
+        [Title("Spatial Denoise")]
         public BoolParameter blur = new BoolParameter(true);
         public ClampedFloatParameter blurSharpness = new ClampedFloatParameter(0.18f, 0f, 1f);
+        public ClampedFloatParameter spatialDenoiseRadius = new ClampedFloatParameter(1.25f, 0.5f, 3f);
+        public ClampedFloatParameter spatialDenoiseStrength = new ClampedFloatParameter(0.75f, 0f, 1f);
+        [Title("Leak Guard")]
+        public ClampedFloatParameter leakGuardStrength = new ClampedFloatParameter(0.65f, 0f, 1f);
+        public ClampedFloatParameter edgeFadeStrength = new ClampedFloatParameter(0.5f, 0f, 1f);
+        public ClampedFloatParameter normalConeTightness = new ClampedFloatParameter(0.55f, 0f, 1f);
+        public ClampedFloatParameter skyEdgeSuppression = new ClampedFloatParameter(0.6f, 0f, 1f);
 
         [Title("Temporal Denoise")]
         public BoolParameter temporalAccumulation = new BoolParameter(true);
@@ -117,6 +125,8 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter temporalDepthRejection = new ClampedFloatParameter(0.02f, 0.001f, 0.2f);
         public ClampedFloatParameter temporalNormalRejection = new ClampedFloatParameter(0.65f, 0f, 1f);
         public ClampedFloatParameter temporalClamp = new ClampedFloatParameter(1f, 0.25f, 4f);
+        public ClampedFloatParameter temporalVarianceClamp = new ClampedFloatParameter(1.25f, 0f, 4f);
+        public ClampedFloatParameter temporalHitRejection = new ClampedFloatParameter(0.55f, 0f, 1f);
 
         public bool IsEnabled()
         {

@@ -179,20 +179,20 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         AtmosphereHorizon = 405, // Atmosphere debug: horizon blend weight used by the sky pass.
         AtmosphereGroundBlend = 406, // Atmosphere debug: below-horizon ground contribution blend.
         AtmosphereViewDirection = 407, // Atmosphere debug: reconstructed sky view direction encoded as RGB.
-        ScreenSpaceSubsurfaceSetup = 408, // 5S debug: setup mask, strength, and profile slice.
-        ScreenSpaceSubsurfaceTileMask = 409, // 5S debug: low-resolution tile activity mask.
-        ScreenSpaceSubsurfaceBlur = 410, // 5S debug: blurred Subsurface color before combine.
-        ScreenSpaceSubsurfaceCombine = 411, // 5S debug: combined color before copying to CameraColor.
-        ScreenSpaceSubsurfaceThickness = 412, // 5S debug: decoded thickness from setup / GBuffer data.
-        ScreenSpaceSubsurfaceProfileIndex = 413, // 5S debug: resolved subsurface profile slot.
-        ScreenSpaceSubsurfaceTransmission = 414, // 5S debug: profile transmission contribution.
-        ScreenSpaceSubsurfaceDiffuse = 415, // 5S debug: diffuse lighting source used by the blur.
-        ScreenSpaceSubsurfaceSpecular = 416, // 5S debug: non-diffuse source preserved by the combine.
-        ScreenSpaceSubsurfaceStability = 417, // 5S debug: depth/normal stability gate used by the blur.
-        ScreenSpaceSubsurfaceSampleCount = 418, // 5S debug: adaptive Burley sample count stored in history.
-        ScreenSpaceSubsurfaceVariance = 419, // 5S debug: history variance used to choose adaptive samples.
-        ScreenSpaceSubsurfaceHistory = 420, // 5S debug: history validity, age, and residual summary.
-        ScreenSpaceSubsurfaceMask = 421, // 5S debug: full-resolution stencil-derived surface mask.
+        ScreenSpaceSubsurfaceSetup = 408, // SSS debug: setup mask, strength, and profile slice.
+        ScreenSpaceSubsurfaceCoarseMask = 409, // SSS debug: coarse 8x8 activity mask.
+        ScreenSpaceSubsurfaceBlur = 410, // SSS debug: blurred Subsurface color before combine.
+        ScreenSpaceSubsurfaceCombine = 411, // SSS debug: combined color before copying to CameraColor.
+        ScreenSpaceSubsurfaceThickness = 412, // SSS debug: decoded thickness from setup / GBuffer data.
+        ScreenSpaceSubsurfaceProfileIndex = 413, // SSS debug: resolved subsurface profile slot.
+        ScreenSpaceSubsurfaceTransmission = 414, // SSS debug: profile transmission contribution.
+        ScreenSpaceSubsurfaceDiffuse = 415, // SSS debug: diffuse lighting source used by the blur.
+        ScreenSpaceSubsurfaceSpecular = 416, // SSS debug: non-diffuse source preserved by the combine.
+        ScreenSpaceSubsurfaceStability = 417, // SSS debug: depth/normal stability gate used by the blur.
+        ScreenSpaceSubsurfaceSampleCount = 418, // SSS debug: adaptive Burley sample count stored in history.
+        ScreenSpaceSubsurfaceVariance = 419, // SSS debug: history variance used to choose adaptive samples.
+        ScreenSpaceSubsurfaceHistory = 420, // SSS debug: history validity, age, and residual summary.
+        ScreenSpaceSubsurfaceMask = 421, // SSS debug: full-resolution stencil-derived surface mask.
         FogAmount = 394, // Fog debug: final screen-space fog opacity.
         FogTransmittance = 395, // Fog debug: screen-space fog transmittance after height and distance gates.
         FogHeight = 396, // Fog debug: reconstructed world height relative to the fog height plane.
@@ -207,11 +207,19 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         AutoExposureHistogramRange = 386, // Auto exposure debug: current histogram EV range and out-of-range colors.
         ScreenSpaceAmbientOcclusionSurfaceStability = 387, // SSAO debug: current-frame depth/normal stability used to gate temporal history.
         ScreenSpaceAmbientOcclusionDiagnosticCompare = 388, // SSAO debug: quadrant compare for raw/final/history/difference with temporal gates.
-        ScreenSpaceGlobalIlluminationRaw = 389, // XGI debug: raw screen-space diffuse GI before the depth/normal bilateral blur.
-        ScreenSpaceGlobalIlluminationFinal = 390, // XGI debug: blurred diffuse GI texture consumed by composite.
-        ScreenSpaceGlobalIlluminationHitRatio = 422, // XGI debug: trace hit confidence in alpha, with sky fallback shown as low values.
-        ScreenSpaceGlobalIlluminationOverlay = 423, // XGI debug: final diffuse GI added over the current camera color.
-        ScreenSpaceGlobalIlluminationComposite = 424 // XGI debug: isolated final composite contribution.
+        ScreenSpaceGlobalIlluminationRaw = 389, // BurtGI debug: raw screen-space diffuse GI before the depth/normal bilateral blur.
+        ScreenSpaceGlobalIlluminationFinal = 390, // BurtGI debug: blurred diffuse GI texture consumed by composite.
+        ScreenSpaceGlobalIlluminationHitRatio = 422, // BurtGI debug: trace hit confidence in alpha, with sky fallback shown as low values.
+        ScreenSpaceGlobalIlluminationOverlay = 423, // BurtGI debug: final diffuse GI added over the current camera color.
+        ScreenSpaceGlobalIlluminationComposite = 424, // BurtGI debug: isolated final composite contribution.
+        ScreenSpaceGlobalIlluminationTemporalConfidence = 425, // BurtGI debug: v1 temporal history acceptance confidence after depth/normal/color gates.
+        ScreenSpaceGlobalIlluminationTemporalRejection = 426, // BurtGI debug: v1 temporal disocclusion/rejection mask, with blue carrying current hit ratio.
+        ScreenSpaceGlobalIlluminationHistory = 427, // BurtGI debug: previous resolved diffuse GI history used by temporal accumulation.
+        ScreenSpaceGlobalIlluminationDifference = 428, // BurtGI debug: amplified absolute difference between current final GI and previous history.
+        ScreenSpaceGlobalIlluminationLeakGuard = 429, // BurtGI debug: edge, hit and sky-fallback risk used by the v2 leak guard.
+        ScreenSpaceGlobalIlluminationDiagnosticCompare = 430, // BurtGI debug: quadrant compare for raw/final/hit/leak-guard diagnostics.
+        ScreenSpaceSubsurfaceAlgorithm = 431, // SSS debug: material-selected algorithm, red = 5S Burley, green = 4S Separable.
+        ScreenSpaceGlobalIlluminationConfidence = 432 // BurtGI debug: quadrant compare for hit ratio, surface validity, edge risk, and sky-fallback risk.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。

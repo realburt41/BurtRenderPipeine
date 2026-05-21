@@ -105,6 +105,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 {
                     resources.RegisterScreenSpaceGlobalIlluminationRawTexture();
                     resources.RegisterScreenSpaceGlobalIlluminationTexture();
+                    if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(request, asset))
+                    {
+                        resources.RegisterBurtGITemporalDiagnosticsTexture();
+                    }
                 }
 
                 if (ShouldRegisterScreenSpaceSubsurface(request, asset))
@@ -119,15 +123,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                         resources.RegisterScreenSpaceSubsurfaceMaskTexture();
                     }
 
-                    resources.RegisterScreenSpaceSubsurfaceTileTexture();
                     resources.RegisterScreenSpaceSubsurfaceTempTexture();
                     resources.RegisterScreenSpaceSubsurfaceBlurTexture();
                     resources.RegisterScreenSpaceSubsurfaceCombineTexture();
-                    resources.RegisterScreenSpaceSubsurfaceHistoryTexture();
-                    resources.RegisterScreenSpaceSubsurfaceVelocityTexture();
-                    resources.RegisterScreenSpaceSubsurfaceDilatedVelocityTexture();
-                    resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateBurleyArgsBufferDescriptor());
-                    resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateBurleyGroupBufferDescriptor(request.Camera));
+                    if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(request, asset))
+                    {
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateBurleyArgsBufferDescriptor());
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateBurleyGroupBufferDescriptor(request.Camera));
+                        resources.RegisterScreenSpaceSubsurfaceHistoryTexture();
+                        resources.RegisterScreenSpaceSubsurfaceVelocityTexture();
+                    }
                 }
             }
 

@@ -200,43 +200,59 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare:
                     return "SSAO Diagnostic Compare";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw:
-                    return "XGI Raw";
+                    return "BurtGI Raw";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal:
-                    return "XGI Final";
+                    return "BurtGI Final";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio:
-                    return "XGI Hit Ratio";
+                    return "BurtGI Hit Ratio";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay:
-                    return "XGI Overlay";
+                    return "BurtGI Overlay";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
-                    return "XGI Composite";
+                    return "BurtGI Composite";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalConfidence:
+                    return "BurtGI Temporal Confidence";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalRejection:
+                    return "BurtGI Temporal Rejection";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHistory:
+                    return "BurtGI History";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDifference:
+                    return "BurtGI Difference";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard:
+                    return "BurtGI Leak Guard";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare:
+                    return "BurtGI Diagnostic Compare";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
+                    return "BurtGI Confidence";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
-                    return "5S Setup";
+                    return "SSS Setup";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
-                    return "5S Mask";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceTileMask:
-                    return "5S Tile Mask";
+                    return "SSS Mask";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCoarseMask:
+                    return "SSS Coarse Mask";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:
-                    return "5S Blur";
+                    return "SSS Blur";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine:
-                    return "5S Combine";
+                    return "SSS Combine";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness:
-                    return "5S Thickness";
+                    return "SSS Thickness";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex:
-                    return "5S Profile Index";
+                    return "SSS Profile Index";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm:
+                    return "SSS Algorithm";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission:
-                    return "5S Transmission";
+                    return "SSS Transmission";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse:
-                    return "5S Diffuse";
+                    return "SSS Diffuse";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular:
-                    return "5S Specular";
+                    return "SSS Specular";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceStability:
-                    return "5S Stability";
+                    return "SSS Stability";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount:
-                    return "5S Sample Count";
+                    return "SSS Sample Count";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceVariance:
-                    return "5S Variance";
+                    return "SSS Variance";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory:
-                    return "5S History";
+                    return "SSS History";
                 case BurtShadingDebugMode.BloomPrefilter:
                     return "Bloom Prefilter";
                 case BurtShadingDebugMode.BloomFinalBloom:
@@ -617,6 +633,13 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalConfidence,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalRejection,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHistory,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDifference,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence,
             BurtShadingDebugMode.BloomPrefilter,
             BurtShadingDebugMode.BloomFinalBloom,
             BurtShadingDebugMode.BloomMip1,
@@ -704,24 +727,32 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare
         });
 
-        public static readonly BurtShadingDebugGroup ScreenSpaceGlobalIllumination = new BurtShadingDebugGroup("Screen Space Global Illumination", "XGI", new[]
+        public static readonly BurtShadingDebugGroup ScreenSpaceGlobalIllumination = new BurtShadingDebugGroup("Screen Space Global Illumination", "BurtGI", new[]
         {
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalConfidence,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalRejection,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHistory,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDifference,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence
         });
 
-        public static readonly BurtShadingDebugGroup ScreenSpaceSubsurface = new BurtShadingDebugGroup("Screen Space Subsurface", "5S", new[]
+        public static readonly BurtShadingDebugGroup ScreenSpaceSubsurface = new BurtShadingDebugGroup("Screen Space Subsurface", "SSS", new[]
         {
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceMask,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceTileMask,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceCoarseMask,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular,
@@ -904,7 +935,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public BurtPostProcessDebugOverlay()
             : base(
                 BurtShadingDebugSSAODropdown.Id,
-                BurtShadingDebugXGIDropdown.Id,
+                BurtShadingDebugBurtGIDropdown.Id,
                 BurtShadingDebugSSSDropdown.Id,
                 BurtShadingDebugBloomDropdown.Id,
                 BurtShadingDebugAutoExposureDropdown.Id,
@@ -1115,11 +1146,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
     }
 
     [EditorToolbarElement(Id, typeof(SceneView))]
-    internal sealed class BurtShadingDebugXGIDropdown : BurtShadingDebugGroupDropdown
+    internal sealed class BurtShadingDebugBurtGIDropdown : BurtShadingDebugGroupDropdown
     {
-        public const string Id = "BurtRP/Shading Debug/XGI";
+        public const string Id = "BurtRP/Shading Debug/BurtGI";
 
-        public BurtShadingDebugXGIDropdown()
+        public BurtShadingDebugBurtGIDropdown()
             : base(BurtShadingDebugGroups.ScreenSpaceGlobalIllumination)
         {
         }

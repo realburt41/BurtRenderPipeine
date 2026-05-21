@@ -37,6 +37,7 @@ Shader "BurtRP/Subsurface"
         _SubsurfacePower ("Subsurface Power", Range(0.5, 8)) = 3
         _SubsurfaceDistortion ("Subsurface Distortion", Range(0, 1)) = 0.35
         _SubsurfaceAmbient ("Subsurface Ambient", Range(0, 1)) = 0.35
+        [Enum(5S Burley, 0, 4S Separable, 1)] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
         _SubsurfaceProfileIndex ("Subsurface Profile Index", Range(0, 7)) = 0
         [HDR]_SubsurfaceTint ("Subsurface Tint", Color) = (1, 0.45, 0.32, 1)
 
