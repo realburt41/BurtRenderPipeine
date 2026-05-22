@@ -245,6 +245,20 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSS Diffuse";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular:
                     return "SSS Specular";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceColor:
+                    return "SSS Source Color";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceAlpha:
+                    return "SSS Source Alpha";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBaseColor:
+                    return "SSS Base Color";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceEmission:
+                    return "SSS Emission";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuseWithBaseColor:
+                    return "SSS Diffuse x Base";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecularRaw:
+                    return "SSS Specular Raw";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombineDelta:
+                    return "SSS Combine Delta";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceStability:
                     return "SSS Stability";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount:
@@ -549,7 +563,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.HairAdditionalLighting // Hair 追加光直接贡献。
         });
 
-        public static readonly BurtShadingDebugGroup Subsurface = new BurtShadingDebugGroup("Subsurface", "5S", new[]
+        public static readonly BurtShadingDebugGroup Subsurface = new BurtShadingDebugGroup("Subsurface", "SSS", new[]
         {
             BurtShadingDebugMode.SubsurfaceProfileId,
             BurtShadingDebugMode.SubsurfaceTransmission,
@@ -756,6 +770,13 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceColor,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceAlpha,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceBaseColor,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceEmission,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuseWithBaseColor,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecularRaw,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceCombineDelta,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceStability,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceVariance,

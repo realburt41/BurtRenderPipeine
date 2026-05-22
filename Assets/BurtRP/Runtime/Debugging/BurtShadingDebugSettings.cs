@@ -193,6 +193,13 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceSubsurfaceVariance = 419, // SSS debug: history variance used to choose adaptive samples.
         ScreenSpaceSubsurfaceHistory = 420, // SSS debug: history validity, age, and residual summary.
         ScreenSpaceSubsurfaceMask = 421, // SSS debug: full-resolution stencil-derived surface mask.
+        ScreenSpaceSubsurfaceSourceColor = 433, // SSS debug: copied lit source color before SSS rewrites CameraColor.
+        ScreenSpaceSubsurfaceSourceAlpha = 434, // SSS debug: source alpha carrying diffuse luminance from deferred lighting.
+        ScreenSpaceSubsurfaceBaseColor = 435, // SSS debug: base color captured by the SSS forward pass.
+        ScreenSpaceSubsurfaceEmission = 436, // SSS debug: emission captured by the SSS forward pass.
+        ScreenSpaceSubsurfaceDiffuseWithBaseColor = 437, // SSS debug: diffuse lighting multiplied by base color before blur.
+        ScreenSpaceSubsurfaceSpecularRaw = 438, // SSS debug: raw specular residual before display exposure.
+        ScreenSpaceSubsurfaceCombineDelta = 439, // SSS debug: absolute difference between source and combined SSS color.
         FogAmount = 394, // Fog debug: final screen-space fog opacity.
         FogTransmittance = 395, // Fog debug: screen-space fog transmittance after height and distance gates.
         FogHeight = 396, // Fog debug: reconstructed world height relative to the fog height plane.

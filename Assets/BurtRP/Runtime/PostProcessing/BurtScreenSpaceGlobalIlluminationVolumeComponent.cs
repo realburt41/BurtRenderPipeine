@@ -128,6 +128,15 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter temporalVarianceClamp = new ClampedFloatParameter(1.25f, 0f, 4f);
         public ClampedFloatParameter temporalHitRejection = new ClampedFloatParameter(0.55f, 0f, 1f);
 
+        [Title("ScreenProbe Lite")]
+        [InfoBox("Experimental placeholder for the XGI-style ScreenProbe path. It is disabled by default and is not blended into BurtGI yet.")]
+        public BoolParameter screenProbeLite = new BoolParameter(false);
+        public ClampedIntParameter screenProbeSpacingPixels = new ClampedIntParameter(16, 4, 64);
+        public ClampedFloatParameter screenProbeTraceDistance = new ClampedFloatParameter(12f, 0.5f, 80f);
+        public ClampedIntParameter screenProbeSampleCount = new ClampedIntParameter(8, 1, 32);
+        public ClampedFloatParameter screenProbeTemporalFeedback = new ClampedFloatParameter(0.9f, 0f, 0.98f);
+        public ClampedFloatParameter screenProbeApplyStrength = new ClampedFloatParameter(0f, 0f, 1f);
+
         public bool IsEnabled()
         {
             return active && enabled.value && intensity.value > Epsilon && radius.value > Epsilon && sampleCount.value > 0;

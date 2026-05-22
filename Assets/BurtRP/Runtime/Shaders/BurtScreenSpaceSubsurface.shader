@@ -40,7 +40,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         float4 _BurtSSSProfileBoundaryColorBleeds[8];
         float4 _BurtSSSProfileTransmissions[8];
         float4 _BurtSSSProfileTransmissionTints[8];
-        static const float3 BURT_5S_KERNEL_CENTER = float3(0.204f, 0.236f, 0.290f);
+        static const float3 BURT_SSS_FALLBACK_KERNEL_CENTER = float3(0.204f, 0.236f, 0.290f);
         static const float3 BURT_LUMINANCE_WEIGHTS = float3(0.2126f, 0.7152f, 0.0722f);
         static const float BURT_SSS_EXTINCTION_DECODE_SCALE = 100.0f;
         static const float BURT_SSS_DEFAULT_RADIUS_PIXELS = 3.25f;
@@ -426,7 +426,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             BurtSSSAccumulateSample(center, profile, original, uv, texelStep, -offset, kernelWeight, sourceIsLit, sumColor, sumWeight);
         }
 
-        void BurtSSSAccumulate5SKernel(
+        void BurtSSSAccumulateFallbackKernel(
             BurtSSSSurface center,
             BurtSSSProfile profile,
             float3 original,
@@ -656,7 +656,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             texelStep.y *= useSeparableProfileStep ? _BurtSSSScreenSize.x * _BurtSSSScreenSize.w : 1.0f;
             float3 centerWeight = useProfileLut
                 ? max(BurtSSSFetchProfileParam(BURT_SSS_PROFILE_PARAM_KERNEL0_OFFSET, center.profileIndex).rgb, float3(0.0001f, 0.0001f, 0.0001f))
-                : BURT_5S_KERNEL_CENTER;
+                : BURT_SSS_FALLBACK_KERNEL_CENTER;
             float3 sumColor = original * centerWeight;
             float3 sumWeight = centerWeight;
             if (useProfileLut)
@@ -665,7 +665,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             }
             else
             {
-                BurtSSSAccumulate5SKernel(center, profile, original, uv, texelStep, sourceIsLit, sumColor, sumWeight);
+                BurtSSSAccumulateFallbackKernel(center, profile, original, uv, texelStep, sourceIsLit, sumColor, sumWeight);
             }
 
             float3 blurred = sumColor / max(sumWeight, float3(0.0001f, 0.0001f, 0.0001f));
@@ -837,7 +837,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             }
 
             BurtSSSSurface center = BurtSSSLoadSurface(input.screenUV);
-            if (_BurtSSSDebugMode > 14.5f)
+            if (_BurtSSSDebugMode > 14.5f && _BurtSSSDebugMode < 15.5f)
             {
                 float isBurley = (center.profileType & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u ? 1.0f : 0.0f;
                 float isSeparable = (center.profileType & BURT_SSS_PROFILE_TYPE_SEPARABLE) != 0u ? 1.0f : 0.0f;
@@ -868,6 +868,44 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             {
                 float3 exposedSpecular = max(specularLight, float3(0.0f, 0.0f, 0.0f)) * 8.0f;
                 return float4(exposedSpecular / (1.0f + exposedSpecular), 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 15.5f && _BurtSSSDebugMode < 16.5f)
+            {
+                return float4(max(originalLit.rgb, float3(0.0f, 0.0f, 0.0f)), 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 16.5f && _BurtSSSDebugMode < 17.5f)
+            {
+                float diffuseLuminance = max(originalLit.a, 0.0f);
+                return float4(diffuseLuminance, diffuseLuminance, diffuseLuminance, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 17.5f && _BurtSSSDebugMode < 18.5f)
+            {
+                return float4(baseColor, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 18.5f && _BurtSSSDebugMode < 19.5f)
+            {
+                float3 exposedEmission = emission * 0.25f;
+                return float4(exposedEmission / (1.0f + exposedEmission), 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 19.5f && _BurtSSSDebugMode < 20.5f)
+            {
+                return float4(diffuseWithBaseColor, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 20.5f && _BurtSSSDebugMode < 21.5f)
+            {
+                return float4(max(specularLight, float3(0.0f, 0.0f, 0.0f)), 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 21.5f && _BurtSSSDebugMode < 22.5f)
+            {
+                float3 combined = tex2D(_BurtSSSCombineTexture, input.screenUV).rgb;
+                return float4(saturate(abs(max(combined, float3(0.0f, 0.0f, 0.0f)) - max(originalLit.rgb, float3(0.0f, 0.0f, 0.0f))) * 4.0f), 1.0f);
             }
 
             float stability = BurtSSSSurfaceStability(center, profile, input.screenUV);

@@ -81,8 +81,8 @@ namespace Burt.RenderPipeline.Editor
             EditorGUILayout.LabelField("Dual Specular", FormatVector(new Vector3(settings.DualSpecularRoughness0, settings.DualSpecularRoughness1, settings.DualSpecularLobeMix)));
             EditorGUILayout.LabelField("World Unit Scale", FormatFloat(settings.WorldUnitScale));
             EditorGUILayout.LabelField("Screen Radius", FormatFloat(settings.RadiusPixels * settings.MeanFreePathScreenScale) + " px");
-            EditorGUILayout.LabelField("5S Blend / Boundary / Tint", FormatVector(new Vector3(settings.Blend, settings.BoundaryBleed, settings.TintStrength)));
-            EditorGUILayout.LabelField("5S Distance / Min Strength / Scale", FormatVector(new Vector3(settings.DistanceScale, settings.MinStrength, settings.MeanFreePathScreenScale)));
+            EditorGUILayout.LabelField("SSS Blend / Boundary / Tint", FormatVector(new Vector3(settings.Blend, settings.BoundaryBleed, settings.TintStrength)));
+            EditorGUILayout.LabelField("SSS Distance / Min Strength / Scale", FormatVector(new Vector3(settings.DistanceScale, settings.MinStrength, settings.MeanFreePathScreenScale)));
             EditorGUILayout.Space(4f);
         }
 

@@ -52,28 +52,28 @@ namespace Burt.RenderPipeline
         [TitleGroup("Dual Specular")]
         [SerializeField, Range(0f, 1f), LabelText("Lobe Mix")] private float dualSpecularLobeMix = BurtSubsurfaceProfileSettings.DefaultDualSpecularLobeMix;
 
-        [TitleGroup("Screen Space 5S")]
+        [TitleGroup("Screen Space SSS")]
         [SerializeField, Min(0.01f), LabelText("Radius Pixels")] private float radiusPixels = 3.25f;
 
-        [TitleGroup("Screen Space 5S")]
+        [TitleGroup("Screen Space SSS")]
         [SerializeField, Min(0.0001f), LabelText("Depth Sigma")] private float depthSigma = 0.08f;
 
-        [TitleGroup("Screen Space 5S")]
+        [TitleGroup("Screen Space SSS")]
         [SerializeField, Range(0.01f, 1f), LabelText("Normal Sigma")] private float normalSigma = 0.72f;
 
-        [TitleGroup("Screen Space 5S")]
+        [TitleGroup("Screen Space SSS")]
         [SerializeField, Range(0f, 1f), LabelText("Blend")] private float blend = 0.85f;
 
-        [TitleGroup("Screen Space 5S")]
+        [TitleGroup("Screen Space SSS")]
         [SerializeField, Min(0.01f), LabelText("Distance Scale")] private float distanceScale = 2f;
 
-        [TitleGroup("Screen Space 5S")]
+        [TitleGroup("Screen Space SSS")]
         [SerializeField, Range(0f, 1f), LabelText("Boundary Bleed")] private float boundaryBleed = 0.25f;
 
-        [TitleGroup("Screen Space 5S")]
+        [TitleGroup("Screen Space SSS")]
         [SerializeField, Range(0f, 1f), LabelText("Tint Strength")] private float tintStrength = 0.35f;
 
-        [TitleGroup("Screen Space 5S")]
+        [TitleGroup("Screen Space SSS")]
         [SerializeField, Range(0f, 0.2f), LabelText("Min Strength")] private float minStrength = 0.012f;
 
         public string ProfileName => string.IsNullOrEmpty(profileName) ? name : profileName;

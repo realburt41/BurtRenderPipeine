@@ -112,6 +112,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int BurtGITemporalDiagnosticsTextureId = Shader.PropertyToID(BurtGITemporalDiagnosticsTextureShaderName);
 
+        public const string BurtGIScreenProbeRadianceName = "BurtGIScreenProbeRadiance";
+
+        public const string BurtGIScreenProbeRadianceTextureShaderName = "_BurtGIScreenProbeRadianceTexture";
+
+        public static readonly int BurtGIScreenProbeRadianceTextureId = Shader.PropertyToID(BurtGIScreenProbeRadianceTextureShaderName);
+
+        public const string BurtGIScreenProbeIrradianceName = "BurtGIScreenProbeIrradiance";
+
+        public const string BurtGIScreenProbeIrradianceTextureShaderName = "_BurtGIScreenProbeIrradianceTexture";
+
+        public static readonly int BurtGIScreenProbeIrradianceTextureId = Shader.PropertyToID(BurtGIScreenProbeIrradianceTextureShaderName);
+
+        public const string BurtGIScreenProbeConfidenceName = "BurtGIScreenProbeConfidence";
+
+        public const string BurtGIScreenProbeConfidenceTextureShaderName = "_BurtGIScreenProbeConfidenceTexture";
+
+        public static readonly int BurtGIScreenProbeConfidenceTextureId = Shader.PropertyToID(BurtGIScreenProbeConfidenceTextureShaderName);
+
         public const string ScreenSpaceSubsurfaceSourceName = "ScreenSpaceSubsurfaceSource";
 
         public const string ScreenSpaceSubsurfaceSourceTextureShaderName = "_BurtScreenSpaceSubsurfaceSourceTexture";
@@ -714,6 +732,51 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetBurtGITemporalDiagnostics()
         {
             return GetRenderTarget(BurtGITemporalDiagnosticsName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeRadianceTexture()
+        {
+            return RegisterBurtGIScreenProbeRadiance(new RenderTargetIdentifier(BurtGIScreenProbeRadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeRadiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeRadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeRadiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeRadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeIrradianceTexture()
+        {
+            return RegisterBurtGIScreenProbeIrradiance(new RenderTargetIdentifier(BurtGIScreenProbeIrradianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeIrradiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeIrradianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeIrradiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeIrradianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeConfidenceTexture()
+        {
+            return RegisterBurtGIScreenProbeConfidence(new RenderTargetIdentifier(BurtGIScreenProbeConfidenceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeConfidence(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeConfidenceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeConfidence()
+        {
+            return GetRenderTarget(BurtGIScreenProbeConfidenceName);
         }
 
         public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceSourceTexture()

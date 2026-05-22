@@ -40,7 +40,6 @@ float BurtEvaluateDeferredOutputAlpha(BurtPBRShadingComponents components)
 
     float3 diffuseLighting =
         components.directDiffuse +
-        components.additionalDiffuse +
         components.indirectDiffuse;
     return dot(BurtApplyPreExposure(diffuseLighting), float3(0.2126f, 0.7152f, 0.0722f));
 #else

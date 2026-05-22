@@ -109,6 +109,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     {
                         resources.RegisterBurtGITemporalDiagnosticsTexture();
                     }
+
+                    if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(request, asset))
+                    {
+                        resources.RegisterBurtGIScreenProbeRadianceTexture();
+                        resources.RegisterBurtGIScreenProbeIrradianceTexture();
+                        resources.RegisterBurtGIScreenProbeConfidenceTexture();
+                    }
                 }
 
                 if (ShouldRegisterScreenSpaceSubsurface(request, asset))

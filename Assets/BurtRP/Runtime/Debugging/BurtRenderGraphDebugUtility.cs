@@ -1242,6 +1242,31 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             return path + "CombineFinalCopy";
         }
 
+        private static string ResolveScreenSpaceSubsurfaceResourceMode(bool enabled, bool usesBurley, bool usesSeparable)
+        {
+            if (!enabled)
+            {
+                return "Disabled";
+            }
+
+            if (usesBurley && usesSeparable)
+            {
+                return "Mixed4S5S";
+            }
+
+            if (usesBurley)
+            {
+                return "5SBurleyOnly";
+            }
+
+            if (usesSeparable)
+            {
+                return "4SSeparableOnly";
+            }
+
+            return "NoActiveMaterialMode";
+        }
+
         private static string FormatAdditionalLightShadowFirstSliceMatrixHash(BurtLightingData lightingData, Vector4 lightParams)
         {
             if (lightingData == null)
@@ -1369,6 +1394,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset))
                 {
                     var burtGISettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
+                    var burtGIScreenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(request, asset);
                     AppendDescriptorLine(builder, "ScreenSpaceGlobalIlluminationRaw", BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, burtGISettings), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName);
                     AppendDescriptorLine(builder, "ScreenSpaceGlobalIllumination", BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, burtGISettings), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
                     if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(request, asset))
@@ -1379,12 +1405,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     {
                         AppendSkippedRenderTargetLine(builder, "BurtGITemporalDiagnostics", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
                     }
+
+                    if (burtGIScreenProbeSettings.Enabled)
+                    {
+                        var burtGIScreenProbeDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeDescriptor(camera, burtGIScreenProbeSettings);
+                        AppendDescriptorLine(builder, "BurtGIScreenProbeRadiance", burtGIScreenProbeDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName);
+                        AppendDescriptorLine(builder, "BurtGIScreenProbeIrradiance", burtGIScreenProbeDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceName);
+                        AppendDescriptorLine(builder, "BurtGIScreenProbeConfidence", burtGIScreenProbeDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName);
+                    }
+                    else
+                    {
+                        AppendSkippedRenderTargetLine(builder, "BurtGIScreenProbeRadiance", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName);
+                        AppendSkippedRenderTargetLine(builder, "BurtGIScreenProbeIrradiance", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceName);
+                        AppendSkippedRenderTargetLine(builder, "BurtGIScreenProbeConfidence", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName);
+                    }
                 }
                 else
                 {
                     AppendSkippedRenderTargetLine(builder, "ScreenSpaceGlobalIlluminationRaw", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName);
                     AppendSkippedRenderTargetLine(builder, "ScreenSpaceGlobalIllumination", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
                     AppendSkippedRenderTargetLine(builder, "BurtGITemporalDiagnostics", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
+                    AppendSkippedRenderTargetLine(builder, "BurtGIScreenProbeRadiance", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName);
+                    AppendSkippedRenderTargetLine(builder, "BurtGIScreenProbeIrradiance", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceName);
+                    AppendSkippedRenderTargetLine(builder, "BurtGIScreenProbeConfidence", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName);
                 }
 
                 if (BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset))
@@ -1464,6 +1507,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 AppendSkippedRenderTargetLine(builder, "ScreenSpaceGlobalIllumination", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
 
                 AppendSkippedRenderTargetLine(builder, "BurtGITemporalDiagnostics", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
+
+                AppendSkippedRenderTargetLine(builder, "BurtGIScreenProbeRadiance", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName);
+
+                AppendSkippedRenderTargetLine(builder, "BurtGIScreenProbeIrradiance", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceName);
+
+                AppendSkippedRenderTargetLine(builder, "BurtGIScreenProbeConfidence", resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName);
 
                 AppendSkippedRenderTargetLine(builder, "HiZDepth", resourceRegistry, BurtRenderGraphResourceRegistry.HiZDepthName);
 
@@ -1692,6 +1741,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var ssaoSettings = BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionSettings(request, asset);
             var ssaoHistory = BurtScreenSpaceAmbientOcclusionHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
             var burtGISettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
+            var burtGIScreenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(request, asset);
             var burtGIHistory = BurtScreenSpaceGlobalIlluminationHistoryUtility.GetHistoryStatus(request, burtGISettings);
             var temporalAA = request != null ? request.TemporalAA : null;
             var ssaoEnabled = isDeferred && ssaoSettings.Enabled;
@@ -1726,6 +1776,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" BurtGIFinalRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName));
 
             builder.Append(" BurtGITemporalDiagnosticsRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName));
+
+            builder.Append(" BurtGIScreenProbeRadianceRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName));
+
+            builder.Append(" BurtGIScreenProbeIrradianceRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceName));
+
+            builder.Append(" BurtGIScreenProbeConfidenceRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName));
 
             builder.Append(" BurtGIDebugMode=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationDebugModeLabel());
 
@@ -1773,9 +1829,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSSSuppressedByShadingDebug=").Append(sssSuppressedByShadingDebug);
                 builder.Append(" SSSMaterialGate=").Append(BurtScreenSpaceSubsurfacePassUtility.ResolveScreenSpaceSubsurfaceMaterialGateDebugLabel(request, asset));
                 builder.Append(" SSSAlgorithmMode=").Append(BurtScreenSpaceSubsurfacePassUtility.ResolveScreenSpaceSubsurfaceAlgorithmModeLabel(request, asset));
+                builder.Append(" SSSResourceMode=").Append(ResolveScreenSpaceSubsurfaceResourceMode(screenSpaceSubsurfaceEnabled, screenSpaceSubsurfaceUsesBurley, screenSpaceSubsurfaceUsesSeparable));
                 builder.Append(" SSSPassExpected=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSPath=").Append(ResolveScreenSpaceSubsurfacePath(screenSpaceSubsurfaceEnabled, screenSpaceSubsurfaceUsesMaskTexture, screenSpaceSubsurfaceUsesBurley, screenSpaceSubsurfaceUsesSeparable));
                 builder.Append(" SSSKernel=").Append(screenSpaceSubsurfaceEnabled ? "MaterialSelectable4SSeparable5SBurley+ProfileLut66IndirectBurleyAdaptiveHistory" : "Disabled");
+                builder.Append(" SSS4SResources=").Append(screenSpaceSubsurfaceUsesSeparable ? "SetupTempBlurCombine" : "Disabled");
+                builder.Append(" SSS5SResources=").Append(screenSpaceSubsurfaceUsesBurley ? "VelocityHistoryBurleyArgsGroups" : "Disabled");
                 builder.Append(" SSSProfileLut=").Append(screenSpaceSubsurfaceEnabled ? "Enabled" : "Disabled");
                 builder.Append(" SSSSetupPassExpected=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSCoarseMaskPassExpected=False");
@@ -1783,6 +1842,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSSCombinePassExpected=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSIndirect=").Append(screenSpaceSubsurfaceEnabled ? "ProfileSHWrapped" : "Disabled");
                 builder.Append(" SSSDebugMode=").Append(BurtScreenSpaceSubsurfacePassUtility.IsScreenSpaceSubsurfaceDebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
+                builder.Append(" SSSSplitDebug=").Append(screenSpaceSubsurfaceEnabled ? "SourceColor+SourceAlphaDiffuseLuminance+BaseColor+Emission+DiffuseWithBaseColor+SpecularResidual+CombineDelta" : "Disabled");
                 builder.Append(" SSSDiffuseSpecularSplit=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSDiffuseLuminanceSource=").Append(screenSpaceSubsurfaceEnabled ? "DeferredSubsurfaceAlphaSharedSplit" : "Disabled");
                 builder.Append(" SSSProfileIDSource=").Append(screenSpaceSubsurfaceEnabled ? "ScreenSpaceSubsurfaceBaseColorAlpha" : "Disabled");
@@ -1892,6 +1952,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGIOutputTarget=ScreenSpaceGlobalIllumination");
                 builder.Append(" BurtGIRawTarget=ScreenSpaceGlobalIlluminationRaw");
                 builder.Append(" BurtGITemporalDiagnosticsTarget=BurtGITemporalDiagnostics");
+                builder.Append(" BurtGIScreenProbe=").Append(burtGIScreenProbeSettings.Enabled ? "Enabled" : "Disabled");
+                builder.Append(" BurtGIScreenProbeStage=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeStageLabel(burtGIScreenProbeSettings));
+                builder.Append(" BurtGIScreenProbeGrid=").Append(burtGIScreenProbeSettings.Enabled ? ("Spacing" + burtGIScreenProbeSettings.SpacingPixels + "px") : "Disabled");
+                builder.Append(" BurtGIScreenProbeDebug=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeDebugLabel(burtGIScreenProbeSettings));
+                builder.Append(" BurtGIScreenProbeTraceDistance=").Append(FormatFloat(burtGIScreenProbeSettings.TraceDistance));
+                builder.Append(" BurtGIScreenProbeSamples=").Append(burtGIScreenProbeSettings.SampleCount);
+                builder.Append(" BurtGIScreenProbeTemporalFeedback=").Append(FormatFloat(burtGIScreenProbeSettings.TemporalFeedback));
+                builder.Append(" BurtGIScreenProbeApplyStrength=").Append(FormatFloat(burtGIScreenProbeSettings.ApplyStrength));
                 builder.Append(" BurtGIQuality=").Append(burtGISettings.Quality);
                 builder.Append(" BurtGIResolution=").Append(burtGISettings.Resolution);
                 builder.Append(" BurtGIIntensity=").Append(FormatFloat(burtGISettings.Intensity));

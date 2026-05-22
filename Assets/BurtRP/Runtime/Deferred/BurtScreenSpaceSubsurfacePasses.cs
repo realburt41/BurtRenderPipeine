@@ -256,7 +256,7 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(builder.Request, builder.Asset))
+            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -266,11 +266,16 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
+            if (context == null || !BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(context.Request, context.Asset))
+            {
+                return;
+            }
+
             BurtScreenSpaceSubsurfaceRenderTargetUtility.Allocate(
                 context,
                 Name,
                 BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryTextureId,
-                context != null ? context.ScreenSpaceSubsurfaceHistoryTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryName),
+                context.ScreenSpaceSubsurfaceHistoryTarget,
                 BurtScreenSpaceSubsurfacePassUtility.CreateHistoryDescriptor(context),
                 FilterMode.Point);
         }
@@ -282,7 +287,7 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(builder.Request, builder.Asset))
+            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -292,11 +297,16 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
+            if (context == null || !BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(context.Request, context.Asset))
+            {
+                return;
+            }
+
             BurtScreenSpaceSubsurfaceRenderTargetUtility.Allocate(
                 context,
                 Name,
                 BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityTextureId,
-                context != null ? context.ScreenSpaceSubsurfaceVelocityTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName),
+                context.ScreenSpaceSubsurfaceVelocityTarget,
                 BurtScreenSpaceSubsurfacePassUtility.CreateVelocityDescriptor(context),
                 FilterMode.Point);
         }
@@ -456,7 +466,7 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(builder.Request, builder.Asset))
+            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -516,7 +526,7 @@ namespace Burt.RenderPipeline
             cameraDepth = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
             velocity = context != null ? context.ScreenSpaceSubsurfaceVelocityTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName);
 
-            return BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(context != null ? context.Request : null, context != null ? context.Asset : null) &&
+            return BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(context != null ? context.Request : null, context != null ? context.Asset : null) &&
                 context.Request.Camera != null &&
                 cameraDepth.IsValid &&
                 velocity.IsValid;
@@ -680,10 +690,8 @@ namespace Burt.RenderPipeline
 
             builder.ReadScreenSpaceSubsurfaceSource();
             builder.ReadHiZDepth();
-            builder.ReadGBuffer0();
             builder.ReadScreenSpaceSubsurfaceBaseColor();
             builder.ReadGBuffer1();
-            builder.ReadGBuffer2();
             builder.ReadScreenSpaceSubsurfaceEmission();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
@@ -1517,7 +1525,7 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(builder.Request, builder.Asset))
+            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -1527,6 +1535,11 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
+            if (context == null || !BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(context.Request, context.Asset))
+            {
+                return;
+            }
+
             BurtScreenSpaceSubsurfaceRenderTargetUtility.Release(context, Name, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryTextureId);
         }
     }
@@ -1537,7 +1550,7 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(builder.Request, builder.Asset))
+            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -1547,6 +1560,11 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
+            if (context == null || !BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(context.Request, context.Asset))
+            {
+                return;
+            }
+
             BurtScreenSpaceSubsurfaceRenderTargetUtility.Release(context, Name, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityTextureId);
         }
     }
@@ -2210,6 +2228,13 @@ namespace Burt.RenderPipeline
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceColor ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceAlpha ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceBaseColor ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceEmission ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuseWithBaseColor ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecularRaw ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceCombineDelta ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceStability ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceVariance ||
@@ -2242,6 +2267,20 @@ namespace Burt.RenderPipeline
                     return 9;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular:
                     return 10;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceColor:
+                    return 16;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceAlpha:
+                    return 17;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBaseColor:
+                    return 18;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceEmission:
+                    return 19;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuseWithBaseColor:
+                    return 20;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecularRaw:
+                    return 21;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombineDelta:
+                    return 22;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceStability:
                     return 11;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount:

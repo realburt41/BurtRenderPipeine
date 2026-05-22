@@ -406,6 +406,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
         }
 
+        public BurtRenderTargetHandle ReadBurtGIScreenProbeRadiance()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGIScreenProbeRadiance()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName);
+        }
+
+        public BurtRenderTargetHandle ReadBurtGIScreenProbeIrradiance()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGIScreenProbeIrradiance()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceName);
+        }
+
+        public BurtRenderTargetHandle ReadBurtGIScreenProbeConfidence()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGIScreenProbeConfidence()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName);
+        }
+
         public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceSource()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSourceName);

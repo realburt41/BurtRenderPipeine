@@ -259,6 +259,45 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle BurtGIScreenProbeRadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeIrradianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeIrradiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeConfidenceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeConfidence();
+            }
+        }
+
         public BurtRenderTargetHandle ScreenSpaceSubsurfaceSourceTarget
         {
             get

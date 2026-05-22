@@ -15,7 +15,7 @@ MonoBehaviour:
   profileName: Default Skin
   surfaceAlbedo: {r: 0.78, g: 0.52, b: 0.42, a: 1}
   meanFreePathColor: {r: 1, g: 0.42, b: 0.24, a: 1}
-  meanFreePathDistance: 1
+  meanFreePathDistance: 0.1
   worldUnitScale: 1
   tint: {r: 1, g: 1, b: 1, a: 1}
   boundaryColorBleed: {r: 1, g: 1, b: 1, a: 1}

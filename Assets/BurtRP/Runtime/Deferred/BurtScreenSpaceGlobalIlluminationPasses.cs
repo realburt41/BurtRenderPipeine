@@ -105,6 +105,138 @@ namespace Burt.RenderPipeline
         }
     }
 
+    internal abstract class BurtAllocateScreenSpaceGlobalIlluminationScreenProbePass : BurtRenderPass
+    {
+        protected abstract int TextureId { get; }
+        protected abstract BurtRenderTargetHandle GetTarget(BurtRenderGraphContext context);
+        protected abstract void WriteTarget(BurtRenderPassBuilder builder);
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            WriteTarget(builder);
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var target = GetTarget(context);
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context.Request, context.Asset);
+            var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeDescriptor(camera, settings);
+            BurtScreenSpaceGlobalIlluminationRenderTargetUtility.Allocate(context, Name, TextureId, target, descriptor, FilterMode.Bilinear);
+        }
+    }
+
+    internal sealed class BurtAllocateScreenSpaceGlobalIlluminationScreenProbeRadiancePass : BurtAllocateScreenSpaceGlobalIlluminationScreenProbePass
+    {
+        public override string Name => "Burt Allocate ScreenProbe Radiance";
+        protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceTextureId;
+
+        protected override BurtRenderTargetHandle GetTarget(BurtRenderGraphContext context)
+        {
+            return context.BurtGIScreenProbeRadianceTarget;
+        }
+
+        protected override void WriteTarget(BurtRenderPassBuilder builder)
+        {
+            builder.WriteBurtGIScreenProbeRadiance();
+        }
+    }
+
+    internal sealed class BurtAllocateScreenSpaceGlobalIlluminationScreenProbeIrradiancePass : BurtAllocateScreenSpaceGlobalIlluminationScreenProbePass
+    {
+        public override string Name => "Burt Allocate ScreenProbe Irradiance";
+        protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceTextureId;
+
+        protected override BurtRenderTargetHandle GetTarget(BurtRenderGraphContext context)
+        {
+            return context.BurtGIScreenProbeIrradianceTarget;
+        }
+
+        protected override void WriteTarget(BurtRenderPassBuilder builder)
+        {
+            builder.WriteBurtGIScreenProbeIrradiance();
+        }
+    }
+
+    internal sealed class BurtAllocateScreenSpaceGlobalIlluminationScreenProbeConfidencePass : BurtAllocateScreenSpaceGlobalIlluminationScreenProbePass
+    {
+        public override string Name => "Burt Allocate ScreenProbe Confidence";
+        protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceTextureId;
+
+        protected override BurtRenderTargetHandle GetTarget(BurtRenderGraphContext context)
+        {
+            return context.BurtGIScreenProbeConfidenceTarget;
+        }
+
+        protected override void WriteTarget(BurtRenderPassBuilder builder)
+        {
+            builder.WriteBurtGIScreenProbeConfidence();
+        }
+    }
+
+    internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbePreparePass : BurtRenderPass
+    {
+        public override string Name => "Burt ScreenProbe Lite Prepare";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadScreenSpaceGlobalIlluminationRaw();
+            builder.ReadScreenSpaceGlobalIllumination();
+            builder.WriteBurtGIScreenProbeRadiance();
+            builder.WriteBurtGIScreenProbeIrradiance();
+            builder.WriteBurtGIScreenProbeConfidence();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var radianceTarget = context.BurtGIScreenProbeRadianceTarget;
+            var irradianceTarget = context.BurtGIScreenProbeIrradianceTarget;
+            var confidenceTarget = context.BurtGIScreenProbeConfidenceTarget;
+            if (!radianceTarget.IsValid || !irradianceTarget.IsValid || !confidenceTarget.IsValid)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetRenderTarget(radianceTarget.Identifier);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+            cmd.SetRenderTarget(irradianceTarget.Identifier);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+            cmd.SetRenderTarget(confidenceTarget.Identifier);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceTextureId, radianceTarget.Identifier);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceTextureId, irradianceTarget.Identifier);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceTextureId, confidenceTarget.Identifier);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
     internal abstract class BurtScreenSpaceGlobalIlluminationPass : BurtRenderPass
     {
         protected const string ScreenSpaceGlobalIlluminationShaderName = BurtScreenSpaceGlobalIlluminationPassUtility.ScreenSpaceGlobalIlluminationShaderName;
@@ -699,6 +831,87 @@ namespace Burt.RenderPipeline
         }
     }
 
+    internal abstract class BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass : BurtRenderPass
+    {
+        protected abstract int TextureId { get; }
+        protected abstract BurtRenderTargetHandle GetTarget(BurtRenderGraphContext context);
+        protected abstract void ReadTarget(BurtRenderPassBuilder builder);
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            ReadTarget(builder);
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var target = GetTarget(context);
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            BurtScreenSpaceGlobalIlluminationRenderTargetUtility.Release(context, Name, TextureId);
+        }
+    }
+
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationScreenProbeConfidencePass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    {
+        public override string Name => "Burt Release ScreenProbe Confidence";
+        protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceTextureId;
+
+        protected override BurtRenderTargetHandle GetTarget(BurtRenderGraphContext context)
+        {
+            return context.BurtGIScreenProbeConfidenceTarget;
+        }
+
+        protected override void ReadTarget(BurtRenderPassBuilder builder)
+        {
+            builder.ReadBurtGIScreenProbeConfidence();
+        }
+    }
+
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationScreenProbeIrradiancePass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    {
+        public override string Name => "Burt Release ScreenProbe Irradiance";
+        protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceTextureId;
+
+        protected override BurtRenderTargetHandle GetTarget(BurtRenderGraphContext context)
+        {
+            return context.BurtGIScreenProbeIrradianceTarget;
+        }
+
+        protected override void ReadTarget(BurtRenderPassBuilder builder)
+        {
+            builder.ReadBurtGIScreenProbeIrradiance();
+        }
+    }
+
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationScreenProbeRadiancePass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    {
+        public override string Name => "Burt Release ScreenProbe Radiance";
+        protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceTextureId;
+
+        protected override BurtRenderTargetHandle GetTarget(BurtRenderGraphContext context)
+        {
+            return context.BurtGIScreenProbeRadianceTarget;
+        }
+
+        protected override void ReadTarget(BurtRenderPassBuilder builder)
+        {
+            builder.ReadBurtGIScreenProbeRadiance();
+        }
+    }
+
     internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRawPass : BurtRenderPass
     {
         public override string Name => "Burt Release Screen Space Global Illumination Raw";
@@ -910,6 +1123,34 @@ namespace Burt.RenderPipeline
         {
             return resolution == BurtScreenSpaceGlobalIlluminationResolution.Full ? BurtScreenSpaceGlobalIlluminationResolution.Full : BurtScreenSpaceGlobalIlluminationResolution.Half;
         }
+    }
+
+    internal readonly struct BurtScreenSpaceGlobalIlluminationScreenProbeSettings
+    {
+        public static readonly BurtScreenSpaceGlobalIlluminationScreenProbeSettings Disabled = new BurtScreenSpaceGlobalIlluminationScreenProbeSettings(false, 16, 12f, 8, 0.9f, 0f);
+
+        public BurtScreenSpaceGlobalIlluminationScreenProbeSettings(
+            bool enabled,
+            int spacingPixels,
+            float traceDistance,
+            int sampleCount,
+            float temporalFeedback,
+            float applyStrength)
+        {
+            Enabled = enabled;
+            SpacingPixels = Mathf.Clamp(spacingPixels, 4, 64);
+            TraceDistance = Mathf.Clamp(traceDistance, 0.5f, 80f);
+            SampleCount = Mathf.Clamp(sampleCount, 1, 32);
+            TemporalFeedback = Mathf.Clamp(temporalFeedback, 0f, 0.98f);
+            ApplyStrength = Mathf.Clamp01(applyStrength);
+        }
+
+        public bool Enabled { get; }
+        public int SpacingPixels { get; }
+        public float TraceDistance { get; }
+        public int SampleCount { get; }
+        public float TemporalFeedback { get; }
+        public float ApplyStrength { get; }
     }
 
     internal readonly struct BurtScreenSpaceGlobalIlluminationHistoryMatrices
@@ -1577,6 +1818,11 @@ namespace Burt.RenderPipeline
             return ResolveScreenSpaceGlobalIlluminationSettings(request, asset).Enabled;
         }
 
+        public static bool ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(request, asset).Enabled;
+        }
+
         public static bool ShouldUseScreenSpaceGlobalIlluminationDebugView(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
             if (!IsScreenSpaceGlobalIlluminationDebugMode(BurtShadingDebugSettings.Mode))
@@ -1665,6 +1911,28 @@ namespace Burt.RenderPipeline
             return ApplyTemporalAACompatibilityOverrides(CreateScreenSpaceGlobalIlluminationSettings(component), request);
         }
 
+        public static BurtScreenSpaceGlobalIlluminationScreenProbeSettings ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (!ResolveScreenSpaceGlobalIlluminationSettings(request, asset).Enabled)
+            {
+                return BurtScreenSpaceGlobalIlluminationScreenProbeSettings.Disabled;
+            }
+
+            var component = GetScreenSpaceGlobalIlluminationVolumeComponent();
+            if (component == null || !component.screenProbeLite.value)
+            {
+                return BurtScreenSpaceGlobalIlluminationScreenProbeSettings.Disabled;
+            }
+
+            return new BurtScreenSpaceGlobalIlluminationScreenProbeSettings(
+                true,
+                component.screenProbeSpacingPixels.value,
+                component.screenProbeTraceDistance.value,
+                component.screenProbeSampleCount.value,
+                component.screenProbeTemporalFeedback.value,
+                component.screenProbeApplyStrength.value);
+        }
+
         private static BurtScreenSpaceGlobalIlluminationSettings DisableAndInvalidateHistory(BurtRenderRequest request, string reason)
         {
             BurtScreenSpaceGlobalIlluminationHistoryUtility.InvalidateHistory(request != null ? request.Camera : null, reason);
@@ -1682,6 +1950,20 @@ namespace Burt.RenderPipeline
         {
             var descriptor = CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
             descriptor.colorFormat = RenderTextureFormat.ARGB32;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateScreenSpaceGlobalIlluminationScreenProbeDescriptor(Camera camera, BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera);
+            descriptor.width = Mathf.Max(1, (descriptor.width + settings.SpacingPixels - 1) / settings.SpacingPixels);
+            descriptor.height = Mathf.Max(1, (descriptor.height + settings.SpacingPixels - 1) / settings.SpacingPixels);
+            descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
@@ -1765,6 +2047,27 @@ namespace Burt.RenderPipeline
             }
 
             return "BurtGI=ScreenSpaceDiffuseOnly;XGIRef=Prepare>SceneRepresent>FinalGather>ApplyIndirect;Covered=DiffuseIndirect;Missing=ScreenProbeLite,RadianceCache,BackfaceDiffuse,RoughSpecular,TranslucencyVolume";
+        }
+
+        public static string ResolveScreenSpaceGlobalIlluminationScreenProbeStageLabel(BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
+        {
+            if (!settings.Enabled)
+            {
+                return "Disabled";
+            }
+
+            var apply = settings.ApplyStrength > 0f ? "DisabledPlaceholder(strength=" + settings.ApplyStrength.ToString("0.###") + ")" : "DebugOnly";
+            return "Prepare=ProbeGrid;Gather=PlaceholderClear;Filter=Pending;Apply=" + apply;
+        }
+
+        public static string ResolveScreenSpaceGlobalIlluminationScreenProbeDebugLabel(BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
+        {
+            if (!settings.Enabled)
+            {
+                return "Disabled";
+            }
+
+            return "Radiance=AllocatedClear;Irradiance=AllocatedClear;Confidence=AllocatedClear";
         }
 
         public static string ResolveScreenSpaceGlobalIlluminationDebugChannelLabel()
