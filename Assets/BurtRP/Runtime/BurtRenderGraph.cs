@@ -333,7 +333,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     continue; // 跳过空 Pass，避免创建无意义资源声明。
                 }
 
-                var builder = new BurtRenderPassBuilder(passIndex, pass, context.Request, context.Asset, resources); // 为当前 Pass 创建资源声明 Builder，并注入当前 request 与 asset。
+                var builder = new BurtRenderPassBuilder(passIndex, pass, context.Request, context.Asset, resources, context.RenderOptions); // 为当前 Pass 创建资源声明 Builder，并注入当前 request、asset 与 RT 生命周期选项。
 
                 try // Configure 只负责声明依赖，异常不应该直接阻断后续 Debug 信息收集。
                 {

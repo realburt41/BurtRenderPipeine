@@ -912,6 +912,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             sampler2D _BurtTAAVelocityTexture;
             Texture2D<int> _BurtTAAPrevUseCountTexture;
             sampler2D _BurtTAAParallaxRejectionTexture;
+            sampler2D _BurtTAABurtGITexture;
             sampler2D _BurtGBuffer1;
             float4x4 _BurtTAAInverseCurrentViewProjection;
             float4 _BurtTAATexelSize;
@@ -925,6 +926,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float4 _BurtTAACurrentSampleWeights0;
             float4 _BurtTAACurrentSampleWeights1;
             float4 _BurtTAACurrentSampleWeights2;
+            float4 _BurtTAABurtGIParams;
             float _BurtTAAHasGBuffer;
             float _BurtTAADebugYFlip;
             float _BurtShadingDebugEnabled;
@@ -1200,6 +1202,31 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 minCoverage = min(minCoverage, tex2D(_BurtTAAParallaxRejectionTexture, saturate(uv + float2(0.0, texel.y))).g);
                 minCoverage = min(minCoverage, tex2D(_BurtTAAParallaxRejectionTexture, saturate(uv - float2(0.0, texel.y))).g);
                 return saturate(centerCoverage - minCoverage);
+            }
+
+            float BurtTaaBurtGIResponsive(float2 uv, float surfaceWeight, float geometryResponsive)
+            {
+                float enabled = saturate(_BurtTAABurtGIParams.x);
+                if (enabled <= 0.0)
+                {
+                    return 0.0;
+                }
+
+                float2 texel = _BurtTAATexelSize.xy;
+                float4 centerGI = tex2D(_BurtTAABurtGITexture, uv);
+                float hitRatio = saturate(centerGI.a);
+                float lowHitResponsive = 1.0 - smoothstep(0.10, 0.72, hitRatio);
+                float centerLuma = BurtTaaLuminance(max(centerGI.rgb, 0.0));
+                float maxDelta = 0.0;
+                maxDelta = max(maxDelta, abs(BurtTaaLuminance(max(tex2D(_BurtTAABurtGITexture, saturate(uv + float2(texel.x, 0.0))).rgb, 0.0)) - centerLuma));
+                maxDelta = max(maxDelta, abs(BurtTaaLuminance(max(tex2D(_BurtTAABurtGITexture, saturate(uv - float2(texel.x, 0.0))).rgb, 0.0)) - centerLuma));
+                maxDelta = max(maxDelta, abs(BurtTaaLuminance(max(tex2D(_BurtTAABurtGITexture, saturate(uv + float2(0.0, texel.y))).rgb, 0.0)) - centerLuma));
+                maxDelta = max(maxDelta, abs(BurtTaaLuminance(max(tex2D(_BurtTAABurtGITexture, saturate(uv - float2(0.0, texel.y))).rgb, 0.0)) - centerLuma));
+                float localVariation = saturate(maxDelta / max(centerLuma + 0.04, 0.08));
+                float strength = saturate(_BurtTAABurtGIParams.y);
+                float variationStrength = saturate(_BurtTAABurtGIParams.z);
+                float responsive = saturate(lowHitResponsive * strength + localVariation * variationStrength * saturate(0.25 + geometryResponsive));
+                return responsive * enabled * surfaceWeight;
             }
 
             float3 BurtSampleCurrent(float2 uv)
@@ -1548,8 +1575,10 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float taaVelocityBreak = saturate(max(velocityEdgeResponsive, motionResponsive));
                 float taaClampBreak = saturate(max(1.0 - clipWeight, clampTighten));
                 float edgeFeedbackGuard = saturate(max(edgeResponsive, historyCoverageEdge) * max(max(max(taaParallaxBreak, coverageBreak), taaVelocityBreak), taaClampBreak) * (1.0 - historyContinuity));
+                float burtGIResponsive = BurtTaaBurtGIResponsive(uv, surfaceWeight, max(max(edgeResponsive, coverageBreak), responsivePreMask));
                 float responsiveMask = max(max(colorResponsive, depthResponsive), max(max(max(motionResponsive * 0.65, untrustedObjectMotion), velocityEdgeResponsive), responsivePreMask));
                 responsiveMask = saturate(responsiveMask * saturate(_BurtTAAResponsiveParams.x) * historyValid * inBounds * velocityValid * surfaceWeight);
+                responsiveMask = max(responsiveMask, burtGIResponsive * historyValid * inBounds * velocityValid);
                 responsiveMask = max(responsiveMask, edgeFeedbackGuard * historyValid * inBounds * velocityValid * surfaceWeight);
                 float confidenceWeight = lerp(saturate(_BurtTAAFeedbackParams.y), 1.0, saturate(historyConfidence));
                 float confidenceBoost = lerp(min(_BurtTAAFeedbackParams.z, 0.72), _BurtTAAFeedbackParams.z, saturate(historyConfidence));
@@ -1563,6 +1592,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 feedback *= lerp(1.0, 0.55, edgeFeedbackGuard);
                 feedback *= lerp(0.72, 1.0, saturate(coverageValidity));
                 feedback *= lerp(1.0, 0.62, historyCoverageEdge * (1.0 - historyContinuity));
+                feedback *= lerp(1.0, 0.72, burtGIResponsive * historyValid * inBounds * velocityValid);
                 float geometryFeedbackValidity = min(min(depthWeight, depthRangeWeight), min(min(normalWeight, motionWeight), min(parallaxValidity, coverageValidity)));
                 float settledFeedbackFloor = baseFeedback * lerp(0.56, 0.88, historySampleTrust);
                 feedback = max(feedback, settledFeedbackFloor * stableColorRecovery * geometryFeedbackValidity);

@@ -90,6 +90,27 @@ float BurtGetDeferredLightingDebugMaterialChannel(BurtGBufferData gbufferData)
 #endif
 }
 
+void BurtApplyDeferredLightingDebugBaseline(
+    BurtGBufferData shadingGBufferData,
+    BurtLight mainLight,
+    float3 viewDirectionWS,
+    float3 positionWS,
+    float3 shadowPositionWS,
+    float2 screenUV,
+    inout BurtPBRShadingComponents debugComponents)
+{
+#if defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
+    shadingGBufferData.subsurfaceStrength = 0.0f;
+
+    BurtPBRShadingCoreData debugCoreData = BurtPreparePBRShadingCoreData(shadingGBufferData, viewDirectionWS);
+    BurtDirectPBRComponents mainDirectComponents = BurtEvaluatePBRDirectFromCore(debugCoreData, mainLight);
+    BurtDirectPBRComponents additionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(debugCoreData, positionWS, shadowPositionWS, screenUV);
+    BurtDirectPBRComponents directComponents = BurtAddPBRDirectComponents(mainDirectComponents, additionalDirectComponents);
+    BurtIndirectPBRComponents indirectComponents = BurtEvaluatePBRIndirectFromCore(debugCoreData);
+    debugComponents = BurtComposePBRShadingComponentsWithAdditional(debugCoreData, directComponents, indirectComponents, additionalDirectComponents);
+#endif
+}
+
 float3 BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(
     BurtGBufferData gbufferData,
     float3 viewDirectionWS,
@@ -175,18 +196,27 @@ float4 Frag(Varyings input) : SV_Target
     debugSurfaceData.shadingModelID = gbufferData.shadingModelID;
 
     BurtPBRMaterialData debugGBufferMaterialData = BurtPreparePBRMaterialData(gbufferData);
+    BurtPBRShadingComponents debugLightingComponents = pbrComponents;
+    BurtApplyDeferredLightingDebugBaseline(
+        shadingGBufferData,
+        mainLight,
+        viewDirectionWS,
+        positionWS,
+        shadowPositionWS,
+        screenUV,
+        debugLightingComponents);
 
     float3 deferredAONormalWS = BurtGetGBufferDirectionWS(gbufferData);
     BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(BurtGetGBufferDirectionWS(gbufferData));
     debugData.normalWS = deferredAONormalWS;
-    debugData.detailLightingColor = pbrComponents.lighting;
-    debugData.directDiffuseColor = pbrComponents.directDiffuse;
-    debugData.directSpecularColor = pbrComponents.directSpecular;
-    debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
-    debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
+    debugData.detailLightingColor = debugLightingComponents.lighting;
+    debugData.directDiffuseColor = debugLightingComponents.directDiffuse;
+    debugData.directSpecularColor = debugLightingComponents.directSpecular;
+    debugData.additionalDiffuseColor = debugLightingComponents.additionalDiffuse;
+    debugData.additionalSpecularColor = debugLightingComponents.additionalSpecular;
     debugData.additionalUnshadowedColor = BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(shadingGBufferData, viewDirectionWS, positionWS, screenUV);
-    debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
-    debugData.indirectSpecularColor = pbrComponents.indirectSpecular;
+    debugData.indirectDiffuseColor = debugLightingComponents.indirectDiffuse;
+    debugData.indirectSpecularColor = debugLightingComponents.indirectSpecular;
     debugData.shadowAttenuation = shadowAttenuation;
     debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(shadowPositionWS, deferredAONormalWS, screenUV);
 
@@ -213,23 +243,23 @@ float4 Frag(Varyings input) : SV_Target
     debugData.emissionColor = gbufferData.emission;
     debugData.finalLightingColor = finalColor;
     debugData.reflectance = gbufferData.reflectance;
-    debugData.perceptualRoughness = pbrComponents.perceptualRoughness;
-    debugData.specularAARoughness = pbrComponents.specularAARoughness;
-    debugData.specularEnergyCompensation = pbrComponents.specularEnergyCompensation;
-    debugData.indirectSpecularEnergyCompensation = pbrComponents.indirectSpecularEnergyCompensation;
-    debugData.energyPreservation = pbrComponents.energyPreservation;
-    debugData.specularOcclusion = pbrComponents.specularOcclusion;
-    debugData.diffuseColor = pbrComponents.diffuseColor;
-    debugData.directBRDFD = pbrComponents.directBRDFD;
-    debugData.directBRDFVisibility = pbrComponents.directBRDFVisibility;
-    debugData.directBRDFFresnel = pbrComponents.directBRDFFresnel;
-    debugData.directDiffuseLobe = pbrComponents.directDiffuseLobe;
-    debugData.directDiffuseBRDF = pbrComponents.directDiffuseBRDF;
-    debugData.directSpecularBRDF = pbrComponents.directSpecularBRDF;
-    debugData.specularAANormalVariance = pbrComponents.specularAANormalVariance;
-    debugData.specularAARoughnessDelta = pbrComponents.specularAARoughnessDelta;
-    debugData.indirectSpecularDFG = pbrComponents.indirectSpecularDFG;
-    debugData.indirectSpecularEnvBRDF = pbrComponents.indirectSpecularEnvBRDF;
+    debugData.perceptualRoughness = debugLightingComponents.perceptualRoughness;
+    debugData.specularAARoughness = debugLightingComponents.specularAARoughness;
+    debugData.specularEnergyCompensation = debugLightingComponents.specularEnergyCompensation;
+    debugData.indirectSpecularEnergyCompensation = debugLightingComponents.indirectSpecularEnergyCompensation;
+    debugData.energyPreservation = debugLightingComponents.energyPreservation;
+    debugData.specularOcclusion = debugLightingComponents.specularOcclusion;
+    debugData.diffuseColor = debugLightingComponents.diffuseColor;
+    debugData.directBRDFD = debugLightingComponents.directBRDFD;
+    debugData.directBRDFVisibility = debugLightingComponents.directBRDFVisibility;
+    debugData.directBRDFFresnel = debugLightingComponents.directBRDFFresnel;
+    debugData.directDiffuseLobe = debugLightingComponents.directDiffuseLobe;
+    debugData.directDiffuseBRDF = debugLightingComponents.directDiffuseBRDF;
+    debugData.directSpecularBRDF = debugLightingComponents.directSpecularBRDF;
+    debugData.specularAANormalVariance = debugLightingComponents.specularAANormalVariance;
+    debugData.specularAARoughnessDelta = debugLightingComponents.specularAARoughnessDelta;
+    debugData.indirectSpecularDFG = debugLightingComponents.indirectSpecularDFG;
+    debugData.indirectSpecularEnvBRDF = debugLightingComponents.indirectSpecularEnvBRDF;
     debugData.subsurfaceProfileIndex = pbrComponents.subsurfaceProfileIndex;
     debugData.subsurfaceTransmission = pbrComponents.subsurfaceTransmission;
     debugData.subsurfaceKernelWeight = pbrComponents.subsurfaceKernelWeight;

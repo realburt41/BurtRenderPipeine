@@ -125,7 +125,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 Comp Equal
                 Pass Keep
             }
-            Blend One One
+            Blend One One, One Zero
 
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_SUBSURFACE 1

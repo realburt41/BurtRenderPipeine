@@ -168,6 +168,11 @@ float3 BurtSampleSubsurfaceTransmissionProfile(float profileIndex, float materia
     return max(lerp(lower, upper, sampleT), float3(0.0f, 0.0f, 0.0f));
 }
 
+float BurtEvaluateSubsurfaceProfileIntensity(float3 profileColor)
+{
+    return max(dot(max(profileColor, float3(0.0f, 0.0f, 0.0f)), float3(0.3f, 0.59f, 0.11f)), 0.0f);
+}
+
 float BurtHenyeyGreensteinPhase(float anisotropy, float cosTheta)
 {
     float g = clamp(anisotropy, -0.99f, 0.99f);
@@ -1063,7 +1068,8 @@ void BurtApplySubsurfaceDirectPBR(
     GetSpecularEnergyTerms(materialData.f0, materialData.f90, averageRoughness, components.brdfTerms.nDotV, dualEnergyCompensation, dualEnergyPreservation);
     float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(rawNoL, curvature, materialData.subsurfaceProfileIndex);
     float lutWeight = saturate(_BurtSubsurfacePreIntegratedLutEnabled);
-    float3 wrappedDiffuseBRDF = materialData.diffuseColor * diffuseTint * lerp(wrappedDiffuseLobe, lutScatter * BURT_INV_PI, lutWeight) * dualEnergyPreservation;
+    float scatterIntensity = BurtEvaluateSubsurfaceProfileIntensity(lutScatter);
+    float3 wrappedDiffuseBRDF = materialData.diffuseColor * diffuseTint * lerp(wrappedDiffuseLobe, scatterIntensity * BURT_INV_PI, lutWeight) * dualEnergyPreservation;
     float3 wrappedDiffuse = wrappedDiffuseBRDF * lightColor * lerp(wrappedNoL * shadowAttenuation, shadowAttenuation, lutWeight);
 
     float thickness = saturate(materialData.subsurfaceThickness);
@@ -1087,7 +1093,8 @@ void BurtApplySubsurfaceDirectPBR(
     float softenedShadowVisibility = shadowVisibility * lerp(shadowVisibility, sqrt(shadowVisibility), saturate(thickness) * 0.35f);
     float transmissionShadow = softenedShadowVisibility * lerp(0.82f, 1.0f, backFacing);
     float3 profileTint = max(profileTransmissionTint.rgb, float3(0.0f, 0.0f, 0.0f));
-    float3 transmissionThroughput = max(materialData.baseColor * subsurfaceTint * profileTint, float3(0.0f, 0.0f, 0.0f)) * profileTransmittance;
+    float transmissionIntensity = BurtEvaluateSubsurfaceProfileIntensity(profileTransmittance);
+    float3 transmissionThroughput = max(materialData.baseColor * subsurfaceTint * profileTint, float3(0.0f, 0.0f, 0.0f)) * transmissionIntensity;
     float3 transmissionBRDF = transmissionThroughput * transmissionLobe * dualEnergyPreservation;
     float3 transmission = transmissionBRDF * lightColor * transmissionShadow;
 

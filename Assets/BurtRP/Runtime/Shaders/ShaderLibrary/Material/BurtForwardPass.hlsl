@@ -242,6 +242,44 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
         emissionColor,
         finalColor);
 
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
+    BurtSurfaceData debugLightingSurfaceData = shadingSurfaceData;
+    debugLightingSurfaceData.subsurfaceStrength = 0.0f;
+    BurtPBRShadingComponents debugLightingComponents = BurtEvaluateForwardShadingComponents(
+        debugLightingSurfaceData,
+        mainLight,
+        input,
+        normalWS,
+        shadingDirectionWS,
+        viewDirectionWS,
+        facing);
+    debugData.detailLightingColor = debugLightingComponents.lighting;
+    debugData.directDiffuseColor = debugLightingComponents.directDiffuse;
+    debugData.directSpecularColor = debugLightingComponents.directSpecular;
+    debugData.additionalDiffuseColor = debugLightingComponents.additionalDiffuse;
+    debugData.additionalSpecularColor = debugLightingComponents.additionalSpecular;
+    debugData.additionalUnshadowedColor = BurtEvaluateForwardAdditionalUnshadowedDebug(debugLightingSurfaceData, normalWS, shadingDirectionWS, viewDirectionWS, input.positionWS);
+    debugData.indirectDiffuseColor = debugLightingComponents.indirectDiffuse;
+    debugData.indirectSpecularColor = debugLightingComponents.indirectSpecular;
+    debugData.perceptualRoughness = debugLightingComponents.perceptualRoughness;
+    debugData.specularAARoughness = debugLightingComponents.specularAARoughness;
+    debugData.specularEnergyCompensation = debugLightingComponents.specularEnergyCompensation;
+    debugData.indirectSpecularEnergyCompensation = debugLightingComponents.indirectSpecularEnergyCompensation;
+    debugData.energyPreservation = debugLightingComponents.energyPreservation;
+    debugData.specularOcclusion = debugLightingComponents.specularOcclusion;
+    debugData.diffuseColor = debugLightingComponents.diffuseColor;
+    debugData.directBRDFD = debugLightingComponents.directBRDFD;
+    debugData.directBRDFVisibility = debugLightingComponents.directBRDFVisibility;
+    debugData.directBRDFFresnel = debugLightingComponents.directBRDFFresnel;
+    debugData.directDiffuseLobe = debugLightingComponents.directDiffuseLobe;
+    debugData.directDiffuseBRDF = debugLightingComponents.directDiffuseBRDF;
+    debugData.directSpecularBRDF = debugLightingComponents.directSpecularBRDF;
+    debugData.specularAANormalVariance = debugLightingComponents.specularAANormalVariance;
+    debugData.specularAARoughnessDelta = debugLightingComponents.specularAARoughnessDelta;
+    debugData.indirectSpecularDFG = debugLightingComponents.indirectSpecularDFG;
+    debugData.indirectSpecularEnvBRDF = debugLightingComponents.indirectSpecularEnvBRDF;
+#endif
+
     float3 debugColor;
     if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
     {

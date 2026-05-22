@@ -5,7 +5,7 @@ Shader "BurtRP/UnlitColor"
     Properties
     {
         // 定义一个颜色属性，材质 Inspector 中显示为 Base Color，默认值为白色。
-        _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
+        [HDR]_BaseColor ("Base Color", Color) = (1, 1, 1, 1)
     }
 
     // 定义一个 SubShader，Unity 会从上到下选择当前平台可用的 SubShader。

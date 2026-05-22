@@ -125,6 +125,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAACurrentSampleWeights1Id = Shader.PropertyToID("_BurtTAACurrentSampleWeights1");
         private static readonly int TemporalAACurrentSampleWeights2Id = Shader.PropertyToID("_BurtTAACurrentSampleWeights2");
         private static readonly int TemporalAAHasGBufferId = Shader.PropertyToID("_BurtTAAHasGBuffer");
+        private static readonly int TemporalAABurtGITextureId = Shader.PropertyToID("_BurtTAABurtGITexture");
+        private static readonly int TemporalAABurtGIParamsId = Shader.PropertyToID("_BurtTAABurtGIParams");
         private static readonly int ShadingDebugEnabledId = Shader.PropertyToID(BurtShadingDebugSettings.EnabledShaderName);
         private static readonly Color TemporalAADebugUnavailableColor = new Color(0.65f, 0.05f, 0.9f, 1f);
 
@@ -262,6 +264,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.GBuffer1Name))
             {
                 builder.ReadGBuffer1();
+            }
+
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(builder.Request, builder.Asset, builder.RenderOptions) &&
+                builder.ResourceRegistry != null &&
+                builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName))
+            {
+                builder.ReadScreenSpaceGlobalIllumination();
             }
 
             builder.WritePostProcessColor(); // 声明第一段拷贝会写入 PostProcessColor。
@@ -657,6 +666,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAADecimateHistory), MeshTopology.Triangles, 3, 1);
 
             var hasGBuffer1 = context.GBuffer1Target.IsValid;
+            var burtGITarget = context.ScreenSpaceGlobalIlluminationTarget;
+            var useBurtGIForTemporalAA = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(context.Request, context.Asset, context.RenderOptions) && burtGITarget.IsValid;
             cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier);
             cmd.SetGlobalTexture(TemporalAAHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.Color) : cameraColorTarget.Identifier);
             cmd.SetGlobalTexture(TemporalAADepthHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth);
@@ -669,6 +680,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(TemporalAAParallaxRejectionTextureId, parallaxRejection);
             cmd.SetGlobalFloat(TemporalAAHasGBufferId, hasGBuffer1 ? 1f : 0f);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.GBuffer1Id, hasGBuffer1 ? context.GBuffer1Target.Identifier : blackTexture);
+            cmd.SetGlobalTexture(TemporalAABurtGITextureId, useBurtGIForTemporalAA ? burtGITarget.Identifier : blackTexture);
+            cmd.SetGlobalVector(TemporalAABurtGIParamsId, new Vector4(useBurtGIForTemporalAA ? 1f : 0f, 0.5f, 0.38f, 0f));
             cmd.SetGlobalFloat(TemporalAADebugYFlipId, 0f);
             cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
 

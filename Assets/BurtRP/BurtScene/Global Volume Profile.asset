@@ -82,7 +82,7 @@ MonoBehaviour:
     m_Value: 0.5
   intensity:
     m_OverrideState: 1
-    m_Value: 1.1
+    m_Value: 1
   scatter:
     m_OverrideState: 0
     m_Value: 0.65
@@ -337,7 +337,7 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: {r: 0.48, g: 0.66, b: 0.92, a: 1}
   horizonSunsetColor:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: {r: 0.95, g: 0.82, b: 0.58, a: 1}
   horizonIntensity:
     m_OverrideState: 0
@@ -613,6 +613,18 @@ MonoBehaviour:
   spatialDenoiseStrength:
     m_OverrideState: 0
     m_Value: 0.75
+  leakGuardStrength:
+    m_OverrideState: 0
+    m_Value: 0.65
+  edgeFadeStrength:
+    m_OverrideState: 0
+    m_Value: 0.5
+  normalConeTightness:
+    m_OverrideState: 0
+    m_Value: 0.55
+  skyEdgeSuppression:
+    m_OverrideState: 0
+    m_Value: 0.6
   temporalAccumulation:
     m_OverrideState: 0
     m_Value: 1
@@ -785,8 +797,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   active: 1
   enabled:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 1
   visibleDistance:
     m_OverrideState: 0
     m_Value: 300

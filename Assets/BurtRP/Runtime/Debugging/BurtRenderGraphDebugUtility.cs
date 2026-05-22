@@ -115,9 +115,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             AppendRenderTargetState(builder, request, asset, resourceRegistry); // 写入 CameraColor、CameraDepth、PostProcessColor、GBuffer 和最终目标的格式状态。
 
-            AppendPostProcessState(builder, request, asset); // 写入后处理框架、Volume Tonemapping 和 Color Adjustments 的运行状态。
+            AppendPostProcessState(builder, request, asset, renderOptions); // 写入后处理框架、Volume Tonemapping 和 Color Adjustments 的运行状态。
 
-            AppendDeferredState(builder, request, asset, resourceRegistry); // 写入 Deferred GBuffer 注册和调试模式状态，方便确认 Deferred 分支是否真的生效。
+            AppendDeferredState(builder, request, asset, resourceRegistry, renderOptions); // 写入 Deferred GBuffer 注册和调试模式状态，方便确认 Deferred 分支是否真的生效。
 
             if (IsPreviewOrReflectionRequest(request)) // Preview/Reflection 强制走 Forward，Deferred 材质分类对资产预览或 Probe 捕获没有意义。
             {
@@ -1493,7 +1493,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
         private static void AppendPostProcessState( // 写入后处理框架和 Volume 效果状态。
             StringBuilder builder, // 接收要写入的字符串构建器。
             BurtRenderRequest request, // 接收当前渲染请求，用来判断后处理是否应该执行。
-            BurtRenderPipelineAsset asset) // 接收当前管线资产，用来读取后处理框架设置。
+            BurtRenderPipelineAsset asset, // 接收当前管线资产，用来读取后处理框架设置。
+            BurtRequestRenderOptions renderOptions) // Receives request render options for BurtGI/TAA exposure parity.
         {
             builder.AppendLine("PostProcess State:"); // 单独成段输出，方便排查 No-op、Tonemapping 和 Color Adjustments。
 
@@ -1539,6 +1540,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var temporalAA = request != null ? request.TemporalAA : null;
             var temporalAASettings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
             var temporalHistory = BurtTemporalAAUtility.GetHistoryStatus(request != null ? request.Camera : null);
+            var burtGITAAConfidence = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(request, asset, renderOptions) ? "BoundCurrentGIAlpha" : "Disabled";
 
             builder.Append("  AssetEnabled=").Append(assetEnabled); // 写入后处理总开关。
 
@@ -1666,6 +1668,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAADepthEdge=").Append(temporalAASettings.DepthEdgeResponsiveStrength.ToString("0.###"));
             builder.Append(" TAAClampTight=").Append(temporalAASettings.HistoryClampTightness.ToString("0.###"));
             builder.Append(" TAADepthFilterFloor=").Append(temporalAASettings.DepthWeightedFilterFloor.ToString("0.###"));
+            builder.Append(" TAABurtGIConfidence=").Append(burtGITAAConfidence);
             builder.Append(" TAAVelocity=").Append(temporalAA != null ? temporalAA.VelocityMode.ToString() : BurtTemporalAAVelocityMode.Disabled.ToString());
             builder.Append(" TAAObjectMVPass=").Append(temporalAA != null && temporalAA.ObjectMotionVectorPassDrawn);
             builder.Append(" TAADebugMode=").Append(BurtTemporalAAUtility.IsTemporalAADebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
@@ -1680,7 +1683,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             StringBuilder builder, // 接收要写入的字符串构建器。
             BurtRenderRequest request, // 接收当前渲染请求，用来判断 Preview 是否强制走 Forward。
             BurtRenderPipelineAsset asset, // 接收管线资产，用来读取 Deferred 开关。
-            BurtRenderGraphResourceRegistry resourceRegistry) // 接收资源表，用来确认 GBuffer 是否注册。
+            BurtRenderGraphResourceRegistry resourceRegistry, // 接收资源表，用来确认 GBuffer 是否注册。
+            BurtRequestRenderOptions renderOptions) // Receives request render options for BurtGI/TAA exposure parity.
         {
             builder.AppendLine("Deferred State:"); // 单独成段输出，让 Deferred 分支是否生效一眼可见。
 
@@ -1746,6 +1750,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             {
                 var ssrSettings = BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionSettings(request, asset);
                 var ssrSuppressedByShadingDebug = BurtScreenSpaceReflectionPassUtility.IsScreenSpaceReflectionSuppressedByShadingDebug();
+                var sssSuppressedByShadingDebug = BurtScreenSpaceSubsurfacePassUtility.IsScreenSpaceSubsurfaceSuppressedByShadingDebug();
                 var ssrHistory = BurtScreenSpaceReflectionHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
                 var screenSpaceSubsurfaceEnabled = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset);
                 var screenSpaceSubsurfaceUsesBurley = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(request, asset);
@@ -1765,6 +1770,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" HiZDebugView=").Append(asset != null && asset.EnableHiZDebugView);
                 builder.Append(" HiZDebugMip=").Append(asset != null ? asset.HiZDebugMip.ToString() : "<none>");
                 builder.Append(" SSSEnabled=").Append(screenSpaceSubsurfaceEnabled);
+                builder.Append(" SSSSuppressedByShadingDebug=").Append(sssSuppressedByShadingDebug);
                 builder.Append(" SSSMaterialGate=").Append(BurtScreenSpaceSubsurfacePassUtility.ResolveScreenSpaceSubsurfaceMaterialGateDebugLabel(request, asset));
                 builder.Append(" SSSAlgorithmMode=").Append(BurtScreenSpaceSubsurfacePassUtility.ResolveScreenSpaceSubsurfaceAlgorithmModeLabel(request, asset));
                 builder.Append(" SSSPassExpected=").Append(screenSpaceSubsurfaceEnabled);
@@ -1877,6 +1883,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGIDebugPassRequested=").Append(burtGIDebugPassRequested);
                 builder.Append(" BurtGIShaderStatus=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationShaderStatusLabel());
                 builder.Append(" BurtGITraceMode=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationTraceModeLabel(burtGISettings));
+                builder.Append(" BurtGIPipeline=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationPipelineStageLabel(request, asset, renderOptions, burtGISettings));
+                builder.Append(" BurtGIXGIParity=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationXGIParityLabel(burtGISettings));
+                builder.Append(" BurtGIDebugChannels=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationDebugChannelLabel());
+                builder.Append(" BurtGIInspect=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationInspectLabel());
                 builder.Append(" BurtGIPlacement=AfterDeferredLightingBeforeSSS");
                 builder.Append(" BurtGIComposite=AddDiffuseGI");
                 builder.Append(" BurtGIOutputTarget=ScreenSpaceGlobalIllumination");
@@ -1908,7 +1918,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGITemporalClamp=").Append(FormatFloat(burtGISettings.TemporalClamp));
                 builder.Append(" BurtGITemporalVarianceClamp=").Append(FormatFloat(burtGISettings.TemporalVarianceClamp));
                 builder.Append(" BurtGITemporalHitRejection=").Append(FormatFloat(burtGISettings.TemporalHitRejection));
-                builder.Append(" BurtGITemporalConfidence=").Append(burtGITemporalDiagnosticsRequested ? "DiagnosticsRT" : "Disabled");
+                builder.Append(" BurtGITemporalConfidence=").Append(burtGITemporalDiagnosticsRequested ? "DiagnosticsRT" : (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(request, asset, renderOptions) ? "ExternalTAA(CurrentGIAlpha)" : "Disabled"));
                 builder.Append(" BurtGIHistoryValid=").Append(burtGIHistory.HasHistory);
                 builder.Append(" BurtGIHistoryAllocated=").Append(burtGIHistory.HasHistory || burtGIHistory.HasDepthNormalHistory);
                 builder.Append(" BurtGIHistoryMatches=").Append(burtGIHistory.DescriptorMatches);

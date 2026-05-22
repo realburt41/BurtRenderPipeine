@@ -6,6 +6,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
 
         public BurtRenderPipelineAsset Asset { get; } // 保存当前管线资产，供 Pass.Configure 根据 Inspector 配置开关调整资源声明。
 
+        public BurtRequestRenderOptions RenderOptions { get; }
+
         public BurtRenderGraphResourceRegistry ResourceRegistry { get; } // 保存当前 RenderGraph 的资源注册表，Builder 通过它查找资源句柄。
 
         public BurtRenderPassResourceUsage Usage { get; } // 保存当前 Pass 的资源使用记录，RenderGraph 会在配置阶段收集它。
@@ -14,9 +16,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             BurtRenderPass pass, // 接收正在配置的 RenderPass，用它的名称创建资源使用记录。
             BurtRenderRequest request, // 接收当前 RenderGraph 正在处理的渲染请求，让 Pass 可以根据相机任务声明资源。
             BurtRenderPipelineAsset asset, // 接收当前 BurtRP 管线资产，让 Pass 可以根据 Inspector 开关声明资源。
-            BurtRenderGraphResourceRegistry resourceRegistry) // 接收当前 RenderGraph 的资源注册表。
-            : this(-1, pass, request, asset, resourceRegistry)
+            BurtRenderGraphResourceRegistry resourceRegistry, // 接收当前 RenderGraph 的资源注册表。
+            BurtRequestRenderOptions renderOptions = null)
         {
+            Request = request; // 把当前渲染请求保存到 Request 属性里，供 Pass.Configure 使用。
+
+            Asset = asset; // 把当前管线资产保存到 Asset 属性里，供 Pass.Configure 使用。
+
+            RenderOptions = renderOptions;
+
+            ResourceRegistry = resourceRegistry; // 把资源注册表保存到 ResourceRegistry 属性里。
+
+            Usage = CreateUsage(-1, pass); // 为旧入口创建不带图内索引的资源使用记录。
         }
 
         public BurtRenderPassBuilder( // 定义构造函数，用来为某个 Pass 创建资源声明 Builder。
@@ -24,23 +35,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             BurtRenderPass pass, // 接收正在配置的 RenderPass，用它的名称创建资源使用记录。
             BurtRenderRequest request, // 接收当前 RenderGraph 正在处理的渲染请求，让 Pass 可以根据相机任务声明资源。
             BurtRenderPipelineAsset asset, // 接收当前 BurtRP 管线资产，让 Pass 可以根据 Inspector 开关声明资源。
-            BurtRenderGraphResourceRegistry resourceRegistry) // 接收当前 RenderGraph 的资源注册表。
+            BurtRenderGraphResourceRegistry resourceRegistry, // 接收当前 RenderGraph 的资源注册表。
+            BurtRequestRenderOptions renderOptions = null) // Receives current request render options.
         {
             Request = request; // 把当前渲染请求保存到 Request 属性里，供 Pass.Configure 使用。
 
             Asset = asset; // 把当前管线资产保存到 Asset 属性里，供 Pass.Configure 使用。
 
+            RenderOptions = renderOptions;
+
             ResourceRegistry = resourceRegistry; // 把资源注册表保存到 ResourceRegistry 属性里。
 
-            var passName = pass != null ? pass.Name : "NullPass"; // 如果 Pass 存在就读取它的名称，否则使用空 Pass 兜底名称。
+            Usage = CreateUsage(passIndex, pass); // 为当前 Pass 创建一份带顺序索引的资源使用记录。
+        }
 
-            var passKind = pass != null ? pass.Kind : BurtRenderPassKindUtility.InferKind(passName); // Read pass metadata once so debug records match execution.
-
-            var hasSideEffects = pass == null || pass.HasSideEffects; // Null pass records stay conservative.
-
-            var allowCulling = pass != null && pass.AllowCulling; // Culling remains disabled unless a pass explicitly opts in.
-
-            Usage = new BurtRenderPassResourceUsage(passIndex, passName, passKind, hasSideEffects, allowCulling); // 为当前 Pass 创建一份带顺序索引的资源使用记录。
+        private static BurtRenderPassResourceUsage CreateUsage(int passIndex, BurtRenderPass pass)
+        {
+            var passName = pass != null ? pass.Name : "NullPass";
+            var passKind = pass != null ? pass.Kind : BurtRenderPassKindUtility.InferKind(passName);
+            var hasSideEffects = pass == null || pass.HasSideEffects;
+            var allowCulling = pass != null && pass.AllowCulling;
+            return new BurtRenderPassResourceUsage(passIndex, passName, passKind, hasSideEffects, allowCulling);
         }
 
         public BurtRenderTargetHandle ReadRenderTarget(string name) // 定义声明读取某个渲染目标资源的函数。

@@ -196,7 +196,8 @@ Shader "Hidden/BurtRP/BurtGI"
                 float baseLuma = dot(max(sampleMaterialData.baseColor, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
                 float diffuseFraction = saturate(diffuseLuma / max(baseLuma, 0.001f));
                 float roughDiffuseWeight = lerp(0.35f, 1.0f, saturate(sampleMaterialData.perceptualRoughness));
-                return diffuseFraction * roughDiffuseWeight * saturate(sampleMaterialData.occlusion);
+                float sourceOcclusion = lerp(0.25f, 1.0f, saturate(sampleMaterialData.occlusion));
+                return diffuseFraction * roughDiffuseWeight * sourceOcclusion;
             }
 
             bool BurtGIProjectHistoryUV(float3 positionWS, out float2 historyUV, out float projectedRawDepth)
@@ -371,7 +372,8 @@ Shader "Hidden/BurtRP/BurtGI"
                     float depthWeight = 1.0f - smoothstep(guardedThickness, guardedThickness + max(radius * lerp(0.3f, 0.14f, leakGuard), 0.01f), depthError);
                     float distanceWeight = 1.0f - smoothstep(radius * 0.15f, radius * 1.35f, distanceWS);
                     float normalFacingWeight = smoothstep(0.06f, 0.28f, saturate(dot(normalWS, sampleDirectionFromCenterWS)));
-                    float sampleNormalWeight = lerp(1.0f, saturate(dot(sampleNormalWS, sampleToCenterWS)), normalWeightAmount);
+                    float edgeNormalWeightAmount = saturate(normalWeightAmount + leakGuard * edgeFactor * 0.35f);
+                    float sampleNormalWeight = lerp(1.0f, saturate(dot(sampleNormalWS, sampleToCenterWS)), edgeNormalWeightAmount);
                     float surfaceCone = smoothstep(lerp(0.12f, 0.45f, saturate(_BurtGIParams4.z)), 1.0f, saturate(dot(normalWS, sampleNormalWS)));
                     float weight = depthWeight * distanceWeight * normalFacingWeight * sampleNormalWeight * lerp(1.0f, surfaceCone, leakGuard) * coplanarReject;
                     if (weight <= 0.0001f)
@@ -390,7 +392,10 @@ Shader "Hidden/BurtRP/BurtGI"
                 float hitRatio = saturate(totalWeight / max((float)stepCount * 0.35f, 1.0f));
                 float3 screenIrradiance = totalWeight > 0.0001f ? tracedRadiance / totalWeight : 0.0f;
                 float skyEdgeFade = lerp(1.0f, 1.0f - edgeFactor, saturate(_BurtGIParams4.w));
-                float3 skyDiffuse = BurtSampleIndirectDiffuseIrradiance(normalWS) * _BurtGIParams1.y * (1.0f - hitRatio) * skyEdgeFade;
+                float edgeSkyRisk = saturate(edgeFactor * leakGuard * saturate(_BurtGIParams4.w));
+                float lowHitConfidence = smoothstep(0.05f, 0.65f, hitRatio);
+                float skyFallbackWeight = (1.0f - hitRatio) * skyEdgeFade * lerp(1.0f, lowHitConfidence, edgeSkyRisk);
+                float3 skyDiffuse = BurtSampleIndirectDiffuseIrradiance(normalWS) * _BurtGIParams1.y * skyFallbackWeight;
                 float3 diffuseOcclusion = BurtGTAOMultiBounce(materialData.occlusion, materialData.baseColor);
                 float3 indirectDiffuse = materialData.diffuseColor * (screenIrradiance * hitRatio + skyDiffuse) * diffuseOcclusion * distanceFade * edgeFade;
                 return float4(max(indirectDiffuse, 0.0f), hitRatio);
@@ -419,8 +424,11 @@ Shader "Hidden/BurtRP/BurtGI"
                 float spatialRadius = max(_BurtGIParams3.x, 0.5f);
                 float spatialStrength = saturate(_BurtGIParams3.y);
                 float leakGuard = saturate(_BurtGIParams4.x);
-                float4 sum = center * lerp(4.0f, 6.0f, spatialStrength);
-                float totalWeight = lerp(4.0f, 6.0f, spatialStrength);
+                float centerWeight = lerp(4.0f, 6.0f, spatialStrength);
+                float3 colorSum = center.rgb * centerWeight;
+                float colorWeightSum = centerWeight;
+                float hitSum = saturate(center.a) * centerWeight;
+                float hitWeightSum = centerWeight;
 
                 [unroll]
                 for (int i = 0; i < 16; ++i)
@@ -459,13 +467,20 @@ Shader "Hidden/BurtRP/BurtGI"
                     float normalWeight = pow(normalDot, normalPower);
                     float edgeCrossWeight = lerp(1.0f, smoothstep(0.35f, 1.0f, normalDot), leakGuard * centerEdgeFactor);
                     float ringWeight = i < 4 ? 1.0f : (i < 8 ? 0.7f : 0.42f);
-                    float hitWeight = lerp(0.55f, 1.0f, saturate(tex2D(_BurtScreenSpaceGlobalIlluminationRawTexture, sampleUV).a));
-                    float weight = depthWeight * normalWeight * edgeCrossWeight * ringWeight * hitWeight * spatialStrength;
-                    sum += tex2D(_BurtScreenSpaceGlobalIlluminationRawTexture, sampleUV) * weight;
-                    totalWeight += weight;
+                    float4 sampleBurtGI = tex2D(_BurtScreenSpaceGlobalIlluminationRawTexture, sampleUV);
+                    float sampleHitRatio = saturate(sampleBurtGI.a);
+                    float hitWeight = lerp(0.55f, 1.0f, sampleHitRatio);
+                    float hitDeltaWeight = lerp(1.0f, 1.0f - smoothstep(0.25f, 0.85f, abs(sampleHitRatio - saturate(center.a))), leakGuard * centerEdgeFactor);
+                    float baseWeight = depthWeight * normalWeight * edgeCrossWeight * ringWeight * spatialStrength;
+                    float colorWeight = baseWeight * hitWeight * hitDeltaWeight;
+                    float hitFilterWeight = baseWeight * lerp(1.0f, hitDeltaWeight, leakGuard * centerEdgeFactor * 0.65f);
+                    colorSum += sampleBurtGI.rgb * colorWeight;
+                    colorWeightSum += colorWeight;
+                    hitSum += sampleHitRatio * hitFilterWeight;
+                    hitWeightSum += hitFilterWeight;
                 }
 
-                float4 filtered = sum / max(totalWeight, 0.0001f);
+                float4 filtered = float4(colorSum / max(colorWeightSum, 0.0001f), hitSum / max(hitWeightSum, 0.0001f));
                 return lerp(center, filtered, spatialStrength);
             }
 
@@ -632,7 +647,9 @@ Shader "Hidden/BurtRP/BurtGI"
                 }
 
                 float3 burtGI = tex2D(_BurtScreenSpaceGlobalIlluminationTexture, screenUV).rgb;
-                cameraColor.rgb += burtGI * _BurtGIParams1.x;
+                float3 appliedGI = burtGI * _BurtGIParams1.x;
+                cameraColor.rgb += appliedGI;
+                cameraColor.a += dot(max(appliedGI, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
                 return cameraColor;
             }
 
@@ -668,11 +685,11 @@ Shader "Hidden/BurtRP/BurtGI"
                 float edgeFactor = BurtGIEdgeFactor(screenUV, rawDepth, normalWS);
                 surfaceMask = 1.0f;
                 hitRatio = saturate(finalBurtGI.a);
-                geometryMask = smoothstep(0.02f, 0.18f, hitRatio);
-                surfaceValidity = geometryMask * lerp(1.0f, 1.0f - edgeFactor, saturate(_BurtGIParams4.y) * saturate(_BurtGIParams4.x));
+                geometryMask = surfaceMask;
+                surfaceValidity = surfaceMask * lerp(1.0f, 1.0f - edgeFactor, saturate(_BurtGIParams4.y) * saturate(_BurtGIParams4.x));
                 float lowHitRisk = smoothstep(0.0f, 0.65f, 1.0f - hitRatio);
-                skyFallbackRisk = saturate(lowHitRisk * _BurtGIParams4.w * saturate(edgeFactor * 1.35f)) * geometryMask;
-                edgeLeakRisk = saturate(edgeFactor * lerp(0.75f, 1.3f, saturate(_BurtGIParams4.x))) * geometryMask;
+                skyFallbackRisk = saturate(lowHitRisk * _BurtGIParams4.w * saturate(edgeFactor * 1.35f)) * surfaceMask;
+                edgeLeakRisk = saturate(edgeFactor * lerp(0.75f, 1.3f, saturate(_BurtGIParams4.x))) * surfaceMask;
             }
 
             float4 BurtGIDebugLeakGuard(float2 screenUV, float4 finalBurtGI)
@@ -684,7 +701,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float edgeLeakRisk;
                 float skyFallbackRisk;
                 BurtGIComputeDebugValidity(screenUV, finalBurtGI, surfaceMask, hitRatio, geometryMask, surfaceValidity, edgeLeakRisk, skyFallbackRisk);
-                float geometryContext = geometryMask * 0.08f;
+                float geometryContext = geometryMask * 0.025f;
                 return float4(edgeLeakRisk, geometryContext, skyFallbackRisk, 1.0f);
             }
 

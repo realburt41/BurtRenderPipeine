@@ -1219,7 +1219,8 @@ float3 BurtEvaluateSubsurfaceIndirectProfile(
     float wrapVisibility = lerp(0.55f, 1.15f, max(ambientWrap, normalWrap));
     float scatterVisibility = lerp(0.75f, 1.25f, scatteringDistribution);
     float3 tint = max(materialData.subsurfaceTint * profileTint.rgb, float3(0.0f, 0.0f, 0.0f));
-    float3 subsurfaceDiffuse = materialData.baseColor * tint * profileTransmittance * wrappedIrradiance;
+    float transmissionIntensity = BurtEvaluateSubsurfaceProfileIntensity(profileTransmittance);
+    float3 subsurfaceDiffuse = materialData.baseColor * tint * transmissionIntensity * wrappedIrradiance;
     return subsurfaceDiffuse * materialData.occlusion * subsurfaceStrength * thicknessVisibility * wrapVisibility * scatterVisibility * lerp(0.55f, 1.0f, meanFreePathVisibility);
 }
 #endif
@@ -1235,7 +1236,7 @@ BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData 
 
 #if BURT_ENABLE_SUBSURFACE_SHADING
     components.subsurfaceIndirect = BurtEvaluateSubsurfaceIndirectProfile(materialData, geometryData);
-    components.diffuse = max(components.diffuse, components.subsurfaceIndirect);
+    components.diffuse = lerp(components.diffuse, components.subsurfaceIndirect, saturate(materialData.subsurfaceStrength));
     components.specular = BurtEvaluateSubsurfaceIndirectSpecularDualLobe(materialData, geometryData, components.specularEnergyCompensation);
 #endif
 

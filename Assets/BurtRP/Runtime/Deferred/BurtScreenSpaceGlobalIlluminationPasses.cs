@@ -1733,13 +1733,90 @@ namespace Burt.RenderPipeline
                 return "Disabled";
             }
 
-            var label = "ScreenSpaceDiffuseBounce+DiffuseSourceFiltered+SkySHFallback+V2.2LeakGuardEdgeFadeNormalCone+GrazingPlaneReject+PerSampleJitter";
+            var label = "ScreenSpaceDiffuseBounce+DiffuseSourceFiltered+SkySHFallback+V2.5LeakGuardEdgeFadeNormalCone+DiffuseOcclusionFloor+EdgeSkyConfidence+HitAwareBlur+StableHitAlpha+ReadableLeakGuardDebug+GrazingPlaneReject+PerSampleJitter";
             if (settings.Resolution == BurtScreenSpaceGlobalIlluminationResolution.Full && !settings.TemporalAccumulation)
             {
                 label += "+TAAFullResCurrent+StabilizedLeakGuard";
             }
 
             return label;
+        }
+
+        public static string ResolveScreenSpaceGlobalIlluminationPipelineStageLabel(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions, BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            if (!settings.Enabled)
+            {
+                return "Disabled";
+            }
+
+            var filter = settings.Blur ? "HitAwareSpatialBilateral" : "None";
+            var temporal = ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(request, asset, renderOptions)
+                ? "ExternalTAA(CurrentGIAlpha)"
+                : (settings.TemporalAccumulation ? "InternalHistory" : "Disabled(" + ResolveScreenSpaceGlobalIlluminationTemporalDisabledReason(request, settings) + ")");
+
+            return "Prepare=GBuffer+LitCameraColor;Gather=ScreenSpaceDiffuseTrace(" + settings.Resolution + ");Filter=" + filter + ";Apply=AddDiffuseGI;TAA=" + temporal;
+        }
+
+        public static string ResolveScreenSpaceGlobalIlluminationXGIParityLabel(BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            if (!settings.Enabled)
+            {
+                return "Disabled";
+            }
+
+            return "BurtGI=ScreenSpaceDiffuseOnly;XGIRef=Prepare>SceneRepresent>FinalGather>ApplyIndirect;Covered=DiffuseIndirect;Missing=ScreenProbeLite,RadianceCache,BackfaceDiffuse,RoughSpecular,TranslucencyVolume";
+        }
+
+        public static string ResolveScreenSpaceGlobalIlluminationDebugChannelLabel()
+        {
+            switch (BurtShadingDebugSettings.Mode)
+            {
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw:
+                    return "RawRGB=TraceDiffuseGI;RawA=HitRatio";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal:
+                    return "FinalRGB=FilteredDiffuseGI;FinalA=HitRatio";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio:
+                    return "R=LowHitOrMiss;G=HitRatio;B=0";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay:
+                    return "RGB=CameraPlusGIContribution";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
+                    return "RGB=GIContributionOnly";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalConfidence:
+                    return "R=TemporalRejection;G=Confidence;B=HitRatio";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalRejection:
+                    return "R=Rejected;G=Accepted;B=HitRatio";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHistory:
+                    return "RGB=PreviousGIHistory";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDifference:
+                    return "RGB=AmplifiedAbsFinalMinusHistory";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard:
+                    return "R=EdgeLeakRisk;G=DimStableSurfaceContext;B=SkyFallbackRisk";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare:
+                    return "Quadrants=Raw,Final,HitRatio,LeakGuard";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
+                    return "Quadrants=HitRatio,SurfaceValidity,EdgeRisk,SkyFallbackRisk";
+                default:
+                    return "Disabled";
+            }
+        }
+
+        public static string ResolveScreenSpaceGlobalIlluminationInspectLabel()
+        {
+            return "RawRGB+RawHitA>FinalRGB+FinalHitA>CompositeAdd>TAACurrentGIAlpha;Debug=HitRatio,LeakGuard,Confidence,DiagnosticCompare";
+        }
+
+        public static bool ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(request, asset, null);
+        }
+
+        public static bool ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions)
+        {
+            var temporalAA = request != null ? request.TemporalAA : null;
+            return temporalAA != null &&
+                temporalAA.Enabled &&
+                BurtTemporalAAUtility.ShouldUseTemporalAA(request, asset, renderOptions) &&
+                ShouldUseScreenSpaceGlobalIllumination(request, asset);
         }
 
         public static string ResolveScreenSpaceGlobalIlluminationTemporalStatusLabel(BurtRenderRequest request, BurtScreenSpaceGlobalIlluminationSettings settings)
@@ -1979,7 +2056,7 @@ namespace Burt.RenderPipeline
                 settings.TemporalHitRejection);
         }
 
-        private static bool ShouldUseTemporalAACompatibility(BurtRenderRequest request)
+        public static bool ShouldUseTemporalAACompatibility(BurtRenderRequest request)
         {
             var temporalAA = request != null ? request.TemporalAA : null;
             if (temporalAA != null && temporalAA.Enabled)
