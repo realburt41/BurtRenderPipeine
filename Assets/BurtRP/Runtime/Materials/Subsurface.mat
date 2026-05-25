@@ -95,7 +95,7 @@ Material:
     - _GlossyReflections: 1
     - _Metallic: 0
     - _Mode: 0
-    - _NormalScale: 1
+    - _NormalScale: 0.334
     - _OcclusionStrength: 1
     - _Parallax: 0.02
     - _Reflectance: 0.5

@@ -19,6 +19,34 @@
     #define UNITY_SAMPLE_TEXCUBE_LOD(tex, coord, lod) texCUBElod(tex, float4(coord, lod))
 #endif
 
+static const float BURT_MULTIPASS_DEFAULT_SHELL_LENGTH = 0.03f;
+
+float4 _FurScale;
+float _FurMaxCount;
+
+uint BurtGetCurrentInstanceID()
+{
+#if defined(UNITY_INSTANCING_ENABLED) || defined(UNITY_PROCEDURAL_INSTANCING_ENABLED) || defined(UNITY_STEREO_INSTANCING_ENABLED)
+    return unity_InstanceID;
+#else
+    return 0u;
+#endif
+}
+
+float BurtGetMultipassLayerFactor()
+{
+    float layerCount = max(_FurMaxCount, 1.0f);
+    return saturate(BurtGetCurrentInstanceID() / max(layerCount - 1.0f, 1.0f));
+}
+
+float4 BurtApplyMultipassObjectShellOffset(float4 positionOS, float3 normalOS)
+{
+    float layerFactor = BurtGetMultipassLayerFactor();
+    float3 safeScale = max(abs(_FurScale.xyz), float3(0.0001f, 0.0001f, 0.0001f));
+    positionOS.xyz += normalOS / safeScale * (layerFactor * BURT_MULTIPASS_DEFAULT_SHELL_LENGTH);
+    return positionOS;
+}
+
 // 定义一个很小的正数，用来避免除以 0 或 rsqrt 输入 0 导致 NaN。
 static const float BURT_EPSILON = 0.000001f;
 

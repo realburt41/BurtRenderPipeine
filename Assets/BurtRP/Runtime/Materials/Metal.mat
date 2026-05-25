@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: Lit
+  m_Name: Metal
   m_Shader: {fileID: 4800000, guid: a8b6208548b3416c817e0034dfab527d, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
@@ -15,7 +15,7 @@ Material:
   - BURT_ALPHA_CLIP
   m_InvalidKeywords: []
   m_LightmapFlags: 4
-  m_EnableInstancingVariants: 0
+  m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: 2000
   stringTagMap:
@@ -52,18 +52,18 @@ Material:
     - _DoubleSidedEnable: 0
     - _DoubleSidedNormalMode: 0
     - _DstBlend: 0
-    - _Metallic: 0
+    - _Metallic: 1
     - _NormalScale: 0
     - _OcclusionStrength: 1
     - _Reflectance: 0.5
-    - _Smoothness: 0.704
+    - _Smoothness: 1
     - _SrcBlend: 1
     - _SubsurfaceScatteringMode: 0
     - _Surface: 0
     - _ZTest: 4
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.21176472, g: 0.9137255, b: 0.8886363, a: 1}
+    - _BaseColor: {r: 0.9150943, g: 0.75667745, b: 0.21150766, a: 1}
     - _DoubleSidedNormalModeConstants: {r: 1, g: 1, b: 1, a: 0}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}

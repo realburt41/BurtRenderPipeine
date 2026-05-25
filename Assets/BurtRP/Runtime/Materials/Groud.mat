@@ -57,6 +57,7 @@ Material:
     - _Reflectance: 0.5
     - _Smoothness: 0
     - _SrcBlend: 1
+    - _SubsurfaceScatteringMode: 0
     - _Surface: 0
     - _ZTest: 4
     - _ZWrite: 1

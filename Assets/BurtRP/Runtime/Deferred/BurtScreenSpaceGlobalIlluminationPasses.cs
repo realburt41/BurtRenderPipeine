@@ -2015,7 +2015,7 @@ namespace Burt.RenderPipeline
                 return "Disabled";
             }
 
-            var label = "ScreenSpaceDiffuseBounce+DiffuseSourceFiltered+SkySHFallback+V2.5LeakGuardEdgeFadeNormalCone+DiffuseOcclusionFloor+EdgeSkyConfidence+HitAwareBlur+StableHitAlpha+ReadableLeakGuardDebug+GrazingPlaneReject+PerSampleJitter";
+            var label = "ScreenSpaceDiffuseBounce+DiffuseSourceFiltered+SkySHFallback+V3.2CoplanarGateFix+NearFieldEdgeGuardedColorBleed+NoSilhouetteEnergyFade+LeakGuardEdgeFadeNormalCone+DiffuseOcclusionFloor+EdgeSkyConfidence+HitAwareBlur+StableHitAlpha+ReadableLeakGuardDebug+GrazingPlaneReject+PerSampleJitter";
             if (settings.Resolution == BurtScreenSpaceGlobalIlluminationResolution.Full && !settings.TemporalAccumulation)
             {
                 label += "+TAAFullResCurrent+StabilizedLeakGuard";

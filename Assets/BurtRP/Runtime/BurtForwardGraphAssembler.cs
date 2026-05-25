@@ -24,8 +24,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
         private readonly BurtRenderPass setupLightingPass = new BurtSetupLightingPass(); // 创建灯光上传 Pass，用来在场景绘制前设置 BurtRP 全局灯光和阴影参数。
 
         private readonly BurtRenderPass depthPrepass = new BurtDepthPrepass(); // 创建深度预写 Pass，用来在颜色绘制前先建立 CameraDepth。
+        private readonly BurtRenderPass drawMultipassDepthPrepass = new BurtDrawMultipassDepthPrepass();
 
         private readonly BurtRenderPass drawOpaquePass = new BurtDrawOpaquePass(); // 创建不透明物体绘制 Pass，并在整个管线生命周期内复用它。
+        private readonly BurtRenderPass drawMultipassForwardOpaquePass = new BurtDrawMultipassForwardOpaquePass();
 
         private readonly BurtRenderPass drawEditorPreviewPass = new BurtDrawEditorPreviewPass(); // 创建编辑器 Preview 专用绘制 Pass，兼容 Unity 内部资产预览 shader。
 
@@ -36,6 +38,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
         private readonly BurtRenderPass applyVolumetricFogPass = new BurtApplyVolumetricFogPass();
 
         private readonly BurtRenderPass drawTransparentPass = new BurtDrawTransparentPass(); // 创建透明物体绘制 Pass，并在整个管线生命周期内复用它。
+        private readonly BurtRenderPass drawMultipassTransparentPass = new BurtDrawMultipassTransparentPass();
 
         private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // 创建不支持 Shader 的调试 Pass，让非 BurtRP 材质显示为明显的错误材质。
 
@@ -150,9 +153,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 if (ShouldUseDepthPrepass(asset)) // 如果管线资产允许 Depth Prepass，就把深度预写阶段加入图中。
                 {
                     graph.AddPass(depthPrepass); // 把深度预写 Pass 添加到 RenderGraph，让不透明物体先写入 CameraDepth。
+                    graph.AddPass(drawMultipassDepthPrepass);
                 }
 
                 graph.AddPass(drawOpaquePass); // 把不透明物体绘制 Pass 添加到 RenderGraph，让它在已有深度基础上写入颜色。
+                graph.AddPass(drawMultipassForwardOpaquePass);
                 if (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterOpaqueBeforeSky(request))
                 {
                     graph.AddPass(applyAtmosphereAerialPerspectivePass);
@@ -180,6 +185,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 }
 
                 graph.AddPass(drawTransparentPass); // 把透明物体绘制 Pass 添加到 RenderGraph，让透明物体最后做混合。
+                graph.AddPass(drawMultipassTransparentPass);
 
                 if (ShouldUseUnsupportedShaderDebug(request, asset)) // 如果开启了不支持 Shader 调试，就在普通场景绘制后插入错误材质绘制。
                 {

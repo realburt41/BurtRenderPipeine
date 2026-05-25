@@ -1340,7 +1340,7 @@ namespace Burt.RenderPipeline
 
     internal static class BurtScreenSpaceReflectionHistoryUtility
     {
-        private const int HistoryAlgorithmVersion = 41;
+        private const int HistoryAlgorithmVersion = 53;
         private const int CameraStatePruneInterval = 128;
         private const float ProjectionChangeEpsilon = 0.0001f;
 
@@ -2178,6 +2178,12 @@ namespace Burt.RenderPipeline
                 mode == BurtShadingDebugMode.ScreenSpaceReflectionMaterialWeight ||
                 mode == BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMip ||
                 mode == BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionTemporalAlpha ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMipAlpha ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionReceiverContinuity ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionFallbackSpecular ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionCompositeDelta ||
+                mode == BurtShadingDebugMode.ScreenSpaceReflectionCameraColor ||
                 mode == BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality ||
                 mode == BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality ||
                 mode == BurtShadingDebugMode.ScreenSpaceReflectionResolveQuality ||
@@ -2373,6 +2379,18 @@ namespace Burt.RenderPipeline
                     return 14;
                 case BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor:
                     return 15;
+                case BurtShadingDebugMode.ScreenSpaceReflectionTemporalAlpha:
+                    return 32;
+                case BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMipAlpha:
+                    return 33;
+                case BurtShadingDebugMode.ScreenSpaceReflectionReceiverContinuity:
+                    return 34;
+                case BurtShadingDebugMode.ScreenSpaceReflectionFallbackSpecular:
+                    return 35;
+                case BurtShadingDebugMode.ScreenSpaceReflectionCompositeDelta:
+                    return 36;
+                case BurtShadingDebugMode.ScreenSpaceReflectionCameraColor:
+                    return 37;
                 case BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality:
                     return 16;
                 case BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality:

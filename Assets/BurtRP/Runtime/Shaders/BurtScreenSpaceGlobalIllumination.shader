@@ -200,6 +200,141 @@ Shader "Hidden/BurtRP/BurtGI"
                 return diffuseFraction * roughDiffuseWeight * sourceOcclusion;
             }
 
+            float3 BurtGITintRadianceByDiffuseAlbedo(float3 sourceRadiance, BurtPBRMaterialData sampleMaterialData)
+            {
+                float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
+                float3 diffuseColor = max(sampleMaterialData.diffuseColor, 0.0f);
+                float diffuseLuma = dot(diffuseColor, lumaWeights);
+                float sourceLuma = dot(max(sourceRadiance, 0.0f), lumaWeights);
+                float maxChannel = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b));
+                float minChannel = min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b));
+                float chroma = saturate((maxChannel - minChannel) / max(maxChannel, 0.001f));
+                float tintWeight = smoothstep(0.025f, 0.18f, diffuseLuma) * saturate(chroma * 1.35f);
+                float3 normalizedDiffuse = min(diffuseColor / max(diffuseLuma, 0.035f), 4.0f);
+                float colorBleedBoost = lerp(1.0f, 1.65f, tintWeight);
+                float3 diffuseTintedRadiance = normalizedDiffuse * sourceLuma * colorBleedBoost;
+                return BurtGIClampRadiance(lerp(sourceRadiance, diffuseTintedRadiance, tintWeight));
+            }
+
+            float BurtGIComputeDiffuseChroma(float3 diffuseColor)
+            {
+                float maxChannel = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b));
+                float minChannel = min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b));
+                return saturate((maxChannel - minChannel) / max(maxChannel, 0.001f));
+            }
+
+            float2 BurtGINearFieldColorBleedOffset(int index)
+            {
+                float2 direction = 0.0f;
+                if (index == 0) direction = float2(1.0f, 0.0f);
+                if (index == 1) direction = float2(-1.0f, 0.0f);
+                if (index == 2) direction = float2(0.0f, 1.0f);
+                if (index == 3) direction = float2(0.0f, -1.0f);
+                if (index == 4) direction = float2(1.0f, 1.0f);
+                if (index == 5) direction = float2(-1.0f, 1.0f);
+                if (index == 6) direction = float2(1.0f, -1.0f);
+                if (index == 7) direction = float2(-1.0f, -1.0f);
+                if (index == 8) direction = float2(2.0f, 1.0f);
+                if (index == 9) direction = float2(-2.0f, 1.0f);
+                if (index == 10) direction = float2(2.0f, -1.0f);
+                if (index == 11) direction = float2(-2.0f, -1.0f);
+                if (index == 12) direction = float2(1.0f, 2.0f);
+                if (index == 13) direction = float2(-1.0f, 2.0f);
+                if (index == 14) direction = float2(1.0f, -2.0f);
+                if (index == 15) direction = float2(-1.0f, -2.0f);
+                if (index == 16) direction = float2(3.0f, 1.0f);
+                if (index == 17) direction = float2(-3.0f, 1.0f);
+                if (index == 18) direction = float2(3.0f, -1.0f);
+                if (index == 19) direction = float2(-3.0f, -1.0f);
+                if (index == 20) direction = float2(1.0f, 3.0f);
+                if (index == 21) direction = float2(-1.0f, 3.0f);
+                if (index == 22) direction = float2(1.0f, -3.0f);
+                if (index == 23) direction = float2(-1.0f, -3.0f);
+                return direction * rsqrt(max(dot(direction, direction), 0.0001f));
+            }
+
+            void BurtGIGatherNearFieldColorBleed(
+                float2 screenUV,
+                float3 positionWS,
+                float3 normalWS,
+                float radius,
+                float centerEdgeFactor,
+                out float3 bleedRadiance,
+                out float bleedStrength)
+            {
+                float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
+                float centerEdgeGate = 1.0f - smoothstep(0.18f, 0.65f, centerEdgeFactor);
+                if (centerEdgeGate <= 0.001f)
+                {
+                    bleedRadiance = 0.0f;
+                    bleedStrength = 0.0f;
+                    return;
+                }
+
+                float screenRadiusPixels = clamp(10.0f + radius * 18.0f, 16.0f, 52.0f) * lerp(0.55f, 1.0f, centerEdgeGate);
+                float3 radianceSum = 0.0f;
+                float weightSum = 0.0f;
+
+                [unroll]
+                for (int i = 0; i < 24; ++i)
+                {
+                    float ring = i < 8 ? 0.38f : (i < 16 ? 0.76f : 1.16f);
+                    float ringWeight = i < 8 ? 1.0f : (i < 16 ? 0.72f : 0.48f);
+                    float2 sampleUV = saturate(screenUV + BurtGINearFieldColorBleedOffset(i) * _BurtGISourceTexelSize.xy * screenRadiusPixels * ring);
+                    float sampleRawDepth = BurtSampleDeferredRawDepth(sampleUV);
+                    if (BurtGIIsSkyDepth(sampleRawDepth))
+                    {
+                        continue;
+                    }
+
+                    float3 samplePositionWS = BurtReconstructDeferredPositionWS(sampleUV, sampleRawDepth);
+                    float3 deltaWS = samplePositionWS - positionWS;
+                    float distanceWS = length(deltaWS);
+                    if (distanceWS <= 0.0001f || distanceWS > radius * 2.75f)
+                    {
+                        continue;
+                    }
+
+                    BurtEncodedGBuffer sampleEncodedGBuffer = BurtSampleEncodedGBuffer(sampleUV);
+                    BurtPBRMaterialData sampleMaterialData = BurtPreparePBRMaterialData(BurtDecodeGBuffer(sampleEncodedGBuffer));
+                    float3 sampleDiffuse = max(sampleMaterialData.diffuseColor, 0.0f);
+                    float sampleDiffuseLuma = dot(sampleDiffuse, lumaWeights);
+                    float sampleChroma = BurtGIComputeDiffuseChroma(sampleDiffuse);
+                    float colorSourceWeight = smoothstep(0.05f, 0.26f, sampleChroma) * smoothstep(0.025f, 0.14f, sampleDiffuseLuma);
+                    if (colorSourceWeight <= 0.0001f)
+                    {
+                        continue;
+                    }
+
+                    float3 toSampleWS = deltaWS / max(distanceWS, 0.0001f);
+                    float3 sampleNormalWS = BurtGISampleNormalWS(sampleUV);
+                    float sampleEdgeFactor = BurtGIEdgeFactor(sampleUV, sampleRawDepth, sampleNormalWS);
+                    float sampleEdgeGate = 1.0f - smoothstep(0.22f, 0.72f, sampleEdgeFactor);
+                    float planeSeparationRatio = abs(dot(deltaWS, normalWS)) / max(distanceWS, 0.0001f);
+                    float planeGate = 1.0f - smoothstep(0.10f, 0.32f, planeSeparationRatio);
+                    float normalSimilarity = saturate(dot(normalWS, sampleNormalWS));
+                    float normalSimilarityGate = smoothstep(0.18f, 0.72f, normalSimilarity);
+                    float receiverFacing = smoothstep(-0.08f, 0.32f, dot(normalWS, toSampleWS));
+                    float sourceFacing = smoothstep(-0.18f, 0.42f, dot(sampleNormalWS, -toSampleWS));
+                    float distanceWeight = 1.0f - smoothstep(radius * 0.08f, radius * 2.45f, distanceWS);
+                    float sourceWeight = max(BurtGIComputeDiffuseSourceWeight(sampleMaterialData), colorSourceWeight * 0.72f);
+                    float sampleWeight = ringWeight * colorSourceWeight * receiverFacing * sourceFacing * distanceWeight * sourceWeight;
+                    sampleWeight *= centerEdgeGate * sampleEdgeGate * planeGate * normalSimilarityGate;
+                    if (sampleWeight <= 0.0001f)
+                    {
+                        continue;
+                    }
+
+                    float3 sampleRadiance = BurtGIClampRadiance(tex2D(_BurtGISourceColorTexture, sampleUV).rgb);
+                    sampleRadiance = BurtGITintRadianceByDiffuseAlbedo(sampleRadiance, sampleMaterialData);
+                    radianceSum += sampleRadiance * sampleWeight;
+                    weightSum += sampleWeight;
+                }
+
+                bleedRadiance = weightSum > 0.0001f ? radianceSum / weightSum : 0.0f;
+                bleedStrength = saturate(weightSum * 0.32f * centerEdgeGate);
+            }
+
             bool BurtGIProjectHistoryUV(float3 positionWS, out float2 historyUV, out float projectedRawDepth)
             {
                 float4 previousClip = mul(_BurtGIPreviousViewProjectionMatrix, float4(positionWS, 1.0f));
@@ -302,7 +437,6 @@ Shader "Hidden/BurtRP/BurtGI"
                 float centerLinearDepth = LinearEyeDepth(rawDepth);
                 float distanceFade = 1.0f - saturate(centerLinearDepth / max(_BurtGIParams2.z, 1.0f));
                 float edgeFactor = BurtGIEdgeFactor(screenUV, rawDepth, normalWS);
-                float edgeFade = lerp(1.0f, 1.0f - edgeFactor, saturate(_BurtGIParams4.y));
                 float leakGuard = saturate(_BurtGIParams4.x);
 
                 float3 tangentWS;
@@ -365,7 +499,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     float normalDifferent = 1.0f - smoothstep(0.9f, 0.985f, normalSimilarity);
                     float planeSeparationRatio = abs(dot(deltaWS, normalWS)) / max(distanceWS, 0.0001f);
                     float planeSeparated = smoothstep(lerp(0.04f, 0.08f, leakGuard), lerp(0.14f, 0.22f, leakGuard), planeSeparationRatio);
-                    float coplanarReject = max(normalDifferent, planeSeparated);
+                    float coplanarGate = 1.0f - max(normalDifferent, planeSeparated);
                     float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
                     float depthError = abs(probeLinearDepth - sampleLinearDepth);
                     float guardedThickness = thickness * lerp(1.0f, 0.55f, leakGuard * edgeFactor);
@@ -375,7 +509,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     float edgeNormalWeightAmount = saturate(normalWeightAmount + leakGuard * edgeFactor * 0.35f);
                     float sampleNormalWeight = lerp(1.0f, saturate(dot(sampleNormalWS, sampleToCenterWS)), edgeNormalWeightAmount);
                     float surfaceCone = smoothstep(lerp(0.12f, 0.45f, saturate(_BurtGIParams4.z)), 1.0f, saturate(dot(normalWS, sampleNormalWS)));
-                    float weight = depthWeight * distanceWeight * normalFacingWeight * sampleNormalWeight * lerp(1.0f, surfaceCone, leakGuard) * coplanarReject;
+                    float weight = depthWeight * distanceWeight * normalFacingWeight * sampleNormalWeight * lerp(1.0f, surfaceCone, leakGuard) * coplanarGate;
                     if (weight <= 0.0001f)
                     {
                         continue;
@@ -384,6 +518,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     BurtEncodedGBuffer sampleEncodedGBuffer = BurtSampleEncodedGBuffer(sampleUV);
                     BurtPBRMaterialData sampleMaterialData = BurtPreparePBRMaterialData(BurtDecodeGBuffer(sampleEncodedGBuffer));
                     float3 sampleRadiance = BurtGIClampRadiance(tex2D(_BurtGISourceColorTexture, sampleUV).rgb);
+                    sampleRadiance = BurtGITintRadianceByDiffuseAlbedo(sampleRadiance, sampleMaterialData);
                     sampleRadiance *= BurtGIComputeDiffuseSourceWeight(sampleMaterialData);
                     tracedRadiance += sampleRadiance * weight;
                     totalWeight += weight;
@@ -391,13 +526,17 @@ Shader "Hidden/BurtRP/BurtGI"
 
                 float hitRatio = saturate(totalWeight / max((float)stepCount * 0.35f, 1.0f));
                 float3 screenIrradiance = totalWeight > 0.0001f ? tracedRadiance / totalWeight : 0.0f;
-                float skyEdgeFade = lerp(1.0f, 1.0f - edgeFactor, saturate(_BurtGIParams4.w));
-                float edgeSkyRisk = saturate(edgeFactor * leakGuard * saturate(_BurtGIParams4.w));
-                float lowHitConfidence = smoothstep(0.05f, 0.65f, hitRatio);
-                float skyFallbackWeight = (1.0f - hitRatio) * skyEdgeFade * lerp(1.0f, lowHitConfidence, edgeSkyRisk);
+                float screenHitEnergy = totalWeight > 0.0001f ? saturate(lerp(sqrt(hitRatio), pow(hitRatio, 0.35f), 0.55f)) : 0.0f;
+                float3 nearFieldColorBleed = 0.0f;
+                float nearFieldColorBleedStrength = 0.0f;
+                BurtGIGatherNearFieldColorBleed(screenUV, positionWS, normalWS, radius, edgeFactor, nearFieldColorBleed, nearFieldColorBleedStrength);
+                float nearFieldEnergy = nearFieldColorBleedStrength * (1.0f - screenHitEnergy * 0.35f);
+                screenIrradiance += nearFieldColorBleed * nearFieldEnergy;
+                screenHitEnergy = saturate(screenHitEnergy + nearFieldEnergy);
+                float skyFallbackWeight = 1.0f - screenHitEnergy;
                 float3 skyDiffuse = BurtSampleIndirectDiffuseIrradiance(normalWS) * _BurtGIParams1.y * skyFallbackWeight;
                 float3 diffuseOcclusion = BurtGTAOMultiBounce(materialData.occlusion, materialData.baseColor);
-                float3 indirectDiffuse = materialData.diffuseColor * (screenIrradiance * hitRatio + skyDiffuse) * diffuseOcclusion * distanceFade * edgeFade;
+                float3 indirectDiffuse = materialData.diffuseColor * (screenIrradiance * screenHitEnergy + skyDiffuse) * diffuseOcclusion * distanceFade;
                 return float4(max(indirectDiffuse, 0.0f), hitRatio);
             }
 
@@ -649,7 +788,6 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 burtGI = tex2D(_BurtScreenSpaceGlobalIlluminationTexture, screenUV).rgb;
                 float3 appliedGI = burtGI * _BurtGIParams1.x;
                 cameraColor.rgb += appliedGI;
-                cameraColor.a += dot(max(appliedGI, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
                 return cameraColor;
             }
 
@@ -687,8 +825,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 hitRatio = saturate(finalBurtGI.a);
                 geometryMask = surfaceMask;
                 surfaceValidity = surfaceMask * lerp(1.0f, 1.0f - edgeFactor, saturate(_BurtGIParams4.y) * saturate(_BurtGIParams4.x));
-                float lowHitRisk = smoothstep(0.0f, 0.65f, 1.0f - hitRatio);
-                skyFallbackRisk = saturate(lowHitRisk * _BurtGIParams4.w * saturate(edgeFactor * 1.35f)) * surfaceMask;
+                skyFallbackRisk = saturate((1.0f - hitRatio) * _BurtGIParams1.y) * surfaceMask;
                 edgeLeakRisk = saturate(edgeFactor * lerp(0.75f, 1.3f, saturate(_BurtGIParams4.x))) * surfaceMask;
             }
 

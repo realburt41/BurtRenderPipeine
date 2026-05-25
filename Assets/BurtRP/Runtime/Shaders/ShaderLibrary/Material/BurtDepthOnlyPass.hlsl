@@ -3,6 +3,7 @@
 #define BURT_DEPTH_ONLY_PASS_INCLUDED
 
 #include "UnityCG.cginc"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
 
 #if !defined(BURT_DEPTH_ONLY_ALPHA_CLIP)
@@ -16,6 +17,8 @@
 struct DepthAttributes
 {
     float4 positionOS : POSITION;
+    float3 normalOS : NORMAL;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 
 #if BURT_DEPTH_ONLY_ALPHA_CLIP
     float2 uv0 : TEXCOORD0;
@@ -33,8 +36,11 @@ struct DepthVaryings
 
 DepthVaryings VertDepth(DepthAttributes input)
 {
+    UNITY_SETUP_INSTANCE_ID(input);
+    float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+
     DepthVaryings output;
-    output.positionCS = UnityObjectToClipPos(input.positionOS);
+    output.positionCS = UnityObjectToClipPos(positionOS);
 
 #if BURT_DEPTH_ONLY_ALPHA_CLIP
     output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);

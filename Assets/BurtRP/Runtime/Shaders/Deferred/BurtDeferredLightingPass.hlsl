@@ -72,6 +72,23 @@ BurtPBRShadingComponents BurtEvaluateDeferredLightingShadingModelComponents(
 {
 #if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
     return BurtEvaluateHairShadingComponentsFromGBuffer(gbufferData, mainLight, viewDirectionWS, positionWS, shadowPositionWS, screenUV);
+#elif defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
+    BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
+    float subsurfaceStrength = saturate(materialData.subsurfaceStrength);
+    if (_BurtDeferredSubsurfaceDiffuseLuminanceOutputEnabled > 0.5f &&
+        subsurfaceStrength > 0.0001f &&
+        materialData.metallic < 0.5f)
+    {
+        materialData.diffuseColor = DiffuseColorFromBaseColor(float3(1.0f, 1.0f, 1.0f), materialData.metallic);
+    }
+
+    BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(gbufferData, viewDirectionWS);
+    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(materialData, geometryData);
+    BurtDirectPBRComponents mainDirectComponents = BurtEvaluatePBRDirectFromCore(coreData, mainLight);
+    BurtDirectPBRComponents additionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(coreData, positionWS, shadowPositionWS, screenUV);
+    BurtDirectPBRComponents directComponents = BurtAddPBRDirectComponents(mainDirectComponents, additionalDirectComponents);
+    BurtIndirectPBRComponents indirectComponents = BurtEvaluatePBRIndirectFromCore(coreData);
+    return BurtComposePBRShadingComponentsWithAdditional(coreData, directComponents, indirectComponents, additionalDirectComponents);
 #else
     return BurtEvaluatePBRShadingComponentsFromGBuffer(gbufferData, mainLight, viewDirectionWS, positionWS, shadowPositionWS, screenUV);
 #endif

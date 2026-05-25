@@ -1811,6 +1811,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 var screenSpaceSubsurfaceEnabled = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset);
                 var screenSpaceSubsurfaceUsesBurley = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(request, asset);
                 var screenSpaceSubsurfaceUsesSeparable = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceSeparable(request, asset);
+                var screenSpaceSubsurfaceDebugSampling = BurtShadingDebugSettings.IsDebugging &&
+                    BurtScreenSpaceSubsurfacePassUtility.IsScreenSpaceSubsurfaceDebugMode(BurtShadingDebugSettings.Mode);
+                var screenSpaceSubsurfaceTemporalSamplingReady = temporalAA != null &&
+                    temporalAA.Enabled &&
+                    temporalAA.HistoryValid &&
+                    temporalAA.VelocityMode != BurtTemporalAAVelocityMode.Disabled;
+                var screenSpaceSubsurfaceHistory = BurtScreenSpaceSubsurfaceHistoryUtility.GetHistoryStatus(request);
                 var shouldUseHiZDepth = BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset) || screenSpaceSubsurfaceEnabled;
                 var screenSpaceSubsurfaceUsesStencilTexture = screenSpaceSubsurfaceEnabled && BurtScreenSpaceSubsurfacePassUtility.ShouldUseStencilTexture(request);
                 var screenSpaceSubsurfaceUsesMaskTexture = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(request, asset);
@@ -1844,13 +1851,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSSDebugMode=").Append(BurtScreenSpaceSubsurfacePassUtility.IsScreenSpaceSubsurfaceDebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
                 builder.Append(" SSSSplitDebug=").Append(screenSpaceSubsurfaceEnabled ? "SourceColor+SourceAlphaDiffuseLuminance+BaseColor+Emission+DiffuseWithBaseColor+SpecularResidual+CombineDelta" : "Disabled");
                 builder.Append(" SSSDiffuseSpecularSplit=").Append(screenSpaceSubsurfaceEnabled);
-                builder.Append(" SSSDiffuseLuminanceSource=").Append(screenSpaceSubsurfaceEnabled ? "DeferredSubsurfaceAlphaSharedSplit" : "Disabled");
+                builder.Append(" SSSDiffuseLuminanceSource=").Append(screenSpaceSubsurfaceEnabled ? "DeferredSubsurfaceAlphaBaseColorSpecularGuard" : "Disabled");
                 builder.Append(" SSSProfileIDSource=").Append(screenSpaceSubsurfaceEnabled ? "ScreenSpaceSubsurfaceBaseColorAlpha" : "Disabled");
                 builder.Append(" SSSStencilGated=").Append(screenSpaceSubsurfaceEnabled ? "ShaderStencilPlusMaskTexture" : "Disabled");
                 builder.Append(" SSSStencilTexture=").Append(screenSpaceSubsurfaceUsesStencilTexture);
                 builder.Append(" SSSMaskFallback=").Append(screenSpaceSubsurfaceUsesMaskTexture ? "GBuffer1StrengthProfileMask" : "Disabled");
                 builder.Append(" SSSHistoryVelocity=").Append(screenSpaceSubsurfaceUsesBurley ? "RawSceneVelocity" : "Disabled");
                 builder.Append(" SSSVelocityDilation=Removed");
+                builder.Append(" SSSBurleySampling=").Append(screenSpaceSubsurfaceUsesBurley ? (screenSpaceSubsurfaceDebugSampling ? "StableDebugNoDepthNoiseMin64" : (screenSpaceSubsurfaceTemporalSamplingReady && screenSpaceSubsurfaceHistory.HasHistory ? "TemporalAnimatedAdaptive16To64" : "StableNoTemporalNoDepthNoiseMin32")) : "Disabled");
+                builder.Append(" SSSHistoryValid=").Append(screenSpaceSubsurfaceUsesBurley && screenSpaceSubsurfaceHistory.HasHistory);
+                builder.Append(" SSSHistoryAge=").Append(screenSpaceSubsurfaceUsesBurley ? screenSpaceSubsurfaceHistory.HistoryAge : 0);
+                builder.Append(" SSSHistoryReason=").Append(screenSpaceSubsurfaceUsesBurley ? screenSpaceSubsurfaceHistory.Reason : "Disabled");
                 builder.Append(" SSSTemporalVelocityMode=").Append(screenSpaceSubsurfaceUsesBurley && temporalAA != null ? temporalAA.VelocityMode.ToString() : BurtTemporalAAVelocityMode.Disabled.ToString());
                 builder.Append(" SSSTemporalHistoryValid=").Append(screenSpaceSubsurfaceUsesBurley && temporalAA != null && temporalAA.HistoryValid);
                 builder.Append(" SSSObjectMVPass=").Append(screenSpaceSubsurfaceUsesBurley && temporalAA != null && temporalAA.ObjectMotionVectorPassDrawn);
@@ -1864,6 +1875,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     builder.Append(" SSSProfiles=").Append(FormatSubsurfaceProfiles(sssProfilePalette));
                     builder.Append(" SSSSurfaceAlbedo=").Append(FormatVector4(sssProfile.SurfaceAlbedoVector));
                     builder.Append(" SSSMeanFreePath=").Append(FormatVector4(sssProfile.MeanFreePathVector));
+                    var sssEffectiveDiffuseMeanFreePath = BurtSubsurfaceLutUtility.GetEffectiveDiffuseMeanFreePathForLut(sssProfile);
+                    builder.Append(" SSSEffectiveDMFP=").Append(FormatVector3(
+                        sssEffectiveDiffuseMeanFreePath.x,
+                        sssEffectiveDiffuseMeanFreePath.y,
+                        sssEffectiveDiffuseMeanFreePath.z));
                     builder.Append(" SSSDualSpecular=").Append(FormatVector4(sssProfile.DualSpecularVector));
                     builder.Append(" SSSTint=").Append(FormatVector4(sssProfile.TintVector));
                     builder.Append(" SSSBoundaryColorBleed=").Append(FormatVector4(sssProfile.BoundaryColorBleedVector));
@@ -1884,6 +1900,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     builder.Append(" SSSProfiles=<none>");
                     builder.Append(" SSSSurfaceAlbedo=<none>");
                     builder.Append(" SSSMeanFreePath=<none>");
+                    builder.Append(" SSSEffectiveDMFP=<none>");
                     builder.Append(" SSSDualSpecular=<none>");
                     builder.Append(" SSSTint=<none>");
                     builder.Append(" SSSBoundaryColorBleed=<none>");
@@ -1949,6 +1966,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGIInspect=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationInspectLabel());
                 builder.Append(" BurtGIPlacement=AfterDeferredLightingBeforeSSS");
                 builder.Append(" BurtGIComposite=AddDiffuseGI");
+                builder.Append(" BurtGIColorBleed=NearFieldDiffuseGather24EdgeGuarded+StrongDiffuseAlbedoTint1.0+ChromaBoost1.65+HitEnergyPow0.35");
                 builder.Append(" BurtGIOutputTarget=ScreenSpaceGlobalIllumination");
                 builder.Append(" BurtGIRawTarget=ScreenSpaceGlobalIlluminationRaw");
                 builder.Append(" BurtGITemporalDiagnosticsTarget=BurtGITemporalDiagnostics");

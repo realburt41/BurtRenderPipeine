@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: DefaultSubsurfaceProfile
   m_EditorClassIdentifier: 
   profileName: Default Skin
-  surfaceAlbedo: {r: 0.78, g: 0.52, b: 0.42, a: 1}
+  surfaceAlbedo: {r: 0.96862745, g: 0.5849138, b: 0.45098042, a: 1}
   meanFreePathColor: {r: 1, g: 0.42, b: 0.24, a: 1}
   meanFreePathDistance: 0.1
   worldUnitScale: 1

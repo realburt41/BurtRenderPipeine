@@ -1,0 +1,159 @@
+Shader "BurtRP/Multipass Fur"
+{
+    Properties
+    {
+        _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
+        [NoScaleOffset] _BaseMap ("Base Map", 2D) = "white" {}
+        _DarkColor ("Dark Color", Color) = (0, 0, 0, 0)
+        _BaseMapPanner ("Base Map Panner", Vector) = (1, 1, 0, 0)
+
+        [NoScaleOffset] _MaskMap ("Mask Map (R Metallic, G Occlusion, B Height, A Roughness)", 2D) = "white" {}
+        _Occlusion ("AO", Range(0, 1)) = 1
+        _Roughness ("Roughness", Range(0, 1)) = 0.75
+        _Reflectance ("Reflectance", Range(0, 1)) = 0.5
+        _Anisotropy ("Anisotropy", Range(-0.999, 0.999)) = 0
+
+        [NoScaleOffset] _EmissiveMap ("Emissive Map", 2D) = "white" {}
+        [HDR] _EmissiveColor ("Emissive Color", Color) = (0, 0, 0, 1)
+        _EmissiveTillingPanner ("Emissive Tiling Panner", Vector) = (1, 1, 0, 0)
+        [Toggle] _EmissiveUseViewSpaceUV ("Effect Use View Space UV", Float) = 0
+        _ViewSpaceUVNormalIntensity ("View Space UV Normal Intensity", Range(0, 1)) = 0
+        _FurRimIntensity ("Fur Rim Intensity", Range(0, 5)) = 1
+        _FurRimPower ("Fur Rim Power", Range(1, 20)) = 8
+
+        _FurAttenuation ("Fur Attenuation", Range(0, 2)) = 1
+        _FurTickness ("Fur Thickness", Range(0, 1)) = 1
+        _FurTicknessCurve ("Fur Thickness Curve", Range(0, 1)) = 1
+        _FurExpand ("Fur Base Expand", Range(0, 5)) = 0
+        _FurSpacing ("Fur Spacing", Float) = 3
+        _FurSpacingMax ("Fur Spacing Max", Range(0, 1)) = 1
+
+        [NoScaleOffset] _FlowTex ("Flow Noise", 2D) = "white" {}
+        [Toggle] _FlowTexUV2 ("Flow Uses UV1", Range(0, 1)) = 0
+        _FlowTilling ("Flow Tiling", Float) = 50
+        _FlowPanner ("Flow Panner", Vector) = (0, 0, 0, 0)
+
+        [NoScaleOffset] _FlowDirectionMap ("Flow Direction Map", 2D) = "gray" {}
+        [Toggle(BURT_MULTIPASS_FUR_USE_DIRECTION_MAP)] _UseDirectionMap ("Use Direction Map", Float) = 0
+        [Toggle] _FlowDirectionUV2 ("Flow Direction Uses UV1", Range(0, 1)) = 0
+        _FlowDirectionIntensity ("Flow Direction Intensity", Range(0, 2)) = 0
+        [Enum(X,0,Y,1,Z,2)] _FurGravityDirection ("Fur Gravity Direction", Float) = 0
+        _FurGravityIntensity ("Fur Gravity Intensity", Range(-1, 1)) = 0
+
+        [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 1
+        _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.01
+
+        [HideInInspector] _FurScale ("Fur Scale", Vector) = (1, 1, 1, 1)
+        [HideInInspector] _FurMaxCount ("Fur Max Count", Integer) = 16
+        [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (1, 1, -1, 0)
+        [HideInInspector] _Cull ("Cull", Float) = 2
+        [HideInInspector] _SrcBlend ("Source Blend", Float) = 1
+        [HideInInspector] _DstBlend ("Destination Blend", Float) = 10
+        [HideInInspector] _ZWrite ("ZWrite", Float) = 1
+        [HideInInspector] _ZTest ("ZTest", Float) = 4
+    }
+
+    SubShader
+    {
+        Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
+
+        Pass
+        {
+            Name "Burt Multipass Fur Depth Only"
+            Tags { "LightMode" = "BurtDepthOnly" }
+            ColorMask 0
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertMultipassFur
+            #pragma fragment FragMultipassFurDepth
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Multipass Fur Shadow Caster"
+            Tags { "LightMode" = "ShadowCaster" }
+            ColorMask 0
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertMultipassFur
+            #pragma fragment FragMultipassFurDepth
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Multipass Fur GBuffer"
+            Tags { "LightMode" = "BurtGBuffer" }
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            Stencil
+            {
+                Ref 0
+                ReadMask 3
+                WriteMask 3
+                Comp Always
+                Pass Replace
+            }
+
+            HLSLPROGRAM
+            #pragma vertex VertMultipassFur
+            #pragma fragment FragMultipassFurGBuffer
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Multipass Fur Forward"
+            Tags { "LightMode" = "BurtForward" }
+            ZWrite [_ZWrite]
+            ZTest [_ZTest]
+            Cull [_Cull]
+            Blend [_SrcBlend] [_DstBlend]
+
+            HLSLPROGRAM
+            #pragma vertex VertMultipassFur
+            #pragma fragment FragMultipassFurForward
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
+            ENDHLSL
+        }
+    }
+
+    Fallback Off
+}

@@ -159,9 +159,6 @@ namespace Burt.RenderPipeline
 
         private void OnValidate()
         {
-#if UNITY_EDITOR
-            BurtSubsurfaceLutUtility.MarkEditorInteraction();
-#endif
             surfaceAlbedo = Clamp01Color(surfaceAlbedo);
             meanFreePathColor = ClampPositiveColor(meanFreePathColor, 0.0001f);
             meanFreePathDistance = Mathf.Max(0.01f, meanFreePathDistance);
@@ -182,6 +179,9 @@ namespace Burt.RenderPipeline
             boundaryBleed = Mathf.Clamp01(boundaryBleed);
             tintStrength = Mathf.Clamp01(tintStrength);
             minStrength = Mathf.Clamp(minStrength, 0f, 0.2f);
+#if UNITY_EDITOR
+            BurtSubsurfaceLutUtility.RequestEditorTextureRebuild();
+#endif
         }
 
         private static Color Clamp01Color(Color value)
@@ -338,7 +338,7 @@ namespace Burt.RenderPipeline
 
         public float MinStrength { get; }
 
-        public float MeanFreePathScreenScale => Mathf.Clamp(MeanFreePathDistance * WorldUnitScale, 0.05f, 4f);
+        public float MeanFreePathScreenScale => BurtSubsurfaceLutUtility.GetMeanFreePathScreenScale(this);
 
         public Vector4 Params => new Vector4(RadiusPixels, DepthSigma, NormalSigma, MinStrength);
 

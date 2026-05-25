@@ -19,6 +19,7 @@ struct GBufferAttributes
     float3 normalOS : NORMAL;
     float4 tangentOS : TANGENT;
     float2 uv0 : TEXCOORD0;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct GBufferVaryings
@@ -65,8 +66,11 @@ float BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(BurtSurfaceData sur
 
 GBufferVaryings VertGBuffer(GBufferAttributes input)
 {
+    UNITY_SETUP_INSTANCE_ID(input);
+    float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+
     GBufferVaryings output;
-    output.positionCS = UnityObjectToClipPos(input.positionOS);
+    output.positionCS = UnityObjectToClipPos(positionOS);
     output.normalWS = BurtSafeNormalize(UnityObjectToWorldNormal(input.normalOS));
     output.tangentWS = BurtObjectToWorldTangent(input.tangentOS);
     output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);

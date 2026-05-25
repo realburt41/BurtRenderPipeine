@@ -572,20 +572,20 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 2
   resolution:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 1
   intensity:
     m_OverrideState: 1
-    m_Value: 0.6
+    m_Value: 0.5
   radius:
-    m_OverrideState: 0
-    m_Value: 2
+    m_OverrideState: 1
+    m_Value: 1.6
   sampleCount:
-    m_OverrideState: 0
-    m_Value: 12
+    m_OverrideState: 1
+    m_Value: 16
   maxSteps:
-    m_OverrideState: 0
-    m_Value: 8
+    m_OverrideState: 1
+    m_Value: 10
   thickness:
     m_OverrideState: 0
     m_Value: 0.35
@@ -605,14 +605,14 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 1
   blurSharpness:
-    m_OverrideState: 0
-    m_Value: 0.18
+    m_OverrideState: 1
+    m_Value: 0.35
   spatialDenoiseRadius:
-    m_OverrideState: 0
-    m_Value: 1.25
+    m_OverrideState: 1
+    m_Value: 1
   spatialDenoiseStrength:
-    m_OverrideState: 0
-    m_Value: 0.75
+    m_OverrideState: 1
+    m_Value: 0.82
   leakGuardStrength:
     m_OverrideState: 0
     m_Value: 0.65
@@ -719,7 +719,7 @@ MonoBehaviour:
   active: 1
   enabled:
     m_OverrideState: 1
-    m_Value: 1
+    m_Value: 0
   feedback:
     m_OverrideState: 0
     m_Value: 0.93

@@ -226,7 +226,13 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceGlobalIlluminationLeakGuard = 429, // BurtGI debug: edge, hit and sky-fallback risk used by the v2 leak guard.
         ScreenSpaceGlobalIlluminationDiagnosticCompare = 430, // BurtGI debug: quadrant compare for raw/final/hit/leak-guard diagnostics.
         ScreenSpaceSubsurfaceAlgorithm = 431, // SSS debug: material-selected algorithm, red = 5S Burley, green = 4S Separable.
-        ScreenSpaceGlobalIlluminationConfidence = 432 // BurtGI debug: quadrant compare for hit ratio, surface validity, edge risk, and sky-fallback risk.
+        ScreenSpaceGlobalIlluminationConfidence = 432, // BurtGI debug: quadrant compare for hit ratio, surface validity, edge risk, and sky-fallback risk.
+        ScreenSpaceReflectionTemporalAlpha = 440, // SSR debug: temporal accumulation alpha before final material/composite weighting.
+        ScreenSpaceReflectionRoughnessMipAlpha = 441, // SSR debug: alpha in the roughness-selected temporal mip.
+        ScreenSpaceReflectionReceiverContinuity = 442, // SSR debug: final receiver same-surface continuity gate.
+        ScreenSpaceReflectionFallbackSpecular = 443, // SSR debug: camera IBL fallback specular that SSR replaces.
+        ScreenSpaceReflectionCompositeDelta = 444, // SSR debug: red = darkening delta, green = brightening delta, blue = final alpha.
+        ScreenSpaceReflectionCameraColor = 445 // SSR debug: camera color copied at the start of SSR composite.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。

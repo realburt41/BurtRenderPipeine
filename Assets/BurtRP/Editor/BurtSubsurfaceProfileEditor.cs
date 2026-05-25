@@ -155,7 +155,7 @@ namespace Burt.RenderPipeline.Editor
             EnsurePreviewTexture();
             if (ShouldDeferPreviewRebuild())
             {
-                BurtSubsurfaceLutUtility.MarkEditorInteraction();
+                BurtSubsurfaceLutUtility.RequestEditorTextureRebuild();
                 previewDirty = true;
                 pendingPreviewHash = hash;
                 RegisterPreviewUpdate();
@@ -202,7 +202,7 @@ namespace Burt.RenderPipeline.Editor
 
             if (ShouldDeferPreviewRebuild())
             {
-                BurtSubsurfaceLutUtility.MarkEditorInteraction();
+                BurtSubsurfaceLutUtility.RequestEditorTextureRebuild();
                 return;
             }
 

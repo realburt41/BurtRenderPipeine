@@ -93,6 +93,8 @@ Shader "BurtRP/Lit"
             // Declares the depth fragment shader entry point.
             #pragma fragment FragDepth
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
 
             // Includes Unity helper functions such as UnityObjectToClipPos.
             #include "UnityCG.cginc"
@@ -136,6 +138,8 @@ Shader "BurtRP/Lit"
             // Declares the shadow fragment shader entry point.
             #pragma fragment FragShadow
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
 
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 
@@ -188,9 +192,10 @@ Shader "BurtRP/Lit"
             // 声明 GBuffer 片元 shader 入口。
             #pragma fragment FragGBuffer
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
 
             // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
-            #pragma target 3.0
+            #pragma target 3.5
 
             // 引入 Lit 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
@@ -232,9 +237,10 @@ Shader "BurtRP/Lit"
             // Declares the forward fragment shader entry point.
             #pragma fragment Frag
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
 
             // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
-            #pragma target 3.0
+            #pragma target 3.5
             #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
 
             // Selects the shared Forward shading model before BurtLighting.hlsl is included.
@@ -255,4 +261,3 @@ Shader "BurtRP/Lit"
     // Disables fallback so BurtRP shader errors do not silently use another pipeline shader.
     Fallback Off
 }
-

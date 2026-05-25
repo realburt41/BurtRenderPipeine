@@ -3,6 +3,7 @@
 #define BURT_SHADOW_CASTER_PASS_INCLUDED
 
 #include "UnityCG.cginc"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
 
 #if !defined(BURT_SHADOW_CASTER_ALPHA_CLIP)
@@ -26,6 +27,7 @@ struct ShadowAttributes
 {
     float4 positionOS : POSITION;
     float3 normalOS : NORMAL;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 
 #if BURT_SHADOW_CASTER_ALPHA_CLIP
     float2 uv0 : TEXCOORD0;
@@ -82,8 +84,11 @@ float3 ApplyBurtShadowCasterNormalBias(float4 positionOS, float3 normalOS)
 
 ShadowVaryings VertShadow(ShadowAttributes input)
 {
+    UNITY_SETUP_INSTANCE_ID(input);
+    float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+
     ShadowVaryings output;
-    float3 biasedPositionWS = ApplyBurtShadowCasterNormalBias(input.positionOS, input.normalOS);
+    float3 biasedPositionWS = ApplyBurtShadowCasterNormalBias(positionOS, input.normalOS);
     output.positionCS = mul(UNITY_MATRIX_VP, float4(biasedPositionWS, 1.0f));
 
 #if !defined(_CASTING_PUNCTUAL_LIGHT_SHADOW)

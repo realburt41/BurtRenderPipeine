@@ -703,7 +703,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             {
                 cmd.SetRenderTarget(debugTarget);
                 BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-                cmd.SetGlobalFloat(TemporalAADebugYFlipId, BurtFinalBlitUtility.ResolveFinalBlitYFlip(context.Request));
+                cmd.SetGlobalFloat(TemporalAADebugYFlipId, 0f);
                 cmd.SetGlobalFloat(ShadingDebugEnabledId, 1f);
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAResolve), MeshTopology.Triangles, 3, 1);
                 cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);

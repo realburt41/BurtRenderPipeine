@@ -68,6 +68,7 @@ namespace Burt.RenderPipeline
         private static bool hasLastPaletteHashes;
 #if UNITY_EDITOR
         private static double lastInteractiveTime;
+        private static bool editorTextureRebuildUpdateRegistered;
         private const double InteractiveRebuildDelaySeconds = 0.35;
 #endif
 
@@ -203,6 +204,19 @@ namespace Burt.RenderPipeline
             hasLastPaletteHashes = false;
         }
 
+        public static void RequestEditorTextureRebuild()
+        {
+#if UNITY_EDITOR
+            if (Application.isPlaying)
+            {
+                return;
+            }
+
+            MarkEditorInteraction();
+            RegisterEditorTextureRebuild();
+#endif
+        }
+
         public static void MarkEditorInteraction()
         {
 #if UNITY_EDITOR
@@ -254,6 +268,15 @@ namespace Burt.RenderPipeline
                 0f,
                 MaxDiffuseMeanFreePathInMillimeters);
             return Max(Multiply(diffuseMeanFreePathInMillimeters, settings.WorldUnitScale * MillimetersToCentimeters), 0.01f);
+        }
+
+        public static float GetMeanFreePathScreenScale(BurtSubsurfaceProfileSettings settings)
+        {
+            var effectiveDiffuseMeanFreePath = GetEffectiveDiffuseMeanFreePathForLut(settings);
+            var dominantEffectiveDistance = Mathf.Max(
+                effectiveDiffuseMeanFreePath.x,
+                Mathf.Max(effectiveDiffuseMeanFreePath.y, effectiveDiffuseMeanFreePath.z));
+            return Mathf.Clamp(dominantEffectiveDistance * 0.5f, 0.05f, 4f);
         }
 
         private static Vector3 ToRgb(Color color)
@@ -741,6 +764,64 @@ namespace Burt.RenderPipeline
                 Object.DestroyImmediate(texture);
             }
         }
+
+#if UNITY_EDITOR
+        private static void RegisterEditorTextureRebuild()
+        {
+            if (editorTextureRebuildUpdateRegistered)
+            {
+                return;
+            }
+
+            editorTextureRebuildUpdateRegistered = true;
+            EditorApplication.update += DelayedEditorTextureRebuild;
+        }
+
+        private static void DelayedEditorTextureRebuild()
+        {
+            if (Application.isPlaying)
+            {
+                UnregisterEditorTextureRebuild();
+                return;
+            }
+
+            if (GUIUtility.hotControl != 0 || EditorGUIUtility.editingTextField)
+            {
+                lastInteractiveTime = EditorApplication.timeSinceStartup;
+                return;
+            }
+
+            if (EditorApplication.timeSinceStartup - lastInteractiveTime < InteractiveRebuildDelaySeconds)
+            {
+                return;
+            }
+
+            UnregisterEditorTextureRebuild();
+            MarkCachedTextureContentsDirty();
+            SceneView.RepaintAll();
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+        }
+
+        private static void UnregisterEditorTextureRebuild()
+        {
+            if (!editorTextureRebuildUpdateRegistered)
+            {
+                return;
+            }
+
+            EditorApplication.update -= DelayedEditorTextureRebuild;
+            editorTextureRebuildUpdateRegistered = false;
+        }
+
+        private static void MarkCachedTextureContentsDirty()
+        {
+            preIntegratedLutHash = 0;
+            profileParamLutHash = 0;
+            preIntegratedProfileHashesValid = false;
+            profileParamRowHashesValid = false;
+            hasLastPaletteHashes = false;
+        }
+#endif
 
         private static bool ShouldDeferTextureRebuild()
         {

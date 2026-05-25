@@ -367,6 +367,18 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSR Roughness Mip";
                 case BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor:
                     return "SSR Resolved Color";
+                case BurtShadingDebugMode.ScreenSpaceReflectionTemporalAlpha:
+                    return "SSR Temporal Alpha";
+                case BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMipAlpha:
+                    return "SSR Mip Alpha";
+                case BurtShadingDebugMode.ScreenSpaceReflectionReceiverContinuity:
+                    return "SSR Receiver Continuity";
+                case BurtShadingDebugMode.ScreenSpaceReflectionFallbackSpecular:
+                    return "SSR Fallback Specular";
+                case BurtShadingDebugMode.ScreenSpaceReflectionCompositeDelta:
+                    return "SSR Composite Delta";
+                case BurtShadingDebugMode.ScreenSpaceReflectionCameraColor:
+                    return "SSR Camera Color";
                 case BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality:
                     return "SSR Depth Quality";
                 case BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality:
@@ -681,6 +693,12 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceReflectionMaterialWeight,
             BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMip,
             BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor,
+            BurtShadingDebugMode.ScreenSpaceReflectionTemporalAlpha,
+            BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMipAlpha,
+            BurtShadingDebugMode.ScreenSpaceReflectionReceiverContinuity,
+            BurtShadingDebugMode.ScreenSpaceReflectionFallbackSpecular,
+            BurtShadingDebugMode.ScreenSpaceReflectionCompositeDelta,
+            BurtShadingDebugMode.ScreenSpaceReflectionCameraColor,
             BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality,
             BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality,
             BurtShadingDebugMode.ScreenSpaceReflectionResolveQuality,
@@ -855,6 +873,12 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceReflectionMaterialWeight,
             BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMip,
             BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor,
+            BurtShadingDebugMode.ScreenSpaceReflectionTemporalAlpha,
+            BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMipAlpha,
+            BurtShadingDebugMode.ScreenSpaceReflectionReceiverContinuity,
+            BurtShadingDebugMode.ScreenSpaceReflectionFallbackSpecular,
+            BurtShadingDebugMode.ScreenSpaceReflectionCompositeDelta,
+            BurtShadingDebugMode.ScreenSpaceReflectionCameraColor,
             BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality,
             BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality,
             BurtShadingDebugMode.ScreenSpaceReflectionResolveQuality,
