@@ -791,8 +791,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var totalWeight = 0f;
             for (var i = 0; i < TemporalAACurrentSampleWeights.Length; i++)
             {
-                var x = TemporalAACurrentSampleOffsets[i].x + jitterPixels.x;
-                var y = TemporalAACurrentSampleOffsets[i].y + jitterPixels.y;
+                var x = TemporalAACurrentSampleOffsets[i].x - jitterPixels.x;
+                var y = TemporalAACurrentSampleOffsets[i].y - jitterPixels.y;
                 var weight = Mathf.Exp((-0.5f / 0.22f) * (x * x + y * y));
                 TemporalAACurrentSampleWeights[i] = weight;
                 totalWeight += weight;

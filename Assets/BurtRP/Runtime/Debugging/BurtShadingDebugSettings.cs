@@ -185,6 +185,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceSubsurfaceCombine = 411, // SSS debug: combined color before copying to CameraColor.
         ScreenSpaceSubsurfaceThickness = 412, // SSS debug: decoded thickness from setup / GBuffer data.
         ScreenSpaceSubsurfaceProfileIndex = 413, // SSS debug: resolved subsurface profile slot.
+        ScreenSpaceSubsurfaceProfileTint = 446, // SSS debug: profile tint color selected by the material profile slot.
+        ScreenSpaceSubsurfaceProfileSurfaceAlbedo = 447, // SSS debug: profile surface albedo color selected by the material profile slot.
+        ScreenSpaceSubsurfaceProfileMeanFreePath = 448, // SSS debug: profile mean free path color selected by the material profile slot.
+        ScreenSpaceSubsurfaceProfileTintedLighting = 449, // SSS debug: XRender-style profile-tinted diffuse lighting before base color is reapplied.
+        ScreenSpaceSubsurfaceProfileTintedFinal = 450, // SSS debug: XRender-style profile-tinted diffuse after base color is reapplied.
         ScreenSpaceSubsurfaceTransmission = 414, // SSS debug: profile transmission contribution.
         ScreenSpaceSubsurfaceDiffuse = 415, // SSS debug: diffuse lighting source used by the blur.
         ScreenSpaceSubsurfaceSpecular = 416, // SSS debug: non-diffuse source preserved by the combine.

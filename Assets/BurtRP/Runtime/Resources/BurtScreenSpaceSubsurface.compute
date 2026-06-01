@@ -9,8 +9,8 @@
 #define BURT_SSS_SHARED_TILE_AREA (BURT_SSS_SHARED_TILE_SIZE * BURT_SSS_SHARED_TILE_SIZE)
 #define BURT_SSS_SHARED_FILL_COUNT ((BURT_SSS_SHARED_TILE_AREA + BURT_SSS_TILE_SIZE * BURT_SSS_TILE_SIZE - 1) / (BURT_SSS_TILE_SIZE * BURT_SSS_TILE_SIZE))
 #define BURT_SSS_PROFILE_COUNT 8
-#define BURT_SSS_BURLEY_MIN_SAMPLE_COUNT 16
-#define BURT_SSS_BURLEY_STABLE_SAMPLE_COUNT 32
+#define BURT_SSS_BURLEY_MIN_SAMPLE_COUNT 48
+#define BURT_SSS_BURLEY_STABLE_SAMPLE_COUNT 64
 #define BURT_SSS_BURLEY_DEBUG_SAMPLE_COUNT 64
 #define BURT_SSS_BURLEY_MAX_SAMPLE_COUNT 64
 #define BURT_SSS_BURLEY_INV_MAX_SAMPLE_COUNT (1.0 / BURT_SSS_BURLEY_MAX_SAMPLE_COUNT)
@@ -396,7 +396,6 @@ void BurtSSSDecodeLightingComponents(
     emission = BurtSSSLoadPreExposedEmission(pixel);
     float4 sourceWithoutEmission = float4(max(source.rgb - emission, float3(0.0, 0.0, 0.0)), source.a);
     diffuseWithBaseColor = BurtSSSSplitDiffuseLighting(sourceWithoutEmission);
-    diffuseWithBaseColor = min(BurtSSSStabilizeDiffuseHue(diffuseWithBaseColor, sourceWithoutEmission.a, baseColor), sourceWithoutEmission.rgb);
     diffuseLighting = BurtSSSDecodeDiffuseLighting(diffuseWithBaseColor, baseColor);
     specularLight = max(sourceWithoutEmission.rgb - diffuseWithBaseColor, float3(0.0, 0.0, 0.0));
 }
@@ -550,7 +549,9 @@ int BurtSSSResolveAdaptiveBurleySampleCount(BurtSSSSurface center, BurtSSSProfil
     }
 
     float variance = max(history.params.a, 0.0);
-    return clamp((int)(variance / BURT_SSS_HISTORY_VARIANCE_TARGET), BURT_SSS_BURLEY_MIN_SAMPLE_COUNT, BURT_SSS_BURLEY_MAX_SAMPLE_COUNT);
+    float adaptiveFactor = saturate(sqrt(variance / max(BURT_SSS_HISTORY_VARIANCE_TARGET * 64.0, 0.000001)));
+    int adaptiveSamples = (int)round(lerp((float)BURT_SSS_BURLEY_MIN_SAMPLE_COUNT, (float)BURT_SSS_BURLEY_MAX_SAMPLE_COUNT, adaptiveFactor));
+    return clamp(adaptiveSamples, BURT_SSS_BURLEY_MIN_SAMPLE_COUNT, BURT_SSS_BURLEY_MAX_SAMPLE_COUNT);
 }
 
 void BurtSSSFillBurleyShared(int2 groupPixel, uint groupIndex)
@@ -622,8 +623,10 @@ float BurtSSSEvaluateTemporalVariance(float3 currentDiffuse, float3 referenceDif
 {
     float3 encodedCurrent = pow(max(currentDiffuse, float3(0.0, 0.0, 0.0)), 1.0 / 2.2);
     float3 encodedReference = pow(max(referenceDiffuse, float3(0.0, 0.0, 0.0)), 1.0 / 2.2);
-    float residual = BurtSSSPerceivedLuminance(encodedCurrent) - BurtSSSPerceivedLuminance(encodedReference);
-    return residual * residual;
+    float3 residual = encodedCurrent - encodedReference;
+    float lumaResidual = dot(residual, BURT_SSS_LUMINANCE);
+    float3 chromaResidual = residual - float3(lumaResidual, lumaResidual, lumaResidual);
+    return lumaResidual * lumaResidual + dot(chromaResidual, chromaResidual) * 0.02;
 }
 
 void BurtSSSWriteHistory(int2 pixel, float3 diffuse, float variance, float valid)
@@ -687,7 +690,7 @@ float2 BurtSSSCalculateBurleyScale(float centerSceneDepth, BurtSSSProfile profil
     float2 scale = float2(worldUnitScale, worldUnitScale) * (projectionScale / depthInMillimeters);
     scale *= BURT_SSS_SUBSURFACE_KERNEL_SIZE;
     float radiusScale = clamp(profile.params.x / BURT_SSS_DEFAULT_RADIUS_PIXELS, 0.1, 4.0);
-    scale *= radiusScale * BurtSSSResolveMeanFreePathScreenScale(profile);
+    scale *= radiusScale;
     scale.y *= _BurtSSSScreenSize.x * _BurtSSSScreenSize.w;
     return scale;
 }
@@ -764,33 +767,28 @@ float3 BurtSSSAccumulateBurley(
         float theta = randomT1.y * BURT_SSS_TWO_PI;
         float2 diskDirection = BurtSSSRotate2D(float2(cos(theta), sin(theta)), diskRotation);
         float2 uvOffset = burleyScale * radiusInProfileUnits * diskDirection;
-        int2 samplePixel = (int2)((float2)pixel + uvOffset * _BurtSSSScreenSize.xy);
+        int2 samplePixel = (int2)round((float2)pixel + uvOffset * _BurtSSSScreenSize.xy);
         float inBounds = BurtSSSInPixelBounds(samplePixel) ? 1.0 : 0.0;
         int2 clampedPixel = BurtSSSClampPixel(samplePixel);
-        BurtSSSSurface sampleSurface = BurtSSSLoadSurface(clampedPixel);
-        float sameBurleyType = ((center.profileType & sampleSurface.profileType) & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u ? 1.0 : 0.0;
-        float surfaceWeight = BurtSSSSampleWeight(center, sampleSurface, profile, inBounds) * sameBurleyType;
         float4 sampleDiffuseDepth;
         float3 sampleNormalWS;
         BurtSSSLoadBurleySample(clampedPixel, groupPixel, sampleDiffuseDepth, sampleNormalWS);
         float3 sampleDiffuse = sampleDiffuseDepth.rgb;
         float sampleSceneDepth = sampleDiffuseDepth.a;
 
-        float normalSimilarity = saturate(dot(center.normalWS, sampleNormalWS) * 0.5 + 0.5);
-        float normalWeight = lerp(sqrt(normalSimilarity), 1.0, saturate(center.strength) * 0.35);
+        float normalWeight = sqrt(saturate(dot(center.normalWS, sampleNormalWS) * 0.5 + 0.5));
         float depthDelta = (sampleSceneDepth - centerSceneDepth) * BURT_SSS_UNITY_M_2_MM / BurtSSSResolveWorldUnitScale(profile);
-        float depthWindow = max(profile.params.y * 48.0, 0.5);
-        depthDelta *= lerp(0.42, 1.0, saturate(abs(depthDelta) / depthWindow));
         float sampledRadius = sqrt(radiusInProfileUnits * radiusInProfileUnits + depthDelta * depthDelta);
         float3 diffusionProfile = BurtSSSDiffuseProfile(diffuseMeanFreePath, inverseSearchLightScale, sampledRadius);
         float pdf = BurtSSSGetPDF(radiusInProfileUnits, lDivS);
-        float3 sampleWeight = diffusionProfile / pdf * normalWeight * surfaceWeight;
+        float3 sampleWeight = diffusionProfile / pdf * normalWeight * inBounds;
 
         radianceAccumulated += sampleWeight * sampleDiffuse;
         weightingFactor += sampleWeight;
     }
 
-    float3 burleyDiffuse = any(weightingFactor <= 0.0)
+    float maxWeight = max(max(weightingFactor.r, weightingFactor.g), weightingFactor.b);
+    float3 burleyDiffuse = maxWeight <= 0.0001
         ? originalDiffuse
         : radianceAccumulated / max(weightingFactor, float3(0.0001, 0.0001, 0.0001)) * (1.0 / 0.99995);
     burleyDiffuse = lerp(burleyDiffuse, originalDiffuse, centerSampleWeight);
@@ -969,9 +967,7 @@ float3 BurtSSSStabilizeDiffuseLightingChroma(float3 original, float3 blurred, fl
 
 float3 BurtSSSStabilizeDiffuseLighting(float3 original, float3 blurred, float strength)
 {
-    float3 stable = BurtSSSPreserveDiffuseLuminance(original, blurred, strength);
-    stable = BurtSSSStabilizeDiffuseLightingChroma(original, stable, strength);
-    return BurtSSSPreserveDiffuseLuminance(original, stable, strength);
+    return BurtSSSPreserveDiffuseLuminance(original, blurred, strength);
 }
 
 float3 BurtSSSClampHistoryDiffuse(float3 current, float3 history, float strength)
@@ -995,32 +991,22 @@ float3 BurtSSSTemporalResolveDiffuse(
     int sampleCount,
     out float variance)
 {
-    float3 stableCurrent = BurtSSSStabilizeDiffuseLighting(original, current, strength);
-    variance = BurtSSSEvaluateTemporalVariance(stableCurrent, original);
+    float3 currentDiffuse = max(current, float3(0.0, 0.0, 0.0));
+    variance = BurtSSSEvaluateTemporalVariance(currentDiffuse, original);
     if (!history.valid)
     {
-        return stableCurrent;
+        return currentDiffuse;
     }
 
-    float currentLum = dot(max(stableCurrent, float3(0.0, 0.0, 0.0)), BURT_SSS_LUMINANCE);
-    float historyLum = dot(max(history.params.rgb, float3(0.0, 0.0, 0.0)), BURT_SSS_LUMINANCE);
-    if (currentLum > 0.001 && historyLum < currentLum * 0.06)
-    {
-        return stableCurrent;
-    }
-
-    float3 historyDiffuse = BurtSSSClampHistoryDiffuse(stableCurrent, history.params.rgb, strength);
     float historyVariance = max(history.params.a, 0.0);
     float currentWeight = saturate(_BurtSSSHistoryParams.y);
     float sampleConfidence = saturate((float)sampleCount * BURT_SSS_BURLEY_INV_MAX_SAMPLE_COUNT);
     float varianceGate = saturate(sqrt(historyVariance / max(BURT_SSS_HISTORY_VARIANCE_TARGET * 16.0, 0.000001)));
-    currentWeight = lerp(currentWeight * 0.55, currentWeight, max(sampleConfidence, varianceGate));
-    currentWeight = clamp(currentWeight, 0.05, 0.35);
+    currentWeight = lerp(currentWeight * 0.45, currentWeight, max(sampleConfidence, varianceGate));
+    currentWeight = clamp(currentWeight, 0.03, 0.22);
 
-    float3 resolved = lerp(historyDiffuse, stableCurrent, currentWeight);
-    resolved = BurtSSSStabilizeDiffuseLighting(original, resolved, strength);
-    variance = lerp(historyVariance, BurtSSSEvaluateTemporalVariance(stableCurrent, resolved), currentWeight);
-    return resolved;
+    variance = lerp(historyVariance, variance, currentWeight);
+    return currentDiffuse;
 }
 
 [numthreads(1, 1, 1)]
@@ -1082,8 +1068,8 @@ void SetupMainCS(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex :
             float3 specularLight;
             BurtSSSDecodeLightingComponents(pixel, source, baseColor, emission, diffuseWithBaseColor, diffuse, specularLight);
             float sceneDepth = surface.linearEyeDepth;
-            diffuseLight = float4(diffuseWithBaseColor, sceneDepth);
-            output = float4(diffuseWithBaseColor, 1.0);
+            diffuseLight = float4(diffuse, sceneDepth);
+            output = float4(diffuse, 1.0);
             if (materialHasBurleyProfile)
             {
                 InterlockedOr(BurtSSSGroupActive, 1);
@@ -1153,8 +1139,8 @@ void SetupMainNoBurleyGroupsCS(uint3 dispatchThreadID : SV_DispatchThreadID)
             float3 specularLight;
             BurtSSSDecodeLightingComponents(pixel, source, baseColor, emission, diffuseWithBaseColor, diffuse, specularLight);
             float sceneDepth = surface.linearEyeDepth;
-            diffuseLight = float4(diffuseWithBaseColor, sceneDepth);
-            output = float4(diffuseWithBaseColor, 1.0);
+            diffuseLight = float4(diffuse, sceneDepth);
+            output = float4(diffuse, 1.0);
         }
     }
 

@@ -245,7 +245,6 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             emission = BurtSSSLoadPreExposedEmission(uv);
             float4 sourceWithoutEmission = float4(max(source.rgb - emission, float3(0.0f, 0.0f, 0.0f)), source.a);
             diffuseWithBaseColor = BurtSSSSplitDiffuseLighting(sourceWithoutEmission);
-            diffuseWithBaseColor = min(BurtSSSStabilizeDiffuseHue(diffuseWithBaseColor, sourceWithoutEmission.a, baseColor), sourceWithoutEmission.rgb);
             diffuseLighting = BurtSSSDecodeDiffuseLighting(diffuseWithBaseColor, baseColor);
             specularLight = max(sourceWithoutEmission.rgb - diffuseWithBaseColor, float3(0.0f, 0.0f, 0.0f));
         }
@@ -598,9 +597,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         float3 BurtSSSStabilizeDiffuseLighting(float3 original, float3 blurred, float strength)
         {
-            float3 stable = BurtSSSPreserveDiffuseLuminance(original, blurred, strength);
-            stable = BurtSSSStabilizeDiffuseLightingChroma(original, stable, strength);
-            return BurtSSSPreserveDiffuseLuminance(original, stable, strength);
+            return BurtSSSPreserveDiffuseLuminance(original, blurred, strength);
         }
 
         float3 BurtSSSFilterBurleyBlur(float2 uv, BurtSSSSurface center, BurtSSSProfile profile, float3 centerColor)
@@ -679,13 +676,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             }
 
             float3 blurred = sumColor / max(sumWeight, float3(0.0001f, 0.0001f, 0.0001f));
-            float3 materialTint = max(center.tint, float3(0.0f, 0.0f, 0.0f));
-            float3 profileTint = max(profile.tint.rgb, float3(0.0f, 0.0f, 0.0f));
-            float3 transmissionTint = max(profile.transmissionTint.rgb, float3(0.0f, 0.0f, 0.0f));
-            float3 profileAlbedo = max(profile.surfaceAlbedo.rgb, float3(0.0f, 0.0f, 0.0f));
-            float3 tint = lerp(float3(1.0f, 1.0f, 1.0f), materialTint * profileTint * transmissionTint * lerp(float3(1.0f, 1.0f, 1.0f), profileAlbedo, 0.35f), profile.params2.w);
-            float3 tintedBlurred = blurred * lerp(float3(1.0f, 1.0f, 1.0f), tint, saturate(applyTint));
-            return BurtSSSStabilizeDiffuseLighting(original, tintedBlurred, center.strength);
+            return BurtSSSStabilizeDiffuseLighting(original, blurred, center.strength);
         }
 
         float4 FragCopy(Varyings input) : SV_Target
@@ -775,7 +766,6 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
             float4 subsurfaceColor = tex2D(_BurtSSSBlurTexture, uv);
             float3 subsurfaceDiffuseColor = max(subsurfaceColor.rgb / max(subsurfaceColor.a, 0.00001f), float3(0.0f, 0.0f, 0.0f));
-            BurtSSSSurface center = BurtSSSLoadSurface(uv);
             float3 baseColor;
             float3 emission;
             float3 originalDiffuseWithBaseColor;
@@ -783,20 +773,9 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             float3 specularLight;
             BurtSSSDecodeLightingComponents(uv, originalLit, baseColor, emission, originalDiffuseWithBaseColor, originalDiffuseLighting, specularLight);
             BurtSSSProfile profile = BurtSSSLoadProfile((float)profileIndex);
-            if ((profileType & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u)
-            {
-                subsurfaceDiffuseColor = BurtSSSFilterBurleyBlur(uv, center, profile, subsurfaceDiffuseColor);
-            }
-
-            float tintStrength = saturate(profile.params2.w) * 0.45f;
-            float blend = saturate(setupMask * setup.g * profile.params2.x);
-            float3 profileTint = lerp(float3(1.0f, 1.0f, 1.0f), saturate(profile.tint.rgb), tintStrength);
-            float3 tintedSubsurfaceDiffuse = subsurfaceDiffuseColor * profileTint;
-            float3 subsurfaceDiffuse = lerp(originalDiffuseWithBaseColor, tintedSubsurfaceDiffuse, blend);
-            if ((profileType & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u)
-            {
-                subsurfaceDiffuse = BurtSSSPreserveDiffuseLuminance(originalDiffuseWithBaseColor, subsurfaceDiffuse, blend * 0.45f);
-            }
+            float3 profileTintMix = saturate(profile.tint.rgb);
+            float3 subsurfaceLighting = lerp(originalDiffuseLighting, subsurfaceDiffuseColor, profileTintMix);
+            float3 subsurfaceDiffuse = subsurfaceLighting * baseColor;
             return float4(max(subsurfaceDiffuse + specularLight + emission, float3(0.0f, 0.0f, 0.0f)), 1.0f);
         }
 
@@ -855,6 +834,24 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             }
 
             BurtSSSProfile profile = BurtSSSLoadProfile(center.profileIndex);
+            if (_BurtSSSDebugMode > 22.5f && _BurtSSSDebugMode < 23.5f)
+            {
+                return float4(saturate(profile.tint.rgb) * setup.r, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 23.5f && _BurtSSSDebugMode < 24.5f)
+            {
+                return float4(saturate(profile.surfaceAlbedo.rgb) * setup.r, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 24.5f && _BurtSSSDebugMode < 25.5f)
+            {
+                float3 meanFreePathColor = max(profile.meanFreePath.rgb, float3(0.0f, 0.0f, 0.0f));
+                float maxMeanFreePath = max(max(meanFreePathColor.r, meanFreePathColor.g), meanFreePathColor.b);
+                meanFreePathColor /= max(maxMeanFreePath, 0.0001f);
+                return float4(saturate(meanFreePathColor) * setup.r, 1.0f);
+            }
+
             float4 originalLit = tex2D(_BurtSSSOriginalTexture, input.screenUV);
             float3 baseColor;
             float3 emission;
@@ -862,6 +859,32 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             float3 diffuseLighting;
             float3 specularLight;
             BurtSSSDecodeLightingComponents(input.screenUV, originalLit, baseColor, emission, diffuseWithBaseColor, diffuseLighting, specularLight);
+
+            if (_BurtSSSDebugMode > 25.5f && _BurtSSSDebugMode < 26.5f)
+            {
+                if (setup.r <= 0.0f || (center.profileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) == 0u)
+                {
+                    return float4(0.0f, 0.0f, 0.0f, 1.0f);
+                }
+
+                float4 subsurfaceColor = tex2D(_BurtSSSBlurTexture, input.screenUV);
+                float3 subsurfaceDiffuseColor = max(subsurfaceColor.rgb / max(subsurfaceColor.a, 0.00001f), float3(0.0f, 0.0f, 0.0f));
+                float3 profileTintedLighting = lerp(diffuseLighting, subsurfaceDiffuseColor, saturate(profile.tint.rgb));
+                return float4(max(profileTintedLighting, float3(0.0f, 0.0f, 0.0f)) * setup.r, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 26.5f && _BurtSSSDebugMode < 27.5f)
+            {
+                if (setup.r <= 0.0f || (center.profileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) == 0u)
+                {
+                    return float4(0.0f, 0.0f, 0.0f, 1.0f);
+                }
+
+                float4 subsurfaceColor = tex2D(_BurtSSSBlurTexture, input.screenUV);
+                float3 subsurfaceDiffuseColor = max(subsurfaceColor.rgb / max(subsurfaceColor.a, 0.00001f), float3(0.0f, 0.0f, 0.0f));
+                float3 profileTintedLighting = lerp(diffuseLighting, subsurfaceDiffuseColor, saturate(profile.tint.rgb));
+                return float4(max(profileTintedLighting * baseColor, float3(0.0f, 0.0f, 0.0f)) * setup.r, 1.0f);
+            }
 
             if (_BurtSSSDebugMode < 8.5f)
             {

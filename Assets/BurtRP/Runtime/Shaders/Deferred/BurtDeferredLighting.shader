@@ -129,6 +129,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
 
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_SUBSURFACE 1
+            #define BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT 1
             #pragma target 4.5
             #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"

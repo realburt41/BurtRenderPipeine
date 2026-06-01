@@ -470,7 +470,12 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
     materialData.linearRoughness = PerceptualRoughnessToLinearRoughness(materialData.perceptualRoughness);
     materialData.a2 = LinearRoughnessToA2(materialData.linearRoughness);
 
-    materialData.diffuseColor = DiffuseColorFromBaseColor(materialData.baseColor, materialData.metallic);
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT) && BURT_ENABLE_SUBSURFACE_SHADING
+    float3 diffuseBaseColor = BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID) ? float3(1.0f, 1.0f, 1.0f) : materialData.baseColor;
+#else
+    float3 diffuseBaseColor = materialData.baseColor;
+#endif
+    materialData.diffuseColor = DiffuseColorFromBaseColor(diffuseBaseColor, materialData.metallic);
     materialData.f0 = DielectricReflectanceToF0(materialData.baseColor, materialData.reflectance, materialData.metallic);
     materialData.f90 = ApproximateF90(materialData.f0);
 
@@ -1054,7 +1059,11 @@ void BurtApplySubsurfaceDirectPBR(
 
     float curvature = saturate(1.0f - materialData.subsurfaceThickness);
     float3 subsurfaceTint = max(materialData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
+    float3 diffuseTint = float3(1.0f, 1.0f, 1.0f);
+#else
     float3 diffuseTint = lerp(float3(1.0f, 1.0f, 1.0f), subsurfaceTint, 0.65f);
+#endif
     float4 dualSpecular = BurtLoadSubsurfaceProfileDualSpecular(materialData.subsurfaceProfileIndex);
     float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(materialData.subsurfaceProfileIndex);
     float4 profileTransmissionTint = BurtLoadSubsurfaceProfileTransmissionTint(materialData.subsurfaceProfileIndex);
@@ -1094,7 +1103,11 @@ void BurtApplySubsurfaceDirectPBR(
     float transmissionShadow = softenedShadowVisibility * lerp(0.82f, 1.0f, backFacing);
     float3 profileTint = max(profileTransmissionTint.rgb, float3(0.0f, 0.0f, 0.0f));
     float transmissionIntensity = BurtEvaluateSubsurfaceProfileIntensity(profileTransmittance);
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
+    float3 transmissionThroughput = float3(0.0f, 0.0f, 0.0f);
+#else
     float3 transmissionThroughput = max(materialData.baseColor * subsurfaceTint * profileTint, float3(0.0f, 0.0f, 0.0f)) * transmissionIntensity;
+#endif
     float3 transmissionBRDF = transmissionThroughput * transmissionLobe * dualEnergyPreservation;
     float3 transmission = transmissionBRDF * lightColor * transmissionShadow;
 

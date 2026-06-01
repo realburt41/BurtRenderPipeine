@@ -237,6 +237,16 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSS Thickness";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex:
                     return "SSS Profile Index";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTint:
+                    return "SSS Profile Tint";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileSurfaceAlbedo:
+                    return "SSS Profile Surface Albedo";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileMeanFreePath:
+                    return "SSS Profile Mean Free Path";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedLighting:
+                    return "SSS Profile Tinted Lighting";
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal:
+                    return "SSS Profile Tinted Final";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm:
                     return "SSS Algorithm";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission:
@@ -784,6 +794,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTint,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileSurfaceAlbedo,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileMeanFreePath,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedLighting,
+            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse,

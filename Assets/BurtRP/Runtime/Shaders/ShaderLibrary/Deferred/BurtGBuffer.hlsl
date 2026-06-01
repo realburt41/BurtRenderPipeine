@@ -797,7 +797,12 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData gbufferData)
     materialData.linearRoughness = PerceptualRoughnessToLinearRoughness(materialData.perceptualRoughness);
     materialData.a2 = LinearRoughnessToA2(materialData.linearRoughness);
 
-    materialData.diffuseColor = DiffuseColorFromBaseColor(materialData.baseColor, materialData.metallic);
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT) && BURT_ENABLE_SUBSURFACE_SHADING
+    float3 diffuseBaseColor = BurtIsActiveSubsurfaceShadingModel(gbufferData.shadingModelID) ? float3(1.0f, 1.0f, 1.0f) : materialData.baseColor;
+#else
+    float3 diffuseBaseColor = materialData.baseColor;
+#endif
+    materialData.diffuseColor = DiffuseColorFromBaseColor(diffuseBaseColor, materialData.metallic);
     materialData.f0 = DielectricReflectanceToF0(materialData.baseColor, materialData.reflectance, materialData.metallic);
     materialData.f90 = ApproximateF90(materialData.f0);
 

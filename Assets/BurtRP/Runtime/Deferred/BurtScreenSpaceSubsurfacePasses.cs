@@ -2252,6 +2252,11 @@ namespace Burt.RenderPipeline
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTint ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileSurfaceAlbedo ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileMeanFreePath ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedLighting ||
+                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse ||
@@ -2287,6 +2292,16 @@ namespace Burt.RenderPipeline
                     return 6;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex:
                     return 7;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTint:
+                    return 23;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileSurfaceAlbedo:
+                    return 24;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileMeanFreePath:
+                    return 25;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedLighting:
+                    return 26;
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal:
+                    return 27;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm:
                     return 15;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission:
@@ -2983,11 +2998,11 @@ namespace Burt.RenderPipeline
 
     internal static class BurtScreenSpaceSubsurfaceHistoryUtility
     {
-        public const float ExponentialWeight = 0.18f;
+        public const float ExponentialWeight = 0.12f;
         public const float HistoryVarianceTarget = 0.0001f;
         public const int MaxBurleySampleCount = 64;
 
-        private const int HistoryAlgorithmVersion = 3;
+        private const int HistoryAlgorithmVersion = 7;
         private const int CameraStatePruneInterval = 128;
         private const float ProjectionChangeEpsilon = 0.0001f;
         private const float ProfileSignatureEpsilon = 0.0001f;

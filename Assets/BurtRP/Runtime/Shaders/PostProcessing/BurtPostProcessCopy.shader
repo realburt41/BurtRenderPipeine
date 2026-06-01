@@ -1580,6 +1580,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 responsiveMask = saturate(responsiveMask * saturate(_BurtTAAResponsiveParams.x) * historyValid * inBounds * velocityValid * surfaceWeight);
                 responsiveMask = max(responsiveMask, burtGIResponsive * historyValid * inBounds * velocityValid);
                 responsiveMask = max(responsiveMask, edgeFeedbackGuard * historyValid * inBounds * velocityValid * surfaceWeight);
+                float stableStaticEdge = saturate(depthContinuity * parallaxValidity * coverageValidity * historyConfidence * historyUseWarmup * lowMotionStability * (1.0 - max(velocityEdgeResponsive, untrustedObjectMotion)));
+                stableStaticEdge *= smoothstep(0.18, 0.78, depthEdgeResponsive);
+                responsiveMask *= lerp(1.0, 0.68, stableStaticEdge);
                 float confidenceWeight = lerp(saturate(_BurtTAAFeedbackParams.y), 1.0, saturate(historyConfidence));
                 float confidenceBoost = lerp(min(_BurtTAAFeedbackParams.z, 0.72), _BurtTAAFeedbackParams.z, saturate(historyConfidence));
                 float baseFeedback = min(saturate(_BurtTAAParams.x), max(saturate(_BurtTAAParams2.w), 0.01));
@@ -1596,6 +1599,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float geometryFeedbackValidity = min(min(depthWeight, depthRangeWeight), min(min(normalWeight, motionWeight), min(parallaxValidity, coverageValidity)));
                 float settledFeedbackFloor = baseFeedback * lerp(0.56, 0.88, historySampleTrust);
                 feedback = max(feedback, settledFeedbackFloor * stableColorRecovery * geometryFeedbackValidity);
+                feedback = max(feedback, baseFeedback * lerp(0.88, 1.0, historySampleTrust) * stableStaticEdge * geometryFeedbackValidity);
                 feedback = min(feedback, lerp(0.86, 0.982, historyContinuity));
                 feedback = min(feedback, lerp(0.78, 0.982, saturate(coverageValidity)));
                 feedback = min(feedback, lerp(0.72, 0.982, saturate(historyUseStability)));

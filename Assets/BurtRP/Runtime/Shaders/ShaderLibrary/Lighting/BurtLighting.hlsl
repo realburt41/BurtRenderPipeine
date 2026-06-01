@@ -1218,9 +1218,13 @@ float3 BurtEvaluateSubsurfaceIndirectProfile(
     float thicknessVisibility = lerp(0.18f, 1.0f, thickness);
     float wrapVisibility = lerp(0.55f, 1.15f, max(ambientWrap, normalWrap));
     float scatterVisibility = lerp(0.75f, 1.25f, scatteringDistribution);
-    float3 tint = max(materialData.subsurfaceTint * profileTint.rgb, float3(0.0f, 0.0f, 0.0f));
     float transmissionIntensity = BurtEvaluateSubsurfaceProfileIntensity(profileTransmittance);
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
+    float3 subsurfaceDiffuse = wrappedIrradiance * transmissionIntensity;
+#else
+    float3 tint = max(materialData.subsurfaceTint * profileTint.rgb, float3(0.0f, 0.0f, 0.0f));
     float3 subsurfaceDiffuse = materialData.baseColor * tint * transmissionIntensity * wrappedIrradiance;
+#endif
     return subsurfaceDiffuse * materialData.occlusion * subsurfaceStrength * thicknessVisibility * wrapVisibility * scatterVisibility * lerp(0.55f, 1.0f, meanFreePathVisibility);
 }
 #endif

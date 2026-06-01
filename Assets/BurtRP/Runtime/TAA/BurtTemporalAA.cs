@@ -526,6 +526,11 @@ namespace Burt.RenderPipeline
             return string.IsNullOrEmpty(ResolveTemporalAADisabledReason(request, asset, renderOptions));
         }
 
+        public static string ResolveTemporalAADiagnosticDisabledReason(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions)
+        {
+            return ResolveTemporalAADisabledReason(request, asset, renderOptions) ?? "Enabled";
+        }
+
         private static string ResolveTemporalAADisabledReason(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions)
         {
             if (request == null || !request.IsValid || request.Camera == null)
@@ -546,7 +551,7 @@ namespace Burt.RenderPipeline
             var settings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
             if (!settings.Enabled)
             {
-                return "DisabledByVolumeOrAsset";
+                return BurtPostProcessUtility.ResolveTemporalAAConfigurationDisabledReason(request, asset) ?? "DisabledByVolumeOrAsset";
             }
 
             if (renderOptions != null && renderOptions.UseSharedRenderTargets && renderOptions.RequestCountInStack > 1)
