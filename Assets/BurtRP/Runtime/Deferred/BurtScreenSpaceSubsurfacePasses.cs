@@ -3002,7 +3002,7 @@ namespace Burt.RenderPipeline
         public const float HistoryVarianceTarget = 0.0001f;
         public const int MaxBurleySampleCount = 64;
 
-        private const int HistoryAlgorithmVersion = 7;
+        private const int HistoryAlgorithmVersion = 8;
         private const int CameraStatePruneInterval = 128;
         private const float ProjectionChangeEpsilon = 0.0001f;
         private const float ProfileSignatureEpsilon = 0.0001f;

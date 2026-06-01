@@ -719,6 +719,16 @@ float BurtSSSSampleWeight(BurtSSSSurface center, BurtSSSSurface sampleSurface, B
     return inBounds * modelWeight * profileWeight * depthWeight * normalWeight * thicknessWeight * strengthWeight;
 }
 
+float BurtSSSBurleySampleGate(BurtSSSSurface center, BurtSSSSurface sampleSurface, BurtSSSProfile profile, float inBounds)
+{
+    float modelWeight = center.valid * sampleSurface.valid;
+    float profileWeight = BurtSSSResolveProfileIndex(center.profileIndex) == BurtSSSResolveProfileIndex(sampleSurface.profileIndex) ? 1.0 : 0.0;
+    float sameBurleyType = ((center.profileType & sampleSurface.profileType) & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u ? 1.0 : 0.0;
+    float depthWindow = max(profile.params.y * max(center.linearEyeDepth, 0.05), 0.0001);
+    float depthWeight = exp2(-abs(center.linearEyeDepth - sampleSurface.linearEyeDepth) / depthWindow);
+    return inBounds * modelWeight * profileWeight * sameBurleyType * depthWeight;
+}
+
 float3 BurtSSSAccumulateBurley(
     BurtSSSSurface center,
     BurtSSSProfile profile,
@@ -770,18 +780,20 @@ float3 BurtSSSAccumulateBurley(
         int2 samplePixel = (int2)round((float2)pixel + uvOffset * _BurtSSSScreenSize.xy);
         float inBounds = BurtSSSInPixelBounds(samplePixel) ? 1.0 : 0.0;
         int2 clampedPixel = BurtSSSClampPixel(samplePixel);
+        BurtSSSSurface sampleSurface = BurtSSSLoadSurface(clampedPixel);
+        float surfaceWeight = BurtSSSBurleySampleGate(center, sampleSurface, profile, inBounds);
         float4 sampleDiffuseDepth;
         float3 sampleNormalWS;
         BurtSSSLoadBurleySample(clampedPixel, groupPixel, sampleDiffuseDepth, sampleNormalWS);
         float3 sampleDiffuse = sampleDiffuseDepth.rgb;
         float sampleSceneDepth = sampleDiffuseDepth.a;
 
-        float normalWeight = sqrt(saturate(dot(center.normalWS, sampleNormalWS) * 0.5 + 0.5));
+        float normalWeight = lerp(sqrt(saturate(dot(center.normalWS, sampleNormalWS) * 0.5 + 0.5)), 1.0, saturate(center.strength) * 0.15);
         float depthDelta = (sampleSceneDepth - centerSceneDepth) * BURT_SSS_UNITY_M_2_MM / BurtSSSResolveWorldUnitScale(profile);
         float sampledRadius = sqrt(radiusInProfileUnits * radiusInProfileUnits + depthDelta * depthDelta);
         float3 diffusionProfile = BurtSSSDiffuseProfile(diffuseMeanFreePath, inverseSearchLightScale, sampledRadius);
         float pdf = BurtSSSGetPDF(radiusInProfileUnits, lDivS);
-        float3 sampleWeight = diffusionProfile / pdf * normalWeight * inBounds;
+        float3 sampleWeight = diffusionProfile / pdf * normalWeight * surfaceWeight;
 
         radianceAccumulated += sampleWeight * sampleDiffuse;
         weightingFactor += sampleWeight;
