@@ -191,32 +191,6 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             return max(litColor.rgb, float3(0.0f, 0.0f, 0.0f)) * diffuseFactor;
         }
 
-        float3 BurtSSSReconstructDiffuseWithBaseColor(float diffuseLuminance, float3 baseColor)
-        {
-            float3 safeBaseColor = max(baseColor, float3(0.0f, 0.0f, 0.0f));
-            float baseLuminance = dot(safeBaseColor, BURT_LUMINANCE_WEIGHTS);
-            return safeBaseColor * (max(diffuseLuminance, 0.0f) / max(baseLuminance, 0.001f));
-        }
-
-        float3 BurtSSSStabilizeDiffuseHue(float3 splitDiffuse, float sourceDiffuseLuminance, float3 baseColor)
-        {
-            float3 projectedDiffuse = BurtSSSReconstructDiffuseWithBaseColor(sourceDiffuseLuminance, baseColor);
-            float splitLuminance = dot(max(splitDiffuse, float3(0.0f, 0.0f, 0.0f)), BURT_LUMINANCE_WEIGHTS);
-            float baseLuminance = dot(max(baseColor, float3(0.0f, 0.0f, 0.0f)), BURT_LUMINANCE_WEIGHTS);
-            float3 splitChroma = splitDiffuse / max(splitLuminance, 0.001f);
-            float3 baseChroma = max(baseColor, float3(0.0f, 0.0f, 0.0f)) / max(baseLuminance, 0.001f);
-            float projectionWeight = saturate(length(splitChroma - baseChroma) * 0.15f);
-            return lerp(splitDiffuse, projectedDiffuse, projectionWeight);
-        }
-
-        float3 BurtSSSResolveDiffuseWithBaseColor(float4 sourceWithoutEmission, float3 baseColor)
-        {
-            float3 sourceColor = max(sourceWithoutEmission.rgb, float3(0.0f, 0.0f, 0.0f));
-            float sourceLuminance = dot(sourceColor, BURT_LUMINANCE_WEIGHTS);
-            float diffuseFactor = sourceLuminance > 0.0001f ? saturate(max(sourceWithoutEmission.a, 0.0f) / sourceLuminance) : 0.0f;
-            return sourceColor * diffuseFactor;
-        }
-
         float3 BurtSSSLoadBaseColor(float2 uv)
         {
             return max(tex2D(_BurtScreenSpaceSubsurfaceBaseColorTexture, uv).rgb, float3(0.0f, 0.0f, 0.0f));
@@ -574,79 +548,12 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             return max(blurred * energyRatio, float3(0.0f, 0.0f, 0.0f));
         }
 
-        float3 BurtSSSStabilizeDiffuseLightingChroma(float3 original, float3 blurred, float strength)
-        {
-            float3 safeOriginal = max(original, float3(0.0f, 0.0f, 0.0f));
-            float3 safeBlurred = max(blurred, float3(0.0f, 0.0f, 0.0f));
-            float originalLum = dot(safeOriginal, BURT_LUMINANCE_WEIGHTS);
-            float blurredLum = dot(safeBlurred, BURT_LUMINANCE_WEIGHTS);
-            if (originalLum <= 0.0001f || blurredLum <= 0.0001f)
-            {
-                return safeBlurred;
-            }
-
-            float3 originalChroma = safeOriginal / max(originalLum, 0.0001f);
-            float3 blurredChroma = safeBlurred / max(blurredLum, 0.0001f);
-            float chromaDrift = saturate(length(blurredChroma - originalChroma) * 0.45f);
-            float warmShift = saturate((blurredChroma.r - max(blurredChroma.g, blurredChroma.b)) - (originalChroma.r - max(originalChroma.g, originalChroma.b)));
-            float luminanceLift = saturate((blurredLum - originalLum) / max(blurredLum, 0.0001f));
-            float lockWeight = saturate(strength * lerp(0.18f, 0.52f, chromaDrift) * lerp(1.0f, 0.35f, max(luminanceLift, warmShift)));
-            float3 lockedBlurred = originalChroma * blurredLum;
-            return max(lerp(safeBlurred, lockedBlurred, lockWeight), float3(0.0f, 0.0f, 0.0f));
-        }
-
         float3 BurtSSSStabilizeDiffuseLighting(float3 original, float3 blurred, float strength)
         {
             return BurtSSSPreserveDiffuseLuminance(original, blurred, strength);
         }
 
-        float3 BurtSSSFilterBurleyBlur(float2 uv, BurtSSSSurface center, BurtSSSProfile profile, float3 centerColor)
-        {
-            if (center.valid <= 0.0f || (center.profileType & BURT_SSS_PROFILE_TYPE_BURLEY) == 0u)
-            {
-                return centerColor;
-            }
-
-            float2 texel = _BurtSSSScreenSize.zw;
-            float centerLum = dot(max(centerColor, float3(0.0f, 0.0f, 0.0f)), BURT_LUMINANCE_WEIGHTS);
-            float3 sumColor = centerColor * 2.5f;
-            float sumWeight = 2.5f;
-
-            [unroll]
-            for (int y = -1; y <= 1; y++)
-            {
-                [unroll]
-                for (int x = -1; x <= 1; x++)
-                {
-                    if (x == 0 && y == 0)
-                    {
-                        continue;
-                    }
-
-                    float2 sampleOffset = float2((float)x, (float)y);
-                    float2 sampleUVUnclamped = uv + sampleOffset * texel;
-                    float inBounds = BurtSSSInBounds(sampleUVUnclamped);
-                    float2 sampleUV = saturate(sampleUVUnclamped);
-                    BurtSSSSurface sampleSurface = BurtSSSLoadSurface(sampleUV);
-                    float sameBurleyType = ((center.profileType & sampleSurface.profileType) & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u ? 1.0f : 0.0f;
-                    float surfaceWeight = BurtSSSSampleWeight(center, sampleSurface, profile, inBounds) * sameBurleyType * BurtSSSLoadSetup(sampleUV).r;
-                    float4 samplePacked = tex2D(_BurtSSSBlurTexture, sampleUV);
-                    float3 sampleColor = max(samplePacked.rgb / max(samplePacked.a, 0.00001f), float3(0.0f, 0.0f, 0.0f));
-                    float sampleLum = dot(sampleColor, BURT_LUMINANCE_WEIGHTS);
-                    float rangeWindow = max(max(centerLum, sampleLum) * 0.32f + 0.015f, 0.0001f);
-                    float rangeWeight = exp2(-abs(sampleLum - centerLum) / rangeWindow);
-                    float spatialWeight = abs(x) + abs(y) == 1 ? 0.72f : 0.42f;
-                    float weight = surfaceWeight * rangeWeight * spatialWeight;
-                    sumColor += sampleColor * weight;
-                    sumWeight += weight;
-                }
-            }
-
-            float3 filtered = sumColor / max(sumWeight, 0.0001f);
-            return lerp(centerColor, filtered, saturate(center.strength * profile.params2.x * 0.75f));
-        }
-
-        float3 BurtSSSBlur(float2 uv, float2 direction, float applyTint, float sourceIsLit, float useSeparableRadius)
+        float3 BurtSSSBlur(float2 uv, float2 direction, float sourceIsLit, float useSeparableRadius)
         {
             BurtSSSSurface center = BurtSSSLoadSurface(uv);
             float3 original = BurtSSSDecodeSourceDiffuse(tex2D(_BurtSSSSourceTexture, uv), sourceIsLit);
@@ -694,7 +601,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
                 return tex2D(_BurtSSSSourceTexture, input.screenUV);
             }
 
-            return float4(BurtSSSBlur(input.screenUV, float2(1.0f, 0.0f), 0.0f, 0.0f, 1.0f), 1.0f);
+            return float4(BurtSSSBlur(input.screenUV, float2(1.0f, 0.0f), 0.0f, 1.0f), 1.0f);
         }
 
         float4 FragVertical(Varyings input) : SV_Target
@@ -707,7 +614,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
                 return tex2D(_BurtSSSSourceTexture, input.screenUV);
             }
 
-            float3 blurred = BurtSSSBlur(input.screenUV, float2(0.0f, 1.0f), 1.0f, 0.0f, 1.0f);
+            float3 blurred = BurtSSSBlur(input.screenUV, float2(0.0f, 1.0f), 0.0f, 1.0f);
             float3 baseColor;
             float3 emission;
             float3 originalDiffuseWithBaseColor;
