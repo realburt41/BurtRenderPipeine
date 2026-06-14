@@ -1788,7 +1788,6 @@ namespace Burt.RenderPipeline
         private const int SubsurfaceScatteringMode5SBurley = 0;
         private const int SubsurfaceScatteringMode4SSeparable = 1;
         private const int SubsurfaceScatteringMode3SPreintegrated = 2;
-        private static readonly int SubsurfaceStrengthMaterialId = Shader.PropertyToID("_SubsurfaceStrength");
         private static readonly int SubsurfaceProfileIndexMaterialId = Shader.PropertyToID("_SubsurfaceProfileIndex");
         private static readonly int SubsurfaceScatteringModeMaterialId = Shader.PropertyToID("_SubsurfaceScatteringMode");
         private static readonly ShaderTagId LightModeTag = new ShaderTagId("LightMode");
@@ -2095,11 +2094,6 @@ namespace Burt.RenderPipeline
 
             var shaderLooksSubsurface = material.shader.name == SubsurfaceMaterialShaderName ||
                 material.shader.name.IndexOf("Subsurface", System.StringComparison.OrdinalIgnoreCase) >= 0;
-            if (!material.HasProperty(SubsurfaceStrengthMaterialId))
-            {
-                return shaderLooksSubsurface;
-            }
-
             scatteringMode = ResolveSubsurfaceScatteringMode(material);
             if (scatteringMode == SubsurfaceScatteringMode3SPreintegrated)
             {
@@ -2108,14 +2102,14 @@ namespace Burt.RenderPipeline
 
             if (scatteringMode == SubsurfaceScatteringMode4SSeparable)
             {
-                return material.GetFloat(SubsurfaceStrengthMaterialId) > 0f;
+                return shaderLooksSubsurface;
             }
 
             var profileIndex = material.HasProperty(SubsurfaceProfileIndexMaterialId)
                 ? Mathf.Clamp(Mathf.RoundToInt(material.GetFloat(SubsurfaceProfileIndexMaterialId)), 0, BurtSubsurfaceProfilePalette.MaxProfiles - 1)
                 : 0;
             var minStrength = ResolveMaterialProfileMinStrength(asset, profileIndex);
-            return material.GetFloat(SubsurfaceStrengthMaterialId) > minStrength;
+            return 1.0f > minStrength;
         }
 
         private static int ResolveSubsurfaceScatteringMode(Material material)

@@ -6,19 +6,19 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl" // 引入 BurtSafeNormalize，用来安全归一化切线、法线和最终结果。
 
 // 声明材质法线贴图，BurtLit 的 Forward pass 会用 mesh UV0 对它进行采样。
-sampler2D _NormalMap;
-sampler2D _ClearCoatNormalMap;
+Texture2D _NormalMap;
+Texture2D _ClearCoatNormalMap;
 
 // 采样材质法线贴图，当前阶段复用 Base Map 的 UV 和 Tiling / Offset。
 float4 BurtSampleNormalMap(float2 normalMapUV)
 {
     // 返回 normal map 的原始打包值，后续函数会把它解包成切线空间法线。
-    return tex2D(_NormalMap, normalMapUV);
+    return BURT_SAMPLE_TEXTURE2D_REPEAT(_NormalMap, normalMapUV);
 }
 
 float4 BurtSampleClearCoatNormalMap(float2 normalMapUV)
 {
-    return tex2D(_ClearCoatNormalMap, normalMapUV);
+    return BURT_SAMPLE_TEXTURE2D_REPEAT(_ClearCoatNormalMap, normalMapUV);
 }
 
 // 把 Unity normal map 的打包颜色解包成切线空间法线，并应用强度缩放。

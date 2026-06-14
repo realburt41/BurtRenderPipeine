@@ -510,6 +510,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
                 builder.Append("    PerObjectShadowSlice[").Append(sliceIndex).Append("]:");
                 builder.Append(" Renderers=").Append(slice.Renderers != null ? slice.Renderers.Count : 0);
+                builder.Append(" MultipassRenderers=").Append(slice.MultipassRenderers != null ? slice.MultipassRenderers.Count : 0);
                 builder.Append(" Resolution=").Append(slice.SliceResolution);
                 builder.Append(" Strength=").Append(FormatFloat(slice.Strength));
                 builder.Append(" ReceiverDepthBias=").Append(FormatFloat(slice.ReceiverDepthBias));
@@ -1796,8 +1797,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAAFinalBlitYFlip=").Append(FormatFloat(finalBlitYFlip));
             builder.Append(" TAADebugYFlip=").Append(FormatFloat(temporalAADebugYFlip));
             builder.Append(" TAAUVSpace=XRenderFullscreenPlatformSampleUv;HistoryDepthVelocityFeedbackSameOrientation;FinalCameraColorTemporalAACopy;FinalBlitHandlesDisplayFlip;BurtVelocityPrevMinusCurrentHistoryUvPlusVelocity");
-            builder.Append(" TAAFilter=Current3x3OffsetMinusPixelJitter");
-            builder.Append(" TAANote=XRenderPixelFilterParity;VelocitySignInternalToBurt");
+            builder.Append(" TAAFilter=Current3x3OffsetPlusPixelJitter");
+            builder.Append(" TAANote=XRenderTSRAccumulationParity;DecimateMaxUseCountDepth;VelocitySignInternalToBurt;NoEdgeVelocityValidityDrop;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3CurrentFilter");
 
             builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
 

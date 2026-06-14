@@ -19,6 +19,35 @@
     #define UNITY_SAMPLE_TEXCUBE_LOD(tex, coord, lod) texCUBElod(tex, float4(coord, lod))
 #endif
 
+SamplerState sampler_PointClamp;
+SamplerState sampler_LinearClamp;
+SamplerState sampler_PointRepeat;
+SamplerState sampler_LinearRepeat;
+SamplerState sampler_TriLinearClamp;
+SamplerState sampler_TriLinearRepeat;
+SamplerComparisonState sampler_PointClampCompare;
+SamplerComparisonState sampler_LinearClampCompare;
+
+#define SamplerPointClamp sampler_PointClamp
+#define SamplerLinearClamp sampler_LinearClamp
+#define SamplerPointRepeat sampler_PointRepeat
+#define SamplerLinearRepeat sampler_LinearRepeat
+#define SamplerTriLinearClamp sampler_TriLinearClamp
+#define SamplerTriLinearRepeat sampler_TriLinearRepeat
+#define SamplerPointClampCompare sampler_PointClampCompare
+#define SamplerLinearClampCompare sampler_LinearClampCompare
+
+#define BURT_SAMPLE_TEXTURE2D_REPEAT(textureName, uv) textureName.Sample(sampler_LinearRepeat, uv)
+#define BURT_SAMPLE_TEXTURE2D_CLAMP(textureName, uv) textureName.Sample(sampler_LinearClamp, uv)
+#define BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(textureName, uv) textureName.Sample(sampler_PointClamp, uv)
+#define BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(textureName, uv, lod) textureName.SampleLevel(sampler_LinearClamp, uv, lod)
+#define BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(textureName, uv, lod) textureName.SampleLevel(sampler_PointClamp, uv, lod)
+#define BURT_SAMPLE_TEXTURE2D_ARRAY_LOD_CLAMP(textureName, uv, slice, lod) textureName.SampleLevel(sampler_LinearClamp, float3(uv, slice), lod)
+#define BURT_SAMPLE_TEXTURE2D_ARRAY_LOD_REPEAT(textureName, uv, slice, lod) textureName.SampleLevel(sampler_LinearRepeat, float3(uv, slice), lod)
+#define BURT_SAMPLE_TEXTURECUBE_LOD_CLAMP(textureName, direction, lod) textureName.SampleLevel(sampler_LinearClamp, direction, lod)
+#define BURT_SAMPLE_TEXTURECUBE_LOD_REPEAT(textureName, direction, lod) textureName.SampleLevel(sampler_LinearRepeat, direction, lod)
+#define BURT_SAMPLE_SHADOW_CLAMP(textureName, coord) textureName.SampleCmpLevelZero(sampler_LinearClampCompare, (coord).xy, (coord).z)
+
 static const float BURT_MULTIPASS_DEFAULT_SHELL_LENGTH = 0.03f;
 
 float4 _FurScale;

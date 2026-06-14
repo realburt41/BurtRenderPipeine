@@ -10,6 +10,7 @@ namespace Burt.RenderPipeline
         public const int DefaultSliceResolution = 1024;
 
         private const string CastingPunctualLightShadowKeyword = "_CASTING_PUNCTUAL_LIGHT_SHADOW";
+        private const string ShadowCasterPassName = "ShadowCaster";
 
         private static readonly int PerObjectShadowRows0Id = Shader.PropertyToID("_BurtPerObjectShadowRows0");
         private static readonly int PerObjectShadowRows1Id = Shader.PropertyToID("_BurtPerObjectShadowRows1");
@@ -38,11 +39,48 @@ namespace Burt.RenderPipeline
         private static readonly Vector4[] WorldToShadowRows2 = new Vector4[MaxSlices];
         private static readonly Vector4[] WorldToShadowRows3 = new Vector4[MaxSlices];
         private static readonly Vector3[] BoundsCorners = new Vector3[8];
+        private static readonly ShaderTagId LightModeTag = new ShaderTagId("LightMode");
+        private static readonly ShaderTagId ShadowCasterLightModeTag = new ShaderTagId(ShadowCasterPassName);
+
+        public static System.IDisposable BeginDirectionalLightRenderingLayerMaskOverrideForCulling()
+        {
+            if (BurtPerObjectShadowRegistry.ActiveCount <= 0)
+            {
+                return null;
+            }
+
+            var lights = Object.FindObjectsOfType<Light>();
+            DirectionalLightRenderingLayerMaskScope scope = null;
+            for (var lightIndex = 0; lightIndex < lights.Length; lightIndex++)
+            {
+                var light = lights[lightIndex];
+                if (light == null || !light.isActiveAndEnabled || light.type != LightType.Directional)
+                {
+                    continue;
+                }
+
+                var originalMask = light.renderingLayerMask;
+                var maskedLightMask = originalMask & ~(int)BurtPerObjectShadow.PerObjectShadowRenderingLayerMask;
+                if (maskedLightMask == originalMask)
+                {
+                    continue;
+                }
+
+                if (scope == null)
+                {
+                    scope = new DirectionalLightRenderingLayerMaskScope();
+                }
+
+                scope.Add(light, originalMask);
+                light.renderingLayerMask = maskedLightMask;
+            }
+
+            return scope;
+        }
 
         public static bool ShouldUsePerObjectShadow(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
-            return BurtShadowUtility.ShouldUseMainLightShadow(request, asset) &&
-                request != null &&
+            return request != null &&
                 request.IsValid &&
                 request.Camera != null &&
                 BurtPerObjectShadowRegistry.ActiveCount > 0;
@@ -265,6 +303,7 @@ namespace Burt.RenderPipeline
         {
             slice.Reset();
             component.CollectRenderers(slice.Renderers);
+            component.CollectMultipassRenderers(slice.MultipassRenderers);
             if (!TryCalculateRenderableBounds(slice.Renderers, camera, out var boundsWS))
             {
                 return false;
@@ -338,6 +377,31 @@ namespace Burt.RenderPipeline
             }
 
             return true;
+        }
+
+        public static int FindShadowCasterPass(Material material)
+        {
+            if (material == null)
+            {
+                return -1;
+            }
+
+            var shader = material.shader;
+            if (shader == null)
+            {
+                return -1;
+            }
+
+            for (var passIndex = 0; passIndex < shader.passCount; passIndex++)
+            {
+                var lightMode = shader.FindPassTagValue(passIndex, LightModeTag);
+                if (lightMode.Equals(ShadowCasterLightModeTag))
+                {
+                    return passIndex;
+                }
+            }
+
+            return material.FindPass(ShadowCasterPassName);
         }
 
         private static Matrix4x4 CreateWorldToShadowViewMatrix(Vector3 centerWS, Quaternion lightRotation)
@@ -491,6 +555,33 @@ namespace Burt.RenderPipeline
 
             return rects;
         }
+
+        private sealed class DirectionalLightRenderingLayerMaskScope : System.IDisposable
+        {
+            private readonly List<Light> lights = new List<Light>();
+            private readonly List<int> renderingLayerMasks = new List<int>();
+
+            public void Add(Light light, int renderingLayerMask)
+            {
+                lights.Add(light);
+                renderingLayerMasks.Add(renderingLayerMask);
+            }
+
+            public void Dispose()
+            {
+                for (var lightIndex = 0; lightIndex < lights.Count; lightIndex++)
+                {
+                    var light = lights[lightIndex];
+                    if (light != null)
+                    {
+                        light.renderingLayerMask = renderingLayerMasks[lightIndex];
+                    }
+                }
+
+                lights.Clear();
+                renderingLayerMasks.Clear();
+            }
+        }
     }
 
     internal sealed class PerObjectShadowPrepareData
@@ -517,6 +608,7 @@ namespace Burt.RenderPipeline
     internal sealed class PerObjectShadowSlice
     {
         public readonly List<Renderer> Renderers = new List<Renderer>(16);
+        public readonly List<BurtMultipassRenderer> MultipassRenderers = new List<BurtMultipassRenderer>(4);
 
         public int Index;
         public int SliceResolution;
@@ -533,6 +625,7 @@ namespace Burt.RenderPipeline
         public void Reset()
         {
             Renderers.Clear();
+            MultipassRenderers.Clear();
             Index = 0;
             SliceResolution = BurtPerObjectShadowUtility.DefaultSliceResolution;
             Strength = 0f;
@@ -702,7 +795,7 @@ namespace Burt.RenderPipeline
                         continue;
                     }
 
-                    var passIndex = material.FindPass("ShadowCaster");
+                    var passIndex = BurtPerObjectShadowUtility.FindShadowCasterPass(material);
                     if (passIndex < 0)
                     {
                         continue;
@@ -710,6 +803,18 @@ namespace Burt.RenderPipeline
 
                     cmd.DrawRenderer(renderer, material, submeshIndex, passIndex);
                 }
+            }
+
+            for (var rendererIndex = 0; rendererIndex < slice.MultipassRenderers.Count; rendererIndex++)
+            {
+                BurtMultipassRenderer.DrawOne(
+                    cmd,
+                    slice.MultipassRenderers[rendererIndex],
+                    camera,
+                    BurtMultipassShaderPass.ShadowCaster,
+                    RenderQueueRange.opaque,
+                    (int)BurtPerObjectShadow.PerObjectShadowRenderingLayerMask,
+                    true);
             }
 
             renderContext.ExecuteCommandBuffer(cmd);

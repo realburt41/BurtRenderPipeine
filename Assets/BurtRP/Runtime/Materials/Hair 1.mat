@@ -58,7 +58,7 @@ Material:
     - _BackLightMask: 0.5
     - _BackLightMaskRange: 1
     - _Cull: 0
-    - _Cutoff: 0.33
+    - _Cutoff: 0.518
     - _DoubleSidedEnable: 1
     - _DoubleSidedNormalMode: 2
     - _EdgeRoughRimPower: 4
@@ -84,7 +84,7 @@ Material:
     - _Occlusion: 1
     - _OcclusionStrength: 1
     - _OpacityMaskOffset: 0.235
-    - _OpacityMaskValue: 0.33
+    - _OpacityMaskValue: 0.518
     - _Reflectance: 0.5
     - _RootGradientEnable: 1
     - _RootGradientPosEnable: 0

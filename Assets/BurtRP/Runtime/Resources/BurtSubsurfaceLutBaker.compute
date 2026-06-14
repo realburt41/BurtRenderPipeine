@@ -1,11 +1,15 @@
+#pragma kernel GenerateProfileParamLut
 #pragma kernel GeneratePreIntegratedLut
 #pragma kernel GenerateSHLut
 
 Texture2D<float4> _BurtSubsurfaceProfileParamLut;
+StructuredBuffer<float4> _BurtSubsurfaceProfileSettings;
+RWTexture2D<float4> _BurtSubsurfaceProfileParamLutRW;
 RWTexture2DArray<float4> _BurtSubsurfacePreIntegratedLutRW;
 RWTexture2DArray<float4> _BurtSubsurfaceSHLutRW;
 
 int _BurtSubsurfaceLutProfileIndex;
+int _BurtSubsurfaceProfileSettingsStride;
 float4 _BurtSubsurfacePreIntegratedLutSize;
 float4 _BurtSubsurfaceSHLutSize;
 float4 _BurtSubsurfaceProfileParamLutSize;
@@ -18,9 +22,27 @@ float4 _BurtSubsurfaceProfileParamLutSize;
 #define BURT_SURFACE_ALBEDO_OFFSET 0
 #define BURT_MEAN_FREE_PATH_OFFSET 1
 #define BURT_TINT_OFFSET 2
+#define BURT_BOUNDARY_COLOR_BLEED_OFFSET 3
+#define BURT_DUAL_SPECULAR_OFFSET 4
+#define BURT_TRANSMISSION_PARAMS_OFFSET 5
+#define BURT_TRANSMISSION_PROFILE_OFFSET 6
+#define BURT_TRANSMISSION_PROFILE_SIZE 32
+#define BURT_KERNEL0_OFFSET 38
+#define BURT_KERNEL0_SIZE 13
+#define BURT_KERNEL1_OFFSET 51
+#define BURT_KERNEL1_SIZE 9
+#define BURT_KERNEL2_OFFSET 60
+#define BURT_KERNEL2_SIZE 6
 #define BURT_DMFP_DECODE 500.0
 #define BURT_WORLD_UNIT_SCALE_DECODE 50.0
 #define BURT_CM_TO_MM 10.0
+#define BURT_MM_TO_CM 0.1
+#define BURT_DMFP_TO_MFP_MAGIC 0.6
+#define BURT_DMFP_ENCODE 0.002
+#define BURT_WORLD_UNIT_SCALE_ENCODE 0.02
+#define BURT_MAX_DMFP_MM 500.0
+#define BURT_MAX_TRANSMISSION_PROFILE_DISTANCE 10.0
+#define BURT_SUBSURFACE_RADIUS_SCALE 1024.0
 #define BURT_SH_INTEGRATION_STEP 0.005
 
 float4 BurtFetchProfileParam(int sampleIndex, int profileIndex)
@@ -49,6 +71,53 @@ float3 BurtSearchLightDiffuseScalingFactor(float3 surfaceAlbedo)
 {
     float3 value = surfaceAlbedo - 0.33;
     return 3.5 + 100.0 * value * value * value * value;
+}
+
+float3 BurtPerpendicularScalingFactor(float3 surfaceAlbedo)
+{
+    float3 value = abs(surfaceAlbedo - 0.8);
+    return 1.85 - surfaceAlbedo + 7.0 * value * value * value;
+}
+
+float3 BurtDiffuseMeanFreePathFromMeanFreePath(float3 surfaceAlbedo, float3 meanFreePath)
+{
+    return meanFreePath * (BurtSearchLightDiffuseScalingFactor(surfaceAlbedo) / max(BurtPerpendicularScalingFactor(surfaceAlbedo), float3(0.0001, 0.0001, 0.0001)));
+}
+
+float3 BurtMeanFreePathFromDiffuseMeanFreePath(float3 surfaceAlbedo, float3 diffuseMeanFreePath)
+{
+    return diffuseMeanFreePath * (BurtPerpendicularScalingFactor(surfaceAlbedo) / max(BurtSearchLightDiffuseScalingFactor(surfaceAlbedo), float3(0.0001, 0.0001, 0.0001)));
+}
+
+float BurtBurleyScatteringProfile(float radius, float surfaceAlbedo, float scalingFactor, float diffuseMeanFreePath)
+{
+    float diffuseDistance = max(diffuseMeanFreePath, 0.01);
+    float normalizedRadius = max(radius, 0.0) / diffuseDistance;
+    float inverseDiffusion = 1.0 / max(scalingFactor, 0.0001);
+    float exponentValue = -normalizedRadius / inverseDiffusion;
+    return max(surfaceAlbedo * (exp(exponentValue) + exp(exponentValue / 3.0)) / (inverseDiffusion * diffuseDistance) / (8.0 * BURT_PI), 0.0);
+}
+
+float3 BurtBurleyScatteringProfile(float radius, float3 surfaceAlbedo, float3 scalingFactor, float3 diffuseMeanFreePath)
+{
+    return float3(
+        BurtBurleyScatteringProfile(radius, surfaceAlbedo.r, scalingFactor.r, diffuseMeanFreePath.r),
+        BurtBurleyScatteringProfile(radius, surfaceAlbedo.g, scalingFactor.g, diffuseMeanFreePath.g),
+        BurtBurleyScatteringProfile(radius, surfaceAlbedo.b, scalingFactor.b, diffuseMeanFreePath.b));
+}
+
+float BurtBurleyTransmissionProfile(float radius, float surfaceAlbedo, float scalingFactor, float diffuseMeanFreePath)
+{
+    float safeDistance = max(diffuseMeanFreePath, 0.01);
+    return 0.25 * surfaceAlbedo * (exp(-scalingFactor * radius / safeDistance) + 3.0 * exp(-scalingFactor * radius / (3.0 * safeDistance)));
+}
+
+float3 BurtTransmissionProfile(float radius, float3 surfaceAlbedo, float3 scalingFactor, float3 diffuseMeanFreePath, float3 transmissionTint)
+{
+    return float3(
+        BurtBurleyTransmissionProfile(radius, surfaceAlbedo.r, scalingFactor.r, diffuseMeanFreePath.r),
+        BurtBurleyTransmissionProfile(radius, surfaceAlbedo.g, scalingFactor.g, diffuseMeanFreePath.g),
+        BurtBurleyTransmissionProfile(radius, surfaceAlbedo.b, scalingFactor.b, diffuseMeanFreePath.b)) * transmissionTint;
 }
 
 float3 BurtBurleyUnit(float angle, float3 sharpness)
@@ -162,6 +231,196 @@ float BurtSHBandScale(int band)
     }
 
     return sqrt(BURT_FOUR_PI / 5.0) * BURT_TWO_PI * BURT_INV_HALF_PI;
+}
+
+float4 BurtFetchProfileSetting(int profileIndex, int settingIndex)
+{
+    int stride = max(_BurtSubsurfaceProfileSettingsStride, 1);
+    return _BurtSubsurfaceProfileSettings[profileIndex * stride + settingIndex];
+}
+
+float4 BurtComputeKernelValue(
+    int sampleIndex,
+    int singleEdgeSamples,
+    float3 surfaceAlbedo,
+    float3 diffuseMeanFreePath,
+    float scatterRadius,
+    float worldUnitScale)
+{
+    int totalSamples = singleEdgeSamples * 2 - 1;
+    float range = totalSamples > 20 ? 3.0 : 2.0;
+    float stepValue = 2.0 * range / max((float)(totalSamples - 1), 1.0);
+    float3 scalingFactor = BurtSearchLightDiffuseScalingFactor(surfaceAlbedo);
+    float3 sumValue = float3(0.0, 0.0, 0.0);
+    float4 selected = float4(0.0, 0.0, 0.0, 0.0);
+
+    [loop]
+    for (int i = 0; i < 25; i++)
+    {
+        if (i >= totalSamples)
+        {
+            break;
+        }
+
+        float offset = -range + (float)i * stepValue;
+        float signValue = offset < 0.0 ? -1.0 : 1.0;
+        float remapped = range * signValue * abs(offset * offset) / max(range * range, 0.0001);
+        if (i == totalSamples / 2)
+        {
+            remapped = 0.0;
+        }
+
+        float previousRemapped = remapped;
+        if (i > 0)
+        {
+            float previousOffset = -range + (float)(i - 1) * stepValue;
+            float previousSign = previousOffset < 0.0 ? -1.0 : 1.0;
+            previousRemapped = range * previousSign * abs(previousOffset * previousOffset) / max(range * range, 0.0001);
+            if ((i - 1) == totalSamples / 2)
+            {
+                previousRemapped = 0.0;
+            }
+        }
+
+        float nextRemapped = remapped;
+        if (i < totalSamples - 1)
+        {
+            float nextOffset = -range + (float)(i + 1) * stepValue;
+            float nextSign = nextOffset < 0.0 ? -1.0 : 1.0;
+            nextRemapped = range * nextSign * abs(nextOffset * nextOffset) / max(range * range, 0.0001);
+            if ((i + 1) == totalSamples / 2)
+            {
+                nextRemapped = 0.0;
+            }
+        }
+
+        float area = (abs(remapped - previousRemapped) + abs(remapped - nextRemapped)) * 0.5;
+        float3 weight = BurtBurleyScatteringProfile(abs(remapped) * scatterRadius * BURT_CM_TO_MM, surfaceAlbedo, scalingFactor, diffuseMeanFreePath) * area;
+        float alpha = remapped * 2.0;
+
+        bool selectedSample = sampleIndex == 0
+            ? i == totalSamples / 2
+            : i == sampleIndex + singleEdgeSamples - 1;
+
+        sumValue += weight;
+        if (selectedSample)
+        {
+            selected = float4(weight, alpha);
+        }
+    }
+
+    float alphaScale = scatterRadius * worldUnitScale * BURT_CM_TO_MM / (3.0 * BURT_SUBSURFACE_RADIUS_SCALE);
+    return float4(selected.rgb / max(sumValue, float3(0.0001, 0.0001, 0.0001)), selected.a * alphaScale);
+}
+
+float4 BurtGenerateProfileParamValue(int column, int profileIndex)
+{
+    float4 setting0 = BurtFetchProfileSetting(profileIndex, 0);
+    float4 setting1 = BurtFetchProfileSetting(profileIndex, 1);
+    float4 tint = BurtFetchProfileSetting(profileIndex, 2);
+    float4 boundaryColorBleed = BurtFetchProfileSetting(profileIndex, 3);
+    float4 dualSpecular = BurtFetchProfileSetting(profileIndex, 4);
+    float4 transmissionParams = BurtFetchProfileSetting(profileIndex, 5);
+    float4 transmissionTintAndExtinction = BurtFetchProfileSetting(profileIndex, 6);
+
+    float3 surfaceAlbedo = clamp(setting0.rgb, float3(0.009, 0.009, 0.009), float3(1.0, 1.0, 1.0));
+    float3 meanFreePathColor = clamp(setting1.rgb, float3(0.009, 0.009, 0.009), float3(1.0, 1.0, 1.0));
+    float meanFreePathDistance = max(setting0.a, 0.01);
+    float worldUnitScale = max(setting1.a, 0.01);
+    float3 meanFreePath = meanFreePathColor * meanFreePathDistance;
+    float3 diffuseMeanFreePath = BurtDiffuseMeanFreePathFromMeanFreePath(surfaceAlbedo, meanFreePath) * (BURT_CM_TO_MM / BURT_DMFP_TO_MFP_MAGIC);
+    float3 clampedDiffuseMeanFreePath = clamp(diffuseMeanFreePath, float3(0.0, 0.0, 0.0), float3(BURT_MAX_DMFP_MM, BURT_MAX_DMFP_MM, BURT_MAX_DMFP_MM));
+    float3 samplingMeanFreePath = BurtMeanFreePathFromDiffuseMeanFreePath(surfaceAlbedo, diffuseMeanFreePath);
+    float maxMeanFreePath = max(samplingMeanFreePath.r, max(samplingMeanFreePath.g, samplingMeanFreePath.b));
+    float samplingAlbedo = surfaceAlbedo.b;
+    float samplingDiffuseMeanFreePath = clamp(diffuseMeanFreePath.b, 0.0, BURT_MAX_DMFP_MM);
+    if (abs(samplingMeanFreePath.r - maxMeanFreePath) < 0.00001)
+    {
+        samplingAlbedo = surfaceAlbedo.r;
+        samplingDiffuseMeanFreePath = clamp(diffuseMeanFreePath.r, 0.0, BURT_MAX_DMFP_MM);
+    }
+    else if (abs(samplingMeanFreePath.g - maxMeanFreePath) < 0.00001)
+    {
+        samplingAlbedo = surfaceAlbedo.g;
+        samplingDiffuseMeanFreePath = clamp(diffuseMeanFreePath.g, 0.0, BURT_MAX_DMFP_MM);
+    }
+
+    if (column == BURT_SURFACE_ALBEDO_OFFSET)
+    {
+        return float4(surfaceAlbedo, samplingAlbedo);
+    }
+
+    if (column == BURT_MEAN_FREE_PATH_OFFSET)
+    {
+        return float4(clampedDiffuseMeanFreePath * BURT_DMFP_ENCODE, samplingDiffuseMeanFreePath * BURT_DMFP_ENCODE);
+    }
+
+    if (column == BURT_TINT_OFFSET)
+    {
+        return float4(saturate(tint.rgb), worldUnitScale * BURT_WORLD_UNIT_SCALE_ENCODE);
+    }
+
+    if (column == BURT_BOUNDARY_COLOR_BLEED_OFFSET)
+    {
+        return float4(max(boundaryColorBleed.rgb, float3(0.0, 0.0, 0.0)), 0.0);
+    }
+
+    if (column == BURT_DUAL_SPECULAR_OFFSET)
+    {
+        return dualSpecular;
+    }
+
+    if (column == BURT_TRANSMISSION_PARAMS_OFFSET)
+    {
+        return transmissionParams;
+    }
+
+    if (column >= BURT_TRANSMISSION_PROFILE_OFFSET && column < BURT_TRANSMISSION_PROFILE_OFFSET + BURT_TRANSMISSION_PROFILE_SIZE)
+    {
+        int profileSample = column - BURT_TRANSMISSION_PROFILE_OFFSET;
+        float normalizedDistance = (float)profileSample / (float)BURT_TRANSMISSION_PROFILE_SIZE;
+        float worldUnitToMillimeters = 1.0 / max(worldUnitScale * BURT_CM_TO_MM, 0.0001);
+        float distanceInMillimeters = normalizedDistance * BURT_MAX_TRANSMISSION_PROFILE_DISTANCE * worldUnitToMillimeters;
+        float radiusOffsetInMillimeters = 0.06 * worldUnitToMillimeters;
+        float3 transmission = BurtTransmissionProfile(
+            distanceInMillimeters + radiusOffsetInMillimeters,
+            surfaceAlbedo,
+            BurtSearchLightDiffuseScalingFactor(surfaceAlbedo),
+            clampedDiffuseMeanFreePath,
+            max(transmissionTintAndExtinction.rgb, float3(0.0, 0.0, 0.0)));
+        return float4(transmission, exp(-distanceInMillimeters * max(transmissionTintAndExtinction.a, 0.01)));
+    }
+
+    float scatterRadius = max(samplingDiffuseMeanFreePath * BURT_MM_TO_CM, 0.1);
+    if (column >= BURT_KERNEL0_OFFSET && column < BURT_KERNEL0_OFFSET + BURT_KERNEL0_SIZE)
+    {
+        return BurtComputeKernelValue(column - BURT_KERNEL0_OFFSET, BURT_KERNEL0_SIZE, surfaceAlbedo, clampedDiffuseMeanFreePath, scatterRadius, worldUnitScale);
+    }
+
+    if (column >= BURT_KERNEL1_OFFSET && column < BURT_KERNEL1_OFFSET + BURT_KERNEL1_SIZE)
+    {
+        return BurtComputeKernelValue(column - BURT_KERNEL1_OFFSET, BURT_KERNEL1_SIZE, surfaceAlbedo, clampedDiffuseMeanFreePath, scatterRadius, worldUnitScale);
+    }
+
+    if (column >= BURT_KERNEL2_OFFSET && column < BURT_KERNEL2_OFFSET + BURT_KERNEL2_SIZE)
+    {
+        return BurtComputeKernelValue(column - BURT_KERNEL2_OFFSET, BURT_KERNEL2_SIZE, surfaceAlbedo, clampedDiffuseMeanFreePath, scatterRadius, worldUnitScale);
+    }
+
+    return float4(0.0, 0.0, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void GenerateProfileParamLut(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width = (uint)_BurtSubsurfaceProfileParamLutSize.x;
+    uint height = (uint)_BurtSubsurfaceProfileParamLutSize.y;
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+    {
+        return;
+    }
+
+    _BurtSubsurfaceProfileParamLutRW[dispatchThreadId.xy] = BurtGenerateProfileParamValue((int)dispatchThreadId.x, (int)dispatchThreadId.y);
 }
 
 [numthreads(8, 8, 1)]

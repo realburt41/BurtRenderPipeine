@@ -273,7 +273,7 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
     BurtSurfaceData debugLightingSurfaceData = shadingSurfaceData;
-    debugLightingSurfaceData.subsurfaceStrength = 0.0f;
+    debugLightingSurfaceData.shadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
     BurtPBRShadingComponents debugLightingComponents = BurtEvaluateForwardShadingComponents(
         debugLightingSurfaceData,
         mainLight,

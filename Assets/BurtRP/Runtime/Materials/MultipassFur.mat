@@ -13,13 +13,15 @@ Material:
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
   - BURT_ALPHA_CLIP
-  m_InvalidKeywords: []
+  m_InvalidKeywords:
+  - _FURBLURENABLED_ON
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 2560
+  m_CustomRenderQueue: 2450
   stringTagMap:
-    RenderType: Transparent
+    QUEUE: AlphaTest
+    RenderType: TransparentCutout
   disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
@@ -37,11 +39,19 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
-    - _FlowTex:
+    - _FlowDirectionMapSegmentArray:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _FlowTex:
+        m_Texture: {fileID: 2800000, guid: f14d3e72184ed53488ad21c6231f76bc, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _MaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _NormalMap:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
@@ -52,37 +62,44 @@ Material:
     - _Anisotropy: 0
     - _Cull: 2
     - _Cutoff: 0.01
-    - _DstBlend: 10
+    - _DstBlend: 0
     - _EmissiveUseViewSpaceUV: 0
     - _FlowDirectionIntensity: 0
+    - _FlowDirectionIntensitySegment1: 0.6
+    - _FlowDirectionIntensitySegment2: 0.8
+    - _FlowDirectionIntensitySegment3: 1.2
     - _FlowDirectionUV2: 0
     - _FlowTexUV2: 0
-    - _FlowTilling: 40
-    - _FurAttenuation: 0.4
+    - _FlowTilling: 2
+    - _FurAttenuation: 0.3
+    - _FurBlurDistance: 5
+    - _FurBlurEnabled: 1
     - _FurExpand: 0
     - _FurGravityDirection: 0
     - _FurGravityIntensity: 0
     - _FurRimIntensity: 1
     - _FurRimPower: 8
-    - _FurSpacing: 40
+    - _FurSpacing: 400
     - _FurSpacingMax: 1
     - _FurTickness: 1
     - _FurTicknessCurve: 1
+    - _NormalScale: 1
     - _Occlusion: 1
     - _Reflectance: 0.5
     - _Roughness: 1
     - _SrcBlend: 1
     - _UseDirectionMap: 0
+    - _UseDirectionMapSegment: 0
     - _ViewSpaceUVNormalIntensity: 0
     - _ZTest: 4
     - _ZWrite: 1
-  m_Colors:
-  - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
-  - _BaseMapPanner: {r: 1, g: 1, b: 0, a: 0}
-  - _DarkColor: {r: 0.9433962, g: 0.9433962, b: 0.9433962, a: 1}
-  - _DoubleSidedNormalModeConstants: {r: 1, g: 1, b: -1, a: 0}
-  - _EmissiveColor: {r: 0, g: 0, b: 0, a: 1}
-  - _EmissiveTillingPanner: {r: 1, g: 1, b: 0, a: 0}
-  - _FlowPanner: {r: 0, g: 0, b: 0, a: 0}
-  - _FurScale: {r: 1, g: 1, b: 1, a: 1}
+    m_Colors:
+    - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
+    - _BaseMapPanner: {r: 1, g: 1, b: 0, a: 0}
+    - _DarkColor: {r: 0.6981132, g: 0.6981132, b: 0.6981132, a: 0}
+    - _DoubleSidedNormalModeConstants: {r: 1, g: 1, b: -1, a: 0}
+    - _EmissiveColor: {r: 0, g: 0, b: 0, a: 1}
+    - _EmissiveTillingPanner: {r: 1, g: 1, b: 0, a: 0}
+    - _FlowPanner: {r: 0, g: 0, b: 0, a: 0}
+    - _FurScale: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

@@ -12,6 +12,7 @@ namespace Burt.RenderPipeline
         DepthOnly = 2,
         ShadowCaster = 3,
         GBuffer = 4,
+        FurBlurProperty = 5,
     }
 
     [DisallowMultipleComponent]
@@ -22,12 +23,17 @@ namespace Burt.RenderPipeline
         public const int MaxMultipassLayerCount = 32;
         private const int DefaultMultipassLayerCount = 16;
 
-        private const int MaxShaderPassTypeCount = 5;
+        private const int MaxShaderPassTypeCount = 6;
         private static readonly List<BurtMultipassRenderer> s_Renderers = new List<BurtMultipassRenderer>();
         private static readonly Matrix4x4[] s_InstanceMatrices = new Matrix4x4[MaxMultipassLayerCount];
         private static MaterialPropertyBlock s_DrawPropertyBlock;
         private static readonly int FurScaleId = Shader.PropertyToID("_FurScale");
         private static readonly int FurMaxCountId = Shader.PropertyToID("_FurMaxCount");
+
+#if UNITY_EDITOR
+        internal static bool s_ForceGlobal32Layer;
+        internal static int s_ForceGlobalLayerCount = MaxMultipassLayerCount;
+#endif
 
         private static readonly string[][] ShaderPassNames =
         {
@@ -67,6 +73,10 @@ namespace Burt.RenderPipeline
                 "Burt Lit GBuffer",
                 "Burt Hair GBuffer",
                 "BurtGBuffer"
+            },
+            new[]
+            {
+                "Burt Multipass Fur Blur Property"
             }
         };
 
@@ -74,11 +84,31 @@ namespace Burt.RenderPipeline
         [Range(1, MaxMultipassLayerCount)]
         public int m_LayerCount = DefaultMultipassLayerCount;
 
+        [Tooltip("Use a separate shell layer count for each renderer material slot.")]
+        public bool m_SupportDifferentPassCount;
+
+        [Tooltip("Per-material shell layer counts. Used only when Support Different Pass Count is enabled.")]
+        [SerializeField]
+        public int[] m_LayerCountList = Array.Empty<int>();
+
+        [Tooltip("Optional material overrides for each renderer material slot.")]
+        [SerializeField]
+        public Material[] m_OverrideMaterials = Array.Empty<Material>();
+
+        [Tooltip("Distance fade curve. The evaluated value is multiplied by the original layer count.")]
+        public AnimationCurve m_DistanceFadeCurve = AnimationCurve.Linear(0.0f, 1.0f, 100.0f, 1.0f);
+
         [Tooltip("Rendering layer mask used by Burt multipass draws.")]
         public int m_RenderingLayerMask = 1;
 
         [NonSerialized]
         public Renderer m_Renderer;
+
+        [NonSerialized]
+        public bool m_Force32Layer;
+
+        [NonSerialized]
+        public int m_ForceLayerCount = MaxMultipassLayerCount;
 
         private List<int>[][] supportPasses = Array.Empty<List<int>[]>();
         private int cachedMaterialHash;
@@ -95,6 +125,14 @@ namespace Burt.RenderPipeline
 
         public int LayerCount => Mathf.Clamp(m_LayerCount, 1, MaxMultipassLayerCount);
 
+        public static void SetForceGlobal32Layer(bool enable, int layerCount = MaxMultipassLayerCount)
+        {
+#if UNITY_EDITOR
+            s_ForceGlobal32Layer = enable;
+            s_ForceGlobalLayerCount = Mathf.Clamp(layerCount, 0, MaxMultipassLayerCount);
+#endif
+        }
+
         public List<int> GetSupportPass(int submeshIndex, BurtMultipassShaderPass pass)
         {
             EnsureCache();
@@ -109,7 +147,48 @@ namespace Burt.RenderPipeline
 
         public int GetPassCount(int submeshIndex)
         {
+            if (m_SupportDifferentPassCount && m_LayerCountList != null && submeshIndex >= 0 && submeshIndex < m_LayerCountList.Length)
+            {
+                return Mathf.Clamp(m_LayerCountList[submeshIndex], 1, MaxMultipassLayerCount);
+            }
+
             return LayerCount;
+        }
+
+        public AnimationCurve GetDistanceFadeCurve(int submeshIndex = 0)
+        {
+            return m_DistanceFadeCurve;
+        }
+
+        public Material[] GetOverrideMaterials()
+        {
+            return m_OverrideMaterials;
+        }
+
+        public void SetOverrideMaterial(int submeshIndex, Material material)
+        {
+            EnsureRenderer();
+            SyncSubmeshConfiguration();
+            if (m_OverrideMaterials == null || submeshIndex < 0 || submeshIndex >= m_OverrideMaterials.Length)
+            {
+                Debug.LogError($"SetOverrideMaterial exceed on {name}.", this);
+                return;
+            }
+
+            if (m_OverrideMaterials[submeshIndex] == material)
+            {
+                return;
+            }
+
+            m_OverrideMaterials[submeshIndex] = material;
+            cacheDirty = true;
+            OnMaterialChanged();
+        }
+
+        public void SetForce32Layer(bool enable, int layerCount = MaxMultipassLayerCount)
+        {
+            m_Force32Layer = enable;
+            m_ForceLayerCount = Mathf.Clamp(layerCount, 0, MaxMultipassLayerCount);
         }
 
         public Transform GetRootTransform()
@@ -125,6 +204,8 @@ namespace Burt.RenderPipeline
 
         public void OnMeshChanged()
         {
+            EnsureRenderer();
+            SyncSubmeshConfiguration();
             cacheDirty = true;
             InitializeMaterialCache();
         }
@@ -179,7 +260,10 @@ namespace Burt.RenderPipeline
 
         private void OnValidate()
         {
+            EnsureRenderer();
             m_LayerCount = Mathf.Clamp(m_LayerCount, 1, MaxMultipassLayerCount);
+            m_ForceLayerCount = Mathf.Clamp(m_ForceLayerCount, 0, MaxMultipassLayerCount);
+            SyncSubmeshConfiguration();
             cacheDirty = true;
         }
 
@@ -202,10 +286,50 @@ namespace Burt.RenderPipeline
             return materials != null ? materials.Length : 0;
         }
 
+        private void SyncSubmeshConfiguration()
+        {
+            var materialCount = GetMaterialCount();
+            if (m_LayerCountList == null)
+            {
+                m_LayerCountList = Array.Empty<int>();
+            }
+
+            if (m_OverrideMaterials == null)
+            {
+                m_OverrideMaterials = Array.Empty<Material>();
+            }
+
+            if (m_LayerCountList.Length != materialCount)
+            {
+                var oldLength = m_LayerCountList.Length;
+                Array.Resize(ref m_LayerCountList, materialCount);
+                for (var i = oldLength; i < m_LayerCountList.Length; i++)
+                {
+                    m_LayerCountList[i] = LayerCount;
+                }
+            }
+
+            for (var i = 0; i < m_LayerCountList.Length; i++)
+            {
+                m_LayerCountList[i] = Mathf.Clamp(m_LayerCountList[i], 1, MaxMultipassLayerCount);
+            }
+
+            if (m_OverrideMaterials.Length != materialCount)
+            {
+                Array.Resize(ref m_OverrideMaterials, materialCount);
+            }
+
+            if (m_DistanceFadeCurve == null)
+            {
+                m_DistanceFadeCurve = AnimationCurve.Linear(0.0f, 1.0f, 100.0f, 1.0f);
+            }
+        }
+
         private void InitializeMaterialCache()
         {
             var materials = m_Renderer != null ? m_Renderer.sharedMaterials : null;
             var materialCount = materials != null ? materials.Length : 0;
+            SyncSubmeshConfiguration();
             Array.Resize(ref supportPasses, materialCount);
             for (var submeshIndex = 0; submeshIndex < materialCount; submeshIndex++)
             {
@@ -239,8 +363,16 @@ namespace Burt.RenderPipeline
             }
         }
 
-        private static Material ResolveMaterial(Material[] materials, int submeshIndex)
+        private Material ResolveMaterial(Material[] materials, int submeshIndex)
         {
+            if (m_OverrideMaterials != null &&
+                submeshIndex >= 0 &&
+                submeshIndex < m_OverrideMaterials.Length &&
+                m_OverrideMaterials[submeshIndex] != null)
+            {
+                return m_OverrideMaterials[submeshIndex];
+            }
+
             return materials != null && submeshIndex >= 0 && submeshIndex < materials.Length ? materials[submeshIndex] : null;
         }
 
@@ -270,6 +402,15 @@ namespace Burt.RenderPipeline
                 for (var i = 0; i < materials.Length; i++)
                 {
                     var material = materials[i];
+                    hash = hash * 31 + (material != null ? material.GetInstanceID() : 0);
+                }
+            }
+
+            if (m_OverrideMaterials != null)
+            {
+                for (var i = 0; i < m_OverrideMaterials.Length; i++)
+                {
+                    var material = m_OverrideMaterials[i];
                     hash = hash * 31 + (material != null ? material.GetInstanceID() : 0);
                 }
             }
@@ -329,8 +470,25 @@ namespace Burt.RenderPipeline
                     continue;
                 }
 
-                multipassRenderer.Draw(cmd, pass, range);
+                multipassRenderer.Draw(cmd, camera, pass, range);
             }
+        }
+
+        internal static void DrawOne(
+            CommandBuffer cmd,
+            BurtMultipassRenderer multipassRenderer,
+            Camera camera,
+            BurtMultipassShaderPass pass,
+            RenderQueueRange range,
+            int renderingLayerMask = ~0,
+            bool skipCameraFrustumTest = false)
+        {
+            if (cmd == null || !IsRendererDrawable(multipassRenderer, camera, null, renderingLayerMask, pass, skipCameraFrustumTest))
+            {
+                return;
+            }
+
+            multipassRenderer.Draw(cmd, camera, pass, range);
         }
 
         private static bool IsRendererDrawable(
@@ -338,7 +496,8 @@ namespace Burt.RenderPipeline
             Camera camera,
             Plane[] planes,
             int renderingLayerMask,
-            BurtMultipassShaderPass pass)
+            BurtMultipassShaderPass pass,
+            bool skipCameraFrustumTest = false)
         {
             if (multipassRenderer == null || !multipassRenderer.isActiveAndEnabled)
             {
@@ -351,7 +510,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            if ((camera.cullingMask & (1 << renderer.gameObject.layer)) == 0)
+            if (camera != null && (camera.cullingMask & (1 << renderer.gameObject.layer)) == 0)
             {
                 return false;
             }
@@ -366,10 +525,10 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            return planes == null || planes.Length == 0 || GeometryUtility.TestPlanesAABB(planes, renderer.bounds);
+            return skipCameraFrustumTest || planes == null || planes.Length == 0 || GeometryUtility.TestPlanesAABB(planes, renderer.bounds);
         }
 
-        private void Draw(CommandBuffer cmd, BurtMultipassShaderPass pass, RenderQueueRange range)
+        private void Draw(CommandBuffer cmd, Camera camera, BurtMultipassShaderPass pass, RenderQueueRange range)
         {
             EnsureCache();
             var renderer = m_Renderer;
@@ -385,10 +544,9 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var layerCount = LayerCount;
             var rootTransform = GetRootTransform();
             var instanceMatrix = ResolveRendererMatrix(renderer, rootTransform);
-            FillInstanceMatrices(instanceMatrix, layerCount);
+            FillInstanceMatrices(instanceMatrix, MaxMultipassLayerCount);
 
             var submeshCount = Mathf.Min(materials.Length, mesh.subMeshCount);
             for (var submeshIndex = 0; submeshIndex < submeshCount; submeshIndex++)
@@ -403,6 +561,12 @@ namespace Burt.RenderPipeline
 
                 var passList = GetSupportPass(submeshIndex, pass);
                 if (passList == null || passList.Count == 0)
+                {
+                    continue;
+                }
+
+                var layerCount = ResolveLayerCount(submeshIndex, camera, rootTransform);
+                if (layerCount <= 0)
                 {
                     continue;
                 }
@@ -424,6 +588,43 @@ namespace Burt.RenderPipeline
                         propertyBlock);
                 }
             }
+        }
+
+        private int ResolveLayerCount(int submeshIndex, Camera camera, Transform rootTransform)
+        {
+            var originLayerCount = GetPassCount(submeshIndex);
+            var layerCount = originLayerCount;
+            var distanceFadeCurve = GetDistanceFadeCurve(submeshIndex);
+            if (distanceFadeCurve != null && distanceFadeCurve.length >= 2 && camera != null && rootTransform != null)
+            {
+                var distance = Vector3.Distance(camera.transform.position, rootTransform.position);
+                if (distance >= distanceFadeCurve[0].time)
+                {
+                    layerCount = Mathf.RoundToInt(Mathf.Max(0.0f, distanceFadeCurve.Evaluate(distance)) * originLayerCount);
+                }
+            }
+
+            layerCount = Mathf.Clamp(layerCount, 0, MaxMultipassLayerCount);
+            if (IsForceLayerCountEnabled(out var forceLayerCount))
+            {
+                layerCount = Mathf.Clamp(forceLayerCount, 0, MaxMultipassLayerCount);
+            }
+
+            return layerCount;
+        }
+
+        private bool IsForceLayerCountEnabled(out int forceLayerCount)
+        {
+#if UNITY_EDITOR
+            if (s_ForceGlobal32Layer)
+            {
+                forceLayerCount = s_ForceGlobalLayerCount;
+                return true;
+            }
+#endif
+
+            forceLayerCount = m_ForceLayerCount;
+            return m_Force32Layer;
         }
 
         private static MaterialPropertyBlock GetDrawPropertyBlock()

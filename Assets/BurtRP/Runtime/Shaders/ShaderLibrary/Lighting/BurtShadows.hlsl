@@ -4,9 +4,9 @@
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 
-UNITY_DECLARE_SHADOWMAP(_BurtMainLightShadowMap);
-UNITY_DECLARE_SHADOWMAP(_BurtAdditionalLightShadowAtlas);
-UNITY_DECLARE_SHADOWMAP(_BurtPerObjectShadowAtlas);
+Texture2D _BurtMainLightShadowMap;
+Texture2D _BurtAdditionalLightShadowAtlas;
+Texture2D _BurtPerObjectShadowAtlas;
 
 #define BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES 4
 #define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT 32
@@ -15,6 +15,7 @@ UNITY_DECLARE_SHADOWMAP(_BurtPerObjectShadowAtlas);
 #define BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_POINT 1.0f
 #define BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_SPOT 2.0f
 #define BURT_PER_OBJECT_SHADOW_MAX_SLICES 8
+#define BURT_PER_OBJECT_SHADOW_PCF_RADIUS_TEXELS 1.0f
 
 float4x4 _BurtMainLightWorldToShadow;
 float4 _BurtMainLightWorldToShadowRow0;
@@ -297,7 +298,7 @@ float BurtApplyMainLightReceiverBias(float projectedDepth)
 float BurtSampleMainLightShadowCompare(float3 projectedShadowCoord, int cascadeIndex)
 {
     projectedShadowCoord.xy = BurtClampMainLightShadowUVToCascade(projectedShadowCoord.xy, cascadeIndex);
-    return UNITY_SAMPLE_SHADOW(_BurtMainLightShadowMap, projectedShadowCoord);
+    return BURT_SAMPLE_SHADOW_CLAMP(_BurtMainLightShadowMap, projectedShadowCoord);
 }
 
 float BurtSampleMainLightShadowCompare(float3 projectedShadowCoord)
@@ -827,7 +828,32 @@ float3 BurtApplyPerObjectShadowReceiverBias(float3 positionWS, float3 normalWS, 
     }
 
     float noL = saturate(dot(safeNormalWS, lightDirectionWS));
-    return positionWS + safeNormalWS * normalBias * (1.0f - noL);
+    float sinTheta = 1.0f - noL;
+    float pcfBiasScale = (1.0f + ceil(0.5f * (BURT_PER_OBJECT_SHADOW_PCF_RADIUS_TEXELS * 2.0f + 1.0f))) * 0.5f;
+    return positionWS + safeNormalWS * normalBias * pcfBiasScale * sinTheta;
+}
+
+float BurtSamplePerObjectShadowCompare(float3 projectedShadowCoord, int sliceIndex)
+{
+    projectedShadowCoord.xy = BurtClampPerObjectShadowUVToRect(projectedShadowCoord.xy, sliceIndex);
+    return BURT_SAMPLE_SHADOW_CLAMP(_BurtPerObjectShadowAtlas, projectedShadowCoord);
+}
+
+float BurtSamplePerObjectShadowPCF(float3 projectedShadowCoord, int sliceIndex)
+{
+    float2 texelSize = max(_BurtPerObjectShadowTexelSize.xy, float2(0.0f, 0.0f));
+    if (texelSize.x <= 0.0f || texelSize.y <= 0.0f)
+    {
+        return BurtSamplePerObjectShadowCompare(projectedShadowCoord, sliceIndex);
+    }
+
+    float center = BurtSamplePerObjectShadowCompare(projectedShadowCoord, sliceIndex) * 2.0f;
+    float sum = center
+        + BurtSamplePerObjectShadowCompare(projectedShadowCoord + float3(texelSize.x, 0.0f, 0.0f), sliceIndex)
+        + BurtSamplePerObjectShadowCompare(projectedShadowCoord + float3(-texelSize.x, 0.0f, 0.0f), sliceIndex)
+        + BurtSamplePerObjectShadowCompare(projectedShadowCoord + float3(0.0f, texelSize.y, 0.0f), sliceIndex)
+        + BurtSamplePerObjectShadowCompare(projectedShadowCoord + float3(0.0f, -texelSize.y, 0.0f), sliceIndex);
+    return sum * (1.0f / 6.0f);
 }
 
 float BurtSamplePerObjectShadowSlice(float3 positionWS, float3 normalWS, int sliceIndex)
@@ -842,9 +868,8 @@ float BurtSamplePerObjectShadowSlice(float3 positionWS, float3 normalWS, int sli
     }
 
     float4 sliceParams = _BurtPerObjectShadowSliceParams[sliceIndex];
-    projectedShadowCoord.xy = BurtClampPerObjectShadowUVToRect(projectedShadowCoord.xy, sliceIndex);
     projectedShadowCoord.z = saturate(projectedShadowCoord.z + max(sliceParams.y, 0.0f));
-    float rawShadow = UNITY_SAMPLE_SHADOW(_BurtPerObjectShadowAtlas, projectedShadowCoord);
+    float rawShadow = BurtSamplePerObjectShadowPCF(projectedShadowCoord, sliceIndex);
     return BurtApplyShadowStrength(rawShadow, sliceParams.x);
 }
 
@@ -990,33 +1015,33 @@ float BurtGetMainLightShadowReceiverDepthDeltaDebug(float3 positionWS, float3 no
     return lerp(0.5f, deltaDebug, litWeight);
 }
 
+float BurtSampleMainLightShadowWithoutPerObject(float3 positionWS)
+{
+    float mainVisibility = 1.0f;
+    int cascadeIndex = _BurtMainLightShadowStrength > 0.0001f ? BurtSelectMainLightShadowCascade(positionWS) : -1;
+    if (cascadeIndex >= 0)
+    {
+        float4 positionWS4 = float4(positionWS, 1.0f);
+        float rawShadow = BurtSampleMainLightShadowRawVisibility(BurtTransformWorldToMainLightShadowCascade(positionWS4, cascadeIndex), cascadeIndex);
+
+        float blendWeight = BurtCalculateMainLightCascadeBlendWeight(positionWS, cascadeIndex);
+        if (blendWeight > 0.0f)
+        {
+            int nextCascadeIndex = min(cascadeIndex + 1, BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES - 1);
+            float nextRawShadow = BurtSampleMainLightShadowRawVisibility(BurtTransformWorldToMainLightShadowCascade(positionWS4, nextCascadeIndex), nextCascadeIndex);
+            rawShadow = lerp(rawShadow, nextRawShadow, blendWeight);
+        }
+
+        rawShadow = lerp(rawShadow, 1.0f, BurtCalculateMainLightShadowFade(positionWS, cascadeIndex));
+        mainVisibility = BurtApplyShadowStrength(rawShadow, _BurtMainLightShadowStrength);
+    }
+
+    return mainVisibility;
+}
+
 float BurtSampleMainLightShadow(float3 positionWS, float3 normalWS)
 {
-    if (_BurtMainLightShadowStrength <= 0.0001f)
-    {
-        return 1.0f;
-    }
-
-    int cascadeIndex = BurtSelectMainLightShadowCascade(positionWS);
-    if (cascadeIndex < 0)
-    {
-        return 1.0f;
-    }
-
-    float4 positionWS4 = float4(positionWS, 1.0f);
-    float rawShadow = BurtSampleMainLightShadowRawVisibility(BurtTransformWorldToMainLightShadowCascade(positionWS4, cascadeIndex), cascadeIndex);
-
-    float blendWeight = BurtCalculateMainLightCascadeBlendWeight(positionWS, cascadeIndex);
-    if (blendWeight > 0.0f)
-    {
-        int nextCascadeIndex = min(cascadeIndex + 1, BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES - 1);
-        float nextRawShadow = BurtSampleMainLightShadowRawVisibility(BurtTransformWorldToMainLightShadowCascade(positionWS4, nextCascadeIndex), nextCascadeIndex);
-        rawShadow = lerp(rawShadow, nextRawShadow, blendWeight);
-    }
-
-    rawShadow = lerp(rawShadow, 1.0f, BurtCalculateMainLightShadowFade(positionWS, cascadeIndex));
-    rawShadow = min(rawShadow, BurtSamplePerObjectShadow(positionWS, normalWS));
-    return BurtApplyShadowStrength(rawShadow, _BurtMainLightShadowStrength);
+    return min(BurtSampleMainLightShadowWithoutPerObject(positionWS), BurtSamplePerObjectShadow(positionWS, normalWS));
 }
 
 float BurtSampleMainLightShadow(float3 positionWS)
@@ -1268,7 +1293,7 @@ float BurtSampleAdditionalLightShadowCompare(float4 shadowCoord, int sliceIndex,
 
     projectedShadowCoord.xy = BurtClampAdditionalLightShadowUVToRect(projectedShadowCoord.xy, sliceIndex, isPointShadow);
     projectedShadowCoord.z = BurtApplyAdditionalLightReceiverBias(projectedShadowCoord.z);
-    return UNITY_SAMPLE_SHADOW(_BurtAdditionalLightShadowAtlas, projectedShadowCoord);
+    return BURT_SAMPLE_SHADOW_CLAMP(_BurtAdditionalLightShadowAtlas, projectedShadowCoord);
 }
 
 float BurtSampleAdditionalLightShadow(int lightIndex, float3 positionWS, float3 lightDirectionWS, float3 normalWS, float3 lightPositionWS)

@@ -112,6 +112,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAACurrentViewProjectionId = Shader.PropertyToID("_BurtTAACurrentViewProjection");
         private static readonly int TemporalAACurrentNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAACurrentNonJitteredViewProjection");
         private static readonly int TemporalAAInverseCurrentViewProjectionId = Shader.PropertyToID("_BurtTAAInverseCurrentViewProjection");
+        private static readonly int TemporalAAInverseCurrentNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAAInverseCurrentNonJitteredViewProjection");
+        private static readonly int TemporalAAJitterId = Shader.PropertyToID("_BurtTAAJitter");
         private static readonly int TemporalAATexelSizeId = Shader.PropertyToID("_BurtTAATexelSize");
         private static readonly int TemporalAAParamsId = Shader.PropertyToID("_BurtTAAParams");
         private static readonly int TemporalAAParams2Id = Shader.PropertyToID("_BurtTAAParams2");
@@ -757,6 +759,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalMatrix(TemporalAACurrentViewProjectionId, temporalAA.CurrentViewProjectionMatrix);
             cmd.SetGlobalMatrix(TemporalAACurrentNonJitteredViewProjectionId, temporalAA.CurrentNonJitteredViewProjectionMatrix);
             cmd.SetGlobalMatrix(TemporalAAInverseCurrentViewProjectionId, temporalAA.InverseCurrentViewProjectionMatrix);
+            cmd.SetGlobalMatrix(TemporalAAInverseCurrentNonJitteredViewProjectionId, temporalAA.InverseCurrentNonJitteredViewProjectionMatrix);
+            cmd.SetGlobalVector(TemporalAAJitterId, new Vector4(temporalAA.Jitter.x, temporalAA.Jitter.y, temporalAA.JitterPixels.x, temporalAA.JitterPixels.y));
             cmd.SetGlobalVector(TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
             cmd.SetGlobalVector(TemporalAAParamsId, new Vector4(temporalAA.Settings.Feedback, temporalAA.Settings.ClampStrength, historyValid ? 1f : 0f, temporalAA.FrameIndex));
             cmd.SetGlobalVector(TemporalAAParams2Id, new Vector4(temporalAA.Settings.Sharpness, temporalAA.Settings.JitterScale, temporalAA.Settings.StaticEdgeRelaxation, temporalAA.Settings.BaseBlendFactor));
@@ -787,8 +791,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var totalWeight = 0f;
             for (var i = 0; i < TemporalAACurrentSampleWeights.Length; i++)
             {
-                var x = TemporalAACurrentSampleOffsets[i].x - jitterPixels.x;
-                var y = TemporalAACurrentSampleOffsets[i].y - jitterPixels.y;
+                var x = TemporalAACurrentSampleOffsets[i].x + jitterPixels.x;
+                var y = TemporalAACurrentSampleOffsets[i].y + jitterPixels.y;
                 var weight = Mathf.Exp((-0.5f / 0.22f) * (x * x + y * y));
                 TemporalAACurrentSampleWeights[i] = weight;
                 totalWeight += weight;

@@ -69,7 +69,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             float3 BurtSSAOSampleNormalWS(float2 screenUV)
             {
-                return BurtDecodeNormalWSFromGBuffer(tex2D(_BurtGBuffer1, screenUV).rg);
+                return BurtDecodeNormalWSFromGBuffer(BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV).rg);
             }
 
             float BurtSSAORawDepthFromClip(float clipZ)

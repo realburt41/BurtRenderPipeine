@@ -115,7 +115,7 @@ Shader "Hidden/BurtRP/BurtGI"
 
             float3 BurtGISampleNormalWS(float2 screenUV)
             {
-                return BurtDecodeNormalWSFromGBuffer(tex2D(_BurtGBuffer1, screenUV).rg);
+                return BurtDecodeNormalWSFromGBuffer(BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV).rg);
             }
 
             void BurtGIBuildTangentBasis(float3 normalWS, out float3 tangentWS, out float3 bitangentWS)

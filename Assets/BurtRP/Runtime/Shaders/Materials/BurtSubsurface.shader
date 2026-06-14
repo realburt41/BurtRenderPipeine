@@ -32,15 +32,14 @@ Shader "BurtRP/Subsurface"
 
         // 定义环境遮蔽强度，0 表示忽略 Mask Map 的 G 通道，1 表示完全使用 G 通道。
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
-        _SubsurfaceStrength ("Subsurface Strength", Range(0, 1)) = 0
         _SubsurfaceThickness ("Subsurface Thickness", Range(0, 1)) = 0.5
         _SubsurfacePower ("Subsurface Power", Range(0.5, 8)) = 3
         _SubsurfaceDistortion ("Subsurface Distortion", Range(0, 1)) = 0.35
         _SubsurfaceAmbient ("Subsurface Ambient", Range(0, 1)) = 0.35
         [Enum(5S Burley, 0, 4S Separable, 1, 3S Preintegrated, 2)] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
         _SubsurfaceProfileIndex ("Subsurface Profile Index", Range(0, 7)) = 0
-        [HDR]_SubsurfaceTint ("Subsurface Tint", Color) = (1, 0.45, 0.32, 1)
-
+        _Subsurface3SCurvatureScale ("3S Curvature Scale", Range(0, 2)) = 0.5
+        _Subsurface3SCurvatureBias ("3S Curvature Bias", Range(0, 1)) = 0
         // 定义自发光贴图，Forward 光照会把它作为不受灯光影响的颜色叠加到最终结果。
         _EmissionMap ("Emission Map", 2D) = "white" {}
 

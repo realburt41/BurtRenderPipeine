@@ -113,6 +113,9 @@ namespace Burt.RenderPipeline.Editor
                 case "BurtRP/Hair":
                     BurtHairShaderGUI.ValidateMaterialState(material);
                     return true;
+                case "BurtRP/Multipass Fur":
+                    BurtMultipassFurShaderGUI.ValidateMaterialState(material);
+                    return true;
                 case "BurtRP/UnlitColor":
                     BurtUnlitShaderGUI.ValidateMaterialState(material);
                     return true;

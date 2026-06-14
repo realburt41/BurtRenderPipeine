@@ -281,7 +281,7 @@ namespace Burt.RenderPipeline
         private const int HaltonSequenceLength = 1024;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
-        private const int HistoryLayoutVersion = 2;
+        private const int HistoryLayoutVersion = 4;
 
         private sealed class CameraState
         {

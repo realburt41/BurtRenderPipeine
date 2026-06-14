@@ -10,6 +10,9 @@ namespace Burt.RenderPipeline
     {
         public const int MinSliceResolution = 64;
         public const int MaxSliceResolution = 4096;
+        public const float DefaultNormalBias = 5f;
+        internal const uint MainLightRenderingLayerMask = 0xFFu;
+        internal const uint PerObjectShadowRenderingLayerMask = 1u << 22;
 
         [SerializeField]
         private int priority;
@@ -28,10 +31,17 @@ namespace Burt.RenderPipeline
         private float receiverDepthBias = 0.0005f;
 
         [SerializeField]
-        private float normalBias = 1f;
+        private float normalBias = DefaultNormalBias;
 
         [SerializeField]
         private bool includeInactiveRenderers;
+
+        private readonly Dictionary<Renderer, uint> originalRenderingLayerMasks = new Dictionary<Renderer, uint>();
+        private readonly Dictionary<BurtMultipassRenderer, int> originalMultipassRenderingLayerMasks = new Dictionary<BurtMultipassRenderer, int>();
+        private readonly List<Renderer> rendererScratch = new List<Renderer>();
+        private readonly List<BurtMultipassRenderer> multipassRendererScratch = new List<BurtMultipassRenderer>();
+        private readonly List<Renderer> restoreScratch = new List<Renderer>();
+        private readonly List<BurtMultipassRenderer> restoreMultipassScratch = new List<BurtMultipassRenderer>();
 
         public int Priority => priority;
 
@@ -52,11 +62,18 @@ namespace Burt.RenderPipeline
         private void OnEnable()
         {
             BurtPerObjectShadowRegistry.Register(this);
+            SyncRendererLayerOverrides();
         }
 
         private void OnDisable()
         {
+            RestoreRendererLayerOverrides();
             BurtPerObjectShadowRegistry.Unregister(this);
+        }
+
+        private void OnDestroy()
+        {
+            RestoreRendererLayerOverrides();
         }
 
         private void OnValidate()
@@ -70,7 +87,22 @@ namespace Burt.RenderPipeline
             if (isActiveAndEnabled)
             {
                 BurtPerObjectShadowRegistry.Register(this);
+                SyncRendererLayerOverrides();
             }
+            else
+            {
+                RestoreRendererLayerOverrides();
+            }
+        }
+
+        private void Update()
+        {
+            SyncRendererLayerOverrides();
+        }
+
+        private void OnTransformChildrenChanged()
+        {
+            SyncRendererLayerOverrides();
         }
 
         internal void CollectRenderers(List<Renderer> renderers)
@@ -81,6 +113,163 @@ namespace Burt.RenderPipeline
             }
 
             GetComponentsInChildren(includeInactiveRenderers, renderers);
+        }
+
+        internal void CollectMultipassRenderers(List<BurtMultipassRenderer> renderers)
+        {
+            if (renderers == null)
+            {
+                return;
+            }
+
+            GetComponentsInChildren(includeInactiveRenderers, renderers);
+        }
+
+        private void SyncRendererLayerOverrides()
+        {
+            if (!IsRenderable)
+            {
+                RestoreRendererLayerOverrides();
+                return;
+            }
+
+            rendererScratch.Clear();
+            GetComponentsInChildren(includeInactiveRenderers, rendererScratch);
+
+            restoreScratch.Clear();
+            foreach (var entry in originalRenderingLayerMasks)
+            {
+                var renderer = entry.Key;
+                if (renderer == null || !rendererScratch.Contains(renderer))
+                {
+                    restoreScratch.Add(renderer);
+                }
+            }
+
+            for (var index = 0; index < restoreScratch.Count; index++)
+            {
+                RestoreRendererLayerOverride(restoreScratch[index]);
+            }
+
+            for (var index = 0; index < rendererScratch.Count; index++)
+            {
+                var renderer = rendererScratch[index];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                var currentMask = renderer.renderingLayerMask;
+                if (!originalRenderingLayerMasks.TryGetValue(renderer, out var originalMask))
+                {
+                    originalMask = currentMask;
+                    originalRenderingLayerMasks.Add(renderer, originalMask);
+                }
+
+                var perObjectMask = (originalMask & ~MainLightRenderingLayerMask) | PerObjectShadowRenderingLayerMask;
+                if (currentMask != perObjectMask)
+                {
+                    renderer.renderingLayerMask = perObjectMask;
+                }
+            }
+
+            SyncMultipassRendererLayerOverrides();
+        }
+
+        private void RestoreRendererLayerOverrides()
+        {
+            restoreScratch.Clear();
+            foreach (var entry in originalRenderingLayerMasks)
+            {
+                restoreScratch.Add(entry.Key);
+            }
+
+            for (var index = 0; index < restoreScratch.Count; index++)
+            {
+                RestoreRendererLayerOverride(restoreScratch[index]);
+            }
+
+            restoreScratch.Clear();
+            RestoreMultipassRendererLayerOverrides();
+        }
+
+        private void RestoreRendererLayerOverride(Renderer renderer)
+        {
+            if (renderer != null && originalRenderingLayerMasks.TryGetValue(renderer, out var originalMask))
+            {
+                renderer.renderingLayerMask = originalMask;
+            }
+
+            originalRenderingLayerMasks.Remove(renderer);
+        }
+
+        private void SyncMultipassRendererLayerOverrides()
+        {
+            multipassRendererScratch.Clear();
+            GetComponentsInChildren(includeInactiveRenderers, multipassRendererScratch);
+
+            restoreMultipassScratch.Clear();
+            foreach (var entry in originalMultipassRenderingLayerMasks)
+            {
+                var multipassRenderer = entry.Key;
+                if (multipassRenderer == null || !multipassRendererScratch.Contains(multipassRenderer))
+                {
+                    restoreMultipassScratch.Add(multipassRenderer);
+                }
+            }
+
+            for (var index = 0; index < restoreMultipassScratch.Count; index++)
+            {
+                RestoreMultipassRendererLayerOverride(restoreMultipassScratch[index]);
+            }
+
+            for (var index = 0; index < multipassRendererScratch.Count; index++)
+            {
+                var multipassRenderer = multipassRendererScratch[index];
+                if (multipassRenderer == null)
+                {
+                    continue;
+                }
+
+                var currentMask = multipassRenderer.m_RenderingLayerMask;
+                if (!originalMultipassRenderingLayerMasks.TryGetValue(multipassRenderer, out var originalMask))
+                {
+                    originalMask = currentMask;
+                    originalMultipassRenderingLayerMasks.Add(multipassRenderer, originalMask);
+                }
+
+                var perObjectMask = (originalMask & ~(int)MainLightRenderingLayerMask) | (int)PerObjectShadowRenderingLayerMask;
+                if (currentMask != perObjectMask)
+                {
+                    multipassRenderer.m_RenderingLayerMask = perObjectMask;
+                }
+            }
+        }
+
+        private void RestoreMultipassRendererLayerOverrides()
+        {
+            restoreMultipassScratch.Clear();
+            foreach (var entry in originalMultipassRenderingLayerMasks)
+            {
+                restoreMultipassScratch.Add(entry.Key);
+            }
+
+            for (var index = 0; index < restoreMultipassScratch.Count; index++)
+            {
+                RestoreMultipassRendererLayerOverride(restoreMultipassScratch[index]);
+            }
+
+            restoreMultipassScratch.Clear();
+        }
+
+        private void RestoreMultipassRendererLayerOverride(BurtMultipassRenderer multipassRenderer)
+        {
+            if (multipassRenderer != null && originalMultipassRenderingLayerMasks.TryGetValue(multipassRenderer, out var originalMask))
+            {
+                multipassRenderer.m_RenderingLayerMask = originalMask;
+            }
+
+            originalMultipassRenderingLayerMasks.Remove(multipassRenderer);
         }
     }
 

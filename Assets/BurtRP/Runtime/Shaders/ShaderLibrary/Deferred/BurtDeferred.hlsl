@@ -6,11 +6,11 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl" // 引入 BurtEncodedGBuffer / BurtGBufferData，以及 GBuffer 编解码函数。
 
 // 主 Agent 分配并绑定的五张 GBuffer，全局名来自 BurtRenderGraphResourceRegistry 的 _BurtGBuffer0/1/2/3/4 约定。
-sampler2D _BurtGBuffer0;
-sampler2D _BurtGBuffer1;
-sampler2D _BurtGBuffer2;
-sampler2D _BurtGBuffer3;
-sampler2D _BurtGBuffer4;
+Texture2D _BurtGBuffer0;
+Texture2D _BurtGBuffer1;
+Texture2D _BurtGBuffer2;
+Texture2D _BurtGBuffer3;
+Texture2D _BurtGBuffer4;
 
 // 主 Agent 绑定的 CameraDepth；来源可以是 DepthPrepass，也可以是 GBuffer pass 写入的共享深度。
 UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -117,17 +117,17 @@ BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
     BurtEncodedGBuffer encodedGBuffer;
 
     // GBuffer0：baseColor.rgb + occlusion.a。
-    encodedGBuffer.gbuffer0 = tex2D(_BurtGBuffer0, screenUV);
+    encodedGBuffer.gbuffer0 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer0, screenUV);
 
     // GBuffer1：oct normal.rg + packed shadingModel/material.b + smoothness.a。
-    encodedGBuffer.gbuffer1 = tex2D(_BurtGBuffer1, screenUV);
+    encodedGBuffer.gbuffer1 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV);
 
     // GBuffer2：emission.rgb + reflectance.a。
-    encodedGBuffer.gbuffer2 = tex2D(_BurtGBuffer2, screenUV);
+    encodedGBuffer.gbuffer2 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer2, screenUV);
 
-    encodedGBuffer.gbuffer3 = tex2D(_BurtGBuffer3, screenUV);
+    encodedGBuffer.gbuffer3 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer3, screenUV);
 
-    encodedGBuffer.gbuffer4 = tex2D(_BurtGBuffer4, screenUV);
+    encodedGBuffer.gbuffer4 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer4, screenUV);
 
     // 返回采样结果，让调用方继续 Decode 或做原始 GBuffer Debug。
     return encodedGBuffer;
@@ -136,7 +136,7 @@ BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
 float BurtSampleDeferredShadingModelID(float2 screenUV)
 {
     // Fast path for split lighting passes: read only GBuffer1.b to reject the wrong shading model before sampling all GBuffer/depth data.
-    float packedShadingModelAndMaterial = tex2D(_BurtGBuffer1, screenUV).b;
+    float packedShadingModelAndMaterial = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV).b;
     float shadingModelID;
     BurtDecodeMetallicAndShadingModelFromGBuffer(packedShadingModelAndMaterial, shadingModelID);
     return shadingModelID;

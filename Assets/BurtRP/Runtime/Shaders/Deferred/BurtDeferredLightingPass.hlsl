@@ -83,7 +83,7 @@ float BurtGetDeferredLightingDebugMaterialChannel(BurtGBufferData gbufferData)
 #if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
     return BurtGetHairScatter(gbufferData);
 #elif defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
-    return saturate(gbufferData.subsurfaceStrength);
+    return 1.0f;
 #else
     return saturate(gbufferData.metallic);
 #endif
@@ -99,7 +99,7 @@ void BurtApplyDeferredLightingDebugBaseline(
     inout BurtPBRShadingComponents debugComponents)
 {
 #if defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
-    shadingGBufferData.subsurfaceStrength = 0.0f;
+    shadingGBufferData.shadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
 
     BurtPBRShadingCoreData debugCoreData = BurtPreparePBRShadingCoreData(shadingGBufferData, viewDirectionWS);
     BurtDirectPBRComponents mainDirectComponents = BurtEvaluatePBRDirectFromCore(debugCoreData, mainLight);
@@ -138,16 +138,18 @@ float4 Frag(Varyings input) : SV_Target
     BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
     BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
     gbufferData.shadingModelID = BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID;
-    float3 shadowNormalWS = BurtGetGBufferDirectionWS(gbufferData);
-#if BURT_ACTIVE_HAIR_SHADING_MODEL
-    shadowNormalWS = BurtGetHairGeometryNormalWS(gbufferData);
-#endif
 
     float rawDepth;
     float3 positionWS;
     float3 shadowPositionWS;
     float3 viewDirectionWS;
     BurtPrepareDeferredViewData(screenUV, rawDepth, positionWS, shadowPositionWS, viewDirectionWS);
+
+    float3 shadowNormalWS = BurtGetGBufferDirectionWS(gbufferData);
+#if BURT_ACTIVE_HAIR_SHADING_MODEL
+    gbufferData = BurtResolveHairDeferredGeometryData(gbufferData, viewDirectionWS, positionWS);
+    shadowNormalWS = BurtGetHairGeometryNormalWS(gbufferData);
+#endif
 
     float shadowAttenuation = BurtSampleMainLightShadow(shadowPositionWS, shadowNormalWS);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
@@ -188,13 +190,13 @@ float4 Frag(Varyings input) : SV_Target
     debugSurfaceData.smoothness = gbufferData.smoothness;
     debugSurfaceData.metallic = BurtGetDeferredLightingDebugMaterialChannel(gbufferData);
     debugSurfaceData.clearCoatMask = BurtGetClearCoatMask(gbufferData);
-    debugSurfaceData.subsurfaceStrength = BurtGetSubsurfaceStrength(gbufferData);
     debugSurfaceData.subsurfaceThickness = BurtGetSubsurfaceThickness(gbufferData);
     debugSurfaceData.subsurfacePower = BurtGetSubsurfacePower(gbufferData);
     debugSurfaceData.subsurfaceDistortion = BurtGetSubsurfaceDistortion(gbufferData);
     debugSurfaceData.subsurfaceAmbient = BurtGetSubsurfaceAmbient(gbufferData);
     debugSurfaceData.subsurfaceScatteringMode = BurtGetSubsurfaceScatteringMode(gbufferData);
-    debugSurfaceData.subsurfaceTint = BurtGetSubsurfaceTint(gbufferData);
+    debugSurfaceData.subsurface3SCurvature = saturate(gbufferData.subsurface3SCurvature);
+    debugSurfaceData.subsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(gbufferData);
     debugSurfaceData.occlusion = gbufferData.occlusion;
     debugSurfaceData.shadingModelID = gbufferData.shadingModelID;
 

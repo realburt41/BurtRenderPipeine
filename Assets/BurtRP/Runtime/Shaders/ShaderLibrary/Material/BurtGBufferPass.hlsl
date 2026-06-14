@@ -57,7 +57,7 @@ static const float BURT_SUBSURFACE_PROFILE_TYPE_SEPARABLE = 128.0f;
 
 float BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(BurtSurfaceData surfaceData)
 {
-    if (saturate(surfaceData.subsurfaceStrength) <= 0.0f || BurtIsSubsurface3SPreIntegratedMode(surfaceData.subsurfaceScatteringMode))
+    if (BurtIsSubsurface3SPreIntegratedMode(surfaceData.subsurfaceScatteringMode))
     {
         return 0.0f;
     }

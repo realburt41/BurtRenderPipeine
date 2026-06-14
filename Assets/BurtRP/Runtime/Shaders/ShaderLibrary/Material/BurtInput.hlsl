@@ -2,13 +2,15 @@
 #ifndef BURT_INPUT_INCLUDED // 开始 include guard，防止多个 shader library 重复包含时产生重定义。
 #define BURT_INPUT_INCLUDED // 标记 BurtInput.hlsl 已经被包含过，后续重复 include 会被跳过。
 
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
+
 // 声明 Base Map 贴图，BurtLit 和其它 Lit 类型 shader 会用它采样基础颜色。
-sampler2D _BaseMap;
+Texture2D _BaseMap;
 
 // 声明 Mask Map 贴图，Forward PBR 会把 R 当金属度、G 当环境遮蔽、A 当光滑度。
-sampler2D _MaskMap;
-sampler2D _IDMap;
-sampler2D _GradientMap;
+Texture2D _MaskMap;
+Texture2D _IDMap;
+Texture2D _GradientMap;
 
 // 定义 XRender / Frostbite 风格的默认 reflectance，0.5 会映射到常见非金属 F0=0.04。
 static const float BURT_INPUT_DEFAULT_REFLECTANCE = 0.5f;
@@ -27,7 +29,6 @@ static const float BURT_SUBSURFACE_DEFAULT_THICKNESS = 0.5f;
 static const float BURT_SUBSURFACE_DEFAULT_POWER = 3.0f;
 static const float BURT_SUBSURFACE_DEFAULT_DISTORTION = 0.35f;
 static const float BURT_SUBSURFACE_DEFAULT_AMBIENT = 0.35f;
-static const float3 BURT_SUBSURFACE_DEFAULT_TINT = float3(1.0f, 0.45f, 0.32f);
 static const float BURT_SUBSURFACE_PROFILE_COUNT = 8.0f;
 static const float BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX = 0.0f;
 static const float BURT_SUBSURFACE_SCATTERING_MODE_5S_BURLEY = 0.0f;
@@ -89,8 +90,6 @@ struct BurtSurfaceData
 
     float clearCoatRoughness;
 
-    float subsurfaceStrength;
-
     float subsurfaceThickness;
 
     float subsurfacePower;
@@ -101,7 +100,7 @@ struct BurtSurfaceData
 
     float subsurfaceScatteringMode;
 
-    float3 subsurfaceTint;
+    float subsurface3SCurvature;
 
     float subsurfaceProfileIndex;
 
@@ -152,13 +151,12 @@ bool BurtIsSubsurface5SBurleyMode(float scatteringMode)
 
 void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
 {
-    surfaceData.subsurfaceStrength = 0.0f;
     surfaceData.subsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
     surfaceData.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
     surfaceData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
     surfaceData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
     surfaceData.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
-    surfaceData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
+    surfaceData.subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
     surfaceData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
     surfaceData.hairSecondaryRoughness = 0.5f;
     surfaceData.hairBackLight = 0.0f;
@@ -192,8 +190,7 @@ float2 BurtTransformBaseMapUV(float2 uv0, float4 baseMapST)
 // 使用已经转换过的 UV 采样材质 Base Map。
 float4 BurtSampleBaseMap(float2 baseMapUV)
 {
-    // 使用 sampler2D + tex2D，是为了兼容当前 BurtLit.shader 仍在使用的 UnityCG.cginc 写法。
-    return tex2D(_BaseMap, baseMapUV);
+    return BURT_SAMPLE_TEXTURE2D_REPEAT(_BaseMap, baseMapUV);
 }
 
 // 按 Unity 的贴图 Tiling / Offset 规则转换 Mask Map 使用的 mesh UV0。
@@ -207,7 +204,7 @@ float2 BurtTransformMaskMapUV(float2 uv0, float4 maskMapST)
 float4 BurtSampleMaskMap(float2 maskMapUV)
 {
     // R 通道约定为 Metallic，G 通道约定为 Occlusion，A 通道约定为 Smoothness，B 通道暂时预留。
-    return tex2D(_MaskMap, maskMapUV);
+    return BURT_SAMPLE_TEXTURE2D_REPEAT(_MaskMap, maskMapUV);
 }
 
 // 根据标量参数和 Mask Map 计算最终金属度。
@@ -363,21 +360,19 @@ BurtSurfaceData BurtApplyClearCoatSurfaceSemantics(BurtSurfaceData surfaceData, 
 
 BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
     BurtSurfaceData surfaceData,
-    float subsurfaceStrength,
     float subsurfaceThickness,
     float subsurfacePower,
     float subsurfaceDistortion,
     float subsurfaceAmbient,
-    float3 subsurfaceTint,
+    float subsurface3SCurvature,
     float subsurfaceProfileIndex,
     float subsurfaceScatteringMode)
 {
-    surfaceData.subsurfaceStrength = saturate(subsurfaceStrength);
     surfaceData.subsurfaceThickness = saturate(subsurfaceThickness);
     surfaceData.subsurfacePower = BurtClampSubsurfacePower(subsurfacePower);
     surfaceData.subsurfaceDistortion = saturate(subsurfaceDistortion);
     surfaceData.subsurfaceAmbient = saturate(subsurfaceAmbient);
-    surfaceData.subsurfaceTint = max(subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+    surfaceData.subsurface3SCurvature = saturate(subsurface3SCurvature);
     surfaceData.subsurfaceProfileIndex = BurtClampSubsurfaceProfileIndex(subsurfaceProfileIndex);
     surfaceData.subsurfaceScatteringMode = BurtClampSubsurfaceScatteringMode(subsurfaceScatteringMode);
     surfaceData.reflectance = BURT_SUBSURFACE_FIXED_REFLECTANCE;
@@ -387,56 +382,52 @@ BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
 
 BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
     BurtSurfaceData surfaceData,
-    float subsurfaceStrength,
     float subsurfaceThickness,
     float subsurfacePower,
     float subsurfaceDistortion,
     float subsurfaceAmbient,
-    float3 subsurfaceTint,
     float subsurfaceProfileIndex)
 {
     return BurtApplySubsurfaceSurfaceSemantics(
         surfaceData,
-        subsurfaceStrength,
         subsurfaceThickness,
         subsurfacePower,
         subsurfaceDistortion,
         subsurfaceAmbient,
-        subsurfaceTint,
+        1.0f - saturate(subsurfaceThickness),
         subsurfaceProfileIndex,
         BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE);
 }
 
 BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
     BurtSurfaceData surfaceData,
-    float subsurfaceStrength,
     float subsurfaceThickness,
     float subsurfacePower,
     float subsurfaceDistortion,
-    float subsurfaceAmbient,
-    float3 subsurfaceTint)
+    float subsurfaceAmbient)
 {
     return BurtApplySubsurfaceSurfaceSemantics(
         surfaceData,
-        subsurfaceStrength,
         subsurfaceThickness,
         subsurfacePower,
         subsurfaceDistortion,
         subsurfaceAmbient,
-        subsurfaceTint,
-        BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX);
+        1.0f - saturate(subsurfaceThickness),
+        BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX,
+        BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE);
 }
 
-BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(BurtSurfaceData surfaceData, float subsurfaceStrength)
+BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(BurtSurfaceData surfaceData)
 {
     return BurtApplySubsurfaceSurfaceSemantics(
         surfaceData,
-        subsurfaceStrength,
         BURT_SUBSURFACE_DEFAULT_THICKNESS,
         BURT_SUBSURFACE_DEFAULT_POWER,
         BURT_SUBSURFACE_DEFAULT_DISTORTION,
         BURT_SUBSURFACE_DEFAULT_AMBIENT,
-        BURT_SUBSURFACE_DEFAULT_TINT);
+        1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS,
+        BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX,
+        BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE);
 }
 
 BurtSurfaceData BurtApplyAnisotropySurfaceSemantics(BurtSurfaceData surfaceData, float anisotropy)

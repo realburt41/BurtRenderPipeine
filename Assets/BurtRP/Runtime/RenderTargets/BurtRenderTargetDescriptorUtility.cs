@@ -311,6 +311,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateFurBlurPropertyDescriptor(Camera camera)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            descriptor.colorFormat = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGFloat)
+                ? RenderTextureFormat.RGFloat
+                : SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBFloat)
+                    ? RenderTextureFormat.ARGBFloat
+                    : RenderTextureFormat.ARGBHalf;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateFurBlurColorDescriptor(Camera camera)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            descriptor.colorFormat = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf)
+                ? RenderTextureFormat.ARGBHalf
+                : RenderTextureFormat.ARGB32;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
         public static int CalculateMipCount(int width, int height)
         {
             var maxDimension = Mathf.Max(1, Mathf.Max(width, height));

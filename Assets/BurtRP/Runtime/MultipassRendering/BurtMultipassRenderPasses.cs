@@ -27,7 +27,10 @@ namespace Burt.RenderPipeline
 
             var cmd = CommandBufferPool.Get(Name);
             cmd.BeginSample(Name);
-            BurtMultipassRenderer.DrawAll(cmd, context, multipassPass, renderQueueRange);
+            var renderingLayerMask = multipassPass == BurtMultipassShaderPass.ShadowCaster
+                ? (int)BurtPerObjectShadow.MainLightRenderingLayerMask
+                : ~0;
+            BurtMultipassRenderer.DrawAll(cmd, context, multipassPass, renderQueueRange, renderingLayerMask);
             cmd.EndSample(Name);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);

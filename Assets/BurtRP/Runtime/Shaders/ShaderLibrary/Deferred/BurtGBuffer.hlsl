@@ -47,8 +47,6 @@ float shadingModelID;
 
     float clearCoatRoughness;
 
-    float subsurfaceStrength;
-
     float subsurfaceThickness;
 
     float subsurfacePower;
@@ -59,7 +57,7 @@ float shadingModelID;
 
     float subsurfaceScatteringMode;
 
-    float3 subsurfaceTint;
+    float subsurface3SCurvature;
 
     float subsurfaceProfileIndex;
 
@@ -332,12 +330,12 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
 
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
     data.metallic = 0.0f;
-    data.materialChannel = saturate(surfaceData.subsurfaceStrength);
+    data.materialChannel = 1.0f;
 #elif BURT_ENABLE_SUBSURFACE_SHADING
     if (BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID))
     {
         data.metallic = 0.0f;
-        data.materialChannel = saturate(surfaceData.subsurfaceStrength);
+        data.materialChannel = 1.0f;
     }
     else
     {
@@ -365,13 +363,12 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
     data.shadingModelID = BurtResolveSurfaceShadingModel(surfaceData.shadingModelID);
     data.clearCoatMask = 0.0f;
     data.clearCoatRoughness = 0.2f;
-    data.subsurfaceStrength = 0.0f;
     data.subsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
     data.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
     data.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
     data.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
     data.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
-    data.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
+    data.subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
     data.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
     data.hairSecondaryRoughness = 0.5f;
     data.hairBackLight = 0.0f;
@@ -394,24 +391,22 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
 #endif
 
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
-    data.subsurfaceStrength = saturate(data.materialChannel);
     data.subsurfaceThickness = saturate(surfaceData.subsurfaceThickness);
     data.subsurfacePower = BurtClampSubsurfacePower(surfaceData.subsurfacePower);
     data.subsurfaceDistortion = saturate(surfaceData.subsurfaceDistortion);
     data.subsurfaceAmbient = saturate(surfaceData.subsurfaceAmbient);
     data.subsurfaceScatteringMode = BurtClampSubsurfaceScatteringMode(surfaceData.subsurfaceScatteringMode);
-    data.subsurfaceTint = max(surfaceData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+    data.subsurface3SCurvature = saturate(surfaceData.subsurface3SCurvature);
     data.subsurfaceProfileIndex = BurtClampSubsurfaceProfileIndex(surfaceData.subsurfaceProfileIndex);
 #elif BURT_ENABLE_SUBSURFACE_SHADING
     if (BurtIsActiveSubsurfaceShadingModel(data.shadingModelID))
     {
-        data.subsurfaceStrength = saturate(data.materialChannel);
         data.subsurfaceThickness = saturate(surfaceData.subsurfaceThickness);
         data.subsurfacePower = BurtClampSubsurfacePower(surfaceData.subsurfacePower);
         data.subsurfaceDistortion = saturate(surfaceData.subsurfaceDistortion);
         data.subsurfaceAmbient = saturate(surfaceData.subsurfaceAmbient);
         data.subsurfaceScatteringMode = BurtClampSubsurfaceScatteringMode(surfaceData.subsurfaceScatteringMode);
-        data.subsurfaceTint = max(surfaceData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+        data.subsurface3SCurvature = saturate(surfaceData.subsurface3SCurvature);
         data.subsurfaceProfileIndex = BurtClampSubsurfaceProfileIndex(surfaceData.subsurfaceProfileIndex);
     }
 #endif
@@ -576,9 +571,9 @@ float BurtGetReflectionRoughness(BurtGBufferData gbufferData)
 float BurtGetSubsurfaceStrength(BurtGBufferData gbufferData)
 {
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
-    return saturate(gbufferData.subsurfaceStrength);
+    return 1.0f;
 #elif BURT_ENABLE_SUBSURFACE_SHADING
-    return BurtIsActiveSubsurfaceShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.subsurfaceStrength) : 0.0f;
+    return BurtIsActiveSubsurfaceShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
 #else
     return 0.0f;
 #endif
@@ -636,17 +631,6 @@ float BurtGetSubsurfaceAmbient(BurtGBufferData gbufferData)
     return BurtIsActiveSubsurfaceShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.subsurfaceAmbient) : BURT_SUBSURFACE_DEFAULT_AMBIENT;
 #else
     return BURT_SUBSURFACE_DEFAULT_AMBIENT;
-#endif
-}
-
-float3 BurtGetSubsurfaceTint(BurtGBufferData gbufferData)
-{
-#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
-    return max(gbufferData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
-#elif BURT_ENABLE_SUBSURFACE_SHADING
-    return BurtIsActiveSubsurfaceShadingModel(gbufferData.shadingModelID) ? max(gbufferData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f)) : BURT_SUBSURFACE_DEFAULT_TINT;
-#else
-    return BURT_SUBSURFACE_DEFAULT_TINT;
 #endif
 }
 
@@ -759,9 +743,10 @@ float4 BurtEncodeClearCoatOrDefaultGBuffer3(BurtGBufferData data)
 
 float4 BurtEncodeSubsurfaceGBuffer3(BurtGBufferData data)
 {
-    return float4(
-        max(data.subsurfaceTint, float3(0.0f, 0.0f, 0.0f)),
-        BurtEncodeSubsurfacePowerAmbientForGBuffer(data.subsurfacePower, data.subsurfaceAmbient));
+    float subsurfaceControl = BurtIsSubsurface3SPreIntegratedMode(data.subsurfaceScatteringMode)
+        ? saturate(data.subsurface3SCurvature)
+        : BurtEncodeSubsurfacePowerAmbientForGBuffer(data.subsurfacePower, data.subsurfaceAmbient);
+    return float4(1.0f, 1.0f, 1.0f, subsurfaceControl);
 }
 
 float4 BurtEncodeGBuffer3(BurtGBufferData data)
@@ -901,13 +886,12 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
 #endif
     data.clearCoatMask = 0.0f;
     data.clearCoatRoughness = 0.2f;
-    data.subsurfaceStrength = 0.0f;
     data.subsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
     data.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
     data.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
     data.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
     data.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
-    data.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
+    data.subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
     data.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
     data.hairSecondaryRoughness = 0.5f;
     data.hairBackLight = 0.0f;
@@ -945,19 +929,21 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
 #endif
 
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
-    data.subsurfaceStrength = saturate(data.materialChannel);
-    data.subsurfaceTint = max(encoded.gbuffer3.rgb, float3(0.0f, 0.0f, 0.0f));
     BurtDecodeSubsurfacePowerAmbientFromGBuffer(encoded.gbuffer3.a, data.subsurfacePower, data.subsurfaceAmbient);
     BurtDecodeSubsurfaceDistortionModeFromGBuffer(encoded.gbuffer4.b, data.subsurfaceDistortion, data.subsurfaceScatteringMode);
     BurtDecodeSubsurfaceThicknessProfileFromGBuffer(encoded.gbuffer4.a, data.subsurfaceThickness, data.subsurfaceProfileIndex);
+    data.subsurface3SCurvature = BurtIsSubsurface3SPreIntegratedMode(data.subsurfaceScatteringMode)
+        ? saturate(encoded.gbuffer3.a)
+        : saturate(1.0f - data.subsurfaceThickness);
 #elif BURT_ENABLE_SUBSURFACE_SHADING
     if (BurtIsActiveSubsurfaceShadingModel(data.shadingModelID))
     {
-        data.subsurfaceStrength = saturate(data.materialChannel);
-        data.subsurfaceTint = max(encoded.gbuffer3.rgb, float3(0.0f, 0.0f, 0.0f));
         BurtDecodeSubsurfacePowerAmbientFromGBuffer(encoded.gbuffer3.a, data.subsurfacePower, data.subsurfaceAmbient);
         BurtDecodeSubsurfaceDistortionModeFromGBuffer(encoded.gbuffer4.b, data.subsurfaceDistortion, data.subsurfaceScatteringMode);
         BurtDecodeSubsurfaceThicknessProfileFromGBuffer(encoded.gbuffer4.a, data.subsurfaceThickness, data.subsurfaceProfileIndex);
+        data.subsurface3SCurvature = BurtIsSubsurface3SPreIntegratedMode(data.subsurfaceScatteringMode)
+            ? saturate(encoded.gbuffer3.a)
+            : saturate(1.0f - data.subsurfaceThickness);
     }
 #endif
     data.smoothness = saturate(encoded.gbuffer1.a);
@@ -998,13 +984,13 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData gbufferData)
 #endif
     materialData.clearCoatMask = BurtGetClearCoatMask(gbufferData);
     materialData.clearCoatRoughness = BurtGetClearCoatRoughness(gbufferData);
-    materialData.subsurfaceStrength = BurtGetSubsurfaceStrength(gbufferData);
+    materialData.subsurfaceActive = BurtIsSubsurfaceShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
     materialData.subsurfaceThickness = BurtGetSubsurfaceThickness(gbufferData);
     materialData.subsurfacePower = BurtGetSubsurfacePower(gbufferData);
     materialData.subsurfaceDistortion = BurtGetSubsurfaceDistortion(gbufferData);
     materialData.subsurfaceAmbient = BurtGetSubsurfaceAmbient(gbufferData);
     materialData.subsurfaceScatteringMode = BurtGetSubsurfaceScatteringMode(gbufferData);
-    materialData.subsurfaceTint = BurtGetSubsurfaceTint(gbufferData);
+    materialData.subsurface3SCurvature = saturate(gbufferData.subsurface3SCurvature);
     materialData.subsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(gbufferData);
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
     materialData.reflectance = BURT_SUBSURFACE_FIXED_REFLECTANCE;

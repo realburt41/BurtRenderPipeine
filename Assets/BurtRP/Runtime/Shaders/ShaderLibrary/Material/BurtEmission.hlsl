@@ -3,7 +3,7 @@
 #define BURT_EMISSION_INCLUDED // 标记 BurtEmission.hlsl 已经被包含过，后续重复 include 会被跳过。
 
 // 声明自发光贴图，BurtLit 的 Forward pass 会用 mesh UV0 对它进行采样。
-sampler2D _EmissionMap;
+Texture2D _EmissionMap;
 
 // 按 Unity 的贴图 Tiling / Offset 规则转换自发光贴图 UV。
 float2 BurtTransformEmissionMapUV(float2 uv0, float4 emissionMapST)
@@ -16,7 +16,7 @@ float2 BurtTransformEmissionMapUV(float2 uv0, float4 emissionMapST)
 float4 BurtSampleEmissionMap(float2 emissionMapUV)
 {
     // 返回自发光贴图颜色，后续会和材质 Emission Color 相乘。
-    return tex2D(_EmissionMap, emissionMapUV);
+    return BURT_SAMPLE_TEXTURE2D_REPEAT(_EmissionMap, emissionMapUV);
 }
 
 // 计算最终自发光颜色。

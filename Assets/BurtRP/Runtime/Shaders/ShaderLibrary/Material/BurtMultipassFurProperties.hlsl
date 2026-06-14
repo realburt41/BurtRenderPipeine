@@ -10,6 +10,8 @@ CBUFFER_START(UnityPerMaterial)
     float4 _DarkColor;
     float4 _BaseMap_ST;
     float4 _BaseMapPanner;
+    float4 _NormalMap_ST;
+    float _NormalScale;
     float4 _MaskMap_ST;
     float _Occlusion;
     float _Roughness;
@@ -34,10 +36,16 @@ CBUFFER_START(UnityPerMaterial)
     float4 _FlowPanner;
     float4 _FlowDirectionMap_ST;
     float _UseDirectionMap;
+    float _UseDirectionMapSegment;
     float _FlowDirectionUV2;
     float _FlowDirectionIntensity;
+    float _FlowDirectionIntensitySegment1;
+    float _FlowDirectionIntensitySegment2;
+    float _FlowDirectionIntensitySegment3;
     float _FurGravityDirection;
     float _FurGravityIntensity;
+    float _FurBlurEnabled;
+    float _FurBlurDistance;
     float _AlphaClip;
     float _Cutoff;
     float4 _DoubleSidedNormalModeConstants;

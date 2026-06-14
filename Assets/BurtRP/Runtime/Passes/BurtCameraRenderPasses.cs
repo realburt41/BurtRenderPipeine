@@ -956,9 +956,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var cascadeSpheres = cascadeCache.CascadeSpheres;
             var cascadeAtlasRects = cascadeCache.CascadeAtlasRects;
             var cmd = CommandBufferPool.Get(Name);
+            var usePerObjectShadow = BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(request, context.Asset);
+            var mainLight = usePerObjectShadow ? ResolveMainLight(request, shadowData) : null;
+            var restoreMainLightRenderingLayerMask = false;
+            var originalMainLightRenderingLayerMask = 0;
 
             try
             {
+                if (mainLight != null)
+                {
+                    originalMainLightRenderingLayerMask = mainLight.renderingLayerMask;
+                    mainLight.renderingLayerMask = originalMainLightRenderingLayerMask & ~(int)BurtPerObjectShadow.PerObjectShadowRenderingLayerMask;
+                    restoreMainLightRenderingLayerMask = true;
+                }
+
                 cmd.SetRenderTarget(shadowMapTarget.Identifier);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, atlasResolution, atlasResolution);
                 cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
@@ -998,12 +1009,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                     {
                         var shadowDrawingSettings = new ShadowDrawingSettings(request.CullingResults, shadowData.MainLightIndex, BatchCullingProjectionType.Orthographic);
                         shadowDrawingSettings.splitData = cascadeCache.SplitDatas[cascadeIndex];
+                        shadowDrawingSettings.useRenderingLayerMaskTest = usePerObjectShadow;
                         renderContext.DrawShadows(ref shadowDrawingSettings);
                     }
                 }
             }
             finally
             {
+                if (restoreMainLightRenderingLayerMask && mainLight != null)
+                {
+                    mainLight.renderingLayerMask = originalMainLightRenderingLayerMask;
+                }
+
                 CommandBufferPool.Release(cmd);
                 ResetMainLightShadowCasterState(renderContext, camera);
             }
@@ -1081,6 +1098,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
 
             return direction.normalized;
+        }
+
+        private static Light ResolveMainLight(BurtRenderRequest request, BurtShadowData shadowData)
+        {
+            if (request == null || shadowData == null || shadowData.MainLightIndex < 0)
+            {
+                return null;
+            }
+
+            var visibleLights = request.CullingResults.visibleLights;
+            if (shadowData.MainLightIndex >= visibleLights.Length)
+            {
+                return null;
+            }
+
+            return visibleLights[shadowData.MainLightIndex].light;
         }
 
         private static void SetKeyword(CommandBuffer cmd, string keyword, bool enabled)

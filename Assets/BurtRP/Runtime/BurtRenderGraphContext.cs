@@ -441,6 +441,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle FurBlurPropertyTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
+                }
+
+                return ResourceRegistry.GetFurBlurProperty();
+            }
+        }
+
+        public BurtRenderTargetHandle FurBlurColorTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurColorName);
+                }
+
+                return ResourceRegistry.GetFurBlurColor();
+            }
+        }
+
         public BurtRenderBufferHandle GetBuffer(string name)
         {
             if (ResourceRegistry == null)

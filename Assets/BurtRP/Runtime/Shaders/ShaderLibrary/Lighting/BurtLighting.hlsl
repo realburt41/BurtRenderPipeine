@@ -87,11 +87,10 @@ float4 _BurtAmbientSHC;
 // 标记 BurtRP 自己�?ambient SH 是否已经上传�? 表示可用�? 表示回退�?Unity 内置 ShadeSH9
 float _BurtAmbientSHEnabled;
 
-// 保存 BurtRP 全局天空反射 cubemap；UNITY_DECLARE_TEXCUBE 会同时声明纹理和 sampler_BurtSkyReflectionTexture，匹�?UNITY_SAMPLE_TEXCUBE_LOD 的宏展开
-UNITY_DECLARE_TEXCUBE(_BurtSkyReflectionTexture);
-UNITY_DECLARE_TEXCUBE(_BurtSkyReflectionSourceTexture);
-UNITY_DECLARE_TEXCUBE(_BurtSkyDiffuseCubemapTexture);
-sampler2D _BurtSkyDiffuseSHTexture;
+TextureCube _BurtSkyReflectionTexture;
+TextureCube _BurtSkyReflectionSourceTexture;
+TextureCube _BurtSkyDiffuseCubemapTexture;
+Texture2D _BurtSkyDiffuseSHTexture;
 
 // 保存 BurtRP 全局天空反射 HDR 解码参数，当前第一版默认按原始 RGB 使用
 float4 _BurtSkyReflectionHDR;
@@ -704,12 +703,12 @@ float3 BurtSampleSkyDiffuseCubemap(float3 normalWS)
 {
     float3 safeNormalWS = BurtSafeNormalize(normalWS);
     float3 skySampleDirectionWS = BurtRotateSkyReflectionDirection(safeNormalWS);
-    float4 encodedSkyDiffuse = UNITY_SAMPLE_TEXCUBE_LOD(_BurtSkyDiffuseCubemapTexture, skySampleDirectionWS, max(_BurtSkyDiffuseCubemapMip, 0.0f));
+    float4 encodedSkyDiffuse = BURT_SAMPLE_TEXTURECUBE_LOD_CLAMP(_BurtSkyDiffuseCubemapTexture, skySampleDirectionWS, max(_BurtSkyDiffuseCubemapMip, 0.0f));
     float3 skyDiffuse = DecodeHDR(encodedSkyDiffuse, _BurtSkyDiffuseCubemapHDR) * max(_BurtSkyDiffuseCubemapTint.rgb, float3(0.0f, 0.0f, 0.0f)) * max(_BurtSkyDiffuseCubemapIntensity, 0.0f);
     if (_BurtSkyReflectionSourceEnabled > 0.5f)
     {
         float sourceDiffuseMip = max(_BurtSkyReflectionSourceMaxMip, 0.0f);
-        float4 encodedSourceDiffuse = UNITY_SAMPLE_TEXCUBE_LOD(_BurtSkyReflectionSourceTexture, skySampleDirectionWS, sourceDiffuseMip);
+        float4 encodedSourceDiffuse = BURT_SAMPLE_TEXTURECUBE_LOD_CLAMP(_BurtSkyReflectionSourceTexture, skySampleDirectionWS, sourceDiffuseMip);
         float3 sourceDiffuse = DecodeHDR(encodedSourceDiffuse, _BurtSkyReflectionSourceHDR) * max(_BurtSkyDiffuseCubemapTint.rgb, float3(0.0f, 0.0f, 0.0f)) * max(_BurtSkyDiffuseCubemapIntensity, 0.0f);
         skyDiffuse = BurtSelectIndirectFallbackIfBlack(skyDiffuse, sourceDiffuse);
     }
@@ -721,7 +720,7 @@ float3 BurtSampleSkyDiffuseCubemap(float3 normalWS)
 float4 BurtSampleSkyDiffuseSHPacked(float index)
 {
     float u = (index + 0.5f) / 7.0f;
-    return tex2Dlod(_BurtSkyDiffuseSHTexture, float4(u, 0.5f, 0.0f, 0.0f));
+    return BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtSkyDiffuseSHTexture, float2(u, 0.5f), 0.0f);
 }
 
 float3 BurtEvaluateSkyDiffuseSH9(float3 normalWS)
@@ -1038,7 +1037,7 @@ float3 safeReflectionDirectionWS = BurtSafeNormalize(reflectionDirectionWS);
         float3 skySampleDirectionWS = BurtRotateSkyReflectionDirection(safeReflectionDirectionWS); // 对指�?cubemap 应用 XRender 风格水平旋转；默认参数为 identity�?
         float skyReflectionMaxMip = max(_BurtSkyReflectionMaxMip, 0.0f); // 使用 C# 上传的实�?mip 上限，避免不同尺�?cubemap 都套用固�?6�?
         float skyReflectionMipLevel = ComputeReflectionCaptureMipFromRoughness(roughness, skyReflectionMaxMip); // 使用 XRender 风格 roughness->mip 曲线计算全局天空反射 LOD�?
-        float4 encodedSkyReflection = UNITY_SAMPLE_TEXCUBE_LOD(_BurtSkyReflectionTexture, skySampleDirectionWS, skyReflectionMipLevel);
+        float4 encodedSkyReflection = BURT_SAMPLE_TEXTURECUBE_LOD_CLAMP(_BurtSkyReflectionTexture, skySampleDirectionWS, skyReflectionMipLevel);
         float3 skyReflectionRadiance = DecodeHDR(encodedSkyReflection, _BurtSkyReflectionHDR) * max(_BurtSkyReflectionTint.rgb, float3(0.0f, 0.0f, 0.0f)) * max(0.0f, _BurtSkyReflectionIntensity); // 解码 HDR 并乘 Lighting 面板的反射强度
 skyReflectionRadiance = BurtApplySkyLowerHemisphere(skyReflectionRadiance, safeReflectionDirectionWS, _BurtSkyLowerHemisphereSpecularColor); // 没有离线 convolve 时，用方向覆盖近�?XRender �?lower hemisphere 输入处理�?
         return max(skyReflectionRadiance, float3(0.0f, 0.0f, 0.0f));
@@ -1052,7 +1051,7 @@ skyReflectionRadiance = BurtApplySkyLowerHemisphere(skyReflectionRadiance, safeR
     const float legacyUnitySpecCubeMaxMip = 6.0f; // Unity 内置 reflection probe legacy 路径暂时保留 0..6 的常�?mip 上限，后续有专用数据源后再替换�?
     float legacyUnitySpecCubeMipLevel = ComputeReflectionCaptureMipFromRoughness(roughness, legacyUnitySpecCubeMaxMip); // �?legacy unity_SpecCube0 路径单独计算 mip，避免误用全局 sky �?mip 上限�?
     // 兼容旧路径：采样 Unity 当前绑定�?reflection probe / sky reflection cubemap
-float4 encodedSpecular = UNITY_SAMPLE_TEXCUBE_LOD(unity_SpecCube0, safeReflectionDirectionWS, legacyUnitySpecCubeMipLevel);
+float4 encodedSpecular = BURT_SAMPLE_TEXTURECUBE_LOD_CLAMP(unity_SpecCube0, safeReflectionDirectionWS, legacyUnitySpecCubeMipLevel);
 
     // 使用 Unity 提供�?HDR 解码参数�?RGBM/编码反射颜色还原为线�?HDR 颜色
 float3 specularRadiance = DecodeHDR(encodedSpecular, unity_SpecCube0_HDR);
@@ -1135,7 +1134,7 @@ float3 BurtEvaluateSubsurfaceIndirectSpecularDualLobe(
     BurtPBRGeometryData geometryData,
     float3 fallbackIndirectSpecularEnergyCompensation)
 {
-    float subsurfaceStrength = saturate(materialData.subsurfaceStrength);
+    float subsurfaceStrength = BurtGetSubsurfaceMaterialWeight(materialData);
     if (subsurfaceStrength <= 0.0001f)
     {
         return BurtEvaluateIndirectSpecularPBR(materialData, geometryData, fallbackIndirectSpecularEnergyCompensation);
@@ -1282,23 +1281,24 @@ float3 BurtEvaluateSubsurfaceIndirectProfile(
     BurtPBRMaterialData materialData,
     BurtPBRGeometryData geometryData)
 {
-    float subsurfaceStrength = saturate(materialData.subsurfaceStrength);
+    float subsurfaceStrength = BurtGetSubsurfaceMaterialWeight(materialData);
     if (subsurfaceStrength <= 0.0001f)
     {
         return float3(0.0f, 0.0f, 0.0f);
     }
 
-    float thickness = saturate(materialData.subsurfaceThickness);
     if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
     {
-        float curvature = saturate(1.0f - thickness);
+        float curvature = saturate(materialData.subsurface3SCurvature);
+        float3 preintegratedTint = max(BurtLoadSubsurfaceProfileTransmissionTint(materialData.subsurfaceProfileIndex).rgb, float3(0.0f, 0.0f, 0.0f));
         float3 referenceSHIrradiance = BurtEvaluateSubsurface3SSH9(curvature, materialData.subsurfaceProfileIndex, geometryData.normalWS);
         float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(1.0f, curvature, materialData.subsurfaceProfileIndex);
         float3 fallbackIrradiance = lerp(float3(1.0f, 1.0f, 1.0f), lutScatter, saturate(_BurtSubsurfacePreIntegratedLutEnabled)) * BurtSampleIndirectDiffuseIrradiance(geometryData.normalWS);
         float3 subsurfaceIrradiance = lerp(fallbackIrradiance, referenceSHIrradiance, saturate(_BurtSubsurfaceSHLutEnabled));
-        return materialData.diffuseColor * subsurfaceIrradiance * BurtGTAOMultiBounce(materialData.occlusion, materialData.baseColor) * subsurfaceStrength;
+        return materialData.diffuseColor * preintegratedTint * subsurfaceIrradiance * BurtGTAOMultiBounce(materialData.occlusion, materialData.baseColor) * subsurfaceStrength;
     }
 
+    float thickness = saturate(materialData.subsurfaceThickness);
     float ambientWrap = saturate(materialData.subsurfaceAmbient);
     float3 frontIrradiance = BurtSampleIndirectDiffuseIrradiance(geometryData.normalWS);
     float3 backIrradiance = BurtSampleIndirectDiffuseIrradiance(-geometryData.normalWS);
@@ -1322,7 +1322,7 @@ float3 BurtEvaluateSubsurfaceIndirectProfile(
 #if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
     float3 subsurfaceDiffuse = wrappedIrradiance * transmissionIntensity;
 #else
-    float3 tint = max(materialData.subsurfaceTint * profileTint.rgb, float3(0.0f, 0.0f, 0.0f));
+    float3 tint = max(profileTint.rgb, float3(0.0f, 0.0f, 0.0f));
     float3 subsurfaceDiffuse = materialData.baseColor * tint * transmissionIntensity * wrappedIrradiance;
 #endif
     return subsurfaceDiffuse * materialData.occlusion * subsurfaceStrength * thicknessVisibility * wrapVisibility * scatterVisibility * lerp(0.55f, 1.0f, meanFreePathVisibility);
@@ -1344,7 +1344,7 @@ BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData 
     if (isSubsurface3S)
     {
         components.subsurfaceIndirect = BurtEvaluateSubsurfaceIndirectProfile(materialData, geometryData);
-        components.diffuse = lerp(components.diffuse, components.subsurfaceIndirect, saturate(materialData.subsurfaceStrength));
+        components.diffuse = lerp(components.diffuse, components.subsurfaceIndirect, BurtGetSubsurfaceMaterialWeight(materialData));
     }
     else
     {
@@ -1352,7 +1352,7 @@ BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData 
     }
 #else
     components.subsurfaceIndirect = BurtEvaluateSubsurfaceIndirectProfile(materialData, geometryData);
-    components.diffuse = lerp(components.diffuse, components.subsurfaceIndirect, saturate(materialData.subsurfaceStrength));
+    components.diffuse = lerp(components.diffuse, components.subsurfaceIndirect, BurtGetSubsurfaceMaterialWeight(materialData));
 #endif
     if (!isSubsurface3S)
     {
@@ -1460,13 +1460,13 @@ BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData baseMate
     clearCoatMaterialData.linearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatMaterialData.perceptualRoughness);
     clearCoatMaterialData.a2 = LinearRoughnessToA2(clearCoatMaterialData.linearRoughness);
     clearCoatMaterialData.clearCoatMask = 0.0f;
-    clearCoatMaterialData.subsurfaceStrength = 0.0f;
+    clearCoatMaterialData.subsurfaceActive = 0.0f;
     clearCoatMaterialData.subsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
     clearCoatMaterialData.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
     clearCoatMaterialData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
     clearCoatMaterialData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
     clearCoatMaterialData.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
-    clearCoatMaterialData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
+    clearCoatMaterialData.subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
     clearCoatMaterialData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
     return clearCoatMaterialData;
 }
@@ -2087,7 +2087,7 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     components.subsurfaceIndirect = indirectComponents.subsurfaceIndirect;
 
 #if BURT_ENABLE_SUBSURFACE_SHADING
-    if (saturate(coreData.materialData.subsurfaceStrength) > 0.0001f)
+    if (BurtGetSubsurfaceMaterialWeight(coreData.materialData) > 0.0001f)
     {
         components.subsurfaceTransmission = BurtSampleSubsurfaceTransmissionProfile(
             coreData.materialData.subsurfaceProfileIndex,

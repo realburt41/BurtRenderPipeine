@@ -7,6 +7,9 @@ Shader "BurtRP/Multipass Fur"
         _DarkColor ("Dark Color", Color) = (0, 0, 0, 0)
         _BaseMapPanner ("Base Map Panner", Vector) = (1, 1, 0, 0)
 
+        [NoScaleOffset] [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
+        _NormalScale ("Normal Scale", Range(0, 2)) = 1
+
         [NoScaleOffset] _MaskMap ("Mask Map (R Metallic, G Occlusion, B Height, A Roughness)", 2D) = "white" {}
         _Occlusion ("AO", Range(0, 1)) = 1
         _Roughness ("Roughness", Range(0, 1)) = 0.75
@@ -35,10 +38,17 @@ Shader "BurtRP/Multipass Fur"
 
         [NoScaleOffset] _FlowDirectionMap ("Flow Direction Map", 2D) = "gray" {}
         [Toggle(BURT_MULTIPASS_FUR_USE_DIRECTION_MAP)] _UseDirectionMap ("Use Direction Map", Float) = 0
+        [NoScaleOffset] _FlowDirectionMapSegmentArray ("Direction Segment Array", 2DArray) = "" {}
+        [Toggle] _UseDirectionMapSegment ("Use Direction Map Segment", Range(0, 1)) = 0
         [Toggle] _FlowDirectionUV2 ("Flow Direction Uses UV1", Range(0, 1)) = 0
         _FlowDirectionIntensity ("Flow Direction Intensity", Range(0, 2)) = 0
+        _FlowDirectionIntensitySegment1 ("Direction Segment 1 Intensity", Range(0, 2)) = 0.6
+        _FlowDirectionIntensitySegment2 ("Direction Segment 2 Intensity", Range(0, 2)) = 0.8
+        _FlowDirectionIntensitySegment3 ("Direction Segment 3 Intensity", Range(0, 2)) = 1.2
         [Enum(X,0,Y,1,Z,2)] _FurGravityDirection ("Fur Gravity Direction", Float) = 0
         _FurGravityIntensity ("Fur Gravity Intensity", Range(-1, 1)) = 0
+        [Toggle] _FurBlurEnabled ("Fur Blur Enabled", Float) = 1
+        _FurBlurDistance ("Fur Blur Distance", Float) = 10
 
         [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 1
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.01
@@ -48,7 +58,7 @@ Shader "BurtRP/Multipass Fur"
         [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (1, 1, -1, 0)
         [HideInInspector] _Cull ("Cull", Float) = 2
         [HideInInspector] _SrcBlend ("Source Blend", Float) = 1
-        [HideInInspector] _DstBlend ("Destination Blend", Float) = 10
+        [HideInInspector] _DstBlend ("Destination Blend", Float) = 0
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
     }
@@ -74,7 +84,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma multi_compile_instancing
             #pragma target 3.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
@@ -97,7 +107,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma target 3.5
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
@@ -127,7 +137,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma multi_compile_instancing
             #pragma target 3.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
@@ -149,11 +159,33 @@ Shader "BurtRP/Multipass Fur"
             #pragma multi_compile_instancing
             #pragma target 3.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Multipass Fur Blur Property"
+            Tags { "LightMode" = "BurtFurBlurProperty" }
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertMultipassFur
+            #pragma fragment FragMultipassFurBlurProperty
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
     }
 
+    CustomEditor "Burt.RenderPipeline.Editor.BurtMultipassFurShaderGUI"
     Fallback Off
 }

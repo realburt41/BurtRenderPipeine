@@ -6,11 +6,19 @@ using UnityEngine;
 internal sealed class BurtMultipassRendererEditor : Editor
 {
     private SerializedProperty layerCount;
+    private SerializedProperty supportDifferentPassCount;
+    private SerializedProperty layerCountList;
+    private SerializedProperty overrideMaterials;
+    private SerializedProperty distanceFadeCurve;
     private SerializedProperty renderingLayerMask;
 
     private void OnEnable()
     {
         layerCount = serializedObject.FindProperty("m_LayerCount");
+        supportDifferentPassCount = serializedObject.FindProperty("m_SupportDifferentPassCount");
+        layerCountList = serializedObject.FindProperty("m_LayerCountList");
+        overrideMaterials = serializedObject.FindProperty("m_OverrideMaterials");
+        distanceFadeCurve = serializedObject.FindProperty("m_DistanceFadeCurve");
         renderingLayerMask = serializedObject.FindProperty("m_RenderingLayerMask");
     }
 
@@ -19,6 +27,14 @@ internal sealed class BurtMultipassRendererEditor : Editor
         serializedObject.Update();
 
         EditorGUILayout.PropertyField(layerCount, new GUIContent("Layer Count"));
+        EditorGUILayout.PropertyField(supportDifferentPassCount, new GUIContent("Different Pass Count"));
+        if (supportDifferentPassCount.boolValue)
+        {
+            EditorGUILayout.PropertyField(layerCountList, new GUIContent("Layer Count List"), true);
+        }
+
+        EditorGUILayout.PropertyField(overrideMaterials, new GUIContent("Override Materials"), true);
+        EditorGUILayout.PropertyField(distanceFadeCurve, new GUIContent("Distance Fade Curve"));
         EditorGUILayout.PropertyField(renderingLayerMask, new GUIContent("Rendering Layer Mask"));
 
         serializedObject.ApplyModifiedProperties();

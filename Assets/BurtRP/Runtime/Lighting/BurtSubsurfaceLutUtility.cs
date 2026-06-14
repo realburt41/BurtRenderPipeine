@@ -74,6 +74,7 @@ namespace Burt.RenderPipeline
         private static Texture2DArray fallbackSHLut;
         private static int shLutHash;
         private static Texture2D profileParamLut;
+        private static RenderTexture gpuProfileParamLut;
         private static Texture2D fallbackProfileParamLut;
         private static int profileParamLutHash;
         private static readonly int[] preIntegratedProfileHashes = new int[ProfileSlotCount];
@@ -89,13 +90,21 @@ namespace Burt.RenderPipeline
         private static int lastProfileParamPaletteHash;
         private static bool hasLastPaletteHashes;
         private static ComputeShader lutBakerShader;
+        private static ComputeBuffer profileParamSettingsBuffer;
+        private static Vector4[] profileParamSettingsBufferData;
+        private static bool gpuProfileParamLutRandomWrite;
+        private static int profileParamKernel = -1;
         private static int preIntegratedKernel = -1;
         private static int shKernel = -1;
         private static bool lutBakerUnavailable;
         private static bool loggedGpuFallback;
+        private const int ProfileParamSettingsVectorCount = 7;
         private static readonly int BakerProfileIndexId = Shader.PropertyToID("_BurtSubsurfaceLutProfileIndex");
+        private static readonly int BakerProfileParamSettingsId = Shader.PropertyToID("_BurtSubsurfaceProfileSettings");
+        private static readonly int BakerProfileParamSettingsStrideId = Shader.PropertyToID("_BurtSubsurfaceProfileSettingsStride");
         private static readonly int BakerPreIntegratedLutSizeId = Shader.PropertyToID("_BurtSubsurfacePreIntegratedLutSize");
         private static readonly int BakerSHLutSizeId = Shader.PropertyToID("_BurtSubsurfaceSHLutSize");
+        private static readonly int BakerProfileParamLutRWId = Shader.PropertyToID("_BurtSubsurfaceProfileParamLutRW");
         private static readonly int BakerPreIntegratedLutRWId = Shader.PropertyToID("_BurtSubsurfacePreIntegratedLutRW");
         private static readonly int BakerSHLutRWId = Shader.PropertyToID("_BurtSubsurfaceSHLutRW");
 #if UNITY_EDITOR
@@ -273,7 +282,7 @@ namespace Burt.RenderPipeline
             return fallbackSHLut;
         }
 
-        public static Texture2D GetOrCreateProfileParamLut()
+        public static Texture GetOrCreateProfileParamLut()
         {
             return GetOrCreateProfileParamLut(BurtSubsurfaceProfilePalette.Resolve(BurtSubsurfaceProfileSettings.Default, null));
         }
@@ -299,24 +308,60 @@ namespace Burt.RenderPipeline
             return fallbackProfileParamLut;
         }
 
-        public static Texture2D GetOrCreateProfileParamLut(BurtSubsurfaceProfilePalette palette)
+        public static Texture GetOrCreateProfileParamLut(BurtSubsurfaceProfilePalette palette)
         {
-            if (profileParamLut != null)
+            if (gpuProfileParamLut != null && gpuProfileParamLut.IsCreated())
             {
+                if (ShouldDeferTextureRebuild())
+                {
+                    return gpuProfileParamLut;
+                }
+
                 var cachedHash = GetCachedProfileParamPaletteHash(palette);
                 if (profileParamLutHash == cachedHash)
                 {
+                    return gpuProfileParamLut;
+                }
+            }
+            else if (profileParamLut != null)
+            {
+                if (ShouldDeferTextureRebuild())
+                {
                     return profileParamLut;
                 }
+
+                var cachedHash = GetCachedProfileParamPaletteHash(palette);
+                if (profileParamLutHash == cachedHash)
+                {
+                    return TryUploadProfileParamLutToGpu(false) ? gpuProfileParamLut : profileParamLut;
+                }
+            }
+            else if (ShouldDeferTextureRebuild())
+            {
+                return null;
             }
 
             var currentHash = GetCachedProfileParamPaletteHash(palette);
+            if (TryUpdateGpuProfileParamLut(palette, currentHash))
+            {
+                return gpuProfileParamLut;
+            }
+
             EnsureProfileParamLutTexture();
-            if (UpdateProfileParamLutRows(palette))
+            var changed = UpdateProfileParamLutRows(palette);
+            if (changed)
             {
                 profileParamLut.Apply(false, false);
             }
 
+            if (TryUploadProfileParamLutToGpu(changed))
+            {
+                profileParamLutHash = currentHash;
+                return gpuProfileParamLut;
+            }
+
+            DestroyRenderTexture(gpuProfileParamLut);
+            gpuProfileParamLut = null;
             profileParamLutHash = currentHash;
             return profileParamLut;
         }
@@ -337,8 +382,12 @@ namespace Burt.RenderPipeline
             shProfileHashesValid = false;
             DestroyTexture(profileParamLut);
             profileParamLut = null;
+            DestroyRenderTexture(gpuProfileParamLut);
+            gpuProfileParamLut = null;
+            gpuProfileParamLutRandomWrite = false;
             profileParamLutHash = 0;
             profileParamRowHashesValid = false;
+            ReleaseProfileParamSettingsBuffer();
             hasLastPaletteHashes = false;
         }
 
@@ -560,6 +609,157 @@ namespace Burt.RenderPipeline
             };
 
             profileParamRowHashesValid = false;
+        }
+
+        private static bool TryUploadProfileParamLutToGpu(bool sourceChanged)
+        {
+            if (!CanUseGpuProfileParamLut())
+            {
+                return false;
+            }
+
+            var gpuTextureRecreated = EnsureGpuProfileParamLutTexture(false);
+            if (!sourceChanged && !gpuTextureRecreated)
+            {
+                return gpuProfileParamLut != null && gpuProfileParamLut.IsCreated();
+            }
+
+            if (profileParamLut == null || gpuProfileParamLut == null || !gpuProfileParamLut.IsCreated())
+            {
+                return false;
+            }
+
+            Graphics.CopyTexture(profileParamLut, 0, 0, gpuProfileParamLut, 0, 0);
+            return true;
+        }
+
+        private static bool EnsureGpuProfileParamLutTexture(bool randomWrite)
+        {
+            if (gpuProfileParamLut != null &&
+                gpuProfileParamLut.IsCreated() &&
+                gpuProfileParamLutRandomWrite == randomWrite)
+            {
+                return false;
+            }
+
+            DestroyRenderTexture(gpuProfileParamLut);
+            var descriptor = new RenderTextureDescriptor(ProfileParamLutWidth, ProfileParamLutHeight)
+            {
+                graphicsFormat = SelectGpuProfileParamLutFormat(),
+                depthBufferBits = 0,
+                msaaSamples = 1,
+                dimension = TextureDimension.Tex2D,
+                volumeDepth = 1,
+                mipCount = 1,
+                useMipMap = false,
+                autoGenerateMips = false,
+                enableRandomWrite = randomWrite,
+                sRGB = false
+            };
+            gpuProfileParamLut = new RenderTexture(descriptor)
+            {
+                name = "Burt Subsurface Profile Param LUT GPU",
+                hideFlags = HideFlags.HideAndDontSave,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Point,
+                anisoLevel = 0
+            };
+            gpuProfileParamLut.Create();
+            gpuProfileParamLutRandomWrite = randomWrite;
+            return true;
+        }
+
+        private static bool TryUpdateGpuProfileParamLut(BurtSubsurfaceProfilePalette palette, int currentHash)
+        {
+            if (!CanUseGpuLutBaker() || !CanUseGpuProfileParamLutForRandomWrite())
+            {
+                return false;
+            }
+
+            var shader = GetLutBakerShader();
+            if (shader == null || profileParamKernel < 0)
+            {
+                return false;
+            }
+
+            EnsureGpuProfileParamLutTexture(true);
+            EnsureProfileParamSettingsBuffer();
+            UpdateProfileParamSettingsBuffer(palette);
+
+            var cmd = CommandBufferPool.Get("Burt Subsurface GPU Profile Param LUT");
+            cmd.SetComputeBufferParam(shader, profileParamKernel, BakerProfileParamSettingsId, profileParamSettingsBuffer);
+            cmd.SetComputeIntParam(shader, BakerProfileParamSettingsStrideId, ProfileParamSettingsVectorCount);
+            cmd.SetComputeVectorParam(shader, ProfileParamLutSizeId, ProfileParamLutSizeVector);
+            cmd.SetComputeTextureParam(shader, profileParamKernel, BakerProfileParamLutRWId, gpuProfileParamLut);
+            cmd.DispatchCompute(
+                shader,
+                profileParamKernel,
+                Mathf.CeilToInt(ProfileParamLutWidth / 8f),
+                Mathf.CeilToInt(ProfileParamLutHeight / 8f),
+                1);
+            Graphics.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+
+            DestroyTexture(profileParamLut);
+            profileParamLut = null;
+            profileParamLutHash = currentHash;
+            profileParamRowHashesValid = false;
+            return true;
+        }
+
+        private static void EnsureProfileParamSettingsBuffer()
+        {
+            var count = ProfileSlotCount * ProfileParamSettingsVectorCount;
+            if (profileParamSettingsBuffer != null && profileParamSettingsBuffer.count == count && profileParamSettingsBuffer.stride == 16)
+            {
+                return;
+            }
+
+            ReleaseProfileParamSettingsBuffer();
+            profileParamSettingsBuffer = new ComputeBuffer(count, 16, ComputeBufferType.Structured)
+            {
+                name = "Burt Subsurface Profile Param Settings"
+            };
+        }
+
+        private static void UpdateProfileParamSettingsBuffer(BurtSubsurfaceProfilePalette palette)
+        {
+            var count = Mathf.Clamp(palette.Count, 1, ProfileSlotCount);
+            var fallback = palette.GetSettings(0);
+            var vectorCount = ProfileSlotCount * ProfileParamSettingsVectorCount;
+            if (profileParamSettingsBufferData == null || profileParamSettingsBufferData.Length != vectorCount)
+            {
+                profileParamSettingsBufferData = new Vector4[vectorCount];
+            }
+
+            for (var profileIndex = 0; profileIndex < ProfileSlotCount; profileIndex++)
+            {
+                var settings = profileIndex < count ? palette.GetSettings(profileIndex) : fallback;
+                var offset = profileIndex * ProfileParamSettingsVectorCount;
+                var surfaceAlbedo = GetSurfaceAlbedoForLut(settings);
+                var meanFreePathColor = Clamp(ToRgb(settings.MeanFreePathColor), MeanFreePathBias, 1f);
+                profileParamSettingsBufferData[offset] = new Vector4(surfaceAlbedo.x, surfaceAlbedo.y, surfaceAlbedo.z, settings.MeanFreePathDistance);
+                profileParamSettingsBufferData[offset + 1] = new Vector4(meanFreePathColor.x, meanFreePathColor.y, meanFreePathColor.z, settings.WorldUnitScale);
+                profileParamSettingsBufferData[offset + 2] = new Vector4(
+                    Mathf.Clamp01(settings.Tint.r),
+                    Mathf.Clamp01(settings.Tint.g),
+                    Mathf.Clamp01(settings.Tint.b),
+                    0f);
+                profileParamSettingsBufferData[offset + 3] = new Vector4(
+                    settings.BoundaryColorBleed.r,
+                    settings.BoundaryColorBleed.g,
+                    settings.BoundaryColorBleed.b,
+                    0f);
+                profileParamSettingsBufferData[offset + 4] = settings.DualSpecularVector;
+                profileParamSettingsBufferData[offset + 5] = settings.TransmissionVector;
+                profileParamSettingsBufferData[offset + 6] = new Vector4(
+                    Mathf.Clamp01(settings.TransmissionTintColor.r),
+                    Mathf.Clamp01(settings.TransmissionTintColor.g),
+                    Mathf.Clamp01(settings.TransmissionTintColor.b),
+                    settings.ExtinctionScale);
+            }
+
+            profileParamSettingsBuffer.SetData(profileParamSettingsBufferData);
         }
 
         private static bool UpdatePreIntegratedLutSlices(BurtSubsurfaceProfilePalette palette)
@@ -1043,6 +1243,49 @@ namespace Burt.RenderPipeline
             return GraphicsFormat.R16G16B16A16_SFloat;
         }
 
+        private static GraphicsFormat SelectGpuProfileParamLutFormat()
+        {
+            switch (SelectProfileParamLutFormat())
+            {
+                case TextureFormat.RGBAHalf:
+                    return GraphicsFormat.R16G16B16A16_SFloat;
+                case TextureFormat.RGBAFloat:
+                    return GraphicsFormat.R32G32B32A32_SFloat;
+                default:
+                    return GraphicsFormat.R8G8B8A8_UNorm;
+            }
+        }
+
+        private static bool CanUseGpuProfileParamLut()
+        {
+            var format = SelectGpuProfileParamLutFormat();
+            if (!SystemInfo.IsFormatSupported(format, FormatUsage.Sample) ||
+                !SystemInfo.IsFormatSupported(format, FormatUsage.Render))
+            {
+                LogGpuFallbackOnce("GPU profile-param LUT format is not sampleable.");
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool CanUseGpuProfileParamLutForRandomWrite()
+        {
+            if (!CanUseGpuProfileParamLut())
+            {
+                return false;
+            }
+
+            var format = SelectGpuProfileParamLutFormat();
+            if (!SystemInfo.IsFormatSupported(format, FormatUsage.LoadStore))
+            {
+                LogGpuFallbackOnce("GPU profile-param LUT format does not support random write.");
+                return false;
+            }
+
+            return true;
+        }
+
         private static bool CanUseGpuLutBaker()
         {
             if (lutBakerUnavailable || !SystemInfo.supportsComputeShaders)
@@ -1082,6 +1325,7 @@ namespace Burt.RenderPipeline
 
             try
             {
+                profileParamKernel = lutBakerShader.FindKernel("GenerateProfileParamLut");
                 preIntegratedKernel = lutBakerShader.FindKernel("GeneratePreIntegratedLut");
                 shKernel = lutBakerShader.FindKernel("GenerateSHLut");
             }
@@ -1090,6 +1334,7 @@ namespace Burt.RenderPipeline
                 LogGpuFallbackOnce("BurtSubsurfaceLutBaker kernel lookup failed: " + exception.Message);
                 lutBakerUnavailable = true;
                 lutBakerShader = null;
+                profileParamKernel = -1;
                 preIntegratedKernel = -1;
                 shKernel = -1;
                 return null;
@@ -1106,7 +1351,7 @@ namespace Burt.RenderPipeline
             }
 
             loggedGpuFallback = true;
-            Debug.LogWarning("BurtRP Subsurface GPU LUT baker disabled. Falling back to CPU LUT generation. " + reason);
+            Debug.LogWarning("BurtRP Subsurface GPU LUT path disabled. Falling back to CPU LUT generation. " + reason);
         }
 
         private static int ComputePaletteHash(BurtSubsurfaceProfilePalette palette)
@@ -1271,6 +1516,17 @@ namespace Burt.RenderPipeline
             }
 
             DestroyTexture(texture);
+        }
+
+        private static void ReleaseProfileParamSettingsBuffer()
+        {
+            if (profileParamSettingsBuffer == null)
+            {
+                return;
+            }
+
+            profileParamSettingsBuffer.Release();
+            profileParamSettingsBuffer = null;
         }
 
 #if UNITY_EDITOR

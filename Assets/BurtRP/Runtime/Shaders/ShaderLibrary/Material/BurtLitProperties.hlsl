@@ -50,8 +50,6 @@ CBUFFER_START(UnityPerMaterial)
 
     float _ClearCoatNormalScale;
 
-    float _SubsurfaceStrength;
-
     float _SubsurfaceThickness;
 
     float _SubsurfacePower;
@@ -64,7 +62,9 @@ CBUFFER_START(UnityPerMaterial)
 
     float _SubsurfaceProfileIndex;
 
-    float4 _SubsurfaceTint;
+    float _Subsurface3SCurvatureScale;
+
+    float _Subsurface3SCurvatureBias;
 
     // 保存自发光颜色，Forward 用它和 Emission Map 相乘。
     float4 _EmissionColor;

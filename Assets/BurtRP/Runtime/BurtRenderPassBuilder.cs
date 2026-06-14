@@ -546,6 +546,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceVelocityName);
         }
 
+        public BurtRenderTargetHandle ReadFurBlurProperty()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
+        }
+
+        public BurtRenderTargetHandle WriteFurBlurProperty()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
+        }
+
+        public BurtRenderTargetHandle ReadFurBlurColor()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.FurBlurColorName);
+        }
+
+        public BurtRenderTargetHandle WriteFurBlurColor()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.FurBlurColorName);
+        }
+
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.MainLightShadowMapName); // 使用统一资源名声明读取主光阴影图。

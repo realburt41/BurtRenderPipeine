@@ -102,7 +102,6 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             float strength;
             float thickness;
             float3 normalWS;
-            float3 tint;
             float profileIndex;
             uint profileType;
             float rawDepth;
@@ -374,7 +373,6 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             surface.strength = BurtGetSubsurfaceStrength(data);
             surface.thickness = BurtGetSubsurfaceThickness(data);
             surface.normalWS = BurtGetDefaultLitNormalWS(data);
-            surface.tint = BurtGetSubsurfaceTint(data);
             surface.profileIndex = BurtGetSubsurfaceProfileIndex(data);
             bool gbufferValid = BurtIsSubsurfaceShadingModel(data.shadingModelID) && !BurtSSSIsSkyDepth(surface.rawDepth);
             uint profileIDFromTexture;
@@ -687,7 +685,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             BurtSSSDecodeProfileIDAndType(BurtSSSLoadProfileIDAndTypePoint(sampleUVUnclamped), sampleProfileIndex, sampleProfileType);
             float sampleDepth = sampleSource.a;
             float sameProfile = BurtSSSResolveProfileIndex(center.profileIndex) == BurtSSSResolveProfileIndex((float)sampleProfileIndex) ? 1.0f : 0.0f;
-            float hasScreenSpaceProfile = (sampleProfileType & BURT_SSS_PROFILE_TYPE_SEPARABLE) != 0u ? 1.0f : 0.0f;
+            float hasScreenSpaceProfile = (sampleProfileType & BURT_SSS_PROFILE_TYPE_MASK) != 0u ? 1.0f : 0.0f;
             float sameSample = inBounds * sameProfile * hasScreenSpaceProfile;
             float3 sampleColor = sameSample > 0.5f ? sampleSource.rgb : centerSource.rgb;
             float sampleAlpha = BurtSSSSeparableSampleAlpha(centerSceneDepth, sampleDepth);
@@ -1025,7 +1023,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         float4 FragMask(Varyings input) : SV_Target
         {
-            float4 gbuffer1 = tex2D(_BurtGBuffer1, input.screenUV);
+            float4 gbuffer1 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, input.screenUV);
             float shadingModelID;
             float strength = BurtDecodeMetallicAndShadingModelFromGBuffer(gbuffer1.b, shadingModelID);
             uint profileIDFromMaterial;

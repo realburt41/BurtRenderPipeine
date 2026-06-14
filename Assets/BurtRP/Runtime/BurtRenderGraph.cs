@@ -141,6 +141,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                         resources.RegisterScreenSpaceSubsurfaceVelocityTexture();
                     }
                 }
+
+                if (ShouldRegisterFurBlur(request, asset))
+                {
+                    resources.RegisterFurBlurPropertyTexture();
+                    resources.RegisterFurBlurColorTexture();
+                }
             }
 
             if (ShouldRegisterMainLightShadowMap(request, asset)) // 如果当前 request 的主光需要阴影，就把主光阴影图纳入资源表。
@@ -268,6 +274,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderPipelineAsset asset)
         {
             return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset);
+        }
+
+        private static bool ShouldRegisterFurBlur(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) && BurtFurBlurPassUtility.ShouldUseFurBlur(request, asset);
         }
 
         public void AddPass(BurtRenderPass pass) // 定义添加 Pass 的函数，Assembler 会通过它把 Pass 放进图里。

@@ -51,7 +51,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private static readonly GUIContent ScreenSpaceSubsurfaceBlendLabel = new("Fallback Blend", "未指定 profile 时使用的最终混合强度。");
         private static readonly GUIContent ScreenSpaceSubsurfaceDistanceScaleLabel = new("Fallback Distance Scale", "未指定 profile 时使用的远距离衰减强度。");
         private static readonly GUIContent ScreenSpaceSubsurfaceBoundaryBleedLabel = new("Fallback Boundary Bleed", "未指定 profile 时使用的边界防串色强度。");
-        private static readonly GUIContent ScreenSpaceSubsurfaceTintStrengthLabel = new("Fallback Tint Strength", "未指定 profile 时使用的材质 tint 混合强度。");
+        private static readonly GUIContent ScreenSpaceSubsurfaceTintStrengthLabel = new("Fallback Tint Strength", "未指定 profile 时使用的 profile tint 混合强度。");
         private static readonly GUIContent ScreenSpaceSubsurfaceMinStrengthLabel = new("Fallback Min Strength", "未指定 profile 时过滤低强度次表面像素的阈值。");
         private static readonly GUIContent PostProcessSettingsLabel = new("Post Process Settings", "后处理框架设置，具体效果参数从 Global Volume 读取。"); // 定义后处理设置显示文本。
         private static readonly GUIContent PostProcessVolumeLayerMaskLabel = new("Post Process Volume Layer Mask", "后处理 Global Volume 查询层，Tonemapping 等效果参数从匹配的 Volume Profile 读取。"); // 定义后处理 Volume 层显示文本。

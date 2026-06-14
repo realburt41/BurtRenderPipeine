@@ -26,7 +26,7 @@ float BurtAvatarHairGradientFactor(float2 uv0, float3 positionOS)
 float3 BurtAvatarHairApplyGradientMap(float3 baseColor, float gradientMask)
 {
     float gradientV = (_GradientRowIndex + 0.5f) * max(_GradientMap_TexelSize.y, BURT_EPSILON);
-    float3 gradientColor = tex2D(_GradientMap, float2(saturate(gradientMask), saturate(gradientV))).rgb;
+    float3 gradientColor = BURT_SAMPLE_TEXTURE2D_CLAMP(_GradientMap, float2(saturate(gradientMask), saturate(gradientV))).rgb;
     float3 blendSoftLight = (1.0f - 2.0f * gradientColor) * baseColor * baseColor + 2.0f * gradientColor * baseColor;
     float3 blendOverlay = lerp(
         2.0f * baseColor * gradientColor,
@@ -51,7 +51,7 @@ float3 BurtAvatarHairStructureFactor(float hairStructureMask)
 float4 BurtEvaluateMaterialPassBaseColor(float2 uv0, float2 uv1, float3 positionOS)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float4 idValue = tex2D(_IDMap, uv0 * float2(_IDXTilling, 1.0f));
+    float4 idValue = BURT_SAMPLE_TEXTURE2D_REPEAT(_IDMap, uv0 * float2(_IDXTilling, 1.0f));
     float4 baseMap = BurtSampleBaseMap(uv0);
     float4 maskMap = BurtEvaluateMaterialPassMaskMap(uv0, uv1);
     float gradientFactor = BurtAvatarHairGradientFactor(uv0, positionOS);
@@ -131,7 +131,8 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, floa
         surfaceData = BurtApplyAnisotropySurfaceSemantics(surfaceData, _Anisotropy);
         surfaceData = BurtApplyClearCoatSurfaceSemantics(surfaceData, _ClearCoatMask, _ClearCoatRoughness);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
-        surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceStrength, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, _SubsurfaceTint.rgb, _SubsurfaceProfileIndex, _SubsurfaceScatteringMode);
+        float subsurface3SCurvature = saturate(maskMap.g * _Subsurface3SCurvatureScale + _Subsurface3SCurvatureBias);
+        surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, subsurface3SCurvature, _SubsurfaceProfileIndex, _SubsurfaceScatteringMode);
     #else
         surfaceData = BurtApplyAnisotropySurfaceSemantics(surfaceData, _Anisotropy);
     #endif
@@ -151,7 +152,7 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
     float3 viewDirectionWS)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float4 idValue = tex2D(_IDMap, uv0 * float2(_IDXTilling, 1.0f));
+    float4 idValue = BURT_SAMPLE_TEXTURE2D_REPEAT(_IDMap, uv0 * float2(_IDXTilling, 1.0f));
     float nDotV = saturate(dot(BurtSafeNormalize(geometryNormalWS), viewDirectionWS));
     float edgeRoughness = lerp(0.0f, _RoughParameter.z, saturate(pow(1.0f - nDotV, _EdgeRoughRimPower)));
     float2 roughness = saturate(_RoughParameter.xy + edgeRoughness.xx);
@@ -206,7 +207,7 @@ float3 BurtGetMaterialPassShadingDirectionWS(float3 normalWS, float4 tangentWS)
 float3 BurtGetMaterialPassShadingDirectionWS(float2 uv0, float3 normalWS, float4 tangentWS, float facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float idValue = tex2D(_IDMap, uv0 * float2(_IDXTilling, 1.0f)).r;
+    float idValue = BURT_SAMPLE_TEXTURE2D_REPEAT(_IDMap, uv0 * float2(_IDXTilling, 1.0f)).r;
     float3 hairTangentTS = lerp(_TangentA.xyz, _TangentB.xyz, idValue) * _IDIntensity;
     hairTangentTS = BurtSafeNormalize(hairTangentTS + float3(0.0f, 1.0f, 0.0f));
 

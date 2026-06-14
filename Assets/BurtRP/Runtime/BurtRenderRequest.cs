@@ -167,7 +167,16 @@ namespace Burt.RenderPipeline
             ApplyIndirectLightingCullingParameters(ref cullingParameters);
 
             // 使用 Unity 内置剔除系统得到当前相机可见物体。
-            var cullingResults = context.Cull(ref cullingParameters);
+            var perObjectShadowLightMaskScope = BurtPerObjectShadowUtility.BeginDirectionalLightRenderingLayerMaskOverrideForCulling();
+            CullingResults cullingResults;
+            try
+            {
+                cullingResults = context.Cull(ref cullingParameters);
+            }
+            finally
+            {
+                perObjectShadowLightMaskScope?.Dispose();
+            }
 
             // 创建一个新的请求对象。
             var request = new BurtRenderRequest();

@@ -30,21 +30,19 @@ static const float BURT_CLEAR_COAT_ETA = 1.0f / BURT_CLEAR_COAT_IOR;
 static const float BURT_GGX_DISTRIBUTION_DENOMINATOR_EPSILON = 0.000000000001f;
 
 // 声明 BurtRP 预积�?FG LUT；C# 会绑�?Assets/Textures/PreintegratedFG.exr 或关闭开关走解析近似
-sampler2D _BurtPreIntegratedFG;
+Texture2D _BurtPreIntegratedFG;
 float _BurtPreIntegratedFGEnabled;
 #if BURT_ENABLE_SUBSURFACE_SHADING
 Texture2DArray _BurtSubsurfacePreIntegratedLut;
-SamplerState sampler_BurtSubsurfacePreIntegratedLut;
 float _BurtSubsurfacePreIntegratedLutEnabled;
 Texture2DArray _BurtSubsurfaceSHLut;
-SamplerState sampler_BurtSubsurfaceSHLut;
 float _BurtSubsurfaceSHLutEnabled;
 float _BurtSubsurfaceProfileCount;
 float4 _BurtSubsurfaceProfileDualSpeculars[8];
 float4 _BurtSubsurfaceProfileTransmissions[8];
 float4 _BurtSubsurfaceProfileTransmissionTints[8];
 #if defined(SHADER_TARGET) && SHADER_TARGET < 35
-    sampler2D _BurtSubsurfaceProfileParamLut;
+    Texture2D _BurtSubsurfaceProfileParamLut;
     #define BURT_SUBSURFACE_PROFILE_PARAM_LUT_USE_LOAD 0
 #else
     Texture2D<float4> _BurtSubsurfaceProfileParamLut;
@@ -85,7 +83,7 @@ float4 BurtFetchSubsurfaceProfileParam(float sampleIndex, float profileIndex)
     float height = max(_BurtSubsurfaceProfileParamLutSize.y, 1.0f);
     float resolvedProfile = BurtClampSubsurfaceProfileIndex(profileIndex);
     float2 uv = (float2(clamp(sampleIndex, 0.0f, width - 1.0f), resolvedProfile) + 0.5f) / float2(width, height);
-    return tex2D(_BurtSubsurfaceProfileParamLut, uv);
+    return BURT_SAMPLE_TEXTURE2D_CLAMP(_BurtSubsurfaceProfileParamLut, uv);
 #endif
 }
 
@@ -100,7 +98,7 @@ float3 BurtSampleSubsurfacePreIntegratedLut(float rawNoL, float curvature, float
     int profileSlice = clamp((int)floor(BurtClampSubsurfaceProfileIndex(profileIndex) + 0.5f), 0, 7);
     float localU = saturate(rawNoL * 0.5f + 0.5f) * (1.0f - localInvSize) + 0.5f * localInvSize;
     float localV = saturate(curvature) * (1.0f - localInvSize) + 0.5f * localInvSize;
-    return max(_BurtSubsurfacePreIntegratedLut.SampleLevel(sampler_BurtSubsurfacePreIntegratedLut, float3(localU, localV, profileSlice), 0.0f).rgb, float3(0.0f, 0.0f, 0.0f));
+    return max(BURT_SAMPLE_TEXTURE2D_ARRAY_LOD_CLAMP(_BurtSubsurfacePreIntegratedLut, float2(localU, localV), profileSlice, 0.0f).rgb, float3(0.0f, 0.0f, 0.0f));
 }
 
 float3 BurtSampleSubsurfaceSHLut(float curvature, float shBand, float profileIndex)
@@ -108,7 +106,7 @@ float3 BurtSampleSubsurfaceSHLut(float curvature, float shBand, float profileInd
     float localU = saturate(curvature) * (1.0f - BURT_SUBSURFACE_SH_LUT_INV_WIDTH) + 0.5f * BURT_SUBSURFACE_SH_LUT_INV_WIDTH;
     float localV = (clamp(shBand, 0.0f, 2.0f) + 0.5f) / 3.0f;
     int profileSlice = clamp((int)floor(BurtClampSubsurfaceProfileIndex(profileIndex) + 0.5f), 0, 7);
-    return max(_BurtSubsurfaceSHLut.SampleLevel(sampler_BurtSubsurfaceSHLut, float3(localU, localV, profileSlice), 0.0f).rgb, float3(0.0f, 0.0f, 0.0f));
+    return max(BURT_SAMPLE_TEXTURE2D_ARRAY_LOD_CLAMP(_BurtSubsurfaceSHLut, float2(localU, localV), profileSlice, 0.0f).rgb, float3(0.0f, 0.0f, 0.0f));
 }
 
 float4 BurtLoadSubsurfaceProfileDualSpecular(float profileIndex)
@@ -393,7 +391,7 @@ float3 f90;
 
     float clearCoatRoughness;
 
-    float subsurfaceStrength;
+    float subsurfaceActive;
 
     float subsurfaceThickness;
 
@@ -405,7 +403,7 @@ float3 f90;
 
     float subsurfaceScatteringMode;
 
-    float3 subsurfaceTint;
+    float subsurface3SCurvature;
 
     float subsurfaceProfileIndex;
 };
@@ -445,46 +443,43 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
     materialData.clearCoatMask = 0.0f;
 #endif
     materialData.clearCoatRoughness = ClampPerceptualRoughness(surfaceData.clearCoatRoughness);
+    materialData.subsurfaceActive = BurtIsSubsurfaceShadingModel(surfaceData.shadingModelID) ? 1.0f : 0.0f;
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
-    materialData.subsurfaceStrength = saturate(surfaceData.subsurfaceStrength);
     materialData.subsurfaceThickness = saturate(surfaceData.subsurfaceThickness);
     materialData.subsurfacePower = BurtClampSubsurfacePower(surfaceData.subsurfacePower);
     materialData.subsurfaceDistortion = saturate(surfaceData.subsurfaceDistortion);
     materialData.subsurfaceAmbient = saturate(surfaceData.subsurfaceAmbient);
     materialData.subsurfaceScatteringMode = BurtClampSubsurfaceScatteringMode(surfaceData.subsurfaceScatteringMode);
-    materialData.subsurfaceTint = max(surfaceData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+    materialData.subsurface3SCurvature = saturate(surfaceData.subsurface3SCurvature);
     materialData.subsurfaceProfileIndex = BurtClampSubsurfaceProfileIndex(surfaceData.subsurfaceProfileIndex);
 #elif BURT_ENABLE_SUBSURFACE_SHADING
     if (BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID))
     {
-        materialData.subsurfaceStrength = saturate(surfaceData.subsurfaceStrength);
         materialData.subsurfaceThickness = saturate(surfaceData.subsurfaceThickness);
         materialData.subsurfacePower = BurtClampSubsurfacePower(surfaceData.subsurfacePower);
         materialData.subsurfaceDistortion = saturate(surfaceData.subsurfaceDistortion);
         materialData.subsurfaceAmbient = saturate(surfaceData.subsurfaceAmbient);
         materialData.subsurfaceScatteringMode = BurtClampSubsurfaceScatteringMode(surfaceData.subsurfaceScatteringMode);
-        materialData.subsurfaceTint = max(surfaceData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
+        materialData.subsurface3SCurvature = saturate(surfaceData.subsurface3SCurvature);
         materialData.subsurfaceProfileIndex = BurtClampSubsurfaceProfileIndex(surfaceData.subsurfaceProfileIndex);
     }
     else
     {
-        materialData.subsurfaceStrength = 0.0f;
         materialData.subsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
         materialData.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
         materialData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
         materialData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
         materialData.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
-        materialData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
+        materialData.subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
         materialData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
     }
 #else
-    materialData.subsurfaceStrength = 0.0f;
     materialData.subsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
     materialData.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
     materialData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
     materialData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
     materialData.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
-    materialData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
+    materialData.subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
     materialData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
 #endif
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
@@ -512,6 +507,11 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
     materialData.f90 = ApproximateF90(materialData.f0);
 
     return materialData;
+}
+
+float BurtGetSubsurfaceMaterialWeight(BurtPBRMaterialData materialData)
+{
+    return saturate(materialData.subsurfaceActive);
 }
 
 // 保存 PBR 几何侧数据；Forward 由插值输入生成，Deferred 后续�?GBuffer normal 和重�?view direction 生成
@@ -798,7 +798,7 @@ float2 uv = float2(saturate(clampedNdotV), 1.0f - saturate(perceptualRoughness))
 uv = Remap01CoordToHalfTexelCoord(uv, float2(BURT_PREINTEGRATED_FG_LUT_INV_SIZE, BURT_PREINTEGRATED_FG_LUT_INV_SIZE));
 
     // RGB 分别保存 DFG.x、DFG.y 和能量补偿使用的单次散射能量 Z
-return tex2D(_BurtPreIntegratedFG, uv).rgb;
+return BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtPreIntegratedFG, uv, 0.0f).rgb;
 }
 
 float3 SanitizePreIntegratedFG(float3 fg, float3 fallbackFG)
@@ -1074,7 +1074,7 @@ void BurtApplySubsurfaceDirectPBR(
     float shadowAttenuation)
 {
 #if BURT_ENABLE_SUBSURFACE_SHADING
-    float subsurfaceStrength = saturate(materialData.subsurfaceStrength);
+    float subsurfaceStrength = BurtGetSubsurfaceMaterialWeight(materialData);
     if (subsurfaceStrength <= 0.0001f)
     {
         return;
@@ -1089,12 +1089,13 @@ void BurtApplySubsurfaceDirectPBR(
     float vDotH = saturate(dot(v, h));
     float wrappedDiffuseLobe = SlabLobe_Diffuse(materialData, geometryData.nDotV, wrappedNoL, vDotH);
 
-    float curvature = saturate(1.0f - materialData.subsurfaceThickness);
+    float curvature = saturate(materialData.subsurface3SCurvature);
     if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
     {
         float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(rawNoL, curvature, materialData.subsurfaceProfileIndex);
         float lutWeight = saturate(_BurtSubsurfacePreIntegratedLutEnabled);
-        float3 preintegratedDiffuseBRDF = materialData.diffuseColor * lutScatter * BURT_INV_PI;
+        float3 preintegratedTint = max(BurtLoadSubsurfaceProfileTransmissionTint(materialData.subsurfaceProfileIndex).rgb, float3(0.0f, 0.0f, 0.0f));
+        float3 preintegratedDiffuseBRDF = materialData.diffuseColor * preintegratedTint * lutScatter * BURT_INV_PI;
         float3 preintegratedDiffuse = preintegratedDiffuseBRDF * lightColor * shadowAttenuation;
         float targetDiffuseLobe = BurtEvaluateSubsurfaceProfileIntensity(lutScatter) * BURT_INV_PI;
 
@@ -1104,11 +1105,10 @@ void BurtApplySubsurfaceDirectPBR(
         return;
     }
 
-    float3 subsurfaceTint = max(materialData.subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
 #if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
     float3 diffuseTint = float3(1.0f, 1.0f, 1.0f);
 #else
-    float3 diffuseTint = lerp(float3(1.0f, 1.0f, 1.0f), subsurfaceTint, 0.65f);
+    float3 diffuseTint = max(BurtLoadSubsurfaceProfileTransmissionTint(materialData.subsurfaceProfileIndex).rgb, float3(0.0f, 0.0f, 0.0f));
 #endif
     float4 dualSpecular = BurtLoadSubsurfaceProfileDualSpecular(materialData.subsurfaceProfileIndex);
     float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(materialData.subsurfaceProfileIndex);
@@ -1149,7 +1149,7 @@ void BurtApplySubsurfaceDirectPBR(
     float transmissionShadow = softenedShadowVisibility * lerp(0.82f, 1.0f, backFacing);
     float3 profileTint = max(profileTransmissionTint.rgb, float3(0.0f, 0.0f, 0.0f));
     float transmissionIntensity = BurtEvaluateSubsurfaceProfileIntensity(profileTransmittance);
-    float3 transmissionThroughput = max(materialData.baseColor * subsurfaceTint * profileTint, float3(0.0f, 0.0f, 0.0f)) * transmissionIntensity;
+    float3 transmissionThroughput = max(materialData.baseColor * profileTint, float3(0.0f, 0.0f, 0.0f)) * transmissionIntensity;
     float3 transmissionBRDF = transmissionThroughput * transmissionLobe * dualEnergyPreservation;
     float3 transmission = transmissionBRDF * lightColor * transmissionShadow;
 

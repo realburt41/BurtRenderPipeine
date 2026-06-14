@@ -24,7 +24,6 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent SubsurfaceScatteringModeLabel = new GUIContent("SSS Algorithm", "Choose 5S Burley, 4S Separable screen-space skin scattering, or 3S Preintegrated skin shading.");
         private static readonly GUIContent SubsurfaceProfileLabel = new GUIContent("Subsurface Profile", "Drag a BurtSubsurfaceProfile asset here. The material stores the resolved profile slot for the shader.");
         private static readonly GUIContent SubsurfaceProfileIndexLabel = new GUIContent("Subsurface Profile Index", "Runtime slot used by the shader. 0 is the default profile, 1-7 are the pipeline profile list.");
-        private static readonly GUIContent Subsurface3SCurvatureLabel = new GUIContent("3S Curvature", "Controls the preintegrated 3S LUT curvature. Stored as inverse Subsurface Thickness.");
         private static readonly GUIContent DoubleSidedLabel = new GUIContent("Double Sided", "Render both front and back faces by switching culling off.");
         private static readonly GUIContent DoubleSidedNormalModeLabel = new GUIContent("Double Sided Normal Mode", "Back-face normal mode, matching XRender: None, Flip, or Mirror in tangent space.");
         private static readonly GUIContent SurfaceTypeLabel = new GUIContent("Surface Type");
@@ -61,14 +60,14 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty clearCoatRoughness;
         private MaterialProperty clearCoatNormalMap;
         private MaterialProperty clearCoatNormalScale;
-        private MaterialProperty subsurfaceStrength;
         private MaterialProperty subsurfaceThickness;
         private MaterialProperty subsurfacePower;
         private MaterialProperty subsurfaceDistortion;
         private MaterialProperty subsurfaceAmbient;
         private MaterialProperty subsurfaceScatteringMode;
         private MaterialProperty subsurfaceProfileIndex;
-        private MaterialProperty subsurfaceTint;
+        private MaterialProperty subsurface3SCurvatureScale;
+        private MaterialProperty subsurface3SCurvatureBias;
         private MaterialProperty normalMap;
         private MaterialProperty normalScale;
         private MaterialProperty emissionMap;
@@ -133,14 +132,14 @@ namespace Burt.RenderPipeline.Editor
             clearCoatRoughness = Find("_ClearCoatRoughness");
             clearCoatNormalMap = Find("_ClearCoatNormalMap");
             clearCoatNormalScale = Find("_ClearCoatNormalScale");
-            subsurfaceStrength = Find("_SubsurfaceStrength");
             subsurfaceThickness = Find("_SubsurfaceThickness");
             subsurfacePower = Find("_SubsurfacePower");
             subsurfaceDistortion = Find("_SubsurfaceDistortion");
             subsurfaceAmbient = Find("_SubsurfaceAmbient");
             subsurfaceScatteringMode = Find("_SubsurfaceScatteringMode");
             subsurfaceProfileIndex = Find("_SubsurfaceProfileIndex");
-            subsurfaceTint = Find("_SubsurfaceTint");
+            subsurface3SCurvatureScale = Find("_Subsurface3SCurvatureScale");
+            subsurface3SCurvatureBias = Find("_Subsurface3SCurvatureBias");
             normalMap = Find("_NormalMap");
             normalScale = Find("_NormalScale");
             emissionMap = Find("_EmissionMap");
@@ -365,7 +364,7 @@ namespace Burt.RenderPipeline.Editor
 
         private void DrawSubsurfaceInputs(Material material)
         {
-            if (!IsSubsurfaceShader(material) || subsurfaceStrength == null)
+            if (!IsSubsurfaceShader(material))
             {
                 return;
             }
@@ -377,10 +376,10 @@ namespace Burt.RenderPipeline.Editor
 
             DrawSubsurfaceScatteringMode();
             bool is3SMode = IsSubsurface3SMode();
-            DrawProperty(subsurfaceStrength);
             if (is3SMode)
             {
-                DrawSubsurface3SCurvature();
+                DrawProperty(subsurface3SCurvatureScale);
+                DrawProperty(subsurface3SCurvatureBias);
             }
             else
             {
@@ -395,10 +394,6 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawSubsurfaceProfilePicker();
-            if (!is3SMode)
-            {
-                DrawProperty(subsurfaceTint);
-            }
             EditorGUILayout.HelpBox("Materials pick a BurtSubsurfaceProfile asset. BurtRP resolves it to the pipeline profile slots used by deferred SSS and profile-driven skin specular.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
         }
@@ -422,25 +417,6 @@ namespace Burt.RenderPipeline.Editor
                 {
                     ClampSubsurfaceScatteringMode(target as Material);
                 }
-            }
-        }
-
-        private void DrawSubsurface3SCurvature()
-        {
-            if (subsurfaceThickness == null)
-            {
-                return;
-            }
-
-            EditorGUI.BeginChangeCheck();
-            EditorGUI.showMixedValue = subsurfaceThickness.hasMixedValue;
-            float curvature = 1.0f - Mathf.Clamp01(subsurfaceThickness.floatValue);
-            curvature = EditorGUILayout.Slider(Subsurface3SCurvatureLabel, curvature, 0.0f, 1.0f);
-            EditorGUI.showMixedValue = false;
-            if (EditorGUI.EndChangeCheck())
-            {
-                materialEditor.RegisterPropertyChangeUndo(Subsurface3SCurvatureLabel.text);
-                subsurfaceThickness.floatValue = 1.0f - Mathf.Clamp01(curvature);
             }
         }
 
@@ -482,6 +458,7 @@ namespace Burt.RenderPipeline.Editor
             {
                 material.SetFloat("_Reflectance", 0.42f);
             }
+
         }
 
         private void DrawSubsurfaceProfilePicker()
