@@ -424,6 +424,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.AppendLine();
 
             AppendAdditionalLightShadowState(builder, lightingData, resourceRegistry);
+            AppendPerObjectShadowState(builder, request, asset, resourceRegistry);
             AppendTileLightDebugState(builder, request, asset, lightingData, resourceRegistry, renderOptions);
             AppendAdditionalLightDetails(builder, lightingData);
         }
@@ -465,6 +466,60 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.AppendLine();
 
             AppendAdditionalLightShadowSlices(builder, lightingData);
+        }
+
+        private static void AppendPerObjectShadowState(
+            StringBuilder builder,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            var atlasRegistered = IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.PerObjectShadowAtlasName);
+            var shouldUse = BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(request, asset);
+            var preparedData = shouldUse ? BurtPerObjectShadowUtility.Prepare(request) : null;
+
+            builder.Append("  PerObjectShadowAtlasRegistered=").Append(atlasRegistered);
+            builder.Append(" PerObjectShadowRequested=").Append(shouldUse);
+            builder.Append(" PerObjectShadowRegistryActive=").Append(BurtPerObjectShadowRegistry.ActiveCount);
+            builder.Append(" PerObjectShadowCollected=").Append(preparedData != null ? preparedData.Components.Count : 0);
+            builder.Append(" PerObjectShadowPreparedSlices=").Append(preparedData != null ? preparedData.SliceCount : 0);
+            builder.Append(" PerObjectShadowAtlasSize=");
+            builder.Append(preparedData != null ? preparedData.AtlasWidth : 0);
+            builder.Append("x").Append(preparedData != null ? preparedData.AtlasHeight : 0);
+            builder.Append(" PerObjectShadowMaxSlices=").Append(BurtPerObjectShadowUtility.MaxSlices);
+            builder.AppendLine();
+
+            AppendPerObjectShadowSlices(builder, preparedData);
+        }
+
+        private static void AppendPerObjectShadowSlices(StringBuilder builder, PerObjectShadowPrepareData preparedData)
+        {
+            if (preparedData == null || preparedData.SliceCount <= 0)
+            {
+                return;
+            }
+
+            var sliceCount = Mathf.Clamp(preparedData.SliceCount, 0, BurtPerObjectShadowUtility.MaxSlices);
+            for (var sliceIndex = 0; sliceIndex < sliceCount; sliceIndex++)
+            {
+                var slice = preparedData.Slices[sliceIndex];
+                if (slice == null)
+                {
+                    continue;
+                }
+
+                builder.Append("    PerObjectShadowSlice[").Append(sliceIndex).Append("]:");
+                builder.Append(" Renderers=").Append(slice.Renderers != null ? slice.Renderers.Count : 0);
+                builder.Append(" Resolution=").Append(slice.SliceResolution);
+                builder.Append(" Strength=").Append(FormatFloat(slice.Strength));
+                builder.Append(" ReceiverDepthBias=").Append(FormatFloat(slice.ReceiverDepthBias));
+                builder.Append(" ReceiverNormalBias=").Append(FormatFloat(slice.ReceiverNormalBias));
+                builder.Append(" WorldTexelSize=").Append(FormatFloat(slice.WorldTexelSize));
+                builder.Append(" Viewport=").Append(FormatRect(slice.Viewport));
+                builder.Append(" AtlasRect=").Append(FormatVector4(slice.AtlasRect));
+                builder.Append(" MatrixHash=").Append(FormatMatrixHash(slice.WorldToShadowMatrix));
+                builder.AppendLine();
+            }
         }
 
         private static void AppendAdditionalLightShadowSlices(StringBuilder builder, BurtLightingData lightingData)
@@ -1185,6 +1240,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 + ")";
         }
 
+        private static string FormatRect(Rect value)
+        {
+            return "(" + FormatFloat(value.x)
+                + "," + FormatFloat(value.y)
+                + "," + FormatFloat(value.width)
+                + "," + FormatFloat(value.height)
+                + ")";
+        }
+
         private static string FormatSubsurfaceProfiles(BurtSubsurfaceProfilePalette palette)
         {
             var count = Mathf.Clamp(palette.Count, 1, BurtSubsurfaceProfilePalette.MaxProfiles);
@@ -1589,6 +1653,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var temporalAA = request != null ? request.TemporalAA : null;
             var temporalAASettings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
             var temporalAADisabledReason = BurtTemporalAAUtility.ResolveTemporalAADiagnosticDisabledReason(request, asset, renderOptions);
+            var temporalAASource = BurtPostProcessUtility.ResolveTemporalAASourceLabel(request);
             var temporalAAVolumeState = BurtPostProcessUtility.ResolveTemporalAAVolumeStateLabel();
             var temporalHistory = BurtTemporalAAUtility.GetHistoryStatus(request != null ? request.Camera : null);
             var burtGITAAConfidence = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(request, asset, renderOptions) ? "BoundCurrentGIAlpha" : "Disabled";
@@ -1697,6 +1762,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" TAAEnabled=").Append(temporalAA != null && temporalAA.Enabled);
             builder.Append(" TAAReason=").Append(temporalAADisabledReason);
+            builder.Append(" TAASource=").Append(temporalAASource);
             builder.Append(" TAAVolume=").Append(temporalAAVolumeState);
             builder.Append(" TAAHistoryValid=").Append(temporalAA != null && temporalAA.HistoryValid);
             builder.Append(" TAAHistoryAllocated=").Append(temporalHistory.HasHistory);
@@ -1729,7 +1795,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAADebugMode=").Append(BurtTemporalAAUtility.IsTemporalAADebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
             builder.Append(" TAAFinalBlitYFlip=").Append(FormatFloat(finalBlitYFlip));
             builder.Append(" TAADebugYFlip=").Append(FormatFloat(temporalAADebugYFlip));
-            builder.Append(" TAAUVSpace=ResolveNoPreFlip;FinalBlitHandlesDisplayFlip;BurtVelocityPrevMinusCurrentHistoryUvPlusVelocity");
+            builder.Append(" TAAUVSpace=XRenderFullscreenPlatformSampleUv;HistoryDepthVelocityFeedbackSameOrientation;FinalCameraColorTemporalAACopy;FinalBlitHandlesDisplayFlip;BurtVelocityPrevMinusCurrentHistoryUvPlusVelocity");
             builder.Append(" TAAFilter=Current3x3OffsetMinusPixelJitter");
             builder.Append(" TAANote=XRenderPixelFilterParity;VelocitySignInternalToBurt");
 

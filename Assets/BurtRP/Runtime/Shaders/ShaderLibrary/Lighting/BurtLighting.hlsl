@@ -781,6 +781,96 @@ float3 BurtEvaluateAmbientSH9(float3 normalWS)
     return max(shIrradiance, float3(0.0f, 0.0f, 0.0f));
 }
 
+#if BURT_ENABLE_SUBSURFACE_SHADING
+float3 BurtEvaluateSubsurface3SSH9(float curvature, float profileIndex, float3 normalWS)
+{
+    float3 safeNormalWS = BurtSafeNormalize(normalWS);
+    float3 zh0 = BurtSampleSubsurfaceSHLut(curvature, 0.0f, profileIndex);
+    float3 zh1 = BurtSampleSubsurfaceSHLut(curvature, 1.0f, profileIndex);
+    float3 zh2 = BurtSampleSubsurfaceSHLut(curvature, 2.0f, profileIndex);
+
+    float4 shAr;
+    float4 shAg;
+    float4 shAb;
+    float4 shBr;
+    float4 shBg;
+    float4 shBb;
+    float4 shC;
+    float3 shNormalDirection = safeNormalWS;
+
+    if (_BurtSkyDiffuseSHEnabled > 0.5f)
+    {
+        shNormalDirection = BurtRotateSkyReflectionDirection(safeNormalWS);
+        shAr = BurtSampleSkyDiffuseSHPacked(0.0f);
+        shAg = BurtSampleSkyDiffuseSHPacked(1.0f);
+        shAb = BurtSampleSkyDiffuseSHPacked(2.0f);
+        shBr = BurtSampleSkyDiffuseSHPacked(3.0f);
+        shBg = BurtSampleSkyDiffuseSHPacked(4.0f);
+        shBb = BurtSampleSkyDiffuseSHPacked(5.0f);
+        shC = BurtSampleSkyDiffuseSHPacked(6.0f);
+    }
+    else if (_BurtAmbientSHEnabled > 0.5f)
+    {
+        shAr = _BurtAmbientSHAr;
+        shAg = _BurtAmbientSHAg;
+        shAb = _BurtAmbientSHAb;
+        shBr = _BurtAmbientSHBr;
+        shBg = _BurtAmbientSHBg;
+        shBb = _BurtAmbientSHBb;
+        shC = _BurtAmbientSHC;
+    }
+    else
+    {
+        shAr = unity_SHAr;
+        shAg = unity_SHAg;
+        shAb = unity_SHAb;
+        shBr = unity_SHBr;
+        shBg = unity_SHBg;
+        shBb = unity_SHBb;
+        shC = unity_SHC;
+    }
+
+    shAr.xyz *= zh1.x;
+    shAr.w *= zh0.x;
+    shAg.xyz *= zh1.y;
+    shAg.w *= zh0.y;
+    shAb.xyz *= zh1.z;
+    shAb.w *= zh0.z;
+
+    float4 shNormal = float4(shNormalDirection, 1.0f);
+    float3 linearL0L1;
+    linearL0L1.r = dot(shAr, shNormal);
+    linearL0L1.g = dot(shAg, shNormal);
+    linearL0L1.b = dot(shAb, shNormal);
+
+    shBr *= zh2.x;
+    shBg *= zh2.y;
+    shBb *= zh2.z;
+    shC.xyz *= zh2.xyz;
+
+    float4 vB = shNormal.xyzz * shNormal.yzzx;
+    float3 linearL2;
+    linearL2.r = dot(shBr, vB);
+    linearL2.g = dot(shBg, vB);
+    linearL2.b = dot(shBb, vB);
+
+    float vC = shNormalDirection.x * shNormalDirection.x - shNormalDirection.y * shNormalDirection.y;
+    float3 shIrradiance = linearL0L1 + linearL2 + shC.rgb * vC;
+    if (_BurtSkyDiffuseSHEnabled > 0.5f)
+    {
+        shIrradiance *= max(_BurtSkyDiffuseCubemapTint.rgb, float3(0.0f, 0.0f, 0.0f)) * max(_BurtSkyDiffuseCubemapIntensity, 0.0f);
+    }
+
+    shIrradiance = BurtApplySkyLowerHemisphere(shIrradiance, safeNormalWS, _BurtSkyLowerHemisphereDiffuseColor);
+
+#ifdef UNITY_COLORSPACE_GAMMA
+    shIrradiance = pow(max(shIrradiance, float3(0.0f, 0.0f, 0.0f)), 1.0f / 2.2f);
+#endif
+
+    return max(shIrradiance, float3(0.0f, 0.0f, 0.0f));
+}
+#endif
+
 // 计算经典 Lambert 漫反射项
 float BurtLambert(float3 normalWS, float3 lightDirectionWS)
 {
@@ -1199,6 +1289,16 @@ float3 BurtEvaluateSubsurfaceIndirectProfile(
     }
 
     float thickness = saturate(materialData.subsurfaceThickness);
+    if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
+    {
+        float curvature = saturate(1.0f - thickness);
+        float3 referenceSHIrradiance = BurtEvaluateSubsurface3SSH9(curvature, materialData.subsurfaceProfileIndex, geometryData.normalWS);
+        float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(1.0f, curvature, materialData.subsurfaceProfileIndex);
+        float3 fallbackIrradiance = lerp(float3(1.0f, 1.0f, 1.0f), lutScatter, saturate(_BurtSubsurfacePreIntegratedLutEnabled)) * BurtSampleIndirectDiffuseIrradiance(geometryData.normalWS);
+        float3 subsurfaceIrradiance = lerp(fallbackIrradiance, referenceSHIrradiance, saturate(_BurtSubsurfaceSHLutEnabled));
+        return materialData.diffuseColor * subsurfaceIrradiance * BurtGTAOMultiBounce(materialData.occlusion, materialData.baseColor) * subsurfaceStrength;
+    }
+
     float ambientWrap = saturate(materialData.subsurfaceAmbient);
     float3 frontIrradiance = BurtSampleIndirectDiffuseIrradiance(geometryData.normalWS);
     float3 backIrradiance = BurtSampleIndirectDiffuseIrradiance(-geometryData.normalWS);
@@ -1239,13 +1339,25 @@ BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData 
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
 
 #if BURT_ENABLE_SUBSURFACE_SHADING
+    bool isSubsurface3S = BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode);
 #if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
-    components.subsurfaceIndirect = components.diffuse;
+    if (isSubsurface3S)
+    {
+        components.subsurfaceIndirect = BurtEvaluateSubsurfaceIndirectProfile(materialData, geometryData);
+        components.diffuse = lerp(components.diffuse, components.subsurfaceIndirect, saturate(materialData.subsurfaceStrength));
+    }
+    else
+    {
+        components.subsurfaceIndirect = components.diffuse;
+    }
 #else
     components.subsurfaceIndirect = BurtEvaluateSubsurfaceIndirectProfile(materialData, geometryData);
     components.diffuse = lerp(components.diffuse, components.subsurfaceIndirect, saturate(materialData.subsurfaceStrength));
 #endif
-    components.specular = BurtEvaluateSubsurfaceIndirectSpecularDualLobe(materialData, geometryData, components.specularEnergyCompensation);
+    if (!isSubsurface3S)
+    {
+        components.specular = BurtEvaluateSubsurfaceIndirectSpecularDualLobe(materialData, geometryData, components.specularEnergyCompensation);
+    }
 #endif
 
 #if BURT_ENABLE_CLEAR_COAT_SHADING
@@ -1353,6 +1465,7 @@ BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData baseMate
     clearCoatMaterialData.subsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
     clearCoatMaterialData.subsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
     clearCoatMaterialData.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
+    clearCoatMaterialData.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
     clearCoatMaterialData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
     clearCoatMaterialData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
     return clearCoatMaterialData;

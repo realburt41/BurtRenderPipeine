@@ -138,6 +138,10 @@ float4 Frag(Varyings input) : SV_Target
     BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
     BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
     gbufferData.shadingModelID = BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID;
+    float3 shadowNormalWS = BurtGetGBufferDirectionWS(gbufferData);
+#if BURT_ACTIVE_HAIR_SHADING_MODEL
+    shadowNormalWS = BurtGetHairGeometryNormalWS(gbufferData);
+#endif
 
     float rawDepth;
     float3 positionWS;
@@ -145,7 +149,7 @@ float4 Frag(Varyings input) : SV_Target
     float3 viewDirectionWS;
     BurtPrepareDeferredViewData(screenUV, rawDepth, positionWS, shadowPositionWS, viewDirectionWS);
 
-    float shadowAttenuation = BurtSampleMainLightShadow(shadowPositionWS);
+    float shadowAttenuation = BurtSampleMainLightShadow(shadowPositionWS, shadowNormalWS);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
 
     BurtGBufferData shadingGBufferData = gbufferData;
@@ -189,6 +193,7 @@ float4 Frag(Varyings input) : SV_Target
     debugSurfaceData.subsurfacePower = BurtGetSubsurfacePower(gbufferData);
     debugSurfaceData.subsurfaceDistortion = BurtGetSubsurfaceDistortion(gbufferData);
     debugSurfaceData.subsurfaceAmbient = BurtGetSubsurfaceAmbient(gbufferData);
+    debugSurfaceData.subsurfaceScatteringMode = BurtGetSubsurfaceScatteringMode(gbufferData);
     debugSurfaceData.subsurfaceTint = BurtGetSubsurfaceTint(gbufferData);
     debugSurfaceData.occlusion = gbufferData.occlusion;
     debugSurfaceData.shadingModelID = gbufferData.shadingModelID;

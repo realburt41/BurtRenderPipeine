@@ -107,7 +107,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAAConfidenceTextureId = Shader.PropertyToID("_BurtTAAConfidenceTexture");
         private static readonly int TemporalAAAntiFlickerTextureId = Shader.PropertyToID("_BurtTAAAntiFlickerTexture");
         private static readonly int TemporalAADebugTextureId = Shader.PropertyToID("_BurtTAADebugTexture");
-        private static readonly int TemporalAADebugYFlipId = Shader.PropertyToID("_BurtTAADebugYFlip");
         private static readonly int TemporalAAPreviousViewProjectionId = Shader.PropertyToID("_BurtTAAPreviousViewProjection");
         private static readonly int TemporalAAPreviousNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAAPreviousNonJitteredViewProjection");
         private static readonly int TemporalAACurrentViewProjectionId = Shader.PropertyToID("_BurtTAACurrentViewProjection");
@@ -682,7 +681,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.GBuffer1Id, hasGBuffer1 ? context.GBuffer1Target.Identifier : blackTexture);
             cmd.SetGlobalTexture(TemporalAABurtGITextureId, useBurtGIForTemporalAA ? burtGITarget.Identifier : blackTexture);
             cmd.SetGlobalVector(TemporalAABurtGIParamsId, new Vector4(useBurtGIForTemporalAA ? 1f : 0f, 0.5f, 0.38f, 0f));
-            cmd.SetGlobalFloat(TemporalAADebugYFlipId, 0f);
             cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
 
             cmd.SetRenderTarget(postProcessColorTarget.Identifier);
@@ -703,11 +701,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             {
                 cmd.SetRenderTarget(debugTarget);
                 BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-                cmd.SetGlobalFloat(TemporalAADebugYFlipId, 0f);
                 cmd.SetGlobalFloat(ShadingDebugEnabledId, 1f);
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAResolve), MeshTopology.Triangles, 3, 1);
                 cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
-                cmd.SetGlobalFloat(TemporalAADebugYFlipId, 0f);
             }
 
             DisablePostProcessEffects(cmd);

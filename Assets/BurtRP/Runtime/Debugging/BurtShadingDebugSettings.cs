@@ -89,6 +89,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         AdditionalShadowDepthDelta = 231,
         CameraDepth = 300, // 全屏调试：复用 BurtRP 当前已有的 CameraDepth debug pass。
         MainLightShadow = 301, // 全屏调试：复用 BurtRP 当前已有的 MainLightShadow debug pass。
+        PerObjectShadowAtlas = 475, // Fullscreen debug: per-object shadow atlas.
         ScreenSpaceAmbientOcclusionRaw = 302, // SSAO debug: raw visibility before blur and final power/intensity curve.
         ScreenSpaceAmbientOcclusionFinal = 303, // SSAO debug: final power/intensity-curved AO texture consumed by deferred lighting.
         ScreenSpaceAmbientOcclusionOverlay = 304, // SSAO debug: final AO multiplied over the current camera color.
@@ -369,6 +370,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.ShadowCascadeIndex:
                 case BurtShadingDebugMode.ShadowReceiverDepthDelta:
                 case BurtShadingDebugMode.MainLightShadow:
+                case BurtShadingDebugMode.PerObjectShadowAtlas:
                 case BurtShadingDebugMode.CameraDepth:
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw:
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal:
@@ -434,7 +436,8 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
             return mode == BurtShadingDebugMode.ShadowAttenuation
                 || (mode >= BurtShadingDebugMode.ShadowCascadeIndex && mode <= BurtShadingDebugMode.ShadowReceiverDepthDelta)
                 || mode == BurtShadingDebugMode.ShadowPCSSBlockerFraction
-                || mode == BurtShadingDebugMode.MainLightShadow;
+                || mode == BurtShadingDebugMode.MainLightShadow
+                || mode == BurtShadingDebugMode.PerObjectShadowAtlas;
         }
 
         public static void ApplyGlobalShaderProperties() // 把当前 shading debug 状态上传给 shader。

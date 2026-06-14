@@ -585,6 +585,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             {
                 ReadAdditionalLightShadowAtlas();
             }
+
+            if (BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(Request, Asset))
+            {
+                ReadPerObjectShadowAtlas();
+            }
         }
 
         public void WriteShadowGlobals() // 定义声明写入阴影全局状态的快捷函数。
@@ -612,6 +617,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteAdditionalLightShadowAtlas()
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.AdditionalLightShadowAtlasName);
+        }
+
+        public BurtRenderTargetHandle ReadPerObjectShadowAtlas()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.PerObjectShadowAtlasName);
+        }
+
+        public BurtRenderTargetHandle WritePerObjectShadowAtlas()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.PerObjectShadowAtlasName);
         }
 
         private BurtRenderBufferHandle GetBuffer(string name) // Reads a logical buffer from the registry while preserving invalid handles for diagnostics.

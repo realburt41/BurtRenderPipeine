@@ -176,11 +176,11 @@ Shader "BurtRP/UnlitColor"
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
                 float3 normalWS = BurtSafeNormalize(input.normalWS);
                 float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS));
+                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS, normalWS));
                 BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.positionWS);
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
-                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
+                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
                 debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
                 debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
                 debugData.additionalUnshadowedColor = pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular;
@@ -304,11 +304,11 @@ Shader "BurtRP/UnlitColor"
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
                 float3 normalWS = BurtSafeNormalize(input.normalWS);
                 float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS));
+                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS, normalWS));
                 BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.positionWS);
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
-                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
+                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
                 debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
                 debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
                 debugData.additionalUnshadowedColor = pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular;

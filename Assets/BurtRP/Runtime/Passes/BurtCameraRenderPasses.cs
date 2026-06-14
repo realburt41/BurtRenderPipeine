@@ -149,6 +149,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null); // 恢复 viewport，避免前序 RT 改过尺寸后影响绘制。
             BindMainLightShadowMapIfValid(context, cmd); // DrawRenderers 可能在 Deferred Lighting 之后执行，重新绑定当前 request 的 shadow map 避免读到旧全局纹理。
             BindAdditionalLightShadowAtlasIfValid(context, cmd);
+            BindPerObjectShadowAtlasIfValid(context, cmd);
             context.ScriptableContext.ExecuteCommandBuffer(cmd); // 立即提交目标绑定，后面的 DrawRenderers 会使用这个状态。
             CommandBufferPool.Release(cmd); // 释放临时命令缓冲，避免每帧 GC。
             return true;
@@ -178,6 +179,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
 
             BurtAdditionalLightShadowUtility.BindAdditionalLightShadowAtlasIfValid(cmd, context.AdditionalLightShadowAtlasTarget);
+        }
+
+        public static void BindPerObjectShadowAtlasIfValid(BurtRenderGraphContext context, CommandBuffer cmd)
+        {
+            if (context == null || cmd == null)
+            {
+                return;
+            }
+
+            BurtPerObjectShadowUtility.BindPerObjectShadowAtlasIfValid(cmd, context.PerObjectShadowAtlasTarget);
         }
 
         public static DrawingSettings CreateDepthDrawingSettings(SortingSettings sortingSettings) // 创建 BurtRP 深度预写使用的 DrawingSettings。
@@ -2250,6 +2261,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
 
             BurtAdditionalLightShadowUtility.UploadAdditionalLightShadowReceiverGlobals(cmd, null, lightingData);
+            BurtPerObjectShadowUtility.ClearPerObjectShadowReceiverGlobals(cmd);
 
             renderContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);

@@ -228,7 +228,7 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
     float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
     float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
     BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
-    float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
+    float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
     BurtSurfaceData shadingSurfaceData = surfaceData;
 

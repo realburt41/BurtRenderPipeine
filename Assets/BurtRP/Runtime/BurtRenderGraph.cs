@@ -152,6 +152,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             {
                 resources.RegisterAdditionalLightShadowAtlasTexture();
             }
+
+            if (ShouldRegisterPerObjectShadowAtlas(request, asset))
+            {
+                resources.RegisterPerObjectShadowAtlasTexture();
+            }
         }
 
         private static bool ShouldRegisterPostProcessColor( // 定义判断当前 request 是否需要注册后处理中间颜色图的辅助函数。
@@ -171,6 +176,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
         private static bool ShouldRegisterAdditionalLightShadowAtlas(BurtRenderRequest request)
         {
             return BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(request);
+        }
+
+        private static bool ShouldRegisterPerObjectShadowAtlas(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(request, asset);
         }
 
         private static bool ShouldRegisterGBufferTargets( // 定义判断当前 request 是否需要注册 Deferred GBuffer 资源的辅助函数。

@@ -57,13 +57,13 @@ static const float BURT_SUBSURFACE_PROFILE_TYPE_SEPARABLE = 128.0f;
 
 float BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(BurtSurfaceData surfaceData)
 {
-    if (saturate(surfaceData.subsurfaceStrength) <= 0.0f)
+    if (saturate(surfaceData.subsurfaceStrength) <= 0.0f || BurtIsSubsurface3SPreIntegratedMode(surfaceData.subsurfaceScatteringMode))
     {
         return 0.0f;
     }
 
     float profileID = BurtClampSubsurfaceProfileIndex(surfaceData.subsurfaceProfileIndex);
-    float profileType = abs(BurtClampSubsurfaceScatteringMode(surfaceData.subsurfaceScatteringMode) - BURT_SUBSURFACE_SCATTERING_MODE_4S_SEPARABLE) < 0.5f
+    float profileType = BurtIsSubsurface4SSeparableMode(surfaceData.subsurfaceScatteringMode)
         ? BURT_SUBSURFACE_PROFILE_TYPE_SEPARABLE
         : BURT_SUBSURFACE_PROFILE_TYPE_BURLEY;
     return (profileType + profileID) / 255.0f;

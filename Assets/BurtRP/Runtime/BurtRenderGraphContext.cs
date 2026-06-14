@@ -464,6 +464,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle PerObjectShadowAtlasTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.PerObjectShadowAtlasName);
+                }
+
+                return ResourceRegistry.GetPerObjectShadowAtlas();
+            }
+        }
+
         public BurtRenderBufferHandle AdditionalLightBuffer => GetBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName);
 
         public BurtRenderBufferHandle TileLightCountBuffer => GetBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName);

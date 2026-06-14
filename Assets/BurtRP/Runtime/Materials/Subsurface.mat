@@ -98,7 +98,7 @@ Material:
     - _NormalScale: 0.334
     - _OcclusionStrength: 1
     - _Parallax: 0.02
-    - _Reflectance: 0.5
+    - _Reflectance: 0.42
     - _Smoothness: 1
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
@@ -107,9 +107,9 @@ Material:
     - _SubsurfaceDistortion: 0.369
     - _SubsurfacePower: 1.52
     - _SubsurfaceProfileIndex: 0
-    - _SubsurfaceScatteringMode: 1
+    - _SubsurfaceScatteringMode: 2
     - _SubsurfaceStrength: 1
-    - _SubsurfaceThickness: 0.283
+    - _SubsurfaceThickness: 0
     - _Surface: 0
     - _UVSec: 0
     - _ZTest: 4

@@ -113,6 +113,11 @@ namespace Burt.RenderPipeline
                 builder.ReadAdditionalLightShadowAtlas();
             }
 
+            if (BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(builder.Request, builder.Asset))
+            {
+                builder.ReadPerObjectShadowAtlas();
+            }
+
             if (readsExistingCameraColor)
             {
                 builder.ReadCameraColor();
@@ -156,6 +161,7 @@ namespace Burt.RenderPipeline
             BindRuntimeTiledLighting(context, cmd);
             UploadMainLightShadowReceiverGlobals(context, cmd, material);
             UploadAdditionalLightShadowReceiverGlobals(context, cmd, material);
+            UploadPerObjectShadowReceiverGlobals(context, cmd, material);
             UploadCameraReconstructionGlobals(context, cmd, material);
             BindSubsurfaceDiffuseLuminanceOutput(context, cmd, material);
             cmd.DrawProcedural(Matrix4x4.identity, material, shaderPassIndex, MeshTopology.Triangles, 3, 1);
@@ -549,6 +555,24 @@ namespace Burt.RenderPipeline
             var atlasTarget = context.AdditionalLightShadowAtlasTarget;
             var lightingData = context.Request != null ? context.Request.LightingData : null;
             BurtAdditionalLightShadowUtility.UploadAdditionalLightShadowReceiverGlobals(cmd, material, atlasTarget, lightingData);
+        }
+
+        private void UploadPerObjectShadowReceiverGlobals(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
+        {
+            if (cmd == null || material == null)
+            {
+                return;
+            }
+
+            if (context == null || !BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(context.Request, context.Asset))
+            {
+                BurtPerObjectShadowUtility.ClearPerObjectShadowReceiverGlobals(cmd, material);
+                return;
+            }
+
+            var atlasTarget = context.PerObjectShadowAtlasTarget;
+            var preparedData = BurtPerObjectShadowUtility.Prepare(context.Request);
+            BurtPerObjectShadowUtility.UploadPerObjectShadowReceiverGlobals(cmd, material, atlasTarget, preparedData);
         }
     }
 

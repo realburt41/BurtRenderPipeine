@@ -381,5 +381,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.autoGenerateMips = false;
             return descriptor;
         }
+
+        public static RenderTextureDescriptor CreatePerObjectShadowAtlasDescriptor(int width, int height)
+        {
+            var safeWidth = Mathf.Max(1, width);
+            var safeHeight = Mathf.Max(1, height);
+            var depthFormat = GraphicsFormatUtility.GetDepthStencilFormat(32, 0);
+            var descriptor = new RenderTextureDescriptor(safeWidth, safeHeight, GraphicsFormat.None, depthFormat);
+            descriptor.shadowSamplingMode = SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES2 ? ShadowSamplingMode.CompareDepths : ShadowSamplingMode.None;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            return descriptor;
+        }
     }
 }

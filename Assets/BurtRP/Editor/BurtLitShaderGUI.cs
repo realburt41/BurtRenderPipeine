@@ -21,9 +21,10 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent ClearCoatNormalMapLabel = new GUIContent("Clear Coat Normal Map");
         private static readonly GUIContent EmissionMapLabel = new GUIContent("Emission Map");
         private static readonly GUIContent ShadingModelLabel = new GUIContent("Shading Model");
-        private static readonly GUIContent SubsurfaceScatteringModeLabel = new GUIContent("SSS Algorithm", "Choose 5S Burley or 4S Separable screen-space skin scattering.");
+        private static readonly GUIContent SubsurfaceScatteringModeLabel = new GUIContent("SSS Algorithm", "Choose 5S Burley, 4S Separable screen-space skin scattering, or 3S Preintegrated skin shading.");
         private static readonly GUIContent SubsurfaceProfileLabel = new GUIContent("Subsurface Profile", "Drag a BurtSubsurfaceProfile asset here. The material stores the resolved profile slot for the shader.");
         private static readonly GUIContent SubsurfaceProfileIndexLabel = new GUIContent("Subsurface Profile Index", "Runtime slot used by the shader. 0 is the default profile, 1-7 are the pipeline profile list.");
+        private static readonly GUIContent Subsurface3SCurvatureLabel = new GUIContent("3S Curvature", "Controls the preintegrated 3S LUT curvature. Stored as inverse Subsurface Thickness.");
         private static readonly GUIContent DoubleSidedLabel = new GUIContent("Double Sided", "Render both front and back faces by switching culling off.");
         private static readonly GUIContent DoubleSidedNormalModeLabel = new GUIContent("Double Sided Normal Mode", "Back-face normal mode, matching XRender: None, Flip, or Mirror in tangent space.");
         private static readonly GUIContent SurfaceTypeLabel = new GUIContent("Surface Type");
@@ -35,7 +36,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent EnabledPassesLabel = new GUIContent("Enabled Passes");
         private static readonly string[] SurfaceTypeNames = { "Opaque", "Transparent" };
         private static readonly string[] DoubleSidedNormalModeNames = { "None", "Flip", "Mirror" };
-        private static readonly string[] SubsurfaceScatteringModeNames = { "5S Burley", "4S Separable" };
+        private static readonly string[] SubsurfaceScatteringModeNames = { "5S Burley", "4S Separable", "3S Preintegrated" };
         private const string SubsurfaceProfileGuidTag = "BurtSubsurfaceProfileGuid";
         private static bool showSurfaceOptions = true;
         private static bool showBaseInputs = true;
@@ -93,7 +94,7 @@ namespace Burt.RenderPipeline.Editor
             MigrateLegacyTransparentShader(material);
             DrawSurfaceOptions(material);
             DrawBaseInputs();
-            DrawPbrInputs();
+            DrawPbrInputs(material);
             DrawNormalInputs();
             DrawClearCoatInputs(material);
             DrawSubsurfaceInputs(material);
@@ -114,6 +115,7 @@ namespace Burt.RenderPipeline.Editor
 
             BurtShaderGUIUtility.UpdateEmissionFlag(material);
             ClampSubsurfaceScatteringMode(material);
+            ApplySubsurfaceMaterialDefaults(material);
             ApplySurfaceOptions(material);
         }
 
@@ -304,7 +306,7 @@ namespace Burt.RenderPipeline.Editor
             BurtShaderGUIUtility.EndSection();
         }
 
-        private void DrawPbrInputs()
+        private void DrawPbrInputs(Material material)
         {
             if (!BurtShaderGUIUtility.BeginSection(PbrMaskLabel, ref showPbrMaskInputs))
             {
@@ -314,17 +316,25 @@ namespace Burt.RenderPipeline.Editor
             DrawTexture(MaskMapLabel, maskMap);
             if (maskMap != null)
             {
-                BurtShaderGUIUtility.DrawChannelHint("Channels: R Metallic | G Occlusion | B Reserved | A Smoothness");
+                BurtShaderGUIUtility.DrawChannelHint(IsSubsurfaceShader(material)
+                    ? "Channels: G Occlusion | A Smoothness. R Metallic is ignored by Subsurface skin."
+                    : "Channels: R Metallic | G Occlusion | B Reserved | A Smoothness");
             }
 
-            BurtShaderGUIUtility.DrawSubHeader("Lit");
-            DrawProperty(metallic);
-            DrawProperty(anisotropy);
+            if (!IsSubsurfaceShader(material))
+            {
+                BurtShaderGUIUtility.DrawSubHeader("Lit");
+                DrawProperty(metallic);
+                DrawProperty(anisotropy);
+            }
 
             BurtShaderGUIUtility.DrawSubHeader("Shared");
             DrawProperty(smoothness);
             DrawProperty(occlusionStrength);
-            DrawProperty(reflectance);
+            if (!IsSubsurfaceShader(material))
+            {
+                DrawProperty(reflectance);
+            }
 
             if (maskMap != null)
             {
@@ -366,13 +376,29 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawSubsurfaceScatteringMode();
+            bool is3SMode = IsSubsurface3SMode();
             DrawProperty(subsurfaceStrength);
-            DrawProperty(subsurfaceThickness);
-            DrawProperty(subsurfacePower);
-            DrawProperty(subsurfaceDistortion);
-            DrawProperty(subsurfaceAmbient);
+            if (is3SMode)
+            {
+                DrawSubsurface3SCurvature();
+            }
+            else
+            {
+                DrawProperty(subsurfaceThickness);
+            }
+
+            if (!is3SMode)
+            {
+                DrawProperty(subsurfacePower);
+                DrawProperty(subsurfaceDistortion);
+                DrawProperty(subsurfaceAmbient);
+            }
+
             DrawSubsurfaceProfilePicker();
-            DrawProperty(subsurfaceTint);
+            if (!is3SMode)
+            {
+                DrawProperty(subsurfaceTint);
+            }
             EditorGUILayout.HelpBox("Materials pick a BurtSubsurfaceProfile asset. BurtRP resolves it to the pipeline profile slots used by deferred SSS and profile-driven skin specular.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
         }
@@ -399,6 +425,32 @@ namespace Burt.RenderPipeline.Editor
             }
         }
 
+        private void DrawSubsurface3SCurvature()
+        {
+            if (subsurfaceThickness == null)
+            {
+                return;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUI.showMixedValue = subsurfaceThickness.hasMixedValue;
+            float curvature = 1.0f - Mathf.Clamp01(subsurfaceThickness.floatValue);
+            curvature = EditorGUILayout.Slider(Subsurface3SCurvatureLabel, curvature, 0.0f, 1.0f);
+            EditorGUI.showMixedValue = false;
+            if (EditorGUI.EndChangeCheck())
+            {
+                materialEditor.RegisterPropertyChangeUndo(Subsurface3SCurvatureLabel.text);
+                subsurfaceThickness.floatValue = 1.0f - Mathf.Clamp01(curvature);
+            }
+        }
+
+        private bool IsSubsurface3SMode()
+        {
+            return subsurfaceScatteringMode != null &&
+                !subsurfaceScatteringMode.hasMixedValue &&
+                Mathf.RoundToInt(subsurfaceScatteringMode.floatValue) == 2;
+        }
+
         private static void ClampSubsurfaceScatteringMode(Material material)
         {
             if (material == null || !material.HasProperty("_SubsurfaceScatteringMode"))
@@ -407,6 +459,29 @@ namespace Burt.RenderPipeline.Editor
             }
 
             material.SetFloat("_SubsurfaceScatteringMode", Mathf.Clamp(Mathf.RoundToInt(material.GetFloat("_SubsurfaceScatteringMode")), 0, SubsurfaceScatteringModeNames.Length - 1));
+        }
+
+        private static void ApplySubsurfaceMaterialDefaults(Material material)
+        {
+            if (!IsSubsurfaceShader(material))
+            {
+                return;
+            }
+
+            if (material.HasProperty("_Metallic"))
+            {
+                material.SetFloat("_Metallic", 0.0f);
+            }
+
+            if (material.HasProperty("_Anisotropy"))
+            {
+                material.SetFloat("_Anisotropy", 0.0f);
+            }
+
+            if (material.HasProperty("_Reflectance"))
+            {
+                material.SetFloat("_Reflectance", 0.42f);
+            }
         }
 
         private void DrawSubsurfaceProfilePicker()

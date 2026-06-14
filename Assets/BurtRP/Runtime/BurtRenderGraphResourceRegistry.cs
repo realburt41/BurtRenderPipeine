@@ -214,6 +214,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int AdditionalLightShadowAtlasId = Shader.PropertyToID(AdditionalLightShadowAtlasShaderName);
 
+        public const string PerObjectShadowAtlasName = "PerObjectShadowAtlas";
+
+        public const string PerObjectShadowAtlasShaderName = "_BurtPerObjectShadowAtlas";
+
+        public static readonly int PerObjectShadowAtlasId = Shader.PropertyToID(PerObjectShadowAtlasShaderName);
+
         public const string LightingGlobalsName = "LightingGlobals"; // 定义灯光全局状态的逻辑资源名，用来让 Setup Lighting 和 Shading Pass 建立依赖。
 
         public const string ShadowGlobalsName = "ShadowGlobals"; // 定义阴影全局状态的逻辑资源名，用来描述 shadow matrix、shadow strength 等 shader 全局变量。
@@ -972,6 +978,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetAdditionalLightShadowAtlas()
         {
             return GetRenderTarget(AdditionalLightShadowAtlasName);
+        }
+
+        public BurtRenderTargetHandle RegisterPerObjectShadowAtlasTexture()
+        {
+            return RegisterPerObjectShadowAtlas(new RenderTargetIdentifier(PerObjectShadowAtlasId));
+        }
+
+        public BurtRenderTargetHandle RegisterPerObjectShadowAtlas(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(PerObjectShadowAtlasName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetPerObjectShadowAtlas()
+        {
+            return GetRenderTarget(PerObjectShadowAtlasName);
         }
 
         private void ReleaseAllInternalBuffers() // Releases graph-owned buffers before the registry is reset.

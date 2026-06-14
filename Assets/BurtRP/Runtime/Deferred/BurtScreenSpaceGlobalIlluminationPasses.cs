@@ -2369,7 +2369,7 @@ namespace Burt.RenderPipeline
 
             return IsScreenSpaceGlobalIlluminationDebugMode(BurtShadingDebugSettings.Mode) &&
                 !IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(BurtShadingDebugSettings.Mode) &&
-                BurtPostProcessUtility.HasActiveTemporalAAVolume();
+                BurtPostProcessUtility.HasActiveTemporalAASource(request);
         }
 
         private static void ApplyScreenSpaceGlobalIlluminationQualityPreset(

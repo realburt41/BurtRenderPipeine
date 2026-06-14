@@ -183,6 +183,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Camera Depth"; // 已有全屏深度调试。
                 case BurtShadingDebugMode.MainLightShadow:
                     return "Main Light Shadow"; // 已有主光阴影图调试。
+                case BurtShadingDebugMode.PerObjectShadowAtlas:
+                    return "Per Object Shadow Atlas";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw:
                     return "SSAO Raw";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal:
@@ -227,26 +229,12 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSS Setup";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
                     return "SSS Mask";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCoarseMask:
-                    return "SSS Coarse Mask";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:
                     return "SSS Blur";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine:
                     return "SSS Combine";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness:
-                    return "SSS Thickness";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex:
-                    return "SSS Profile Index";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTint:
-                    return "SSS Profile Tint";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintRaw:
                     return "SSS Profile Tint Raw";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileSurfaceAlbedo:
-                    return "SSS Profile Surface Albedo";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileMeanFreePath:
-                    return "SSS Profile Mean Free Path";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedLighting:
-                    return "SSS Profile Tinted Lighting";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal:
                     return "SSS Profile Tinted Final";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurAlpha:
@@ -255,74 +243,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSS Blur Radius";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurDelta:
                     return "SSS Blur Delta";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableSampleGate:
-                    return "SSS 4S Sample Gate";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontalDelta:
-                    return "SSS 4S Horizontal Delta";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurNormalized:
-                    return "SSS Blur Normalized";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurSignedDelta:
-                    return "SSS Blur Signed Delta";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetupDiffuse:
-                    return "SSS Setup Diffuse";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontal:
-                    return "SSS 4S Horizontal";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontalDepth:
-                    return "SSS 4S Horizontal Depth";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceXRenderCombineFactors:
-                    return "SSS XRender Combine Factors";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileKernel:
-                    return "SSS Profile Kernel";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSSSColorDelta:
-                    return "SSS SSSColor Delta";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileKernelColor:
-                    return "SSS Profile Kernel RGB";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceFinalDelta:
-                    return "SSS Final Delta";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceFinalDiffuseDelta:
-                    return "SSS Final Diffuse Delta";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSSSColorSignedDelta:
-                    return "SSS SSSColor Signed Delta";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedDelta:
-                    return "SSS Profile Tinted Delta";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableValidity:
                     return "SSS 4S Validity";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableIO:
                     return "SSS 4S IO";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableStages:
-                    return "SSS 4S Stages";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableChain:
                     return "SSS 4S Chain";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceXRenderCombineTriplet:
-                    return "SSS XRender Combine Triplet";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm:
                     return "SSS Algorithm";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission:
-                    return "SSS Transmission";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse:
-                    return "SSS Diffuse";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular:
-                    return "SSS Specular";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceColor:
-                    return "SSS Source Color";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceAlpha:
-                    return "SSS Source Alpha";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBaseColor:
-                    return "SSS Base Color";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceEmission:
-                    return "SSS Emission";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuseWithBaseColor:
-                    return "SSS Diffuse Lighting";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecularRaw:
-                    return "SSS Specular Raw";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombineDelta:
-                    return "SSS Combine Delta";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceStability:
-                    return "SSS Stability";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount:
-                    return "SSS Sample Count";
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceVariance:
-                    return "SSS Variance";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory:
                     return "SSS History";
                 case BurtShadingDebugMode.BloomPrefilter:
@@ -716,7 +644,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ShadowPCSSRadius, // 当前像素的 PCSS 半影半径。
             BurtShadingDebugMode.ShadowReceiverDepthDelta, // receiver / shadow map 深度差，用来调 bias。
             BurtShadingDebugMode.ShadowPCSSBlockerFraction, // PCSS blocker search 命中的 blocker 占比。
-            BurtShadingDebugMode.MainLightShadow // 主光 shadow map 全屏 Debug。
+            BurtShadingDebugMode.MainLightShadow, // 主光 shadow map 全屏 Debug。
+            BurtShadingDebugMode.PerObjectShadowAtlas
         });
 
         public static readonly BurtShadingDebugGroup Fullscreen = new BurtShadingDebugGroup("Fullscreen / Render Data", "Fullscreen", new[] // 非后处理的全屏 Render Data 入口。
@@ -859,54 +788,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         {
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceMask,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceCoarseMask,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTint,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintRaw,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileSurfaceAlbedo,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileMeanFreePath,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedLighting,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurAlpha,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurRadius,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurDelta,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableSampleGate,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontalDelta,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurNormalized,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurSignedDelta,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSetupDiffuse,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontal,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontalDepth,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceXRenderCombineFactors,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileKernel,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSSSColorDelta,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileKernelColor,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceFinalDelta,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceFinalDiffuseDelta,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSSSColorSignedDelta,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedDelta,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableValidity,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableIO,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableStages,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableChain,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceXRenderCombineTriplet,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceColor,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceAlpha,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceBaseColor,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceEmission,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuseWithBaseColor,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecularRaw,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceCombineDelta,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceStability,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount,
-            BurtShadingDebugMode.ScreenSpaceSubsurfaceVariance,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory
         });
 

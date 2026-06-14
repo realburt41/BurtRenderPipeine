@@ -6,6 +6,7 @@
 
 UNITY_DECLARE_SHADOWMAP(_BurtMainLightShadowMap);
 UNITY_DECLARE_SHADOWMAP(_BurtAdditionalLightShadowAtlas);
+UNITY_DECLARE_SHADOWMAP(_BurtPerObjectShadowAtlas);
 
 #define BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES 4
 #define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT 32
@@ -13,6 +14,7 @@ UNITY_DECLARE_SHADOWMAP(_BurtAdditionalLightShadowAtlas);
 #define BURT_ADDITIONAL_LIGHT_SHADOW_POINT_FACE_COUNT 6
 #define BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_POINT 1.0f
 #define BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_SPOT 2.0f
+#define BURT_PER_OBJECT_SHADOW_MAX_SLICES 8
 
 float4x4 _BurtMainLightWorldToShadow;
 float4 _BurtMainLightWorldToShadowRow0;
@@ -45,6 +47,15 @@ float4 _BurtAdditionalLightShadowSliceRows2[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLI
 float4 _BurtAdditionalLightShadowSliceRows3[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
 float4 _BurtAdditionalLightShadowParams;
 float4 _BurtAdditionalLightShadowTexelSize;
+
+float4 _BurtPerObjectShadowRows0[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
+float4 _BurtPerObjectShadowRows1[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
+float4 _BurtPerObjectShadowRows2[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
+float4 _BurtPerObjectShadowRows3[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
+float4 _BurtPerObjectShadowAtlasRects[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
+float4 _BurtPerObjectShadowSliceParams[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
+float4 _BurtPerObjectShadowParams;
+float4 _BurtPerObjectShadowTexelSize;
 
 // x: PCSS enabled, y: light size in texels, z: blocker search radius in texels, w: max filter radius in texels.
 float4 _BurtMainLightShadowPCSSParams;
@@ -761,6 +772,108 @@ float3 BurtProjectWorldToMainLightShadowCascade(float3 positionWS, int cascadeIn
     return shadowCoord.xyz / safeW;
 }
 
+int BurtGetPerObjectShadowSliceCount()
+{
+    int sliceCount = (int)(_BurtPerObjectShadowParams.x + 0.5f);
+    return min(max(sliceCount, 0), BURT_PER_OBJECT_SHADOW_MAX_SLICES);
+}
+
+float4 BurtTransformWorldToPerObjectShadowSlice(float4 positionWS, int sliceIndex)
+{
+    return float4(
+        dot(_BurtPerObjectShadowRows0[sliceIndex], positionWS),
+        dot(_BurtPerObjectShadowRows1[sliceIndex], positionWS),
+        dot(_BurtPerObjectShadowRows2[sliceIndex], positionWS),
+        dot(_BurtPerObjectShadowRows3[sliceIndex], positionWS));
+}
+
+float2 BurtGetPerObjectShadowAtlasTexelMargin(int sliceIndex)
+{
+    float4 atlasRect = _BurtPerObjectShadowAtlasRects[sliceIndex];
+    float2 rectSize = max(atlasRect.zw - atlasRect.xy, max(_BurtPerObjectShadowTexelSize.xy, float2(0.0f, 0.0f)));
+    return min(max(_BurtPerObjectShadowTexelSize.xy, float2(0.0f, 0.0f)), rectSize * 0.45f);
+}
+
+bool BurtIsInsidePerObjectShadowAtlas(float3 shadowCoord, int sliceIndex)
+{
+    float4 atlasRect = _BurtPerObjectShadowAtlasRects[sliceIndex];
+    float2 texelMargin = BurtGetPerObjectShadowAtlasTexelMargin(sliceIndex);
+    bool outsideShadowMap = shadowCoord.x <= atlasRect.x + texelMargin.x
+        || shadowCoord.x >= atlasRect.z - texelMargin.x
+        || shadowCoord.y <= atlasRect.y + texelMargin.y
+        || shadowCoord.y >= atlasRect.w - texelMargin.y
+        || shadowCoord.z <= 0.0f
+        || shadowCoord.z >= 1.0f;
+
+    return !outsideShadowMap;
+}
+
+float2 BurtClampPerObjectShadowUVToRect(float2 shadowUV, int sliceIndex)
+{
+    float4 atlasRect = _BurtPerObjectShadowAtlasRects[sliceIndex];
+    float2 texelMargin = BurtGetPerObjectShadowAtlasTexelMargin(sliceIndex);
+    return clamp(shadowUV, atlasRect.xy + texelMargin, atlasRect.zw - texelMargin);
+}
+
+float3 BurtApplyPerObjectShadowReceiverBias(float3 positionWS, float3 normalWS, int sliceIndex)
+{
+    float3 safeNormalWS = BurtSafeNormalize(normalWS);
+    float3 lightDirectionWS = BurtSafeNormalize(_BurtMainLightDirection.xyz);
+    float4 sliceParams = _BurtPerObjectShadowSliceParams[sliceIndex];
+    float normalBias = max(sliceParams.z, 0.0f);
+    if (normalBias <= 0.0f)
+    {
+        return positionWS;
+    }
+
+    float noL = saturate(dot(safeNormalWS, lightDirectionWS));
+    return positionWS + safeNormalWS * normalBias * (1.0f - noL);
+}
+
+float BurtSamplePerObjectShadowSlice(float3 positionWS, float3 normalWS, int sliceIndex)
+{
+    float3 biasedPositionWS = BurtApplyPerObjectShadowReceiverBias(positionWS, normalWS, sliceIndex);
+    float4 shadowCoord = BurtTransformWorldToPerObjectShadowSlice(float4(biasedPositionWS, 1.0f), sliceIndex);
+    float safeW = abs(shadowCoord.w) > 0.00001f ? shadowCoord.w : (shadowCoord.w < 0.0f ? -0.00001f : 0.00001f);
+    float3 projectedShadowCoord = shadowCoord.xyz / safeW;
+    if (!BurtIsInsidePerObjectShadowAtlas(projectedShadowCoord, sliceIndex))
+    {
+        return 1.0f;
+    }
+
+    float4 sliceParams = _BurtPerObjectShadowSliceParams[sliceIndex];
+    projectedShadowCoord.xy = BurtClampPerObjectShadowUVToRect(projectedShadowCoord.xy, sliceIndex);
+    projectedShadowCoord.z = saturate(projectedShadowCoord.z + max(sliceParams.y, 0.0f));
+    float rawShadow = UNITY_SAMPLE_SHADOW(_BurtPerObjectShadowAtlas, projectedShadowCoord);
+    return BurtApplyShadowStrength(rawShadow, sliceParams.x);
+}
+
+float BurtSamplePerObjectShadow(float3 positionWS, float3 normalWS)
+{
+    int sliceCount = BurtGetPerObjectShadowSliceCount();
+    if (sliceCount <= 0)
+    {
+        return 1.0f;
+    }
+
+    float visibility = 1.0f;
+    UNITY_UNROLL
+    for (int sliceIndex = 0; sliceIndex < BURT_PER_OBJECT_SHADOW_MAX_SLICES; sliceIndex++)
+    {
+        if (sliceIndex < sliceCount)
+        {
+            visibility = min(visibility, BurtSamplePerObjectShadowSlice(positionWS, normalWS, sliceIndex));
+        }
+    }
+
+    return visibility;
+}
+
+float BurtSamplePerObjectShadow(float3 positionWS)
+{
+    return BurtSamplePerObjectShadow(positionWS, _BurtMainLightDirection.xyz);
+}
+
 float BurtGetMainLightShadowPCSSRadiusDebug(float3 positionWS)
 {
     if (_BurtMainLightShadowPCSSParams.x <= 0.5f)
@@ -877,7 +990,7 @@ float BurtGetMainLightShadowReceiverDepthDeltaDebug(float3 positionWS, float3 no
     return lerp(0.5f, deltaDebug, litWeight);
 }
 
-float BurtSampleMainLightShadow(float3 positionWS)
+float BurtSampleMainLightShadow(float3 positionWS, float3 normalWS)
 {
     if (_BurtMainLightShadowStrength <= 0.0001f)
     {
@@ -902,7 +1015,13 @@ float BurtSampleMainLightShadow(float3 positionWS)
     }
 
     rawShadow = lerp(rawShadow, 1.0f, BurtCalculateMainLightShadowFade(positionWS, cascadeIndex));
+    rawShadow = min(rawShadow, BurtSamplePerObjectShadow(positionWS, normalWS));
     return BurtApplyShadowStrength(rawShadow, _BurtMainLightShadowStrength);
+}
+
+float BurtSampleMainLightShadow(float3 positionWS)
+{
+    return BurtSampleMainLightShadow(positionWS, _BurtMainLightDirection.xyz);
 }
 
 float BurtSampleMainLightShadow(float4 shadowCoord)

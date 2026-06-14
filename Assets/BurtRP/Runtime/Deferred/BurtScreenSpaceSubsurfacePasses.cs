@@ -1787,6 +1787,7 @@ namespace Burt.RenderPipeline
         private const string SubsurfaceMaterialShaderName = "BurtRP/Subsurface";
         private const int SubsurfaceScatteringMode5SBurley = 0;
         private const int SubsurfaceScatteringMode4SSeparable = 1;
+        private const int SubsurfaceScatteringMode3SPreintegrated = 2;
         private static readonly int SubsurfaceStrengthMaterialId = Shader.PropertyToID("_SubsurfaceStrength");
         private static readonly int SubsurfaceProfileIndexMaterialId = Shader.PropertyToID("_SubsurfaceProfileIndex");
         private static readonly int SubsurfaceScatteringModeMaterialId = Shader.PropertyToID("_SubsurfaceScatteringMode");
@@ -2100,6 +2101,11 @@ namespace Burt.RenderPipeline
             }
 
             scatteringMode = ResolveSubsurfaceScatteringMode(material);
+            if (scatteringMode == SubsurfaceScatteringMode3SPreintegrated)
+            {
+                return false;
+            }
+
             if (scatteringMode == SubsurfaceScatteringMode4SSeparable)
             {
                 return material.GetFloat(SubsurfaceStrengthMaterialId) > 0f;
@@ -2119,7 +2125,7 @@ namespace Burt.RenderPipeline
                 return SubsurfaceScatteringMode5SBurley;
             }
 
-            return Mathf.Clamp(Mathf.RoundToInt(material.GetFloat(SubsurfaceScatteringModeMaterialId)), SubsurfaceScatteringMode5SBurley, SubsurfaceScatteringMode4SSeparable);
+            return Mathf.Clamp(Mathf.RoundToInt(material.GetFloat(SubsurfaceScatteringModeMaterialId)), SubsurfaceScatteringMode5SBurley, SubsurfaceScatteringMode3SPreintegrated);
         }
 
         private static float ResolveMaterialProfileMinStrength(BurtRenderPipelineAsset asset, int profileIndex)

@@ -42,6 +42,14 @@ namespace Burt.RenderPipeline
         DontClear = 3
     }
 
+    public enum BurtCameraAntialiasingMode
+    {
+        None = 0,
+
+        [InspectorName("Temporal Anti-aliasing (TAA)")]
+        TemporalAntialiasing = 1
+    }
+
     // 限制同一个 GameObject 上只能挂一个 BurtCameraData。
     [DisallowMultipleComponent]
 
@@ -81,6 +89,8 @@ namespace Burt.RenderPipeline
         // 控制 SolidColor 模式下使用的清屏颜色。
         [SerializeField] private Color clearColor = new(0.02f, 0.02f, 0.025f, 1f);
 
+        [SerializeField] private BurtCameraAntialiasingMode antialiasingMode = BurtCameraAntialiasingMode.None;
+
         // 控制是否把 BurtRP 的清屏模式和清屏颜色反向同步到 Unity 原生 Camera 组件，方便 SceneView、Camera Preview 和第三方工具看到一致配置。
         [SerializeField] private bool syncClearSettingsToUnityCamera = true;
 
@@ -119,6 +129,8 @@ namespace Burt.RenderPipeline
 
         // 暴露只读属性，让渲染器可以读取 clearColor，用于纯色清屏。
         public Color ClearColor => clearColor;
+
+        public BurtCameraAntialiasingMode AntialiasingMode => antialiasingMode;
 
         // Unity 在组件启用时调用这个函数，适合初始化缓存和同步相机深度。
         private void OnEnable()

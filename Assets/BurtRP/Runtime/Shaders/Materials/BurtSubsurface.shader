@@ -20,7 +20,7 @@ Shader "BurtRP/Subsurface"
         _NormalScale ("Normal Scale", Range(0, 2)) = 1
 
         // 定义 XRender / Frostbite 风格的介质反射率，0.5 会映射到常见非金属 F0=0.04。
-        _Reflectance ("Reflectance", Range(0, 1)) = 0.5
+        [HideInInspector] _Reflectance ("Reflectance", Range(0, 1)) = 0.42
 
         // 定义金属度，0 表示非金属介质，1 表示金属材质。
         _Metallic ("Metallic", Range(0, 1)) = 0
@@ -37,7 +37,7 @@ Shader "BurtRP/Subsurface"
         _SubsurfacePower ("Subsurface Power", Range(0.5, 8)) = 3
         _SubsurfaceDistortion ("Subsurface Distortion", Range(0, 1)) = 0.35
         _SubsurfaceAmbient ("Subsurface Ambient", Range(0, 1)) = 0.35
-        [Enum(5S Burley, 0, 4S Separable, 1)] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
+        [Enum(5S Burley, 0, 4S Separable, 1, 3S Preintegrated, 2)] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
         _SubsurfaceProfileIndex ("Subsurface Profile Index", Range(0, 7)) = 0
         [HDR]_SubsurfaceTint ("Subsurface Tint", Color) = (1, 0.45, 0.32, 1)
 

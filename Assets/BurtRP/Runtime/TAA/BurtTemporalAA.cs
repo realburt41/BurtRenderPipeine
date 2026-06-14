@@ -281,6 +281,7 @@ namespace Burt.RenderPipeline
         private const int HaltonSequenceLength = 1024;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
+        private const int HistoryLayoutVersion = 2;
 
         private sealed class CameraState
         {
@@ -313,6 +314,7 @@ namespace Burt.RenderPipeline
             public RenderTextureDescriptor DepthDescriptor;
             public RenderTextureDescriptor ConfidenceDescriptor;
             public RenderTextureDescriptor AntiFlickerDescriptor;
+            public int HistoryLayoutVersion;
             public bool HasValidHistory;
             public bool HasPreviousCameraState;
             public string LastInvalidationReason = "NeverAllocated";
@@ -429,7 +431,8 @@ namespace Burt.RenderPipeline
             var depthMatches = state.DepthHistory != null && Matches(state.DepthDescriptor, depthDescriptor);
             var confidenceMatches = state.ConfidenceHistory != null && Matches(state.ConfidenceDescriptor, confidenceDescriptor);
             var antiFlickerMatches = state.AntiFlickerHistory != null && Matches(state.AntiFlickerDescriptor, antiFlickerDescriptor);
-            var descriptorsMatch = colorMatches && depthMatches && confidenceMatches && antiFlickerMatches;
+            var layoutMatches = state.HistoryLayoutVersion == HistoryLayoutVersion;
+            var descriptorsMatch = colorMatches && depthMatches && confidenceMatches && antiFlickerMatches && layoutMatches;
             var targetTextureId = GetTargetTextureId(camera);
             GetTargetSize(camera, out var targetWidth, out var targetHeight);
             var renderScale = CalculateRenderScale(camera, colorDescriptor);
@@ -445,6 +448,10 @@ namespace Burt.RenderPipeline
                 postProcessSignature1,
                 projectionMatrix,
                 descriptorsMatch);
+            if (!layoutMatches && string.IsNullOrEmpty(invalidationReason))
+            {
+                invalidationReason = "HistoryLayoutChanged";
+            }
             state.CurrentRendererMode = rendererMode;
 
             if (!descriptorsMatch)
@@ -513,6 +520,7 @@ namespace Burt.RenderPipeline
             state.PreviousViewProjectionMatrix = temporalAA.CurrentViewProjectionMatrix;
             state.PreviousNonJitteredViewProjectionMatrix = temporalAA.CurrentNonJitteredViewProjectionMatrix;
             state.PreviousNonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
+            state.HistoryLayoutVersion = HistoryLayoutVersion;
             state.HasPreviousCameraState = true;
         }
 
@@ -1076,6 +1084,7 @@ namespace Burt.RenderPipeline
             state.DepthHistory = null;
             state.ConfidenceHistory = null;
             state.AntiFlickerHistory = null;
+            state.HistoryLayoutVersion = 0;
             state.HasValidHistory = false;
             state.FirstValidFrameIndex = 0;
         }

@@ -12,6 +12,7 @@ sampler2D _GradientMap;
 
 // 定义 XRender / Frostbite 风格的默认 reflectance，0.5 会映射到常见非金属 F0=0.04。
 static const float BURT_INPUT_DEFAULT_REFLECTANCE = 0.5f;
+static const float BURT_SUBSURFACE_FIXED_REFLECTANCE = 0.42f;
 
 // Deferred shading model ids. 0 keeps old Default Lit behavior; 1 is the first experimental Hair path.
 static const float BURT_SHADING_MODEL_DEFAULT_LIT = 0.0f;
@@ -31,6 +32,7 @@ static const float BURT_SUBSURFACE_PROFILE_COUNT = 8.0f;
 static const float BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX = 0.0f;
 static const float BURT_SUBSURFACE_SCATTERING_MODE_5S_BURLEY = 0.0f;
 static const float BURT_SUBSURFACE_SCATTERING_MODE_4S_SEPARABLE = 1.0f;
+static const float BURT_SUBSURFACE_SCATTERING_MODE_3S_PREINTEGRATED = 2.0f;
 static const float BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE = BURT_SUBSURFACE_SCATTERING_MODE_5S_BURLEY;
 
 float BurtResolveSurfaceShadingModel(float shadingModelID)
@@ -130,7 +132,22 @@ float BurtClampSubsurfaceProfileIndex(float profileIndex)
 
 float BurtClampSubsurfaceScatteringMode(float scatteringMode)
 {
-    return clamp(floor(scatteringMode + 0.5f), BURT_SUBSURFACE_SCATTERING_MODE_5S_BURLEY, BURT_SUBSURFACE_SCATTERING_MODE_4S_SEPARABLE);
+    return clamp(floor(scatteringMode + 0.5f), BURT_SUBSURFACE_SCATTERING_MODE_5S_BURLEY, BURT_SUBSURFACE_SCATTERING_MODE_3S_PREINTEGRATED);
+}
+
+bool BurtIsSubsurface3SPreIntegratedMode(float scatteringMode)
+{
+    return abs(BurtClampSubsurfaceScatteringMode(scatteringMode) - BURT_SUBSURFACE_SCATTERING_MODE_3S_PREINTEGRATED) < 0.5f;
+}
+
+bool BurtIsSubsurface4SSeparableMode(float scatteringMode)
+{
+    return abs(BurtClampSubsurfaceScatteringMode(scatteringMode) - BURT_SUBSURFACE_SCATTERING_MODE_4S_SEPARABLE) < 0.5f;
+}
+
+bool BurtIsSubsurface5SBurleyMode(float scatteringMode)
+{
+    return abs(BurtClampSubsurfaceScatteringMode(scatteringMode) - BURT_SUBSURFACE_SCATTERING_MODE_5S_BURLEY) < 0.5f;
 }
 
 void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
@@ -363,6 +380,7 @@ BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(
     surfaceData.subsurfaceTint = max(subsurfaceTint, float3(0.0f, 0.0f, 0.0f));
     surfaceData.subsurfaceProfileIndex = BurtClampSubsurfaceProfileIndex(subsurfaceProfileIndex);
     surfaceData.subsurfaceScatteringMode = BurtClampSubsurfaceScatteringMode(subsurfaceScatteringMode);
+    surfaceData.reflectance = BURT_SUBSURFACE_FIXED_REFLECTANCE;
     surfaceData.shadingModelID = BURT_SHADING_MODEL_SUBSURFACE;
     return surfaceData;
 }

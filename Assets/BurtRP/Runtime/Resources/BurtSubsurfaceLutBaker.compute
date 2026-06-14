@@ -1,0 +1,216 @@
+#pragma kernel GeneratePreIntegratedLut
+#pragma kernel GenerateSHLut
+
+Texture2D<float4> _BurtSubsurfaceProfileParamLut;
+RWTexture2DArray<float4> _BurtSubsurfacePreIntegratedLutRW;
+RWTexture2DArray<float4> _BurtSubsurfaceSHLutRW;
+
+int _BurtSubsurfaceLutProfileIndex;
+float4 _BurtSubsurfacePreIntegratedLutSize;
+float4 _BurtSubsurfaceSHLutSize;
+float4 _BurtSubsurfaceProfileParamLutSize;
+
+#define BURT_PI 3.14159265359
+#define BURT_TWO_PI 6.28318530718
+#define BURT_FOUR_PI 12.56637061436
+#define BURT_HALF_PI 1.57079632679
+#define BURT_INV_HALF_PI 0.63661977236
+#define BURT_SURFACE_ALBEDO_OFFSET 0
+#define BURT_MEAN_FREE_PATH_OFFSET 1
+#define BURT_TINT_OFFSET 2
+#define BURT_DMFP_DECODE 500.0
+#define BURT_WORLD_UNIT_SCALE_DECODE 50.0
+#define BURT_CM_TO_MM 10.0
+#define BURT_SH_INTEGRATION_STEP 0.005
+
+float4 BurtFetchProfileParam(int sampleIndex, int profileIndex)
+{
+    int width = max((int)_BurtSubsurfaceProfileParamLutSize.x, 1);
+    int height = max((int)_BurtSubsurfaceProfileParamLutSize.y, 1);
+    int x = clamp(sampleIndex, 0, width - 1);
+    int y = clamp(profileIndex, 0, height - 1);
+    return _BurtSubsurfaceProfileParamLut.Load(int3(x, y, 0));
+}
+
+float3 BurtGetSurfaceAlbedo(int profileIndex)
+{
+    return max(BurtFetchProfileParam(BURT_SURFACE_ALBEDO_OFFSET, profileIndex).rgb, float3(0.009, 0.009, 0.009));
+}
+
+float3 BurtGetEffectiveDiffuseMeanFreePath(int profileIndex)
+{
+    float3 encodedDiffuseMeanFreePath = max(BurtFetchProfileParam(BURT_MEAN_FREE_PATH_OFFSET, profileIndex).rgb, float3(0.0, 0.0, 0.0));
+    float encodedWorldUnitScale = max(BurtFetchProfileParam(BURT_TINT_OFFSET, profileIndex).a, 0.0);
+    float worldUnitScaleInMillimeters = encodedWorldUnitScale * BURT_WORLD_UNIT_SCALE_DECODE * BURT_CM_TO_MM;
+    return max(0.01 * encodedDiffuseMeanFreePath * BURT_DMFP_DECODE * worldUnitScaleInMillimeters, float3(0.01, 0.01, 0.01));
+}
+
+float3 BurtSearchLightDiffuseScalingFactor(float3 surfaceAlbedo)
+{
+    float3 value = surfaceAlbedo - 0.33;
+    return 3.5 + 100.0 * value * value * value * value;
+}
+
+float3 BurtBurleyUnit(float angle, float3 sharpness)
+{
+    return exp(sharpness * angle);
+}
+
+float3 BurtIntegralCosineWithExponent(float angle, float sinAngle, float cosAngle, float3 sharpness)
+{
+    return (sinAngle + sharpness * cosAngle) * BurtBurleyUnit(angle, sharpness) / (1.0 + sharpness * sharpness);
+}
+
+float3 BurtIntegralSineWithExponent(float angle, float sinAngle, float cosAngle, float3 sharpness)
+{
+    return (-cosAngle + sharpness * sinAngle) * BurtBurleyUnit(angle, sharpness) / (1.0 + sharpness * sharpness);
+}
+
+float3 BurtIntegralBurleyUnit(float angle, float3 sharpness)
+{
+    return BurtBurleyUnit(angle, sharpness) / sharpness;
+}
+
+float3 BurtIntegralBurleyDiffusion(float angle, float3 burleyA, float3 burleyB)
+{
+    return BurtIntegralBurleyUnit(angle, burleyA) + BurtIntegralBurleyUnit(angle, burleyB);
+}
+
+float3 BurtApproximationRingIntegralOfBurleyDiffusion(
+    float angle,
+    float sinAngle,
+    float cosAngle,
+    float theta,
+    float cosTheta,
+    float sinTheta,
+    float3 burleyA,
+    float3 burleyB)
+{
+    return cosTheta * (
+            BurtIntegralCosineWithExponent(angle, sinAngle, cosAngle, burleyA) +
+            BurtIntegralCosineWithExponent(angle, sinAngle, cosAngle, burleyB)) -
+        sinTheta * (
+            BurtIntegralSineWithExponent(angle, sinAngle, cosAngle, burleyA) +
+            BurtIntegralSineWithExponent(angle, sinAngle, cosAngle, burleyB));
+}
+
+float3 BurtEvaluatePreIntegratedDiffuse(float rawNoL, float curvature, float3 surfaceAlbedo, float3 diffuseMeanFreePath)
+{
+    float cosTheta = clamp(rawNoL, -1.0, 1.0);
+    float theta = acos(cosTheta);
+    float sinTheta = sin(theta);
+    float3 s3d = BurtSearchLightDiffuseScalingFactor(surfaceAlbedo);
+    float3 burleyA = (-s3d / (max(diffuseMeanFreePath, float3(0.01, 0.01, 0.01)) * max(curvature, 0.0001))) * (2.0 / BURT_PI);
+    float3 burleyB = burleyA / 3.0;
+    float3 integralOnRing = 2.0 * (BurtIntegralBurleyDiffusion(BURT_PI, burleyA, burleyB) - BurtIntegralBurleyDiffusion(0.0, burleyA, burleyB));
+
+    float3 integralOnNegativeAngle;
+    float3 integralOnPositiveAngle;
+    if (theta <= BURT_HALF_PI)
+    {
+        float angleStart = -(BURT_HALF_PI + theta);
+        integralOnNegativeAngle =
+            BurtApproximationRingIntegralOfBurleyDiffusion(0.0, 0.0, 1.0, theta, cosTheta, sinTheta, -burleyA, -burleyB) -
+            BurtApproximationRingIntegralOfBurleyDiffusion(angleStart, sin(angleStart), cos(angleStart), theta, cosTheta, sinTheta, -burleyA, -burleyB);
+
+        float angleEnd = BURT_HALF_PI - theta;
+        integralOnPositiveAngle =
+            BurtApproximationRingIntegralOfBurleyDiffusion(angleEnd, sin(angleEnd), cos(angleEnd), theta, cosTheta, sinTheta, burleyA, burleyB) -
+            BurtApproximationRingIntegralOfBurleyDiffusion(0.0, 0.0, 1.0, theta, cosTheta, sinTheta, burleyA, burleyB);
+    }
+    else
+    {
+        float angleEnd = BURT_HALF_PI - theta;
+        integralOnNegativeAngle =
+            BurtApproximationRingIntegralOfBurleyDiffusion(angleEnd, sin(angleEnd), cos(angleEnd), theta, cosTheta, sinTheta, -burleyA, -burleyB) -
+            BurtApproximationRingIntegralOfBurleyDiffusion(-BURT_PI, 0.0, -1.0, theta, cosTheta, sinTheta, -burleyA, -burleyB);
+
+        float angleStart = BURT_HALF_PI * 3.0 - theta;
+        integralOnPositiveAngle =
+            BurtApproximationRingIntegralOfBurleyDiffusion(BURT_PI, 0.0, -1.0, theta, cosTheta, sinTheta, burleyA, burleyB) -
+            BurtApproximationRingIntegralOfBurleyDiffusion(angleStart, sin(angleStart), cos(angleStart), theta, cosTheta, sinTheta, burleyA, burleyB);
+    }
+
+    return max((integralOnNegativeAngle + integralOnPositiveAngle) / max(abs(integralOnRing), float3(0.00001, 0.00001, 0.00001)), float3(0.0, 0.0, 0.0));
+}
+
+float BurtSHBasis(int band, float z)
+{
+    if (band == 0)
+    {
+        return 0.282094791774;
+    }
+
+    if (band == 1)
+    {
+        return 0.488602511903 * z;
+    }
+
+    return 0.315391565253 * (3.0 * z * z - 1.0);
+}
+
+float BurtSHBandScale(int band)
+{
+    if (band == 0)
+    {
+        return sqrt(BURT_FOUR_PI) * BURT_TWO_PI * BURT_INV_HALF_PI;
+    }
+
+    if (band == 1)
+    {
+        return sqrt(BURT_FOUR_PI / 3.0) * BURT_TWO_PI * BURT_INV_HALF_PI;
+    }
+
+    return sqrt(BURT_FOUR_PI / 5.0) * BURT_TWO_PI * BURT_INV_HALF_PI;
+}
+
+[numthreads(8, 8, 1)]
+void GeneratePreIntegratedLut(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width = (uint)_BurtSubsurfacePreIntegratedLutSize.x;
+    uint height = (uint)_BurtSubsurfacePreIntegratedLutSize.y;
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+    {
+        return;
+    }
+
+    float2 uv = ((float2)dispatchThreadId.xy + 0.5) * _BurtSubsurfacePreIntegratedLutSize.zw;
+    float rawNoL = uv.x * 2.0 - 1.0;
+    float curvature = max(uv.y, 0.0001);
+    int profileIndex = _BurtSubsurfaceLutProfileIndex;
+    float3 surfaceAlbedo = BurtGetSurfaceAlbedo(profileIndex);
+    float3 diffuseMeanFreePath = BurtGetEffectiveDiffuseMeanFreePath(profileIndex);
+    float3 burleyDiffuse = BurtEvaluatePreIntegratedDiffuse(rawNoL, curvature, surfaceAlbedo, diffuseMeanFreePath);
+    _BurtSubsurfacePreIntegratedLutRW[uint3(dispatchThreadId.xy, (uint)profileIndex)] = float4(burleyDiffuse, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void GenerateSHLut(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width = (uint)_BurtSubsurfaceSHLutSize.x;
+    uint height = (uint)_BurtSubsurfaceSHLutSize.y;
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+    {
+        return;
+    }
+
+    int band = min((int)dispatchThreadId.y, 2);
+    float curvature = max(((float)dispatchThreadId.x + 0.5) * _BurtSubsurfaceSHLutSize.z, 0.0001);
+    int profileIndex = _BurtSubsurfaceLutProfileIndex;
+    float3 surfaceAlbedo = BurtGetSurfaceAlbedo(profileIndex);
+    float3 diffuseMeanFreePath = BurtGetEffectiveDiffuseMeanFreePath(profileIndex);
+    float3 integral = float3(0.0, 0.0, 0.0);
+    int count = 0;
+
+    for (float theta = 0.0; theta < BURT_HALF_PI; theta += BURT_SH_INTEGRATION_STEP)
+    {
+        float noL = saturate(cos(theta));
+        float sinTheta = sqrt(max(1.0 - noL * noL, 0.0));
+        float3 skinNoL = BurtEvaluatePreIntegratedDiffuse(noL, curvature, surfaceAlbedo, diffuseMeanFreePath);
+        integral += BurtSHBasis(band, noL) * sinTheta * skinNoL;
+        count++;
+    }
+
+    float3 color = count > 0 ? integral / count * BurtSHBandScale(band) : float3(0.0, 0.0, 0.0);
+    _BurtSubsurfaceSHLutRW[uint3(dispatchThreadId.xy, (uint)profileIndex)] = float4(max(color, float3(0.0, 0.0, 0.0)), 0.0);
+}

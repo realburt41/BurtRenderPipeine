@@ -13,9 +13,9 @@ MonoBehaviour:
   m_Name: DefaultSubsurfaceProfile
   m_EditorClassIdentifier: 
   profileName: Default Skin
-  surfaceAlbedo: {r: 0.89433956, g: 0.53294283, b: 0.48429328, a: 1}
-  meanFreePathColor: {r: 0.9056604, g: 0.5256878, b: 0.38020647, a: 1}
-  meanFreePathDistance: 0.52
+  surfaceAlbedo: {r: 0.78, g: 0.52, b: 0.42, a: 1}
+  meanFreePathColor: {r: 1, g: 0.42, b: 0.24, a: 1}
+  meanFreePathDistance: 0.65
   worldUnitScale: 0.1
   tint: {r: 1, g: 1, b: 1, a: 1}
   boundaryColorBleed: {r: 1, g: 1, b: 1, a: 1}
@@ -27,7 +27,7 @@ MonoBehaviour:
   dualSpecularRoughness0: 0.75
   dualSpecularRoughness1: 1.3
   dualSpecularLobeMix: 0.85
-  radiusPixels: 2.37
+  radiusPixels: 3.25
   depthSigma: 0.08
   normalSigma: 0.72
   blend: 0.85

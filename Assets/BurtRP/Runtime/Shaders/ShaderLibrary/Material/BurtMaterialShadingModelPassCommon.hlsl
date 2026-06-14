@@ -126,12 +126,14 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, floa
     return BurtApplyHairGBufferSurfaceSemantics(surfaceData, (_HairScatter + _HairScatterBoost) * maskMap.r, hairShiftScale);
 #else
     BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
-    surfaceData = BurtApplyAnisotropySurfaceSemantics(surfaceData, _Anisotropy);
 
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_CLEAR_COAT)
+        surfaceData = BurtApplyAnisotropySurfaceSemantics(surfaceData, _Anisotropy);
         surfaceData = BurtApplyClearCoatSurfaceSemantics(surfaceData, _ClearCoatMask, _ClearCoatRoughness);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
         surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceStrength, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, _SubsurfaceTint.rgb, _SubsurfaceProfileIndex, _SubsurfaceScatteringMode);
+    #else
+        surfaceData = BurtApplyAnisotropySurfaceSemantics(surfaceData, _Anisotropy);
     #endif
 
     return surfaceData;

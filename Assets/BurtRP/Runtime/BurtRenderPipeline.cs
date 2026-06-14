@@ -142,8 +142,11 @@ namespace Burt.RenderPipeline
                 ? asset.ScreenSpaceSubsurfaceProfilePalette
                 : BurtSubsurfaceProfilePalette.Resolve(BurtSubsurfaceProfileSettings.Default, null);
             var lut = BurtSubsurfaceLutUtility.GetOrCreatePreIntegratedLut(palette);
+            var shLut = BurtSubsurfaceLutUtility.GetOrCreateSHLut(palette);
             Shader.SetGlobalTexture(BurtSubsurfaceLutUtility.TextureId, lut != null ? lut : BurtSubsurfaceLutUtility.GetFallbackPreIntegratedLut());
             Shader.SetGlobalFloat(BurtSubsurfaceLutUtility.EnabledId, lut != null ? 1.0f : 0.0f);
+            Shader.SetGlobalTexture(BurtSubsurfaceLutUtility.SHLutId, shLut != null ? shLut : BurtSubsurfaceLutUtility.GetFallbackSHLut());
+            Shader.SetGlobalFloat(BurtSubsurfaceLutUtility.SHLutEnabledId, shLut != null ? 1.0f : 0.0f);
             BurtSubsurfaceProfileShaderUtility.BindGlobals(asset);
         }
 

@@ -928,7 +928,6 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float4 _BurtTAACurrentSampleWeights2;
             float4 _BurtTAABurtGIParams;
             float _BurtTAAHasGBuffer;
-            float _BurtTAADebugYFlip;
             float _BurtShadingDebugEnabled;
             float _BurtShadingDebugMode;
 
@@ -940,8 +939,16 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
+            }
+
+            float2 BurtTaaExternalUv(float2 uv)
+            {
+                return uv;
             }
 
             float3 BurtTaaDebugColor(float3 color)
@@ -1114,12 +1121,13 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 }
 
                 float2 texel = _BurtTAATexelSize.xy;
-                float3 centerNormal = BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, uv).rg);
+                float2 gbufferUv = BurtTaaExternalUv(uv);
+                float3 centerNormal = BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, gbufferUv).rg);
                 float minDot = 1.0;
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv + float2(texel.x, 0.0))).rg)));
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv - float2(texel.x, 0.0))).rg)));
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv + float2(0.0, texel.y))).rg)));
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv - float2(0.0, texel.y))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv + float2(texel.x, 0.0))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv - float2(texel.x, 0.0))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv + float2(0.0, texel.y))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv - float2(0.0, texel.y))).rg)));
                 return lerp(0.55, 1.0, saturate((minDot - 0.75) * 4.0));
             }
 
@@ -1130,7 +1138,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     return float3(0.5, 0.5, 0.5);
                 }
 
-                return BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, uv).rg) * 0.5 + 0.5;
+                return BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, BurtTaaExternalUv(uv)).rg) * 0.5 + 0.5;
             }
 
             float BurtTaaDepthDisocclusionWeight(float currentRawDepth, float historyRawDepth)
@@ -1381,10 +1389,6 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float4 Frag(Varyings input) : SV_Target
             {
                 float2 uv = input.uv;
-                if (_BurtTAADebugYFlip > 0.5)
-                {
-                    uv.y = 1.0 - uv.y;
-                }
 
                 float rawDepth = tex2D(_BurtTAACurrentDepthTexture, uv).r;
                 float surfaceWeight = BurtTaaValidSurfaceWeight(rawDepth);
@@ -1585,7 +1589,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 responsiveMask *= lerp(1.0, 0.68, stableStaticEdge);
                 float confidenceWeight = lerp(saturate(_BurtTAAFeedbackParams.y), 1.0, saturate(historyConfidence));
                 float confidenceBoost = lerp(min(_BurtTAAFeedbackParams.z, 0.72), _BurtTAAFeedbackParams.z, saturate(historyConfidence));
-                float baseFeedback = min(saturate(_BurtTAAParams.x), max(saturate(_BurtTAAParams2.w), 0.01));
+                float baseFeedback = saturate(_BurtTAAParams.x);
                 float feedback = baseFeedback * historyValid * velocityValid * inBounds * surfaceWeight * rejectionWeight * confidenceBoost;
                 feedback *= confidenceWeight;
                 feedback *= lerp(0.82, 1.04, historySampleTrust);
@@ -1744,13 +1748,21 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
             }
 
+            float2 BurtTaaExternalUv(float2 uv)
+            {
+                return uv;
+            }
+
             float4 Frag(Varyings input) : SV_Target
             {
-                return tex2D(_BurtCameraDepthTexture, input.uv).rrrr;
+                return tex2D(_BurtCameraDepthTexture, BurtTaaExternalUv(input.uv)).rrrr;
             }
             ENDHLSL
         }
@@ -1782,6 +1794,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
             }
@@ -1862,6 +1877,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
             }
@@ -1946,6 +1964,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
             }
@@ -2095,6 +2116,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
             }
@@ -2165,6 +2189,11 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return normalize(n + 1e-6);
             }
 
+            float2 BurtTaaExternalUv(float2 uv)
+            {
+                return uv;
+            }
+
             float BurtTaaNormalEdgeWeight(float2 uv)
             {
                 if (_BurtTAAHasGBuffer < 0.5)
@@ -2173,12 +2202,13 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 }
 
                 float2 texel = _BurtTAATexelSize.xy;
-                float3 centerNormal = BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, uv).rg);
+                float2 gbufferUv = BurtTaaExternalUv(uv);
+                float3 centerNormal = BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, gbufferUv).rg);
                 float minDot = 1.0;
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv + float2(texel.x, 0.0))).rg)));
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv - float2(texel.x, 0.0))).rg)));
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv + float2(0.0, texel.y))).rg)));
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv - float2(0.0, texel.y))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv + float2(texel.x, 0.0))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv - float2(texel.x, 0.0))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv + float2(0.0, texel.y))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv - float2(0.0, texel.y))).rg)));
                 return lerp(0.55, 1.0, saturate((minDot - 0.75) * 4.0));
             }
 
@@ -2336,6 +2366,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
             }
@@ -2392,6 +2425,11 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return normalize(n + 1e-6);
             }
 
+            float2 BurtTaaExternalUv(float2 uv)
+            {
+                return uv;
+            }
+
             float BurtTaaNormalEdgeWeight(float2 uv)
             {
                 if (_BurtTAAHasGBuffer < 0.5)
@@ -2400,12 +2438,13 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 }
 
                 float2 texel = _BurtTAATexelSize.xy;
-                float3 centerNormal = BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, uv).rg);
+                float2 gbufferUv = BurtTaaExternalUv(uv);
+                float3 centerNormal = BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, gbufferUv).rg);
                 float minDot = 1.0;
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv + float2(texel.x, 0.0))).rg)));
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv - float2(texel.x, 0.0))).rg)));
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv + float2(0.0, texel.y))).rg)));
-                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(uv - float2(0.0, texel.y))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv + float2(texel.x, 0.0))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv - float2(texel.x, 0.0))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv + float2(0.0, texel.y))).rg)));
+                minDot = min(minDot, dot(centerNormal, BurtTaaDecodeOctNormal(tex2D(_BurtGBuffer1, saturate(gbufferUv - float2(0.0, texel.y))).rg)));
                 return lerp(0.55, 1.0, saturate((minDot - 0.75) * 4.0));
             }
 
@@ -2552,6 +2591,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
             }
@@ -2593,6 +2635,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
             }
@@ -2688,6 +2733,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
                 output.uv = uv;
                 return output;
             }
