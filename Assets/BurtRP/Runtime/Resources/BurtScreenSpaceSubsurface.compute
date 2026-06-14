@@ -55,7 +55,7 @@ float4 _BurtSSSProfileTint;
 float4 _BurtSSSBoundaryColorBleed;
 float4 _BurtSSSFrameParams; // x=frame index, y=wrapped frame index, z=stable sampling, w=debug sampling.
 float4 _BurtSSSHistoryParams; // x=history valid, y=current-frame blend, zw=current TAA jitter in UV space.
-float4 _BurtSSSProjectionParams; // x=uv scale, y=projection scale, z=kernel size, w=unused.
+float4 _BurtSSSProjectionParams; // x=XRender SSS scale (m00 / kernel size * 0.5), y=projection m00, z=kernel size, w=unused.
 float _BurtSSSProfileCount;
 float _BurtSubsurfaceProfileParamLutEnabled;
 float4 _BurtSubsurfaceProfileParamLutSize;
@@ -74,7 +74,7 @@ groupshared uint BurtSSSGroupActive;
 groupshared float4 BurtSSSSharedDiffuseDepth[BURT_SSS_SHARED_TILE_AREA];
 groupshared float3 BurtSSSSharedNormalWS[BURT_SSS_SHARED_TILE_AREA];
 
-static const float3 BURT_SSS_LUMINANCE = float3(0.2126, 0.7152, 0.0722);
+static const float3 BURT_SSS_LUMINANCE = float3(0.3, 0.59, 0.11);
 static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 4.0;
 static const float BURT_GBUFFER_SHADING_MODEL_PACK_SCALE = 0.999;
 static const float BURT_SHADING_MODEL_SUBSURFACE = 3.0;
@@ -215,6 +215,11 @@ void BurtSSSDecodeProfileIDAndType(float encodedData, out uint profileIndex, out
     type = encoded & BURT_SSS_PROFILE_TYPE_MASK;
 }
 
+float BurtSSSEncodeProfileIDAndType(uint profileIndex, uint type)
+{
+    return (float)((profileIndex & BURT_SSS_PROFILE_ID_MASK) | (type & BURT_SSS_PROFILE_TYPE_MASK)) / 255.0;
+}
+
 float BurtSSSLoadProfileIDAndType(int2 pixel)
 {
     int2 clampedPixel = BurtSSSClampPixel(pixel);
@@ -309,8 +314,7 @@ BurtSSSSurface BurtSSSLoadSurface(int2 pixel)
     {
         surface.profileIndex = (float)clamp((int)profileIDFromTexture, 0, BURT_SSS_PROFILE_COUNT - 1);
         surface.profileType = profileTypeFromTexture;
-        BurtSSSProfile profile = BurtSSSLoadProfile(surface.profileIndex);
-        surface.valid = surface.valid > 0.0 && surface.strength > profile.params.w ? 1.0 : 0.0;
+        surface.valid = surface.valid > 0.0 ? 1.0 : 0.0;
     }
     else
     {
@@ -435,6 +439,55 @@ bool BurtSSSUseDebugSampling()
     return _BurtSSSFrameParams.w > 0.5;
 }
 
+float BurtSSSInterleavedGradientNoise(float2 uv, float frameIndex)
+{
+    float2 pixel = floor(uv * max(_BurtSSSScreenSize.xy, float2(1.0, 1.0)));
+    float noise = frac(52.9829189 * frac(dot(pixel, float2(0.06711056, 0.00583715)) + frameIndex * 0.000123));
+    return noise;
+}
+
+float BurtSSSResolveSetupDepth(float2 uv, float sceneDepth, uint profileType)
+{
+    if ((profileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) == 0u)
+    {
+        return sceneDepth;
+    }
+
+    if (BurtSSSUseStableSampling() || BurtSSSUseDebugSampling())
+    {
+        return sceneDepth;
+    }
+
+    float noiseFrame = _BurtSSSFrameParams.y;
+    float noise = BurtSSSInterleavedGradientNoise(uv, noiseFrame);
+    return sceneDepth + noise * (sceneDepth / 1024.0);
+}
+
+float4 BurtSSSLoadSetupDiffuseDepth(int2 pixel)
+{
+    int2 clampedPixel = BurtSSSClampPixel(pixel);
+    uint profileIDFromTexture;
+    uint profileTypeFromTexture;
+    BurtSSSDecodeProfileIDAndType(BurtSSSLoadProfileIDAndType(clampedPixel), profileIDFromTexture, profileTypeFromTexture);
+    if ((profileTypeFromTexture & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) == 0u)
+    {
+        return float4(0.0, 0.0, 0.0, 0.0);
+    }
+
+    float4 source = _BurtSSSSourceTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0));
+    float3 baseColor;
+    float3 emission;
+    float3 diffuseWithBaseColor;
+    float3 diffuse;
+    float3 specularLight;
+    BurtSSSDecodeLightingComponents(clampedPixel, source, baseColor, emission, diffuseWithBaseColor, diffuse, specularLight);
+
+    float rawDepth = _BurtCameraDepthTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0));
+    float linearEyeDepth = BurtSSSIsSkyDepth(rawDepth) ? 0.0 : BurtSSSLinearEyeDepth(rawDepth);
+    float2 uv = ((float2)clampedPixel + 0.5) * _BurtSSSScreenSize.zw;
+    return float4(diffuse, BurtSSSResolveSetupDepth(uv, linearEyeDepth, profileTypeFromTexture));
+}
+
 float4 BurtSSSSampleHistoryBilinear(float2 uv)
 {
     float2 screenSize = max(_BurtSSSScreenSize.xy, float2(1.0, 1.0));
@@ -504,7 +557,7 @@ void BurtSSSFillBurleyShared(int2 groupPixel, uint groupIndex)
 
         int2 sharedLocal = int2((int)(sharedIndex % BURT_SSS_SHARED_TILE_SIZE), (int)(sharedIndex / BURT_SSS_SHARED_TILE_SIZE));
         int2 sharedPixel = BurtSSSClampPixel(sharedCorner + sharedLocal);
-        BurtSSSSharedDiffuseDepth[sharedIndex] = _BurtSSSTempTexture[sharedPixel];
+        BurtSSSSharedDiffuseDepth[sharedIndex] = BurtSSSLoadSetupDiffuseDepth(sharedPixel);
         BurtSSSSharedNormalWS[sharedIndex] = BurtSSSDecodeNormalWS(_BurtGBuffer1.Load(int3(sharedPixel.x, sharedPixel.y, 0)).rg);
     }
 }
@@ -530,7 +583,7 @@ void BurtSSSLoadBurleySample(int2 samplePixel, int2 groupPixel, out float4 diffu
     }
 
     int2 clampedPixel = BurtSSSClampPixel(samplePixel);
-    diffuseDepth = _BurtSSSTempTexture[clampedPixel];
+    diffuseDepth = BurtSSSLoadSetupDiffuseDepth(clampedPixel);
     normalWS = BurtSSSDecodeNormalWS(_BurtGBuffer1.Load(int3(clampedPixel.x, clampedPixel.y, 0)).rg);
 }
 
@@ -583,7 +636,7 @@ float3 BurtSSSResolveDiffuseMeanFreePath(BurtSSSProfile profile)
 float BurtSSSResolveSamplingDiffuseMeanFreePath(BurtSSSProfile profile, float3 diffuseMeanFreePath)
 {
     float decodedDominant = profile.meanFreePath.a * BurtSSSResolveProfileParamDistanceDecode(profile);
-    return max(decodedDominant, max(max(diffuseMeanFreePath.r, diffuseMeanFreePath.g), diffuseMeanFreePath.b));
+    return max(decodedDominant, 0.01);
 }
 
 float2 BurtSSSCalculateBurleyScale(float centerSceneDepth, BurtSSSProfile profile)
@@ -593,8 +646,6 @@ float2 BurtSSSCalculateBurleyScale(float centerSceneDepth, BurtSSSProfile profil
     float depthInMillimeters = max(centerSceneDepth * BURT_SSS_UNITY_M_2_CM * BURT_SSS_UNITY_CM_2_MM, 0.0001);
     float2 scale = float2(worldUnitScale, worldUnitScale) * (projectionScale / depthInMillimeters);
     scale *= BURT_SSS_SUBSURFACE_KERNEL_SIZE;
-    float radiusScale = clamp(profile.params.x / BURT_SSS_DEFAULT_RADIUS_PIXELS, 0.1, 4.0);
-    scale *= radiusScale;
     scale.y *= _BurtSSSScreenSize.x * _BurtSSSScreenSize.w;
     return scale;
 }
@@ -610,14 +661,9 @@ float3 BurtSSSGetCenterSampleWeight(float2 burleyScale, float samplingDiffuseMea
     return saturate(BurtSSSGetCDF3(max(samplingDiffuseMeanFreePath * inverseSearchLightScale, float3(0.0001, 0.0001, 0.0001)), centerSampleRadius));
 }
 
-float BurtSSSBurleySampleGate(BurtSSSSurface center, BurtSSSSurface sampleSurface, BurtSSSProfile profile, float inBounds)
+float BurtSSSBurleySampleGate(BurtSSSSurface center)
 {
-    float modelWeight = center.valid * sampleSurface.valid;
-    float profileWeight = BurtSSSResolveProfileIndex(center.profileIndex) == BurtSSSResolveProfileIndex(sampleSurface.profileIndex) ? 1.0 : 0.0;
-    float sameBurleyType = ((center.profileType & sampleSurface.profileType) & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u ? 1.0 : 0.0;
-    float depthWindow = max(profile.params.y * max(center.linearEyeDepth, 0.05), 0.0001);
-    float depthWeight = exp2(-abs(center.linearEyeDepth - sampleSurface.linearEyeDepth) / depthWindow);
-    return inBounds * modelWeight * profileWeight * sameBurleyType * depthWeight;
+    return center.valid;
 }
 
 float3 BurtSSSAccumulateBurley(
@@ -630,13 +676,13 @@ float3 BurtSSSAccumulateBurley(
 {
     float3 surfaceAlbedo = saturate(profile.surfaceAlbedo.rgb);
     float3 diffuseMeanFreePath = BurtSSSResolveDiffuseMeanFreePath(profile);
-    float samplingAlbedo = max(profile.surfaceAlbedo.a, max(max(surfaceAlbedo.r, surfaceAlbedo.g), surfaceAlbedo.b));
+    float samplingAlbedo = max(profile.surfaceAlbedo.a, 0.0001);
     float samplingDiffuseMeanFreePath = BurtSSSResolveSamplingDiffuseMeanFreePath(profile, diffuseMeanFreePath);
     float samplingValue = samplingAlbedo - 0.33;
     float samplingSearchLightScale = 3.5 + 100.0 * samplingValue * samplingValue * samplingValue * samplingValue;
     float3 searchLightScale = BurtSSSSearchLightDiffuseScalingFactor(surfaceAlbedo);
     float3 inverseSearchLightScale = rcp(max(searchLightScale, float3(0.0001, 0.0001, 0.0001)));
-    float centerSceneDepth = max(_BurtSSSTempTexture[pixel].a, center.linearEyeDepth);
+    float centerSceneDepth = max(BurtSSSLoadSetupDiffuseDepth(pixel).a, center.linearEyeDepth);
     float2 burleyScale = BurtSSSCalculateBurleyScale(centerSceneDepth, profile);
     float lDivS = max(samplingDiffuseMeanFreePath / max(samplingSearchLightScale, 0.0001), 0.0001);
     float centerSampleRadius = BurtSSSGetCenterSampleRadius(burleyScale);
@@ -646,10 +692,6 @@ float3 BurtSSSAccumulateBurley(
     float3 weightingFactor = float3(0.0, 0.0, 0.0);
     uint2 seedPixel = (uint2)max(pixel, int2(0, 0));
     uint seedStart = BurtSSSRand3DPCG16(int3((int)seedPixel.x, (int)seedPixel.y, 17)).x;
-    uint frameIndex = BurtSSSUseStableSampling() ? 0u : (uint)floor(max(_BurtSSSFrameParams.x, 0.0));
-    float2 frameScramble = BurtSSSUseStableSampling() ? float2(0.0, 0.0) : BurtSSSR2Sequence(frameIndex);
-    float2 pixelScramble = frac(BurtSSSR2Sequence(seedStart) + frameScramble);
-    float diskRotation = pixelScramble.y * BURT_SSS_TWO_PI;
 
     [loop]
     for (int i = 0; i < BURT_SSS_BURLEY_MAX_SAMPLE_COUNT; i++)
@@ -659,27 +701,22 @@ float3 BurtSSSAccumulateBurley(
             break;
         }
 
-        float sampleIndex = (float)i + 0.5;
-        float2 randomT1 = frac(BurtSSSR2Sequence((uint)i) + pixelScramble);
-        randomT1.x = frac((sampleIndex / max((float)sampleCount, 1.0)) + pixelScramble.x);
+        float2 randomT1 = BurtSSSR2Sequence(seedStart++);
         randomT1.x = min(centerSampleCDF + randomT1.x * (1.0 - centerSampleCDF), 0.99999);
 
         float radiusInProfileUnits = BurtSSSRadiusRootApprox(lDivS, randomT1.x);
         float theta = randomT1.y * BURT_SSS_TWO_PI;
-        float2 diskDirection = BurtSSSRotate2D(float2(cos(theta), sin(theta)), diskRotation);
+        float2 diskDirection = float2(cos(theta), sin(theta));
         float2 uvOffset = burleyScale * radiusInProfileUnits * diskDirection;
         int2 samplePixel = (int2)round((float2)pixel + uvOffset * _BurtSSSScreenSize.xy);
-        float inBounds = BurtSSSInPixelBounds(samplePixel) ? 1.0 : 0.0;
         int2 clampedPixel = BurtSSSClampPixel(samplePixel);
-        BurtSSSSurface sampleSurface = BurtSSSLoadSurface(clampedPixel);
-        float surfaceWeight = BurtSSSBurleySampleGate(center, sampleSurface, profile, inBounds);
+        float surfaceWeight = BurtSSSBurleySampleGate(center);
         float4 sampleDiffuseDepth;
         float3 sampleNormalWS;
         BurtSSSLoadBurleySample(clampedPixel, groupPixel, sampleDiffuseDepth, sampleNormalWS);
         float3 sampleDiffuse = sampleDiffuseDepth.rgb;
         float sampleSceneDepth = sampleDiffuseDepth.a;
-
-        float normalWeight = lerp(sqrt(saturate(dot(center.normalWS, sampleNormalWS) * 0.5 + 0.5)), 1.0, saturate(center.strength) * 0.15);
+        float normalWeight = sqrt(saturate(dot(center.normalWS, sampleNormalWS) * 0.5 + 0.5));
         float depthDelta = (sampleSceneDepth - centerSceneDepth) * BURT_SSS_UNITY_M_2_MM / BurtSSSResolveWorldUnitScale(profile);
         float sampledRadius = sqrt(radiusInProfileUnits * radiusInProfileUnits + depthDelta * depthDelta);
         float3 diffusionProfile = BurtSSSDiffuseProfile(diffuseMeanFreePath, inverseSearchLightScale, sampledRadius);
@@ -761,16 +798,19 @@ void SetupMainCS(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex :
         BurtSSSDecodeProfileIDAndType(materialEncodedProfileIDAndType, profileIndexFromMaterial, profileTypeFromMaterial);
         bool materialHasBurleyProfile = (profileTypeFromMaterial & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u;
         bool materialHasScreenSpaceProfile = (profileTypeFromMaterial & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u;
-        bool validSurface = surface.valid > 0.0 && stencilMatched && materialHasScreenSpaceProfile;
-        if (validSurface)
+        bool validMaterialSurface = surface.valid > 0.0 && stencilMatched && materialHasScreenSpaceProfile;
+        uint effectiveProfileType = BURT_SSS_PROFILE_TYPE_NONE;
+        if (validMaterialSurface)
         {
             surface.profileIndex = (float)clamp((int)profileIndexFromMaterial, 0, BURT_SSS_PROFILE_COUNT - 1);
             surface.profileType = profileTypeFromMaterial;
             BurtSSSProfile materialProfile = BurtSSSLoadProfile(surface.profileIndex);
-            validSurface = surface.strength > materialProfile.params.w;
+            effectiveProfileType |= profileTypeFromMaterial & BURT_SSS_PROFILE_TYPE_SEPARABLE;
+            effectiveProfileType |= surface.strength > materialProfile.params.w ? (profileTypeFromMaterial & BURT_SSS_PROFILE_TYPE_BURLEY) : BURT_SSS_PROFILE_TYPE_NONE;
         }
 
-        profileIDAndType = validSurface ? materialEncodedProfileIDAndType : 0.0;
+        bool validSurface = validMaterialSurface && (effectiveProfileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u;
+        profileIDAndType = validSurface ? BurtSSSEncodeProfileIDAndType(profileIndexFromMaterial, effectiveProfileType) : 0.0;
         setup = float4(validSurface ? 1.0 : 0.0, saturate(surface.strength), saturate(surface.profileIndex / 7.0), saturate(surface.thickness));
 
         if (validSurface)
@@ -782,10 +822,11 @@ void SetupMainCS(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex :
             float3 diffuse;
             float3 specularLight;
             BurtSSSDecodeLightingComponents(pixel, source, baseColor, emission, diffuseWithBaseColor, diffuse, specularLight);
-            float sceneDepth = surface.linearEyeDepth;
+            float2 uv = ((float2)pixel + 0.5) * _BurtSSSScreenSize.zw;
+            float sceneDepth = BurtSSSResolveSetupDepth(uv, surface.linearEyeDepth, effectiveProfileType);
             diffuseLight = float4(diffuse, sceneDepth);
-            output = float4(diffuse, 1.0);
-            if (materialHasBurleyProfile)
+            output = diffuseLight;
+            if ((effectiveProfileType & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u)
             {
                 InterlockedOr(BurtSSSGroupActive, 1);
             }
@@ -832,16 +873,19 @@ void SetupMainNoBurleyGroupsCS(uint3 dispatchThreadID : SV_DispatchThreadID)
         uint profileTypeFromMaterial;
         BurtSSSDecodeProfileIDAndType(materialEncodedProfileIDAndType, profileIndexFromMaterial, profileTypeFromMaterial);
         bool materialHasScreenSpaceProfile = (profileTypeFromMaterial & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u;
-        bool validSurface = surface.valid > 0.0 && stencilMatched && materialHasScreenSpaceProfile;
-        if (validSurface)
+        bool validMaterialSurface = surface.valid > 0.0 && stencilMatched && materialHasScreenSpaceProfile;
+        uint effectiveProfileType = BURT_SSS_PROFILE_TYPE_NONE;
+        if (validMaterialSurface)
         {
             surface.profileIndex = (float)clamp((int)profileIndexFromMaterial, 0, BURT_SSS_PROFILE_COUNT - 1);
             surface.profileType = profileTypeFromMaterial;
             BurtSSSProfile materialProfile = BurtSSSLoadProfile(surface.profileIndex);
-            validSurface = surface.strength > materialProfile.params.w;
+            effectiveProfileType |= profileTypeFromMaterial & BURT_SSS_PROFILE_TYPE_SEPARABLE;
+            effectiveProfileType |= surface.strength > materialProfile.params.w ? (profileTypeFromMaterial & BURT_SSS_PROFILE_TYPE_BURLEY) : BURT_SSS_PROFILE_TYPE_NONE;
         }
 
-        profileIDAndType = validSurface ? materialEncodedProfileIDAndType : 0.0;
+        bool validSurface = validMaterialSurface && (effectiveProfileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u;
+        profileIDAndType = validSurface ? BurtSSSEncodeProfileIDAndType(profileIndexFromMaterial, effectiveProfileType) : 0.0;
         setup = float4(validSurface ? 1.0 : 0.0, saturate(surface.strength), saturate(surface.profileIndex / 7.0), saturate(surface.thickness));
 
         if (validSurface)
@@ -853,9 +897,10 @@ void SetupMainNoBurleyGroupsCS(uint3 dispatchThreadID : SV_DispatchThreadID)
             float3 diffuse;
             float3 specularLight;
             BurtSSSDecodeLightingComponents(pixel, source, baseColor, emission, diffuseWithBaseColor, diffuse, specularLight);
-            float sceneDepth = surface.linearEyeDepth;
+            float2 uv = ((float2)pixel + 0.5) * _BurtSSSScreenSize.zw;
+            float sceneDepth = BurtSSSResolveSetupDepth(uv, surface.linearEyeDepth, effectiveProfileType);
             diffuseLight = float4(diffuse, sceneDepth);
-            output = float4(diffuse, 1.0);
+            output = diffuseLight;
         }
     }
 
@@ -886,11 +931,11 @@ void BurleySinglePass(uint3 indirectGroupID : SV_GroupID, uint groupIndex : SV_G
     }
 
     BurtSSSSurface center = BurtSSSLoadSurface(pixel);
-    float3 originalDiffuse = _BurtSSSTempTexture[pixel].rgb;
+    float4 originalDiffuseDepth = BurtSSSLoadSetupDiffuseDepth(pixel);
+    float3 originalDiffuse = originalDiffuseDepth.rgb;
 
     if (center.valid <= 0.0 || (center.profileType & BURT_SSS_PROFILE_TYPE_BURLEY) == 0u)
     {
-        _BurtSSSBlurTexture[pixel] = float4(originalDiffuse, 1.0);
         BurtSSSWriteHistory(pixel, originalDiffuse, 0.0, 0.0);
         return;
     }

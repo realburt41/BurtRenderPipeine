@@ -100,7 +100,11 @@ ShadowVaryings VertShadow(ShadowAttributes input)
 #endif
 
 #if BURT_SHADOW_CASTER_ALPHA_CLIP
-    output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
+    #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+        output.baseMapUV = input.uv0;
+    #else
+        output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
+    #endif
 #endif
 
     return output;
@@ -110,7 +114,11 @@ float4 FragShadow(ShadowVaryings input) : SV_Target
 {
 #if BURT_SHADOW_CASTER_ALPHA_CLIP
     float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
-    BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
+    #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+        BurtApplyAlphaClip(saturate(baseColor.a - saturate(_ShadowCutOff)), _AlphaClip, 0.0f);
+    #else
+        BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
+    #endif
 #endif
 
     return 0;

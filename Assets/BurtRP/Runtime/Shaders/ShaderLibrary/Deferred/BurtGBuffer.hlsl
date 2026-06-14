@@ -60,6 +60,22 @@ float shadingModelID;
     float3 subsurfaceTint;
 
     float subsurfaceProfileIndex;
+
+    float hairSecondaryRoughness;
+
+    float hairBackLight;
+
+    float hairShadowFillStrength;
+
+    float3 hairGeometryNormalWS;
+
+    float hairSpecularShift;
+
+    float hairSecondarySpecularShift;
+
+    float3 hairSpecularColor;
+
+    float3 hairSecondarySpecularColor;
 };
 
 // 保存实际写入 RenderTarget 的五�?GBuffer 颜色；这里只定义编码结果，不负责 RT 创建或生命周期
@@ -151,6 +167,16 @@ static const float BURT_HAIR_SHIFT_PACK_DIMENSION = 16.0f;
 static const float BURT_HAIR_SCATTER_PACK_MAX_BUCKET = BURT_HAIR_SCATTER_PACK_DIMENSION - 1.0f;
 static const float BURT_HAIR_SHIFT_PACK_MAX_BUCKET = BURT_HAIR_SHIFT_PACK_DIMENSION - 1.0f;
 static const float BURT_HAIR_MATERIAL_PACK_MAX_VALUE = BURT_HAIR_SCATTER_PACK_DIMENSION * BURT_HAIR_SHIFT_PACK_DIMENSION - 1.0f;
+static const float BURT_HAIR_CONTROL_PACK_DIMENSION = 64.0f;
+static const float BURT_HAIR_CONTROL_PACK_MAX_BUCKET = BURT_HAIR_CONTROL_PACK_DIMENSION - 1.0f;
+static const float BURT_HAIR_CONTROL_PACK_MAX_VALUE = BURT_HAIR_CONTROL_PACK_DIMENSION * BURT_HAIR_CONTROL_PACK_DIMENSION - 1.0f;
+static const float BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION = 16.0f;
+static const float BURT_HAIR_SHIFT_CONTROL_PACK_MAX_BUCKET = BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION - 1.0f;
+static const float BURT_HAIR_SHIFT_CONTROL_PACK_MAX_VALUE = BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION * BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION * BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION - 1.0f;
+static const float BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MIN = -2.60f;
+static const float BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MAX = 5.32f;
+static const float BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MIN = -5.10f;
+static const float BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MAX = 8.22f;
 
 float BurtQuantizeHairMaterialValue(float value, float maxBucket)
 {
@@ -173,6 +199,42 @@ void BurtDecodeHairMaterialChannel(float packedHairMaterial, out float hairScatt
 
     hairScatter = saturate(scatterBucket / BURT_HAIR_SCATTER_PACK_MAX_BUCKET);
     hairShiftScale = saturate(shiftBucket / BURT_HAIR_SHIFT_PACK_MAX_BUCKET);
+}
+
+float BurtEncodeHairRoughnessFillForGBuffer(float secondaryRoughness, float shadowFillStrength)
+{
+    float roughnessBucket = BurtQuantizeHairMaterialValue(secondaryRoughness, BURT_HAIR_CONTROL_PACK_MAX_BUCKET);
+    float fillBucket = BurtQuantizeHairMaterialValue(shadowFillStrength, BURT_HAIR_CONTROL_PACK_MAX_BUCKET);
+    return (fillBucket * BURT_HAIR_CONTROL_PACK_DIMENSION + roughnessBucket) / BURT_HAIR_CONTROL_PACK_MAX_VALUE;
+}
+
+void BurtDecodeHairRoughnessFillFromGBuffer(float packedValue, out float secondaryRoughness, out float shadowFillStrength)
+{
+    float packedBucket = floor(saturate(packedValue) * BURT_HAIR_CONTROL_PACK_MAX_VALUE + 0.5f);
+    float fillBucket = floor(packedBucket / BURT_HAIR_CONTROL_PACK_DIMENSION);
+    float roughnessBucket = packedBucket - fillBucket * BURT_HAIR_CONTROL_PACK_DIMENSION;
+    secondaryRoughness = saturate(roughnessBucket / BURT_HAIR_CONTROL_PACK_MAX_BUCKET);
+    shadowFillStrength = saturate(fillBucket / BURT_HAIR_CONTROL_PACK_MAX_BUCKET);
+}
+
+float BurtEncodeHairShiftBackLightForGBuffer(float specularShift, float secondarySpecularShift, float backLight)
+{
+    float primaryBucket = floor(saturate((specularShift - BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MIN) / max(BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MAX - BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MIN, BURT_EPSILON)) * BURT_HAIR_SHIFT_CONTROL_PACK_MAX_BUCKET + 0.5f);
+    float secondaryBucket = floor(saturate((secondarySpecularShift - BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MIN) / max(BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MAX - BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MIN, BURT_EPSILON)) * BURT_HAIR_SHIFT_CONTROL_PACK_MAX_BUCKET + 0.5f);
+    float backLightBucket = BurtQuantizeHairMaterialValue(backLight, BURT_HAIR_SHIFT_CONTROL_PACK_MAX_BUCKET);
+    return (backLightBucket * BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION * BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION + secondaryBucket * BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION + primaryBucket) / BURT_HAIR_SHIFT_CONTROL_PACK_MAX_VALUE;
+}
+
+void BurtDecodeHairShiftBackLightFromGBuffer(float packedValue, out float specularShift, out float secondarySpecularShift, out float backLight)
+{
+    float packedBucket = floor(saturate(packedValue) * BURT_HAIR_SHIFT_CONTROL_PACK_MAX_VALUE + 0.5f);
+    float backLightBucket = floor(packedBucket / (BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION * BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION));
+    float remainingBucket = packedBucket - backLightBucket * BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION * BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION;
+    float secondaryBucket = floor(remainingBucket / BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION);
+    float primaryBucket = remainingBucket - secondaryBucket * BURT_HAIR_SHIFT_CONTROL_PACK_DIMENSION;
+    specularShift = lerp(BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MIN, BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MAX, primaryBucket / BURT_HAIR_SHIFT_CONTROL_PACK_MAX_BUCKET);
+    secondarySpecularShift = lerp(BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MIN, BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MAX, secondaryBucket / BURT_HAIR_SHIFT_CONTROL_PACK_MAX_BUCKET);
+    backLight = saturate(backLightBucket / BURT_HAIR_SHIFT_CONTROL_PACK_MAX_BUCKET);
 }
 
 float BurtEncodeSubsurfacePowerForGBuffer(float power)
@@ -280,6 +342,14 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
     data.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
     data.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
     data.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
+    data.hairSecondaryRoughness = 0.5f;
+    data.hairBackLight = 0.0f;
+    data.hairShadowFillStrength = 0.0f;
+    data.hairGeometryNormalWS = data.normalWS;
+    data.hairSpecularShift = 0.0f;
+    data.hairSecondarySpecularShift = 0.0f;
+    data.hairSpecularColor = float3(1.0f, 1.0f, 1.0f);
+    data.hairSecondarySpecularColor = float3(1.0f, 1.0f, 1.0f);
 
 #if BURT_ACTIVE_CLEAR_COAT_SHADING_MODEL
     data.clearCoatMask = saturate(surfaceData.clearCoatMask);
@@ -335,10 +405,25 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
     return BurtCreateGBufferData(surfaceData, safeNormalWS, float4(BurtCreateFallbackTangentWS(safeNormalWS), 1.0f), emission);
 }
 
-BurtGBufferData BurtCreateHairGBufferData(BurtSurfaceData surfaceData, float3 strandDirectionWS, float3 emission)
+BurtGBufferData BurtCreateHairGBufferData(BurtSurfaceData surfaceData, float3 strandDirectionWS, float3 hairNormalWS, float3 hairGeometryNormalWS, float3 emission)
 {
     surfaceData.shadingModelID = BURT_SHADING_MODEL_HAIR;
-    return BurtCreateGBufferData(surfaceData, strandDirectionWS, emission);
+    BurtGBufferData data = BurtCreateGBufferData(surfaceData, strandDirectionWS, emission);
+    data.clearCoatNormalWS = BurtSafeNormalize(hairNormalWS);
+    data.hairGeometryNormalWS = BurtSafeNormalize(hairGeometryNormalWS);
+    data.hairSecondaryRoughness = ClampPerceptualRoughness(surfaceData.hairSecondaryRoughness);
+    data.hairBackLight = saturate(surfaceData.hairBackLight);
+    data.hairShadowFillStrength = saturate(surfaceData.hairShadowFillStrength);
+    data.hairSpecularShift = clamp(surfaceData.hairSpecularShift, BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MIN, BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MAX);
+    data.hairSecondarySpecularShift = clamp(surfaceData.hairSecondarySpecularShift, BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MIN, BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MAX);
+    data.hairSpecularColor = max(surfaceData.hairSpecularColor, float3(0.0f, 0.0f, 0.0f));
+    data.hairSecondarySpecularColor = max(surfaceData.hairSecondarySpecularColor, float3(0.0f, 0.0f, 0.0f));
+    return data;
+}
+
+BurtGBufferData BurtCreateHairGBufferData(BurtSurfaceData surfaceData, float3 strandDirectionWS, float3 emission)
+{
+    return BurtCreateHairGBufferData(surfaceData, strandDirectionWS, strandDirectionWS, strandDirectionWS, emission);
 }
 
 BurtGBufferData BurtCreateClearCoatGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 clearCoatNormalWS, float3 emission)
@@ -398,6 +483,16 @@ float3 BurtGetClearCoatNormalWS(BurtGBufferData gbufferData)
 float3 BurtGetHairStrandDirectionWS(BurtGBufferData gbufferData)
 {
     return gbufferData.normalWS;
+}
+
+float3 BurtGetHairShadingNormalWS(BurtGBufferData gbufferData)
+{
+    return BurtSafeNormalize(gbufferData.clearCoatNormalWS);
+}
+
+float3 BurtGetHairGeometryNormalWS(BurtGBufferData gbufferData)
+{
+    return BurtSafeNormalize(gbufferData.hairGeometryNormalWS);
 }
 
 float BurtGetDefaultLitMetallic(BurtGBufferData gbufferData)
@@ -538,6 +633,41 @@ float BurtGetHairLongitudinalShiftScale(BurtGBufferData gbufferData)
     return hairShiftScale;
 }
 
+float BurtGetHairSecondaryRoughness(BurtGBufferData gbufferData)
+{
+    return ClampPerceptualRoughness(gbufferData.hairSecondaryRoughness);
+}
+
+float BurtGetHairBackLight(BurtGBufferData gbufferData)
+{
+    return saturate(gbufferData.hairBackLight);
+}
+
+float BurtGetHairShadowFillStrength(BurtGBufferData gbufferData)
+{
+    return saturate(gbufferData.hairShadowFillStrength);
+}
+
+float BurtGetHairSpecularShift(BurtGBufferData gbufferData)
+{
+    return clamp(gbufferData.hairSpecularShift, BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MIN, BURT_HAIR_PRIMARY_SPECULAR_SHIFT_MAX);
+}
+
+float BurtGetHairSecondarySpecularShift(BurtGBufferData gbufferData)
+{
+    return clamp(gbufferData.hairSecondarySpecularShift, BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MIN, BURT_HAIR_SECONDARY_SPECULAR_SHIFT_MAX);
+}
+
+float3 BurtGetHairSpecularColor(BurtGBufferData gbufferData)
+{
+    return max(gbufferData.hairSpecularColor, float3(0.0f, 0.0f, 0.0f));
+}
+
+float3 BurtGetHairSecondarySpecularColor(BurtGBufferData gbufferData)
+{
+    return max(gbufferData.hairSecondarySpecularColor, float3(0.0f, 0.0f, 0.0f));
+}
+
 float BurtGetGBufferMaterialChannel(BurtGBufferData gbufferData)
 {
 #if BURT_ACTIVE_HAIR_SHADING_MODEL
@@ -592,6 +722,19 @@ float4 BurtEncodeSubsurfaceGBuffer3(BurtGBufferData data)
 
 float4 BurtEncodeGBuffer3(BurtGBufferData data)
 {
+#if BURT_ACTIVE_HAIR_SHADING_MODEL
+    return float4(
+        max(data.hairSpecularColor, float3(0.0f, 0.0f, 0.0f)),
+        BurtEncodeHairRoughnessFillForGBuffer(data.hairSecondaryRoughness, data.hairShadowFillStrength));
+#elif BURT_ENABLE_HAIR_SHADING
+    if (BurtIsActiveHairShadingModel(data.shadingModelID))
+    {
+        return float4(
+            max(data.hairSpecularColor, float3(0.0f, 0.0f, 0.0f)),
+            BurtEncodeHairRoughnessFillForGBuffer(data.hairSecondaryRoughness, data.hairShadowFillStrength));
+    }
+#endif
+
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
     return BurtEncodeSubsurfaceGBuffer3(data);
 #elif BURT_ENABLE_SUBSURFACE_SHADING
@@ -607,6 +750,19 @@ float4 BurtEncodeGBuffer3(BurtGBufferData data)
 float4 BurtEncodeGBuffer4(BurtGBufferData data)
 {
     float2 encodedTangentWS = BurtEncodeNormalWSForGBuffer(data.tangentWS);
+
+#if BURT_ACTIVE_HAIR_SHADING_MODEL
+    return float4(
+        max(data.hairSecondarySpecularColor, float3(0.0f, 0.0f, 0.0f)),
+        BurtEncodeHairShiftBackLightForGBuffer(data.hairSpecularShift, data.hairSecondarySpecularShift, data.hairBackLight));
+#elif BURT_ENABLE_HAIR_SHADING
+    if (BurtIsActiveHairShadingModel(data.shadingModelID))
+    {
+        return float4(
+            max(data.hairSecondarySpecularColor, float3(0.0f, 0.0f, 0.0f)),
+            BurtEncodeHairShiftBackLightForGBuffer(data.hairSpecularShift, data.hairSecondarySpecularShift, data.hairBackLight));
+    }
+#endif
 
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
     return float4(
@@ -708,6 +864,29 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
     data.subsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
     data.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
     data.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
+    data.hairSecondaryRoughness = 0.5f;
+    data.hairBackLight = 0.0f;
+    data.hairShadowFillStrength = 0.0f;
+    data.hairGeometryNormalWS = data.normalWS;
+    data.hairSpecularShift = 0.0f;
+    data.hairSecondarySpecularShift = 0.0f;
+    data.hairSpecularColor = float3(1.0f, 1.0f, 1.0f);
+    data.hairSecondarySpecularColor = float3(1.0f, 1.0f, 1.0f);
+
+#if BURT_ACTIVE_HAIR_SHADING_MODEL
+    data.hairSpecularColor = max(encoded.gbuffer3.rgb, float3(0.0f, 0.0f, 0.0f));
+    BurtDecodeHairRoughnessFillFromGBuffer(encoded.gbuffer3.a, data.hairSecondaryRoughness, data.hairShadowFillStrength);
+    data.hairSecondarySpecularColor = max(encoded.gbuffer4.rgb, float3(0.0f, 0.0f, 0.0f));
+    BurtDecodeHairShiftBackLightFromGBuffer(encoded.gbuffer4.a, data.hairSpecularShift, data.hairSecondarySpecularShift, data.hairBackLight);
+#elif BURT_ENABLE_HAIR_SHADING
+    if (BurtIsActiveHairShadingModel(data.shadingModelID))
+    {
+        data.hairSpecularColor = max(encoded.gbuffer3.rgb, float3(0.0f, 0.0f, 0.0f));
+        BurtDecodeHairRoughnessFillFromGBuffer(encoded.gbuffer3.a, data.hairSecondaryRoughness, data.hairShadowFillStrength);
+        data.hairSecondarySpecularColor = max(encoded.gbuffer4.rgb, float3(0.0f, 0.0f, 0.0f));
+        BurtDecodeHairShiftBackLightFromGBuffer(encoded.gbuffer4.a, data.hairSpecularShift, data.hairSecondarySpecularShift, data.hairBackLight);
+    }
+#endif
 
 #if BURT_ACTIVE_CLEAR_COAT_SHADING_MODEL
     data.clearCoatMask = saturate(encoded.gbuffer3.b);

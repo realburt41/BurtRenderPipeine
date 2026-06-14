@@ -31,7 +31,7 @@ namespace Burt.RenderPipeline
         private const float EncodeDiffuseMeanFreePathInMillimetersToUnit = 0.002f;
         private const float MaxDiffuseMeanFreePathInMillimeters = 500f;
         private const float SubsurfaceRadiusScale = 1024f;
-        private const int LutFormulaVersion = 3;
+        private const int LutFormulaVersion = 7;
         private const int ProfileSlotCount = BurtSubsurfaceProfilePalette.MaxProfiles;
         public const int ProfileParamLutWidth = 66;
         public const int ProfileParamLutHeight = ProfileSlotCount;
@@ -164,20 +164,11 @@ namespace Burt.RenderPipeline
         {
             if (profileParamLut != null)
             {
-                if (ShouldDeferTextureRebuild())
-                {
-                    return profileParamLut;
-                }
-
                 var cachedHash = GetCachedProfileParamPaletteHash(palette);
                 if (profileParamLutHash == cachedHash)
                 {
                     return profileParamLut;
                 }
-            }
-            else if (ShouldDeferTextureRebuild())
-            {
-                return null;
             }
 
             var currentHash = GetCachedProfileParamPaletteHash(palette);
@@ -426,13 +417,13 @@ namespace Burt.RenderPipeline
             var rowOffset = profileIndex * ProfileParamLutWidth;
             var surfaceAlbedo = GetSurfaceAlbedoForLut(settings);
             var diffuseMeanFreePath = GetDiffuseMeanFreePathInMillimetersForProfileParam(settings, surfaceAlbedo);
-            ResolveProfileSamplingComponents(surfaceAlbedo, diffuseMeanFreePath, out var samplingAlbedo, out var samplingDiffuseMeanFreePath);
+            ResolveProfileSamplingComponentsForParamLut(surfaceAlbedo, diffuseMeanFreePath, out var clampedDiffuseMeanFreePath, out var samplingAlbedo, out var samplingDiffuseMeanFreePath);
 
             pixels[rowOffset + ProfileParamSurfaceAlbedoOffset] = ToColor(surfaceAlbedo, samplingAlbedo);
             pixels[rowOffset + ProfileParamMeanFreePathOffset] = ToColor(
-                Multiply(diffuseMeanFreePath, EncodeDiffuseMeanFreePathInMillimetersToUnit),
+                Multiply(clampedDiffuseMeanFreePath, EncodeDiffuseMeanFreePathInMillimetersToUnit),
                 samplingDiffuseMeanFreePath * EncodeDiffuseMeanFreePathInMillimetersToUnit);
-            pixels[rowOffset + ProfileParamTintOffset] = new Color(settings.Tint.r, settings.Tint.g, settings.Tint.b, settings.WorldUnitScale * EncodeWorldUnitScaleInCentimetersToUnit);
+            pixels[rowOffset + ProfileParamTintOffset] = new Color(Mathf.Clamp01(settings.Tint.r), Mathf.Clamp01(settings.Tint.g), Mathf.Clamp01(settings.Tint.b), settings.WorldUnitScale * EncodeWorldUnitScaleInCentimetersToUnit);
             pixels[rowOffset + ProfileParamBoundaryColorBleedOffset] = new Color(settings.BoundaryColorBleed.r, settings.BoundaryColorBleed.g, settings.BoundaryColorBleed.b, 0f);
             pixels[rowOffset + ProfileParamDualSpecularOffset] = ToColor(settings.DualSpecularVector);
             pixels[rowOffset + ProfileParamTransmissionParamsOffset] = ToColor(settings.TransmissionVector);
@@ -448,47 +439,46 @@ namespace Burt.RenderPipeline
                     distanceInMillimeters + radiusOffsetInMillimeters,
                     surfaceAlbedo,
                     scalingFactor,
-                    diffuseMeanFreePath,
+                    clampedDiffuseMeanFreePath,
                     settings.TransmissionTintColor);
                 pixels[rowOffset + ProfileParamTransmissionProfileOffset + i] = ToColor(transmission, Mathf.Exp(-distanceInMillimeters * settings.ExtinctionScale));
             }
 
-            var scatterRadius = Mathf.Max(diffuseMeanFreePath.z * MillimetersToCentimeters, 0.1f);
-            FillKernel(pixels, rowOffset + ProfileParamKernel0Offset, ProfileParamKernel0Size, settings, surfaceAlbedo, diffuseMeanFreePath, scatterRadius);
-            FillKernel(pixels, rowOffset + ProfileParamKernel1Offset, ProfileParamKernel1Size, settings, surfaceAlbedo, diffuseMeanFreePath, scatterRadius);
-            FillKernel(pixels, rowOffset + ProfileParamKernel2Offset, ProfileParamKernel2Size, settings, surfaceAlbedo, diffuseMeanFreePath, scatterRadius);
+            var scatterRadius = Mathf.Max(samplingDiffuseMeanFreePath * MillimetersToCentimeters, 0.1f);
+            FillKernel(pixels, rowOffset + ProfileParamKernel0Offset, ProfileParamKernel0Size, settings, surfaceAlbedo, clampedDiffuseMeanFreePath, scatterRadius);
+            FillKernel(pixels, rowOffset + ProfileParamKernel1Offset, ProfileParamKernel1Size, settings, surfaceAlbedo, clampedDiffuseMeanFreePath, scatterRadius);
+            FillKernel(pixels, rowOffset + ProfileParamKernel2Offset, ProfileParamKernel2Size, settings, surfaceAlbedo, clampedDiffuseMeanFreePath, scatterRadius);
         }
 
         private static Vector3 GetDiffuseMeanFreePathInMillimetersForProfileParam(BurtSubsurfaceProfileSettings settings, Vector3 surfaceAlbedo)
         {
             var meanFreePathColor = Clamp(ToRgb(settings.MeanFreePathColor), MeanFreePathBias, 1f);
             var meanFreePath = Multiply(meanFreePathColor, settings.MeanFreePathDistance);
-            return Clamp(
-                Multiply(GetDiffuseMeanFreePathFromMeanFreePath(surfaceAlbedo, meanFreePath), CentimetersToMillimeters / DiffuseMeanFreePathToMeanFreePathMagicNumber),
-                0f,
-                MaxDiffuseMeanFreePathInMillimeters);
+            return Multiply(GetDiffuseMeanFreePathFromMeanFreePath(surfaceAlbedo, meanFreePath), CentimetersToMillimeters / DiffuseMeanFreePathToMeanFreePathMagicNumber);
         }
 
-        private static void ResolveProfileSamplingComponents(Vector3 surfaceAlbedo, Vector3 diffuseMeanFreePath, out float samplingAlbedo, out float samplingDiffuseMeanFreePath)
+        private static void ResolveProfileSamplingComponentsForParamLut(Vector3 surfaceAlbedo, Vector3 diffuseMeanFreePath, out Vector3 clampedDiffuseMeanFreePath, out float samplingAlbedo, out float samplingDiffuseMeanFreePath)
         {
             var meanFreePath = GetMeanFreePathFromDiffuseMeanFreePath(surfaceAlbedo, diffuseMeanFreePath);
             var maxComponent = Mathf.Max(meanFreePath.x, Mathf.Max(meanFreePath.y, meanFreePath.z));
+            clampedDiffuseMeanFreePath = Clamp(diffuseMeanFreePath, 0f, MaxDiffuseMeanFreePathInMillimeters);
+
             if (Mathf.Abs(meanFreePath.x - maxComponent) < float.Epsilon)
             {
                 samplingAlbedo = surfaceAlbedo.x;
-                samplingDiffuseMeanFreePath = diffuseMeanFreePath.x;
+                samplingDiffuseMeanFreePath = Mathf.Clamp(diffuseMeanFreePath.x, 0f, MaxDiffuseMeanFreePathInMillimeters);
                 return;
             }
 
             if (Mathf.Abs(meanFreePath.y - maxComponent) < float.Epsilon)
             {
                 samplingAlbedo = surfaceAlbedo.y;
-                samplingDiffuseMeanFreePath = diffuseMeanFreePath.y;
+                samplingDiffuseMeanFreePath = Mathf.Clamp(diffuseMeanFreePath.y, 0f, MaxDiffuseMeanFreePathInMillimeters);
                 return;
             }
 
             samplingAlbedo = surfaceAlbedo.z;
-            samplingDiffuseMeanFreePath = diffuseMeanFreePath.z;
+            samplingDiffuseMeanFreePath = Mathf.Clamp(diffuseMeanFreePath.z, 0f, MaxDiffuseMeanFreePathInMillimeters);
         }
 
         private static void FillKernel(

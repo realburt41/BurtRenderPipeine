@@ -6,6 +6,9 @@ namespace Burt.RenderPipeline.Editor
 {
     public sealed class BurtHairShaderGUI : ShaderGUI
     {
+        private const float DefaultHairCutoff = 0.33f;
+        private const float CutoffMigrationEpsilon = 0.0001f;
+
         private static readonly GUIContent SurfaceOptionsLabel = new GUIContent("Hair Surface Options");
         private static readonly GUIContent BaseInputsLabel = new GUIContent("Base Inputs");
         private static readonly GUIContent HairInputsLabel = new GUIContent("Hair Inputs");
@@ -13,7 +16,9 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent EmissionLabel = new GUIContent("Emission");
 
         private static readonly GUIContent BaseMapLabel = new GUIContent("Base Map", "Hair tint RGB and alpha for card cutout.");
-        private static readonly GUIContent MaskMapLabel = new GUIContent("Hair Mask Map", "R Scatter, G Occlusion, B Longitudinal lobe shift scale, A Smoothness.");
+        private static readonly GUIContent MaskMapLabel = new GUIContent("Hair Mask Map", "AvatarHair: R Reflectance, G Occlusion, B Height.");
+        private static readonly GUIContent IdMapLabel = new GUIContent("ID Map", "R Strand direction, G structure mask, A gradient color mask.");
+        private static readonly GUIContent GradientMapLabel = new GUIContent("Gradient Map", "AvatarHair gradient color lookup.");
         private static readonly GUIContent NormalMapLabel = new GUIContent("Normal Map", "Currently used for forward material debug; deferred Hair stores strand direction in the GBuffer vector slot.");
         private static readonly GUIContent EmissionMapLabel = new GUIContent("Emission Map");
         private static readonly GUIContent ShadingModelLabel = new GUIContent("Shading Model");
@@ -34,9 +39,19 @@ namespace Burt.RenderPipeline.Editor
 
         private MaterialProperty baseMap;
         private MaterialProperty baseColor;
+        private MaterialProperty rootColor;
+        private MaterialProperty rootGradient;
+        private MaterialProperty rootGradientEnable;
+        private MaterialProperty rootGradientReverse;
+        private MaterialProperty rootGradientPosEnable;
+        private MaterialProperty gradientDirection;
+        private MaterialProperty gradientPosOffset;
         private MaterialProperty maskMap;
-        private MaterialProperty smoothness;
-        private MaterialProperty occlusionStrength;
+        private MaterialProperty idMap;
+        private MaterialProperty idXTilling;
+        private MaterialProperty idIntensity;
+        private MaterialProperty tangentA;
+        private MaterialProperty tangentB;
         private MaterialProperty reflectance;
         private MaterialProperty normalMap;
         private MaterialProperty normalScale;
@@ -44,6 +59,9 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty emissionColor;
         private MaterialProperty alphaClip;
         private MaterialProperty cutoff;
+        private MaterialProperty shadowCutOff;
+        private MaterialProperty opacityMaskValue;
+        private MaterialProperty opacityMaskOffset;
         private MaterialProperty doubleSidedEnable;
         private MaterialProperty doubleSidedNormalMode;
         private MaterialProperty cull;
@@ -53,12 +71,41 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty hairShiftScale;
         private MaterialProperty hairRoughnessOffset;
         private MaterialProperty hairTangentFlip;
+        private MaterialProperty scatterUseFullRange;
+        private MaterialProperty scatter;
+        private MaterialProperty scatterFull;
+        private MaterialProperty occlusion;
+        private MaterialProperty albedoOcclusion;
+        private MaterialProperty albedoOcclusionColor;
+        private MaterialProperty backLightIntensity;
+        private MaterialProperty backLightMask;
+        private MaterialProperty backLightMaskRange;
+        private MaterialProperty hairShadowFillStrength;
+        private MaterialProperty hairBrightColor;
+        private MaterialProperty hairBrightIntensity;
+        private MaterialProperty hairShadowColor;
+        private MaterialProperty hairShadowIntensity;
+        private MaterialProperty hairShadowPower;
+        private MaterialProperty hairRotate;
+        private MaterialProperty specularShift;
+        private MaterialProperty secondarySpecularShift;
+        private MaterialProperty roughParameter;
+        private MaterialProperty edgeRoughRimPower;
+        private MaterialProperty specularColor;
+        private MaterialProperty specularSecondColor;
+        private MaterialProperty gradientColorEnable;
+        private MaterialProperty gradientMap;
+        private MaterialProperty gradientRowIndex;
+        private MaterialProperty gradientSoftLight;
+        private MaterialProperty gradientOverlay;
+        private MaterialProperty gradientReplace;
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
             this.materialEditor = materialEditor;
             properties = props;
             CacheProperties();
+            SyncCutoffPropertiesForInspector();
 
             Material material = materialEditor.target as Material;
             DrawSurfaceOptions(material);
@@ -88,9 +135,19 @@ namespace Burt.RenderPipeline.Editor
         {
             baseMap = Find("_BaseMap");
             baseColor = Find("_BaseColor");
+            rootColor = Find("_RootColor");
+            rootGradient = Find("_RootGradient");
+            rootGradientEnable = Find("_RootGradientEnable");
+            rootGradientReverse = Find("_RootGradientReverse");
+            rootGradientPosEnable = Find("_RootGradientPosEnable");
+            gradientDirection = Find("_GradientDirection");
+            gradientPosOffset = Find("_GradientPosOffset");
             maskMap = Find("_MaskMap");
-            smoothness = Find("_Smoothness");
-            occlusionStrength = Find("_OcclusionStrength");
+            idMap = Find("_IDMap");
+            idXTilling = Find("_IDXTilling");
+            idIntensity = Find("_IDIntensity");
+            tangentA = Find("_TangentA");
+            tangentB = Find("_TangentB");
             reflectance = Find("_Reflectance");
             normalMap = Find("_NormalMap");
             normalScale = Find("_NormalScale");
@@ -98,6 +155,9 @@ namespace Burt.RenderPipeline.Editor
             emissionColor = Find("_EmissionColor");
             alphaClip = Find("_AlphaClip");
             cutoff = Find("_Cutoff");
+            shadowCutOff = Find("_ShadowCutOff");
+            opacityMaskValue = Find("_OpacityMaskValue");
+            opacityMaskOffset = Find("_OpacityMaskOffset");
             doubleSidedEnable = Find("_DoubleSidedEnable");
             doubleSidedNormalMode = Find("_DoubleSidedNormalMode");
             cull = Find("_Cull");
@@ -107,6 +167,34 @@ namespace Burt.RenderPipeline.Editor
             hairShiftScale = Find("_HairShiftScale");
             hairRoughnessOffset = Find("_HairRoughnessOffset");
             hairTangentFlip = Find("_HairTangentFlip");
+            scatterUseFullRange = Find("_ScatterUseFullRange");
+            scatter = Find("_Scatter");
+            scatterFull = Find("_ScatterFull");
+            occlusion = Find("_Occlusion");
+            albedoOcclusion = Find("_AlbedoOcclusion");
+            albedoOcclusionColor = Find("_AlbedoOcclusionColor");
+            backLightIntensity = Find("_BackLightIntensity");
+            backLightMask = Find("_BackLightMask");
+            backLightMaskRange = Find("_BackLightMaskRange");
+            hairShadowFillStrength = Find("_HairShadowFillStrength");
+            hairBrightColor = Find("_HairBrightColor");
+            hairBrightIntensity = Find("_HairBrightIntensity");
+            hairShadowColor = Find("_HairShadowColor");
+            hairShadowIntensity = Find("_HairShadowIntensity");
+            hairShadowPower = Find("_HairShadowPower");
+            hairRotate = Find("_HairRotate");
+            specularShift = Find("_SpecularShift");
+            secondarySpecularShift = Find("_SecondarySpecularShift");
+            roughParameter = Find("_RoughParameter");
+            edgeRoughRimPower = Find("_EdgeRoughRimPower");
+            specularColor = Find("_SpecularColor");
+            specularSecondColor = Find("_SpecularSecondColor");
+            gradientColorEnable = Find("_GradientColorEnable");
+            gradientMap = Find("_GradientMap");
+            gradientRowIndex = Find("_GradientRowIndex");
+            gradientSoftLight = Find("_GradientSoftLight");
+            gradientOverlay = Find("_GradientOverlay");
+            gradientReplace = Find("_GradientReplace");
         }
 
         private MaterialProperty Find(string propertyName)
@@ -135,7 +223,12 @@ namespace Burt.RenderPipeline.Editor
                 bool showCutoff = alphaClip == null || alphaClip.floatValue >= 0.5f;
                 using (new EditorGUI.DisabledScope(!showCutoff))
                 {
+                    EditorGUI.BeginChangeCheck();
                     DrawProperty(cutoff);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        SyncOpacityMaskValueToCutoff();
+                    }
                 }
             }
 
@@ -156,7 +249,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             BurtShaderGUIUtility.DrawSeparator();
-            EditorGUILayout.HelpBox("Hair is double-sided and writes strand direction into the GBuffer vector slot. Use GBuffer / Hair Strand and Hair Scatter debug views when tuning cards.", MessageType.Info);
+            EditorGUILayout.HelpBox("Hair is double-sided and writes AvatarHair strand direction and lobe controls into the Hair GBuffer payload.", MessageType.Info);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -212,6 +305,13 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawTextureWithColor(BaseMapLabel, baseMap, baseColor);
+            DrawProperty(rootGradientEnable);
+            DrawProperty(rootGradientReverse);
+            DrawProperty(rootColor);
+            DrawProperty(rootGradient);
+            DrawProperty(rootGradientPosEnable);
+            DrawProperty(gradientDirection);
+            DrawProperty(gradientPosOffset);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -225,20 +325,74 @@ namespace Burt.RenderPipeline.Editor
             DrawTexture(MaskMapLabel, maskMap);
             if (maskMap != null)
             {
-                BurtShaderGUIUtility.DrawChannelHint("Channels: R Scatter | G Occlusion | B Shift Scale | A Smoothness");
+                BurtShaderGUIUtility.DrawChannelHint("Channels: R Reflectance | G Occlusion | B Height | A unused");
             }
 
-            BurtShaderGUIUtility.DrawSubHeader("Hair");
+            BurtShaderGUIUtility.DrawSubHeader("Alpha");
+            DrawProperty(hairShadowFillStrength);
+            DrawProperty(shadowCutOff);
+            using (new EditorGUI.DisabledScope(true))
+            {
+                DrawProperty(opacityMaskValue);
+            }
+            DrawProperty(opacityMaskOffset);
+
+            BurtShaderGUIUtility.DrawSubHeader("PBR");
+            DrawProperty(scatterUseFullRange);
+            if (scatterUseFullRange == null || scatterUseFullRange.floatValue < 0.5f)
+            {
+                DrawProperty(scatter);
+            }
+            else
+            {
+                DrawProperty(scatterFull);
+            }
+            DrawProperty(occlusion);
+            DrawProperty(albedoOcclusion);
+            DrawProperty(albedoOcclusionColor);
+            DrawProperty(backLightIntensity);
+            DrawProperty(backLightMask);
+            DrawProperty(backLightMaskRange);
+            DrawProperty(reflectance);
+            DrawProperty(hairSpecularScale);
+
+            BurtShaderGUIUtility.DrawSubHeader("ID / Strand");
+            DrawTexture(IdMapLabel, idMap);
+            DrawProperty(idXTilling);
+            DrawProperty(idIntensity);
+            DrawProperty(tangentA);
+            DrawProperty(tangentB);
+            DrawProperty(hairTangentFlip);
+            DrawProperty(hairRotate);
+
+            BurtShaderGUIUtility.DrawSubHeader("Structure");
+            DrawProperty(hairBrightColor);
+            DrawProperty(hairBrightIntensity);
+            DrawProperty(hairShadowColor);
+            DrawProperty(hairShadowIntensity);
+            DrawProperty(hairShadowPower);
+
+            BurtShaderGUIUtility.DrawSubHeader("Specular");
+            DrawProperty(specularShift);
+            DrawProperty(secondarySpecularShift);
+            DrawProperty(roughParameter);
+            DrawProperty(edgeRoughRimPower);
+            DrawProperty(specularColor);
+            DrawProperty(specularSecondColor);
+
+            BurtShaderGUIUtility.DrawSubHeader("Gradient Color");
+            DrawProperty(gradientColorEnable);
+            DrawTexture(GradientMapLabel, gradientMap);
+            DrawProperty(gradientRowIndex);
+            DrawProperty(gradientSoftLight);
+            DrawProperty(gradientOverlay);
+            DrawProperty(gradientReplace);
+
+            BurtShaderGUIUtility.DrawSubHeader("Legacy Compat");
             DrawProperty(hairScatter);
             DrawProperty(hairScatterBoost);
-            DrawProperty(hairSpecularScale);
             DrawProperty(hairShiftScale);
             DrawProperty(hairRoughnessOffset);
-            DrawProperty(hairTangentFlip);
-            BurtShaderGUIUtility.DrawSubHeader("Shared");
-            DrawProperty(smoothness);
-            DrawProperty(occlusionStrength);
-            DrawProperty(reflectance);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -313,6 +467,54 @@ namespace Burt.RenderPipeline.Editor
             }
         }
 
+        private void SyncOpacityMaskValueToCutoff()
+        {
+            if (cutoff == null || opacityMaskValue == null)
+            {
+                return;
+            }
+
+            opacityMaskValue.floatValue = cutoff.floatValue;
+        }
+
+        private void SyncCutoffPropertiesForInspector()
+        {
+            if (cutoff == null || opacityMaskValue == null || cutoff.hasMixedValue || opacityMaskValue.hasMixedValue)
+            {
+                return;
+            }
+
+            float cutoffValue = cutoff.floatValue;
+            float opacityMask = opacityMaskValue.floatValue;
+            if (Mathf.Abs(cutoffValue - DefaultHairCutoff) <= CutoffMigrationEpsilon &&
+                Mathf.Abs(opacityMask - cutoffValue) > CutoffMigrationEpsilon)
+            {
+                cutoffValue = opacityMask;
+                cutoff.floatValue = cutoffValue;
+            }
+
+            opacityMaskValue.floatValue = cutoffValue;
+        }
+
+        private static void SyncHairOpacityCutoff(Material material)
+        {
+            if (!material.HasProperty("_Cutoff") || !material.HasProperty("_OpacityMaskValue"))
+            {
+                return;
+            }
+
+            float cutoffValue = material.GetFloat("_Cutoff");
+            float opacityMaskValue = material.GetFloat("_OpacityMaskValue");
+            if (Mathf.Abs(cutoffValue - DefaultHairCutoff) <= CutoffMigrationEpsilon &&
+                Mathf.Abs(opacityMaskValue - cutoffValue) > CutoffMigrationEpsilon)
+            {
+                cutoffValue = opacityMaskValue;
+                material.SetFloat("_Cutoff", cutoffValue);
+            }
+
+            material.SetFloat("_OpacityMaskValue", cutoffValue);
+        }
+
         internal static void ApplyHairMaterialOptions(Material material)
         {
             if (material == null)
@@ -322,6 +524,7 @@ namespace Burt.RenderPipeline.Editor
 
             BurtShaderGUIUtility.ApplyDoubleSidedState(material, true);
             BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
+            SyncHairOpacityCutoff(material);
             material.SetOverrideTag("RenderType", "Opaque");
             material.SetOverrideTag("Queue", string.Empty);
             material.renderQueue = (int)RenderQueue.Geometry;

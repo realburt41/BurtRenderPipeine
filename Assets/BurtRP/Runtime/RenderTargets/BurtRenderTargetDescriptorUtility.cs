@@ -120,6 +120,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceSourceDescriptor(Camera camera)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            return descriptor;
+        }
+
         public static RenderTextureDescriptor CreateScreenSpaceSubsurfaceBaseColorDescriptor(Camera camera)
         {
             var descriptor = CreateScreenSpaceSubsurfaceColorDescriptor(camera);

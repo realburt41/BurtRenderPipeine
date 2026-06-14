@@ -5,6 +5,7 @@
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairDither.hlsl"
 
 #if !defined(BURT_DEPTH_ONLY_ALPHA_CLIP)
     #if defined(BURT_ALPHA_CLIP)
@@ -43,7 +44,11 @@ DepthVaryings VertDepth(DepthAttributes input)
     output.positionCS = UnityObjectToClipPos(positionOS);
 
 #if BURT_DEPTH_ONLY_ALPHA_CLIP
-    output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
+    #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+        output.baseMapUV = input.uv0;
+    #else
+        output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
+    #endif
 #endif
 
     return output;
@@ -53,7 +58,11 @@ float4 FragDepth(DepthVaryings input) : SV_Target
 {
 #if BURT_DEPTH_ONLY_ALPHA_CLIP
     float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
-    BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
+    #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+        BurtApplyHairDitherAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
+    #else
+        BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
+    #endif
 #endif
 
     return 0;

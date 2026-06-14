@@ -186,10 +186,34 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceSubsurfaceThickness = 412, // SSS debug: decoded thickness from setup / GBuffer data.
         ScreenSpaceSubsurfaceProfileIndex = 413, // SSS debug: resolved subsurface profile slot.
         ScreenSpaceSubsurfaceProfileTint = 446, // SSS debug: profile tint color selected by the material profile slot.
+        ScreenSpaceSubsurfaceProfileTintRaw = 467, // SSS debug: raw profile tint selected by the material profile slot, without setup/mask modulation.
         ScreenSpaceSubsurfaceProfileSurfaceAlbedo = 447, // SSS debug: profile surface albedo color selected by the material profile slot.
         ScreenSpaceSubsurfaceProfileMeanFreePath = 448, // SSS debug: profile mean free path color selected by the material profile slot.
         ScreenSpaceSubsurfaceProfileTintedLighting = 449, // SSS debug: XRender-style profile-tinted diffuse lighting before base color is reapplied.
         ScreenSpaceSubsurfaceProfileTintedFinal = 450, // SSS debug: XRender-style profile-tinted diffuse after base color is reapplied.
+        ScreenSpaceSubsurfaceBlurAlpha = 451, // SSS debug: alpha stored in the final Subsurface blur texture; 4S stores a valid-pixel mask, 5S stores Burley weight.
+        ScreenSpaceSubsurfaceBlurRadius = 452, // SSS debug: estimated 4S separable maximum blur offset in screen pixels.
+        ScreenSpaceSubsurfaceBlurDelta = 453, // SSS debug: amplified absolute difference between 4S blurred diffuse and original diffuse lighting.
+        ScreenSpaceSubsurfaceSeparableSampleGate = 454, // SSS debug: 4S separable sample gate, red = profile/type hits, green = depth weight, blue = radius.
+        ScreenSpaceSubsurfaceSeparableHorizontalDelta = 455, // SSS debug: amplified absolute difference between 4S horizontal temp and original diffuse lighting.
+        ScreenSpaceSubsurfaceBlurNormalized = 456, // SSS debug: blur texture normalized by alpha, matching the SSSColor consumed by combine.
+        ScreenSpaceSubsurfaceBlurSignedDelta = 457, // SSS debug: signed normalized blur versus diffuse lighting, green = red-channel gain, red = red-channel loss, blue = blue-channel change.
+        ScreenSpaceSubsurfaceSetupDiffuse = 458, // SSS debug: setup-stage diffuse lighting stored before 4S/5S blur.
+        ScreenSpaceSubsurfaceSeparableHorizontal = 459, // SSS debug: raw 4S separable horizontal output stored in the temp texture.
+        ScreenSpaceSubsurfaceSeparableHorizontalDepth = 460, // SSS debug: scene depth alpha preserved by the 4S horizontal output.
+        ScreenSpaceSubsurfaceXRenderCombineFactors = 461, // SSS debug: red = diffuse factor, green = max profile tint, blue = SSSColor delta.
+        ScreenSpaceSubsurfaceProfileKernel = 462, // SSS debug: red = center kernel weight, green = max kernel offset, blue = radius pixels.
+        ScreenSpaceSubsurfaceSSSColorDelta = 463, // SSS debug: amplified relative SSSColor versus diffuse light delta before profile tint.
+        ScreenSpaceSubsurfaceProfileKernelColor = 464, // SSS debug: normalized RGB spread of the 4S profile kernel.
+        ScreenSpaceSubsurfaceFinalDelta = 465, // SSS debug: signed final color delta after XRender-style combine.
+        ScreenSpaceSubsurfaceFinalDiffuseDelta = 466, // SSS debug: signed diffuse-only final delta after base color is reapplied.
+        ScreenSpaceSubsurfaceSSSColorSignedDelta = 468, // SSS debug: signed SSSColor versus diffuse light delta before profile tint/base color.
+        ScreenSpaceSubsurfaceProfileTintedDelta = 469, // SSS debug: signed profile-tinted diffuse delta before base color is reapplied.
+        ScreenSpaceSubsurfaceSeparableValidity = 470, // SSS debug: 4S validity, red = setup mask, green = separable profile type, blue = source depth.
+        ScreenSpaceSubsurfaceSeparableIO = 471, // SSS debug: 4S pass IO, red = horizontal depth, green = vertical alpha, blue = vertical delta.
+        ScreenSpaceSubsurfaceSeparableStages = 472, // SSS debug: 4S stage diagnostics, red = setup/type/depth validity, green = horizontal activity, blue = vertical activity.
+        ScreenSpaceSubsurfaceSeparableChain = 473, // SSS debug: 4S chain diagnostics, red = material forward encoding, green = GBuffer subsurface, blue = setup/profile/pass writes.
+        ScreenSpaceSubsurfaceXRenderCombineTriplet = 474, // SSS debug: repeated local stripes of XRender combine inputs; profile tint, SSSColor, and subsurface lighting.
         ScreenSpaceSubsurfaceTransmission = 414, // SSS debug: profile transmission contribution.
         ScreenSpaceSubsurfaceDiffuse = 415, // SSS debug: diffuse lighting source used by the blur.
         ScreenSpaceSubsurfaceSpecular = 416, // SSS debug: non-diffuse source preserved by the combine.
@@ -202,7 +226,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceSubsurfaceSourceAlpha = 434, // SSS debug: source alpha carrying diffuse luminance from deferred lighting.
         ScreenSpaceSubsurfaceBaseColor = 435, // SSS debug: base color captured by the SSS forward pass.
         ScreenSpaceSubsurfaceEmission = 436, // SSS debug: emission captured by the SSS forward pass.
-        ScreenSpaceSubsurfaceDiffuseWithBaseColor = 437, // SSS debug: diffuse lighting multiplied by base color before blur.
+        ScreenSpaceSubsurfaceDiffuseWithBaseColor = 437, // SSS debug: decoded diffuse lighting before profile tint/base-color recombine; legacy enum name is kept for compatibility.
         ScreenSpaceSubsurfaceSpecularRaw = 438, // SSS debug: raw specular residual before display exposure.
         ScreenSpaceSubsurfaceCombineDelta = 439, // SSS debug: absolute difference between source and combined SSS color.
         FogAmount = 394, // Fog debug: final screen-space fog opacity.

@@ -7,6 +7,8 @@ sampler2D _BaseMap;
 
 // 声明 Mask Map 贴图，Forward PBR 会把 R 当金属度、G 当环境遮蔽、A 当光滑度。
 sampler2D _MaskMap;
+sampler2D _IDMap;
+sampler2D _GradientMap;
 
 // 定义 XRender / Frostbite 风格的默认 reflectance，0.5 会映射到常见非金属 F0=0.04。
 static const float BURT_INPUT_DEFAULT_REFLECTANCE = 0.5f;
@@ -100,6 +102,20 @@ struct BurtSurfaceData
     float3 subsurfaceTint;
 
     float subsurfaceProfileIndex;
+
+    float hairSecondaryRoughness;
+
+    float hairBackLight;
+
+    float hairShadowFillStrength;
+
+    float hairSpecularShift;
+
+    float hairSecondarySpecularShift;
+
+    float3 hairSpecularColor;
+
+    float3 hairSecondarySpecularColor;
 };
 
 float BurtClampSubsurfacePower(float power)
@@ -127,6 +143,13 @@ void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
     surfaceData.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
     surfaceData.subsurfaceTint = BURT_SUBSURFACE_DEFAULT_TINT;
     surfaceData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
+    surfaceData.hairSecondaryRoughness = 0.5f;
+    surfaceData.hairBackLight = 0.0f;
+    surfaceData.hairShadowFillStrength = 0.0f;
+    surfaceData.hairSpecularShift = 0.0f;
+    surfaceData.hairSecondarySpecularShift = 0.0f;
+    surfaceData.hairSpecularColor = float3(1.0f, 1.0f, 1.0f);
+    surfaceData.hairSecondarySpecularColor = float3(1.0f, 1.0f, 1.0f);
 }
 
 // 保存片元级几何输入，后续高光、雾效、附加光等功能会继续扩展这个结构。

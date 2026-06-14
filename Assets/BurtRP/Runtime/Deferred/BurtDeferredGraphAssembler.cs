@@ -618,11 +618,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(screenSpaceSubsurfaceSetupPass);
-            if (useScreenSpaceSubsurfaceBurley)
-            {
-                graph.AddPass(screenSpaceSubsurfaceBurleyPass);
-            }
-
             if (useScreenSpaceSubsurfaceSeparable)
             {
                 graph.AddPass(screenSpaceSubsurfaceSeparableHorizontalPass);
@@ -631,6 +626,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
             if (useScreenSpaceSubsurfaceBurley)
             {
+                graph.AddPass(screenSpaceSubsurfaceBurleyPass);
                 graph.AddPass(screenSpaceSubsurfaceStoreHistoryPass);
             }
 
@@ -981,8 +977,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             bool useLocalGBufferTargets)
         {
             return useLocalGBufferTargets &&
-                (BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset) ||
-                    BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset));
+                BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
         }
 
         private static bool ShouldSeedOverlayCameraColor( // 判断 Overlay 是否需要从最终目标继承颜色。

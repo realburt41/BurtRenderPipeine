@@ -1121,9 +1121,21 @@ void BurtApplySubsurfaceDirectPBR(
     float lightVisibility = components.brdfTerms.nDotL * shadowAttenuation;
     float3 dualSpecularContribution = dualSpecularBRDF * lightColor * lightVisibility;
 
-    components.diffuse = lerp(components.diffuse, wrappedDiffuse + transmission, subsurfaceStrength);
-    components.brdfTerms.diffuseLobe = lerp(components.brdfTerms.diffuseLobe, max(wrappedDiffuseLobe, transmissionLobe), subsurfaceStrength);
-    components.brdfTerms.diffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, wrappedDiffuseBRDF + transmissionBRDF * transmissionShadow, subsurfaceStrength);
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
+    // 5S/4S match XRender's post-process SSS path: direct diffuse stays as the
+    // ordinary diffuse input, while profile diffusion/tint is applied by the
+    // screen-space subsurface pass. Keep the dual-specular profile override.
+    float3 targetDiffuse = components.diffuse;
+    float targetDiffuseLobe = components.brdfTerms.diffuseLobe;
+    float3 targetDiffuseBRDF = components.brdfTerms.diffuseBRDF;
+#else
+    float3 targetDiffuse = wrappedDiffuse + transmission;
+    float targetDiffuseLobe = max(wrappedDiffuseLobe, transmissionLobe);
+    float3 targetDiffuseBRDF = wrappedDiffuseBRDF + transmissionBRDF * transmissionShadow;
+#endif
+    components.diffuse = lerp(components.diffuse, targetDiffuse, subsurfaceStrength);
+    components.brdfTerms.diffuseLobe = lerp(components.brdfTerms.diffuseLobe, targetDiffuseLobe, subsurfaceStrength);
+    components.brdfTerms.diffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, targetDiffuseBRDF, subsurfaceStrength);
     components.specular = lerp(components.specular, dualSpecularContribution, subsurfaceStrength);
     components.energyPreservation = lerp(components.energyPreservation, dualEnergyPreservation, subsurfaceStrength);
     components.brdfTerms.specularBRDF = lerp(components.brdfTerms.specularBRDF, dualSpecularBRDF, subsurfaceStrength);

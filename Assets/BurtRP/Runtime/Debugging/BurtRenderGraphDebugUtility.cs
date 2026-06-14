@@ -1229,14 +1229,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             }
 
             path += "Setup";
-            if (usesBurley)
-            {
-                path += "BurleyGroupsBurleyStoreHistory";
-            }
-
             if (usesSeparable)
             {
                 path += "SeparableHorizontalVertical";
+            }
+
+            if (usesBurley)
+            {
+                path += "BurleyGroupsBurleyStoreHistory";
             }
 
             return path + "CombineFinalCopy";
@@ -1821,6 +1821,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 var screenSpaceSubsurfaceEnabled = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset);
                 var screenSpaceSubsurfaceUsesBurley = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(request, asset);
                 var screenSpaceSubsurfaceUsesSeparable = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceSeparable(request, asset);
+                var screenSpaceSubsurfaceHasBurleyMaterial = BurtScreenSpaceSubsurfacePassUtility.HasScreenSpaceSubsurfaceBurleyMaterialCandidate(request, asset);
+                var screenSpaceSubsurfaceHasSeparableMaterial = BurtScreenSpaceSubsurfacePassUtility.HasScreenSpaceSubsurfaceSeparableMaterialCandidate(request, asset);
                 var screenSpaceSubsurfaceDebugSampling = BurtShadingDebugSettings.IsDebugging &&
                     BurtScreenSpaceSubsurfacePassUtility.IsScreenSpaceSubsurfaceDebugMode(BurtShadingDebugSettings.Mode);
                 var screenSpaceSubsurfaceTemporalSamplingReady = temporalAA != null &&
@@ -1828,7 +1830,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     temporalAA.HistoryValid &&
                     temporalAA.VelocityMode != BurtTemporalAAVelocityMode.Disabled;
                 var screenSpaceSubsurfaceHistory = BurtScreenSpaceSubsurfaceHistoryUtility.GetHistoryStatus(request);
-                var shouldUseHiZDepth = BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset) || screenSpaceSubsurfaceEnabled;
+                var shouldUseHiZDepth = BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
                 var screenSpaceSubsurfaceUsesStencilTexture = screenSpaceSubsurfaceEnabled && BurtScreenSpaceSubsurfacePassUtility.ShouldUseStencilTexture(request);
                 var screenSpaceSubsurfaceUsesMaskTexture = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(request, asset);
                 builder.Append(" HiZNeeded=").Append(shouldUseHiZDepth);
@@ -1850,8 +1852,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSSPassExpected=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSPath=").Append(ResolveScreenSpaceSubsurfacePath(screenSpaceSubsurfaceEnabled, screenSpaceSubsurfaceUsesMaskTexture, screenSpaceSubsurfaceUsesBurley, screenSpaceSubsurfaceUsesSeparable));
                 builder.Append(" SSSKernel=").Append(screenSpaceSubsurfaceEnabled ? "MaterialSelectable4SSeparable5SBurley+ProfileLut66IndirectBurleyAdaptiveHistory" : "Disabled");
-                builder.Append(" SSS4SResources=").Append(screenSpaceSubsurfaceUsesSeparable ? "SetupTempBlurCombine" : "Disabled");
-                builder.Append(" SSS5SResources=").Append(screenSpaceSubsurfaceUsesBurley ? "VelocityHistoryBurleyArgsGroups" : "Disabled");
+                builder.Append(" SSS4SResources=").Append(screenSpaceSubsurfaceUsesSeparable ? (screenSpaceSubsurfaceHasSeparableMaterial ? "SetupTempBlurCombine" : "SetupTempBlurCombine(PixelGate)") : "Disabled");
+                builder.Append(" SSS4SMaterialCandidate=").Append(screenSpaceSubsurfaceHasSeparableMaterial);
+                builder.Append(" SSS5SResources=").Append(screenSpaceSubsurfaceUsesBurley ? (screenSpaceSubsurfaceHasBurleyMaterial ? "VelocityHistoryBurleyArgsGroups" : "VelocityHistoryBurleyArgsGroups(PixelGate)") : "Disabled");
+                builder.Append(" SSS5SMaterialCandidate=").Append(screenSpaceSubsurfaceHasBurleyMaterial);
                 builder.Append(" SSSProfileLut=").Append(screenSpaceSubsurfaceEnabled ? "Enabled" : "Disabled");
                 builder.Append(" SSSSetupPassExpected=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSCoarseMaskPassExpected=False");
@@ -1859,9 +1863,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSSCombinePassExpected=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSIndirect=").Append(screenSpaceSubsurfaceEnabled ? "ProfileSHWrapped" : "Disabled");
                 builder.Append(" SSSDebugMode=").Append(BurtScreenSpaceSubsurfacePassUtility.IsScreenSpaceSubsurfaceDebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
-                builder.Append(" SSSSplitDebug=").Append(screenSpaceSubsurfaceEnabled ? "SourceColor+SourceAlphaDiffuseLuminance+BaseColor+Emission+DiffuseWithBaseColor+SpecularResidual+CombineDelta+ProfileTintedLighting+ProfileTintedFinal" : "Disabled");
+                builder.Append(" SSSDebugShaderMode=").Append(BurtScreenSpaceSubsurfacePassUtility.ResolveScreenSpaceSubsurfaceShaderDebugMode());
+                builder.Append(" SSSSplitDebug=").Append(screenSpaceSubsurfaceEnabled ? "SourceColor+SourceAlphaDiffuseLuminance+BaseColor+Emission+DiffuseWithBaseColor+SpecularResidual+CombineDelta+ProfileTintedLighting+ProfileTintedFinal+BlurAlpha+BlurRadius+BlurDelta+SeparableSampleGate+SeparableHorizontalDelta+BlurNormalized+BlurSignedDelta+SetupDiffuse+SeparableHorizontal+SeparableHorizontalDepth+XRenderCombineFactors+ProfileKernel+SSSColorDelta+ProfileKernelColor+FinalDelta+FinalDiffuseDelta+SSSColorSignedDelta+ProfileTintedDelta+SeparableValidity+SeparableIO+SeparableStages+SeparableChain+XRenderCombineTriplet+Algorithm" : "Disabled");
                 builder.Append(" SSSDiffuseSpecularSplit=").Append(screenSpaceSubsurfaceEnabled);
-                builder.Append(" SSSDiffuseLuminanceSource=").Append(screenSpaceSubsurfaceEnabled ? "DeferredSubsurfaceAlphaBaseColorSpecularGuard" : "Disabled");
+                builder.Append(" SSSDiffuseLuminanceSource=").Append(screenSpaceSubsurfaceEnabled ? "DeferredSubsurfaceAlphaLightingSpaceSpecularGuard" : "Disabled");
                 builder.Append(" SSSProfileIDSource=").Append(screenSpaceSubsurfaceEnabled ? "ScreenSpaceSubsurfaceBaseColorAlpha" : "Disabled");
                 builder.Append(" SSSStencilGated=").Append(screenSpaceSubsurfaceEnabled ? "ShaderStencilPlusMaskTexture" : "Disabled");
                 builder.Append(" SSSStencilTexture=").Append(screenSpaceSubsurfaceUsesStencilTexture);

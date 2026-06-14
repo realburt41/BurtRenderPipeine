@@ -22,6 +22,7 @@ struct Attributes
     float3 normalOS : NORMAL;
     float4 tangentOS : TANGENT;
     float2 uv0 : TEXCOORD0;
+    float2 uv1 : TEXCOORD1;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -34,6 +35,9 @@ struct Varyings
     float3 positionWS : TEXCOORD4;
     float2 emissionMapUV : TEXCOORD5;
     float2 maskMapUV : TEXCOORD6;
+    float2 uv0 : TEXCOORD7;
+    float2 uv1 : TEXCOORD8;
+    float3 positionOS : TEXCOORD9;
 };
 
 Varyings Vert(Attributes input)
@@ -52,17 +56,28 @@ Varyings Vert(Attributes input)
     output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
     output.emissionMapUV = BurtTransformEmissionMapUV(input.uv0, _EmissionMap_ST);
     output.maskMapUV = BurtTransformMaskMapUV(input.uv0, _MaskMap_ST);
+    output.uv0 = input.uv0;
+    output.uv1 = input.uv1;
+    output.positionOS = positionOS.xyz;
     return output;
 }
 
 float3 BurtGetForwardNormalWS(Varyings input, float facing)
 {
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    return BurtGetMaterialPassNormalWS(input.uv0 * float2(_IDXTilling, 1.0f), input.normalWS, input.tangentWS, facing);
+#else
     return BurtGetMaterialPassNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, facing);
+#endif
 }
 
-float3 BurtGetForwardShadingDirectionWS(Varyings input, float3 normalWS)
+float3 BurtGetForwardShadingDirectionWS(Varyings input, float3 normalWS, float facing)
 {
-    return BurtGetMaterialPassShadingDirectionWS(normalWS, input.tangentWS);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    return BurtGetMaterialPassShadingDirectionWS(input.uv0, input.normalWS, input.tangentWS, facing);
+#else
+    return BurtGetMaterialPassShadingDirectionWS(input.uv0, normalWS, input.tangentWS);
+#endif
 }
 
 float3 BurtGetForwardDebugNormalWS(float3 normalWS, float3 shadingDirectionWS)
@@ -73,7 +88,8 @@ float3 BurtGetForwardDebugNormalWS(float3 normalWS, float3 shadingDirectionWS)
 BurtPBRShadingComponents BurtEvaluateForwardShadingComponents(BurtSurfaceData surfaceData, BurtLight mainLight, Varyings input, float3 normalWS, float3 shadingDirectionWS, float3 viewDirectionWS, float facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    return BurtEvaluateHairShadingComponentsFromGBuffer(BurtCreateHairGBufferData(surfaceData, shadingDirectionWS, float3(0.0f, 0.0f, 0.0f)), mainLight, viewDirectionWS, input.positionWS);
+    float3 geometryNormalWS = BurtGetMaterialPassGeometryNormalWS(input.normalWS, facing);
+    return BurtEvaluateHairShadingComponentsFromGBuffer(BurtCreateHairGBufferData(surfaceData, shadingDirectionWS, normalWS, geometryNormalWS, float3(0.0f, 0.0f, 0.0f)), mainLight, viewDirectionWS, input.positionWS);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_CLEAR_COAT)
     float3 clearCoatNormalWS = BurtSampleClearCoatNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, _ClearCoatNormalScale, facing, _DoubleSidedNormalModeConstants);
     return BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, input.tangentWS, clearCoatNormalWS, viewDirectionWS, input.positionWS);
@@ -85,20 +101,25 @@ BurtPBRShadingComponents BurtEvaluateForwardShadingComponents(BurtSurfaceData su
 #if defined(BURT_ENABLE_SHADING_DEBUG)
 BurtGBufferData BurtCreateForwardDebugGBufferData(BurtSurfaceData surfaceData, Varyings input, float3 normalWS, float3 shadingDirectionWS, float facing)
 {
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    float3 geometryNormalWS = BurtGetMaterialPassGeometryNormalWS(input.normalWS, facing);
+    return BurtCreateMaterialPassGBufferData(surfaceData, input.uv0 * float2(_IDXTilling, 1.0f), geometryNormalWS, normalWS, input.tangentWS, shadingDirectionWS, facing, float3(0.0f, 0.0f, 0.0f));
+#else
     return BurtCreateMaterialPassGBufferData(surfaceData, input.baseMapUV, input.normalWS, normalWS, input.tangentWS, shadingDirectionWS, facing, float3(0.0f, 0.0f, 0.0f));
+#endif
 }
 
-float3 BurtEvaluateForwardAdditionalUnshadowedDebug(BurtSurfaceData surfaceData, float3 normalWS, float3 shadingDirectionWS, float3 viewDirectionWS, float3 positionWS)
+float3 BurtEvaluateForwardAdditionalUnshadowedDebug(BurtSurfaceData surfaceData, Varyings input, float3 normalWS, float3 shadingDirectionWS, float3 viewDirectionWS, float facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    BurtGBufferData hairGBufferData = BurtCreateHairGBufferData(surfaceData, shadingDirectionWS, float3(0.0f, 0.0f, 0.0f));
-    float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(shadingDirectionWS, viewDirectionWS);
-    BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
-    BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(hairGBufferData, hairGeometryData, positionWS);
+    float3 geometryNormalWS = BurtGetMaterialPassGeometryNormalWS(input.normalWS, facing);
+    BurtGBufferData hairGBufferData = BurtCreateHairGBufferData(surfaceData, shadingDirectionWS, normalWS, geometryNormalWS, float3(0.0f, 0.0f, 0.0f));
+    BurtPBRGeometryData hairGeometryData = BurtPrepareHairGeometryData(hairGBufferData, viewDirectionWS);
+    BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(hairGBufferData, hairGeometryData, input.positionWS);
     return hairAdditional.diffuse + hairAdditional.specular;
 #else
     BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(surfaceData, normalWS, viewDirectionWS);
-    BurtDirectPBRComponents additional = BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, positionWS);
+    BurtDirectPBRComponents additional = BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, input.positionWS);
     return additional.diffuse + additional.specular;
 #endif
 }
@@ -113,6 +134,8 @@ void BurtFillForwardShadingDebugData(
     float3 normalWS,
     float3 shadingDirectionWS,
     float3 viewDirectionWS,
+    Varyings input,
+    float facing,
     float3 positionWS,
     float shadowAttenuation,
     float3 emissionColor,
@@ -124,7 +147,7 @@ void BurtFillForwardShadingDebugData(
     debugData.directSpecularColor = pbrComponents.directSpecular;
     debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
     debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
-    debugData.additionalUnshadowedColor = BurtEvaluateForwardAdditionalUnshadowedDebug(shadingSurfaceData, normalWS, shadingDirectionWS, viewDirectionWS, positionWS);
+    debugData.additionalUnshadowedColor = BurtEvaluateForwardAdditionalUnshadowedDebug(shadingSurfaceData, input, normalWS, shadingDirectionWS, viewDirectionWS, facing);
     debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
     debugData.indirectSpecularColor = pbrComponents.indirectSpecular;
     debugData.shadowAttenuation = shadowAttenuation;
@@ -197,14 +220,14 @@ void BurtFillForwardShadingDebugData(
 
 float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
 {
-    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
-    BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
+    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS);
+    BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
 
     float3 normalWS = BurtGetForwardNormalWS(input, facing);
-    float3 shadingDirectionWS = BurtGetForwardShadingDirectionWS(input, normalWS);
+    float3 shadingDirectionWS = BurtGetForwardShadingDirectionWS(input, normalWS, facing);
     float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
-    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
+    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
     float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
     BurtSurfaceData shadingSurfaceData = surfaceData;
@@ -241,6 +264,8 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
         normalWS,
         shadingDirectionWS,
         viewDirectionWS,
+        input,
+        facing,
         input.positionWS,
         shadowAttenuation,
         emissionColor,
@@ -262,7 +287,7 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
     debugData.directSpecularColor = debugLightingComponents.directSpecular;
     debugData.additionalDiffuseColor = debugLightingComponents.additionalDiffuse;
     debugData.additionalSpecularColor = debugLightingComponents.additionalSpecular;
-    debugData.additionalUnshadowedColor = BurtEvaluateForwardAdditionalUnshadowedDebug(debugLightingSurfaceData, normalWS, shadingDirectionWS, viewDirectionWS, input.positionWS);
+    debugData.additionalUnshadowedColor = BurtEvaluateForwardAdditionalUnshadowedDebug(debugLightingSurfaceData, input, normalWS, shadingDirectionWS, viewDirectionWS, facing);
     debugData.indirectDiffuseColor = debugLightingComponents.indirectDiffuse;
     debugData.indirectSpecularColor = debugLightingComponents.indirectSpecular;
     debugData.perceptualRoughness = debugLightingComponents.perceptualRoughness;

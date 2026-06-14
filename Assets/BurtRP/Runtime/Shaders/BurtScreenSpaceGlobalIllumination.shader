@@ -7,6 +7,7 @@ Shader "Hidden/BurtRP/BurtGI"
         Tags { "RenderPipeline" = "BurtRenderPipeline" }
 
         HLSLINCLUDE
+            #define BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT 1
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtDeferred.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
@@ -788,6 +789,11 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 burtGI = tex2D(_BurtScreenSpaceGlobalIlluminationTexture, screenUV).rgb;
                 float3 appliedGI = burtGI * _BurtGIParams1.x;
                 cameraColor.rgb += appliedGI;
+                if (BurtIsSubsurfaceShadingModel(BurtSampleDeferredShadingModelID(screenUV)))
+                {
+                    cameraColor.a += dot(max(appliedGI, 0.0f), float3(0.3f, 0.59f, 0.11f));
+                }
+
                 return cameraColor;
             }
 

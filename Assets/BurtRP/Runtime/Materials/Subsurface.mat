@@ -105,11 +105,11 @@ Material:
     - _SrcBlend: 1
     - _SubsurfaceAmbient: 0.344
     - _SubsurfaceDistortion: 0.369
-    - _SubsurfacePower: 4.14
+    - _SubsurfacePower: 1.52
     - _SubsurfaceProfileIndex: 0
-    - _SubsurfaceScatteringMode: 0
+    - _SubsurfaceScatteringMode: 1
     - _SubsurfaceStrength: 1
-    - _SubsurfaceThickness: 0.582
+    - _SubsurfaceThickness: 0.283
     - _Surface: 0
     - _UVSec: 0
     - _ZTest: 4

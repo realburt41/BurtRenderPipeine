@@ -19,6 +19,7 @@ struct GBufferAttributes
     float3 normalOS : NORMAL;
     float4 tangentOS : TANGENT;
     float2 uv0 : TEXCOORD0;
+    float2 uv1 : TEXCOORD1;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -30,6 +31,10 @@ struct GBufferVaryings
     float4 tangentWS : TEXCOORD2;
     float2 maskMapUV : TEXCOORD3;
     float2 emissionMapUV : TEXCOORD4;
+    float2 uv0 : TEXCOORD5;
+    float2 uv1 : TEXCOORD6;
+    float3 positionOS : TEXCOORD7;
+    float3 positionWS : TEXCOORD8;
 };
 
 struct GBufferFragmentOutput
@@ -76,6 +81,10 @@ GBufferVaryings VertGBuffer(GBufferAttributes input)
     output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
     output.maskMapUV = BurtTransformMaskMapUV(input.uv0, _MaskMap_ST);
     output.emissionMapUV = BurtTransformEmissionMapUV(input.uv0, _EmissionMap_ST);
+    output.uv0 = input.uv0;
+    output.uv1 = input.uv1;
+    output.positionOS = positionOS.xyz;
+    output.positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
     return output;
 }
 
@@ -93,8 +102,11 @@ GBufferFragmentOutput BurtPackGBufferOutput(BurtEncodedGBuffer encodedGBuffer)
 BurtGBufferData BurtCreateMaterialGBufferData(GBufferVaryings input, float facing, BurtSurfaceData surfaceData, float3 emissionColor)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float3 shadingDirectionWS = BurtGetMaterialPassShadingDirectionWS(input.normalWS, input.tangentWS);
-    return BurtCreateMaterialPassGBufferData(surfaceData, input.baseMapUV, input.normalWS, input.normalWS, input.tangentWS, shadingDirectionWS, facing, emissionColor);
+    float2 hairNormalMapUV = input.uv0 * float2(_IDXTilling, 1.0f);
+    float3 baseNormalWS = BurtGetMaterialPassNormalWS(hairNormalMapUV, input.normalWS, input.tangentWS, facing);
+    float3 geometryNormalWS = BurtGetMaterialPassGeometryNormalWS(input.normalWS, facing);
+    float3 shadingDirectionWS = BurtGetMaterialPassShadingDirectionWS(input.uv0, input.normalWS, input.tangentWS, facing);
+    return BurtCreateMaterialPassGBufferData(surfaceData, hairNormalMapUV, geometryNormalWS, baseNormalWS, input.tangentWS, shadingDirectionWS, facing, emissionColor);
 #else
     float3 baseNormalWS = BurtGetMaterialPassNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, facing);
     float3 shadingDirectionWS = BurtGetMaterialPassShadingDirectionWS(baseNormalWS, input.tangentWS);
@@ -104,11 +116,12 @@ BurtGBufferData BurtCreateMaterialGBufferData(GBufferVaryings input, float facin
 
 GBufferFragmentOutput FragGBuffer(GBufferVaryings input, fixed facing : VFACE)
 {
-    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
-    BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
+    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS);
+    BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
 
-    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
-    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
+    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
+    float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
     float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
     BurtGBufferData gbufferData = BurtCreateMaterialGBufferData(input, facing, surfaceData, emissionColor);
 
@@ -117,11 +130,12 @@ GBufferFragmentOutput FragGBuffer(GBufferVaryings input, fixed facing : VFACE)
 
 SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings input, fixed facing : VFACE)
 {
-    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
-    BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
+    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS);
+    BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
 
-    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
-    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
+    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
+    float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
     float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
 
     SubsurfaceForwardFragmentOutput output;

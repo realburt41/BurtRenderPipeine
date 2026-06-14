@@ -1239,8 +1239,12 @@ BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData 
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
 
 #if BURT_ENABLE_SUBSURFACE_SHADING
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
+    components.subsurfaceIndirect = components.diffuse;
+#else
     components.subsurfaceIndirect = BurtEvaluateSubsurfaceIndirectProfile(materialData, geometryData);
     components.diffuse = lerp(components.diffuse, components.subsurfaceIndirect, saturate(materialData.subsurfaceStrength));
+#endif
     components.specular = BurtEvaluateSubsurfaceIndirectSpecularDualLobe(materialData, geometryData, components.specularEnergyCompensation);
 #endif
 
@@ -2175,11 +2179,27 @@ float3 BurtHairAbsorptionTint(float3 baseColor)
     return sqrt(saturate(baseColor));
 }
 
+float3 BurtHairColorToAbsorption(float3 color)
+{
+    float3 safeColor = clamp(color, float3(0.0001f, 0.0001f, 0.0001f), float3(1.0f, 1.0f, 1.0f));
+    const float b = 0.3f;
+    const float b2 = b * b;
+    const float b3 = b * b2;
+    const float b4 = b2 * b2;
+    const float b5 = b * b4;
+    const float d = 5.969f - 0.215f * b + 2.532f * b2 - 10.73f * b3 + 5.574f * b4 + 0.245f * b5;
+    float3 absorption = log(safeColor) / d;
+    return absorption * absorption;
+}
+
 float3 BurtHairSpecularF0(BurtGBufferData gbufferData)
 {
     // Reflectance already includes _HairSpecularScale before GBuffer packing; keep F0 dielectric and avoid reading Lit metallic.
     float specularScale = saturate(gbufferData.reflectance) * 2.0f;
-    return float3(0.04f, 0.04f, 0.04f) * specularScale;
+    float3 specularTint = BurtGetHairSpecularColor(gbufferData);
+    float tintScale = PerceivedLuminance(specularTint);
+    float3 tintColor = specularTint / max(tintScale, 0.0001f);
+    return float3(0.04f, 0.04f, 0.04f) * specularScale * tintScale * tintColor;
 }
 
 float BurtHairSpecularScale(BurtGBufferData gbufferData)
@@ -2203,6 +2223,34 @@ float3 BurtLimitHairSpecularEnergy(float3 specularBRDF, float roughness, float s
     return safeSpecularBRDF * min(1.0f, energyLimit / max(specularLuminance, BURT_EPSILON));
 }
 
+float BurtHairRoughnessToBlinnPhongSpecularExponent(float roughness)
+{
+    return clamp(2.0f * rcp(max(roughness * roughness, BURT_EPSILON)) - 2.0f, BURT_EPSILON, rcp(BURT_EPSILON));
+}
+
+float BurtHairKajiyaKayPeakFromLinearRoughness(float linearRoughness)
+{
+    float specularExponent = BurtHairRoughnessToBlinnPhongSpecularExponent(max(linearRoughness, 1.0f / 255.0f));
+    return (specularExponent + 2.0f) * (0.5f * BURT_INV_PI);
+}
+
+float BurtHairMarschnerAutoSpecularGain(float legacyPeak, float marschnerPeak, float response, float maxGain)
+{
+    float gain = legacyPeak / max(marschnerPeak, 0.0001f);
+    return clamp(pow(max(gain, 1.0f), response), 1.0f, maxGain);
+}
+
+float3 BurtHairKajiyaKayDiffuseAttenuation(float3 baseColor, float scatter, float3 lightDirectionWS, float3 viewDirectionWS, float3 strandDirectionWS, float shadow)
+{
+    float kajiyaDiffuse = 1.0f - abs(dot(strandDirectionWS, lightDirectionWS));
+    float3 fakeNormal = BurtSafeNormalize(viewDirectionWS - strandDirectionWS * dot(viewDirectionWS, strandDirectionWS));
+    float wrappedNoL = saturate((dot(fakeNormal, lightDirectionWS) + 1.0f) * 0.25f);
+    float diffuseScatter = BURT_INV_PI * lerp(wrappedNoL, kajiyaDiffuse, 0.33f) * scatter;
+    float luma = max(PerceivedLuminance(baseColor), BURT_EPSILON);
+    float3 scatterTint = pow(max(baseColor / luma, float3(0.001f, 0.001f, 0.001f)), saturate(1.0f - shadow));
+    return sqrt(saturate(baseColor)) * diffuseScatter * scatterTint;
+}
+
 float3 BurtHairCreateFallbackNormalWS(float3 strandDirectionWS)
 {
     float3 fallbackAxis = abs(strandDirectionWS.y) < 0.95f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
@@ -2217,6 +2265,52 @@ float3 BurtHairCreateViewFacingNormalWS(float3 strandDirectionWS, float3 viewDir
     float3 viewNormal = viewDirection - strand * dot(viewDirection, strand);
     float normalLengthSquared = dot(viewNormal, viewNormal);
     return normalLengthSquared > 0.0001f ? viewNormal * rsqrt(normalLengthSquared) : BurtHairCreateFallbackNormalWS(strand);
+}
+
+float3 BurtHairReconstructGeometryNormalWS(float3 positionWS, float3 viewDirectionWS)
+{
+    float3 geometricNormalWS = cross(ddx(positionWS), ddy(positionWS));
+    float normalLengthSquared = dot(geometricNormalWS, geometricNormalWS);
+    if (normalLengthSquared <= 0.0001f)
+    {
+        return BurtSafeNormalize(viewDirectionWS);
+    }
+
+    geometricNormalWS *= rsqrt(normalLengthSquared);
+    return dot(geometricNormalWS, viewDirectionWS) < 0.0f ? -geometricNormalWS : geometricNormalWS;
+}
+
+BurtGBufferData BurtResolveHairDeferredGeometryData(BurtGBufferData gbufferData, float3 viewDirectionWS, float3 positionWS)
+{
+    float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
+    float3 hairNormalWS = BurtGetHairShadingNormalWS(gbufferData);
+    float3 hairGeometryNormalWS = BurtGetHairGeometryNormalWS(gbufferData);
+    float3 reconstructedGeometryNormalWS = BurtHairReconstructGeometryNormalWS(positionWS, viewDirectionWS);
+
+    bool decodedHairMissingNormals =
+        abs(dot(hairNormalWS, strandDirectionWS)) > 0.98f &&
+        abs(dot(hairGeometryNormalWS, strandDirectionWS)) > 0.98f;
+
+    if (decodedHairMissingNormals)
+    {
+        gbufferData.clearCoatNormalWS = reconstructedGeometryNormalWS;
+        gbufferData.hairGeometryNormalWS = reconstructedGeometryNormalWS;
+    }
+
+    return gbufferData;
+}
+
+BurtPBRGeometryData BurtPrepareHairGeometryData(BurtGBufferData gbufferData, float3 viewDirectionWS)
+{
+    float3 hairNormalWS = BurtGetHairShadingNormalWS(gbufferData);
+    float3 strandDirectionWS = BurtGetHairStrandDirectionWS(gbufferData);
+    return BurtPreparePBRGeometryData(hairNormalWS, float4(strandDirectionWS, 1.0f), viewDirectionWS);
+}
+
+BurtPBRGeometryData BurtPrepareHairGeometryData(BurtGBufferData gbufferData, float3 viewDirectionWS, float3 positionWS)
+{
+    gbufferData = BurtResolveHairDeferredGeometryData(gbufferData, viewDirectionWS, positionWS);
+    return BurtPrepareHairGeometryData(gbufferData, viewDirectionWS);
 }
 
 struct BurtHairDirectComponents
@@ -2235,96 +2329,102 @@ struct BurtHairDirectComponents
 
 BurtHairDirectComponents BurtEvaluateHairDirectComponents(BurtGBufferData gbufferData, BurtPBRGeometryData geometryData, BurtLight light)
 {
-    // UE Hair 需�?strand tangent；BurtRP/Hair 会把 mesh tangent 存进 GBuffer normalWS 槽，旧材质则仍可�?normal �?fallback
-float3 t = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
+    float3 baseColor = saturate(gbufferData.baseColor);
+    float3 t = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
+    float3 n = geometryData.normalWS;
+    float3 geometricN = BurtGetHairGeometryNormalWS(gbufferData);
     float3 v = geometryData.viewDirectionWS;
     float3 l = BurtSafeNormalize(light.directionWS);
-
-    float sinThetaL = clamp(dot(t, l), -1.0f, 1.0f);
-    float sinThetaV = clamp(dot(t, v), -1.0f, 1.0f);
-    float cosThetaD = max(cos(0.5f * abs(asin(sinThetaV) - asin(sinThetaL))), 0.01f);
-
-    float3 lp = l - sinThetaL * t;
-    float3 vp = v - sinThetaV * t;
-    float cosPhi = dot(lp, vp) * rsqrt(max(dot(lp, lp) * dot(vp, vp), 0.0001f));
-    cosPhi = clamp(cosPhi, -1.0f, 1.0f);
-    float cosHalfPhi = sqrt(saturate(0.5f + 0.5f * cosPhi));
-    float voL = clamp(dot(v, l), -1.0f, 1.0f);
+    float lightFalloff = saturate(light.shadowAttenuation + BurtGetHairShadowFillStrength(gbufferData));
 
     float roughness = clamp(gbufferData.perceptualRoughness, 1.0f / 255.0f, 1.0f);
+    float secondaryRoughness = clamp(BurtGetHairSecondaryRoughness(gbufferData), 1.0f / 255.0f, 1.0f);
+    float backlit = min(BurtGetHairBackLight(gbufferData), 1.0f);
     float scatter = BurtGetHairScatter(gbufferData);
-    float shiftScale = BurtGetHairLongitudinalShiftScale(gbufferData);
     float specularScale = BurtHairSpecularScale(gbufferData);
-    float3 absorptionTint = BurtHairAbsorptionTint(gbufferData.baseColor);
-    float baseWidth = roughness * roughness;
+
+    float3 normalSlope = n - geometricN * dot(n, geometricN);
+    float3 marschnerT = BurtSafeNormalize(t + normalSlope * 1.5f);
+    float sinThetaL = clamp(dot(marschnerT, l), -1.0f, 1.0f);
+    float sinThetaV = clamp(dot(marschnerT, v), -1.0f, 1.0f);
+    float cosThetaD = max(cos(0.5f * abs(asin(sinThetaV) - asin(sinThetaL))), 0.01f);
+    float3 lp = l - sinThetaL * marschnerT;
+    float3 vp = v - sinThetaV * marschnerT;
+    float cosPhi = clamp(dot(lp, vp) * rsqrt(max(dot(lp, lp) * dot(vp, vp), 0.0001f)), -1.0f, 1.0f);
+    float cosHalfPhi = sqrt(saturate(0.5f + 0.5f * cosPhi));
+    float voL = dot(v, l);
     float nPrime = 1.19f / cosThetaD + 0.36f * cosThetaD;
 
-    float shift = 0.035f * shiftScale;
-    float alphaR = -shift * 2.0f;
-    float alphaTT = shift;
-    float alphaTRT = shift * 4.0f;
+    float primaryB = roughness * roughness * 0.75f;
+    float ttB = roughness * roughness * 0.5f;
+    float secondaryB = max(secondaryRoughness * secondaryRoughness, 0.0001f) * 0.85f;
+    float alphaR = -0.07f;
+    float alphaTT = 0.035f;
+    float alphaTRT = 0.14f;
 
-    // R lobe: follow UE HairShading's shifted longitudinal Gaussian and azimuthal 0.25 * CosHalfPhi term.
     float sinAlphaR = sin(alphaR);
     float cosAlphaR = cos(alphaR);
-    float shiftedSinThetaV = 2.0f * sinAlphaR * (cosAlphaR * cosHalfPhi * sqrt(saturate(1.0f - sinThetaV * sinThetaV)) + sinAlphaR * sinThetaV);
-    float primaryWidth = baseWidth * sqrt(2.0f) * max(cosHalfPhi, 0.1f);
-    float primaryTheta = sinThetaL + sinThetaV - shiftedSinThetaV;
-    float primaryM = BurtHairGaussian(primaryWidth, primaryTheta);
+    float shiftR = 2.0f * sinAlphaR * (cosAlphaR * cosHalfPhi * sqrt(saturate(1.0f - sinThetaV * sinThetaV)) + sinAlphaR * sinThetaV);
+    shiftR += BurtGetHairSpecularShift(gbufferData);
+    float primaryBScale = sqrt(2.0f) * cosHalfPhi;
+    float primaryM = BurtHairGaussian(primaryB * primaryBScale, sinThetaL + sinThetaV - shiftR);
     float primaryN = 0.25f * cosHalfPhi;
     float primaryFScalar = BurtHairFresnel(sqrt(saturate(0.5f + 0.5f * voL)));
-    float primaryBacklitScale = lerp(1.0f, lerp(0.35f, 1.0f, scatter), saturate(-voL));
-    float3 primaryF = float3(primaryFScalar, primaryFScalar, primaryFScalar) * specularScale;
-    float3 primarySpecular = primaryM * primaryN * primaryF * primaryBacklitScale;
 
-    // TT colored lobe: use UE's azimuthal fit and a legacy absorption tint derived from BaseColor.
-    float secondaryM = BurtHairGaussian(baseWidth * 0.5f, sinThetaL + sinThetaV - alphaTT);
+    float nDotL = saturate(dot(n, l));
+    float legacyVisibility = nDotL * saturate(dot(geometricN, v) * 1000000.0f);
+    float legacyPrimaryPeak = 0.25f * max(primaryFScalar, 0.0001f) * BurtHairKajiyaKayPeakFromLinearRoughness(PerceptualRoughnessToLinearRoughness(roughness)) * legacyVisibility;
+    float marschnerPrimaryPeak = BurtHairGaussian(max(primaryB * sqrt(2.0f), 1.0f / 255.0f), 0.0f) * primaryN * max(primaryFScalar, 0.0001f);
+    float primaryAutoGain = BurtHairMarschnerAutoSpecularGain(legacyPrimaryPeak, marschnerPrimaryPeak, 1.0f, 2.0f);
+    float3 specularTint = BurtGetHairSpecularColor(gbufferData);
+    float tintScale = PerceivedLuminance(specularTint);
+    float3 tintColor = specularTint / max(tintScale, 0.0001f);
+    float3 rBaseColorTint = lerp(float3(1.0f, 1.0f, 1.0f), sqrt(abs(baseColor)), 0.6f);
+    float3 primarySpecular = primaryM * primaryN * primaryFScalar * specularScale * primaryAutoGain * 2.0f * tintScale * tintColor * rBaseColorTint * lerp(1.0f, backlit, saturate(-voL));
+
+    float ttM = BurtHairGaussian(ttB, sinThetaL + sinThetaV - alphaTT);
     float a = rcp(max(nPrime, BURT_EPSILON));
-    float h = saturate(cosHalfPhi * (1.0f + a * (0.6f - 0.8f * cosPhi)));
+    float h = cosHalfPhi * (1.0f + a * (0.6f - 0.8f * cosPhi));
     float ttF = BurtHairFresnel(cosThetaD * sqrt(saturate(1.0f - h * h)));
     float ttFp = (1.0f - ttF) * (1.0f - ttF);
-    float ttAbsorptionPower = 0.5f * sqrt(saturate(1.0f - (h * a) * (h * a))) / cosThetaD;
-    float3 ttTint = BurtHairSafePow(gbufferData.baseColor, ttAbsorptionPower);
-    float secondaryN = exp(-3.65f * cosPhi - 3.98f);
-    float coloredSpecularStrength = lerp(0.25f, 1.0f, scatter) * lerp(0.5f, 1.0f, saturate(gbufferData.reflectance));
-    float3 secondarySpecular = secondaryM * secondaryN * ttFp * ttTint * coloredSpecularStrength;
+    float3 ttAbsorption = BurtHairColorToAbsorption(baseColor);
+    float3 ttTint = exp(-ttAbsorption * 2.0f * abs(1.0f - (h * a) * (h * a) / cosThetaD));
+    float ttN = exp(-3.65f * cosPhi - 3.98f);
+    float3 transmissionSpecular = ttM * ttN * ttFp * ttTint * backlit;
 
-    // TRT glint: a cheaper colored secondary highlight using UE's narrow forward azimuthal fit.
-    float tertiaryM = BurtHairGaussian(baseWidth * 2.0f, sinThetaL + sinThetaV - alphaTRT);
+    float secondaryShiftRaw = clamp((BurtGetHairSecondarySpecularShift(gbufferData) - 1.56f) / 3.33f, -2.0f, 2.0f);
+    float trtM = BurtHairGaussian(secondaryB, sinThetaL + sinThetaV - alphaTRT - secondaryShiftRaw);
     float trtF = BurtHairFresnel(cosThetaD * 0.5f);
     float trtFp = (1.0f - trtF) * (1.0f - trtF) * trtF;
-    float3 trtTint = BurtHairSafePow(gbufferData.baseColor, 0.8f / cosThetaD);
-    float tertiaryN = exp(17.0f * cosPhi - 16.78f);
-    float3 tertiarySpecular = tertiaryM * tertiaryN * trtFp * trtTint * lerp(0.05f, 0.5f, scatter);
+    float3 trtTint = BurtHairSafePow(baseColor, 0.8f / cosThetaD);
+    const float trtAzimuthSharpness = 20.0f;
+    const float trtAzimuthPeakLog = 0.22f;
+    float trtN = exp(trtAzimuthSharpness * cosPhi - (trtAzimuthSharpness - trtAzimuthPeakLog));
 
-    // Multiple-scatter/diffuse approximation from UE KajiyaKayDiffuseAttenuation, with HairScatter controlling strength.
-    float kajiyaDiffuse = 1.0f - abs(sinThetaL);
-    float3 fakeNormal = BurtHairCreateViewFacingNormalWS(t, v);
-    float wrappedNoL = saturate((dot(fakeNormal, l) + 1.0f) * 0.25f);
-    float diffuseLobe = BURT_INV_PI * lerp(wrappedNoL, kajiyaDiffuse, 0.33f);
-    float backlit = saturate(-voL);
-    float transmissionLobe = BURT_INV_PI * backlit * backlit * kajiyaDiffuse;
-    float luminance = max(dot(gbufferData.baseColor, float3(0.2126f, 0.7152f, 0.0722f)), BURT_EPSILON);
-    float3 scatterBase = max(abs(gbufferData.baseColor / luminance), float3(0.001f, 0.001f, 0.001f));
-    float3 scatterTint = pow(scatterBase, 1.0f - saturate(light.shadowAttenuation));
-    float3 scatterDiffuseBRDF = absorptionTint * diffuseLobe * scatter * scatterTint;
-    float3 transmissionBRDF = absorptionTint * absorptionTint * transmissionLobe * scatter * 0.35f;
+    float secondaryLinearRoughness = PerceptualRoughnessToLinearRoughness(secondaryRoughness);
+    float legacySecondaryPeak = 0.25f * max(trtFp, 0.0001f) * BurtHairKajiyaKayPeakFromLinearRoughness(secondaryLinearRoughness) * legacyVisibility;
+    float trtReferenceN = exp(trtAzimuthPeakLog);
+    float3 trtReferenceTint = BurtHairSafePow(baseColor, 0.8f);
+    float marschnerSecondaryPeak = BurtHairGaussian(max(secondaryB, 1.0f / 255.0f), 0.0f) * trtReferenceN * max(trtFp, 0.0001f) * sqrt(max(PerceivedLuminance(trtReferenceTint), 0.0001f));
+    float secondaryAutoGain = BurtHairMarschnerAutoSpecularGain(legacySecondaryPeak, marschnerSecondaryPeak, 0.75f, 2.1f);
+    float3 secondarySpecular = trtM * trtN * trtFp * trtTint * secondaryAutoGain * 0.75f * BurtGetHairSecondarySpecularColor(gbufferData) * specularScale;
+
+    float diffuseLobe = BURT_INV_PI * lerp(saturate((dot(BurtHairCreateViewFacingNormalWS(t, v), l) + 1.0f) * 0.25f), 1.0f - abs(sinThetaL), 0.33f);
+    float transmissionLobe = ttM * ttN * ttFp * backlit;
+    float3 scatterDiffuseBRDF = max(BurtHairKajiyaKayDiffuseAttenuation(baseColor, scatter, l, v, n, lightFalloff), float3(0.0f, 0.0f, 0.0f));
 
     BurtHairDirectComponents components;
-    components.diffuseBRDF = scatterDiffuseBRDF + transmissionBRDF;
-    components.specularBRDF = BurtLimitHairSpecularEnergy(primarySpecular + secondarySpecular + tertiarySpecular, roughness, specularScale, scatter);
+    components.diffuseBRDF = scatterDiffuseBRDF;
+    components.specularBRDF = BurtLimitHairSpecularEnergy(primarySpecular + secondarySpecular, roughness, specularScale, scatter);
     components.primaryLobe = primaryM * primaryN * specularScale;
-    components.secondaryLobe = secondaryM * secondaryN * coloredSpecularStrength + tertiaryM * tertiaryN * lerp(0.05f, 0.5f, scatter);
+    components.secondaryLobe = trtM * trtN;
     components.transmissionLobe = transmissionLobe;
     components.scatter = scatter;
     components.diffuseLobe = diffuseLobe;
-    components.fresnel = primaryF;
+    components.fresnel = float3(primaryFScalar, primaryFScalar, primaryFScalar);
 
-    float directShadow = saturate(light.shadowAttenuation);
-    float transmissionShadow = lerp(directShadow, sqrt(directShadow), scatter * 0.5f);
-    float3 visibleLightColor = light.color;
-    components.diffuse = (scatterDiffuseBRDF * directShadow + transmissionBRDF * transmissionShadow) * visibleLightColor;
-    components.specular = components.specularBRDF * visibleLightColor * directShadow;
+    components.diffuse = components.diffuseBRDF * light.color;
+    components.specular = components.specularBRDF * light.color * lightFalloff * nDotL + transmissionSpecular * light.color * lightFalloff;
     return components;
 }
 
@@ -2354,6 +2454,7 @@ BurtHairDirectComponents BurtAddHairDirectComponents(BurtHairDirectComponents ba
     baseComponents.secondaryLobe += addedComponents.secondaryLobe;
     baseComponents.transmissionLobe += addedComponents.transmissionLobe;
     baseComponents.diffuseLobe += addedComponents.diffuseLobe;
+    baseComponents.scatter = max(baseComponents.scatter, addedComponents.scatter);
     baseComponents.fresnel = max(baseComponents.fresnel, addedComponents.fresnel);
     return baseComponents;
 }
@@ -2569,9 +2670,8 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
 {
     // Initialize with the existing PBR component layout so all debug fields stay valid, then overwrite the lighting lobes with Hair results.
     BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
-    float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
-    float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
-    BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+    BurtPBRGeometryData geometryData = BurtPrepareHairGeometryData(gbufferData, viewDirectionWS);
+    float3 hairNormalWS = geometryData.normalWS;
     BurtPBRShadingComponents components = BurtEvaluatePBRShadingComponents(materialData, geometryData, mainLight);
 
     BurtHairDirectComponents hairDirect = BurtEvaluateHairDirectComponents(gbufferData, geometryData, mainLight);
@@ -2620,10 +2720,10 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
 
 BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBufferData gbufferData, BurtLight mainLight, float3 viewDirectionWS, float3 positionWS)
 {
+    gbufferData = BurtResolveHairDeferredGeometryData(gbufferData, viewDirectionWS, positionWS);
     BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
-    float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
-    float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
-    BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+    BurtPBRGeometryData geometryData = BurtPrepareHairGeometryData(gbufferData, viewDirectionWS);
+    float3 hairNormalWS = geometryData.normalWS;
     BurtPBRShadingComponents components = BurtEvaluatePBRShadingComponents(materialData, geometryData, mainLight);
 
     BurtHairDirectComponents hairAdditionalDirect = BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS);
@@ -2676,10 +2776,10 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
 
 BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBufferData gbufferData, BurtLight mainLight, float3 viewDirectionWS, float3 positionWS, float2 screenUV)
 {
+    gbufferData = BurtResolveHairDeferredGeometryData(gbufferData, viewDirectionWS, positionWS);
     BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
-    float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
-    float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
-    BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+    BurtPBRGeometryData geometryData = BurtPrepareHairGeometryData(gbufferData, viewDirectionWS);
+    float3 hairNormalWS = geometryData.normalWS;
     BurtPBRShadingComponents components = BurtEvaluatePBRShadingComponents(materialData, geometryData, mainLight);
 
     BurtHairDirectComponents hairAdditionalDirect = BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS, screenUV);
@@ -2731,10 +2831,10 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
 
 BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBufferData gbufferData, BurtLight mainLight, float3 viewDirectionWS, float3 positionWS, float3 shadowPositionWS, float2 screenUV)
 {
+    gbufferData = BurtResolveHairDeferredGeometryData(gbufferData, viewDirectionWS, positionWS);
     BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
-    float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
-    float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
-    BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+    BurtPBRGeometryData geometryData = BurtPrepareHairGeometryData(gbufferData, viewDirectionWS);
+    float3 hairNormalWS = geometryData.normalWS;
     BurtPBRShadingComponents components = BurtEvaluatePBRShadingComponents(materialData, geometryData, mainLight);
 
     BurtHairDirectComponents hairAdditionalDirect = BurtEvaluateHairAdditionalDirectLightingComponents(gbufferData, geometryData, positionWS, shadowPositionWS, screenUV);
@@ -2832,9 +2932,7 @@ float3 BurtEvaluateAdditionalLightingUnshadowedDebug(BurtSurfaceData surfaceData
     if (BurtIsActiveHairShadingModel(surfaceData.shadingModelID))
     {
         BurtGBufferData hairGBufferData = BurtCreateHairGBufferData(surfaceData, normalWS, float3(0.0f, 0.0f, 0.0f));
-        float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(hairGBufferData));
-        float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
-        BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+        BurtPBRGeometryData hairGeometryData = BurtPrepareHairGeometryData(hairGBufferData, viewDirectionWS);
         BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(hairGBufferData, hairGeometryData, positionWS);
         return hairAdditional.diffuse + hairAdditional.specular;
     }
@@ -2851,9 +2949,7 @@ float3 BurtEvaluateAdditionalLightingUnshadowedDebug(BurtSurfaceData surfaceData
     if (BurtIsActiveHairShadingModel(surfaceData.shadingModelID))
     {
         BurtGBufferData hairGBufferData = BurtCreateHairGBufferData(surfaceData, normalWS, float3(0.0f, 0.0f, 0.0f));
-        float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(hairGBufferData));
-        float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
-        BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+        BurtPBRGeometryData hairGeometryData = BurtPrepareHairGeometryData(hairGBufferData, viewDirectionWS);
         BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(hairGBufferData, hairGeometryData, positionWS, screenUV);
         return hairAdditional.diffuse + hairAdditional.specular;
     }
@@ -2869,9 +2965,8 @@ float3 BurtEvaluateAdditionalLightingUnshadowedDebugFromGBuffer(BurtGBufferData 
 #if BURT_ENABLE_HAIR_SHADING
     if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
     {
-        float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
-        float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
-        BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+        gbufferData = BurtResolveHairDeferredGeometryData(gbufferData, viewDirectionWS, positionWS);
+        BurtPBRGeometryData hairGeometryData = BurtPrepareHairGeometryData(gbufferData, viewDirectionWS);
         BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, hairGeometryData, positionWS);
         return hairAdditional.diffuse + hairAdditional.specular;
     }
@@ -2887,9 +2982,8 @@ float3 BurtEvaluateAdditionalLightingUnshadowedDebugFromGBuffer(BurtGBufferData 
 #if BURT_ENABLE_HAIR_SHADING
     if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
     {
-        float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
-        float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
-        BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+        gbufferData = BurtResolveHairDeferredGeometryData(gbufferData, viewDirectionWS, positionWS);
+        BurtPBRGeometryData hairGeometryData = BurtPrepareHairGeometryData(gbufferData, viewDirectionWS);
         BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, hairGeometryData, positionWS, screenUV);
         return hairAdditional.diffuse + hairAdditional.specular;
     }

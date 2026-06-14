@@ -20,7 +20,7 @@ namespace Burt.RenderPipeline
         [SerializeField, Min(0.01f), LabelText("Mean Free Path Distance")] private float meanFreePathDistance = 1f;
 
         [TitleGroup("Burley Normalized")]
-        [SerializeField, Min(0.01f), LabelText("World Unit Scale")] private float worldUnitScale = 1f;
+        [SerializeField, Min(0.01f), LabelText("World Unit Scale")] private float worldUnitScale = 0.1f;
 
         [TitleGroup("Burley Normalized")]
         [SerializeField, LabelText("Tint")] private Color tint = Color.white;
@@ -426,7 +426,7 @@ namespace Burt.RenderPipeline
                 "InlineFallback",
                 new Color(0.78f, 0.52f, 0.42f, 1f),
                 new Color(1f, 0.42f, 0.24f, 1f),
-                1f,
+                0.1f,
                 1f,
                 Color.white,
                 Color.white,

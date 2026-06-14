@@ -205,8 +205,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderPipelineAsset asset)
         {
             return ShouldRegisterGBufferTargets(request, asset) &&
-                (BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset) ||
-                    BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(request, asset));
+                BurtHiZDepthPassUtility.ShouldUseHiZDepth(request, asset);
         }
 
         private static bool ShouldRegisterTileLightBuffers(

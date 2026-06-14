@@ -5,6 +5,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 {
     public sealed class BurtCameraRenderer // 定义单个 request 的执行器，它负责驱动 Assembler 和 RenderGraph。
     {
+        private static readonly int HairDitherFrameIndexId = Shader.PropertyToID("_BurtHairDitherFrameIndex");
+
         private readonly BurtRenderGraph renderGraph = new BurtRenderGraph(); // 创建一个可复用的 RenderGraph，用来承载当前 request 的 Pass 列表和资源表。
 
         public void Render( // 保留旧渲染入口，未传入 options 时保持每个 request 独立分配、FinalBlit 和释放 RT。
@@ -47,6 +49,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             var temporalAA = BurtTemporalAAUtility.PrepareRequest(request, asset, safeRenderOptions);
             request.SetTemporalAA(temporalAA);
+            Shader.SetGlobalFloat(HairDitherFrameIndexId, temporalAA.Enabled ? temporalAA.FrameIndex : 0);
 
             try
             {

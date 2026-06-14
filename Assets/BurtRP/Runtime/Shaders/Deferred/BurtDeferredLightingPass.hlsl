@@ -41,7 +41,7 @@ float BurtEvaluateDeferredOutputAlpha(BurtPBRShadingComponents components)
     float3 diffuseLighting =
         components.directDiffuse +
         components.indirectDiffuse;
-    return dot(BurtApplyPreExposure(diffuseLighting), float3(0.2126f, 0.7152f, 0.0722f));
+    return dot(BurtApplyPreExposure(diffuseLighting), float3(0.3f, 0.59f, 0.11f));
 #else
     return 1.0f;
 #endif
@@ -117,9 +117,8 @@ float3 BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(
     float2 screenUV)
 {
 #if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
-    float3 strandDirectionWS = BurtSafeNormalize(BurtGetHairStrandDirectionWS(gbufferData));
-    float3 hairNormalWS = BurtHairCreateViewFacingNormalWS(strandDirectionWS, viewDirectionWS);
-    BurtPBRGeometryData hairGeometryData = BurtPreparePBRGeometryData(hairNormalWS, viewDirectionWS);
+    gbufferData = BurtResolveHairDeferredGeometryData(gbufferData, viewDirectionWS, positionWS);
+    BurtPBRGeometryData hairGeometryData = BurtPrepareHairGeometryData(gbufferData, viewDirectionWS);
     BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(gbufferData, hairGeometryData, positionWS, screenUV);
     return hairAdditional.diffuse + hairAdditional.specular;
 #else

@@ -1,181 +1,145 @@
-// Defines the Shader menu path for the first BurtRP hair material model.
 Shader "BurtRP/Hair"
 {
-    // Defines material properties shown in Unity's Inspector.
     Properties
     {
-        // Defines the main albedo texture sampled by the forward Hair pass from mesh UV0.
         _BaseMap ("Base Map", 2D) = "white" {}
-
-        // Defines the surface tint multiplied by the sampled Base Map before lighting.
         _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
+        _RootColor ("Root Color", Color) = (1, 1, 1, 1)
+        _RootGradient ("Root Gradient", Vector) = (0, 1, 0, 0)
+        [Toggle] _RootGradientEnable ("Root Gradient Enable", Float) = 0
+        [Toggle] _RootGradientReverse ("Root Gradient Reverse", Float) = 0
+        [Toggle] _RootGradientPosEnable ("Use Position Gradient", Float) = 0
+        _GradientDirection ("Position Gradient Direction", Vector) = (1, 0, 0, 0)
+        _GradientPosOffset ("Position Gradient Offset", Vector) = (0, 0, 0, 0)
 
-        // Defines the Hair mask map: R=scatter modulation, G=occlusion, B=longitudinal lobe shift scale, A=smoothness.
-        _MaskMap ("Mask Map (R Scatter, G Occlusion, B Shift, A Smoothness)", 2D) = "white" {}
+        _MaskMap ("Mask Map (R Reflectance, G Occlusion, B Height)", 2D) = "white" {}
+        _IDMap ("ID Map", 2D) = "white" {}
+        _IDXTilling ("ID X Tiling", Range(0, 10)) = 1
+        _IDIntensity ("ID Strand Intensity", Float) = 0
+        _TangentA ("Tangent A", Vector) = (0, 0, 1, 0)
+        _TangentB ("Tangent B", Vector) = (0, 0, -1, 0)
 
-        // 定义切线空间法线贴图，Forward 光照会用它改变每个片元的世界空间法线。
         [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
+        _NormalScale ("Normal Scale", Range(0, 4)) = 1
 
-        // 定义法线贴图强度，0 表示退回几何法线，1 表示使用贴图原始强度。
-        _NormalScale ("Normal Scale", Range(0, 2)) = 0
+        _HairShadowFillStrength ("Shadow Fill Strength", Range(0, 1)) = 0
+        _ShadowCutOff ("Shadow Cutoff", Range(0, 1)) = 0
+        _OpacityMaskValue ("Opacity Mask Value", Range(0, 1)) = 0.33
+        _OpacityMaskOffset ("Opacity Mask Offset", Range(0, 1)) = 0
 
-        // 定义 XRender / Frostbite 风格的介质反射率，0.5 会映射到常见非金属 F0=0.04。
+        _ScatterUseFullRange ("Scatter Use Full Range", Float) = 0
+        _Scatter ("Avatar Scatter", Range(0, 0.33)) = 0
+        _ScatterFull ("Avatar Scatter Full", Range(0, 1)) = 0
+        _Occlusion ("Avatar AO", Range(0, 1)) = 1
+        _AlbedoOcclusion ("Albedo AO", Range(0, 1)) = 0
+        _AlbedoOcclusionColor ("Albedo AO Color", Color) = (0, 0, 0, 0)
+        _BackLightIntensity ("Back Light Intensity", Range(0, 1)) = 1
+        _BackLightMask ("Back Light Mask", Range(0, 1)) = 0.5
+        _BackLightMaskRange ("Back Light Mask Range", Range(0, 2)) = 1
         _Reflectance ("Reflectance", Range(0, 1)) = 0.5
 
-        // Hair scatter strength. Mask Map R can further modulate this per pixel.
-        _HairScatter ("Hair Scatter", Range(0, 1)) = 0.25
+        _HairBrightColor ("Structure Bright Color", Color) = (1, 1, 1, 1)
+        _HairBrightIntensity ("Structure Bright Intensity", Range(1, 3)) = 2
+        _HairShadowColor ("Structure Shadow Color", Color) = (1, 1, 1, 1)
+        _HairShadowIntensity ("Structure Shadow Intensity", Range(0, 1)) = 0
+        _HairShadowPower ("Structure Shadow Power", Range(0, 2)) = 0
 
-        // Extra scatter packed into the existing Hair scatter channel; does not allocate a new GBuffer target.
-        _HairScatterBoost ("Hair Scatter Boost", Range(0, 1)) = 0
+        _HairRotate ("Hair Rotate", Range(-1, 1)) = 0
+        _SpecularShift ("Specular Shift", Range(-2, 2)) = 0.5
+        _SecondarySpecularShift ("Secondary Specular Shift", Range(-2, 2)) = 0.9
+        _RoughParameter ("Primary Secondary Edge Roughness", Vector) = (0.5, 0.5, 1, 0)
+        _EdgeRoughRimPower ("Edge Rough Rim Power", Float) = 4
+        [HDR]_SpecularColor ("Specular Color", Color) = (1, 1, 1, 1)
+        [HDR]_SpecularSecondColor ("Secondary Specular Color", Color) = (1, 1, 1, 1)
 
-        // Multiplies Reflectance before GBuffer write, so Deferred Hair can keep a per-material specular scale.
+        [Toggle] _GradientColorEnable ("Gradient Color Enable", Float) = 0
+        _GradientMap ("Gradient Map", 2D) = "gray" {}
+        _GradientRowIndex ("Gradient Row Index", Float) = 0
+        _GradientSoftLight ("Gradient Soft Light", Range(0, 1)) = 0
+        _GradientOverlay ("Gradient Overlay", Range(0, 1)) = 0
+        _GradientReplace ("Gradient Replace", Range(0, 1)) = 0
+
+        _HairScatter ("Legacy Hair Scatter", Range(0, 1)) = 0.25
+        _HairScatterBoost ("Legacy Hair Scatter Boost", Range(0, 1)) = 0
         _HairSpecularScale ("Hair Specular Scale", Range(0, 2)) = 0.85
-
-        // Scales Mask Map B before packing the longitudinal lobe shift into the Hair GBuffer material channel.
-        _HairShiftScale ("Hair Shift Scale", Range(0, 1)) = 1
-
-        // Positive values make hair rougher by lowering the final smoothness after Mask Map A is applied.
-        _HairRoughnessOffset ("Hair Roughness Offset", Range(0, 0.35)) = 0.05
-
-        // Flips the mesh tangent before it is stored as Hair strand direction in the GBuffer.
+        _HairShiftScale ("Legacy Hair Shift Scale", Range(0, 1)) = 1
+        _HairRoughnessOffset ("Legacy Hair Roughness Offset", Range(0, 0.35)) = 0.05
         [Toggle] _HairTangentFlip ("Flip Strand Direction", Float) = 0
 
-        // 定义材质光滑度，数值越高高光越小越锐利。
-        _Smoothness ("Smoothness", Range(0, 1)) = 0.85
-
-        // 定义环境遮蔽强度，0 表示忽略 Mask Map 的 G 通道，1 表示完全使用 G 通道。
-        _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
-        [HideInInspector] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
-
-        // 定义自发光贴图，Forward 光照会把它作为不受灯光影响的颜色叠加到最终结果。
+        _Smoothness ("Legacy Smoothness", Range(0, 1)) = 0.85
+        _OcclusionStrength ("Legacy Occlusion Strength", Range(0, 1)) = 1
         _EmissionMap ("Emission Map", 2D) = "white" {}
-
-        // 定义自发光颜色，RGB 表示自发光颜色和强度。
         [HDR]_EmissionColor ("Emission Color", Color) = (0, 0, 0, 1)
 
-        // Enables cutout rendering when set to 1 so every Hair pass discards pixels below the same alpha threshold.
         [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 1
-
-        // Stores the alpha cutoff threshold used by Forward, DepthOnly, and ShadowCaster to keep color, depth, and shadows consistent.
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.33
 
+        [HideInInspector] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
         [HideInInspector] _DoubleSidedEnable ("Double Sided", Float) = 1
         [HideInInspector] _DoubleSidedNormalMode ("Double Sided Normal Mode", Float) = 2
         [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (1, 1, -1, 0)
         [HideInInspector] _Cull ("Cull", Float) = 0
     }
 
-    // Defines the runtime SubShader used by BurtRP.
     SubShader
     {
-        // Marks this shader as a BurtRP opaque shader so materials are easy to identify.
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
-
-        // ShaderGUI switches hair cards between back-face culling and double-sided rendering.
         Cull [_Cull]
 
-        // Defines the depth-only pass used by Burt Depth Prepass.
         Pass
         {
-            // Names this pass for Frame Debugger readability.
             Name "Burt Hair Depth Only"
-
-            // Matches BurtDepthPrepass because BurtRP looks for this LightMode.
             Tags { "LightMode" = "BurtDepthOnly" }
-
-            // Disables color writes so this pass only affects CameraDepth.
             ColorMask 0
-
-            // Enables depth writes so opaque lit objects can populate CameraDepth.
             ZWrite On
-
-            // Uses less-equal depth testing, matching the forward color pass.
             ZTest LEqual
 
-            // Starts the HLSL program for this pass.
             HLSLPROGRAM
-
-            // Declares the depth vertex shader entry point.
             #pragma vertex VertDepth
-
-            // Declares the depth fragment shader entry point.
             #pragma fragment FragDepth
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma multi_compile_instancing
             #pragma target 3.5
 
-            // Includes Unity helper functions such as UnityObjectToClipPos.
             #include "UnityCG.cginc"
-
-            // 引入 BurtRP Hair 统一材质 CBUFFER，让 DepthOnly、ShadowCaster、Forward 的 SRP Batcher 布局完全一致。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairProperties.hlsl"
 
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
-
-            // Ends the HLSL program for this pass.
             ENDHLSL
         }
 
-        // Defines the shadow-caster pass used by Burt Draw Main Light Shadow Caster.
         Pass
         {
-            // Names this pass for Frame Debugger readability.
             Name "Burt Hair Shadow Caster"
-
-            // Uses Unity's standard ShadowCaster LightMode because ScriptableRenderContext.DrawShadows searches for this tag.
             Tags { "LightMode" = "ShadowCaster" }
-
-            // Disables color writes because shadow maps only need depth.
             ColorMask 0
-
-            // Enables depth writes so this pass can populate the main-light shadow map.
             ZWrite On
-
-            // Uses less-equal depth testing, matching the other opaque depth passes.
             ZTest LEqual
 
-            // Starts the HLSL program for this pass.
             HLSLPROGRAM
-
-            // Declares the shadow vertex shader entry point.
             #pragma vertex VertShadow
-
-            // Declares the shadow fragment shader entry point.
             #pragma fragment FragShadow
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma multi_compile_instancing
             #pragma target 3.5
-
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 
-            // Includes Unity helper functions, including UnityObjectToClipPos which uses the current light view-projection matrix.
             #include "UnityCG.cginc"
-
-            // 引入 BurtRP Hair 统一材质 CBUFFER，让 ShadowCaster 和其它 Hair pass 使用同一份材质字段顺序。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairProperties.hlsl"
 
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadowCasterPass.hlsl"
-
-            // Ends the HLSL program for this pass.
             ENDHLSL
         }
 
-        // 定义 Deferred 第一版使用的 GBuffer 写入 pass，只负责输出材质数据，不在这里做光照。
         Pass
         {
-            // 给 Frame Debugger 显示一个明确的名字，方便和 Forward/DepthOnly 区分。
             Name "Burt Hair GBuffer"
-
-            // 主 Agent 的 Draw GBuffer Opaque 会用 ShaderTagId("BurtGBuffer") 精确匹配这个 pass。
             Tags { "LightMode" = "BurtGBuffer" }
-
-            // 当前 Deferred 计划允许没有 Depth Prepass 时由 GBuffer pass 写深度，和已有 DepthOnly 的 LEqual 行为保持一致。
             ZWrite On
-
-            // 如果前面已经跑过 Depth Prepass，LEqual 会让等深度片元通过；如果没跑过，也能正常建立 CameraDepth。
             ZTest LEqual
 
-            // Deferred stencil layout: 1 = Hair. Lighting later uses this value to skip non-Hair pixels before the fragment path.
             Stencil
             {
                 Ref 1
@@ -185,75 +149,42 @@ Shader "BurtRP/Hair"
                 Pass Replace
             }
 
-            // 开始 GBuffer pass 的 HLSL 程序。
             HLSLPROGRAM
-
-            // 声明 GBuffer 顶点 shader 入口。
             #pragma vertex VertGBuffer
-
-            // 声明 GBuffer 片元 shader 入口。
             #pragma fragment FragGBuffer
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma multi_compile_instancing
-
-            // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
             #pragma target 3.5
 
-            // 引入 Hair 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
-
-            // 结束 GBuffer pass 的 HLSL 程序。
             ENDHLSL
         }
 
-        // Defines the forward color pass used by Burt Draw Opaque and Burt Draw Transparent.
         Pass
         {
-            // Names this pass for Frame Debugger readability.
             Name "Burt Hair Forward"
-
-            // Matches BurtForward because BurtRP's main draw passes now only render this LightMode.
             Tags { "LightMode" = "BurtForward" }
-
-            // Enables depth writes for opaque forward rendering.
             ZWrite On
-
-            // Uses less-equal depth testing so pixels that match the prepass depth still draw.
             ZTest LEqual
 
-            // Starts the HLSL program for this pass.
             HLSLPROGRAM
-
-            // Declares the forward vertex shader entry point.
             #pragma vertex Vert
-
-            // Declares the forward fragment shader entry point.
             #pragma fragment Frag
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma multi_compile_instancing
-
-            // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
             #pragma target 3.5
             #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
 
-            // Selects the shared Forward shading model before BurtLighting.hlsl is included.
             #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
-
-            // Includes the material CBUFFER first so the shared pass can read the same SRP Batcher layout.
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairProperties.hlsl"
-
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
-
-            // Ends the HLSL program for this pass.
             ENDHLSL
         }
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtHairShaderGUI"
-
-    // Disables fallback so BurtRP shader errors do not silently use another pipeline shader.
     Fallback Off
 }
