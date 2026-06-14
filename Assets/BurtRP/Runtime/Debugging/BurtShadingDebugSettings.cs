@@ -281,14 +281,15 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
             get => currentMode; // 返回当前保存的 debug 模式。
             set // 设置新的 debug 模式，并立刻同步到 shader 全局参数。
             {
-                if (currentMode == value) // 如果模式没有变化，说明只是需要刷新全局 shader 参数。
+                var normalizedMode = NormalizeMode(value);
+                if (currentMode == normalizedMode) // 如果模式没有变化，说明只是需要刷新全局 shader 参数。
                 {
                     ApplyGlobalShaderProperties(); // 重新上传全局参数，避免域重载或相机切换后 shader 状态丢失。
                     return; // 提前返回，避免重复写 previousMode。
                 }
 
                 previousMode = currentMode; // 记录切换前的模式，方便后续扩展返回上一个模式。
-                currentMode = value; // 保存新的当前模式。
+                currentMode = normalizedMode; // 保存新的当前模式。
                 ApplyGlobalShaderProperties(); // 把新的模式同步给 shader 全局参数。
             }
         }
@@ -305,6 +306,127 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         {
             get => tileLightDebugMaxLightsPerTile;
             set => tileLightDebugMaxLightsPerTile = Mathf.Clamp(value, 1, BurtLightingData.MaxAdditionalLights);
+        }
+
+        public static bool IsImportantMode(BurtShadingDebugMode mode)
+        {
+            switch (mode)
+            {
+                case BurtShadingDebugMode.None:
+                case BurtShadingDebugMode.Albedo:
+                case BurtShadingDebugMode.DiffuseColor:
+                case BurtShadingDebugMode.NormalWS:
+                case BurtShadingDebugMode.Smoothness:
+                case BurtShadingDebugMode.Roughness:
+                case BurtShadingDebugMode.Metallic:
+                case BurtShadingDebugMode.Occlusion:
+                case BurtShadingDebugMode.Height:
+                case BurtShadingDebugMode.Reflectance:
+                case BurtShadingDebugMode.GBufferBaseColor:
+                case BurtShadingDebugMode.GBufferNormalWS:
+                case BurtShadingDebugMode.GBufferMetallic:
+                case BurtShadingDebugMode.GBufferSmoothness:
+                case BurtShadingDebugMode.GBufferOcclusion:
+                case BurtShadingDebugMode.GBufferDiffuseColor:
+                case BurtShadingDebugMode.GBufferHairStrandDirection:
+                case BurtShadingDebugMode.GBufferHairScatter:
+                case BurtShadingDebugMode.GBufferHairShift:
+                case BurtShadingDebugMode.GBufferSubsurfaceStrength:
+                case BurtShadingDebugMode.GBufferSubsurfaceThickness:
+                case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
+                case BurtShadingDebugMode.SpecularAARoughness:
+                case BurtShadingDebugMode.DirectBRDFD:
+                case BurtShadingDebugMode.DirectBRDFVisibility:
+                case BurtShadingDebugMode.DirectBRDFFresnel:
+                case BurtShadingDebugMode.HairPrimaryLobe:
+                case BurtShadingDebugMode.HairSecondaryLobe:
+                case BurtShadingDebugMode.HairTransmissionLobe:
+                case BurtShadingDebugMode.HairScatter:
+                case BurtShadingDebugMode.HairAdditionalLighting:
+                case BurtShadingDebugMode.SubsurfaceProfileId:
+                case BurtShadingDebugMode.SubsurfaceTransmission:
+                case BurtShadingDebugMode.IndirectSpecularDFG:
+                case BurtShadingDebugMode.IndirectSpecularEnvBRDF:
+                case BurtShadingDebugMode.SpecularEnergyCompensation:
+                case BurtShadingDebugMode.SpecularOcclusion:
+                case BurtShadingDebugMode.DetailLighting:
+                case BurtShadingDebugMode.DirectDiffuse:
+                case BurtShadingDebugMode.DirectSpecular:
+                case BurtShadingDebugMode.AdditionalLighting:
+                case BurtShadingDebugMode.AdditionalDiffuse:
+                case BurtShadingDebugMode.AdditionalSpecular:
+                case BurtShadingDebugMode.AdditionalLightingUnshadowed:
+                case BurtShadingDebugMode.TileLightCount:
+                case BurtShadingDebugMode.ClusterLightCount:
+                case BurtShadingDebugMode.IndirectLighting:
+                case BurtShadingDebugMode.IndirectDiffuse:
+                case BurtShadingDebugMode.IndirectSpecular:
+                case BurtShadingDebugMode.AmbientOcclusion:
+                case BurtShadingDebugMode.Emission:
+                case BurtShadingDebugMode.FinalLighting:
+                case BurtShadingDebugMode.ShadowAttenuation:
+                case BurtShadingDebugMode.AdditionalShadowAttenuation:
+                case BurtShadingDebugMode.ShadowCascadeIndex:
+                case BurtShadingDebugMode.ShadowReceiverDepthDelta:
+                case BurtShadingDebugMode.MainLightShadow:
+                case BurtShadingDebugMode.CameraDepth:
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw:
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal:
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay:
+                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintRaw:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurAlpha:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurRadius:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurDelta:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableValidity:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableIO:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableChain:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm:
+                case BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory:
+                case BurtShadingDebugMode.BloomPrefilter:
+                case BurtShadingDebugMode.BloomFinalBloom:
+                case BurtShadingDebugMode.BloomThresholdMask:
+                case BurtShadingDebugMode.AutoExposureLuminance:
+                case BurtShadingDebugMode.AutoExposureHistogramRange:
+                case BurtShadingDebugMode.Atmosphere:
+                case BurtShadingDebugMode.AtmosphereAerialSummary:
+                case BurtShadingDebugMode.AtmosphereSunDisk:
+                case BurtShadingDebugMode.FogAmount:
+                case BurtShadingDebugMode.FogTransmittance:
+                case BurtShadingDebugMode.VolumetricFogScattering:
+                case BurtShadingDebugMode.VolumetricFogDensity:
+                case BurtShadingDebugMode.ScreenSpaceReflectionRawHitMask:
+                case BurtShadingDebugMode.ScreenSpaceReflectionHitMask:
+                case BurtShadingDebugMode.ScreenSpaceReflectionColor:
+                case BurtShadingDebugMode.ScreenSpaceReflectionConfidence:
+                case BurtShadingDebugMode.ScreenSpaceReflectionDenoisedColor:
+                case BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor:
+                case BurtShadingDebugMode.ScreenSpaceReflectionCompositeDelta:
+                case BurtShadingDebugMode.TemporalAAHistory:
+                case BurtShadingDebugMode.TemporalAAFeedback:
+                case BurtShadingDebugMode.TemporalAARejection:
+                case BurtShadingDebugMode.TemporalAADifference:
+                case BurtShadingDebugMode.TemporalAAVelocity:
+                case BurtShadingDebugMode.TemporalAAConfidence:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        public static BurtShadingDebugMode NormalizeMode(BurtShadingDebugMode mode)
+        {
+            return IsImportantMode(mode) ? mode : BurtShadingDebugMode.None;
         }
 
         public static bool IsMainLightShadowDebugMode(BurtShadingDebugMode mode) // 统一判断主光阴影相关调试模式，方便日志和阴影诊断共享同一套入口。

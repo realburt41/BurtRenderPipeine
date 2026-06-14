@@ -2280,54 +2280,17 @@ namespace Burt.RenderPipeline
         {
             return mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceMask ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceCoarseMask ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTint ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintRaw ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileSurfaceAlbedo ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileMeanFreePath ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedLighting ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurAlpha ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurRadius ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurDelta ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableSampleGate ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontalDelta ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurNormalized ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurSignedDelta ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSetupDiffuse ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontal ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontalDepth ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceXRenderCombineFactors ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileKernel ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSSSColorDelta ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileKernelColor ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceFinalDelta ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceFinalDiffuseDelta ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSSSColorSignedDelta ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedDelta ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableValidity ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableIO ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableStages ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableChain ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceXRenderCombineTriplet ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceColor ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceAlpha ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceBaseColor ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceEmission ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuseWithBaseColor ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecularRaw ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceCombineDelta ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceStability ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount ||
-                mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceVariance ||
                 mode == BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory;
         }
 
@@ -2339,26 +2302,12 @@ namespace Burt.RenderPipeline
                     return 1;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
                     return 2;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCoarseMask:
-                    return 3;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:
                     return 4;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine:
                     return 5;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceThickness:
-                    return 6;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileIndex:
-                    return 7;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTint:
-                    return 23;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintRaw:
                     return 44;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileSurfaceAlbedo:
-                    return 24;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileMeanFreePath:
-                    return 25;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedLighting:
-                    return 26;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal:
                     return 27;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurAlpha:
@@ -2367,74 +2316,14 @@ namespace Burt.RenderPipeline
                     return 29;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurDelta:
                     return 30;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableSampleGate:
-                    return 31;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontalDelta:
-                    return 32;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurNormalized:
-                    return 33;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurSignedDelta:
-                    return 34;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetupDiffuse:
-                    return 35;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontal:
-                    return 36;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableHorizontalDepth:
-                    return 37;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceXRenderCombineFactors:
-                    return 38;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileKernel:
-                    return 39;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSSSColorDelta:
-                    return 40;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileKernelColor:
-                    return 41;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceFinalDelta:
-                    return 42;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceFinalDiffuseDelta:
-                    return 43;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSSSColorSignedDelta:
-                    return 45;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedDelta:
-                    return 46;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableValidity:
                     return 47;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableIO:
                     return 48;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableStages:
-                    return 49;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableChain:
                     return 50;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceXRenderCombineTriplet:
-                    return 51;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm:
                     return 15;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceTransmission:
-                    return 8;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuse:
-                    return 9;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecular:
-                    return 10;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceColor:
-                    return 16;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSourceAlpha:
-                    return 17;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBaseColor:
-                    return 18;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceEmission:
-                    return 19;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceDiffuseWithBaseColor:
-                    return 20;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSpecularRaw:
-                    return 21;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombineDelta:
-                    return 22;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceStability:
-                    return 11;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSampleCount:
-                    return 12;
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceVariance:
-                    return 13;
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory:
                     return 14;
                 default:

@@ -1740,6 +1740,152 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             float historyAge = saturate(_BurtSSSHistoryDebugParams.y / 64.0f) * historyValid;
             return float4(historyValid, historyAge, saturate(history.a / max(_BurtSSSHistoryDebugParams.w * 16.0f, 0.000001f)), 1.0f);
         }
+
+        float4 FragDebugImportant(Varyings input) : SV_Target
+        {
+            float2 uv = input.screenUV;
+            float4 setup = BurtSSSLoadSetup(uv);
+
+            if (_BurtSSSDebugMode < 1.5f)
+            {
+                return float4(setup.r, setup.g, setup.b, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode < 2.5f)
+            {
+                float mask = tex2D(_BurtSSSMaskTexture, uv).r;
+                return float4(mask, mask, mask, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 3.5f && _BurtSSSDebugMode < 4.5f)
+            {
+                return float4(max(tex2D(_BurtSSSBlurTexture, uv).rgb, float3(0.0f, 0.0f, 0.0f)), 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 4.5f && _BurtSSSDebugMode < 5.5f)
+            {
+                return tex2D(_BurtSSSCombineTexture, uv);
+            }
+
+            BurtSSSSurface center = BurtSSSLoadSurface(uv);
+            if (_BurtSSSDebugMode > 14.5f && _BurtSSSDebugMode < 15.5f)
+            {
+                float isBurley = (center.profileType & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u ? 1.0f : 0.0f;
+                float isSeparable = (center.profileType & BURT_SSS_PROFILE_TYPE_SEPARABLE) != 0u ? 1.0f : 0.0f;
+                return float4(isBurley * setup.r, isSeparable * setup.r, 0.0f, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 27.5f && _BurtSSSDebugMode < 28.5f)
+            {
+                float blurAlpha = tex2D(_BurtSSSBlurTexture, uv).a;
+                return float4(blurAlpha, blurAlpha, blurAlpha, 1.0f);
+            }
+
+            BurtSSSProfile profile = BurtSSSLoadProfile(center.profileIndex);
+            if (_BurtSSSDebugMode > 28.5f && _BurtSSSDebugMode < 29.5f)
+            {
+                float valid = setup.r * ((center.profileType & BURT_SSS_PROFILE_TYPE_SEPARABLE) != 0u ? 1.0f : 0.0f);
+                float centerDepth = tex2D(_BurtSSSSeparableInputTexture, uv).a;
+                if (valid <= 0.0f || centerDepth <= 0.0f)
+                {
+                    return float4(BurtSSSSeparableFailureColor(uv, setup, center, centerDepth) * 0.35f, 1.0f);
+                }
+
+                float radiusPixels = BurtSSSResolveSeparableMaxOffsetPixelsFromDepth(center, profile, centerDepth);
+                float visibleRadius = saturate(radiusPixels / 32.0f) * valid;
+                return float4(visibleRadius, visibleRadius, visibleRadius, 1.0f);
+            }
+
+            uint profileIndex;
+            uint profileType;
+            BurtSSSDecodeProfileIDAndType(BurtSSSLoadProfileIDAndType(uv), profileIndex, profileType);
+            if (_BurtSSSDebugMode > 43.5f && _BurtSSSDebugMode < 44.5f)
+            {
+                float rawProfileIndex = (profileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u
+                    ? (float)profileIndex
+                    : center.profileIndex;
+                BurtSSSProfile rawProfile = BurtSSSLoadProfile(rawProfileIndex);
+                return float4(saturate(rawProfile.tint.rgb), 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 46.5f && _BurtSSSDebugMode < 47.5f)
+            {
+                float setupValid = saturate(setup.r);
+                float typeValid = (center.profileType & BURT_SSS_PROFILE_TYPE_SEPARABLE) != 0u ? 1.0f : 0.0f;
+                float surfaceValid = center.valid > 0.0f ? 1.0f : 0.0f;
+                float sourceDepth = tex2D(_BurtSSSSeparableInputTexture, uv).a;
+                float depthValid = sourceDepth > 0.0f ? 1.0f : 0.0f;
+                float4 chain = BurtSSSSeparableChainColor(uv, setup, center);
+                float validAny = max(max(setupValid, typeValid * surfaceValid), depthValid);
+                return validAny > 0.0f ? float4(setupValid, typeValid * surfaceValid, depthValid, 1.0f) : chain;
+            }
+
+            if (_BurtSSSDebugMode > 47.5f && _BurtSSSDebugMode < 48.5f)
+            {
+                if (setup.r <= 0.0f || (center.profileType & BURT_SSS_PROFILE_TYPE_SEPARABLE) == 0u)
+                {
+                    float sourceDepth = tex2D(_BurtSSSSeparableInputTexture, uv).a;
+                    return float4(BurtSSSSeparableFailureColor(uv, setup, center, sourceDepth) * 0.35f, 1.0f);
+                }
+
+                float4 horizontal = tex2D(_BurtSSSTempTexture, uv);
+                float4 vertical = tex2D(_BurtSSSBlurTexture, uv);
+                float horizontalDepth = horizontal.a > 0.0f ? 1.0f : 0.0f;
+                float verticalAlpha = vertical.a > 0.00001f ? 1.0f : 0.0f;
+                float3 horizontalDiffuse = max(horizontal.rgb, float3(0.0f, 0.0f, 0.0f));
+                float3 verticalDiffuse = verticalAlpha > 0.5f ? BurtSSSResolveProfileDiffuseColor(center.profileType, vertical, horizontalDiffuse) : horizontalDiffuse;
+                float verticalDelta = saturate(dot(abs(verticalDiffuse - horizontalDiffuse), BURT_LUMINANCE_WEIGHTS) * 4.0f);
+                return float4(horizontalDepth * setup.r, verticalAlpha * setup.r, verticalDelta * setup.r, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 49.5f && _BurtSSSDebugMode < 50.5f)
+            {
+                return BurtSSSSeparableChainColor(uv, setup, center);
+            }
+
+            float4 originalLit = tex2D(_BurtSSSOriginalTexture, uv);
+            float3 baseColor;
+            float3 emission;
+            float3 diffuseWithBaseColor;
+            float3 diffuseLighting;
+            float3 specularLight;
+            BurtSSSDecodeLightingComponents(uv, originalLit, baseColor, emission, diffuseWithBaseColor, diffuseLighting, specularLight);
+
+            if (_BurtSSSDebugMode > 29.5f && _BurtSSSDebugMode < 30.5f)
+            {
+                if (setup.r <= 0.0f || (center.profileType & BURT_SSS_PROFILE_TYPE_SEPARABLE) == 0u)
+                {
+                    float sourceDepth = tex2D(_BurtSSSSeparableInputTexture, uv).a;
+                    return float4(BurtSSSSeparableFailureColor(uv, setup, center, sourceDepth) * 0.35f, 1.0f);
+                }
+
+                float4 subsurfaceColor = tex2D(_BurtSSSBlurTexture, uv);
+                float3 blurredDiffuse = BurtSSSResolveProfileDiffuseColor(center.profileType, subsurfaceColor, diffuseLighting);
+                return float4(BurtSSSVisualizeRelativeDelta(blurredDiffuse, diffuseLighting, 128.0f, 96.0f) * setup.r, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 26.5f && _BurtSSSDebugMode < 27.5f)
+            {
+                if (setup.r <= 0.0f || (center.profileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) == 0u)
+                {
+                    return BurtSSSSeparableChainColor(uv, setup, center);
+                }
+
+                float4 subsurfaceColor = tex2D(_BurtSSSBlurTexture, uv);
+                BurtSSSXRenderCombineData combine = BurtSSSEvaluateXRenderCombineData(uv, originalLit, subsurfaceColor, profile, center.profileType, setup.r);
+                return float4(combine.finalColor, 1.0f);
+            }
+
+            if (_BurtSSSDebugMode > 13.5f && _BurtSSSDebugMode < 14.5f)
+            {
+                float4 history = tex2D(_BurtSSSHistoryDebugTexture, uv);
+                float historyValid = saturate(_BurtSSSHistoryDebugParams.x);
+                float historyAge = saturate(_BurtSSSHistoryDebugParams.y / 64.0f) * historyValid;
+                return float4(historyValid, historyAge, saturate(history.a / max(_BurtSSSHistoryDebugParams.w * 16.0f, 0.000001f)), 1.0f);
+            }
+
+            return float4(setup.r, setup.r, setup.r, 1.0f);
+        }
         ENDHLSL
 
         Pass
@@ -1843,7 +1989,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
             HLSLPROGRAM
             #pragma vertex Vert
-            #pragma fragment FragDebug
+            #pragma fragment FragDebugImportant
             ENDHLSL
         }
 

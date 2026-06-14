@@ -550,8 +550,30 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public BurtShadingDebugMode[] Modes { get; } // 当前分类的 Debug 模式列表。
 
+        public int VisibleModeCount
+        {
+            get
+            {
+                var count = 0;
+                foreach (var mode in Modes)
+                {
+                    if (BurtShadingDebugSettings.IsImportantMode(mode))
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+        }
+
         public bool Contains(BurtShadingDebugMode mode) // 判断当前模式是否属于这个分类，用来高亮对应 Dropdown。
         {
+            if (!BurtShadingDebugSettings.IsImportantMode(mode))
+            {
+                return false;
+            }
+
             foreach (var candidate in Modes) // 遍历数组，保持 Unity 旧版本兼容，不依赖 LINQ。
             {
                 if (candidate == mode) // 命中当前模式。
@@ -1395,7 +1417,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public override Vector2 GetWindowSize() // 返回 Popup 尺寸。
         {
-            float listHeight = group.Modes.Length * EditorGUIUtility.singleLineHeight + 8f; // 根据模式数量估算列表高度。
+            float listHeight = group.VisibleModeCount * EditorGUIUtility.singleLineHeight + 8f; // 根据模式数量估算列表高度。
             float contentHeight = 30f + Mathf.Min(listHeight, ScrollMaxHeight) + 48f; // 预留标题和说明区域，不再显示资产信息行。
             if (IsAutoExposureGroup())
             {
@@ -1424,11 +1446,16 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         {
             EditorGUILayout.LabelField(group.Title, EditorStyles.boldLabel); // 显示分类标题。
 
-            float listHeight = Mathf.Min(ScrollMaxHeight, group.Modes.Length * EditorGUIUtility.singleLineHeight + 8f); // 限制滚动区域高度。
+            float listHeight = Mathf.Min(ScrollMaxHeight, group.VisibleModeCount * EditorGUIUtility.singleLineHeight + 8f); // 限制滚动区域高度。
             scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition, GUILayout.Height(listHeight)); // 开始绘制可滚动模式列表。
 
             foreach (var mode in group.Modes) // 遍历当前分类下的所有模式。
             {
+                if (!BurtShadingDebugSettings.IsImportantMode(mode))
+                {
+                    continue;
+                }
+
                 DrawMode(mode); // 绘制单个模式项。
             }
 
@@ -1715,8 +1742,9 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public static void SetMode(BurtShadingDebugMode mode) // 设置 shading debug 模式并同步相关状态。
         {
-            BurtShadingDebugSettings.Mode = mode; // 写入运行时静态状态，并上传 shader 全局参数。
-            SyncExistingDebugViews(mode); // 同步 BurtRP Asset 上已有的 Depth / Shadow / GBuffer 全屏调试开关。
+            var normalizedMode = BurtShadingDebugSettings.NormalizeMode(mode);
+            BurtShadingDebugSettings.Mode = normalizedMode; // 写入运行时静态状态，并上传 shader 全局参数。
+            SyncExistingDebugViews(normalizedMode); // 同步 BurtRP Asset 上已有的 Depth / Shadow / GBuffer 全屏调试开关。
             BurtShadingDebugGroupDropdown.UpdateAllVisualStates(); // 刷新所有分类按钮的高亮和文本。
             SceneView.RepaintAll(); // 立即刷新 SceneView，避免等待下一次交互才看到结果。
         }
