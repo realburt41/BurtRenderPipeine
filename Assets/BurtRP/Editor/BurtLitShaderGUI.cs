@@ -12,6 +12,8 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent PbrMaskLabel = new GUIContent("PBR / Mask Inputs");
         private static readonly GUIContent ClearCoatLabel = new GUIContent("Clear Coat");
         private static readonly GUIContent SubsurfaceLabel = new GUIContent("Subsurface");
+        private static readonly GUIContent FabricLabel = new GUIContent("Fabric");
+        private static readonly GUIContent SilkLabel = new GUIContent("Silk");
         private static readonly GUIContent NormalLabel = new GUIContent("Normal");
         private static readonly GUIContent EmissionLabel = new GUIContent("Emission");
 
@@ -19,6 +21,10 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent MaskMapLabel = new GUIContent("Mask Map", "R Metallic, G Occlusion, B Reserved, A Smoothness.");
         private static readonly GUIContent NormalMapLabel = new GUIContent("Normal Map");
         private static readonly GUIContent ClearCoatNormalMapLabel = new GUIContent("Clear Coat Normal Map");
+        private static readonly GUIContent FuzzMapLabel = new GUIContent("Fuzz Map");
+        private static readonly GUIContent FuzzMaskLabel = new GUIContent("Fuzz Amount Mask");
+        private static readonly GUIContent ThinFilmThicknessMapLabel = new GUIContent("Thin Film Thickness Map");
+        private static readonly GUIContent ThinFilmFactorMaskLabel = new GUIContent("Thin Film Factor Mask");
         private static readonly GUIContent EmissionMapLabel = new GUIContent("Emission Map");
         private static readonly GUIContent ShadingModelLabel = new GUIContent("Shading Model");
         private static readonly GUIContent SubsurfaceScatteringModeLabel = new GUIContent("SSS Algorithm", "Choose 5S Burley, 4S Separable screen-space skin scattering, or 3S Preintegrated skin shading.");
@@ -42,6 +48,8 @@ namespace Burt.RenderPipeline.Editor
         private static bool showPbrMaskInputs = true;
         private static bool showClearCoatInputs = true;
         private static bool showSubsurfaceInputs = true;
+        private static bool showFabricInputs = true;
+        private static bool showSilkInputs = true;
         private static bool showNormalInputs = true;
         private static bool showEmissionInputs = true;
 
@@ -68,6 +76,18 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty subsurfaceProfileIndex;
         private MaterialProperty subsurface3SCurvatureScale;
         private MaterialProperty subsurface3SCurvatureBias;
+        private MaterialProperty fuzzMap;
+        private MaterialProperty fuzzColor;
+        private MaterialProperty fuzzMask;
+        private MaterialProperty fuzzAmount;
+        private MaterialProperty fuzzRoughness;
+        private MaterialProperty facingColor;
+        private MaterialProperty tangentColor;
+        private MaterialProperty falloff;
+        private MaterialProperty thinFilmThicknessMap;
+        private MaterialProperty thinFilmThickness;
+        private MaterialProperty thinFilmFactorMask;
+        private MaterialProperty thinFilmFactor;
         private MaterialProperty normalMap;
         private MaterialProperty normalScale;
         private MaterialProperty emissionMap;
@@ -97,6 +117,8 @@ namespace Burt.RenderPipeline.Editor
             DrawNormalInputs();
             DrawClearCoatInputs(material);
             DrawSubsurfaceInputs(material);
+            DrawFabricInputs(material);
+            DrawSilkInputs(material);
             DrawEmissionInputs();
         }
 
@@ -114,7 +136,6 @@ namespace Burt.RenderPipeline.Editor
 
             BurtShaderGUIUtility.UpdateEmissionFlag(material);
             ClampSubsurfaceScatteringMode(material);
-            ApplySubsurfaceMaterialDefaults(material);
             ApplySurfaceOptions(material);
         }
 
@@ -140,6 +161,18 @@ namespace Burt.RenderPipeline.Editor
             subsurfaceProfileIndex = Find("_SubsurfaceProfileIndex");
             subsurface3SCurvatureScale = Find("_Subsurface3SCurvatureScale");
             subsurface3SCurvatureBias = Find("_Subsurface3SCurvatureBias");
+            fuzzMap = Find("_FuzzMap");
+            fuzzColor = Find("_FuzzColor");
+            fuzzMask = Find("_FuzzMask");
+            fuzzAmount = Find("_FuzzAmount");
+            fuzzRoughness = Find("_FuzzRoughness");
+            facingColor = Find("_FacingColor");
+            tangentColor = Find("_TangentColor");
+            falloff = Find("_Falloff");
+            thinFilmThicknessMap = Find("_ThinFilmThicknessMap");
+            thinFilmThickness = Find("_ThinFilmThickness");
+            thinFilmFactorMask = Find("_ThinFilmFactorMask");
+            thinFilmFactor = Find("_ThinFilmFactor");
             normalMap = Find("_NormalMap");
             normalScale = Find("_NormalScale");
             emissionMap = Find("_EmissionMap");
@@ -343,6 +376,47 @@ namespace Burt.RenderPipeline.Editor
             BurtShaderGUIUtility.EndSection();
         }
 
+        private void DrawFabricInputs(Material material)
+        {
+            if (!IsFabricShader(material) || IsSilkShader(material))
+            {
+                return;
+            }
+
+            if (!BurtShaderGUIUtility.BeginSection(FabricLabel, ref showFabricInputs))
+            {
+                return;
+            }
+
+            DrawTextureWithColor(FuzzMapLabel, fuzzMap, fuzzColor);
+            DrawTexture(FuzzMaskLabel, fuzzMask);
+            DrawProperty(fuzzAmount);
+            DrawProperty(fuzzRoughness);
+            EditorGUILayout.HelpBox("Fabric writes stencil/model 4, stores fuzz color and weight in GBuffer3, and stores tangent, anisotropy, fuzz roughness, and the silk flag in GBuffer4.", MessageType.None);
+            BurtShaderGUIUtility.EndSection();
+        }
+
+        private void DrawSilkInputs(Material material)
+        {
+            if (!IsSilkShader(material))
+            {
+                return;
+            }
+
+            if (!BurtShaderGUIUtility.BeginSection(SilkLabel, ref showSilkInputs))
+            {
+                return;
+            }
+
+            DrawProperty(facingColor);
+            DrawProperty(tangentColor);
+            DrawProperty(falloff);
+            DrawTextureWithExtra(ThinFilmThicknessMapLabel, thinFilmThicknessMap, thinFilmThickness);
+            DrawTextureWithExtra(ThinFilmFactorMaskLabel, thinFilmFactorMask, thinFilmFactor);
+            EditorGUILayout.HelpBox("Silk uses the Fabric deferred model with the silk flag set and keeps anisotropic specular through the shared PBR path.", MessageType.None);
+            BurtShaderGUIUtility.EndSection();
+        }
+
         private void DrawClearCoatInputs(Material material)
         {
             if (!IsClearCoatShader(material) || clearCoatMask == null)
@@ -435,30 +509,6 @@ namespace Burt.RenderPipeline.Editor
             }
 
             material.SetFloat("_SubsurfaceScatteringMode", Mathf.Clamp(Mathf.RoundToInt(material.GetFloat("_SubsurfaceScatteringMode")), 0, SubsurfaceScatteringModeNames.Length - 1));
-        }
-
-        private static void ApplySubsurfaceMaterialDefaults(Material material)
-        {
-            if (!IsSubsurfaceShader(material))
-            {
-                return;
-            }
-
-            if (material.HasProperty("_Metallic"))
-            {
-                material.SetFloat("_Metallic", 0.0f);
-            }
-
-            if (material.HasProperty("_Anisotropy"))
-            {
-                material.SetFloat("_Anisotropy", 0.0f);
-            }
-
-            if (material.HasProperty("_Reflectance"))
-            {
-                material.SetFloat("_Reflectance", 0.42f);
-            }
-
         }
 
         private void DrawSubsurfaceProfilePicker()
@@ -714,6 +764,16 @@ namespace Burt.RenderPipeline.Editor
                 return IsTransparentMaterial(material) ? "PBR Transparent Subsurface" : "PBR Subsurface / Deferred GBuffer";
             }
 
+            if (IsSilkShader(material))
+            {
+                return IsTransparentMaterial(material) ? "PBR Transparent Silk" : "PBR Silk / Deferred Fabric";
+            }
+
+            if (IsFabricShader(material))
+            {
+                return IsTransparentMaterial(material) ? "PBR Transparent Fabric" : "PBR Fabric / Deferred GBuffer";
+            }
+
             return IsTransparentMaterial(material) ? "PBR Transparent" : "PBR Lit / Deferred GBuffer";
         }
 
@@ -729,6 +789,20 @@ namespace Burt.RenderPipeline.Editor
             return material != null &&
                 material.shader != null &&
                 material.shader.name.IndexOf("Subsurface", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsFabricShader(Material material)
+        {
+            return material != null &&
+                material.shader != null &&
+                material.shader.name.IndexOf("Fabric", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsSilkShader(Material material)
+        {
+            return material != null &&
+                material.shader != null &&
+                material.shader.name.IndexOf("Silk", System.StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static BurtRenderPipelineAsset GetActiveBurtAsset()
@@ -821,7 +895,11 @@ namespace Burt.RenderPipeline.Editor
             material.renderQueue = transparent ? (int)RenderQueue.Transparent : (int)RenderQueue.Geometry;
             material.SetShaderPassEnabled("BurtDepthOnly", !transparent);
             material.SetShaderPassEnabled("BurtGBuffer", !transparent);
-            material.SetShaderPassEnabled("BurtSubsurfaceForward", !transparent && material.shader != null && material.shader.name == "BurtRP/Subsurface");
+            if (IsSubsurfaceShader(material))
+            {
+                material.SetShaderPassEnabled("BurtSubsurfaceForward", !transparent);
+            }
+
             material.SetShaderPassEnabled("ShadowCaster", !transparent);
             material.SetShaderPassEnabled("BurtForward", true);
         }

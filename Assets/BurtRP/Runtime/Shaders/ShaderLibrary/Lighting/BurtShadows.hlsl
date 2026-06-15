@@ -57,6 +57,7 @@ float4 _BurtPerObjectShadowAtlasRects[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
 float4 _BurtPerObjectShadowSliceParams[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
 float4 _BurtPerObjectShadowParams;
 float4 _BurtPerObjectShadowTexelSize;
+int _BurtPerObjectShadowObjectIndex;
 
 // x: PCSS enabled, y: light size in texels, z: blocker search radius in texels, w: max filter radius in texels.
 float4 _BurtMainLightShadowPCSSParams;
@@ -779,6 +780,12 @@ int BurtGetPerObjectShadowSliceCount()
     return min(max(sliceCount, 0), BURT_PER_OBJECT_SHADOW_MAX_SLICES);
 }
 
+int BurtDecodePerObjectShadowSliceIndex(int objectIndex)
+{
+    int sliceIndex = objectIndex - 1;
+    return sliceIndex >= 0 && sliceIndex < BurtGetPerObjectShadowSliceCount() ? sliceIndex : -1;
+}
+
 float4 BurtTransformWorldToPerObjectShadowSlice(float4 positionWS, int sliceIndex)
 {
     return float4(
@@ -837,6 +844,72 @@ float BurtSamplePerObjectShadowCompare(float3 projectedShadowCoord, int sliceInd
 {
     projectedShadowCoord.xy = BurtClampPerObjectShadowUVToRect(projectedShadowCoord.xy, sliceIndex);
     return BURT_SAMPLE_SHADOW_CLAMP(_BurtPerObjectShadowAtlas, projectedShadowCoord);
+}
+
+float BurtSamplePerObjectShadowRawDepth(float2 shadowUV, int sliceIndex)
+{
+    float2 clampedUV = BurtClampPerObjectShadowUVToRect(shadowUV, sliceIndex);
+    float2 shadowSize = max(_BurtPerObjectShadowTexelSize.zw, float2(1.0f, 1.0f));
+    int2 pixelCoord = (int2)clamp(floor(clampedUV * shadowSize), float2(0.0f, 0.0f), shadowSize - 1.0f);
+    return _BurtPerObjectShadowAtlas.Load(int3(pixelCoord, 0)).r;
+}
+
+float3 BurtGetPerObjectShadowSliceDebugColor(int sliceIndex)
+{
+    if (sliceIndex == 0) return float3(1.0f, 0.0f, 0.0f);
+    if (sliceIndex == 1) return float3(0.0f, 1.0f, 0.0f);
+    if (sliceIndex == 2) return float3(0.0f, 0.0f, 1.0f);
+    if (sliceIndex == 3) return float3(1.0f, 1.0f, 0.0f);
+    if (sliceIndex == 4) return float3(1.0f, 0.0f, 1.0f);
+    if (sliceIndex == 5) return float3(0.0f, 1.0f, 1.0f);
+    if (sliceIndex == 6) return float3(1.0f, 0.5f, 0.0f);
+    if (sliceIndex == 7) return float3(0.5f, 0.0f, 1.0f);
+    return float3(0.25f, 0.25f, 0.25f);
+}
+
+void BurtFillPerObjectShadowProjectionDebugData(
+    float3 positionWS,
+    float3 normalWS,
+    int objectIndex,
+    out float3 objectIndexColor,
+    out float3 sliceColor,
+    out float3 uvColor,
+    out float3 depthColor,
+    out float3 compareColor)
+{
+    objectIndexColor = float3(0.0f, 0.0f, 0.0f);
+    sliceColor = float3(0.0f, 0.0f, 0.0f);
+    uvColor = float3(0.0f, 0.0f, 0.0f);
+    depthColor = float3(0.0f, 0.0f, 0.0f);
+    compareColor = float3(0.0f, 0.0f, 0.0f);
+
+    int sliceCount = BurtGetPerObjectShadowSliceCount();
+    objectIndex = max(objectIndex, 0);
+    float objectIndexDebug = saturate((float)objectIndex / max((float)sliceCount, 1.0f));
+    objectIndexColor = float3(objectIndexDebug, objectIndexDebug, objectIndexDebug);
+
+    int sliceIndex = BurtDecodePerObjectShadowSliceIndex(objectIndex);
+    if (sliceIndex < 0)
+    {
+        return;
+    }
+
+    float3 biasedPositionWS = BurtApplyPerObjectShadowReceiverBias(positionWS, normalWS, sliceIndex);
+    float4 shadowCoord = BurtTransformWorldToPerObjectShadowSlice(float4(biasedPositionWS, 1.0f), sliceIndex);
+    float safeW = abs(shadowCoord.w) > 0.00001f ? shadowCoord.w : (shadowCoord.w < 0.0f ? -0.00001f : 0.00001f);
+    float3 projectedShadowCoord = shadowCoord.xyz / safeW;
+    bool insideAtlas = BurtIsInsidePerObjectShadowAtlas(projectedShadowCoord, sliceIndex);
+
+    float4 sliceParams = _BurtPerObjectShadowSliceParams[sliceIndex];
+    float receiverDepth = saturate(projectedShadowCoord.z + max(sliceParams.y, 0.0f));
+    float rawDepth = BurtSamplePerObjectShadowRawDepth(projectedShadowCoord.xy, sliceIndex);
+    float compareVisibility = insideAtlas ? BurtSamplePerObjectShadowCompare(float3(projectedShadowCoord.xy, receiverDepth), sliceIndex) : 1.0f;
+    float insideWeight = insideAtlas ? 1.0f : 0.25f;
+
+    sliceColor = BurtGetPerObjectShadowSliceDebugColor(sliceIndex) * insideWeight;
+    uvColor = float3(saturate(BurtClampPerObjectShadowUVToRect(projectedShadowCoord.xy, sliceIndex)), insideAtlas ? 1.0f : 0.0f);
+    depthColor = float3(saturate(receiverDepth), saturate(rawDepth), saturate(compareVisibility));
+    compareColor = float3(compareVisibility, compareVisibility, compareVisibility);
 }
 
 float BurtSamplePerObjectShadowPCF(float3 projectedShadowCoord, int sliceIndex)

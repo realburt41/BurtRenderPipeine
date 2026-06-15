@@ -75,7 +75,7 @@ groupshared float4 BurtSSSSharedDiffuseDepth[BURT_SSS_SHARED_TILE_AREA];
 groupshared float3 BurtSSSSharedNormalWS[BURT_SSS_SHARED_TILE_AREA];
 
 static const float3 BURT_SSS_LUMINANCE = float3(0.3, 0.59, 0.11);
-static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 4.0;
+static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 5.0;
 static const float BURT_GBUFFER_SHADING_MODEL_PACK_SCALE = 0.999;
 static const float BURT_SHADING_MODEL_SUBSURFACE = 3.0;
 static const float BURT_SUBSURFACE_CONTROL_PACK_DIMENSION = 32.0;

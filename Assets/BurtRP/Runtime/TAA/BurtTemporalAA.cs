@@ -281,7 +281,7 @@ namespace Burt.RenderPipeline
         private const int HaltonSequenceLength = 1024;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
-        private const int HistoryLayoutVersion = 4;
+        private const int HistoryLayoutVersion = 7;
 
         private sealed class CameraState
         {
@@ -471,9 +471,9 @@ namespace Burt.RenderPipeline
             var pixelWidth = Mathf.Max(1, colorDescriptor.width);
             var pixelHeight = Mathf.Max(1, colorDescriptor.height);
             var jitter = new Vector2(jitterPixels.x * 2f / pixelWidth, jitterPixels.y * 2f / pixelHeight);
-            var jitteredProjection = projectionMatrix;
-            jitteredProjection.m02 += jitter.x;
-            jitteredProjection.m12 += jitter.y;
+            // Match XRender/Unity temporal jitter: translating clip space is not the
+            // same as adding m02/m12 directly on perspective projection matrices.
+            var jitteredProjection = Matrix4x4.Translate(new Vector3(jitter.x, jitter.y, 0f)) * projectionMatrix;
 
             var previousViewProjection = state.HasPreviousCameraState ? state.PreviousViewProjectionMatrix : GL.GetGPUProjectionMatrix(projectionMatrix, true) * viewMatrix;
             var previousNonJitteredViewProjection = state.HasPreviousCameraState ? state.PreviousNonJitteredViewProjectionMatrix : previousViewProjection;

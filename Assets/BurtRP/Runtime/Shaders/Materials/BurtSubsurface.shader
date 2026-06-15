@@ -20,13 +20,7 @@ Shader "BurtRP/Subsurface"
         _NormalScale ("Normal Scale", Range(0, 2)) = 1
 
         // 定义 XRender / Frostbite 风格的介质反射率，0.5 会映射到常见非金属 F0=0.04。
-        [HideInInspector] _Reflectance ("Reflectance", Range(0, 1)) = 0.42
-
         // 定义金属度，0 表示非金属介质，1 表示金属材质。
-        _Metallic ("Metallic", Range(0, 1)) = 0
-
-        _Anisotropy ("Anisotropy", Range(-1, 1)) = 0
-
         // 定义材质光滑度，数值越高高光越小越锐利。
         _Smoothness ("Smoothness", Range(0, 1)) = 0.5
 
@@ -176,8 +170,8 @@ Shader "BurtRP/Subsurface"
             Stencil
             {
                 Ref 3
-                ReadMask 3
-                WriteMask 3
+                ReadMask 7
+                WriteMask 7
                 Comp Always
                 Pass Replace
             }
@@ -194,9 +188,10 @@ Shader "BurtRP/Subsurface"
             // 声明 GBuffer 片元 shader 入口。
             #pragma fragment FragGBuffer
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
 
             // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
-            #pragma target 3.5
+            #pragma target 4.5
 
             // 引入 Lit 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
@@ -221,7 +216,8 @@ Shader "BurtRP/Subsurface"
             #pragma vertex VertGBuffer
             #pragma fragment FragSubsurfaceForward
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma target 3.5
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma target 4.5
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
 
@@ -260,6 +256,7 @@ Shader "BurtRP/Subsurface"
             // Declares the forward fragment shader entry point.
             #pragma fragment Frag
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
 
             // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
             #pragma target 3.5

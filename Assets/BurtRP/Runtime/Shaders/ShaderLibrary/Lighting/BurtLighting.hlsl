@@ -1290,12 +1290,11 @@ float3 BurtEvaluateSubsurfaceIndirectProfile(
     if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
     {
         float curvature = saturate(materialData.subsurface3SCurvature);
-        float3 preintegratedTint = max(BurtLoadSubsurfaceProfileTransmissionTint(materialData.subsurfaceProfileIndex).rgb, float3(0.0f, 0.0f, 0.0f));
         float3 referenceSHIrradiance = BurtEvaluateSubsurface3SSH9(curvature, materialData.subsurfaceProfileIndex, geometryData.normalWS);
         float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(1.0f, curvature, materialData.subsurfaceProfileIndex);
         float3 fallbackIrradiance = lerp(float3(1.0f, 1.0f, 1.0f), lutScatter, saturate(_BurtSubsurfacePreIntegratedLutEnabled)) * BurtSampleIndirectDiffuseIrradiance(geometryData.normalWS);
         float3 subsurfaceIrradiance = lerp(fallbackIrradiance, referenceSHIrradiance, saturate(_BurtSubsurfaceSHLutEnabled));
-        return materialData.diffuseColor * preintegratedTint * subsurfaceIrradiance * BurtGTAOMultiBounce(materialData.occlusion, materialData.baseColor) * subsurfaceStrength;
+        return materialData.diffuseColor * subsurfaceIrradiance * BurtGTAOMultiBounce(materialData.occlusion, materialData.baseColor) * subsurfaceStrength;
     }
 
     float thickness = saturate(materialData.subsurfaceThickness);
@@ -1468,6 +1467,11 @@ BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData baseMate
     clearCoatMaterialData.subsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
     clearCoatMaterialData.subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
     clearCoatMaterialData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
+    clearCoatMaterialData.fabricActive = 0.0f;
+    clearCoatMaterialData.fabricIsSilk = 0.0f;
+    clearCoatMaterialData.fabricFuzzWeight = 0.0f;
+    clearCoatMaterialData.fabricFuzzRoughness = 0.75f;
+    clearCoatMaterialData.fabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
     return clearCoatMaterialData;
 }
 

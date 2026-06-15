@@ -42,6 +42,8 @@ namespace Burt.RenderPipeline
         private readonly List<BurtMultipassRenderer> multipassRendererScratch = new List<BurtMultipassRenderer>();
         private readonly List<Renderer> restoreScratch = new List<Renderer>();
         private readonly List<BurtMultipassRenderer> restoreMultipassScratch = new List<BurtMultipassRenderer>();
+        private static readonly int ObjectIndexId = Shader.PropertyToID("_BurtPerObjectShadowObjectIndex");
+        private static MaterialPropertyBlock propertyBlockScratch;
 
         public int Priority => priority;
 
@@ -125,6 +127,18 @@ namespace Burt.RenderPipeline
             GetComponentsInChildren(includeInactiveRenderers, renderers);
         }
 
+        internal void SetObjectIndexForRenderers(int objectIndex)
+        {
+            ApplyObjectIndexToRenderers(objectIndex);
+            ApplyObjectIndexToMultipassRenderers(objectIndex);
+        }
+
+        internal void ClearObjectIndexForRenderers()
+        {
+            ApplyObjectIndexToRenderers(0);
+            ApplyObjectIndexToMultipassRenderers(0);
+        }
+
         private void SyncRendererLayerOverrides()
         {
             if (!IsRenderable)
@@ -198,6 +212,7 @@ namespace Burt.RenderPipeline
             if (renderer != null && originalRenderingLayerMasks.TryGetValue(renderer, out var originalMask))
             {
                 renderer.renderingLayerMask = originalMask;
+                SetRendererObjectIndex(renderer, 0);
             }
 
             originalRenderingLayerMasks.Remove(renderer);
@@ -267,9 +282,48 @@ namespace Burt.RenderPipeline
             if (multipassRenderer != null && originalMultipassRenderingLayerMasks.TryGetValue(multipassRenderer, out var originalMask))
             {
                 multipassRenderer.m_RenderingLayerMask = originalMask;
+                SetRendererObjectIndex(multipassRenderer.m_Renderer, 0);
             }
 
             originalMultipassRenderingLayerMasks.Remove(multipassRenderer);
+        }
+
+        private void ApplyObjectIndexToRenderers(int objectIndex)
+        {
+            rendererScratch.Clear();
+            GetComponentsInChildren(includeInactiveRenderers, rendererScratch);
+            for (var index = 0; index < rendererScratch.Count; index++)
+            {
+                SetRendererObjectIndex(rendererScratch[index], objectIndex);
+            }
+        }
+
+        private void ApplyObjectIndexToMultipassRenderers(int objectIndex)
+        {
+            multipassRendererScratch.Clear();
+            GetComponentsInChildren(includeInactiveRenderers, multipassRendererScratch);
+            for (var index = 0; index < multipassRendererScratch.Count; index++)
+            {
+                var multipassRenderer = multipassRendererScratch[index];
+                SetRendererObjectIndex(multipassRenderer != null ? multipassRenderer.m_Renderer : null, objectIndex);
+            }
+        }
+
+        private static void SetRendererObjectIndex(Renderer renderer, int objectIndex)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            if (propertyBlockScratch == null)
+            {
+                propertyBlockScratch = new MaterialPropertyBlock();
+            }
+
+            renderer.GetPropertyBlock(propertyBlockScratch);
+            propertyBlockScratch.SetInteger(ObjectIndexId, Mathf.Max(0, objectIndex));
+            renderer.SetPropertyBlock(propertyBlockScratch);
         }
     }
 

@@ -82,7 +82,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
             #pragma multi_compile_instancing
-            #pragma target 3.5
+            #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
@@ -104,7 +104,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
             #pragma multi_compile_instancing
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
@@ -123,8 +123,8 @@ Shader "BurtRP/Multipass Fur"
             Stencil
             {
                 Ref 0
-                ReadMask 3
-                WriteMask 3
+                ReadMask 7
+                WriteMask 7
                 Comp Always
                 Pass Replace
             }
@@ -135,7 +135,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
             #pragma multi_compile_instancing
-            #pragma target 3.5
+            #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
@@ -157,7 +157,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
             #pragma multi_compile_instancing
-            #pragma target 3.5
+            #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
@@ -178,7 +178,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
             #pragma multi_compile_instancing
-            #pragma target 3.5
+            #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"

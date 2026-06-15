@@ -1,0 +1,138 @@
+Shader "BurtRP/Fabric"
+{
+    Properties
+    {
+        _BaseMap ("Base Map", 2D) = "white" {}
+        _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
+        _MaskMap ("Mask Map (R Metallic, G Occlusion, A Smoothness)", 2D) = "white" {}
+        [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
+        _NormalScale ("Normal Scale", Range(0, 2)) = 1
+        _Reflectance ("Reflectance", Range(0, 1)) = 0.5
+        _Metallic ("Metallic", Range(0, 1)) = 0
+        _Anisotropy ("Anisotropy", Range(-1, 1)) = 0
+        _Smoothness ("Smoothness", Range(0, 1)) = 0.5
+        _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
+        _FuzzMap ("Fuzz Map", 2D) = "white" {}
+        [HDR] _FuzzColor ("Fuzz Color", Color) = (1, 1, 1, 1)
+        _FuzzMask ("Fuzz Amount Mask", 2D) = "white" {}
+        _FuzzAmount ("Fuzz Amount", Range(0, 1)) = 1
+        _FuzzRoughness ("Fuzz Roughness", Range(0, 1)) = 0.75
+        _EmissionMap ("Emission Map", 2D) = "white" {}
+        [HDR]_EmissionColor ("Emission Color", Color) = (0, 0, 0, 1)
+        [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 0
+        _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
+
+        [HideInInspector] _Surface ("Surface Type", Float) = 0
+        [HideInInspector] _DoubleSidedEnable ("Double Sided", Float) = 0
+        [HideInInspector] _DoubleSidedNormalMode ("Double Sided Normal Mode", Float) = 0
+        [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (1, 1, 1, 0)
+        [HideInInspector] _Cull ("Cull", Float) = 2
+        [HideInInspector] _SrcBlend ("Source Blend", Float) = 1
+        [HideInInspector] _DstBlend ("Destination Blend", Float) = 0
+        [HideInInspector] _ZWrite ("ZWrite", Float) = 1
+        [HideInInspector] _ZTest ("ZTest", Float) = 4
+    }
+
+    SubShader
+    {
+        Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
+
+        Pass
+        {
+            Name "Burt Fabric Depth Only"
+            Tags { "LightMode" = "BurtDepthOnly" }
+            ColorMask 0
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertDepth
+            #pragma fragment FragDepth
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Fabric Shadow Caster"
+            Tags { "LightMode" = "ShadowCaster" }
+            ColorMask 0
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertShadow
+            #pragma fragment FragShadow
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadowCasterPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Fabric GBuffer"
+            Tags { "LightMode" = "BurtGBuffer" }
+            ZWrite On
+            ZTest LEqual
+            Stencil
+            {
+                Ref 4
+                ReadMask 7
+                WriteMask 7
+                Comp Always
+                Pass Replace
+            }
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertGBuffer
+            #pragma fragment FragGBuffer
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_FABRIC 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Fabric Forward"
+            Tags { "LightMode" = "BurtForward" }
+            ZWrite [_ZWrite]
+            ZTest [_ZTest]
+            Cull [_Cull]
+            Blend [_SrcBlend] [_DstBlend]
+
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #define BURT_MATERIAL_SHADING_MODEL_FABRIC 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
+            ENDHLSL
+        }
+    }
+
+    CustomEditor "Burt.RenderPipeline.Editor.BurtLitShaderGUI"
+    Fallback Off
+}

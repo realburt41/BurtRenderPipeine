@@ -48,12 +48,11 @@ float3 BurtAvatarHairStructureFactor(float hairStructureMask)
 }
 #endif
 
-float4 BurtEvaluateMaterialPassBaseColor(float2 uv0, float2 uv1, float3 positionOS)
+float4 BurtEvaluateMaterialPassBaseColor(float2 uv0, float2 uv1, float3 positionOS, float4 maskMap)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float4 idValue = BURT_SAMPLE_TEXTURE2D_REPEAT(_IDMap, uv0 * float2(_IDXTilling, 1.0f));
     float4 baseMap = BurtSampleBaseMap(uv0);
-    float4 maskMap = BurtEvaluateMaterialPassMaskMap(uv0, uv1);
     float gradientFactor = BurtAvatarHairGradientFactor(uv0, positionOS);
 
     float rootGradient = saturate(smoothstep(_RootGradient.x, _RootGradient.y, gradientFactor));
@@ -74,6 +73,44 @@ float4 BurtEvaluateMaterialPassBaseColor(float2 uv0, float2 uv1, float3 position
     return BurtSampleBaseMap(BurtTransformBaseMapUV(uv0, _BaseMap_ST)) * _BaseColor;
 #endif
 }
+
+float4 BurtEvaluateMaterialPassBaseColor(float2 uv0, float2 uv1, float3 positionOS)
+{
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    return BurtEvaluateMaterialPassBaseColor(uv0, uv1, positionOS, BurtEvaluateMaterialPassMaskMap(uv0, uv1));
+#else
+    return BurtSampleBaseMap(BurtTransformBaseMapUV(uv0, _BaseMap_ST)) * _BaseColor;
+#endif
+}
+
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+float2 BurtTransformFuzzMapUV(float2 uv0, float4 fuzzMapST)
+{
+    return uv0 * fuzzMapST.xy + fuzzMapST.zw;
+}
+
+float3 BurtEvaluateFabricFuzzColor(float2 uv0)
+{
+    float2 fuzzMapUV = BurtTransformFuzzMapUV(uv0, _FuzzMap_ST);
+    return BURT_SAMPLE_TEXTURE2D_REPEAT(_FuzzMap, fuzzMapUV).rgb * _FuzzColor.rgb;
+}
+
+float BurtEvaluateFabricFuzzWeight(float2 uv0)
+{
+    return BURT_SAMPLE_TEXTURE2D_REPEAT(_FuzzMask, uv0).r * _FuzzAmount;
+}
+
+BurtSurfaceData BurtApplyFabricPassSurfaceSemantics(BurtSurfaceData surfaceData, float2 uv0)
+{
+#if defined(BURT_MATERIAL_SELECTED_FABRIC_IS_SILK)
+    float thinFilmFactor = BURT_SAMPLE_TEXTURE2D_REPEAT(_ThinFilmFactorMask, uv0).r * _ThinFilmFactor;
+    return BurtApplySilkSurfaceSemantics(surfaceData, _Anisotropy, _FacingColor.rgb, _TangentColor.rgb, _Falloff, _ThinFilmThickness, thinFilmFactor);
+#else
+    float fabricFuzzRoughness = ClampPerceptualRoughness(PerceptualSmoothnessToPerceptualRoughness(surfaceData.smoothness) * _FuzzRoughness);
+    return BurtApplyFabricSurfaceSemantics(surfaceData, BurtEvaluateFabricFuzzWeight(uv0), BurtEvaluateFabricFuzzColor(uv0), fabricFuzzRoughness);
+#endif
+}
+#endif
 
 float BurtEvaluateMaterialPassRegularOpacity(float alpha, float cutoff)
 {
@@ -124,20 +161,35 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, floa
     surfaceData.smoothness = saturate(surfaceData.smoothness - _HairRoughnessOffset);
     float hairShiftScale = saturate(_HairShiftScale * maskMap.b);
     return BurtApplyHairGBufferSurfaceSemantics(surfaceData, (_HairScatter + _HairScatterBoost) * maskMap.r, hairShiftScale);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, BURT_SUBSURFACE_FIXED_REFLECTANCE, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
+    float subsurface3SCurvature = saturate(maskMap.g * _Subsurface3SCurvatureScale + _Subsurface3SCurvatureBias);
+    return BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, subsurface3SCurvature, _SubsurfaceProfileIndex, _SubsurfaceScatteringMode);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_FABRIC;
+    return surfaceData;
 #else
     BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
 
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_CLEAR_COAT)
         surfaceData = BurtApplyAnisotropySurfaceSemantics(surfaceData, _Anisotropy);
         surfaceData = BurtApplyClearCoatSurfaceSemantics(surfaceData, _ClearCoatMask, _ClearCoatRoughness);
-    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
-        float subsurface3SCurvature = saturate(maskMap.g * _Subsurface3SCurvatureScale + _Subsurface3SCurvatureBias);
-        surfaceData = BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, subsurface3SCurvature, _SubsurfaceProfileIndex, _SubsurfaceScatteringMode);
     #else
         surfaceData = BurtApplyAnisotropySurfaceSemantics(surfaceData, _Anisotropy);
     #endif
 
     return surfaceData;
+#endif
+}
+
+BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, float4 maskMap, float2 uv0)
+{
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
+    return BurtApplyFabricPassSurfaceSemantics(surfaceData, uv0);
+#else
+    return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
 #endif
 }
 
@@ -175,6 +227,8 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
     surfaceData.hairSpecularColor = _SpecularColor.rgb;
     surfaceData.hairSecondarySpecularColor = _SpecularSecondColor.rgb;
     return BurtApplyHairGBufferSurfaceSemantics(surfaceData, scatter, 1.0f);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+    return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, uv0);
 #else
     return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
 #endif
@@ -259,6 +313,8 @@ BurtGBufferData BurtCreateMaterialPassGBufferData(
     return BurtCreateClearCoatGBufferData(surfaceData, baseNormalWS, tangentWS, clearCoatNormalWS, emissionColor);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
     return BurtCreateSubsurfaceGBufferData(surfaceData, baseNormalWS, tangentWS, emissionColor);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+    return BurtCreateFabricGBufferData(surfaceData, baseNormalWS, tangentWS, emissionColor);
 #else
     return BurtCreateGBufferData(surfaceData, baseNormalWS, tangentWS, emissionColor);
 #endif

@@ -20,8 +20,7 @@ Material:
   m_CustomRenderQueue: 2000
   stringTagMap:
     RenderType: Opaque
-  disabledShaderPasses:
-  - BurtSubsurfaceForward
+  disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -46,7 +45,6 @@ Material:
     m_Floats:
     - _AlphaClip: 1
     - _Anisotropy: 0
-    - _ClearCoatMask: 0
     - _Cull: 2
     - _Cutoff: 0.564
     - _DoubleSidedEnable: 0
@@ -58,7 +56,6 @@ Material:
     - _Reflectance: 0.5
     - _Smoothness: 0.704
     - _SrcBlend: 1
-    - _SubsurfaceScatteringMode: 0
     - _Surface: 0
     - _ZTest: 4
     - _ZWrite: 1

@@ -436,7 +436,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         bool BurtSSSUseSeparableJitter()
         {
-            return !BurtSSSUseStableSampling() && !BurtSSSUseDebugSampling();
+            return !BurtSSSUseDebugSampling();
         }
 
         float4 BurtSSSEncodeSetup(BurtSSSSurface surface)
@@ -885,61 +885,48 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             }
 
             BurtSSSProfile profile = BurtSSSLoadProfile(center.profileIndex);
-            bool useProfileLut = BurtSSSUseProfileParamLut();
-            float radius = useProfileLut ? BurtSSSResolveSeparableRadiusFromDepth(centerSceneDepth) * BurtSSSResolveSeparableProfileRadiusScale(profile) : BurtSSSResolveRadius(center, profile);
-            float2 texelStep = useProfileLut ? direction * radius : direction * _BurtSSSScreenSize.zw * radius;
-            texelStep.y *= useProfileLut ? _BurtSSSScreenSize.x * _BurtSSSScreenSize.w : 1.0f;
-            float3 centerWeight = useProfileLut ? BurtSSSResolveSeparableSampleKernelWeight(0, center) : BURT_SSS_FALLBACK_KERNEL_CENTER;
+            if (!BurtSSSUseProfileParamLut())
+            {
+                float fallbackAlpha = writeValidAlpha > 0.5f ? (centerSource.a > 0.00001f ? 1.0f : 0.0f) : centerSource.a;
+                return float4(centerSource.rgb, fallbackAlpha);
+            }
+
+            float radius = BurtSSSResolveSeparableRadiusFromDepth(centerSceneDepth) * BurtSSSResolveSeparableProfileRadiusScale(profile);
+            float2 texelStep = direction * radius;
+            texelStep.y *= _BurtSSSScreenSize.x * _BurtSSSScreenSize.w;
+            float3 centerWeight = BurtSSSResolveSeparableSampleKernelWeight(0, center);
             float3 sumColor = centerColor * centerWeight;
             float3 sumWeight = float3(0.00001f, 0.00001f, 0.00001f) + centerWeight;
             float2 sampleCenterUV = uv;
 
-            if (useProfileLut)
+            if (BurtSSSUseSeparableJitter())
             {
-                if (BurtSSSUseSeparableJitter())
-                {
-                    int2 pixel = BurtSSSClampPixel(uv);
-                    uint frameIndex = (uint)_BurtSSSFrameParams.x;
-                    uint3 random = BurtSSSRand3DPCG16(int3(pixel.x, pixel.y, (int)frameIndex));
-                    float2 r2 = BurtSSSR2Sequence(random.z);
-                    sampleCenterUV += texelStep * BurtSSSResolveSeparableSampleKernelOffset(1, center) * (r2.x * 2.0f - 1.0f);
+                int2 pixel = BurtSSSClampPixel(uv);
+                uint frameIndex = (uint)_BurtSSSFrameParams.x;
+                uint3 random = BurtSSSRand3DPCG16(int3(pixel.x, pixel.y, (int)frameIndex));
+                float2 r2 = BurtSSSR2Sequence(random.z);
+                sampleCenterUV += texelStep * BurtSSSResolveSeparableSampleKernelOffset(1, center) * (r2.x * 2.0f - 1.0f);
 
-                    float2 crossAxis = abs(direction.x) > 0.5f
-                        ? float2(0.0f, _BurtSSSScreenSize.w)
-                        : float2(_BurtSSSScreenSize.z, 0.0f);
-                    sampleCenterUV += crossAxis * ((r2.y * 2.0f - 1.0f) * 4.0f);
-                }
-
-                [unroll]
-                for (int i = 1; i < BURT_SSS_PROFILE_PARAM_KERNEL0_COUNT; i++)
-                {
-                    BurtSSSAccumulateSeparablePair(
-                        center,
-                        profile,
-                        centerSource,
-                        centerSceneDepth,
-                        sampleCenterUV,
-                        texelStep,
-                        BurtSSSResolveSeparableSampleKernelOffset(i, center),
-                        BurtSSSResolveSeparableSampleKernelWeight(i, center),
-                        sumColor,
-                        sumWeight);
-                }
+                float2 crossAxis = abs(direction.x) > 0.5f
+                    ? float2(0.0f, _BurtSSSScreenSize.w)
+                    : float2(_BurtSSSScreenSize.z, 0.0f);
+                sampleCenterUV += crossAxis * ((r2.y * 2.0f - 1.0f) * 4.0f);
             }
-            else
+
+            [unroll]
+            for (int i = 1; i < BURT_SSS_PROFILE_PARAM_KERNEL0_COUNT; i++)
             {
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 0.22f, float3(0.150f, 0.165f, 0.168f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 0.46f, float3(0.118f, 0.123f, 0.114f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 0.78f, float3(0.090f, 0.088f, 0.074f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 1.16f, float3(0.066f, 0.058f, 0.043f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 1.60f, float3(0.047f, 0.036f, 0.023f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 2.12f, float3(0.032f, 0.021f, 0.012f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 2.74f, float3(0.021f, 0.012f, 0.006f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 3.48f, float3(0.013f, 0.006f, 0.003f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 4.36f, float3(0.008f, 0.003f, 0.0015f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 5.42f, float3(0.0045f, 0.0015f, 0.0007f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 6.68f, float3(0.0025f, 0.0007f, 0.0003f), sumColor, sumWeight);
-                BurtSSSAccumulateSeparablePair(center, profile, centerSource, centerSceneDepth, uv, texelStep, 8.16f, float3(0.0015f, 0.0003f, 0.0001f), sumColor, sumWeight);
+                BurtSSSAccumulateSeparablePair(
+                    center,
+                    profile,
+                    centerSource,
+                    centerSceneDepth,
+                    sampleCenterUV,
+                    texelStep,
+                    BurtSSSResolveSeparableSampleKernelOffset(i, center),
+                    BurtSSSResolveSeparableSampleKernelWeight(i, center),
+                    sumColor,
+                    sumWeight);
             }
 
             float3 blurred = max(sumColor / max(sumWeight, float3(0.00001f, 0.00001f, 0.00001f)), float3(0.0f, 0.0f, 0.0f));

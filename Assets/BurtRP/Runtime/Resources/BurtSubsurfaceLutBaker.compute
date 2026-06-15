@@ -171,7 +171,7 @@ float3 BurtEvaluatePreIntegratedDiffuse(float rawNoL, float curvature, float3 su
     float3 s3d = BurtSearchLightDiffuseScalingFactor(surfaceAlbedo);
     float3 burleyA = (-s3d / (max(diffuseMeanFreePath, float3(0.01, 0.01, 0.01)) * max(curvature, 0.0001))) * (2.0 / BURT_PI);
     float3 burleyB = burleyA / 3.0;
-    float3 integralOnRing = 2.0 * (BurtIntegralBurleyDiffusion(BURT_PI, burleyA, burleyB) - BurtIntegralBurleyDiffusion(0.0, burleyA, burleyB));
+    float3 integralOnRing = 2.0 * (BurtIntegralBurleyDiffusion(BURT_HALF_PI, burleyA, burleyB) - BurtIntegralBurleyDiffusion(0.0, burleyA, burleyB));
 
     float3 integralOnNegativeAngle;
     float3 integralOnPositiveAngle;

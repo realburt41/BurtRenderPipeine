@@ -210,6 +210,12 @@ float value2 = value * value;
 return value2 * value2 * value;
 }
 
+float Pow4(float value)
+{
+    float value2 = value * value;
+    return value2 * value2;
+}
+
 // 出处：XRender/Shaders/Library/CommonColors.hlsl::PerceivedLuminance；Energy Preservation 用感知亮度把 RGB 反射能量压成单通道
 float PerceivedLuminance(float3 color)
 {
@@ -406,6 +412,16 @@ float3 f90;
     float subsurface3SCurvature;
 
     float subsurfaceProfileIndex;
+
+    float fabricActive;
+
+    float fabricIsSilk;
+
+    float fabricFuzzWeight;
+
+    float fabricFuzzRoughness;
+
+    float3 fabricFuzzColor;
 };
 
 // Prepares PBR material data from surface inputs.
@@ -482,6 +498,11 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
     materialData.subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
     materialData.subsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
 #endif
+    materialData.fabricActive = BurtIsFabricShadingModel(surfaceData.shadingModelID) ? 1.0f : 0.0f;
+    materialData.fabricIsSilk = saturate(surfaceData.fabricIsSilk);
+    materialData.fabricFuzzWeight = saturate(surfaceData.fabricFuzzWeight);
+    materialData.fabricFuzzRoughness = ClampPerceptualRoughness(surfaceData.fabricFuzzRoughness);
+    materialData.fabricFuzzColor = max(surfaceData.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f));
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
     materialData.reflectance = BURT_SUBSURFACE_FIXED_REFLECTANCE;
 #elif BURT_ENABLE_SUBSURFACE_SHADING
@@ -592,6 +613,11 @@ float Fd_Lambert()
 return BURT_INV_PI;
 }
 
+float Fd_Lambert_Fabric(float perceptualRoughness)
+{
+    return BURT_INV_PI * lerp(1.0f, 0.5f, saturate(perceptualRoughness));
+}
+
 // 出处：XRender/Shaders/Library/BRDF.hlsl::Fd_Diffuse_Burley；Disney/Burley 粗糙漫反�?lobe
 float Fd_Diffuse_Burley(float roughness, float noV, float noL, float voH)
 {
@@ -620,7 +646,7 @@ float SlabLobe_Diffuse(BurtPBRMaterialData materialData, float noV, float noL, f
 return Fd_Diffuse_Burley(materialData.perceptualRoughness, noV, noL, voH);
 #else
     // 默认沿用当前 Lambert 结果，避免本轮整理改变已�?diffuse 观感
-return Fd_Lambert();
+return materialData.fabricActive > 0.5f ? Fd_Lambert_Fabric(materialData.perceptualRoughness) : Fd_Lambert();
 #endif
 }
 
@@ -643,6 +669,11 @@ float3 F_Schlick_UE(float3 f0, float3 f90, float voH)
 {
     // XRender 的三参数版本等价�?F90 * Fc + (1 - Fc) * F0
 return F_Schlick(f0, f90, voH);
+}
+
+float3 F_Schlick_Fabric(float3 f0, float f90, float u)
+{
+    return f0 + (f90 - f0) * Pow4(1.0f - saturate(u));
 }
 
 float BurtRefractBlendClearCoatApprox(float voH)
@@ -1094,8 +1125,7 @@ void BurtApplySubsurfaceDirectPBR(
     {
         float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(rawNoL, curvature, materialData.subsurfaceProfileIndex);
         float lutWeight = saturate(_BurtSubsurfacePreIntegratedLutEnabled);
-        float3 preintegratedTint = max(BurtLoadSubsurfaceProfileTransmissionTint(materialData.subsurfaceProfileIndex).rgb, float3(0.0f, 0.0f, 0.0f));
-        float3 preintegratedDiffuseBRDF = materialData.diffuseColor * preintegratedTint * lutScatter * BURT_INV_PI;
+        float3 preintegratedDiffuseBRDF = materialData.diffuseColor * lutScatter * BURT_INV_PI;
         float3 preintegratedDiffuse = preintegratedDiffuseBRDF * lightColor * shadowAttenuation;
         float targetDiffuseLobe = BurtEvaluateSubsurfaceProfileIntensity(lutScatter) * BURT_INV_PI;
 
@@ -1191,6 +1221,41 @@ void BurtApplySubsurfaceDirectPBR(
 #endif
 }
 
+void BurtApplyFabricDirectPBR(
+    inout BurtDirectPBRComponents components,
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    float3 lightColor,
+    float3 lightDirectionWS,
+    float shadowAttenuation)
+{
+#if BURT_ENABLE_FABRIC_SHADING
+    if (materialData.fabricActive <= 0.0001f || materialData.fabricIsSilk > 0.5f)
+    {
+        return;
+    }
+
+    float fuzzWeight = saturate(materialData.fabricFuzzWeight);
+    if (fuzzWeight <= 0.0001f)
+    {
+        return;
+    }
+
+    float3 n = geometryData.normalWS;
+    float3 l = BurtSafeNormalize(lightDirectionWS);
+    float noL = saturate(dot(n, l));
+    float noV = saturate(geometryData.nDotV);
+    float3 fuzzFresnel = F_Schlick_Fabric(float3(0.0f, 0.0f, 0.0f), 1.0f, noV);
+    float fuzzDiffuseLobe = Fd_Lambert_Fabric(materialData.fabricFuzzRoughness);
+    float3 fuzzBRDF = materialData.fabricFuzzColor * fuzzWeight * fuzzFresnel * fuzzDiffuseLobe;
+    float3 fuzzLighting = fuzzBRDF * lightColor * noL * shadowAttenuation;
+
+    components.diffuse += fuzzLighting;
+    components.brdfTerms.diffuseBRDF += fuzzBRDF;
+    components.brdfTerms.diffuseLobe = max(components.brdfTerms.diffuseLobe, fuzzDiffuseLobe);
+#endif
+}
+
 // Evaluates a single light from prepared PBR data.
 BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
     BurtPBRMaterialData materialData,
@@ -1215,6 +1280,7 @@ float lightVisibility = components.brdfTerms.nDotL * shadowAttenuation;
     components.specular = components.brdfTerms.specularBRDF * lightColor * lightVisibility;
 
     BurtApplySubsurfaceDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation);
+    BurtApplyFabricDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation);
 
     // 返回拆分后的直接光结果
 return components;

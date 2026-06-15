@@ -76,6 +76,14 @@ float shadingModelID;
     float3 hairSpecularColor;
 
     float3 hairSecondarySpecularColor;
+
+    float fabricIsSilk;
+
+    float fabricFuzzWeight;
+
+    float fabricFuzzRoughness;
+
+    float3 fabricFuzzColor;
 };
 
 // 保存实际写入 RenderTarget 的五�?GBuffer 颜色；这里只定义编码结果，不负责 RT 创建或生命周期
@@ -144,7 +152,7 @@ return BurtSafeNormalize(n);
 }
 
 // GBuffer1.b 复用一个半精度通道保存 shading model �?material scalar；Hair 再把 scatter/shift 压到 material scalar 内
-static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 4.0f;
+static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 5.0f;
 static const float BURT_GBUFFER_SHADING_MODEL_PACK_SCALE = 0.999f;
 
 float BurtEncodeMetallicAndShadingModelForGBuffer(float metallicOrScatter, float shadingModelID)
@@ -309,6 +317,22 @@ void BurtDecodeSubsurfaceDistortionModeFromGBuffer(float packedValue, out float 
     scatteringMode = BurtClampSubsurfaceScatteringMode(scatteringMode);
 }
 
+static const float BURT_FABRIC_ROUGHNESS_SILK_PACK_SCALE = 0.499f;
+
+float BurtEncodeFabricRoughnessSilkForGBuffer(float fuzzRoughness, float isSilk)
+{
+    float packedRoughness = saturate(fuzzRoughness) * BURT_FABRIC_ROUGHNESS_SILK_PACK_SCALE;
+    return isSilk > 0.5f ? 0.5f + packedRoughness : packedRoughness;
+}
+
+void BurtDecodeFabricRoughnessSilkFromGBuffer(float packedValue, out float fuzzRoughness, out float isSilk)
+{
+    float packed = saturate(packedValue);
+    isSilk = packed >= 0.5f ? 1.0f : 0.0f;
+    float localRoughness = isSilk > 0.5f ? packed - 0.5f : packed;
+    fuzzRoughness = ClampPerceptualRoughness(localRoughness / BURT_FABRIC_ROUGHNESS_SILK_PACK_SCALE);
+}
+
 // Creates semantic GBuffer data from material inputs. Hair passes use normalWS as the stored strand direction.
 BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 emission)
 {
@@ -378,6 +402,10 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
     data.hairSecondarySpecularShift = 0.0f;
     data.hairSpecularColor = float3(1.0f, 1.0f, 1.0f);
     data.hairSecondarySpecularColor = float3(1.0f, 1.0f, 1.0f);
+    data.fabricIsSilk = 0.0f;
+    data.fabricFuzzWeight = 0.0f;
+    data.fabricFuzzRoughness = 0.75f;
+    data.fabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
 
 #if BURT_ACTIVE_CLEAR_COAT_SHADING_MODEL
     data.clearCoatMask = saturate(surfaceData.clearCoatMask);
@@ -408,6 +436,21 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
         data.subsurfaceScatteringMode = BurtClampSubsurfaceScatteringMode(surfaceData.subsurfaceScatteringMode);
         data.subsurface3SCurvature = saturate(surfaceData.subsurface3SCurvature);
         data.subsurfaceProfileIndex = BurtClampSubsurfaceProfileIndex(surfaceData.subsurfaceProfileIndex);
+    }
+#endif
+
+#if BURT_ACTIVE_FABRIC_SHADING_MODEL
+    data.fabricIsSilk = saturate(surfaceData.fabricIsSilk);
+    data.fabricFuzzWeight = saturate(surfaceData.fabricFuzzWeight);
+    data.fabricFuzzRoughness = ClampPerceptualRoughness(surfaceData.fabricFuzzRoughness);
+    data.fabricFuzzColor = max(surfaceData.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f));
+#elif BURT_ENABLE_FABRIC_SHADING
+    if (BurtIsActiveFabricShadingModel(data.shadingModelID))
+    {
+        data.fabricIsSilk = saturate(surfaceData.fabricIsSilk);
+        data.fabricFuzzWeight = saturate(surfaceData.fabricFuzzWeight);
+        data.fabricFuzzRoughness = ClampPerceptualRoughness(surfaceData.fabricFuzzRoughness);
+        data.fabricFuzzColor = max(surfaceData.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f));
     }
 #endif
 
@@ -484,6 +527,12 @@ BurtGBufferData BurtCreateSubsurfaceGBufferData(BurtSurfaceData surfaceData, flo
 BurtGBufferData BurtCreateSubsurfaceGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 emission)
 {
     surfaceData.shadingModelID = BURT_SHADING_MODEL_SUBSURFACE;
+    return BurtCreateGBufferData(surfaceData, normalWS, tangentWS, emission);
+}
+
+BurtGBufferData BurtCreateFabricGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 emission)
+{
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_FABRIC;
     return BurtCreateGBufferData(surfaceData, normalWS, tangentWS, emission);
 }
 
@@ -696,6 +745,50 @@ float3 BurtGetHairSecondarySpecularColor(BurtGBufferData gbufferData)
     return max(gbufferData.hairSecondarySpecularColor, float3(0.0f, 0.0f, 0.0f));
 }
 
+float BurtGetFabricFuzzWeight(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FABRIC_SHADING_MODEL
+    return saturate(gbufferData.fabricFuzzWeight);
+#elif BURT_ENABLE_FABRIC_SHADING
+    return BurtIsActiveFabricShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.fabricFuzzWeight) : 0.0f;
+#else
+    return 0.0f;
+#endif
+}
+
+float BurtGetFabricFuzzRoughness(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FABRIC_SHADING_MODEL
+    return ClampPerceptualRoughness(gbufferData.fabricFuzzRoughness);
+#elif BURT_ENABLE_FABRIC_SHADING
+    return BurtIsActiveFabricShadingModel(gbufferData.shadingModelID) ? ClampPerceptualRoughness(gbufferData.fabricFuzzRoughness) : 0.75f;
+#else
+    return 0.75f;
+#endif
+}
+
+float3 BurtGetFabricFuzzColor(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FABRIC_SHADING_MODEL
+    return max(gbufferData.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f));
+#elif BURT_ENABLE_FABRIC_SHADING
+    return BurtIsActiveFabricShadingModel(gbufferData.shadingModelID) ? max(gbufferData.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f)) : float3(1.0f, 1.0f, 1.0f);
+#else
+    return float3(1.0f, 1.0f, 1.0f);
+#endif
+}
+
+float BurtGetFabricIsSilk(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FABRIC_SHADING_MODEL
+    return saturate(gbufferData.fabricIsSilk);
+#elif BURT_ENABLE_FABRIC_SHADING
+    return BurtIsActiveFabricShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.fabricIsSilk) : 0.0f;
+#else
+    return 0.0f;
+#endif
+}
+
 float BurtGetGBufferMaterialChannel(BurtGBufferData gbufferData)
 {
 #if BURT_ACTIVE_HAIR_SHADING_MODEL
@@ -713,6 +806,15 @@ float BurtGetGBufferMaterialChannel(BurtGBufferData gbufferData)
     if (BurtIsActiveSubsurfaceShadingModel(gbufferData.shadingModelID))
     {
         return BurtGetSubsurfaceStrength(gbufferData);
+    }
+#endif
+
+#if BURT_ACTIVE_FABRIC_SHADING_MODEL
+    return BurtGetFabricFuzzWeight(gbufferData);
+#elif BURT_ENABLE_FABRIC_SHADING
+    if (BurtIsActiveFabricShadingModel(gbufferData.shadingModelID))
+    {
+        return BurtGetFabricFuzzWeight(gbufferData);
     }
 #endif
 
@@ -773,6 +875,15 @@ float4 BurtEncodeGBuffer3(BurtGBufferData data)
     }
 #endif
 
+#if BURT_ACTIVE_FABRIC_SHADING_MODEL
+    return float4(max(data.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f)), saturate(data.fabricFuzzWeight));
+#elif BURT_ENABLE_FABRIC_SHADING
+    if (BurtIsActiveFabricShadingModel(data.shadingModelID))
+    {
+        return float4(max(data.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f)), saturate(data.fabricFuzzWeight));
+    }
+#endif
+
     return BurtEncodeClearCoatOrDefaultGBuffer3(data);
 }
 
@@ -805,6 +916,21 @@ float4 BurtEncodeGBuffer4(BurtGBufferData data)
             encodedTangentWS,
             BurtEncodeSubsurfaceDistortionModeForGBuffer(data.subsurfaceDistortion, data.subsurfaceScatteringMode),
             BurtEncodeSubsurfaceThicknessProfileForGBuffer(data.subsurfaceThickness, data.subsurfaceProfileIndex));
+    }
+#endif
+
+#if BURT_ACTIVE_FABRIC_SHADING_MODEL
+    return float4(
+        encodedTangentWS,
+        clamp(data.anisotropy, -1.0f, 1.0f) * 0.5f + 0.5f,
+        BurtEncodeFabricRoughnessSilkForGBuffer(data.fabricFuzzRoughness, data.fabricIsSilk));
+#elif BURT_ENABLE_FABRIC_SHADING
+    if (BurtIsActiveFabricShadingModel(data.shadingModelID))
+    {
+        return float4(
+            encodedTangentWS,
+            clamp(data.anisotropy, -1.0f, 1.0f) * 0.5f + 0.5f,
+            BurtEncodeFabricRoughnessSilkForGBuffer(data.fabricFuzzRoughness, data.fabricIsSilk));
     }
 #endif
 
@@ -946,6 +1072,19 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
             : saturate(1.0f - data.subsurfaceThickness);
     }
 #endif
+
+#if BURT_ACTIVE_FABRIC_SHADING_MODEL
+    data.fabricFuzzColor = max(encoded.gbuffer3.rgb, float3(0.0f, 0.0f, 0.0f));
+    data.fabricFuzzWeight = saturate(encoded.gbuffer3.a);
+    BurtDecodeFabricRoughnessSilkFromGBuffer(encoded.gbuffer4.a, data.fabricFuzzRoughness, data.fabricIsSilk);
+#elif BURT_ENABLE_FABRIC_SHADING
+    if (BurtIsActiveFabricShadingModel(data.shadingModelID))
+    {
+        data.fabricFuzzColor = max(encoded.gbuffer3.rgb, float3(0.0f, 0.0f, 0.0f));
+        data.fabricFuzzWeight = saturate(encoded.gbuffer3.a);
+        BurtDecodeFabricRoughnessSilkFromGBuffer(encoded.gbuffer4.a, data.fabricFuzzRoughness, data.fabricIsSilk);
+    }
+#endif
     data.smoothness = saturate(encoded.gbuffer1.a);
 
     data.perceptualRoughness = ClampPerceptualRoughness(PerceptualSmoothnessToPerceptualRoughness(data.smoothness));
@@ -992,6 +1131,11 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData gbufferData)
     materialData.subsurfaceScatteringMode = BurtGetSubsurfaceScatteringMode(gbufferData);
     materialData.subsurface3SCurvature = saturate(gbufferData.subsurface3SCurvature);
     materialData.subsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(gbufferData);
+    materialData.fabricActive = BurtIsFabricShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+    materialData.fabricIsSilk = BurtGetFabricIsSilk(gbufferData);
+    materialData.fabricFuzzWeight = BurtGetFabricFuzzWeight(gbufferData);
+    materialData.fabricFuzzRoughness = BurtGetFabricFuzzRoughness(gbufferData);
+    materialData.fabricFuzzColor = BurtGetFabricFuzzColor(gbufferData);
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
     materialData.reflectance = BURT_SUBSURFACE_FIXED_REFLECTANCE;
 #elif BURT_ENABLE_SUBSURFACE_SHADING

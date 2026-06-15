@@ -6,6 +6,7 @@ namespace Burt.RenderPipeline.Editor
     internal static class BurtShaderGUIUtility
     {
         public const string AlphaClipKeyword = "BURT_ALPHA_CLIP";
+        public const string EmissionKeyword = "_EMISSION";
         private const string LegacyAlphaClipKeyword = "_ALPHACLIP_ON";
         public static readonly string[] DoubleSidedNormalModeNames = { "None", "Flip", "Mirror" };
         private static GUIStyle sectionHeaderStyle;
@@ -161,9 +162,19 @@ namespace Burt.RenderPipeline.Editor
 
             Color emission = material.GetColor("_EmissionColor");
             MaterialGlobalIlluminationFlags flags = material.globalIlluminationFlags;
-            material.globalIlluminationFlags = emission.maxColorComponent <= 0.0f
-                ? flags | MaterialGlobalIlluminationFlags.EmissiveIsBlack
-                : flags & ~MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+            bool emissionEnabled = emission.maxColorComponent > 0.0f;
+            material.globalIlluminationFlags = emissionEnabled
+                ? flags & ~MaterialGlobalIlluminationFlags.EmissiveIsBlack
+                : flags | MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+
+            if (emissionEnabled)
+            {
+                material.EnableKeyword(EmissionKeyword);
+            }
+            else
+            {
+                material.DisableKeyword(EmissionKeyword);
+            }
         }
 
         public static void ApplyAlphaClipKeyword(Material material)

@@ -1797,8 +1797,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAAFinalBlitYFlip=").Append(FormatFloat(finalBlitYFlip));
             builder.Append(" TAADebugYFlip=").Append(FormatFloat(temporalAADebugYFlip));
             builder.Append(" TAAUVSpace=XRenderFullscreenPlatformSampleUv;HistoryDepthVelocityFeedbackSameOrientation;FinalCameraColorTemporalAACopy;FinalBlitHandlesDisplayFlip;BurtVelocityPrevMinusCurrentHistoryUvPlusVelocity");
-            builder.Append(" TAAFilter=Current3x3OffsetPlusPixelJitter");
-            builder.Append(" TAANote=XRenderTSRAccumulationParity;DecimateMaxUseCountDepth;VelocitySignInternalToBurt;NoEdgeVelocityValidityDrop;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3CurrentFilter");
+            builder.Append(" TAAFilter=Current3x3OffsetMinusPixelJitter");
+            builder.Append(" TAANote=XRenderTSRAccumulationParity;DecimateMaxUseCountDepth;VelocitySignInternalToBurt;NoEdgeVelocityValidityDrop;ProjectionJitterTranslateMatrix;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3CurrentFilter;ResolveBlendXRenderBaseline;FinalHistoryAvailabilityNoSurfaceGate");
 
             builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
 
@@ -1820,9 +1820,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var burtGISettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
             var burtGIScreenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(request, asset);
             var burtGIHistory = BurtScreenSpaceGlobalIlluminationHistoryUtility.GetHistoryStatus(request, burtGISettings);
+            var furBlurHistory = BurtFurBlurHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
             var temporalAA = request != null ? request.TemporalAA : null;
             var ssaoEnabled = isDeferred && ssaoSettings.Enabled;
             var burtGIEnabled = isDeferred && burtGISettings.Enabled;
+            var furBlurEnabled = isDeferred && BurtFurBlurPassUtility.ShouldUseFurBlur(request, asset);
             var ssaoDebugRequested = BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionDebugMode(BurtShadingDebugSettings.Mode);
             var ssaoDebugPassRequested = isDeferred && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusionDebugView(request, asset);
             var burtGIDebugPassRequested = isDeferred && BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationDebugView(request, asset);
@@ -1878,6 +1880,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" SSSTempRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName));
             builder.Append(" SSSBlurRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName));
             builder.Append(" SSSCombineRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName));
+            builder.Append(" FurBlurPropertyRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.FurBlurPropertyName));
+            builder.Append(" FurBlurPropertyTempRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.FurBlurPropertyTempName));
+            builder.Append(" FurBlurColorRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.FurBlurColorName));
+            builder.Append(" FurBlurTemporalRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.FurBlurTemporalName));
 
             if (isDeferred)
             {
@@ -2097,6 +2103,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGIFirstValidFrame=").Append(burtGIHistory.FirstValidFrameIndex);
                 builder.Append(" BurtGILastInvalidationFrame=").Append(burtGIHistory.LastInvalidationFrameIndex);
                 builder.Append(" BurtGIHistoryReason=").Append(burtGIHistory.LastInvalidationReason);
+                builder.Append(" FurBlurEnabled=").Append(furBlurEnabled);
+                builder.Append(" FurBlurCandidateGate=").Append(BurtFurBlurPassUtility.ResolveFurBlurCandidateGateLabel(request, asset));
+                builder.Append(" FurBlurPath=").Append(furBlurEnabled ? "PropertyDilate2BlurTAAComposite" : "Disabled");
+                builder.Append(" FurBlurTiled=CandidateGateOnly;IndirectNotPorted");
+                builder.Append(" FurBlurDebugMode=").Append(BurtFurBlurPassUtility.ResolveFurBlurDebugModeLabel());
+                builder.Append(" FurBlurDebugShaderMode=").Append(BurtFurBlurPassUtility.ResolveFurBlurShaderDebugMode());
+                builder.Append(" FurBlurShaderStatus=").Append(BurtFurBlurPassUtility.ResolveFurBlurShaderStatusLabel());
+                builder.Append(" FurBlurHistoryValid=").Append(furBlurHistory.HasHistory);
+                builder.Append(" FurBlurHistoryMatches=").Append(furBlurHistory.DescriptorMatches);
+                builder.Append(" FurBlurHistoryAge=").Append(furBlurHistory.HistoryAge);
+                builder.Append(" FurBlurFrame=").Append(furBlurHistory.FrameIndex);
+                builder.Append(" FurBlurHistoryReason=").Append(furBlurHistory.Reason);
+                builder.Append(" FurBlurTemporalFeedback=").Append(FormatFloat(BurtFurBlurHistoryUtility.DefaultFeedback));
+                builder.Append(" FurBlurDepthEncoding=DeviceDepthSVPositionZ");
+                builder.Append(" FurBlurReversedZ=").Append(SystemInfo.usesReversedZBuffer);
                 builder.Append(" SSREnabled=").Append(ssrSettings.Enabled);
                 builder.Append(" SSRSuppressedByShadingDebug=").Append(ssrSuppressedByShadingDebug);
                 builder.Append(" SSRDebugMode=").Append(BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionDebugModeLabel());

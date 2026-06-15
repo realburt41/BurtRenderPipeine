@@ -228,6 +228,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf);
         }
 
+        public static RenderTextureDescriptor CreateGBufferObjectIndexDescriptor(Camera camera)
+        {
+            var format = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.R8)
+                ? RenderTextureFormat.R8
+                : RenderTextureFormat.RFloat;
+            var descriptor = CreateGBufferDescriptor(camera, format);
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
         private static RenderTextureDescriptor CreateGBufferDescriptor( // 定义创建 GBuffer RT 描述的共用函数，保证五张 GBuffer 尺寸和采样设置一致。
             Camera camera, // 接收当前相机，用来匹配渲染尺寸和 targetTexture 尺寸。
             RenderTextureFormat format) // 接收当前 GBuffer 需要使用的颜色格式。
@@ -339,6 +349,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.autoGenerateMips = false;
             descriptor.sRGB = false;
             return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateFurBlurTemporalDescriptor(Camera camera)
+        {
+            return CreateFurBlurColorDescriptor(camera);
         }
 
         public static int CalculateMipCount(int width, int height)

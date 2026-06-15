@@ -22,7 +22,9 @@ struct Attributes
     float3 normalOS : NORMAL;
     float4 tangentOS : TANGENT;
     float2 uv0 : TEXCOORD0;
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 uv1 : TEXCOORD1;
+#endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -30,14 +32,20 @@ struct Varyings
 {
     float4 positionCS : SV_POSITION;
     float3 normalWS : TEXCOORD0;
+#if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 baseMapUV : TEXCOORD2;
+#endif
     float4 tangentWS : TEXCOORD3;
     float3 positionWS : TEXCOORD4;
     float2 emissionMapUV : TEXCOORD5;
+#if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 maskMapUV : TEXCOORD6;
+#endif
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 uv0 : TEXCOORD7;
     float2 uv1 : TEXCOORD8;
     float3 positionOS : TEXCOORD9;
+#endif
 };
 
 Varyings Vert(Attributes input)
@@ -53,12 +61,18 @@ Varyings Vert(Attributes input)
 
     output.normalWS = normalize(UnityObjectToWorldNormal(input.normalOS));
     output.tangentWS = BurtObjectToWorldTangent(input.tangentOS);
+#if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
+#endif
     output.emissionMapUV = BurtTransformEmissionMapUV(input.uv0, _EmissionMap_ST);
+#if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     output.maskMapUV = BurtTransformMaskMapUV(input.uv0, _MaskMap_ST);
+#endif
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     output.uv0 = input.uv0;
     output.uv1 = input.uv1;
     output.positionOS = positionOS.xyz;
+#endif
     return output;
 }
 
@@ -76,7 +90,7 @@ float3 BurtGetForwardShadingDirectionWS(Varyings input, float3 normalWS, float f
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     return BurtGetMaterialPassShadingDirectionWS(input.uv0, input.normalWS, input.tangentWS, facing);
 #else
-    return BurtGetMaterialPassShadingDirectionWS(input.uv0, normalWS, input.tangentWS);
+    return BurtGetMaterialPassShadingDirectionWS(normalWS, input.tangentWS);
 #endif
 }
 
@@ -93,6 +107,8 @@ BurtPBRShadingComponents BurtEvaluateForwardShadingComponents(BurtSurfaceData su
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_CLEAR_COAT)
     float3 clearCoatNormalWS = BurtSampleClearCoatNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, _ClearCoatNormalScale, facing, _DoubleSidedNormalModeConstants);
     return BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, input.tangentWS, clearCoatNormalWS, viewDirectionWS, input.positionWS);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC)
+    return BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, input.tangentWS, viewDirectionWS, input.positionWS);
 #else
     return BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, input.tangentWS, viewDirectionWS, input.positionWS);
 #endif
@@ -170,6 +186,16 @@ void BurtFillForwardShadingDebugData(
         debugData.shadowReceiverDepthDelta,
         debugData.shadowPCSSBlockerFraction);
 
+    BurtFillPerObjectShadowShadingDebugData(
+        positionWS,
+        normalWS,
+        _BurtPerObjectShadowObjectIndex,
+        debugData.perObjectShadowObjectIndexColor,
+        debugData.perObjectShadowSliceColor,
+        debugData.perObjectShadowUVColor,
+        debugData.perObjectShadowDepthColor,
+        debugData.perObjectShadowCompareColor);
+
     debugData.ambientOcclusion = surfaceData.occlusion;
     debugData.emissionColor = emissionColor;
     debugData.finalLightingColor = finalColor;
@@ -220,14 +246,23 @@ void BurtFillForwardShadingDebugData(
 
 float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
 {
-    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
+    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS, maskMap);
+#else
+    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
+#endif
     BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
 
     float3 normalWS = BurtGetForwardNormalWS(input, facing);
     float3 shadingDirectionWS = BurtGetForwardShadingDirectionWS(input, normalWS, facing);
     float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
+#else
+    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV);
+#endif
     float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
     BurtSurfaceData shadingSurfaceData = surfaceData;

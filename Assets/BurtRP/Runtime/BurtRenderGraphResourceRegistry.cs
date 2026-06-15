@@ -58,6 +58,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int GBuffer4Id = Shader.PropertyToID(GBuffer4ShaderName);
 
+        public const string GBufferObjectIndexName = "GBufferObjectIndex";
+
+        public const string GBufferObjectIndexShaderName = "_BurtGBufferObjectIndex";
+
+        public static readonly int GBufferObjectIndexId = Shader.PropertyToID(GBufferObjectIndexShaderName);
+
         public const string HiZDepthName = "HiZDepth";
 
         public const string HiZDepthTextureShaderName = "_BurtHiZDepthTexture";
@@ -204,11 +210,31 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int FurBlurPropertyTextureId = Shader.PropertyToID(FurBlurPropertyTextureShaderName);
 
+        public const string FurBlurPropertyTempName = "FurBlurPropertyTemp";
+
+        public const string FurBlurPropertyTempTextureShaderName = "_BurtFurBlurPropertyTempTexture";
+
+        public static readonly int FurBlurPropertyTempTextureId = Shader.PropertyToID(FurBlurPropertyTempTextureShaderName);
+
         public const string FurBlurColorName = "FurBlurColor";
 
         public const string FurBlurColorTextureShaderName = "_BurtFurBlurColorTexture";
 
         public static readonly int FurBlurColorTextureId = Shader.PropertyToID(FurBlurColorTextureShaderName);
+
+        public const string FurBlurTemporalName = "FurBlurTemporal";
+
+        public const string FurBlurTemporalTextureShaderName = "_BurtFurBlurTemporalTexture";
+
+        public static readonly int FurBlurTemporalTextureId = Shader.PropertyToID(FurBlurTemporalTextureShaderName);
+
+        public const string FurBlurHistoryName = "FurBlurHistory";
+
+        public const string FurBlurPersistentHistoryName = "FurBlurPersistentHistory";
+
+        public const string FurBlurHistoryTextureShaderName = "_BurtFurBlurHistoryTexture";
+
+        public static readonly int FurBlurHistoryTextureId = Shader.PropertyToID(FurBlurHistoryTextureShaderName);
 
         public const string ScreenSpaceSubsurfaceBurleyArgsBufferName = "ScreenSpaceSubsurfaceBurleyArgsBuffer";
 
@@ -617,6 +643,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(GBuffer4Name);
         }
 
+        public BurtRenderTargetHandle RegisterGBufferObjectIndexTexture()
+        {
+            return RegisterGBufferObjectIndex(new RenderTargetIdentifier(GBufferObjectIndexId));
+        }
+
+        public BurtRenderTargetHandle RegisterGBufferObjectIndex(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(GBufferObjectIndexName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetGBufferObjectIndex()
+        {
+            return GetRenderTarget(GBufferObjectIndexName);
+        }
+
         public BurtRenderTargetHandle RegisterHiZDepthTexture()
         {
             return RegisterHiZDepth(new RenderTargetIdentifier(HiZDepthTextureId));
@@ -977,6 +1018,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(FurBlurPropertyName);
         }
 
+        public BurtRenderTargetHandle RegisterFurBlurPropertyTempTexture()
+        {
+            return RegisterFurBlurPropertyTemp(new RenderTargetIdentifier(FurBlurPropertyTempTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterFurBlurPropertyTemp(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(FurBlurPropertyTempName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetFurBlurPropertyTemp()
+        {
+            return GetRenderTarget(FurBlurPropertyTempName);
+        }
+
         public BurtRenderTargetHandle RegisterFurBlurColorTexture()
         {
             return RegisterFurBlurColor(new RenderTargetIdentifier(FurBlurColorTextureId));
@@ -990,6 +1046,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetFurBlurColor()
         {
             return GetRenderTarget(FurBlurColorName);
+        }
+
+        public BurtRenderTargetHandle RegisterFurBlurTemporalTexture()
+        {
+            return RegisterFurBlurTemporal(new RenderTargetIdentifier(FurBlurTemporalTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterFurBlurTemporal(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(FurBlurTemporalName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetFurBlurTemporal()
+        {
+            return GetRenderTarget(FurBlurTemporalName);
         }
 
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。

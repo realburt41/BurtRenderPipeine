@@ -66,6 +66,26 @@ CBUFFER_START(UnityPerMaterial)
 
     float _Subsurface3SCurvatureBias;
 
+    float4 _FuzzMap_ST;
+
+    float4 _FuzzColor;
+
+    float _FuzzAmount;
+
+    float _FuzzRoughness;
+
+    float4 _FacingColor;
+
+    float4 _TangentColor;
+
+    float _Falloff;
+
+    float4 _ThinFilmThicknessMap_ST;
+
+    float _ThinFilmThickness;
+
+    float _ThinFilmFactor;
+
     // 保存自发光颜色，Forward 用它和 Emission Map 相乘。
     float4 _EmissionColor;
 

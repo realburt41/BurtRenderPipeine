@@ -96,7 +96,6 @@ Material:
     - _ShadowCutOff: 1
     - _Smoothness: 0.883
     - _SpecularShift: -0.46
-    - _SubsurfaceScatteringMode: 0
     m_Colors:
     - _AlbedoOcclusionColor: {r: 0.4039216, g: 0.34509805, b: 0.34509805, a: 0}
     - _BaseColor: {r: 0.5764706, g: 0.5294118, b: 0.5137255, a: 1}

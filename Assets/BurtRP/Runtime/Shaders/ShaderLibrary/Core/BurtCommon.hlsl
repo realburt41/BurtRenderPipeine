@@ -70,9 +70,16 @@ float BurtGetMultipassLayerFactor()
 
 float4 BurtApplyMultipassObjectShellOffset(float4 positionOS, float3 normalOS)
 {
+#if defined(UNITY_INSTANCING_ENABLED) || defined(UNITY_PROCEDURAL_INSTANCING_ENABLED) || defined(UNITY_STEREO_INSTANCING_ENABLED)
+    if (_FurMaxCount <= 1.0f)
+    {
+        return positionOS;
+    }
+
     float layerFactor = BurtGetMultipassLayerFactor();
     float3 safeScale = max(abs(_FurScale.xyz), float3(0.0001f, 0.0001f, 0.0001f));
     positionOS.xyz += normalOS / safeScale * (layerFactor * BURT_MULTIPASS_DEFAULT_SHELL_LENGTH);
+#endif
     return positionOS;
 }
 

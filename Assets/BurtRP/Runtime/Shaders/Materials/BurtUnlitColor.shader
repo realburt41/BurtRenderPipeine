@@ -204,6 +204,16 @@ Shader "BurtRP/UnlitColor"
                     debugData.shadowReceiverDepthDelta,
                     debugData.shadowPCSSBlockerFraction);
 
+                BurtFillPerObjectShadowShadingDebugData(
+                    input.positionWS,
+                    normalWS,
+                    _BurtPerObjectShadowObjectIndex,
+                    debugData.perObjectShadowObjectIndexColor,
+                    debugData.perObjectShadowSliceColor,
+                    debugData.perObjectShadowUVColor,
+                    debugData.perObjectShadowDepthColor,
+                    debugData.perObjectShadowCompareColor);
+
                 float3 debugColor;
                 if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
                 {
@@ -331,6 +341,16 @@ Shader "BurtRP/UnlitColor"
                     debugData.shadowPCSSRadius,
                     debugData.shadowReceiverDepthDelta,
                     debugData.shadowPCSSBlockerFraction);
+
+                BurtFillPerObjectShadowShadingDebugData(
+                    input.positionWS,
+                    normalWS,
+                    _BurtPerObjectShadowObjectIndex,
+                    debugData.perObjectShadowObjectIndexColor,
+                    debugData.perObjectShadowSliceColor,
+                    debugData.perObjectShadowUVColor,
+                    debugData.perObjectShadowDepthColor,
+                    debugData.perObjectShadowCompareColor);
 
                 float3 debugColor;
                 if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))

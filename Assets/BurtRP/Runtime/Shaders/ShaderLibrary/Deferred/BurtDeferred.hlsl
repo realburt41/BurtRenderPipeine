@@ -11,6 +11,7 @@ Texture2D _BurtGBuffer1;
 Texture2D _BurtGBuffer2;
 Texture2D _BurtGBuffer3;
 Texture2D _BurtGBuffer4;
+Texture2D _BurtGBufferObjectIndex;
 
 // 主 Agent 绑定的 CameraDepth；来源可以是 DepthPrepass，也可以是 GBuffer pass 写入的共享深度。
 UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -140,6 +141,12 @@ float BurtSampleDeferredShadingModelID(float2 screenUV)
     float shadingModelID;
     BurtDecodeMetallicAndShadingModelFromGBuffer(packedShadingModelAndMaterial, shadingModelID);
     return shadingModelID;
+}
+
+int BurtSampleDeferredPerObjectShadowObjectIndex(float2 screenUV)
+{
+    float encodedObjectIndex = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBufferObjectIndex, screenUV).r;
+    return (int)floor(saturate(encodedObjectIndex) * 255.0f + 0.5f);
 }
 
 // 采样 BurtRP CameraDepth 的原始硬件深度，Deferred Lighting 和 GBuffer Debug 共用。

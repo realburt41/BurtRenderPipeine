@@ -53,7 +53,13 @@ struct BurtMultipassFurGBufferOutput
     float4 gbuffer2 : SV_Target2;
     float4 gbuffer3 : SV_Target3;
     float4 gbuffer4 : SV_Target4;
+    float4 objectIndex : SV_Target5;
 };
+
+float4 BurtEncodeMultipassFurPerObjectShadowObjectIndexTarget()
+{
+    return float4(saturate((float)max(_BurtPerObjectShadowObjectIndex, 0) / 255.0f), 0.0f, 0.0f, 1.0f);
+}
 
 float BurtMultipassFurLayerIndex()
 {
@@ -327,6 +333,11 @@ BurtSurfaceData BurtCreateMultipassFurSurfaceData(float4 baseColor, float4 baseM
 
 float3 BurtEvaluateMultipassFurEmission(BurtMultipassFurVaryings input, float4 maskMap)
 {
+    if (max(max(_EmissiveColor.r, _EmissiveColor.g), _EmissiveColor.b) <= 0.0f)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
     float2 emissionUV = input.uv0;
     float viewSpaceMask = 1.0f;
 
@@ -360,6 +371,7 @@ BurtMultipassFurGBufferOutput BurtPackMultipassFurGBuffer(BurtEncodedGBuffer enc
     output.gbuffer2 = encodedGBuffer.gbuffer2;
     output.gbuffer3 = encodedGBuffer.gbuffer3;
     output.gbuffer4 = encodedGBuffer.gbuffer4;
+    output.objectIndex = BurtEncodeMultipassFurPerObjectShadowObjectIndexTarget();
     return output;
 }
 
@@ -435,7 +447,7 @@ float4 FragMultipassFurBlurProperty(BurtMultipassFurVaryings input) : SV_Target
         }
     }
 
-    return float4(theta, input.positionCS.z / input.positionCS.w, 0.0f, 1.0f);
+    return float4(theta, input.positionCS.z, 0.0f, 1.0f);
 }
 
 #endif // BURT_MULTIPASS_FUR_PASS_INCLUDED

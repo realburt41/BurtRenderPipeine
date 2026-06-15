@@ -185,6 +185,16 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Main Light Shadow"; // 已有主光阴影图调试。
                 case BurtShadingDebugMode.PerObjectShadowAtlas:
                     return "Per Object Shadow Atlas";
+                case BurtShadingDebugMode.PerObjectShadowObjectIndex:
+                    return "Per Object Shadow Object Index";
+                case BurtShadingDebugMode.PerObjectShadowSlice:
+                    return "Per Object Shadow Slice";
+                case BurtShadingDebugMode.PerObjectShadowUV:
+                    return "Per Object Shadow UV";
+                case BurtShadingDebugMode.PerObjectShadowDepth:
+                    return "Per Object Shadow Depth";
+                case BurtShadingDebugMode.PerObjectShadowCompare:
+                    return "Per Object Shadow Compare";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw:
                     return "SSAO Raw";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal:
@@ -253,6 +263,18 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSS Algorithm";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory:
                     return "SSS History";
+                case BurtShadingDebugMode.FurBlurDirection:
+                    return "Fur Blur Direction";
+                case BurtShadingDebugMode.FurBlurPropertyDepth:
+                    return "Fur Blur Depth";
+                case BurtShadingDebugMode.FurBlurCurrent:
+                    return "Fur Blur Current";
+                case BurtShadingDebugMode.FurBlurTemporal:
+                    return "Fur Blur Temporal";
+                case BurtShadingDebugMode.FurBlurHistory:
+                    return "Fur Blur History";
+                case BurtShadingDebugMode.FurBlurDiagnostic:
+                    return "Fur Blur Diagnostic";
                 case BurtShadingDebugMode.BloomPrefilter:
                     return "Bloom Prefilter";
                 case BurtShadingDebugMode.BloomFinalBloom:
@@ -645,6 +667,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ShadowReceiverDepthDelta, // receiver / shadow map 深度差，用来调 bias。
             BurtShadingDebugMode.ShadowPCSSBlockerFraction, // PCSS blocker search 命中的 blocker 占比。
             BurtShadingDebugMode.MainLightShadow, // 主光 shadow map 全屏 Debug。
+            BurtShadingDebugMode.PerObjectShadowObjectIndex,
+            BurtShadingDebugMode.PerObjectShadowSlice,
+            BurtShadingDebugMode.PerObjectShadowUV,
+            BurtShadingDebugMode.PerObjectShadowDepth,
+            BurtShadingDebugMode.PerObjectShadowCompare,
             BurtShadingDebugMode.PerObjectShadowAtlas
         });
 
@@ -800,6 +827,16 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableChain,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm,
             BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory
+        });
+
+        public static readonly BurtShadingDebugGroup FurBlur = new BurtShadingDebugGroup("Fur Blur", "Fur", new[]
+        {
+            BurtShadingDebugMode.FurBlurDirection,
+            BurtShadingDebugMode.FurBlurPropertyDepth,
+            BurtShadingDebugMode.FurBlurCurrent,
+            BurtShadingDebugMode.FurBlurTemporal,
+            BurtShadingDebugMode.FurBlurHistory,
+            BurtShadingDebugMode.FurBlurDiagnostic
         });
 
         public static readonly BurtShadingDebugGroup Bloom = new BurtShadingDebugGroup("Bloom", "Bloom", new[] // Bloom 后处理调试。
@@ -983,6 +1020,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 BurtShadingDebugSSAODropdown.Id,
                 BurtShadingDebugBurtGIDropdown.Id,
                 BurtShadingDebugSSSDropdown.Id,
+                BurtShadingDebugFurBlurDropdown.Id,
                 BurtShadingDebugBloomDropdown.Id,
                 BurtShadingDebugAutoExposureDropdown.Id,
                 BurtShadingDebugSSRDropdown.Id,
@@ -1209,6 +1247,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public BurtShadingDebugSSSDropdown()
             : base(BurtShadingDebugGroups.ScreenSpaceSubsurface)
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugFurBlurDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/FurBlur";
+
+        public BurtShadingDebugFurBlurDropdown()
+            : base(BurtShadingDebugGroups.FurBlur)
         {
         }
     }

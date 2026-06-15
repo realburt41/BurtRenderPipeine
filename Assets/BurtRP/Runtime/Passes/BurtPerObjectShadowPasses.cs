@@ -20,6 +20,7 @@ namespace Burt.RenderPipeline
         private static readonly int PerObjectShadowSliceParamsId = Shader.PropertyToID("_BurtPerObjectShadowSliceParams");
         private static readonly int PerObjectShadowParamsId = Shader.PropertyToID("_BurtPerObjectShadowParams");
         private static readonly int PerObjectShadowTexelSizeId = Shader.PropertyToID("_BurtPerObjectShadowTexelSize");
+        internal static readonly int PerObjectShadowObjectIndexId = Shader.PropertyToID("_BurtPerObjectShadowObjectIndex");
         private static readonly int MainLightDirectionId = Shader.PropertyToID("_BurtMainLightDirection");
         private static readonly int ShadowCasterLightPositionId = Shader.PropertyToID("_BurtShadowCasterLightPosition");
         private static readonly int CastingPunctualLightShadowId = Shader.PropertyToID("_BurtCastingPunctualLightShadow");
@@ -94,7 +95,7 @@ namespace Burt.RenderPipeline
                 return preparedData;
             }
 
-            BurtPerObjectShadowRegistry.CollectActive(preparedData.Components, MaxSlices, request.Camera);
+            BurtPerObjectShadowRegistry.CollectActive(preparedData.Components, int.MaxValue, request.Camera);
             if (preparedData.Components.Count <= 0)
             {
                 return preparedData;
@@ -125,7 +126,6 @@ namespace Burt.RenderPipeline
 
             if (validSliceCount <= 0)
             {
-                preparedData.Components.Clear();
                 return preparedData;
             }
 
@@ -143,7 +143,7 @@ namespace Burt.RenderPipeline
                     0f,
                     (slice.Viewport.x + slice.Viewport.width) / preparedData.AtlasWidth,
                     slice.Viewport.height / preparedData.AtlasHeight);
-                slice.WorldToShadowMatrix = BurtMainLightShadowMatrixUtility.CreateWorldToShadowMatrix(slice.ViewMatrix, slice.ProjectionMatrix, slice.AtlasRect);
+                slice.WorldToShadowMatrix = CreateWorldToPerObjectShadowMatrix(slice.ViewMatrix, slice.ProjectionMatrix, slice.AtlasRect);
                 preparedData.Slices[sliceIndex] = slice;
             }
 
@@ -178,6 +178,8 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle atlasTarget,
             PerObjectShadowPrepareData preparedData)
         {
+            ClearObjectIndexesForPreparedComponents(preparedData);
+
             if (preparedData == null || preparedData.SliceCount <= 0 || !atlasTarget.IsValid)
             {
                 ClearPerObjectShadowReceiverGlobals(cmd, material);
@@ -199,6 +201,11 @@ namespace Burt.RenderPipeline
             for (var sliceIndex = 0; sliceIndex < Mathf.Min(preparedData.SliceCount, MaxSlices); sliceIndex++)
             {
                 var slice = preparedData.Slices[sliceIndex];
+                if (slice.Component != null)
+                {
+                    slice.Component.SetObjectIndexForRenderers(sliceIndex + 1);
+                }
+
                 matrices[sliceIndex] = slice.WorldToShadowMatrix;
                 atlasRects[sliceIndex] = slice.AtlasRect;
                 sliceParams[sliceIndex] = new Vector4(
@@ -216,6 +223,19 @@ namespace Burt.RenderPipeline
                 sliceParams,
                 new Vector4(Mathf.Clamp(preparedData.SliceCount, 0, MaxSlices), preparedData.AtlasWidth, preparedData.AtlasHeight, 0f),
                 new Vector4(1f / Mathf.Max(1, preparedData.AtlasWidth), 1f / Mathf.Max(1, preparedData.AtlasHeight), Mathf.Max(1, preparedData.AtlasWidth), Mathf.Max(1, preparedData.AtlasHeight)));
+        }
+
+        private static void ClearObjectIndexesForPreparedComponents(PerObjectShadowPrepareData preparedData)
+        {
+            if (preparedData == null || preparedData.Components == null)
+            {
+                return;
+            }
+
+            for (var componentIndex = 0; componentIndex < preparedData.Components.Count; componentIndex++)
+            {
+                preparedData.Components[componentIndex]?.ClearObjectIndexForRenderers();
+            }
         }
 
         public static void ClearPerObjectShadowReceiverGlobals(CommandBuffer cmd)
@@ -255,7 +275,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalFloat(MainLightShadowDepthBiasId, depthBias);
             cmd.SetGlobalFloat(MainLightShadowNormalBiasId, normalBias);
             cmd.SetGlobalVector(UnityShadowBiasId, new Vector4(depthBias, normalBias, 0f, 0f));
-            cmd.SetGlobalDepthBias(1f, 2.5f);
+            cmd.SetGlobalDepthBias(0f, 0f);
             SetWorldToCameraAndCameraToWorldMatrices(cmd, viewMatrix);
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
         }
@@ -327,6 +347,7 @@ namespace Burt.RenderPipeline
             slice.ReceiverNormalBias = component.NormalBias * CalculateWorldTexelSize(paddedExtents, component.SliceResolution);
             slice.WorldTexelSize = CalculateWorldTexelSize(paddedExtents, component.SliceResolution);
             slice.Index = sliceIndex;
+            slice.Component = component;
             return true;
         }
 
@@ -420,9 +441,22 @@ namespace Burt.RenderPipeline
             return ortho;
         }
 
+        private static Matrix4x4 CreateWorldToPerObjectShadowMatrix(Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix, Vector4 atlasRect)
+        {
+            var worldToShadow = GL.GetGPUProjectionMatrix(projectionMatrix, false) * viewMatrix;
+
+            var textureScaleAndBias = Matrix4x4.identity;
+            textureScaleAndBias.m00 = 0.5f;
+            textureScaleAndBias.m11 = 0.5f;
+            textureScaleAndBias.m03 = 0.5f;
+            textureScaleAndBias.m13 = 0.5f;
+
+            return BurtMainLightShadowMatrixUtility.CreateAtlasSliceTransform(atlasRect) * textureScaleAndBias * worldToShadow;
+        }
+
         private static Quaternion ResolveLightRotation(Vector3 mainLightDirection)
         {
-            var forward = mainLightDirection.sqrMagnitude > 0.0001f ? mainLightDirection.normalized : Vector3.forward;
+            var forward = mainLightDirection.sqrMagnitude > 0.0001f ? -mainLightDirection.normalized : Vector3.forward;
             var up = Mathf.Abs(Vector3.Dot(forward, Vector3.up)) > 0.98f ? Vector3.right : Vector3.up;
             return Quaternion.LookRotation(forward, up);
         }
@@ -621,6 +655,7 @@ namespace Burt.RenderPipeline
         public Matrix4x4 ViewMatrix;
         public Matrix4x4 ProjectionMatrix;
         public Matrix4x4 WorldToShadowMatrix;
+        public BurtPerObjectShadow Component;
 
         public void Reset()
         {
@@ -637,6 +672,7 @@ namespace Burt.RenderPipeline
             ViewMatrix = Matrix4x4.identity;
             ProjectionMatrix = Matrix4x4.identity;
             WorldToShadowMatrix = Matrix4x4.identity;
+            Component = null;
         }
     }
 
@@ -672,7 +708,7 @@ namespace Burt.RenderPipeline
             if (preparedData.SliceCount <= 0)
             {
                 var clearCmd = CommandBufferPool.Get(Name + " Clear Globals");
-                BurtPerObjectShadowUtility.ClearPerObjectShadowReceiverGlobals(clearCmd);
+                BurtPerObjectShadowUtility.UploadPerObjectShadowReceiverGlobals(clearCmd, null, atlasTarget, preparedData);
                 context.ScriptableContext.ExecuteCommandBuffer(clearCmd);
                 CommandBufferPool.Release(clearCmd);
                 return;
@@ -724,7 +760,7 @@ namespace Burt.RenderPipeline
             var preparedData = BurtPerObjectShadowUtility.Prepare(request);
             if (preparedData.SliceCount <= 0)
             {
-                DisablePerObjectShadowReceiverGlobals(context.ScriptableContext);
+                DisablePerObjectShadowReceiverGlobals(context.ScriptableContext, atlasTarget, preparedData);
                 return;
             }
 
@@ -732,6 +768,7 @@ namespace Burt.RenderPipeline
             var cmd = CommandBufferPool.Get(Name);
             try
             {
+                cmd.SetGlobalInt(BurtPerObjectShadowUtility.PerObjectShadowObjectIndexId, 0);
                 cmd.SetRenderTarget(atlasTarget.Identifier);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, preparedData.AtlasWidth, preparedData.AtlasHeight);
                 cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
@@ -746,7 +783,12 @@ namespace Burt.RenderPipeline
                     cmd.SetViewport(slice.Viewport);
                     cmd.EnableScissorRect(slice.Viewport);
                     cmd.SetViewProjectionMatrices(slice.ViewMatrix, slice.ProjectionMatrix);
-                    BurtPerObjectShadowUtility.SetupDirectionalShadowCasterState(cmd, mainLightDirection, slice.ViewMatrix, 0f, 0f);
+                    BurtPerObjectShadowUtility.SetupDirectionalShadowCasterState(
+                        cmd,
+                        mainLightDirection,
+                        slice.ViewMatrix,
+                        0f,
+                        0f);
                     context.ScriptableContext.ExecuteCommandBuffer(cmd);
                     cmd.Clear();
 
@@ -842,6 +884,17 @@ namespace Burt.RenderPipeline
         {
             var cmd = CommandBufferPool.Get("Burt Disable Per Object Shadow Receiver");
             BurtPerObjectShadowUtility.ClearPerObjectShadowReceiverGlobals(cmd);
+            renderContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private static void DisablePerObjectShadowReceiverGlobals(
+            ScriptableRenderContext renderContext,
+            BurtRenderTargetHandle atlasTarget,
+            PerObjectShadowPrepareData preparedData)
+        {
+            var cmd = CommandBufferPool.Get("Burt Disable Per Object Shadow Receiver");
+            BurtPerObjectShadowUtility.UploadPerObjectShadowReceiverGlobals(cmd, null, atlasTarget, preparedData);
             renderContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }

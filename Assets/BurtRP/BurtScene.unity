@@ -221,7 +221,7 @@ Transform:
   m_GameObject: {fileID: 111655242}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 3.19, y: -0.1491721, z: 0.92}
+  m_LocalPosition: {x: 2.279, y: -0.1491721, z: 0.92}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -448,7 +448,7 @@ Transform:
   m_GameObject: {fileID: 476819134}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.026, y: 0.095, z: 1.017}
+  m_LocalPosition: {x: 3.447, y: -0.164, z: 1.017}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -676,7 +676,7 @@ Light:
   m_BounceIntensity: 1
   m_ColorTemperature: 6570
   m_UseColorTemperature: 0
-  m_BoundingSphereOverride: {x: 1.02e-43, y: 2.2e-44, z: 9.16e-42, w: 1.469368e-39}
+  m_BoundingSphereOverride: {x: 0, y: -1.2465794, z: 0.64576554, w: -0.5217112}
   m_UseBoundingSphereOverride: 0
   m_UseViewFrustumForShadowCasterCull: 1
   m_ShadowRadius: 0
@@ -1256,7 +1256,7 @@ Transform:
   m_GameObject: {fileID: 1148666740}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 1.093, y: -0.1491721, z: 1.017}
+  m_LocalPosition: {x: 0.199, y: -0.025, z: 1.017}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1418,7 +1418,7 @@ Transform:
   m_GameObject: {fileID: 1791514764}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 2.083, y: -0.133, z: 0.974}
+  m_LocalPosition: {x: 1.266, y: -0.133, z: 0.974}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1679,7 +1679,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1941300677}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a9ac4034810f48d6b5d82a4795bc1d64, type: 3}
   m_Name: 
@@ -1688,7 +1688,7 @@ MonoBehaviour:
   sliceResolution: 1024
   padding: 0.02
   strength: 1
-  receiverDepthBias: 0.4
+  receiverDepthBias: 0.02
   normalBias: 5
   includeInactiveRenderers: 0
 --- !u!1 &1965080907

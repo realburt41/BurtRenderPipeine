@@ -9,6 +9,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateGBuffer2Pass = new BurtAllocateGBuffer2Pass(); // 创建 GBuffer2 分配 Pass，第一版用于保存 emission 和 reflectance。
         private readonly BurtRenderPass allocateGBuffer3Pass = new BurtAllocateGBuffer3Pass();
         private readonly BurtRenderPass allocateGBuffer4Pass = new BurtAllocateGBuffer4Pass();
+        private readonly BurtRenderPass allocateGBufferObjectIndexPass = new BurtAllocateGBufferObjectIndexPass();
         private readonly BurtRenderPass allocateScreenSpaceAmbientOcclusionRawPass = new BurtAllocateScreenSpaceAmbientOcclusionRawPass();
         private readonly BurtRenderPass allocateScreenSpaceAmbientOcclusionPass = new BurtAllocateScreenSpaceAmbientOcclusionPass();
         private readonly BurtRenderPass screenSpaceAmbientOcclusionTracePass = new BurtScreenSpaceAmbientOcclusionTracePass();
@@ -50,16 +51,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass drawGBufferOpaquePass = new BurtDrawGBufferOpaquePass(); // 创建 GBuffer 不透明绘制 Pass，后续由 shader 侧 BurtGBuffer pass 写入材质数据。
         private readonly BurtRenderPass drawMultipassGBufferOpaquePass = new BurtDrawMultipassGBufferOpaquePass();
         private readonly BurtRenderPass allocateFurBlurPropertyPass = new BurtAllocateFurBlurPropertyPass();
+        private readonly BurtRenderPass allocateFurBlurPropertyTempPass = new BurtAllocateFurBlurPropertyTempPass();
         private readonly BurtRenderPass allocateFurBlurColorPass = new BurtAllocateFurBlurColorPass();
+        private readonly BurtRenderPass allocateFurBlurTemporalPass = new BurtAllocateFurBlurTemporalPass();
         private readonly BurtRenderPass clearFurBlurPropertyPass = new BurtClearFurBlurPropertyPass();
         private readonly BurtRenderPass drawMultipassFurBlurPropertyPass = new BurtDrawMultipassFurBlurPropertyPass();
+        private readonly BurtRenderPass furBlurDilateToTempPass = new BurtFurBlurDilatePass(true);
+        private readonly BurtRenderPass furBlurDilateToPropertyPass = new BurtFurBlurDilatePass(false);
         private readonly BurtRenderPass furBlurPass = new BurtFurBlurPass();
+        private readonly BurtRenderPass furBlurTemporalPass = new BurtFurBlurTemporalPass();
+        private readonly BurtRenderPass furBlurStoreHistoryPass = new BurtFurBlurStoreHistoryPass();
         private readonly BurtRenderPass furBlurCompositePass = new BurtFurBlurCompositePass();
+        private readonly BurtRenderPass furBlurDebugPass = new BurtFurBlurDebugPass();
         private readonly BurtRenderPass clearDeferredLightingTargetPass = new BurtClearDeferredLightingTargetPass(); // 创建 Deferred Lighting 黑场清理 Pass，配合 stencil 分 pass 防止跳过像素保留相机 clear color。
         private readonly BurtRenderPass deferredLitLightingPass = new BurtDeferredLitLightingPass(); // 创建 Default Lit Deferred Lighting Pass，只处理 Default Lit GBuffer 像素。
         private readonly BurtRenderPass deferredHairLightingPass = new BurtDeferredHairLightingPass(); // 创建 Hair Deferred Lighting Pass，只处理 Hair GBuffer 像素。
         private readonly BurtRenderPass deferredClearCoatLightingPass = new BurtDeferredClearCoatLightingPass();
         private readonly BurtRenderPass deferredSubsurfaceLightingPass = new BurtDeferredSubsurfaceLightingPass();
+        private readonly BurtRenderPass deferredFabricLightingPass = new BurtDeferredFabricLightingPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceSourcePass = new BurtAllocateScreenSpaceSubsurfaceSourcePass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceBaseColorPass = new BurtAllocateScreenSpaceSubsurfaceBaseColorPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceEmissionPass = new BurtAllocateScreenSpaceSubsurfaceEmissionPass();
@@ -156,7 +165,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass releaseGBuffer2Pass = new BurtReleaseGBuffer2Pass(); // 创建 GBuffer2 释放 Pass，结束第三张 Deferred 缓存生命周期。
         private readonly BurtRenderPass releaseGBuffer3Pass = new BurtReleaseGBuffer3Pass();
         private readonly BurtRenderPass releaseGBuffer4Pass = new BurtReleaseGBuffer4Pass();
+        private readonly BurtRenderPass releaseGBufferObjectIndexPass = new BurtReleaseGBufferObjectIndexPass();
+        private readonly BurtRenderPass releaseFurBlurTemporalPass = new BurtReleaseFurBlurTemporalPass();
         private readonly BurtRenderPass releaseFurBlurColorPass = new BurtReleaseFurBlurColorPass();
+        private readonly BurtRenderPass releaseFurBlurPropertyTempPass = new BurtReleaseFurBlurPropertyTempPass();
         private readonly BurtRenderPass releaseFurBlurPropertyPass = new BurtReleaseFurBlurPropertyPass();
         private readonly BurtRenderPass releaseScreenSpaceAmbientOcclusionRawPass = new BurtReleaseScreenSpaceAmbientOcclusionRawPass();
         private readonly BurtRenderPass releaseScreenSpaceAmbientOcclusionPass = new BurtReleaseScreenSpaceAmbientOcclusionPass();
@@ -329,6 +341,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.AddPass(allocateGBuffer2Pass); // 添加 GBuffer2 分配 Pass。
             graph.AddPass(allocateGBuffer3Pass);
             graph.AddPass(allocateGBuffer4Pass);
+            graph.AddPass(allocateGBufferObjectIndexPass);
         }
 
         private void AddHiZAllocationPass(
@@ -355,7 +368,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(allocateFurBlurPropertyPass);
+            graph.AddPass(allocateFurBlurPropertyTempPass);
             graph.AddPass(allocateFurBlurColorPass);
+            graph.AddPass(allocateFurBlurTemporalPass);
         }
 
         private void AddTileLightBufferAllocationPasses(
@@ -477,6 +492,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
             graph.AddPass(clearFurBlurPropertyPass);
             graph.AddPass(drawMultipassFurBlurPropertyPass);
+            graph.AddPass(furBlurDilateToTempPass);
+            graph.AddPass(furBlurDilateToPropertyPass);
         }
 
         private void AddReturnToCameraColorPass( // 在 GBuffer 阶段后重新绑定相机颜色目标。
@@ -747,6 +764,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(deferredClearCoatLightingPass);
             }
             graph.AddPass(deferredSubsurfaceLightingPass);
+            graph.AddPass(deferredFabricLightingPass);
         }
 
         private void AddFurBlurPasses(
@@ -761,6 +779,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(furBlurPass);
+            graph.AddPass(furBlurTemporalPass);
+            graph.AddPass(furBlurStoreHistoryPass);
             graph.AddPass(furBlurCompositePass);
         }
 
@@ -910,6 +930,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                     BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(request, asset));
             }
 
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurDebugView(request, asset))
+            {
+                graph.AddPass(furBlurDebugPass);
+            }
+
             if (ShouldUseScreenSpaceReflectionHiZDiagnosticView(request, asset, useLocalGBufferTargets))
             {
                 graph.AddPass(debugScreenSpaceReflectionHiZDiagnosticsPass);
@@ -1022,7 +1047,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return;
             }
 
+            graph.AddPass(releaseFurBlurTemporalPass);
             graph.AddPass(releaseFurBlurColorPass);
+            graph.AddPass(releaseFurBlurPropertyTempPass);
             graph.AddPass(releaseFurBlurPropertyPass);
         }
 
@@ -1036,6 +1063,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(releaseGBuffer4Pass);
+            graph.AddPass(releaseGBufferObjectIndexPass);
             graph.AddPass(releaseGBuffer3Pass);
             graph.AddPass(releaseGBuffer2Pass); // 先释放 GBuffer2，和申请顺序相反，方便观察生命周期。
             graph.AddPass(releaseGBuffer1Pass); // 再释放 GBuffer1。

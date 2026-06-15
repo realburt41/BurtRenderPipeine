@@ -1585,9 +1585,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float stableStaticEdge = saturate(depthContinuity * parallaxValidity * coverageValidity * historyConfidence * historyUseWarmup * lowMotionStability * (1.0 - max(velocityEdgeResponsive, untrustedObjectMotion)));
                 stableStaticEdge *= smoothstep(0.18, 0.78, depthEdgeResponsive);
                 responsiveMask *= lerp(1.0, 0.68, stableStaticEdge);
-                float confidenceWeight = lerp(saturate(_BurtTAAFeedbackParams.y), 1.0, saturate(historyConfidence));
-                float confidenceBoost = lerp(min(_BurtTAAFeedbackParams.z, 0.72), _BurtTAAFeedbackParams.z, saturate(historyConfidence));
-                float finalHistoryAvailability = historyValid * velocityValid * inBounds * surfaceWeight;
+                float finalHistoryAvailability = historyValid * velocityValid * inBounds;
                 float finalRejection = saturate(rawParallaxValidity * finalHistoryAvailability);
                 float stableCurrentBlend = max(0.05, 1.0 - saturate(_BurtTAAParams.x));
                 float boundLumaRange = max(BurtTaaWorkingLuma(clampMax - clampMin), 0.0);
@@ -1597,7 +1595,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 currentBlend = saturate(currentBlend);
                 float feedback = 1.0 - currentBlend;
 
-                float finalFeedback = feedback;
+                float finalFeedback = saturate(feedback * finalHistoryAvailability);
                 float3 resolvedWorking = lerp(currentFilteredWorking, historyWorking, finalFeedback);
                 resolvedWorking += (resolvedWorking - neighborhoodMean) * _BurtTAAParams2.x;
                 resolvedWorking = max(resolvedWorking, 0.0);
@@ -1633,7 +1631,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     if (debugMode == 337) return float4(depthWeight, depthRangeWeight, min(depthWeight, depthRangeWeight), 1.0);
                     if (debugMode == 338) return float4(normalWeight.xxx, 1.0);
                     if (debugMode == 339) return float4(motionWeight.xxx, 1.0);
-                    if (debugMode == 340) return float4(historyConfidence, confidenceWeight, confidenceBoost, 1.0);
+                    if (debugMode == 340) return float4(historyConfidence, historySampleTrust * stableHistoryGate, stableColorRecovery, 1.0);
                     if (debugMode == 341)
                     {
                         float4 rawVelocity = tex2D(_BurtTAARawVelocityTexture, uv);
@@ -1642,7 +1640,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     if (debugMode == 342) return float4(BurtTaaGBufferNormalDebug(uv), 1.0);
                     if (debugMode == 343)
                     {
-                        float historyAvailability = historyValid * inBounds * velocityValid * surfaceWeight;
+                        float historyAvailability = finalHistoryAvailability;
                         float depthBreak = 1.0 - depthContinuity;
                         float parallaxBreak = saturate(max(parallaxDilationBreak + depthContinuity - parallaxValidity, coverageBreak));
                         float edgeBreak = saturate(min(depthContinuity, parallaxValidity) - historyContinuity);
@@ -1665,7 +1663,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     }
                     if (debugMode == 365)
                     {
-                        float reasonAvailability = historyValid * inBounds * velocityValid * surfaceWeight;
+                        float reasonAvailability = finalHistoryAvailability;
                         float currentEdgeContext = saturate(max(max(depthEdgeResponsive, velocityEdgeResponsive), normalEdgeResponsive));
                         float currentDepthRejectSource = max(saturate(1.0 - depthRangeWeight), depthEdgeResponsive);
                         float depthRejectDebug = smoothstep(0.28, 0.82, currentDepthRejectSource) * reasonAvailability;
@@ -1686,8 +1684,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     }
                     if (debugMode == 367)
                     {
-                        float feedbackAvailability = historyValid * inBounds * velocityValid * surfaceWeight;
-                        float feedbackWeight = saturate(finalFeedback) * feedbackAvailability;
+                        float feedbackAvailability = finalHistoryAvailability;
+                        float feedbackWeight = saturate(finalFeedback);
                         float3 feedbackColor = lerp(float3(0.02, 0.02, 0.02), float3(0.10, 0.65, 1.0), smoothstep(0.05, 0.45, feedbackWeight));
                         feedbackColor = lerp(feedbackColor, float3(1.0, 0.95, 0.15), smoothstep(0.45, 0.85, feedbackWeight));
                         feedbackColor = lerp(feedbackColor, float3(1.0, 1.0, 1.0), smoothstep(0.85, 0.98, feedbackWeight));

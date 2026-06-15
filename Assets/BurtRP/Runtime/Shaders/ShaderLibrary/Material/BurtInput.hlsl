@@ -11,6 +11,10 @@ Texture2D _BaseMap;
 Texture2D _MaskMap;
 Texture2D _IDMap;
 Texture2D _GradientMap;
+Texture2D _FuzzMap;
+Texture2D _FuzzMask;
+Texture2D _ThinFilmThicknessMap;
+Texture2D _ThinFilmFactorMask;
 
 // 定义 XRender / Frostbite 风格的默认 reflectance，0.5 会映射到常见非金属 F0=0.04。
 static const float BURT_INPUT_DEFAULT_REFLECTANCE = 0.5f;
@@ -21,7 +25,8 @@ static const float BURT_SHADING_MODEL_DEFAULT_LIT = 0.0f;
 static const float BURT_SHADING_MODEL_HAIR = 1.0f;
 static const float BURT_SHADING_MODEL_CLEAR_COAT = 2.0f;
 static const float BURT_SHADING_MODEL_SUBSURFACE = 3.0f;
-static const float BURT_SHADING_MODEL_MAX_ENCODED = 3.0f;
+static const float BURT_SHADING_MODEL_FABRIC = 4.0f;
+static const float BURT_SHADING_MODEL_MAX_ENCODED = 4.0f;
 
 static const float BURT_SUBSURFACE_POWER_MIN = 0.5f;
 static const float BURT_SUBSURFACE_POWER_MAX = 8.0f;
@@ -55,6 +60,11 @@ bool BurtIsClearCoatShadingModel(float shadingModelID)
 bool BurtIsSubsurfaceShadingModel(float shadingModelID)
 {
     return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_SUBSURFACE) < 0.5f;
+}
+
+bool BurtIsFabricShadingModel(float shadingModelID)
+{
+    return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_FABRIC) < 0.5f;
 }
 
 // 保存光照函数需要的材质表面属性。
@@ -117,6 +127,24 @@ struct BurtSurfaceData
     float3 hairSpecularColor;
 
     float3 hairSecondarySpecularColor;
+
+    float fabricIsSilk;
+
+    float fabricFuzzWeight;
+
+    float fabricFuzzRoughness;
+
+    float3 fabricFuzzColor;
+
+    float3 fabricFacingColor;
+
+    float3 fabricTangentColor;
+
+    float fabricFalloff;
+
+    float fabricThinFilmThickness;
+
+    float fabricThinFilmFactor;
 };
 
 float BurtClampSubsurfacePower(float power)
@@ -165,6 +193,15 @@ void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
     surfaceData.hairSecondarySpecularShift = 0.0f;
     surfaceData.hairSpecularColor = float3(1.0f, 1.0f, 1.0f);
     surfaceData.hairSecondarySpecularColor = float3(1.0f, 1.0f, 1.0f);
+    surfaceData.fabricIsSilk = 0.0f;
+    surfaceData.fabricFuzzWeight = 0.0f;
+    surfaceData.fabricFuzzRoughness = 0.75f;
+    surfaceData.fabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
+    surfaceData.fabricFacingColor = float3(1.0f, 1.0f, 1.0f);
+    surfaceData.fabricTangentColor = float3(1.0f, 1.0f, 1.0f);
+    surfaceData.fabricFalloff = 0.0f;
+    surfaceData.fabricThinFilmThickness = 0.27f;
+    surfaceData.fabricThinFilmFactor = 0.0f;
 }
 
 // 保存片元级几何输入，后续高光、雾效、附加光等功能会继续扩展这个结构。
@@ -433,6 +470,39 @@ BurtSurfaceData BurtApplySubsurfaceSurfaceSemantics(BurtSurfaceData surfaceData)
 BurtSurfaceData BurtApplyAnisotropySurfaceSemantics(BurtSurfaceData surfaceData, float anisotropy)
 {
     surfaceData.anisotropy = clamp(anisotropy, -1.0f, 1.0f);
+    return surfaceData;
+}
+
+BurtSurfaceData BurtApplyFabricSurfaceSemantics(BurtSurfaceData surfaceData, float fuzzWeight, float3 fuzzColor, float fuzzRoughness)
+{
+    surfaceData.fabricIsSilk = 0.0f;
+    surfaceData.fabricFuzzWeight = saturate(fuzzWeight);
+    surfaceData.fabricFuzzColor = max(fuzzColor, float3(0.0f, 0.0f, 0.0f));
+    surfaceData.fabricFuzzRoughness = saturate(fuzzRoughness);
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_FABRIC;
+    return surfaceData;
+}
+
+BurtSurfaceData BurtApplySilkSurfaceSemantics(
+    BurtSurfaceData surfaceData,
+    float anisotropy,
+    float3 facingColor,
+    float3 tangentColor,
+    float falloff,
+    float thinFilmThickness,
+    float thinFilmFactor)
+{
+    surfaceData.anisotropy = clamp(anisotropy, -1.0f, 1.0f);
+    surfaceData.fabricIsSilk = 1.0f;
+    surfaceData.fabricFuzzWeight = 0.0f;
+    surfaceData.fabricFuzzColor = max(lerp(facingColor, tangentColor, saturate(falloff)), float3(0.0f, 0.0f, 0.0f));
+    surfaceData.fabricFuzzRoughness = saturate(thinFilmThickness);
+    surfaceData.fabricFacingColor = max(facingColor, float3(0.0f, 0.0f, 0.0f));
+    surfaceData.fabricTangentColor = max(tangentColor, float3(0.0f, 0.0f, 0.0f));
+    surfaceData.fabricFalloff = saturate(falloff);
+    surfaceData.fabricThinFilmThickness = saturate(thinFilmThickness);
+    surfaceData.fabricThinFilmFactor = saturate(thinFilmFactor);
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_FABRIC;
     return surfaceData;
 }
 

@@ -83,6 +83,11 @@ float3 BurtTransformTangentToWorld(float3 normalTS, float3 normalWS, float4 tang
 // 采样 normal map 并直接输出世界空间法线，供 Forward pass 的光照阶段使用。
 float3 BurtSampleNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS, float normalScale)
 {
+    if (normalScale <= 0.0f)
+    {
+        return BurtSafeNormalize(normalWS);
+    }
+
     // 使用当前片元 UV 采样 normal map 的打包颜色。
     float4 packedNormal = BurtSampleNormalMap(normalMapUV);
 
@@ -95,6 +100,12 @@ float3 BurtSampleNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS,
 
 float3 BurtSampleNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS, float normalScale, float facing, float4 doubleSidedNormalModeConstants)
 {
+    if (normalScale <= 0.0f)
+    {
+        float3 normalTS = BurtApplyDoubleSidedNormalMode(float3(0.0f, 0.0f, 1.0f), facing, doubleSidedNormalModeConstants);
+        return BurtTransformTangentToWorld(normalTS, normalWS, tangentWS);
+    }
+
     float4 packedNormal = BurtSampleNormalMap(normalMapUV);
     float3 normalTS = BurtUnpackNormalScale(packedNormal, normalScale);
     normalTS = BurtApplyDoubleSidedNormalMode(normalTS, facing, doubleSidedNormalModeConstants);
@@ -103,6 +114,12 @@ float3 BurtSampleNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS,
 
 float3 BurtSampleClearCoatNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS, float normalScale, float facing, float4 doubleSidedNormalModeConstants)
 {
+    if (normalScale <= 0.0f)
+    {
+        float3 normalTS = BurtApplyDoubleSidedNormalMode(float3(0.0f, 0.0f, 1.0f), facing, doubleSidedNormalModeConstants);
+        return BurtTransformTangentToWorld(normalTS, normalWS, tangentWS);
+    }
+
     float4 packedNormal = BurtSampleClearCoatNormalMap(normalMapUV);
     float3 normalTS = BurtUnpackNormalScale(packedNormal, normalScale);
     normalTS = BurtApplyDoubleSidedNormalMode(normalTS, facing, doubleSidedNormalModeConstants);

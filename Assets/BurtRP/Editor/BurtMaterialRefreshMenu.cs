@@ -108,6 +108,8 @@ namespace Burt.RenderPipeline.Editor
             switch (material.shader.name)
             {
                 case "BurtRP/Lit":
+                case "BurtRP/Clear Coat":
+                case "BurtRP/Subsurface":
                     BurtLitShaderGUI.ValidateMaterialState(material);
                     return true;
                 case "BurtRP/Hair":

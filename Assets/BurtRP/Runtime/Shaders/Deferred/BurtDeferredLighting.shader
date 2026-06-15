@@ -40,7 +40,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
             Stencil
             {
                 Ref 0
-                ReadMask 3
+                ReadMask 7
                 Comp Equal
                 Pass Keep
             }
@@ -67,7 +67,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
             Stencil
             {
                 Ref 1
-                ReadMask 3
+                ReadMask 7
                 Comp Equal
                 Pass Keep
             }
@@ -94,7 +94,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
             Stencil
             {
                 Ref 2
-                ReadMask 3
+                ReadMask 7
                 Comp Equal
                 Pass Keep
             }
@@ -121,7 +121,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
             Stencil
             {
                 Ref 3
-                ReadMask 3
+                ReadMask 7
                 Comp Equal
                 Pass Keep
             }
@@ -130,6 +130,33 @@ Shader "Hidden/BurtRP/DeferredLighting"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_SUBSURFACE 1
             #define BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT 1
+            #pragma target 4.5
+            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
+            #pragma vertex Vert
+            #pragma fragment Frag
+            ENDHLSL
+        }
+
+        // Fabric pass: only shades stencil/model id 4 pixels and adds them after the Lit pass.
+        Pass
+        {
+            Name "Burt Deferred Fabric Lighting"
+            Tags { "LightMode" = "BurtDeferredFabricLighting" }
+            Cull Off
+            ZWrite Off
+            ZTest Always
+            Stencil
+            {
+                Ref 4
+                ReadMask 7
+                Comp Equal
+                Pass Keep
+            }
+            Blend One One
+
+            HLSLPROGRAM
+            #define BURT_DEFERRED_SHADING_MODEL_FABRIC 1
             #pragma target 4.5
             #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"

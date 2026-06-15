@@ -316,6 +316,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBuffer4Name);
         }
 
+        public BurtRenderTargetHandle ReadGBufferObjectIndex()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.GBufferObjectIndexName);
+        }
+
+        public BurtRenderTargetHandle WriteGBufferObjectIndex()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBufferObjectIndexName);
+        }
+
         public BurtRenderTargetHandle ReadHiZDepth()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.HiZDepthName);
@@ -556,6 +566,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
         }
 
+        public BurtRenderTargetHandle ReadFurBlurPropertyTemp()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+        }
+
+        public BurtRenderTargetHandle WriteFurBlurPropertyTemp()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+        }
+
         public BurtRenderTargetHandle ReadFurBlurColor()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.FurBlurColorName);
@@ -564,6 +584,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteFurBlurColor()
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.FurBlurColorName);
+        }
+
+        public BurtRenderTargetHandle ReadFurBlurTemporal()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.FurBlurTemporalName);
+        }
+
+        public BurtRenderTargetHandle WriteFurBlurTemporal()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.FurBlurTemporalName);
         }
 
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。

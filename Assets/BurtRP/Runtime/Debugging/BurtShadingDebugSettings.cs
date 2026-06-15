@@ -90,6 +90,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         CameraDepth = 300, // 全屏调试：复用 BurtRP 当前已有的 CameraDepth debug pass。
         MainLightShadow = 301, // 全屏调试：复用 BurtRP 当前已有的 MainLightShadow debug pass。
         PerObjectShadowAtlas = 475, // Fullscreen debug: per-object shadow atlas.
+        PerObjectShadowObjectIndex = 476, // Per-object shadow debug: 1-based receiver object index.
+        PerObjectShadowSlice = 477, // Per-object shadow debug: selected atlas slice.
+        PerObjectShadowUV = 478, // Per-object shadow debug: projected atlas UV.
+        PerObjectShadowDepth = 479, // Per-object shadow debug: receiver depth, stored depth, and compare visibility.
+        PerObjectShadowCompare = 480, // Per-object shadow debug: hardware shadow compare visibility.
         ScreenSpaceAmbientOcclusionRaw = 302, // SSAO debug: raw visibility before blur and final power/intensity curve.
         ScreenSpaceAmbientOcclusionFinal = 303, // SSAO debug: final power/intensity-curved AO texture consumed by deferred lighting.
         ScreenSpaceAmbientOcclusionOverlay = 304, // SSAO debug: final AO multiplied over the current camera color.
@@ -262,7 +267,13 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceReflectionReceiverContinuity = 442, // SSR debug: final receiver same-surface continuity gate.
         ScreenSpaceReflectionFallbackSpecular = 443, // SSR debug: camera IBL fallback specular that SSR replaces.
         ScreenSpaceReflectionCompositeDelta = 444, // SSR debug: red = darkening delta, green = brightening delta, blue = final alpha.
-        ScreenSpaceReflectionCameraColor = 445 // SSR debug: camera color copied at the start of SSR composite.
+        ScreenSpaceReflectionCameraColor = 445, // SSR debug: camera color copied at the start of SSR composite.
+        FurBlurDirection = 482, // Fur blur debug: encoded blur direction from the multipass fur property target.
+        FurBlurPropertyDepth = 483, // Fur blur debug: device-depth payload stored with the fur blur property.
+        FurBlurCurrent = 484, // Fur blur debug: current-frame anisotropic fur blur before temporal resolve.
+        FurBlurTemporal = 485, // Fur blur debug: fur blur after temporal resolve.
+        FurBlurHistory = 486, // Fur blur debug: previous fur blur history texture.
+        FurBlurDiagnostic = 487 // Fur blur debug: red = valid property, green = temporal alpha, blue = history age.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -371,6 +382,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.ShadowReceiverDepthDelta:
                 case BurtShadingDebugMode.MainLightShadow:
                 case BurtShadingDebugMode.PerObjectShadowAtlas:
+                case BurtShadingDebugMode.PerObjectShadowObjectIndex:
+                case BurtShadingDebugMode.PerObjectShadowSlice:
+                case BurtShadingDebugMode.PerObjectShadowUV:
+                case BurtShadingDebugMode.PerObjectShadowDepth:
+                case BurtShadingDebugMode.PerObjectShadowCompare:
                 case BurtShadingDebugMode.CameraDepth:
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw:
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal:
@@ -395,6 +411,12 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableChain:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory:
+                case BurtShadingDebugMode.FurBlurDirection:
+                case BurtShadingDebugMode.FurBlurPropertyDepth:
+                case BurtShadingDebugMode.FurBlurCurrent:
+                case BurtShadingDebugMode.FurBlurTemporal:
+                case BurtShadingDebugMode.FurBlurHistory:
+                case BurtShadingDebugMode.FurBlurDiagnostic:
                 case BurtShadingDebugMode.BloomPrefilter:
                 case BurtShadingDebugMode.BloomFinalBloom:
                 case BurtShadingDebugMode.BloomThresholdMask:
@@ -437,7 +459,8 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 || (mode >= BurtShadingDebugMode.ShadowCascadeIndex && mode <= BurtShadingDebugMode.ShadowReceiverDepthDelta)
                 || mode == BurtShadingDebugMode.ShadowPCSSBlockerFraction
                 || mode == BurtShadingDebugMode.MainLightShadow
-                || mode == BurtShadingDebugMode.PerObjectShadowAtlas;
+                || mode == BurtShadingDebugMode.PerObjectShadowAtlas
+                || (mode >= BurtShadingDebugMode.PerObjectShadowObjectIndex && mode <= BurtShadingDebugMode.PerObjectShadowCompare);
         }
 
         public static void ApplyGlobalShaderProperties() // 把当前 shading debug 状态上传给 shader。

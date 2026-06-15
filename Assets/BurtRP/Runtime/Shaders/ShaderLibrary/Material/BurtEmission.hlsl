@@ -22,6 +22,9 @@ float4 BurtSampleEmissionMap(float2 emissionMapUV)
 // 计算最终自发光颜色。
 float3 BurtEvaluateEmission(float2 emissionMapUV, float3 emissionColor)
 {
+#if !defined(_EMISSION)
+    return float3(0.0f, 0.0f, 0.0f);
+#endif
     // 采样自发光贴图 RGB，贴图默认黑色时不会增加任何亮度。
     float3 emissionMapColor = BurtSampleEmissionMap(emissionMapUV).rgb;
 

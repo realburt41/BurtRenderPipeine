@@ -74,7 +74,6 @@ Shader "BurtRP/Hair"
         [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 1
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.33
 
-        [HideInInspector] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
         [HideInInspector] _DoubleSidedEnable ("Double Sided", Float) = 1
         [HideInInspector] _DoubleSidedNormalMode ("Double Sided Normal Mode", Float) = 2
         [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (1, 1, -1, 0)
@@ -143,8 +142,8 @@ Shader "BurtRP/Hair"
             Stencil
             {
                 Ref 1
-                ReadMask 3
-                WriteMask 3
+                ReadMask 7
+                WriteMask 7
                 Comp Always
                 Pass Replace
             }
@@ -153,8 +152,9 @@ Shader "BurtRP/Hair"
             #pragma vertex VertGBuffer
             #pragma fragment FragGBuffer
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
-            #pragma target 3.5
+            #pragma target 4.5
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairProperties.hlsl"
 
@@ -174,6 +174,7 @@ Shader "BurtRP/Hair"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
             #pragma target 3.5
             #pragma multi_compile_fragment _ BURT_SHADING_DEBUG

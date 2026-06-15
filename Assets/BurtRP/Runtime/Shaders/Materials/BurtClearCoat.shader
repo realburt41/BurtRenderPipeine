@@ -32,7 +32,6 @@ Shader "BurtRP/Clear Coat"
 
         // 定义环境遮蔽强度，0 表示忽略 Mask Map 的 G 通道，1 表示完全使用 G 通道。
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
-        [HideInInspector] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
         _ClearCoatMask ("Clear Coat Mask", Range(0, 1)) = 0
         _ClearCoatRoughness ("Clear Coat Roughness", Range(0, 1)) = 0.2
         [Normal] _ClearCoatNormalMap ("Clear Coat Normal Map", 2D) = "bump" {}
@@ -174,8 +173,8 @@ Shader "BurtRP/Clear Coat"
             Stencil
             {
                 Ref 2
-                ReadMask 3
-                WriteMask 3
+                ReadMask 7
+                WriteMask 7
                 Comp Always
                 Pass Replace
             }
@@ -192,9 +191,10 @@ Shader "BurtRP/Clear Coat"
             // 声明 GBuffer 片元 shader 入口。
             #pragma fragment FragGBuffer
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
 
             // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
-            #pragma target 3.0
+            #pragma target 4.5
 
             // 引入 Lit 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
@@ -236,6 +236,7 @@ Shader "BurtRP/Clear Coat"
             // Declares the forward fragment shader entry point.
             #pragma fragment Frag
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
 
             // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
             #pragma target 3.0
@@ -259,4 +260,3 @@ Shader "BurtRP/Clear Coat"
     // Disables fallback so BurtRP shader errors do not silently use another pipeline shader.
     Fallback Off
 }
-

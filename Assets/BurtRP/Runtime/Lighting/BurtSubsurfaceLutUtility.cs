@@ -45,7 +45,7 @@ namespace Burt.RenderPipeline
         private const float EncodeDiffuseMeanFreePathInMillimetersToUnit = 0.002f;
         private const float MaxDiffuseMeanFreePathInMillimeters = 500f;
         private const float SubsurfaceRadiusScale = 1024f;
-        private const int LutFormulaVersion = 8;
+        private const int LutFormulaVersion = 9;
         private const int ProfileSlotCount = BurtSubsurfaceProfilePalette.MaxProfiles;
         public const int ProfileParamLutWidth = 66;
         public const int ProfileParamLutHeight = ProfileSlotCount;
@@ -1642,7 +1642,7 @@ namespace Burt.RenderPipeline
             var burleyA = Multiply(Divide(s3d, Multiply(diffuseMeanFreePathMm, curvature)), -2f / Pi);
             var burleyB = burleyA / 3f;
             var integralOnRing = 2f * (
-                IntegralBurleyDiffusion(Pi, burleyA, burleyB) -
+                IntegralBurleyDiffusion(halfPi, burleyA, burleyB) -
                 IntegralBurleyDiffusion(0f, burleyA, burleyB));
 
             Vector3 integralOnNegativeAngle;

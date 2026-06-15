@@ -13,13 +13,17 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMaterialShadingModelPassCommon.hlsl"
 
+int _BurtPerObjectShadowObjectIndex;
+
 struct GBufferAttributes
 {
     float4 positionOS : POSITION;
     float3 normalOS : NORMAL;
     float4 tangentOS : TANGENT;
     float2 uv0 : TEXCOORD0;
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 uv1 : TEXCOORD1;
+#endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -27,14 +31,20 @@ struct GBufferVaryings
 {
     float4 positionCS : SV_POSITION;
     float3 normalWS : TEXCOORD0;
+#if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 baseMapUV : TEXCOORD1;
+#endif
     float4 tangentWS : TEXCOORD2;
+#if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 maskMapUV : TEXCOORD3;
+#endif
     float2 emissionMapUV : TEXCOORD4;
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 uv0 : TEXCOORD5;
     float2 uv1 : TEXCOORD6;
     float3 positionOS : TEXCOORD7;
     float3 positionWS : TEXCOORD8;
+#endif
 };
 
 struct GBufferFragmentOutput
@@ -44,8 +54,15 @@ struct GBufferFragmentOutput
     float4 gbuffer2 : SV_Target2;
     float4 gbuffer3 : SV_Target3;
     float4 gbuffer4 : SV_Target4;
+    float4 objectIndex : SV_Target5;
 };
 
+float4 BurtEncodePerObjectShadowObjectIndexTarget()
+{
+    return float4(saturate((float)max(_BurtPerObjectShadowObjectIndex, 0) / 255.0f), 0.0f, 0.0f, 1.0f);
+}
+
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
 struct SubsurfaceForwardFragmentOutput
 {
     float4 gbuffer0 : SV_Target0;
@@ -68,6 +85,7 @@ float BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(BurtSurfaceData sur
         : BURT_SUBSURFACE_PROFILE_TYPE_BURLEY;
     return (profileType + profileID) / 255.0f;
 }
+#endif
 
 GBufferVaryings VertGBuffer(GBufferAttributes input)
 {
@@ -78,13 +96,17 @@ GBufferVaryings VertGBuffer(GBufferAttributes input)
     output.positionCS = UnityObjectToClipPos(positionOS);
     output.normalWS = BurtSafeNormalize(UnityObjectToWorldNormal(input.normalOS));
     output.tangentWS = BurtObjectToWorldTangent(input.tangentOS);
+#if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
     output.maskMapUV = BurtTransformMaskMapUV(input.uv0, _MaskMap_ST);
+#endif
     output.emissionMapUV = BurtTransformEmissionMapUV(input.uv0, _EmissionMap_ST);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     output.uv0 = input.uv0;
     output.uv1 = input.uv1;
     output.positionOS = positionOS.xyz;
     output.positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
+#endif
     return output;
 }
 
@@ -96,6 +118,7 @@ GBufferFragmentOutput BurtPackGBufferOutput(BurtEncodedGBuffer encodedGBuffer)
     output.gbuffer2 = encodedGBuffer.gbuffer2;
     output.gbuffer3 = encodedGBuffer.gbuffer3;
     output.gbuffer4 = encodedGBuffer.gbuffer4;
+    output.objectIndex = BurtEncodePerObjectShadowObjectIndexTarget();
     return output;
 }
 
@@ -116,26 +139,35 @@ BurtGBufferData BurtCreateMaterialGBufferData(GBufferVaryings input, float facin
 
 GBufferFragmentOutput FragGBuffer(GBufferVaryings input, fixed facing : VFACE)
 {
-    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
+    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS, maskMap);
+#else
+    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
+#endif
     BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
 
-    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
     BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
+#else
+    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV);
+#endif
     float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
     BurtGBufferData gbufferData = BurtCreateMaterialGBufferData(input, facing, surfaceData, emissionColor);
 
     return BurtPackGBufferOutput(BurtEncodeGBuffer(gbufferData));
 }
 
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
 SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings input, fixed facing : VFACE)
 {
-    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS);
+    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
     BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
 
-    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
-    float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
+    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
     float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
 
     SubsurfaceForwardFragmentOutput output;
@@ -143,5 +175,6 @@ SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings input, fix
     output.gbuffer2 = float4(max(emissionColor, float3(0.0f, 0.0f, 0.0f)), saturate(surfaceData.reflectance));
     return output;
 }
+#endif
 
 #endif // BURT_GBUFFER_PASS_INCLUDED

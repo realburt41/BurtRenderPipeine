@@ -142,6 +142,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle GBufferObjectIndexTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBufferObjectIndexName);
+                }
+
+                return ResourceRegistry.GetGBufferObjectIndex();
+            }
+        }
+
         public BurtRenderTargetHandle HiZDepthTarget
         {
             get
@@ -454,6 +467,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle FurBlurPropertyTempTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+                }
+
+                return ResourceRegistry.GetFurBlurPropertyTemp();
+            }
+        }
+
         public BurtRenderTargetHandle FurBlurColorTarget
         {
             get
@@ -464,6 +490,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetFurBlurColor();
+            }
+        }
+
+        public BurtRenderTargetHandle FurBlurTemporalTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTemporalName);
+                }
+
+                return ResourceRegistry.GetFurBlurTemporal();
             }
         }
 

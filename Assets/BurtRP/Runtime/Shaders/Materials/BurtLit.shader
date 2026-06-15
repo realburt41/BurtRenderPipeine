@@ -32,7 +32,6 @@ Shader "BurtRP/Lit"
 
         // 定义环境遮蔽强度，0 表示忽略 Mask Map 的 G 通道，1 表示完全使用 G 通道。
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
-        [HideInInspector] _SubsurfaceScatteringMode ("SSS Algorithm", Float) = 0
 
         // 定义自发光贴图，Forward 光照会把它作为不受灯光影响的颜色叠加到最终结果。
         _EmissionMap ("Emission Map", 2D) = "white" {}
@@ -174,8 +173,8 @@ Shader "BurtRP/Lit"
             Stencil
             {
                 Ref 0
-                ReadMask 3
-                WriteMask 3
+                ReadMask 7
+                WriteMask 7
                 Comp Always
                 Pass Replace
             }
@@ -192,10 +191,11 @@ Shader "BurtRP/Lit"
             // 声明 GBuffer 片元 shader 入口。
             #pragma fragment FragGBuffer
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
 
             // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
-            #pragma target 3.5
+            #pragma target 4.5
 
             // 引入 Lit 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
@@ -237,6 +237,7 @@ Shader "BurtRP/Lit"
             // Declares the forward fragment shader entry point.
             #pragma fragment Frag
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
 
             // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.

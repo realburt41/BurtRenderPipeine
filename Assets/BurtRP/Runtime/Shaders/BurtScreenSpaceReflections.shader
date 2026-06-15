@@ -1632,6 +1632,12 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                {
+                    bool traceDebugMode = (debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 31);
+                    return traceDebugMode ? float4(0.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 0.0);
+                }
+
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
                 float3 normalWS = BurtGetReflectionNormalWS(gbufferData);
@@ -1869,10 +1875,17 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float centerLinearDepth = LinearEyeDepth(centerDepth);
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+
+                int debugMode = (int)_BurtSSRParams1.z;
+                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID))
+                {
+                    bool traceDebugMode = (debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 31);
+                    return traceDebugMode ? float4(0.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 0.0);
+                }
+
                 float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
                 float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
 
-                int debugMode = (int)_BurtSSRParams1.z;
                 if ((debugMode > 0 && debugMode <= 7) || (debugMode >= 16 && debugMode <= 31))
                 {
                     return centerSSR;
@@ -2082,6 +2095,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
+                if (BurtIsActiveHairShadingModel(sampleGBuffer.shadingModelID))
+                {
+                    return 0.0;
+                }
+
                 float normalWeight = saturate(dot(centerNormal, BurtGetReflectionNormalWS(sampleGBuffer)));
                 normalWeight *= normalWeight * normalWeight;
                 float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
@@ -2109,6 +2127,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
+                if (BurtIsActiveHairShadingModel(sampleGBuffer.shadingModelID))
+                {
+                    return 0.0;
+                }
+
                 float normalSupport = saturate(dot(centerNormal, BurtGetReflectionNormalWS(sampleGBuffer)));
                 normalSupport *= normalSupport;
                 float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
@@ -2126,6 +2149,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID))
+                {
+                    return 0.0;
+                }
+
                 float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
                 float depthTolerance = max(centerLinearDepth * 0.014, 0.018);
                 float2 texel = _BurtDeferredScreenSize.zw;
@@ -2194,6 +2222,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                {
+                    return 0.0;
+                }
+
                 return BurtSSRComputeRoughnessMipFromRoughness(BurtGetReflectionRoughness(gbufferData));
             }
 
@@ -2293,6 +2326,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID))
+                {
+                    return centerSSR.rgb;
+                }
+
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
                 float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
                 float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
@@ -2577,6 +2615,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                {
+                    return 0.0;
+                }
+
                 float reflectionRoughness = BurtGetReflectionRoughness(gbufferData);
                 return BurtSSRComputeMaterialVisibilityWeight(reflectionRoughness);
             }
@@ -2599,6 +2642,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                {
+                    return float3(0.0, 0.0, 0.0);
+                }
+
                 float reflectionRoughness = BurtGetReflectionRoughness(gbufferData);
                 if (BurtSSRComputeMaterialVisibilityWeight(reflectionRoughness) <= 0.0)
                 {
@@ -2678,6 +2726,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                 }
 
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID))
+                {
+                    return compositeDelta;
+                }
+
                 float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
                 float receiverMaterialGate = smoothstep(0.03, 0.22, materialWeight) * (1.0 - smoothstep(0.38, 0.78, centerRoughness));
                 if (receiverMaterialGate <= 0.0001)
@@ -3303,6 +3356,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, currentRawDepth);
                 BurtGBufferData currentGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                if (BurtIsActiveHairShadingModel(currentGBuffer.shadingModelID))
+                {
+                    return float4(0.0, 0.0, 0.0, 0.0);
+                }
+
                 float3 currentNormalWS = BurtGetReflectionNormalWS(currentGBuffer);
                 float currentRoughness = BurtGetReflectionRoughness(currentGBuffer);
                 float2 previousUV;
@@ -3499,6 +3557,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
             float4 FragCopyNormalRoughnessHistory(Varyings input) : SV_Target
             {
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(input.screenUV));
+                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                {
+                    return 0.0;
+                }
+
                 float3 normalWS = BurtGetReflectionNormalWS(gbufferData);
                 return float4(normalWS * 0.5 + 0.5, BurtGetReflectionRoughness(gbufferData));
             }
@@ -3719,6 +3782,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
                     }
 
                     BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
+                    if (BurtIsActiveHairShadingModel(sampleGBuffer.shadingModelID))
+                    {
+                        continue;
+                    }
+
                     float3 sampleNormalWS = BurtGetReflectionNormalWS(sampleGBuffer);
                     float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
                     float depthWeight = exp2(-abs(sampleLinearDepth - centerLinearDepth) / depthTolerance);
@@ -3753,6 +3821,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflections"
 
                 float historyValid = saturate(_BurtSSRTemporalParams0.y);
                 BurtGBufferData currentGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(input.screenUV));
+                if (BurtIsActiveHairShadingModel(currentGBuffer.shadingModelID))
+                {
+                    return 0.0;
+                }
+
                 float3 currentNormalWS = BurtGetReflectionNormalWS(currentGBuffer);
                 float currentRoughness = BurtGetReflectionRoughness(currentGBuffer);
                 float3 positionWS = BurtReconstructDeferredPositionWS(input.screenUV, rawDepth);

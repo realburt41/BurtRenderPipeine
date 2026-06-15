@@ -183,13 +183,16 @@ float4 Frag(Varyings input) : SV_Target
         return float4(finalPreExposedColor, outputAlpha);
     }
 
-    BurtSurfaceData debugSurfaceData;
+    BurtSurfaceData debugSurfaceData = BurtCreateSurfaceData(float4(gbufferData.baseColor, 1.0f));
     debugSurfaceData.baseColor = float4(gbufferData.baseColor, 1.0f);
     debugSurfaceData.alpha = 1.0f;
     debugSurfaceData.reflectance = gbufferData.reflectance;
     debugSurfaceData.smoothness = gbufferData.smoothness;
     debugSurfaceData.metallic = BurtGetDeferredLightingDebugMaterialChannel(gbufferData);
+    debugSurfaceData.anisotropy = gbufferData.anisotropy;
+    debugSurfaceData.height = 0.5f;
     debugSurfaceData.clearCoatMask = BurtGetClearCoatMask(gbufferData);
+    debugSurfaceData.clearCoatRoughness = BurtGetClearCoatRoughness(gbufferData);
     debugSurfaceData.subsurfaceThickness = BurtGetSubsurfaceThickness(gbufferData);
     debugSurfaceData.subsurfacePower = BurtGetSubsurfacePower(gbufferData);
     debugSurfaceData.subsurfaceDistortion = BurtGetSubsurfaceDistortion(gbufferData);
@@ -197,6 +200,10 @@ float4 Frag(Varyings input) : SV_Target
     debugSurfaceData.subsurfaceScatteringMode = BurtGetSubsurfaceScatteringMode(gbufferData);
     debugSurfaceData.subsurface3SCurvature = saturate(gbufferData.subsurface3SCurvature);
     debugSurfaceData.subsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(gbufferData);
+    debugSurfaceData.fabricIsSilk = BurtGetFabricIsSilk(gbufferData);
+    debugSurfaceData.fabricFuzzWeight = BurtGetFabricFuzzWeight(gbufferData);
+    debugSurfaceData.fabricFuzzRoughness = BurtGetFabricFuzzRoughness(gbufferData);
+    debugSurfaceData.fabricFuzzColor = BurtGetFabricFuzzColor(gbufferData);
     debugSurfaceData.occlusion = gbufferData.occlusion;
     debugSurfaceData.shadingModelID = gbufferData.shadingModelID;
 
@@ -243,6 +250,17 @@ float4 Frag(Varyings input) : SV_Target
         debugData.shadowPCSSRadius,
         debugData.shadowReceiverDepthDelta,
         debugData.shadowPCSSBlockerFraction);
+
+    int perObjectShadowObjectIndex = BurtSampleDeferredPerObjectShadowObjectIndex(screenUV);
+    BurtFillPerObjectShadowShadingDebugData(
+        shadowPositionWS,
+        shadowNormalWS,
+        perObjectShadowObjectIndex,
+        debugData.perObjectShadowObjectIndexColor,
+        debugData.perObjectShadowSliceColor,
+        debugData.perObjectShadowUVColor,
+        debugData.perObjectShadowDepthColor,
+        debugData.perObjectShadowCompareColor);
 
     debugData.ambientOcclusion = shadingGBufferData.occlusion;
     debugData.emissionColor = gbufferData.emission;
