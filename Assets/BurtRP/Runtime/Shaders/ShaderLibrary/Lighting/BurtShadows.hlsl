@@ -1112,6 +1112,24 @@ float BurtSampleMainLightShadowWithoutPerObject(float3 positionWS)
     return mainVisibility;
 }
 
+float BurtSampleMainLightTransmissionShadow(float3 positionWS, float3 normalWS, int objectIndex)
+{
+    int sliceIndex = BurtDecodePerObjectShadowSliceIndex(objectIndex);
+    if (sliceIndex < 0)
+    {
+        return 1.0f;
+    }
+
+    float mainVisibility = BurtSampleMainLightShadowWithoutPerObject(positionWS);
+    float perObjectVisibility = BurtSamplePerObjectShadowSlice(positionWS, normalWS, sliceIndex);
+    return min(mainVisibility, perObjectVisibility);
+}
+
+float BurtSampleMainLightTransmissionShadow(float3 positionWS, float3 normalWS)
+{
+    return BurtSampleMainLightTransmissionShadow(positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
+}
+
 float BurtSampleMainLightShadow(float3 positionWS, float3 normalWS)
 {
     return min(BurtSampleMainLightShadowWithoutPerObject(positionWS), BurtSamplePerObjectShadow(positionWS, normalWS));

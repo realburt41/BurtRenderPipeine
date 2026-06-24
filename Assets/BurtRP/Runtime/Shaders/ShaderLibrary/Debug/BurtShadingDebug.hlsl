@@ -43,6 +43,7 @@ static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_PROFILE_ID = 125.0f;
 static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION = 126.0f;
 static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_KERNEL_WEIGHT = 127.0f;
 static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_INDIRECT = 128.0f;
+static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_DIRECT_TRANSMISSION = 129.0f;
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_BASE_COLOR = 130.0f; // 对应 C# BurtShadingDebugMode.GBufferBaseColor，用来显示 GBuffer 解码 BaseColor。
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_NORMAL_WS = 131.0f; // 对应 C# BurtShadingDebugMode.GBufferNormalWS，用来显示 GBuffer 解码向量槽。
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_METALLIC = 132.0f; // 对应 C# BurtShadingDebugMode.GBufferMetallic，用来显示 GBuffer 解码材质通道。
@@ -59,6 +60,11 @@ static const float BURT_SHADING_DEBUG_MODE_GBUFFER_ANISOTROPY = 145.0f;
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_TANGENT_WS = 146.0f;
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_SUBSURFACE_THICKNESS = 147.0f;
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_SUBSURFACE_PROFILE_INDEX = 148.0f;
+static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_BRDF = 149.0f;
+static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_SHADOW = 150.0f;
+static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_PHASE = 151.0f;
+static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_THICKNESS = 152.0f;
+static const float BURT_SHADING_DEBUG_MODE_GBUFFER_FOLIAGE_SCREEN_SPACE_SHADOW_INTENSITY = 158.0f;
 static const float BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING = 200.0f; // 对应 C# BurtShadingDebugMode.DetailLighting，用 0.18 中灰 BaseColor 显示光照细节。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_LIGHTING = 201.0f; // 对应 C# BurtShadingDebugMode.IndirectLighting，用来显示 PBR 间接光。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE = 202.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuse，用来显示直接漫反射。
@@ -280,6 +286,16 @@ struct BurtShadingDebugData
 
     float3 subsurfaceTransmission;
 
+    float3 subsurfaceDirectTransmission;
+
+    float3 subsurfaceTransmissionBRDF;
+
+    float subsurfaceTransmissionShadow;
+
+    float subsurfaceTransmissionPhase;
+
+    float subsurfaceTransmissionThickness;
+
     float3 subsurfaceKernelWeight;
 
     float3 subsurfaceIndirect;
@@ -376,6 +392,11 @@ BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为�
     data.gbufferDiffuseColor = float3(0.0f, 0.0f, 0.0f);
     data.subsurfaceProfileIndex = 0.0f;
     data.subsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
+    data.subsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    data.subsurfaceTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    data.subsurfaceTransmissionShadow = 1.0f;
+    data.subsurfaceTransmissionPhase = 0.0f;
+    data.subsurfaceTransmissionThickness = 0.0f;
     data.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     data.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     return data;
@@ -475,7 +496,7 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ALBEDO)) // Albedo 模式显示贴图和 BaseColor 合成后的基础色。
     {
-        debugColor = saturate(surfaceData.baseColor.rgb); // 把基础色限制到 0 到 1，避免普通 LDR 调试视图过曝。
+        debugColor = max(surfaceData.baseColor.rgb, float3(0.0f, 0.0f, 0.0f)); // 保留 HDR 基础色，便于检查 _BaseColor 是否真实进材质。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
@@ -662,6 +683,37 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
         return true;
     }
 
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_DIRECT_TRANSMISSION))
+    {
+        debugColor = max(data.subsurfaceDirectTransmission, float3(0.0f, 0.0f, 0.0f));
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_BRDF))
+    {
+        debugColor = saturate(data.subsurfaceTransmissionBRDF);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_SHADOW))
+    {
+        debugColor = data.subsurfaceTransmissionShadow.xxx;
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_PHASE))
+    {
+        float visiblePhase = saturate(data.subsurfaceTransmissionPhase * (4.0f * BURT_PI));
+        debugColor = visiblePhase.xxx;
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_THICKNESS))
+    {
+        debugColor = saturate(data.subsurfaceTransmissionThickness).xxx;
+        return true;
+    }
+
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_KERNEL_WEIGHT))
     {
         debugColor = saturate(data.subsurfaceKernelWeight * 4.0f);
@@ -676,7 +728,7 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GBUFFER_BASE_COLOR)) // GBufferBaseColor 模式显示编码再解码后的 BaseColor。
     {
-        debugColor = saturate(data.gbufferBaseColor); // 观察 GBuffer0.rgb 是否能还原材质基础色。
+        debugColor = max(data.gbufferBaseColor, float3(0.0f, 0.0f, 0.0f)); // 观察 GBuffer0.rgb 是否能还原材质基础色和 HDR 范围。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 

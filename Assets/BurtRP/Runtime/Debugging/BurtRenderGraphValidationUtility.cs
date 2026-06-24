@@ -302,9 +302,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让诊断工具
 
         private static bool IsKnownIntentionalSamePassBufferReadWrite(BurtRenderPassResourceUsage usage, string resourceName)
         {
-            return usage != null &&
-                usage.PassName == "Burt Screen Space Subsurface Setup" &&
-                resourceName == BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName;
+            if (usage == null)
+            {
+                return false;
+            }
+
+            if (usage.PassName == "Burt Screen Space Subsurface Setup" &&
+                resourceName == BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName)
+            {
+                return true;
+            }
+
+            return (usage.PassName == "Burt Fur Blur Tiled Setup" ||
+                    usage.PassName == "Burt Fur Blur Fill Tile Args") &&
+                resourceName == BurtRenderGraphResourceRegistry.FurBlurArgsBufferName;
         }
 
         private static void ValidateSamePassGlobalReadWrite(BurtRenderPassResourceUsage usage) // Checks same-pass logical global read/write declarations.

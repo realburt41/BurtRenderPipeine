@@ -8,7 +8,10 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtBRDF.hlsl" // 引入 PBR BRDF 函数，当前单主光和临时间接高光都会复用这里的 Fresnel/粗糙度工具
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl" // 引入 shader-only GBuffer 编解码和 PBRData 桥接函数；这里不采样真实 RT，也不触�?RenderTarget 生命周期�?
 // 保存从当前着色点指向主方向光的世界空间方向，�?Burt Setup Lighting Pass 上传
+#if !defined(BURT_MAIN_LIGHT_DIRECTION_DECLARED)
+#define BURT_MAIN_LIGHT_DIRECTION_DECLARED
 float4 _BurtMainLightDirection;
+#endif
 
 // 保存主方向光颜色，由 Burt Setup Lighting Pass �?Unity 可见光数据中上传
 float4 _BurtMainLightColor;
@@ -140,16 +143,24 @@ float3 color;
 
     // 保存阴影可见性，1 表示完全受光�? 表示完全在阴影中
 float shadowAttenuation;
+
+    float transmissionShadowAttenuation;
 };
 
 // Creates the current main light from BurtRP globals.
-BurtLight BurtCreateMainLight(float shadowAttenuation)
+BurtLight BurtCreateMainLight(float shadowAttenuation, float transmissionShadowAttenuation)
 {
     BurtLight light;
     light.directionWS = BurtSafeNormalize(_BurtMainLightDirection.xyz);
     light.color = _BurtMainLightColor.rgb;
     light.shadowAttenuation = shadowAttenuation;
+    light.transmissionShadowAttenuation = transmissionShadowAttenuation;
     return light;
+}
+
+BurtLight BurtCreateMainLight(float shadowAttenuation)
+{
+    return BurtCreateMainLight(shadowAttenuation, shadowAttenuation);
 }
 
 int BurtGetAdditionalLightCount()
@@ -413,6 +424,7 @@ BurtLight BurtCreateAdditionalLightInternal(int lightIndex, float3 positionWS, f
     light.directionWS = float3(0.0f, 1.0f, 0.0f);
     light.color = float3(0.0f, 0.0f, 0.0f);
     light.shadowAttenuation = 1.0f;
+    light.transmissionShadowAttenuation = 1.0f;
 
     float4 colorAndType = BurtReadAdditionalLightColorAndType(lightIndex);
     float lightType = colorAndType.w;
@@ -443,6 +455,7 @@ BurtLight BurtCreateAdditionalLightInternal(int lightIndex, float3 positionWS, f
 
     light.color = max(colorAndType.rgb, float3(0.0f, 0.0f, 0.0f)) * attenuation;
     light.shadowAttenuation = sampleShadow && lightType > 0.5f ? BurtSampleAdditionalLightShadow(lightIndex, shadowPositionWS, light.directionWS, normalWS, positionAndRange.xyz) : 1.0f;
+    light.transmissionShadowAttenuation = light.shadowAttenuation;
     return light;
 }
 
@@ -1193,6 +1206,25 @@ float3 indirectSpecularEnergyCompensation = GetIndirectSpecularEnergyCompensatio
 return BurtEvaluateIndirectSpecularPBR(surfaceData, normalWS, viewDirectionWS, indirectSpecularEnergyCompensation);
 }
 
+float3 BurtEvaluateFabricIndirectFuzzPBR(BurtPBRMaterialData materialData, BurtPBRGeometryData geometryData)
+{
+    if (materialData.fabricActive <= 0.0001f || materialData.fabricIsSilk > 0.5f)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
+    float fuzzWeight = saturate(materialData.fabricFuzzWeight);
+    if (fuzzWeight <= 0.0001f)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
+    float3 diffuseIrradiance = BurtSampleIndirectDiffuseIrradiance(geometryData.normalWS);
+    float fuzzReflectance = saturate(BurtClothEnergyLookup(materialData.fabricFuzzRoughness, geometryData.nDotV));
+    float3 ao = BurtGTAOMultiBounce(materialData.occlusion, materialData.baseColor);
+    return diffuseIrradiance * max(materialData.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f)) * ao * fuzzReflectance;
+}
+
 // 保存 PBR 间接光拆分结果，Deferred 后续可以复用同一�?SH / Reflection Probe 评估逻辑
 struct BurtIndirectPBRComponents
 {
@@ -1337,6 +1369,16 @@ BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData 
     components.specular = BurtEvaluateIndirectSpecularPBR(materialData, geometryData, components.specularEnergyCompensation);
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
 
+#if BURT_ENABLE_FABRIC_SHADING
+    if (materialData.fabricActive > 0.0001f && materialData.fabricIsSilk <= 0.5f)
+    {
+        float fuzzWeight = saturate(materialData.fabricFuzzWeight);
+        float fuzzEnergyPreservation = saturate(1.0f - BurtClothEnergyLookup(materialData.fabricFuzzRoughness, geometryData.nDotV));
+        float baseLayerWeight = lerp(1.0f, fuzzEnergyPreservation, fuzzWeight);
+        components.diffuse = components.diffuse * baseLayerWeight + BurtEvaluateFabricIndirectFuzzPBR(materialData, geometryData) * fuzzWeight;
+    }
+#endif
+
 #if BURT_ENABLE_SUBSURFACE_SHADING
     bool isSubsurface3S = BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode);
 #if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
@@ -1472,6 +1514,16 @@ BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData baseMate
     clearCoatMaterialData.fabricFuzzWeight = 0.0f;
     clearCoatMaterialData.fabricFuzzRoughness = 0.75f;
     clearCoatMaterialData.fabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
+    clearCoatMaterialData.foliageActive = 0.0f;
+    clearCoatMaterialData.foliageTransmissionColor = float3(0.0f, 0.0f, 0.0f);
+    clearCoatMaterialData.foliageTransmissionWeight = 0.0f;
+    clearCoatMaterialData.foliageThickness = 0.5f;
+    clearCoatMaterialData.foliageBackLight = 0.0f;
+    clearCoatMaterialData.foliageTransmissionNdotL = 0.5f;
+    clearCoatMaterialData.foliageSpecularScale = 0.0f;
+    clearCoatMaterialData.foliageUseSpecularColor = 0.0f;
+    clearCoatMaterialData.foliageScreenSpaceShadowIntensity = 0.0f;
+    clearCoatMaterialData.foliageIsGrass = 0.0f;
     return clearCoatMaterialData;
 }
 
@@ -1593,6 +1645,8 @@ float3 directDiffuse;
     // 保存直接镜面高光贡献，已经包�?GGX、Fresnel、主光颜色、NdotL 和阴影
 float3 directSpecular;
 
+float3 directTransmission;
+
     // 保存直接光总和，等�?directDiffuse + directSpecular
 float3 directLighting;
 
@@ -1683,6 +1737,18 @@ float hairScatter;
 
     float3 subsurfaceTransmission;
 
+    float3 subsurfaceDirectTransmission;
+
+    float3 subsurfaceTransmissionBRDF;
+
+    float subsurfaceTransmissionLobe;
+
+    float subsurfaceTransmissionPhase;
+
+    float subsurfaceTransmissionShadow;
+
+    float subsurfaceTransmissionThickness;
+
     float3 subsurfaceKernelWeight;
 
     float3 subsurfaceIndirect;
@@ -1699,7 +1765,8 @@ BurtDirectPBRComponents BurtEvaluatePBRDirectFromCore(BurtPBRShadingCoreData cor
         coreData.directSpecularPerceptualRoughness,
         light.color,
         light.directionWS,
-        light.shadowAttenuation);
+        light.shadowAttenuation,
+        light.transmissionShadowAttenuation);
 
     float clearCoatMask = saturate(coreData.materialData.clearCoatMask);
 #if BURT_ENABLE_CLEAR_COAT_SHADING
@@ -1784,7 +1851,14 @@ BurtDirectPBRComponents BurtCreateZeroPBRDirectComponents()
     BurtDirectPBRComponents components;
     components.diffuse = float3(0.0f, 0.0f, 0.0f);
     components.specular = float3(0.0f, 0.0f, 0.0f);
+    components.transmission = float3(0.0f, 0.0f, 0.0f);
     components.energyPreservation = 1.0f;
+    components.transmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.transmissionThroughput = float3(0.0f, 0.0f, 0.0f);
+    components.transmissionLobe = 0.0f;
+    components.transmissionPhase = 0.0f;
+    components.transmissionShadow = 1.0f;
+    components.transmissionThickness = 0.0f;
     components.brdfTerms.nDotL = 0.0f;
     components.brdfTerms.nDotV = 0.0f;
     components.brdfTerms.nDotH = 0.0f;
@@ -1805,6 +1879,13 @@ BurtDirectPBRComponents BurtAddPBRDirectComponents(BurtDirectPBRComponents baseC
 {
     baseComponents.diffuse += addedComponents.diffuse;
     baseComponents.specular += addedComponents.specular;
+    baseComponents.transmission += addedComponents.transmission;
+    baseComponents.transmissionBRDF += addedComponents.transmissionBRDF;
+    baseComponents.transmissionThroughput = max(baseComponents.transmissionThroughput, addedComponents.transmissionThroughput);
+    baseComponents.transmissionLobe += addedComponents.transmissionLobe;
+    baseComponents.transmissionPhase = max(baseComponents.transmissionPhase, addedComponents.transmissionPhase);
+    baseComponents.transmissionShadow = min(baseComponents.transmissionShadow, addedComponents.transmissionShadow);
+    baseComponents.transmissionThickness = max(baseComponents.transmissionThickness, addedComponents.transmissionThickness);
     return baseComponents;
 }
 
@@ -2068,7 +2149,8 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     components.directSpecularBRDF = directComponents.brdfTerms.specularBRDF;
     components.directDiffuse = directComponents.diffuse;
     components.directSpecular = directComponents.specular;
-    components.directLighting = components.directDiffuse + components.directSpecular;
+    components.directTransmission = directComponents.transmission;
+    components.directLighting = components.directDiffuse + components.directSpecular + components.directTransmission;
     components.additionalDiffuse = float3(0.0f, 0.0f, 0.0f);
     components.additionalSpecular = float3(0.0f, 0.0f, 0.0f);
     components.additionalLighting = float3(0.0f, 0.0f, 0.0f);
@@ -2087,15 +2169,21 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     components.clearCoatMask = coreData.materialData.clearCoatMask;
     components.subsurfaceProfileIndex = coreData.materialData.subsurfaceProfileIndex;
     components.subsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceDirectTransmission = directComponents.transmission;
+    components.subsurfaceTransmissionBRDF = directComponents.transmissionBRDF;
+    components.subsurfaceTransmissionLobe = directComponents.transmissionLobe;
+    components.subsurfaceTransmissionPhase = directComponents.transmissionPhase;
+    components.subsurfaceTransmissionShadow = directComponents.transmissionShadow;
+    components.subsurfaceTransmissionThickness = directComponents.transmissionThickness;
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = indirectComponents.subsurfaceIndirect;
 
 #if BURT_ENABLE_SUBSURFACE_SHADING
     if (BurtGetSubsurfaceMaterialWeight(coreData.materialData) > 0.0001f)
     {
-        components.subsurfaceTransmission = BurtSampleSubsurfaceTransmissionProfile(
+        components.subsurfaceTransmission = BurtSampleSubsurfaceTransmissionThroughput(
             coreData.materialData.subsurfaceProfileIndex,
-            coreData.materialData.subsurfaceThickness) * max(BurtLoadSubsurfaceProfileTransmissionTint(coreData.materialData.subsurfaceProfileIndex).rgb, float3(0.0f, 0.0f, 0.0f));
+            coreData.materialData.subsurfaceThickness);
         components.subsurfaceKernelWeight = BurtUseSubsurfaceProfileParamLut()
             ? max(BurtFetchSubsurfaceProfileParam(BURT_SUBSURFACE_PROFILE_PARAM_KERNEL0_OFFSET, coreData.materialData.subsurfaceProfileIndex).rgb, float3(0.0f, 0.0f, 0.0f))
             : float3(0.204f, 0.236f, 0.290f);
@@ -2828,8 +2916,15 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     components.hairTransmissionLobe = hairDirect.transmissionLobe;
     components.hairScatter = hairDirect.scatter;
     components.clearCoatMask = 0.0f;
+    components.directTransmission = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceProfileIndex = 0.0f;
     components.subsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceTransmissionLobe = 0.0f;
+    components.subsurfaceTransmissionPhase = 0.0f;
+    components.subsurfaceTransmissionShadow = 1.0f;
+    components.subsurfaceTransmissionThickness = 0.0f;
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     return components;
@@ -2884,8 +2979,15 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     components.hairTransmissionLobe = hairDirect.transmissionLobe;
     components.hairScatter = hairDirect.scatter;
     components.clearCoatMask = 0.0f;
+    components.directTransmission = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceProfileIndex = 0.0f;
     components.subsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceTransmissionLobe = 0.0f;
+    components.subsurfaceTransmissionPhase = 0.0f;
+    components.subsurfaceTransmissionShadow = 1.0f;
+    components.subsurfaceTransmissionThickness = 0.0f;
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     return components;
@@ -2939,8 +3041,15 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     components.hairTransmissionLobe = hairDirect.transmissionLobe;
     components.hairScatter = hairDirect.scatter;
     components.clearCoatMask = 0.0f;
+    components.directTransmission = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceProfileIndex = 0.0f;
     components.subsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceTransmissionLobe = 0.0f;
+    components.subsurfaceTransmissionPhase = 0.0f;
+    components.subsurfaceTransmissionShadow = 1.0f;
+    components.subsurfaceTransmissionThickness = 0.0f;
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     return components;
@@ -2994,8 +3103,15 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     components.hairTransmissionLobe = hairDirect.transmissionLobe;
     components.hairScatter = hairDirect.scatter;
     components.clearCoatMask = 0.0f;
+    components.directTransmission = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceProfileIndex = 0.0f;
     components.subsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.subsurfaceTransmissionLobe = 0.0f;
+    components.subsurfaceTransmissionPhase = 0.0f;
+    components.subsurfaceTransmissionShadow = 1.0f;
+    components.subsurfaceTransmissionThickness = 0.0f;
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     return components;

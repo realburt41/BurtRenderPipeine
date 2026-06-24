@@ -34,6 +34,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         SubsurfaceTransmission = 126, // Material debug: profile-driven Subsurface transmission color.
         SubsurfaceKernelWeight = 127, // Material debug: profile-driven Subsurface kernel center weight.
         SubsurfaceIndirect = 128, // Material debug: SH / ambient Subsurface contribution.
+        SubsurfaceDirectTransmission = 129, // Material debug: direct-light Subsurface transmission contribution.
         GBufferBaseColor = 130, // GBuffer 调试：显示按 BurtGBuffer 约定编码再解码后的 BaseColor。
         GBufferNormalWS = 131, // GBuffer 调试：显示按 octahedron 编码再解码后的世界空间向量槽。
         GBufferMetallic = 132, // GBuffer 调试：显示 GBuffer 材质通道；Default Lit=metallic，Hair=scatter。
@@ -53,6 +54,16 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         GBufferTangentWS = 146, // GBuffer debug: base tangent stored in GBuffer4.rg as octahedral direction.
         GBufferSubsurfaceThickness = 147, // GBuffer debug: Subsurface thickness stored in GBuffer4.a.
         GBufferSubsurfaceProfileIndex = 148, // GBuffer debug: Subsurface profile index packed with thickness in GBuffer4.a.
+        SubsurfaceTransmissionBRDF = 149, // Material debug: unlit Subsurface transmission BRDF.
+        SubsurfaceTransmissionShadow = 150, // Material debug: shadow term used by direct Subsurface transmission.
+        SubsurfaceTransmissionPhase = 151, // Material debug: HG phase term used by direct Subsurface transmission.
+        SubsurfaceTransmissionThickness = 152, // Material debug: profile LUT thickness coordinate used by transmission.
+        GBufferFoliageTransmissionColor = 153,
+        GBufferFoliageTransmissionWeight = 154,
+        GBufferFoliageThickness = 155,
+        GBufferFoliageTransmissionNdotL = 156,
+        GBufferFoliageSpecularScale = 157,
+        GBufferFoliageScreenSpaceShadowIntensity = 158,
         DetailLighting = 200, // 光照调试：参考 XRender Detail Lighting，用 0.18 中灰 BaseColor 重新计算光照，方便只看明暗细节。
         IndirectLighting = 201, // 光照调试：只显示 PBR 间接光，方便检查 SH 漫反射和 Reflection Probe 镜面反射。
         DirectDiffuse = 202, // 光照调试：只显示直接漫反射，方便检查 NdotL、阴影和 1/PI。
@@ -161,6 +172,9 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         TemporalAARejectionReasons = 365, // TAA debug: RGB rejection causes, with magenta highlighting clamp pressure.
         TemporalAAFeedbackWeight = 367, // TAA debug: heatmap of the final history feedback weight.
         TemporalAAPrevUseCount = 376, // TAA debug: raw PrevUseCount RT, where 1 reuse maps to mid gray.
+        TemporalAAMetadata = 489, // TAA debug: metadata RGB, red = trusted object motion, green = responsive, blue = untrusted motion.
+        TemporalAAObjectMotionMask = 490, // TAA debug: object motion ownership, red = trusted, green = untrusted, blue = velocity valid.
+        TemporalAAUpscaleState = 491, // TAA debug: TAAU state, red = active, green/blue = width/height upscale factor.
         ScreenSpaceReflectionHiZWorkCompare = 366, // SSR debug: green means candidate has lower estimated work including proof probes, red means higher.
         ScreenSpaceReflectionHiZStepSaved = 368, // SSR debug: production guarded HiZ saved normalized ray steps versus stable mip0, green means saved and red means regression.
         BloomFinalBloom = 369, // Bloom debug: final bloom texture after the upsample/combine chain.
@@ -273,7 +287,8 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         FurBlurCurrent = 484, // Fur blur debug: current-frame anisotropic fur blur before temporal resolve.
         FurBlurTemporal = 485, // Fur blur debug: fur blur after temporal resolve.
         FurBlurHistory = 486, // Fur blur debug: previous fur blur history texture.
-        FurBlurDiagnostic = 487 // Fur blur debug: red = valid property, green = temporal alpha, blue = history age.
+        FurBlurDiagnostic = 487, // Fur blur debug: red = valid property, green = temporal alpha, blue = history age.
+        FurBlurReprojection = 488 // Fur blur debug: red = reprojected, green = property-compatible, blue = property history valid.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -346,6 +361,12 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.GBufferSubsurfaceStrength:
                 case BurtShadingDebugMode.GBufferSubsurfaceThickness:
                 case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
+                case BurtShadingDebugMode.GBufferFoliageTransmissionColor:
+                case BurtShadingDebugMode.GBufferFoliageTransmissionWeight:
+                case BurtShadingDebugMode.GBufferFoliageThickness:
+                case BurtShadingDebugMode.GBufferFoliageTransmissionNdotL:
+                case BurtShadingDebugMode.GBufferFoliageSpecularScale:
+                case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
                 case BurtShadingDebugMode.SpecularAARoughness:
                 case BurtShadingDebugMode.DirectBRDFD:
                 case BurtShadingDebugMode.DirectBRDFVisibility:
@@ -357,6 +378,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.HairAdditionalLighting:
                 case BurtShadingDebugMode.SubsurfaceProfileId:
                 case BurtShadingDebugMode.SubsurfaceTransmission:
+                case BurtShadingDebugMode.SubsurfaceDirectTransmission:
+                case BurtShadingDebugMode.SubsurfaceTransmissionBRDF:
+                case BurtShadingDebugMode.SubsurfaceTransmissionShadow:
+                case BurtShadingDebugMode.SubsurfaceTransmissionPhase:
+                case BurtShadingDebugMode.SubsurfaceTransmissionThickness:
                 case BurtShadingDebugMode.IndirectSpecularDFG:
                 case BurtShadingDebugMode.IndirectSpecularEnvBRDF:
                 case BurtShadingDebugMode.SpecularEnergyCompensation:
@@ -417,6 +443,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.FurBlurTemporal:
                 case BurtShadingDebugMode.FurBlurHistory:
                 case BurtShadingDebugMode.FurBlurDiagnostic:
+                case BurtShadingDebugMode.FurBlurReprojection:
                 case BurtShadingDebugMode.BloomPrefilter:
                 case BurtShadingDebugMode.BloomFinalBloom:
                 case BurtShadingDebugMode.BloomThresholdMask:
@@ -439,9 +466,36 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.TemporalAAHistory:
                 case BurtShadingDebugMode.TemporalAAFeedback:
                 case BurtShadingDebugMode.TemporalAARejection:
+                case BurtShadingDebugMode.TemporalAARejectionReasons:
+                case BurtShadingDebugMode.TemporalAAHistoryUV:
                 case BurtShadingDebugMode.TemporalAADifference:
                 case BurtShadingDebugMode.TemporalAAVelocity:
                 case BurtShadingDebugMode.TemporalAAConfidence:
+                case BurtShadingDebugMode.TemporalAACurrentDepth:
+                case BurtShadingDebugMode.TemporalAADepthHistory:
+                case BurtShadingDebugMode.TemporalAADepthDelta:
+                case BurtShadingDebugMode.TemporalAAParallaxRejection:
+                case BurtShadingDebugMode.TemporalAAFeedbackWeight:
+                case BurtShadingDebugMode.TemporalAACurrentColor:
+                case BurtShadingDebugMode.TemporalAAResolvedColor:
+                case BurtShadingDebugMode.TemporalAARawVelocity:
+                case BurtShadingDebugMode.TemporalAAUpdatedConfidence:
+                case BurtShadingDebugMode.TemporalAAStaticRelax:
+                case BurtShadingDebugMode.TemporalAALumaRejection:
+                case BurtShadingDebugMode.TemporalAAClipRejection:
+                case BurtShadingDebugMode.TemporalAADepthRejection:
+                case BurtShadingDebugMode.TemporalAANormalRejection:
+                case BurtShadingDebugMode.TemporalAAMotionRejection:
+                case BurtShadingDebugMode.TemporalAAConfidenceGate:
+                case BurtShadingDebugMode.TemporalAAVelocitySource:
+                case BurtShadingDebugMode.TemporalAAGBufferNormal:
+                case BurtShadingDebugMode.TemporalAAAntiFlicker:
+                case BurtShadingDebugMode.TemporalAAHistoryCoverage:
+                case BurtShadingDebugMode.TemporalAAPrevUseCount:
+                case BurtShadingDebugMode.TemporalAAResponsiveMask:
+                case BurtShadingDebugMode.TemporalAAMetadata:
+                case BurtShadingDebugMode.TemporalAAObjectMotionMask:
+                case BurtShadingDebugMode.TemporalAAUpscaleState:
                     return true;
                 default:
                     return false;

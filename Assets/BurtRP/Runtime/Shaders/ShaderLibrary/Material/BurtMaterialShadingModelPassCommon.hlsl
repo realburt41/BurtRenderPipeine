@@ -4,6 +4,11 @@
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairDither.hlsl"
 
+#if !defined(BURT_MAIN_LIGHT_DIRECTION_DECLARED)
+#define BURT_MAIN_LIGHT_DIRECTION_DECLARED
+float4 _BurtMainLightDirection;
+#endif
+
 float4 BurtEvaluateMaterialPassMaskMap(float2 uv0, float2 uv1)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
@@ -100,15 +105,259 @@ float BurtEvaluateFabricFuzzWeight(float2 uv0)
     return BURT_SAMPLE_TEXTURE2D_REPEAT(_FuzzMask, uv0).r * _FuzzAmount;
 }
 
-BurtSurfaceData BurtApplyFabricPassSurfaceSemantics(BurtSurfaceData surfaceData, float2 uv0)
+BurtSurfaceData BurtApplyFabricPassSurfaceSemantics(BurtSurfaceData surfaceData, float4 maskMap, float2 uv0, float nDotV)
 {
 #if defined(BURT_MATERIAL_SELECTED_FABRIC_IS_SILK)
-    float thinFilmFactor = BURT_SAMPLE_TEXTURE2D_REPEAT(_ThinFilmFactorMask, uv0).r * _ThinFilmFactor;
-    return BurtApplySilkSurfaceSemantics(surfaceData, _Anisotropy, _FacingColor.rgb, _TangentColor.rgb, _Falloff, _ThinFilmThickness, thinFilmFactor);
+    return BurtApplySilkSurfaceSemantics(surfaceData, _Anisotropy, _FacingColor.rgb, _TangentColor.rgb, _Falloff, nDotV);
 #else
-    float fabricFuzzRoughness = ClampPerceptualRoughness(PerceptualSmoothnessToPerceptualRoughness(surfaceData.smoothness) * _FuzzRoughness);
+    float fabricFuzzRoughness = ClampPerceptualRoughness(saturate(maskMap.a) * _FuzzRoughness);
     return BurtApplyFabricSurfaceSemantics(surfaceData, BurtEvaluateFabricFuzzWeight(uv0), BurtEvaluateFabricFuzzColor(uv0), fabricFuzzRoughness);
 #endif
+}
+
+BurtSurfaceData BurtApplyFabricPassSurfaceSemantics(BurtSurfaceData surfaceData, float4 maskMap, float2 uv0)
+{
+    return BurtApplyFabricPassSurfaceSemantics(surfaceData, maskMap, uv0, 1.0f);
+}
+#endif
+
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+float3 BurtApplyFoliageSaturation(float3 color, float saturationBoost)
+{
+    float luminance = PerceivedLuminance(color);
+    return max(lerp(float3(luminance, luminance, luminance), color, 1.0f + saturate(saturationBoost)), float3(0.0f, 0.0f, 0.0f));
+}
+
+float BurtMaterialPow3(float value)
+{
+    return value * value * value;
+}
+
+float BurtMaterialSafePow(float value, float power)
+{
+    return pow(max(value, 0.0f), max(power, BURT_EPSILON));
+}
+
+float BurtMaterialRangeRemap(float minValue, float maxValue, float value)
+{
+    return saturate((value - minValue) / max(maxValue - minValue, BURT_EPSILON));
+}
+
+float3 BurtMaterialOverlayBlend(float3 baseColor, float3 blendColor)
+{
+    return lerp(
+        2.0f * baseColor * blendColor,
+        1.0f - 2.0f * (1.0f - baseColor) * (1.0f - blendColor),
+        step(0.5f, baseColor));
+}
+
+float BurtMaterialLinearStep(float edge0, float edge1, float value)
+{
+    return saturate((value - edge0) / max(edge1 - edge0, BURT_EPSILON));
+}
+
+float3 BurtResolveFoliageObjectUpWS()
+{
+    return BurtSafeNormalize(UnityObjectToWorldDir(float3(0.0f, 1.0f, 0.0f)));
+}
+
+float BurtEvaluateFoliageNormalizedHeight(float3 positionOS, float3 positionWS)
+{
+    float height = max(_TreeHeight, BURT_EPSILON);
+    return saturate(positionOS.y / height);
+}
+
+float BurtEvaluateFoliageTintValue()
+{
+    if (_FoliageTintMode > 1.5f)
+    {
+        return saturate(unity_ObjectToWorld._m30);
+    }
+
+    return saturate(_TintValue);
+}
+
+float4 BurtEvaluateMaterialPassBaseColor(float2 baseMapUV, float3 positionWS, float3 positionOS, float4 vertexColor)
+{
+    float4 baseMap = BurtSampleBaseMap(baseMapUV);
+    float4 baseColor = baseMap * _BaseColor;
+
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        float heightMask = saturate(vertexColor.r);
+        float2 noiseUV = positionWS.xz * _NoiseMap_ST.xy * 0.01f + _NoiseMap_ST.zw;
+        float2 noise = BURT_SAMPLE_TEXTURE2D_REPEAT(_NoiseMap, noiseUV).rg;
+        float sqHeightMask = heightMask * heightMask;
+        float heightX = lerp(1.0f - sqHeightMask, sqHeightMask, saturate(_Variation01Height));
+        float heightY = lerp(1.0f - sqHeightMask, sqHeightMask, saturate(_Variation02Height));
+        noise.x = saturate(noise.x * heightX) * max(_VariationIntensity01, 0.0f);
+        noise.y = saturate(noise.y * heightY) * max(_VariationIntensity02, 0.0f);
+
+        float3 grassColor = baseColor.rgb;
+        grassColor = lerp(grassColor, BurtMaterialOverlayBlend(grassColor, _Variation01.rgb), saturate(noise.x - noise.y));
+        grassColor = lerp(grassColor, BurtMaterialOverlayBlend(grassColor, _Variation02.rgb), saturate(noise.y));
+        grassColor = lerp(grassColor, BurtMaterialOverlayBlend(grassColor, _BaseColorTip.rgb), BurtMaterialSafePow(heightMask, _TipMaskPow));
+        baseColor.rgb = saturate(lerp(grassColor, grassColor * 0.85f, saturate(_GroundFadeIntensity)));
+    #else
+        float tintMask = saturate(baseMap.a);
+        float heightScale = BurtMaterialSafePow(BurtEvaluateFoliageNormalizedHeight(positionOS, positionWS), _TintHeightContrast);
+        float aoScale = BurtMaterialRangeRemap(_TintAORemap.x, _TintAORemap.y, BurtMaterialPow3(saturate(vertexColor.a)));
+        float localScale = lerp(aoScale, heightScale, saturate(_TintAOHeightRatio)) * max(_TintScale, 0.0f);
+
+        if (_FoliageTintMode < 0.5f)
+        {
+            baseColor.rgb = lerp(baseColor.rgb, BurtMaterialOverlayBlend(baseColor.rgb, _LocalTintColor.rgb), saturate(localScale));
+        }
+        else
+        {
+            float tintValue = BurtEvaluateFoliageTintValue();
+            float2 tintUV = float2(tintValue, 0.5f);
+            float3 globalTintColor = BURT_SAMPLE_TEXTURE2D_CLAMP(_TintPalette, tintUV).rgb;
+            float3 localTintColor = BURT_SAMPLE_TEXTURE2D_CLAMP(_LocalTintPalette, tintUV).rgb;
+            float3 tintColor = lerp(globalTintColor, localTintColor, saturate(localScale));
+            baseColor.rgb = baseMap.rgb * _BaseColor.rgb * lerp(1.0f, 2.0f * tintColor, tintMask);
+        }
+    #endif
+#endif
+
+    return baseColor;
+}
+
+float BurtEvaluateMaterialPassOpacity(float alpha, float2 baseMapUV, float3 positionWS)
+{
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    float alphaMap = BURT_SAMPLE_TEXTURE2D_REPEAT(_AlphaMap, baseMapUV).r;
+    float distanceToCamera = distance(_WorldSpaceCameraPos.xyz, positionWS);
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        float distanceFactor = saturate(distanceToCamera / 150.0f);
+    #else
+        float distanceFactor = saturate((distanceToCamera - 20.0f) / 200.0f);
+    #endif
+    return saturate(alphaMap + alphaMap * distanceFactor * max(_AlphaIncrease, 0.0f));
+#else
+    return alpha;
+#endif
+}
+
+float3 BurtApplyFoliageMaterialNormalWS(float3 normalWS, float3 positionWS, float4 vertexColor)
+{
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        float cameraDistance = distance(_WorldSpaceCameraPos.xyz, positionWS);
+        float fadeDistance = 250.0f;
+        float fadeDis = saturate((fadeDistance - cameraDistance) / (0.15f * fadeDistance));
+        float3 lightDirectionWS = BurtSafeNormalize(_BurtMainLightDirection.xyz);
+        float3 upWardDir = BurtResolveFoliageObjectUpWS();
+        float noL = dot(lightDirectionWS, upWardDir) * 0.5f + 0.5f;
+        float normalWeight = lerp(1.0f, (_TLNormalWeight - 1.0f) * noL + 1.0f, fadeDis);
+        upWardDir.xz *= max(normalWeight, 0.0f);
+        return BurtSafeNormalize(upWardDir);
+    #else
+        #if defined(BURT_FOLIAGE_USE_BAKED_NORMALS)
+            float3 normalVS = mul((float3x3)UNITY_MATRIX_V, normalWS);
+            normalVS = BurtSafeNormalize(float3(normalVS.x, normalVS.y, abs(normalVS.z)));
+            return BurtSafeNormalize(mul((float3x3)UNITY_MATRIX_I_V, normalVS));
+        #else
+            return normalWS;
+        #endif
+    #endif
+#else
+    return normalWS;
+#endif
+}
+
+BurtSurfaceData BurtApplyFoliageXRenderSurfaceSemantics(
+    BurtSurfaceData surfaceData,
+    float4 baseColor,
+    float4 maskMap,
+    float thicknessScale,
+    float roughnessScale,
+    float reflectanceScale,
+    float3 subsurfaceColor,
+    float subsurfaceColorSaturate,
+    float transmissionNdotL,
+    float backLight,
+    float specularScale,
+    float useSpecularColor)
+{
+    float thickness = saturate(maskMap.b);
+    float roughness = saturate(maskMap.a * roughnessScale);
+    float transmissionWeight = lerp(1.0f, 1.0f - thickness, saturate(thicknessScale));
+    float3 foliageTransmissionColor = BurtApplyFoliageSaturation(baseColor.rgb, subsurfaceColorSaturate) * max(subsurfaceColor, float3(0.0f, 0.0f, 0.0f));
+
+    surfaceData.smoothness = saturate(1.0f - roughness);
+    surfaceData.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
+    return BurtApplyFoliageSurfaceSemantics(
+        surfaceData,
+        foliageTransmissionColor,
+        transmissionWeight,
+        thickness,
+        backLight,
+        transmissionNdotL,
+        saturate(specularScale),
+        useSpecularColor);
+}
+
+BurtSurfaceData BurtApplyFoliageMaterialExtras(BurtSurfaceData surfaceData, float3 positionWS, float3 positionOS, float4 vertexColor)
+{
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        float heightMask = saturate(vertexColor.r);
+        float cameraDistance = distance(_WorldSpaceCameraPos.xyz, positionWS);
+        float nearRange = BurtMaterialSafePow(1.0f - saturate(cameraDistance / max(_HeightAOFallOff, BURT_EPSILON)), 0.7f);
+        float heightOcclusion = saturate(heightMask - saturate(_HeightAO) + 1.0f);
+        surfaceData.occlusion = min(surfaceData.occlusion, lerp(1.0f, heightOcclusion, nearRange));
+    #else
+        float cameraDistance = distance(_WorldSpaceCameraPos.xyz, positionWS);
+        float foliageScreenSpaceShadow = saturate(cameraDistance * 0.025f);
+        surfaceData.occlusion = BurtMaterialRangeRemap(_VertexAORemap.x, _VertexAORemap.y, saturate(vertexColor.a));
+        surfaceData.foliageScreenSpaceShadowIntensity = foliageScreenSpaceShadow * foliageScreenSpaceShadow;
+    #endif
+#endif
+    return surfaceData;
+}
+
+BurtSurfaceData BurtApplyGrassXRenderSurfaceSemantics(
+    BurtSurfaceData surfaceData,
+    float3 normalWS,
+    float3 viewDirectionWS,
+    float3 positionWS,
+    float4 vertexColor)
+{
+#if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    float cameraDistance = distance(_WorldSpaceCameraPos.xyz, positionWS);
+    float fadeDistance = 250.0f;
+    float fadeDis = saturate((fadeDistance - cameraDistance) / (0.15f * fadeDistance));
+    float3 upWardDir = BurtSafeNormalize(lerp(float3(0.0f, 1.0f, 0.0f), BurtResolveFoliageObjectUpWS(), 0.75f));
+    float3 cameraVectorWS = BurtSafeNormalize(viewDirectionWS);
+    float3 lightDirectionWS = BurtSafeNormalize(_BurtMainLightDirection.xyz);
+    float noV = dot(cameraVectorWS, upWardDir);
+    float voL = dot(cameraVectorWS, lightDirectionWS);
+    float noVWeight = BurtMaterialLinearStep(0.5f + _FresnelExp, 1.0f, 1.0f - abs(noV));
+    float voLWeight = saturate(1.0f - (voL * 0.5f + 0.5f));
+    float fresnelTerm = noVWeight * voLWeight;
+    fresnelTerm *= saturate(cameraDistance * 0.04f);
+
+    float grassSSSIntensity = (_FresnelIntensity * fresnelTerm + _SSSIntensity) * fadeDis;
+    float heightMask = saturate(vertexColor.r);
+    float disMask = saturate(1.0f - cameraDistance / max(_SSShadowDistance, BURT_EPSILON));
+    float disFalloff = 1.0f - (1.0f - disMask) * (1.0f - disMask);
+    surfaceData.foliageTransmissionWeight = max(grassSSSIntensity, 0.0f);
+    surfaceData.foliageSpecularScale = saturate(lerp(0.5f, _Specular, fadeDis));
+    surfaceData.foliageUseSpecularColor = 0.0f;
+    surfaceData.foliageScreenSpaceShadowIntensity = max((1.0f - heightMask) * _SSShadowIntensity * disFalloff, 0.0f);
+    surfaceData.foliageIsGrass = 1.0f;
+    surfaceData.reflectance = saturate(lerp(0.5f, _Reflectance, fadeDis));
+    surfaceData.smoothness = saturate(1.0f - _Roughness);
+#endif
+    return surfaceData;
+}
+#endif
+
+#if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+float BurtEvaluateMaterialPassOpacity(float alpha, float2 baseMapUV, float3 positionWS)
+{
+    return alpha;
 }
 #endif
 
@@ -165,9 +414,11 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, floa
     BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, BURT_SUBSURFACE_FIXED_REFLECTANCE, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
     float subsurface3SCurvature = saturate(maskMap.g * _Subsurface3SCurvatureScale + _Subsurface3SCurvatureBias);
     return BurtApplySubsurfaceSurfaceSemantics(surfaceData, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, subsurface3SCurvature, _SubsurfaceProfileIndex, _SubsurfaceScatteringMode);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
+    return BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, maskMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
-    surfaceData.shadingModelID = BURT_SHADING_MODEL_FABRIC;
+    BurtSurfaceData surfaceData = BurtCreateFabricSurfaceData(baseColor, _Reflectance, _Roughness, _Metallic, maskMap, _OcclusionStrength);
     return surfaceData;
 #else
     BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
@@ -186,8 +437,22 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, floa
 BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, float4 maskMap, float2 uv0)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, _Metallic, maskMap, _OcclusionStrength);
-    return BurtApplyFabricPassSurfaceSemantics(surfaceData, uv0);
+    BurtSurfaceData surfaceData = BurtCreateFabricSurfaceData(baseColor, _Reflectance, _Roughness, _Metallic, maskMap, _OcclusionStrength);
+    return BurtApplyFabricPassSurfaceSemantics(surfaceData, maskMap, uv0);
+#else
+    return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
+#endif
+}
+
+BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, float4 maskMap, float2 uv0, float3 normalWS, float3 viewDirectionWS)
+{
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+    BurtSurfaceData surfaceData = BurtCreateFabricSurfaceData(baseColor, _Reflectance, _Roughness, _Metallic, maskMap, _OcclusionStrength);
+    float nDotV = saturate(dot(BurtSafeNormalize(normalWS), BurtSafeNormalize(viewDirectionWS)));
+    return BurtApplyFabricPassSurfaceSemantics(surfaceData, maskMap, uv0, nDotV);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
+    return BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, maskMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
 #else
     return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
 #endif
@@ -228,10 +493,52 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
     surfaceData.hairSecondarySpecularColor = _SpecularSecondColor.rgb;
     return BurtApplyHairGBufferSurfaceSemantics(surfaceData, scatter, 1.0f);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-    return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, uv0);
+    return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, uv0, geometryNormalWS, viewDirectionWS);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
+    return BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, maskMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
 #else
     return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
 #endif
+}
+
+BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
+    float4 baseColor,
+    float4 maskMap,
+    float2 uv0,
+    float3 normalWS,
+    float3 viewDirectionWS,
+    float3 positionWS,
+    float3 positionOS,
+    float4 vertexColor)
+{
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
+    surfaceData = BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, maskMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
+    surfaceData = BurtApplyFoliageMaterialExtras(surfaceData, positionWS, positionOS, vertexColor);
+    return BurtApplyGrassXRenderSurfaceSemantics(surfaceData, normalWS, viewDirectionWS, positionWS, vertexColor);
+#else
+    return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, uv0, normalWS, viewDirectionWS);
+#endif
+}
+
+BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
+    float4 baseColor,
+    float4 maskMap,
+    float2 uv0,
+    float3 normalWS,
+    float3 viewDirectionWS,
+    float3 positionWS)
+{
+    return BurtCreateMaterialShadingModelSurfaceData(
+        baseColor,
+        maskMap,
+        uv0,
+        normalWS,
+        viewDirectionWS,
+        positionWS,
+        float3(0.0f, 0.0f, 0.0f),
+        float4(1.0f, 1.0f, 1.0f, 1.0f));
 }
 
 float3 BurtGetMaterialPassNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS, float facing)
@@ -313,6 +620,8 @@ BurtGBufferData BurtCreateMaterialPassGBufferData(
     return BurtCreateClearCoatGBufferData(surfaceData, baseNormalWS, tangentWS, clearCoatNormalWS, emissionColor);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
     return BurtCreateSubsurfaceGBufferData(surfaceData, baseNormalWS, tangentWS, emissionColor);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    return BurtCreateFoliageGBufferData(surfaceData, baseNormalWS, tangentWS, emissionColor);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
     return BurtCreateFabricGBufferData(surfaceData, baseNormalWS, tangentWS, emissionColor);
 #else

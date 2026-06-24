@@ -13,6 +13,7 @@ namespace Burt.RenderPipeline
         ShadowCaster = 3,
         GBuffer = 4,
         FurBlurProperty = 5,
+        FurBlurVelocity = 6,
     }
 
     [DisallowMultipleComponent]
@@ -23,7 +24,7 @@ namespace Burt.RenderPipeline
         public const int MaxMultipassLayerCount = 32;
         private const int DefaultMultipassLayerCount = 16;
 
-        private const int MaxShaderPassTypeCount = 6;
+        private const int MaxShaderPassTypeCount = 7;
         private static readonly List<BurtMultipassRenderer> s_Renderers = new List<BurtMultipassRenderer>();
         private static readonly Matrix4x4[] s_InstanceMatrices = new Matrix4x4[MaxMultipassLayerCount];
         private static MaterialPropertyBlock s_DrawPropertyBlock;
@@ -77,6 +78,10 @@ namespace Burt.RenderPipeline
             new[]
             {
                 "Burt Multipass Fur Blur Property"
+            },
+            new[]
+            {
+                "Burt Multipass Fur Blur Velocity"
             }
         };
 
@@ -114,6 +119,12 @@ namespace Burt.RenderPipeline
         private int cachedMaterialHash;
         private bool cacheDirty = true;
         private bool registered;
+        private Matrix4x4 previousObjectToWorld = Matrix4x4.identity;
+        private Matrix4x4 capturedObjectToWorld = Matrix4x4.identity;
+        private bool hasPreviousObjectToWorld;
+        private bool hasCapturedObjectToWorld;
+        private int previousObjectToWorldFrame = -1;
+        private int capturedObjectToWorldFrame = -1;
 
 #if UNITY_EDITOR
         private int editorLod;
@@ -546,6 +557,7 @@ namespace Burt.RenderPipeline
 
             var rootTransform = GetRootTransform();
             var instanceMatrix = ResolveRendererMatrix(renderer, rootTransform);
+            var previousMatrix = ResolvePreviousObjectToWorld(instanceMatrix);
             FillInstanceMatrices(instanceMatrix, MaxMultipassLayerCount);
 
             var submeshCount = Mathf.Min(materials.Length, mesh.subMeshCount);
@@ -576,6 +588,7 @@ namespace Burt.RenderPipeline
                 renderer.GetPropertyBlock(propertyBlock, submeshIndex);
                 propertyBlock.SetVector(FurScaleId, rootTransform.lossyScale);
                 propertyBlock.SetInteger(FurMaxCountId, layerCount);
+                propertyBlock.SetMatrix(BurtFurBlurPassUtility.PreviousObjectToWorldId, previousMatrix);
                 for (var passIndex = 0; passIndex < passList.Count; passIndex++)
                 {
                     cmd.DrawMeshInstanced(
@@ -588,6 +601,41 @@ namespace Burt.RenderPipeline
                         propertyBlock);
                 }
             }
+
+            if (pass == BurtMultipassShaderPass.FurBlurVelocity)
+            {
+                CaptureCurrentObjectToWorld(instanceMatrix);
+            }
+        }
+
+        private Matrix4x4 ResolvePreviousObjectToWorld(Matrix4x4 currentMatrix)
+        {
+            PromoteCapturedObjectToWorldIfNeeded(Time.frameCount);
+            var frameDelta = Time.frameCount - previousObjectToWorldFrame;
+            return hasPreviousObjectToWorld && frameDelta >= 0 && frameDelta <= 1 ? previousObjectToWorld : currentMatrix;
+        }
+
+        private void CaptureCurrentObjectToWorld(Matrix4x4 currentMatrix)
+        {
+            var frame = Time.frameCount;
+            PromoteCapturedObjectToWorldIfNeeded(frame);
+            capturedObjectToWorld = currentMatrix;
+            hasCapturedObjectToWorld = true;
+            capturedObjectToWorldFrame = frame;
+        }
+
+        private void PromoteCapturedObjectToWorldIfNeeded(int frame)
+        {
+            if (!hasCapturedObjectToWorld || capturedObjectToWorldFrame >= frame)
+            {
+                return;
+            }
+
+            previousObjectToWorld = capturedObjectToWorld;
+            hasPreviousObjectToWorld = true;
+            previousObjectToWorldFrame = capturedObjectToWorldFrame;
+            hasCapturedObjectToWorld = false;
+            capturedObjectToWorldFrame = -1;
         }
 
         private int ResolveLayerCount(int submeshIndex, Camera camera, Transform rootTransform)

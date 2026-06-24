@@ -32,6 +32,7 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter responsiveRejectionStrength = new ClampedFloatParameter(0.65f, 0f, 1f);
         public ClampedFloatParameter untrustedMotionFeedbackScale = new ClampedFloatParameter(0.35f, 0f, 1f);
         public ClampedFloatParameter disocclusionFeedbackScale = new ClampedFloatParameter(0.18f, 0f, 1f);
+        public ClampedFloatParameter upscaleFactor = new ClampedFloatParameter(1.0f, 1f, 2f);
 
         [Title("Edge Rejection")]
         public ClampedFloatParameter motionEdgeResponsiveStrength = new ClampedFloatParameter(1.2f, 0f, 3f);

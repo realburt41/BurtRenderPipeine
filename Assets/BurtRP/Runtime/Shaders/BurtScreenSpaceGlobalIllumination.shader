@@ -1,7 +1,7 @@
-// BurtRP v2.2 screen-space diffuse GI. It is a small bridge toward BurtGI/Lumen-style lighting,
-// not the final voxel/radiance-cache implementation.
 Shader "Hidden/BurtRP/BurtGI"
 {
+    // BurtRP v2.2 screen-space diffuse GI. It is a small bridge toward BurtGI/Lumen-style lighting,
+    // not the final voxel/radiance-cache implementation.
     SubShader
     {
         Tags { "RenderPipeline" = "BurtRenderPipeline" }
@@ -217,6 +217,14 @@ Shader "Hidden/BurtRP/BurtGI"
                 return BurtGIClampRadiance(lerp(sourceRadiance, diffuseTintedRadiance, tintWeight));
             }
 
+            float3 BurtGIEstimateSampleDiffuseRadiance(BurtPBRMaterialData sampleMaterialData, float3 sampleNormalWS, float3 sampleEmission)
+            {
+                float3 diffuseIrradiance = BurtSampleIndirectDiffuseIrradiance(sampleNormalWS);
+                float3 diffuseRadiance = max(sampleMaterialData.diffuseColor, 0.0f) * max(diffuseIrradiance, 0.0f);
+                diffuseRadiance += max(sampleEmission, 0.0f);
+                return BurtGIClampRadiance(diffuseRadiance);
+            }
+
             float BurtGIComputeDiffuseChroma(float3 diffuseColor)
             {
                 float maxChannel = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b));
@@ -276,7 +284,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 radianceSum = 0.0f;
                 float weightSum = 0.0f;
 
-                [unroll]
+                [loop]
                 for (int i = 0; i < 24; ++i)
                 {
                     float ring = i < 8 ? 0.38f : (i < 16 ? 0.76f : 1.16f);
@@ -326,7 +334,7 @@ Shader "Hidden/BurtRP/BurtGI"
                         continue;
                     }
 
-                    float3 sampleRadiance = BurtGIClampRadiance(tex2D(_BurtGISourceColorTexture, sampleUV).rgb);
+                    float3 sampleRadiance = BurtGIEstimateSampleDiffuseRadiance(sampleMaterialData, sampleNormalWS, sampleEncodedGBuffer.gbuffer2.rgb);
                     sampleRadiance = BurtGITintRadianceByDiffuseAlbedo(sampleRadiance, sampleMaterialData);
                     radianceSum += sampleRadiance * sampleWeight;
                     weightSum += sampleWeight;
@@ -518,7 +526,7 @@ Shader "Hidden/BurtRP/BurtGI"
 
                     BurtEncodedGBuffer sampleEncodedGBuffer = BurtSampleEncodedGBuffer(sampleUV);
                     BurtPBRMaterialData sampleMaterialData = BurtPreparePBRMaterialData(BurtDecodeGBuffer(sampleEncodedGBuffer));
-                    float3 sampleRadiance = BurtGIClampRadiance(tex2D(_BurtGISourceColorTexture, sampleUV).rgb);
+                    float3 sampleRadiance = BurtGIEstimateSampleDiffuseRadiance(sampleMaterialData, sampleNormalWS, sampleEncodedGBuffer.gbuffer2.rgb);
                     sampleRadiance = BurtGITintRadianceByDiffuseAlbedo(sampleRadiance, sampleMaterialData);
                     sampleRadiance *= BurtGIComputeDiffuseSourceWeight(sampleMaterialData);
                     tracedRadiance += sampleRadiance * weight;
@@ -797,6 +805,65 @@ Shader "Hidden/BurtRP/BurtGI"
                 return cameraColor;
             }
 
+            struct BurtGIIndirectChannelsOutput
+            {
+                float4 backfaceDiffuse : SV_Target0;
+                float4 roughSpecular : SV_Target1;
+            };
+
+            float BurtGIBackfaceMaterialWeight(BurtGBufferData gbufferData)
+            {
+                float subsurfaceWeight = BurtIsActiveSubsurfaceShadingModel(gbufferData.shadingModelID)
+                    ? saturate(BurtGetSubsurfaceThickness(gbufferData) * 0.65f + BurtGetSubsurfaceAmbient(gbufferData) * 0.35f)
+                    : 0.0f;
+                float hairWeight = BurtIsActiveHairShadingModel(gbufferData.shadingModelID) ? 0.65f : 0.0f;
+                return saturate(max(subsurfaceWeight, hairWeight));
+            }
+
+            BurtGIIndirectChannelsOutput FragResolveIndirectChannels(Varyings input)
+            {
+                BurtGIIndirectChannelsOutput output;
+                output.backfaceDiffuse = 0.0f;
+                output.roughSpecular = 0.0f;
+
+                float2 screenUV = input.screenUV;
+                float rawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (BurtGIIsSkyDepth(rawDepth))
+                {
+                    return output;
+                }
+
+                BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
+                BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
+                BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
+                float3 normalWS = BurtGetGBufferDirectionWS(gbufferData);
+                float4 finalBurtGI = tex2D(_BurtScreenSpaceGlobalIlluminationTexture, screenUV);
+                float3 diffuseGI = max(finalBurtGI.rgb, 0.0f);
+                float hitRatio = saturate(finalBurtGI.a);
+
+                float backfaceWeight = BurtGIBackfaceMaterialWeight(gbufferData);
+                if (backfaceWeight > 0.0001f)
+                {
+                    float3 backIrradiance = BurtSampleIndirectDiffuseIrradiance(-normalWS) * materialData.diffuseColor;
+                    float3 backfaceDiffuse = lerp(diffuseGI, backIrradiance, saturate(0.35f + backfaceWeight * 0.45f));
+                    output.backfaceDiffuse = float4(max(backfaceDiffuse, 0.0f) * backfaceWeight, hitRatio);
+                }
+
+                float roughness = saturate(gbufferData.perceptualRoughness);
+                float roughSpecularWeight = smoothstep(0.35f, 0.92f, roughness) * saturate(1.0f - materialData.metallic * 0.35f);
+                if (roughSpecularWeight > 0.0001f)
+                {
+                    float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                    float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
+                    float3 reflectionDirectionWS = reflect(-viewDirectionWS, normalWS);
+                    float3 specularRadiance = SampleIndirectSpecularRadiance(reflectionDirectionWS, roughness);
+                    float3 roughSpecular = lerp(diffuseGI, specularRadiance, saturate(0.45f + roughness * 0.35f));
+                    output.roughSpecular = float4(max(roughSpecular, 0.0f) * roughSpecularWeight * saturate(0.55f + hitRatio * 0.45f), hitRatio);
+                }
+
+                return output;
+            }
+
             float4 BurtGIDebugHitRatio(float4 finalBurtGI)
             {
                 float hitRatio = saturate(finalBurtGI.a);
@@ -1070,6 +1137,20 @@ Shader "Hidden/BurtRP/BurtGI"
             #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment FragTemporalDiagnostics
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Screen Space Global Illumination Resolve Indirect Channels"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment FragResolveIndirectChannels
             ENDHLSL
         }
     }

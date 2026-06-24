@@ -69,6 +69,16 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Subsurface Profile ID";
                 case BurtShadingDebugMode.SubsurfaceTransmission:
                     return "Subsurface Transmission";
+                case BurtShadingDebugMode.SubsurfaceDirectTransmission:
+                    return "Subsurface Direct Transmission";
+                case BurtShadingDebugMode.SubsurfaceTransmissionBRDF:
+                    return "Subsurface Transmission BRDF";
+                case BurtShadingDebugMode.SubsurfaceTransmissionShadow:
+                    return "Subsurface Transmission Shadow";
+                case BurtShadingDebugMode.SubsurfaceTransmissionPhase:
+                    return "Subsurface Transmission Phase";
+                case BurtShadingDebugMode.SubsurfaceTransmissionThickness:
+                    return "Subsurface Transmission Thickness";
                 case BurtShadingDebugMode.SubsurfaceKernelWeight:
                     return "Subsurface Kernel Weight";
                 case BurtShadingDebugMode.SubsurfaceIndirect:
@@ -107,6 +117,18 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "GBuffer Subsurface Thickness";
                 case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
                     return "GBuffer Subsurface Profile";
+                case BurtShadingDebugMode.GBufferFoliageTransmissionColor:
+                    return "GBuffer Foliage Transmission";
+                case BurtShadingDebugMode.GBufferFoliageTransmissionWeight:
+                    return "GBuffer Foliage Weight";
+                case BurtShadingDebugMode.GBufferFoliageThickness:
+                    return "GBuffer Foliage Thickness";
+                case BurtShadingDebugMode.GBufferFoliageTransmissionNdotL:
+                    return "GBuffer Foliage NdotL";
+                case BurtShadingDebugMode.GBufferFoliageSpecularScale:
+                    return "GBuffer Foliage Specular";
+                case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
+                    return "GBuffer Foliage SS Shadow";
                 case BurtShadingDebugMode.GBufferAnisotropy:
                     return "GBuffer Anisotropy";
                 case BurtShadingDebugMode.GBufferTangentWS:
@@ -475,6 +497,12 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "TAA Prev Use Count";
                 case BurtShadingDebugMode.TemporalAAResponsiveMask:
                     return "TAA Responsive Mask";
+                case BurtShadingDebugMode.TemporalAAMetadata:
+                    return "TAA Metadata";
+                case BurtShadingDebugMode.TemporalAAObjectMotionMask:
+                    return "TAA Object Motion Mask";
+                case BurtShadingDebugMode.TemporalAAUpscaleState:
+                    return "TAA Upscale State";
                 case BurtShadingDebugMode.TemporalAARejectionReasons:
                     return "TAA Rejection Reasons";
                 case BurtShadingDebugMode.TemporalAAFeedbackWeight:
@@ -575,6 +603,12 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.GBufferSubsurfaceStrength, // Subsurface 专用：GBuffer1.b material channel 解码后的 strength。
             BurtShadingDebugMode.GBufferSubsurfaceThickness,
             BurtShadingDebugMode.GBufferSubsurfaceProfileIndex,
+            BurtShadingDebugMode.GBufferFoliageTransmissionColor,
+            BurtShadingDebugMode.GBufferFoliageTransmissionWeight,
+            BurtShadingDebugMode.GBufferFoliageThickness,
+            BurtShadingDebugMode.GBufferFoliageTransmissionNdotL,
+            BurtShadingDebugMode.GBufferFoliageSpecularScale,
+            BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity,
             BurtShadingDebugMode.GBufferAnisotropy,
             BurtShadingDebugMode.GBufferTangentWS
         });
@@ -609,6 +643,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         {
             BurtShadingDebugMode.SubsurfaceProfileId,
             BurtShadingDebugMode.SubsurfaceTransmission,
+            BurtShadingDebugMode.SubsurfaceDirectTransmission,
+            BurtShadingDebugMode.SubsurfaceTransmissionBRDF,
+            BurtShadingDebugMode.SubsurfaceTransmissionShadow,
+            BurtShadingDebugMode.SubsurfaceTransmissionPhase,
+            BurtShadingDebugMode.SubsurfaceTransmissionThickness,
             BurtShadingDebugMode.SubsurfaceKernelWeight,
             BurtShadingDebugMode.SubsurfaceIndirect
         });
@@ -780,7 +819,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.TemporalAAAntiFlicker,
             BurtShadingDebugMode.TemporalAAHistoryCoverage,
             BurtShadingDebugMode.TemporalAAPrevUseCount,
-            BurtShadingDebugMode.TemporalAAResponsiveMask
+            BurtShadingDebugMode.TemporalAAResponsiveMask,
+            BurtShadingDebugMode.TemporalAAMetadata,
+            BurtShadingDebugMode.TemporalAAObjectMotionMask,
+            BurtShadingDebugMode.TemporalAAUpscaleState
         });
 
         public static readonly BurtShadingDebugGroup ScreenSpaceAmbientOcclusion = new BurtShadingDebugGroup("Screen Space Ambient Occlusion", "SSAO", new[] // SSAO 后处理调试。
@@ -966,7 +1008,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.TemporalAAAntiFlicker,
             BurtShadingDebugMode.TemporalAAHistoryCoverage,
             BurtShadingDebugMode.TemporalAAPrevUseCount,
-            BurtShadingDebugMode.TemporalAAResponsiveMask
+            BurtShadingDebugMode.TemporalAAResponsiveMask,
+            BurtShadingDebugMode.TemporalAAMetadata,
+            BurtShadingDebugMode.TemporalAAObjectMotionMask,
+            BurtShadingDebugMode.TemporalAAUpscaleState
         });
     }
 
@@ -1760,6 +1805,18 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return BurtGBufferDebugViewMode.SubsurfaceThickness;
                 case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
                     return BurtGBufferDebugViewMode.SubsurfaceProfileIndex;
+                case BurtShadingDebugMode.GBufferFoliageTransmissionColor:
+                    return BurtGBufferDebugViewMode.FoliageTransmissionColor;
+                case BurtShadingDebugMode.GBufferFoliageTransmissionWeight:
+                    return BurtGBufferDebugViewMode.FoliageTransmissionWeight;
+                case BurtShadingDebugMode.GBufferFoliageThickness:
+                    return BurtGBufferDebugViewMode.FoliageThickness;
+                case BurtShadingDebugMode.GBufferFoliageTransmissionNdotL:
+                    return BurtGBufferDebugViewMode.FoliageTransmissionNdotL;
+                case BurtShadingDebugMode.GBufferFoliageSpecularScale:
+                    return BurtGBufferDebugViewMode.FoliageSpecularScale;
+                case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
+                    return BurtGBufferDebugViewMode.FoliageScreenSpaceShadowIntensity;
                 case BurtShadingDebugMode.GBufferAnisotropy:
                     return BurtGBufferDebugViewMode.Anisotropy;
                 case BurtShadingDebugMode.GBufferTangentWS:

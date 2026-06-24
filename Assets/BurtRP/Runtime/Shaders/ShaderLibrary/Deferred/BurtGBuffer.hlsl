@@ -84,6 +84,24 @@ float shadingModelID;
     float fabricFuzzRoughness;
 
     float3 fabricFuzzColor;
+
+    float3 foliageTransmissionColor;
+
+    float foliageTransmissionWeight;
+
+    float foliageThickness;
+
+    float foliageBackLight;
+
+    float foliageTransmissionNdotL;
+
+    float foliageSpecularScale;
+
+    float foliageUseSpecularColor;
+
+    float foliageScreenSpaceShadowIntensity;
+
+    float foliageIsGrass;
 };
 
 // 保存实际写入 RenderTarget 的五�?GBuffer 颜色；这里只定义编码结果，不负责 RT 创建或生命周期
@@ -151,23 +169,26 @@ float t = saturate(-n.z);
 return BurtSafeNormalize(n);
 }
 
-// GBuffer1.b 复用一个半精度通道保存 shading model �?material scalar；Hair 再把 scatter/shift 压到 material scalar 内
-static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 5.0f;
-static const float BURT_GBUFFER_SHADING_MODEL_PACK_SCALE = 0.999f;
+// GBuffer1.b stores shading model + material scalar in one half channel. Keep
+// each model bucket away from both edges: Fabric/Silk at metallic=0 otherwise
+// lands on the 4/5 boundary, and half/UNorm RT quantization can decode it as
+// the previous shading model.
+static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 6.0f;
+static const float BURT_GBUFFER_SHADING_MODEL_PACK_BIAS = 0.02f;
+static const float BURT_GBUFFER_SHADING_MODEL_PACK_SCALE = 1.0f - 2.0f * BURT_GBUFFER_SHADING_MODEL_PACK_BIAS;
 
 float BurtEncodeMetallicAndShadingModelForGBuffer(float metallicOrScatter, float shadingModelID)
 {
-    // Point-sampled ARGBHalf GBuffer1 can safely store four model buckets while keeping useful 0..1 material precision.
     float modelID = clamp(BurtResolveSurfaceShadingModel(shadingModelID), 0.0f, BURT_GBUFFER_SHADING_MODEL_PACK_COUNT - 1.0f);
-    return (modelID + saturate(metallicOrScatter) * BURT_GBUFFER_SHADING_MODEL_PACK_SCALE) / BURT_GBUFFER_SHADING_MODEL_PACK_COUNT;
+    float material = BURT_GBUFFER_SHADING_MODEL_PACK_BIAS + saturate(metallicOrScatter) * BURT_GBUFFER_SHADING_MODEL_PACK_SCALE;
+    return (modelID + material) / BURT_GBUFFER_SHADING_MODEL_PACK_COUNT;
 }
 
 float BurtDecodeMetallicAndShadingModelFromGBuffer(float packedValue, out float shadingModelID)
 {
-    // The 0.999 encode scale prevents metallic=1 from spilling into the next shading model bucket.
     float scaled = saturate(packedValue) * BURT_GBUFFER_SHADING_MODEL_PACK_COUNT;
     shadingModelID = floor(min(scaled, BURT_GBUFFER_SHADING_MODEL_PACK_COUNT - BURT_EPSILON));
-    return saturate((scaled - shadingModelID) / BURT_GBUFFER_SHADING_MODEL_PACK_SCALE);
+    return saturate((scaled - shadingModelID - BURT_GBUFFER_SHADING_MODEL_PACK_BIAS) / BURT_GBUFFER_SHADING_MODEL_PACK_SCALE);
 }
 
 static const float BURT_HAIR_SCATTER_PACK_DIMENSION = 32.0f;
@@ -333,6 +354,43 @@ void BurtDecodeFabricRoughnessSilkFromGBuffer(float packedValue, out float fuzzR
     fuzzRoughness = ClampPerceptualRoughness(localRoughness / BURT_FABRIC_ROUGHNESS_SILK_PACK_SCALE);
 }
 
+static const float BURT_FOLIAGE_SPECULAR_PACK_SCALE = 0.499f;
+
+float BurtEncodeFoliageSpecularTypeForGBuffer(float specularScale, float useSpecularColor)
+{
+    float packedSpecular = saturate(specularScale) * BURT_FOLIAGE_SPECULAR_PACK_SCALE;
+    return useSpecularColor > 0.5f ? 0.5f + packedSpecular : packedSpecular;
+}
+
+void BurtDecodeFoliageSpecularTypeFromGBuffer(float packedValue, out float specularScale, out float useSpecularColor)
+{
+    float packed = saturate(packedValue);
+    useSpecularColor = packed >= 0.5f ? 1.0f : 0.0f;
+    float localSpecular = useSpecularColor > 0.5f ? packed - 0.5f : packed;
+    specularScale = saturate(localSpecular / BURT_FOLIAGE_SPECULAR_PACK_SCALE);
+}
+
+static const float BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_DIMENSION = 32.0f;
+static const float BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_MAX_BUCKET = BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_DIMENSION - 1.0f;
+static const float BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_MAX_VALUE =
+    BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_DIMENSION * BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_DIMENSION - 1.0f;
+
+float BurtEncodeFoliageBackLightNdotLForGBuffer(float backLight, float transmissionNdotL)
+{
+    float backLightBucket = floor(saturate(backLight) * BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_MAX_BUCKET + 0.5f);
+    float ndotlBucket = floor(saturate(transmissionNdotL) * BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_MAX_BUCKET + 0.5f);
+    return (ndotlBucket * BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_DIMENSION + backLightBucket) / BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_MAX_VALUE;
+}
+
+void BurtDecodeFoliageBackLightNdotLFromGBuffer(float packedValue, out float backLight, out float transmissionNdotL)
+{
+    float packedBucket = floor(saturate(packedValue) * BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_MAX_VALUE + 0.5f);
+    float ndotlBucket = floor(packedBucket / BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_DIMENSION);
+    float backLightBucket = packedBucket - ndotlBucket * BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_DIMENSION;
+    backLight = saturate(backLightBucket / BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_MAX_BUCKET);
+    transmissionNdotL = saturate(ndotlBucket / BURT_FOLIAGE_BACKLIGHT_NDOTL_PACK_MAX_BUCKET);
+}
+
 // Creates semantic GBuffer data from material inputs. Hair passes use normalWS as the stored strand direction.
 BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 emission)
 {
@@ -344,22 +402,26 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
     data.normalWS = BurtSafeNormalize(normalWS);
     data.clearCoatNormalWS = data.normalWS;
     data.tangentWS = BurtOrthonormalizeTangentWS(data.normalWS, tangentWS.xyz);
-#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
+#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL || BURT_ACTIVE_FOLIAGE_SHADING_MODEL
     data.anisotropy = 0.0f;
-#elif BURT_ENABLE_SUBSURFACE_SHADING
-    data.anisotropy = BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID) ? 0.0f : clamp(surfaceData.anisotropy, -1.0f, 1.0f);
+#elif BURT_ENABLE_SUBSURFACE_SHADING || BURT_ENABLE_FOLIAGE_SHADING
+    data.anisotropy = (BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID) || BurtIsActiveFoliageShadingModel(surfaceData.shadingModelID)) ? 0.0f : clamp(surfaceData.anisotropy, -1.0f, 1.0f);
 #else
     data.anisotropy = clamp(surfaceData.anisotropy, -1.0f, 1.0f);
 #endif
 
-#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
+#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL || BURT_ACTIVE_FOLIAGE_SHADING_MODEL
     data.metallic = 0.0f;
-    data.materialChannel = 1.0f;
-#elif BURT_ENABLE_SUBSURFACE_SHADING
-    if (BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID))
+    data.materialChannel = BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+        ? BurtEncodeFoliageSpecularTypeForGBuffer(surfaceData.foliageSpecularScale, surfaceData.foliageUseSpecularColor)
+        : 1.0f;
+#elif BURT_ENABLE_SUBSURFACE_SHADING || BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID) || BurtIsActiveFoliageShadingModel(surfaceData.shadingModelID))
     {
         data.metallic = 0.0f;
-        data.materialChannel = 1.0f;
+        data.materialChannel = BurtIsActiveFoliageShadingModel(surfaceData.shadingModelID)
+            ? BurtEncodeFoliageSpecularTypeForGBuffer(surfaceData.foliageSpecularScale, surfaceData.foliageUseSpecularColor)
+            : 1.0f;
     }
     else
     {
@@ -406,6 +468,15 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
     data.fabricFuzzWeight = 0.0f;
     data.fabricFuzzRoughness = 0.75f;
     data.fabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
+    data.foliageTransmissionColor = float3(0.55f, 0.85f, 0.35f);
+    data.foliageTransmissionWeight = 0.0f;
+    data.foliageThickness = 0.5f;
+    data.foliageBackLight = 0.5f;
+    data.foliageTransmissionNdotL = 0.5f;
+    data.foliageSpecularScale = 1.0f;
+    data.foliageUseSpecularColor = 0.0f;
+    data.foliageScreenSpaceShadowIntensity = 0.0f;
+    data.foliageIsGrass = 0.0f;
 
 #if BURT_ACTIVE_CLEAR_COAT_SHADING_MODEL
     data.clearCoatMask = saturate(surfaceData.clearCoatMask);
@@ -451,6 +522,35 @@ BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normal
         data.fabricFuzzWeight = saturate(surfaceData.fabricFuzzWeight);
         data.fabricFuzzRoughness = ClampPerceptualRoughness(surfaceData.fabricFuzzRoughness);
         data.fabricFuzzColor = max(surfaceData.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f));
+    }
+#endif
+
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    data.foliageTransmissionColor = max(surfaceData.foliageTransmissionColor, float3(0.0f, 0.0f, 0.0f));
+    data.foliageTransmissionWeight = surfaceData.foliageIsGrass > 0.5f
+        ? max(surfaceData.foliageTransmissionWeight, 0.0f)
+        : saturate(surfaceData.foliageTransmissionWeight);
+    data.foliageThickness = saturate(surfaceData.foliageThickness);
+    data.foliageBackLight = saturate(surfaceData.foliageBackLight);
+    data.foliageTransmissionNdotL = saturate(surfaceData.foliageTransmissionNdotL);
+    data.foliageSpecularScale = saturate(surfaceData.foliageSpecularScale);
+    data.foliageUseSpecularColor = saturate(surfaceData.foliageUseSpecularColor);
+    data.foliageScreenSpaceShadowIntensity = max(surfaceData.foliageScreenSpaceShadowIntensity, 0.0f);
+    data.foliageIsGrass = saturate(surfaceData.foliageIsGrass);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveFoliageShadingModel(data.shadingModelID))
+    {
+        data.foliageTransmissionColor = max(surfaceData.foliageTransmissionColor, float3(0.0f, 0.0f, 0.0f));
+        data.foliageTransmissionWeight = surfaceData.foliageIsGrass > 0.5f
+            ? max(surfaceData.foliageTransmissionWeight, 0.0f)
+            : saturate(surfaceData.foliageTransmissionWeight);
+        data.foliageThickness = saturate(surfaceData.foliageThickness);
+        data.foliageBackLight = saturate(surfaceData.foliageBackLight);
+        data.foliageTransmissionNdotL = saturate(surfaceData.foliageTransmissionNdotL);
+        data.foliageSpecularScale = saturate(surfaceData.foliageSpecularScale);
+        data.foliageUseSpecularColor = saturate(surfaceData.foliageUseSpecularColor);
+        data.foliageScreenSpaceShadowIntensity = max(surfaceData.foliageScreenSpaceShadowIntensity, 0.0f);
+        data.foliageIsGrass = saturate(surfaceData.foliageIsGrass);
     }
 #endif
 
@@ -533,6 +633,12 @@ BurtGBufferData BurtCreateSubsurfaceGBufferData(BurtSurfaceData surfaceData, flo
 BurtGBufferData BurtCreateFabricGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 emission)
 {
     surfaceData.shadingModelID = BURT_SHADING_MODEL_FABRIC;
+    return BurtCreateGBufferData(surfaceData, normalWS, tangentWS, emission);
+}
+
+BurtGBufferData BurtCreateFoliageGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 emission)
+{
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_FOLIAGE;
     return BurtCreateGBufferData(surfaceData, normalWS, tangentWS, emission);
 }
 
@@ -789,6 +895,107 @@ float BurtGetFabricIsSilk(BurtGBufferData gbufferData)
 #endif
 }
 
+float3 BurtGetFoliageTransmissionColor(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return max(gbufferData.foliageTransmissionColor, float3(0.0f, 0.0f, 0.0f));
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID) ? max(gbufferData.foliageTransmissionColor, float3(0.0f, 0.0f, 0.0f)) : float3(0.0f, 0.0f, 0.0f);
+#else
+    return float3(0.0f, 0.0f, 0.0f);
+#endif
+}
+
+float BurtGetFoliageTransmissionWeight(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return gbufferData.foliageIsGrass > 0.5f ? max(gbufferData.foliageTransmissionWeight, 0.0f) : saturate(gbufferData.foliageTransmissionWeight);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID)
+        ? (gbufferData.foliageIsGrass > 0.5f ? max(gbufferData.foliageTransmissionWeight, 0.0f) : saturate(gbufferData.foliageTransmissionWeight))
+        : 0.0f;
+#else
+    return 0.0f;
+#endif
+}
+
+float BurtGetFoliageThickness(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return saturate(gbufferData.foliageThickness);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.foliageThickness) : 0.5f;
+#else
+    return 0.5f;
+#endif
+}
+
+float BurtGetFoliageBackLight(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return saturate(gbufferData.foliageBackLight);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.foliageBackLight) : 0.0f;
+#else
+    return 0.0f;
+#endif
+}
+
+float BurtGetFoliageTransmissionNdotL(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return saturate(gbufferData.foliageTransmissionNdotL);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.foliageTransmissionNdotL) : 0.5f;
+#else
+    return 0.5f;
+#endif
+}
+
+float BurtGetFoliageSpecularScale(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return saturate(gbufferData.foliageSpecularScale);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.foliageSpecularScale) : 0.0f;
+#else
+    return 0.0f;
+#endif
+}
+
+float BurtGetFoliageUseSpecularColor(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return saturate(gbufferData.foliageUseSpecularColor);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.foliageUseSpecularColor) : 0.0f;
+#else
+    return 0.0f;
+#endif
+}
+
+float BurtGetFoliageIsGrass(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return saturate(gbufferData.foliageIsGrass);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID) ? saturate(gbufferData.foliageIsGrass) : 0.0f;
+#else
+    return 0.0f;
+#endif
+}
+
+float BurtGetFoliageScreenSpaceShadowIntensity(BurtGBufferData gbufferData)
+{
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return max(gbufferData.foliageScreenSpaceShadowIntensity, 0.0f);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID) ? max(gbufferData.foliageScreenSpaceShadowIntensity, 0.0f) : 0.0f;
+#else
+    return 0.0f;
+#endif
+}
+
 float BurtGetGBufferMaterialChannel(BurtGBufferData gbufferData)
 {
 #if BURT_ACTIVE_HAIR_SHADING_MODEL
@@ -809,12 +1016,12 @@ float BurtGetGBufferMaterialChannel(BurtGBufferData gbufferData)
     }
 #endif
 
-#if BURT_ACTIVE_FABRIC_SHADING_MODEL
-    return BurtGetFabricFuzzWeight(gbufferData);
-#elif BURT_ENABLE_FABRIC_SHADING
-    if (BurtIsActiveFabricShadingModel(gbufferData.shadingModelID))
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return BurtGetFoliageSpecularScale(gbufferData);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID))
     {
-        return BurtGetFabricFuzzWeight(gbufferData);
+        return BurtGetFoliageSpecularScale(gbufferData);
     }
 #endif
 
@@ -884,6 +1091,21 @@ float4 BurtEncodeGBuffer3(BurtGBufferData data)
     }
 #endif
 
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    float encodedFoliageWeight = data.foliageIsGrass > 0.5f
+        ? saturate(data.foliageTransmissionWeight * 0.1f)
+        : saturate(data.foliageTransmissionWeight);
+    return float4(max(data.foliageTransmissionColor, float3(0.0f, 0.0f, 0.0f)), encodedFoliageWeight);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveFoliageShadingModel(data.shadingModelID))
+    {
+        float encodedFoliageWeight = data.foliageIsGrass > 0.5f
+            ? saturate(data.foliageTransmissionWeight * 0.1f)
+            : saturate(data.foliageTransmissionWeight);
+        return float4(max(data.foliageTransmissionColor, float3(0.0f, 0.0f, 0.0f)), encodedFoliageWeight);
+    }
+#endif
+
     return BurtEncodeClearCoatOrDefaultGBuffer3(data);
 }
 
@@ -934,6 +1156,23 @@ float4 BurtEncodeGBuffer4(BurtGBufferData data)
     }
 #endif
 
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    return float4(
+        max(data.foliageScreenSpaceShadowIntensity, 0.0f),
+        0.0f,
+        BurtEncodeFoliageBackLightNdotLForGBuffer(data.foliageBackLight, data.foliageTransmissionNdotL),
+        saturate(data.foliageThickness));
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveFoliageShadingModel(data.shadingModelID))
+    {
+        return float4(
+            max(data.foliageScreenSpaceShadowIntensity, 0.0f),
+            0.0f,
+            BurtEncodeFoliageBackLightNdotLForGBuffer(data.foliageBackLight, data.foliageTransmissionNdotL),
+            saturate(data.foliageThickness));
+    }
+#endif
+
     return float4(
         encodedTangentWS,
         clamp(data.anisotropy, -1.0f, 1.0f) * 0.5f + 0.5f,
@@ -945,7 +1184,7 @@ BurtEncodedGBuffer BurtEncodeGBuffer(BurtGBufferData data)
 {
     BurtEncodedGBuffer encoded;
 
-    encoded.gbuffer0 = float4(saturate(data.baseColor), saturate(data.occlusion));
+    encoded.gbuffer0 = float4(max(data.baseColor, float3(0.0f, 0.0f, 0.0f)), saturate(data.occlusion));
 
     encoded.gbuffer1 = float4(BurtEncodeNormalWSForGBuffer(data.normalWS), BurtEncodeMetallicAndShadingModelForGBuffer(data.materialChannel, data.shadingModelID), saturate(data.smoothness));
 
@@ -962,7 +1201,7 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
 {
     BurtGBufferData data;
 
-    data.baseColor = saturate(encoded.gbuffer0.rgb);
+    data.baseColor = max(encoded.gbuffer0.rgb, float3(0.0f, 0.0f, 0.0f));
     data.occlusion = saturate(encoded.gbuffer0.a);
 
     data.normalWS = BurtDecodeNormalWSFromGBuffer(encoded.gbuffer1.rg);
@@ -982,10 +1221,10 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
     data.clearCoatNormalWS = data.normalWS;
 #endif
     data.tangentWS = BurtOrthonormalizeTangentWS(data.normalWS, BurtDecodeNormalWSFromGBuffer(encoded.gbuffer4.rg));
-#if BURT_ACTIVE_HAIR_SHADING_MODEL || BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
+#if BURT_ACTIVE_HAIR_SHADING_MODEL || BURT_ACTIVE_SUBSURFACE_SHADING_MODEL || BURT_ACTIVE_FOLIAGE_SHADING_MODEL
     data.anisotropy = 0.0f;
-#elif BURT_ENABLE_HAIR_SHADING || BURT_ENABLE_SUBSURFACE_SHADING
-    if (BurtIsActiveHairShadingModel(data.shadingModelID) || BurtIsActiveSubsurfaceShadingModel(data.shadingModelID))
+#elif BURT_ENABLE_HAIR_SHADING || BURT_ENABLE_SUBSURFACE_SHADING || BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveHairShadingModel(data.shadingModelID) || BurtIsActiveSubsurfaceShadingModel(data.shadingModelID) || BurtIsActiveFoliageShadingModel(data.shadingModelID))
     {
         data.anisotropy = 0.0f;
     }
@@ -996,10 +1235,10 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
 #else
     data.anisotropy = clamp(encoded.gbuffer4.b * 2.0f - 1.0f, -1.0f, 1.0f);
 #endif
-#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
+#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL || BURT_ACTIVE_FOLIAGE_SHADING_MODEL
     data.metallic = 0.0f;
-#elif BURT_ENABLE_SUBSURFACE_SHADING
-    if (BurtIsActiveSubsurfaceShadingModel(data.shadingModelID))
+#elif BURT_ENABLE_SUBSURFACE_SHADING || BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveSubsurfaceShadingModel(data.shadingModelID) || BurtIsActiveFoliageShadingModel(data.shadingModelID))
     {
         data.metallic = 0.0f;
     }
@@ -1027,6 +1266,19 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
     data.hairSecondarySpecularShift = 0.0f;
     data.hairSpecularColor = float3(1.0f, 1.0f, 1.0f);
     data.hairSecondarySpecularColor = float3(1.0f, 1.0f, 1.0f);
+    data.fabricIsSilk = 0.0f;
+    data.fabricFuzzWeight = 0.0f;
+    data.fabricFuzzRoughness = 0.75f;
+    data.fabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
+    data.foliageTransmissionColor = float3(0.0f, 0.0f, 0.0f);
+    data.foliageTransmissionWeight = 0.0f;
+    data.foliageThickness = 0.5f;
+    data.foliageBackLight = 0.0f;
+    data.foliageTransmissionNdotL = 0.5f;
+    data.foliageSpecularScale = 0.0f;
+    data.foliageUseSpecularColor = 0.0f;
+    data.foliageScreenSpaceShadowIntensity = 0.0f;
+    data.foliageIsGrass = 0.0f;
 
 #if BURT_ACTIVE_HAIR_SHADING_MODEL
     data.hairSpecularColor = max(encoded.gbuffer3.rgb, float3(0.0f, 0.0f, 0.0f));
@@ -1085,6 +1337,33 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
         BurtDecodeFabricRoughnessSilkFromGBuffer(encoded.gbuffer4.a, data.fabricFuzzRoughness, data.fabricIsSilk);
     }
 #endif
+
+#if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
+    data.foliageTransmissionColor = max(encoded.gbuffer3.rgb, float3(0.0f, 0.0f, 0.0f));
+    BurtDecodeFoliageSpecularTypeFromGBuffer(data.materialChannel, data.foliageSpecularScale, data.foliageUseSpecularColor);
+    data.foliageIsGrass = 1.0f - saturate(data.foliageUseSpecularColor);
+    data.foliageTransmissionWeight = data.foliageIsGrass > 0.5f
+        ? max(encoded.gbuffer3.a * 10.0f, 0.0f)
+        : saturate(encoded.gbuffer3.a);
+    data.foliageScreenSpaceShadowIntensity = max(encoded.gbuffer4.r, 0.0f);
+    data.tangentWS = BurtCreateFallbackTangentWS(data.normalWS);
+    BurtDecodeFoliageBackLightNdotLFromGBuffer(encoded.gbuffer4.b, data.foliageBackLight, data.foliageTransmissionNdotL);
+    data.foliageThickness = saturate(encoded.gbuffer4.a);
+#elif BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveFoliageShadingModel(data.shadingModelID))
+    {
+        data.foliageTransmissionColor = max(encoded.gbuffer3.rgb, float3(0.0f, 0.0f, 0.0f));
+        BurtDecodeFoliageSpecularTypeFromGBuffer(data.materialChannel, data.foliageSpecularScale, data.foliageUseSpecularColor);
+        data.foliageIsGrass = 1.0f - saturate(data.foliageUseSpecularColor);
+        data.foliageTransmissionWeight = data.foliageIsGrass > 0.5f
+            ? max(encoded.gbuffer3.a * 10.0f, 0.0f)
+            : saturate(encoded.gbuffer3.a);
+        data.foliageScreenSpaceShadowIntensity = max(encoded.gbuffer4.r, 0.0f);
+        data.tangentWS = BurtCreateFallbackTangentWS(data.normalWS);
+        BurtDecodeFoliageBackLightNdotLFromGBuffer(encoded.gbuffer4.b, data.foliageBackLight, data.foliageTransmissionNdotL);
+        data.foliageThickness = saturate(encoded.gbuffer4.a);
+    }
+#endif
     data.smoothness = saturate(encoded.gbuffer1.a);
 
     data.perceptualRoughness = ClampPerceptualRoughness(PerceptualSmoothnessToPerceptualRoughness(data.smoothness));
@@ -1107,10 +1386,10 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData gbufferData)
     BurtPBRMaterialData materialData;
 
     materialData.baseColor = gbufferData.baseColor;
-#if BURT_ACTIVE_HAIR_SHADING_MODEL
+#if BURT_ACTIVE_HAIR_SHADING_MODEL || BURT_ACTIVE_FOLIAGE_SHADING_MODEL
     materialData.metallic = 0.0f;
-#elif BURT_ENABLE_HAIR_SHADING
-    if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+#elif BURT_ENABLE_HAIR_SHADING || BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID) || BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID))
     {
         materialData.metallic = 0.0f;
     }
@@ -1136,6 +1415,16 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData gbufferData)
     materialData.fabricFuzzWeight = BurtGetFabricFuzzWeight(gbufferData);
     materialData.fabricFuzzRoughness = BurtGetFabricFuzzRoughness(gbufferData);
     materialData.fabricFuzzColor = BurtGetFabricFuzzColor(gbufferData);
+    materialData.foliageActive = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+    materialData.foliageTransmissionColor = BurtGetFoliageTransmissionColor(gbufferData);
+    materialData.foliageTransmissionWeight = BurtGetFoliageTransmissionWeight(gbufferData);
+    materialData.foliageThickness = BurtGetFoliageThickness(gbufferData);
+    materialData.foliageBackLight = BurtGetFoliageBackLight(gbufferData);
+    materialData.foliageTransmissionNdotL = BurtGetFoliageTransmissionNdotL(gbufferData);
+    materialData.foliageSpecularScale = BurtGetFoliageSpecularScale(gbufferData);
+    materialData.foliageUseSpecularColor = BurtGetFoliageUseSpecularColor(gbufferData);
+    materialData.foliageScreenSpaceShadowIntensity = BurtGetFoliageScreenSpaceShadowIntensity(gbufferData);
+    materialData.foliageIsGrass = BurtGetFoliageIsGrass(gbufferData);
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
     materialData.reflectance = BURT_SUBSURFACE_FIXED_REFLECTANCE;
 #elif BURT_ENABLE_SUBSURFACE_SHADING
@@ -1145,10 +1434,10 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData gbufferData)
 #endif
     materialData.occlusion = gbufferData.occlusion;
     materialData.smoothness = gbufferData.smoothness;
-#if BURT_ACTIVE_HAIR_SHADING_MODEL || BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
+#if BURT_ACTIVE_HAIR_SHADING_MODEL || BURT_ACTIVE_SUBSURFACE_SHADING_MODEL || BURT_ACTIVE_FOLIAGE_SHADING_MODEL
     materialData.anisotropy = 0.0f;
-#elif BURT_ENABLE_HAIR_SHADING || BURT_ENABLE_SUBSURFACE_SHADING
-    if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID) || BurtIsActiveSubsurfaceShadingModel(gbufferData.shadingModelID))
+#elif BURT_ENABLE_HAIR_SHADING || BURT_ENABLE_SUBSURFACE_SHADING || BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID) || BurtIsActiveSubsurfaceShadingModel(gbufferData.shadingModelID) || BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID))
     {
         materialData.anisotropy = 0.0f;
     }
@@ -1173,6 +1462,12 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData gbufferData)
     materialData.diffuseColor = DiffuseColorFromBaseColor(diffuseBaseColor, materialData.metallic);
     materialData.f0 = DielectricReflectanceToF0(materialData.baseColor, materialData.reflectance, materialData.metallic);
     materialData.f90 = ApproximateF90(materialData.f0);
+    if (materialData.foliageActive > 0.5f)
+    {
+        materialData.f90 = materialData.foliageUseSpecularColor > 0.5f
+            ? saturate(materialData.baseColor * materialData.foliageSpecularScale)
+            : saturate((materialData.baseColor * 0.9f + 0.1f) * materialData.foliageSpecularScale * 3.0f);
+    }
 
     return materialData;
 }

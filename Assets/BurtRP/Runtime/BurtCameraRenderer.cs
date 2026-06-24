@@ -89,6 +89,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
                         Debug.Log(renderGraphDebugDump); // 输出完整 RenderGraph Debug 文本；默认关闭，避免每帧刷屏。
                     }
                 }
+
+                context.Submit(); // Keep the jittered camera projection alive until SRP has submitted the queued draw commands.
             }
             finally
             {
@@ -99,7 +101,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
             }
 
             BurtTemporalAAUtility.CommitRequest(request);
-            context.Submit(); // 把当前 request 累积的所有渲染命令提交给 Unity 执行。
             renderGraph.FlushDeferredResourceReleases(); // Release graph-owned GraphicsBuffers only after queued draw commands have been submitted.
         }
 

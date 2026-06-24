@@ -294,7 +294,7 @@ namespace Burt.RenderPipeline
                 return fallbackProfileParamLut;
             }
 
-            fallbackProfileParamLut = new Texture2D(1, 1, SelectProfileParamLutFormat(), false, true)
+            fallbackProfileParamLut = new Texture2D(ProfileParamLutWidth, ProfileParamLutHeight, SelectProfileParamLutFormat(), false, true)
             {
                 name = "Burt Subsurface Profile Param LUT Fallback",
                 hideFlags = HideFlags.HideAndDontSave,
@@ -303,7 +303,13 @@ namespace Burt.RenderPipeline
                 anisoLevel = 0
             };
 
-            fallbackProfileParamLut.SetPixel(0, 0, Color.black);
+            var fallbackPixels = new Color[ProfileParamLutWidth * ProfileParamLutHeight];
+            for (var profileIndex = 0; profileIndex < ProfileParamLutHeight; profileIndex++)
+            {
+                FillProfileParamRow(fallbackPixels, profileIndex, BurtSubsurfaceProfileSettings.Default);
+            }
+
+            fallbackProfileParamLut.SetPixels(fallbackPixels);
             fallbackProfileParamLut.Apply(false, true);
             return fallbackProfileParamLut;
         }

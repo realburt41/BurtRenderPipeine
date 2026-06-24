@@ -75,8 +75,9 @@ groupshared float4 BurtSSSSharedDiffuseDepth[BURT_SSS_SHARED_TILE_AREA];
 groupshared float3 BurtSSSSharedNormalWS[BURT_SSS_SHARED_TILE_AREA];
 
 static const float3 BURT_SSS_LUMINANCE = float3(0.3, 0.59, 0.11);
-static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 5.0;
-static const float BURT_GBUFFER_SHADING_MODEL_PACK_SCALE = 0.999;
+static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 6.0;
+static const float BURT_GBUFFER_SHADING_MODEL_PACK_BIAS = 0.02;
+static const float BURT_GBUFFER_SHADING_MODEL_PACK_SCALE = 1.0 - 2.0 * BURT_GBUFFER_SHADING_MODEL_PACK_BIAS;
 static const float BURT_SHADING_MODEL_SUBSURFACE = 3.0;
 static const float BURT_SUBSURFACE_CONTROL_PACK_DIMENSION = 32.0;
 static const float BURT_SUBSURFACE_CONTROL_PACK_MAX_BUCKET = 31.0;
@@ -183,7 +184,7 @@ float BurtSSSDecodeMaterialChannel(float packedValue, out float shadingModelID)
 {
     float scaled = saturate(packedValue) * BURT_GBUFFER_SHADING_MODEL_PACK_COUNT;
     shadingModelID = floor(min(scaled, BURT_GBUFFER_SHADING_MODEL_PACK_COUNT - 0.00001));
-    return saturate((scaled - shadingModelID) / BURT_GBUFFER_SHADING_MODEL_PACK_SCALE);
+    return saturate((scaled - shadingModelID - BURT_GBUFFER_SHADING_MODEL_PACK_BIAS) / BURT_GBUFFER_SHADING_MODEL_PACK_SCALE);
 }
 
 void BurtSSSDecodePowerAmbient(float packedControl, out float power, out float ambient)

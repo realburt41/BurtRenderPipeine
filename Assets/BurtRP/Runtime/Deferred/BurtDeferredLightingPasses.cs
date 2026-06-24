@@ -54,6 +54,10 @@ namespace Burt.RenderPipeline
         private static readonly int CameraClipPlanesId = Shader.PropertyToID("_BurtDeferredCameraClipPlanes");
         private static readonly int ScreenSizeId = Shader.PropertyToID("_BurtDeferredScreenSize");
         private static readonly int SubsurfaceDiffuseLuminanceOutputEnabledId = Shader.PropertyToID("_BurtDeferredSubsurfaceDiffuseLuminanceOutputEnabled");
+        private static readonly int BurtGIApplyIndirectDiffuseTextureId = Shader.PropertyToID("_BurtGIDiffuseIndirectTexture");
+        private static readonly int BurtGIApplyIndirectBackfaceDiffuseTextureId = Shader.PropertyToID("_BurtGIBackfaceDiffuseIndirectTexture");
+        private static readonly int BurtGIApplyIndirectRoughSpecularTextureId = Shader.PropertyToID("_BurtGIRoughSpecularIndirectTexture");
+        private static readonly int BurtGIApplyIndirectParamsId = Shader.PropertyToID("_BurtGIApplyIndirectParams");
 
         private readonly string passName;
         private readonly int shaderPassIndex;
@@ -86,6 +90,14 @@ namespace Burt.RenderPipeline
             if (BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(builder.Request, builder.Asset))
             {
                 builder.ReadScreenSpaceAmbientOcclusion();
+            }
+
+            if (ShouldUseBurtGIApplyIndirect(builder.Request, builder.Asset, builder.ResourceRegistry))
+            {
+                builder.ReadScreenSpaceGlobalIllumination();
+                builder.ReadBurtGIBackfaceDiffuseIndirect();
+                builder.ReadBurtGIRoughSpecularIndirect();
+                builder.ReadGlobalResource(BurtRenderGraphResourceRegistry.BurtGIApplyIndirectGlobalsName);
             }
 
             if (ShouldUseRuntimeTiledLighting(builder.Request, builder.Asset, builder.ResourceRegistry))
@@ -161,6 +173,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBufferObjectIndexId, gbufferObjectIndexTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier);
             BindScreenSpaceAmbientOcclusion(context, cmd, material);
+            BindBurtGIApplyIndirect(context, cmd, material);
             BindAdditionalLightBuffer(context, cmd, material);
             BindRuntimeTiledLighting(context, cmd);
             UploadMainLightShadowReceiverGlobals(context, cmd, material);
@@ -225,6 +238,50 @@ namespace Burt.RenderPipeline
             }
         }
 
+        private static void BindBurtGIApplyIndirect(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
+        {
+            var enabled = false;
+            var intensity = 0f;
+            var target = context != null
+                ? context.ScreenSpaceGlobalIlluminationTarget
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
+            var backfaceDiffuseTarget = context != null
+                ? context.BurtGIBackfaceDiffuseIndirectTarget
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName);
+            var roughSpecularTarget = context != null
+                ? context.BurtGIRoughSpecularIndirectTarget
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectName);
+
+            if (context != null &&
+                target.IsValid &&
+                backfaceDiffuseTarget.IsValid &&
+                roughSpecularTarget.IsValid &&
+                BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(context.Request, context.Asset))
+            {
+                var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(context.Request, context.Asset);
+                enabled = settings.Enabled;
+                intensity = settings.Intensity;
+            }
+
+            if (enabled)
+            {
+                cmd.SetGlobalTexture(BurtGIApplyIndirectDiffuseTextureId, target.Identifier);
+            }
+            else
+            {
+                cmd.SetGlobalTexture(BurtGIApplyIndirectDiffuseTextureId, Texture2D.blackTexture);
+            }
+
+            cmd.SetGlobalTexture(BurtGIApplyIndirectBackfaceDiffuseTextureId, enabled ? backfaceDiffuseTarget.Identifier : Texture2D.blackTexture);
+            cmd.SetGlobalTexture(BurtGIApplyIndirectRoughSpecularTextureId, enabled ? roughSpecularTarget.Identifier : Texture2D.blackTexture);
+            var applyParams = new Vector4(enabled ? 1f : 0f, intensity, enabled ? 1f : 0f, enabled ? 1f : 0f);
+            cmd.SetGlobalVector(BurtGIApplyIndirectParamsId, applyParams);
+            if (material != null)
+            {
+                material.SetVector(BurtGIApplyIndirectParamsId, applyParams);
+            }
+        }
+
         private static void BindAdditionalLightBuffer(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
         {
             var additionalLightBuffer = context != null
@@ -271,6 +328,18 @@ namespace Burt.RenderPipeline
                 resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightCountBufferName) &&
                 resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightListBufferName) &&
                 resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.TileLightOffsetBufferName);
+        }
+
+        private static bool ShouldUseBurtGIApplyIndirect(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            BurtRenderGraphResourceRegistry resourceRegistry)
+        {
+            return BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset) &&
+                resourceRegistry != null &&
+                resourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName) &&
+                resourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName) &&
+                resourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectName);
         }
 
         private static bool ShouldUseRuntimeClusteredLighting(
@@ -619,6 +688,14 @@ namespace Burt.RenderPipeline
     {
         public BurtDeferredFabricLightingPass()
             : base("Burt Deferred Fabric Lighting", 4, true)
+        {
+        }
+    }
+
+    internal sealed class BurtDeferredFoliageLightingPass : BurtDeferredLightingPass
+    {
+        public BurtDeferredFoliageLightingPass()
+            : base("Burt Deferred Foliage Lighting", 5, true)
         {
         }
     }

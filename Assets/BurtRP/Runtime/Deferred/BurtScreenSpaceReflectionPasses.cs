@@ -120,8 +120,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceReflectionTracePass : BurtRenderPass
     {
-        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionShaderName;
-        private const string ScreenSpaceReflectionHiZTraceKeyword = "BURT_SSR_HIZ_TRACE";
+        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionTraceShaderName;
         private const float ScreenSpaceReflectionEdgeFadeWidth = 0.04f;
         private static readonly int CameraColorTextureId = BurtRenderGraphResourceRegistry.CameraColorTextureId;
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
@@ -200,7 +199,6 @@ namespace Burt.RenderPipeline
                 hiZMipCount > 1 &&
                 BurtHiZDepthPassUtility.IsHiZDepthShaderAvailable();
             var hiZTraceForShader = ShouldEnableHiZTraceVariant(settings, hasUsableHiZDepth);
-            SetKeyword(material, ScreenSpaceReflectionHiZTraceKeyword, hiZTraceForShader);
             var cmd = CommandBufferPool.Get(Name);
 
             cmd.SetRenderTarget(ssrColorTarget.Identifier);
@@ -316,18 +314,6 @@ namespace Burt.RenderPipeline
                 BurtScreenSpaceReflectionPassUtility.IsScreenSpaceReflectionHiZStepSavedDebugMode(BurtShadingDebugSettings.Mode));
         }
 
-        private static void SetKeyword(Material material, string keyword, bool enabled)
-        {
-            if (enabled)
-            {
-                material.EnableKeyword(keyword);
-            }
-            else
-            {
-                material.DisableKeyword(keyword);
-            }
-        }
-
         private Material GetScreenSpaceReflectionMaterial()
         {
             if (screenSpaceReflectionMaterial != null)
@@ -355,7 +341,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceReflectionDenoisePass : BurtRenderPass
     {
-        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionShaderName;
+        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionDenoiseShaderName;
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -434,7 +420,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(SSRColorTextureId, ssrColorTarget.Identifier);
             cmd.SetGlobalVector(SSRSourceTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
             cmd.SetGlobalVector(SSRParams1Id, new Vector4(0f, 0f, BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderDebugMode(), 0.1f));
-            cmd.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalTexture(SSRDenoisedColorTextureId, ssrDenoisedColorTarget.Identifier);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
@@ -497,7 +483,12 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceReflectionTemporalPass : BurtRenderPass
     {
-        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionShaderName;
+        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionTemporalShaderName;
+        private const int TemporalPassIndex = 0;
+        private const int CopyTemporalColorPassIndex = 1;
+        private const int CopyDepthHistoryPassIndex = 2;
+        private const int CopyNormalRoughnessHistoryPassIndex = 3;
+        private const int CopyMomentHistoryPassIndex = 4;
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -586,7 +577,7 @@ namespace Burt.RenderPipeline
 
             cmd.SetRenderTarget(ssrTemporalColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
-            cmd.DrawProcedural(Matrix4x4.identity, material, 3, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, TemporalPassIndex, MeshTopology.Triangles, 3, 1);
             cmd.GenerateMips(ssrTemporalColorTarget.Identifier);
             cmd.SetGlobalTexture(SSRTemporalColorTextureId, ssrTemporalColorTarget.Identifier);
 
@@ -597,21 +588,21 @@ namespace Burt.RenderPipeline
                 var currentMomentTarget = new RenderTargetIdentifier(SSRCurrentMomentTextureId);
                 cmd.SetRenderTarget(currentMomentTarget);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
-                cmd.DrawProcedural(Matrix4x4.identity, material, 7, MeshTopology.Triangles, 3, 1);
+                cmd.DrawProcedural(Matrix4x4.identity, material, CopyMomentHistoryPassIndex, MeshTopology.Triangles, 3, 1);
                 cmd.CopyTexture(currentMomentTarget, new RenderTargetIdentifier(history.Moment));
                 cmd.ReleaseTemporaryRT(SSRCurrentMomentTextureId);
 
                 cmd.SetRenderTarget(history.Color);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
-                cmd.DrawProcedural(Matrix4x4.identity, material, 4, MeshTopology.Triangles, 3, 1);
+                cmd.DrawProcedural(Matrix4x4.identity, material, CopyTemporalColorPassIndex, MeshTopology.Triangles, 3, 1);
 
                 cmd.SetRenderTarget(history.Depth);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
-                cmd.DrawProcedural(Matrix4x4.identity, material, 5, MeshTopology.Triangles, 3, 1);
+                cmd.DrawProcedural(Matrix4x4.identity, material, CopyDepthHistoryPassIndex, MeshTopology.Triangles, 3, 1);
 
                 cmd.SetRenderTarget(history.NormalRoughness);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
-                cmd.DrawProcedural(Matrix4x4.identity, material, 6, MeshTopology.Triangles, 3, 1);
+                cmd.DrawProcedural(Matrix4x4.identity, material, CopyNormalRoughnessHistoryPassIndex, MeshTopology.Triangles, 3, 1);
                 BurtScreenSpaceReflectionHistoryUtility.MarkHistoryValid(camera);
             }
 
@@ -718,7 +709,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceReflectionCompositePass : BurtRenderPass
     {
-        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionShaderName;
+        private const string ScreenSpaceReflectionShaderName = BurtScreenSpaceReflectionPassUtility.ScreenSpaceReflectionCompositeShaderName;
         private const float ScreenSpaceReflectionEdgeFadeWidth = 0.04f;
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
@@ -798,7 +789,7 @@ namespace Burt.RenderPipeline
             UploadCameraGlobals(cmd, camera, width, height);
             UploadSettings(cmd, settings, maxMip);
             cmd.SetGlobalVector(SSRSourceTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
-            cmd.DrawProcedural(Matrix4x4.identity, material, 2, MeshTopology.Triangles, 3, 1);
+            cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
             cmd.ReleaseTemporaryRT(SSRCameraColorCopyTextureId);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
@@ -1954,6 +1945,10 @@ namespace Burt.RenderPipeline
     internal static class BurtScreenSpaceReflectionPassUtility
     {
         public const string ScreenSpaceReflectionShaderName = "Hidden/BurtRP/ScreenSpaceReflections";
+        public const string ScreenSpaceReflectionTraceShaderName = "Hidden/BurtRP/ScreenSpaceReflections/Trace";
+        public const string ScreenSpaceReflectionDenoiseShaderName = "Hidden/BurtRP/ScreenSpaceReflections/Denoise";
+        public const string ScreenSpaceReflectionCompositeShaderName = "Hidden/BurtRP/ScreenSpaceReflections/Composite";
+        public const string ScreenSpaceReflectionTemporalShaderName = "Hidden/BurtRP/ScreenSpaceReflections/Temporal";
         public const string ScreenSpaceReflectionHiZDiagnosticsShaderName = "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics";
         private static readonly bool EnableScreenSpaceReflectionHiZDiagnostics = true;
         private static int shaderAvailabilityFrame = -1;
@@ -2042,13 +2037,32 @@ namespace Burt.RenderPipeline
             }
 
             shaderAvailabilityFrame = frame;
-            shaderAvailable = Shader.Find(ScreenSpaceReflectionShaderName) != null;
+            shaderAvailable =
+                Shader.Find(ScreenSpaceReflectionTraceShaderName) != null &&
+                Shader.Find(ScreenSpaceReflectionDenoiseShaderName) != null &&
+                Shader.Find(ScreenSpaceReflectionCompositeShaderName) != null &&
+                Shader.Find(ScreenSpaceReflectionTemporalShaderName) != null;
             return shaderAvailable;
         }
 
         public static string ResolveScreenSpaceReflectionShaderStatusLabel()
         {
-            return IsScreenSpaceReflectionShaderAvailable() ? "Ready" : "Missing(" + ScreenSpaceReflectionShaderName + ")";
+            if (IsScreenSpaceReflectionShaderAvailable())
+            {
+                return "Ready";
+            }
+
+            return "Missing(" +
+                ResolveMissingShaderName(ScreenSpaceReflectionTraceShaderName,
+                    ResolveMissingShaderName(ScreenSpaceReflectionDenoiseShaderName,
+                        ResolveMissingShaderName(ScreenSpaceReflectionCompositeShaderName,
+                            ResolveMissingShaderName(ScreenSpaceReflectionTemporalShaderName, ScreenSpaceReflectionShaderName)))) +
+                ")";
+        }
+
+        private static string ResolveMissingShaderName(string shaderName, string fallbackName)
+        {
+            return Shader.Find(shaderName) == null ? shaderName : fallbackName;
         }
 
         public static bool IsScreenSpaceReflectionHiZDiagnosticsShaderAvailable()

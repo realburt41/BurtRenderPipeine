@@ -6,7 +6,7 @@ namespace Burt.RenderPipeline
 {
     public readonly struct BurtTemporalAASettings
     {
-        public static readonly BurtTemporalAASettings Default = new BurtTemporalAASettings(false, 0.93f, 1.0f, 0.95f, 0.04f, 0.28f, 1.15f, 1.25f, 1.35f, 16f, 56f, 0.22f, 0.96f, 0.06f, 0.5f, 0f, 0.875f, 0.65f, 0.35f, 0.18f, 1.2f, 1.1f, 1.15f, 0.12f);
+        public static readonly BurtTemporalAASettings Default = new BurtTemporalAASettings(false, 0.93f, 1.0f, 0.95f, 0.04f, 0.28f, 1.15f, 1.25f, 1.35f, 16f, 56f, 0.22f, 0.96f, 0.06f, 0.5f, 0f, 0.875f, 0.65f, 0.35f, 0.18f, 1.2f, 1.1f, 1.15f, 0.12f, 1.0f);
 
         public bool Enabled { get; }
         public float Feedback { get; }
@@ -32,9 +32,10 @@ namespace Burt.RenderPipeline
         public float DepthEdgeResponsiveStrength { get; }
         public float HistoryClampTightness { get; }
         public float DepthWeightedFilterFloor { get; }
+        public float UpscaleFactor { get; }
 
         public BurtTemporalAASettings(bool enabled, float feedback, float jitterScale, float clampStrength, float sharpness, float staticEdgeRelaxation)
-            : this(enabled, feedback, jitterScale, clampStrength, sharpness, staticEdgeRelaxation, 1.15f, 1.25f, 1.35f, 16f, 56f, 0.22f, 0.96f, 0.06f, 0.5f, 0f, 0.875f, 0.65f, 0.35f, 0.18f, 1.2f, 1.1f, 1.15f, 0.12f)
+            : this(enabled, feedback, jitterScale, clampStrength, sharpness, staticEdgeRelaxation, 1.15f, 1.25f, 1.35f, 16f, 56f, 0.22f, 0.96f, 0.06f, 0.5f, 0f, 0.875f, 0.65f, 0.35f, 0.18f, 1.2f, 1.1f, 1.15f, 0.12f, 1.0f)
         {
         }
 
@@ -62,7 +63,8 @@ namespace Burt.RenderPipeline
             float motionEdgeResponsiveStrength,
             float depthEdgeResponsiveStrength,
             float historyClampTightness,
-            float depthWeightedFilterFloor)
+            float depthWeightedFilterFloor,
+            float upscaleFactor)
         {
             Enabled = enabled;
             Feedback = feedback;
@@ -88,6 +90,7 @@ namespace Burt.RenderPipeline
             DepthEdgeResponsiveStrength = depthEdgeResponsiveStrength;
             HistoryClampTightness = historyClampTightness;
             DepthWeightedFilterFloor = depthWeightedFilterFloor;
+            UpscaleFactor = Mathf.Clamp(upscaleFactor, 1f, 2f);
         }
 
         public BurtTemporalAASettings WithJitterScale(float jitterScale)
@@ -116,7 +119,8 @@ namespace Burt.RenderPipeline
                 MotionEdgeResponsiveStrength,
                 DepthEdgeResponsiveStrength,
                 HistoryClampTightness,
-                DepthWeightedFilterFloor);
+                DepthWeightedFilterFloor,
+                UpscaleFactor);
         }
     }
 
@@ -145,6 +149,8 @@ namespace Burt.RenderPipeline
         public Matrix4x4 PreviousNonJitteredViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 InverseCurrentViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 InverseCurrentNonJitteredViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
+        public float CurrentPreExposure { get; private set; } = 1f;
+        public float HistoryExposureCorrection { get; private set; } = 1f;
         public BurtTemporalAASettings Settings { get; private set; } = BurtTemporalAASettings.Default;
         public BurtTemporalAAVelocityMode VelocityMode { get; internal set; } = BurtTemporalAAVelocityMode.Disabled;
         public bool ObjectMotionVectorPassDrawn { get; internal set; }
@@ -165,6 +171,8 @@ namespace Burt.RenderPipeline
                 PreviousNonJitteredViewProjectionMatrix = viewProjection,
                 InverseCurrentViewProjectionMatrix = viewProjection.inverse,
                 InverseCurrentNonJitteredViewProjectionMatrix = viewProjection.inverse,
+                CurrentPreExposure = 1f,
+                HistoryExposureCorrection = 1f,
                 Settings = BurtTemporalAASettings.Default,
                 VelocityMode = BurtTemporalAAVelocityMode.Disabled
             };
@@ -180,6 +188,8 @@ namespace Burt.RenderPipeline
             Matrix4x4 jitteredProjectionMatrix,
             Matrix4x4 previousViewProjectionMatrix,
             Matrix4x4 previousNonJitteredViewProjectionMatrix,
+            float currentPreExposure,
+            float historyExposureCorrection,
             bool historyValid)
         {
             var gpuJitteredProjectionMatrix = GL.GetGPUProjectionMatrix(jitteredProjectionMatrix, true);
@@ -202,6 +212,8 @@ namespace Burt.RenderPipeline
                 PreviousNonJitteredViewProjectionMatrix = previousNonJitteredViewProjectionMatrix,
                 InverseCurrentViewProjectionMatrix = currentViewProjection.inverse,
                 InverseCurrentNonJitteredViewProjectionMatrix = currentNonJitteredViewProjection.inverse,
+                CurrentPreExposure = Mathf.Max(currentPreExposure, 0.0001f),
+                HistoryExposureCorrection = Mathf.Max(historyExposureCorrection, 0f),
                 Settings = settings,
                 VelocityMode = BurtTemporalAAVelocityMode.CameraOnly
             };
@@ -278,10 +290,10 @@ namespace Burt.RenderPipeline
     {
         private const float ProjectionChangeEpsilon = 0.0001f;
         private const float TemporalAAPostProcessSignatureEpsilon = 0.001f;
-        private const int HaltonSequenceLength = 1024;
+        private const int HaltonSequenceLength = 8;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
-        private const int HistoryLayoutVersion = 7;
+        private const int HistoryLayoutVersion = 27;
 
         private sealed class CameraState
         {
@@ -303,6 +315,7 @@ namespace Burt.RenderPipeline
             public Vector2 PreviousRenderScale = Vector2.one;
             public Vector4 PreviousTemporalAAPostProcessSignature0;
             public Vector4 PreviousTemporalAAPostProcessSignature1;
+            public float PreviousPreExposure = 1f;
             public Matrix4x4 PreviousViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredProjectionMatrix = Matrix4x4.identity;
@@ -423,6 +436,9 @@ namespace Burt.RenderPipeline
             PruneDisposedCameraStates();
             var rendererMode = asset != null ? asset.RendererMode : BurtRendererMode.Forward;
             ResolveTemporalAAPostProcessSignature(out var postProcessSignature0, out var postProcessSignature1);
+            var currentPreExposure = BurtPreExposureUtility.ResolveForFrame(request, asset).PreExposure;
+            var previousPreExposure = state.HasPreviousCameraState ? state.PreviousPreExposure : currentPreExposure;
+            var historyExposureCorrection = currentPreExposure / Mathf.Max(previousPreExposure, 0.0001f);
             var colorDescriptor = CreateColorHistoryDescriptor(camera);
             var depthDescriptor = CreateScalarHistoryDescriptor(camera);
             var confidenceDescriptor = CreateScalarHistoryDescriptor(camera);
@@ -488,6 +504,8 @@ namespace Burt.RenderPipeline
                 jitteredProjection,
                 previousViewProjection,
                 previousNonJitteredViewProjection,
+                currentPreExposure,
+                historyExposureCorrection,
                 state.HasValidHistory && descriptorsMatch);
         }
 
@@ -517,6 +535,7 @@ namespace Burt.RenderPipeline
             state.PreviousTargetHeight = targetHeight;
             state.PreviousRenderScale = CalculateRenderScale(camera, colorDescriptor);
             ResolveTemporalAAPostProcessSignature(out state.PreviousTemporalAAPostProcessSignature0, out state.PreviousTemporalAAPostProcessSignature1);
+            state.PreviousPreExposure = temporalAA.CurrentPreExposure;
             state.PreviousViewProjectionMatrix = temporalAA.CurrentViewProjectionMatrix;
             state.PreviousNonJitteredViewProjectionMatrix = temporalAA.CurrentNonJitteredViewProjectionMatrix;
             state.PreviousNonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
@@ -585,7 +604,10 @@ namespace Burt.RenderPipeline
             return (mode >= BurtShadingDebugMode.TemporalAAHistory && mode <= BurtShadingDebugMode.TemporalAAResponsiveMask)
                 || mode == BurtShadingDebugMode.TemporalAARejectionReasons
                 || mode == BurtShadingDebugMode.TemporalAAFeedbackWeight
-                || mode == BurtShadingDebugMode.TemporalAAPrevUseCount;
+                || mode == BurtShadingDebugMode.TemporalAAPrevUseCount
+                || mode == BurtShadingDebugMode.TemporalAAMetadata
+                || mode == BurtShadingDebugMode.TemporalAAObjectMotionMask
+                || mode == BurtShadingDebugMode.TemporalAAUpscaleState;
         }
 
         public static BurtTemporalAAHistoryTextures EnsureHistoryTextures(Camera camera, out bool historyValid)
@@ -768,6 +790,7 @@ namespace Burt.RenderPipeline
         private static RenderTextureDescriptor CreateColorHistoryDescriptor(Camera camera)
         {
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            ApplyTemporalAAUpscaleFactor(ref descriptor);
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
@@ -778,6 +801,7 @@ namespace Burt.RenderPipeline
         internal static RenderTextureDescriptor CreateScalarHistoryDescriptor(Camera camera)
         {
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            ApplyTemporalAAUpscaleFactor(ref descriptor);
             descriptor.colorFormat = RenderTextureFormat.RFloat;
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
@@ -790,6 +814,7 @@ namespace Burt.RenderPipeline
         private static RenderTextureDescriptor CreateAntiFlickerHistoryDescriptor(Camera camera)
         {
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            ApplyTemporalAAUpscaleFactor(ref descriptor);
             descriptor.colorFormat = RenderTextureFormat.RGHalf;
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
@@ -797,6 +822,24 @@ namespace Burt.RenderPipeline
             descriptor.autoGenerateMips = false;
             descriptor.sRGB = false;
             return descriptor;
+        }
+
+        private static void ApplyTemporalAAUpscaleFactor(ref RenderTextureDescriptor descriptor)
+        {
+            var factor = Mathf.Clamp(ResolveTemporalAAUpscaleFactor(), 1f, 2f);
+            if (factor <= 1.0001f)
+            {
+                return;
+            }
+
+            descriptor.width = Mathf.Max(1, Mathf.RoundToInt(descriptor.width / factor));
+            descriptor.height = Mathf.Max(1, Mathf.RoundToInt(descriptor.height / factor));
+        }
+
+        private static float ResolveTemporalAAUpscaleFactor()
+        {
+            var temporalAA = GetTemporalAAVolumeComponent();
+            return temporalAA != null && temporalAA.IsEnabled() ? temporalAA.upscaleFactor.value : BurtTemporalAASettings.Default.UpscaleFactor;
         }
 
         private static RenderTexture CreateHistoryTexture(RenderTextureDescriptor descriptor, string name, FilterMode filterMode)
@@ -1010,9 +1053,11 @@ namespace Burt.RenderPipeline
             var tonemapping = stack.GetComponent<BurtTonemappingVolumeComponent>();
             var exposure = stack.GetComponent<BurtExposureVolumeComponent>();
             var colorAdjustments = stack.GetComponent<BurtColorAdjustmentsVolumeComponent>();
+            var temporalAA = stack.GetComponent<BurtTemporalAAVolumeComponent>();
             var tonemappingEnabled = tonemapping != null && tonemapping.IsEnabled();
             var exposureEnabled = exposure != null && exposure.IsEnabled();
             var colorAdjustmentsEnabled = colorAdjustments != null && colorAdjustments.IsEnabled();
+            var temporalAAUpscaleFactor = temporalAA != null && temporalAA.IsEnabled() ? temporalAA.upscaleFactor.value : BurtTemporalAASettings.Default.UpscaleFactor;
             var exposureMultiplier = exposureEnabled &&
                 exposure.mode.value != BurtExposureMode.Automatic &&
                 exposure.mode.value != BurtExposureMode.AutomaticHistogram
@@ -1038,7 +1083,7 @@ namespace Burt.RenderPipeline
                 colorFilter.r,
                 colorFilter.g,
                 colorFilter.b,
-                tonemappingEnabled ? (int)tonemapping.mode.value + 1 : 0f);
+                (tonemappingEnabled ? (int)tonemapping.mode.value + 1 : 0f) + Mathf.Clamp(temporalAAUpscaleFactor, 1f, 2f) * 0.01f);
         }
 
         private static bool ProjectionChanged(Matrix4x4 current, Matrix4x4 previous)

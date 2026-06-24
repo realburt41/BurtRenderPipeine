@@ -272,6 +272,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle BurtGIBackfaceDiffuseIndirectTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName);
+                }
+
+                return ResourceRegistry.GetBurtGIBackfaceDiffuseIndirect();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIRoughSpecularIndirectTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectName);
+                }
+
+                return ResourceRegistry.GetBurtGIRoughSpecularIndirect();
+            }
+        }
+
         public BurtRenderTargetHandle BurtGIScreenProbeRadianceTarget
         {
             get
@@ -506,6 +532,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle FurBlurVelocityTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurVelocityName);
+                }
+
+                return ResourceRegistry.GetFurBlurVelocity();
+            }
+        }
+
         public BurtRenderBufferHandle GetBuffer(string name)
         {
             if (ResourceRegistry == null)
@@ -559,6 +598,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
         public BurtRenderBufferHandle ScreenSpaceSubsurfaceBurleyArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName);
 
         public BurtRenderBufferHandle ScreenSpaceSubsurfaceBurleyGroupBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName);
+
+        public BurtRenderBufferHandle FurBlurArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+
+        public BurtRenderBufferHandle FurBlurTileDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
 
         public BurtRequestRenderOptions RenderOptions { get; } // 保存当前 request 的栈级执行选项，Pass 可以通过它判断 RT 生命周期策略。
 

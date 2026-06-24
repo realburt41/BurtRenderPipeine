@@ -11,6 +11,14 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
             Cull Back
             ZWrite Off
             ZTest LEqual
+            Stencil
+            {
+                Ref 8
+                ReadMask 8
+                WriteMask 8
+                Comp Always
+                Pass Replace
+            }
 
             HLSLPROGRAM
             #pragma target 3.5
@@ -76,16 +84,27 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
             {
                 clip(input.sourceConfidence - 0.5);
 
-                float valid = step(1e-5, input.currentClipNoJitter.w) * step(1e-5, input.previousClipNoJitter.w);
+                float valid = step(1e-5, input.currentClipNoJitter.w);
                 float2 currentUv = BurtTaaClipToUv(input.currentClipNoJitter);
                 float2 previousUv = BurtTaaClipToUv(input.previousClipNoJitter);
                 valid *= step(0.0, currentUv.x) * step(currentUv.x, 1.0) * step(0.0, currentUv.y) * step(currentUv.y, 1.0);
-                valid *= step(0.0, previousUv.x) * step(previousUv.x, 1.0) * step(0.0, previousUv.y) * step(previousUv.y, 1.0);
+                float previousAvailable = step(1e-5, input.previousClipNoJitter.w);
+                previousAvailable *= step(0.0, previousUv.x) * step(previousUv.x, 1.0) * step(0.0, previousUv.y) * step(previousUv.y, 1.0);
+                if (valid < 0.5)
+                {
+                    discard;
+                }
+
+                if (previousAvailable < 0.5)
+                {
+                    return float4(2.0, 2.0, 0.0, 0.0);
+                }
+
                 float2 velocity = previousUv - currentUv;
                 float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
                 float keepVelocity = step(0.02, max(velocityPixels.x, velocityPixels.y));
-                velocity *= keepVelocity;
-                return float4(velocity * valid, valid, saturate(input.sourceConfidence));
+                clip(keepVelocity - 0.5);
+                return float4(velocity, 1.0, 1.0);
             }
             ENDHLSL
         }

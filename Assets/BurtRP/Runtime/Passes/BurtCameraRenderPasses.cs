@@ -147,12 +147,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var cmd = CommandBufferPool.Get(commandBufferName); // 用当前 Pass 名创建临时命令缓冲，Frame Debugger 里能看到这次目标恢复。
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 同时绑定颜色和深度，让 ZTest/ZWrite 对后续 DrawRenderers 生效。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null); // 恢复 viewport，避免前序 RT 改过尺寸后影响绘制。
+            RestoreCameraMatricesForMainDraw(context, cmd);
             BindMainLightShadowMapIfValid(context, cmd); // DrawRenderers 可能在 Deferred Lighting 之后执行，重新绑定当前 request 的 shadow map 避免读到旧全局纹理。
             BindAdditionalLightShadowAtlasIfValid(context, cmd);
             BindPerObjectShadowAtlasIfValid(context, cmd);
             context.ScriptableContext.ExecuteCommandBuffer(cmd); // 立即提交目标绑定，后面的 DrawRenderers 会使用这个状态。
             CommandBufferPool.Release(cmd); // 释放临时命令缓冲，避免每帧 GC。
             return true;
+        }
+
+        public static void RestoreCameraMatricesForMainDraw(BurtRenderGraphContext context, CommandBuffer cmd)
+        {
+            var temporalAA = context != null && context.Request != null ? context.Request.TemporalAA : null;
+            if (cmd == null || temporalAA == null || !temporalAA.Enabled)
+            {
+                return;
+            }
+
+            cmd.SetViewProjectionMatrices(temporalAA.ViewMatrix, temporalAA.JitteredProjectionMatrix);
         }
 
         public static void BindMainLightShadowMapIfValid(BurtRenderGraphContext context, CommandBuffer cmd) // 把当前 request 的主光 shadow map 绑定到全局纹理槽。
@@ -2679,6 +2691,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 在绘制不支持 shader 前重新绑定当前 request 的颜色和深度目标。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
             renderContext.ExecuteCommandBuffer(cmd); // 把渲染目标绑定命令提交给 Unity 渲染上下文。
 

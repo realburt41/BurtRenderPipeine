@@ -106,6 +106,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 {
                     resources.RegisterScreenSpaceGlobalIlluminationRawTexture();
                     resources.RegisterScreenSpaceGlobalIlluminationTexture();
+                    resources.RegisterBurtGIBackfaceDiffuseIndirectTexture();
+                    resources.RegisterBurtGIRoughSpecularIndirectTexture();
                     if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(request, asset))
                     {
                         resources.RegisterBurtGITemporalDiagnosticsTexture();
@@ -149,6 +151,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     resources.RegisterFurBlurPropertyTempTexture();
                     resources.RegisterFurBlurColorTexture();
                     resources.RegisterFurBlurTemporalTexture();
+                    resources.RegisterFurBlurVelocityTexture();
+                    if (BurtFurBlurPassUtility.ShouldUseTiledFurBlur(request, asset))
+                    {
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName, BurtFurBlurPassUtility.CreateTileArgsBufferDescriptor());
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName, BurtFurBlurPassUtility.CreateTileDataBufferDescriptor(request.Camera));
+                    }
                 }
             }
 

@@ -32,6 +32,9 @@ struct DepthVaryings
 
 #if BURT_DEPTH_ONLY_ALPHA_CLIP
     float2 baseMapUV : TEXCOORD0;
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)
+        float3 positionWS : TEXCOORD1;
+    #endif
 #endif
 };
 
@@ -49,6 +52,9 @@ DepthVaryings VertDepth(DepthAttributes input)
     #else
         output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
     #endif
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)
+        output.positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
+    #endif
 #endif
 
     return output;
@@ -60,6 +66,16 @@ float4 FragDepth(DepthVaryings input) : SV_Target
     float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
     #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
         BurtApplyHairDitherAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
+    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)
+        float alphaMap = BURT_SAMPLE_TEXTURE2D_REPEAT(_AlphaMap, input.baseMapUV).r;
+        float distanceToCamera = distance(_WorldSpaceCameraPos.xyz, input.positionWS);
+        #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+            float distanceFactor = saturate(distanceToCamera / 150.0f);
+        #else
+            float distanceFactor = saturate((distanceToCamera - 20.0f) / 200.0f);
+        #endif
+        float alpha = saturate(alphaMap + alphaMap * distanceFactor * max(_AlphaIncrease, 0.0f));
+        BurtApplyAlphaClip(alpha, _AlphaClip, _Cutoff);
     #else
         BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
     #endif

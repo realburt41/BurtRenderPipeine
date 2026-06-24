@@ -184,6 +184,27 @@ Shader "BurtRP/Multipass Fur"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "Burt Multipass Fur Blur Velocity"
+            Tags { "LightMode" = "BurtFurBlurVelocity" }
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertMultipassFurVelocity
+            #pragma fragment FragMultipassFurBlurVelocity
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
+            ENDHLSL
+        }
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtMultipassFurShaderGUI"

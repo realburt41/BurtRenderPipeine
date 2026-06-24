@@ -30,6 +30,11 @@ namespace Burt.RenderPipeline
             var renderingLayerMask = multipassPass == BurtMultipassShaderPass.ShadowCaster
                 ? (int)BurtPerObjectShadow.MainLightRenderingLayerMask
                 : ~0;
+            if (multipassPass != BurtMultipassShaderPass.ShadowCaster)
+            {
+                BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
+            }
+
             BurtMultipassRenderer.DrawAll(cmd, context, multipassPass, renderQueueRange, renderingLayerMask);
             cmd.EndSample(Name);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
@@ -63,6 +68,7 @@ namespace Burt.RenderPipeline
             var cmd = CommandBufferPool.Get(Name + " Bind");
             cmd.SetRenderTarget(context.CameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
             return true;
@@ -211,6 +217,7 @@ namespace Burt.RenderPipeline
                 gbufferObjectIndexTarget,
                 cameraDepthTarget);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
             return true;

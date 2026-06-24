@@ -307,6 +307,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbufferObjectIndexTarget, cameraDepthTarget); // 把 GBuffer0/1/2/3/4 作为 MRT color attachments，把 CameraDepth 作为 depth attachment。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, BurtGBufferRenderTargetPassUtility.ResolveCamera(context));
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
             context.ScriptableContext.ExecuteCommandBuffer(cmd); // 把 MRT 绑定命令提交给 Unity 渲染上下文。
 
@@ -353,6 +354,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbufferObjectIndexTarget, cameraDepthTarget, GBufferObjectIndexClearColor, camera);
             BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbufferObjectIndexTarget, cameraDepthTarget); // 清理完成后重新绑定 MRT，方便后续 Draw GBuffer Pass 直接绘制。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
             context.ScriptableContext.ExecuteCommandBuffer(cmd); // 把清理和最终 MRT 绑定命令提交给 Unity 渲染上下文。
 
@@ -404,6 +406,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbufferObjectIndexTarget, cameraDepthTarget); // 绘制前重新绑定 GBuffer MRT，避免前一个 Pass 改过渲染目标。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
             renderContext.ExecuteCommandBuffer(cmd); // 把 MRT 绑定命令提交给 Unity 渲染上下文。
 

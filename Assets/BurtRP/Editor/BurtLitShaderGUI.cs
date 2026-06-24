@@ -14,17 +14,20 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent SubsurfaceLabel = new GUIContent("Subsurface");
         private static readonly GUIContent FabricLabel = new GUIContent("Fabric");
         private static readonly GUIContent SilkLabel = new GUIContent("Silk");
+        private static readonly GUIContent FoliageLabel = new GUIContent("Foliage");
         private static readonly GUIContent NormalLabel = new GUIContent("Normal");
         private static readonly GUIContent EmissionLabel = new GUIContent("Emission");
 
         private static readonly GUIContent BaseMapLabel = new GUIContent("Base Map", "Albedo RGB and alpha for clipping or transparent materials.");
-        private static readonly GUIContent MaskMapLabel = new GUIContent("Mask Map", "R Metallic, G Occlusion, B Reserved, A Smoothness.");
+        private static readonly GUIContent MaskMapLabel = new GUIContent("Mask Map", "R Metallic, G Occlusion, B Reserved, A Smoothness or Roughness for Fabric/Silk.");
         private static readonly GUIContent NormalMapLabel = new GUIContent("Normal Map");
         private static readonly GUIContent ClearCoatNormalMapLabel = new GUIContent("Clear Coat Normal Map");
         private static readonly GUIContent FuzzMapLabel = new GUIContent("Fuzz Map");
         private static readonly GUIContent FuzzMaskLabel = new GUIContent("Fuzz Amount Mask");
-        private static readonly GUIContent ThinFilmThicknessMapLabel = new GUIContent("Thin Film Thickness Map");
-        private static readonly GUIContent ThinFilmFactorMaskLabel = new GUIContent("Thin Film Factor Mask");
+        private static readonly GUIContent AlphaMapLabel = new GUIContent("Alpha Map");
+        private static readonly GUIContent TintPaletteLabel = new GUIContent("Global Tint Palette");
+        private static readonly GUIContent LocalTintPaletteLabel = new GUIContent("Local Tint Palette");
+        private static readonly GUIContent NoiseMapLabel = new GUIContent("Noise Map");
         private static readonly GUIContent EmissionMapLabel = new GUIContent("Emission Map");
         private static readonly GUIContent ShadingModelLabel = new GUIContent("Shading Model");
         private static readonly GUIContent SubsurfaceScatteringModeLabel = new GUIContent("SSS Algorithm", "Choose 5S Burley, 4S Separable screen-space skin scattering, or 3S Preintegrated skin shading.");
@@ -39,6 +42,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent ZTestLabel = new GUIContent("ZTest");
         private static readonly GUIContent BlendLabel = new GUIContent("Blend");
         private static readonly GUIContent EnabledPassesLabel = new GUIContent("Enabled Passes");
+        private static readonly GUIContent ResponsiveAALabel = new GUIContent("Responsive AA", "Marks this material in stencil bit 16 so Temporal AA lowers history feedback on thin or fast-changing surfaces.");
         private static readonly string[] SurfaceTypeNames = { "Opaque", "Transparent" };
         private static readonly string[] DoubleSidedNormalModeNames = { "None", "Flip", "Mirror" };
         private static readonly string[] SubsurfaceScatteringModeNames = { "5S Burley", "4S Separable", "3S Preintegrated" };
@@ -50,6 +54,7 @@ namespace Burt.RenderPipeline.Editor
         private static bool showSubsurfaceInputs = true;
         private static bool showFabricInputs = true;
         private static bool showSilkInputs = true;
+        private static bool showFoliageInputs = true;
         private static bool showNormalInputs = true;
         private static bool showEmissionInputs = true;
 
@@ -62,6 +67,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty metallic;
         private MaterialProperty anisotropy;
         private MaterialProperty smoothness;
+        private MaterialProperty roughness;
         private MaterialProperty occlusionStrength;
         private MaterialProperty reflectance;
         private MaterialProperty clearCoatMask;
@@ -84,10 +90,50 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty facingColor;
         private MaterialProperty tangentColor;
         private MaterialProperty falloff;
-        private MaterialProperty thinFilmThicknessMap;
-        private MaterialProperty thinFilmThickness;
-        private MaterialProperty thinFilmFactorMask;
-        private MaterialProperty thinFilmFactor;
+        private MaterialProperty foliageTransmissionColor;
+        private MaterialProperty foliageTransmissionWeight;
+        private MaterialProperty foliageThickness;
+        private MaterialProperty foliageBackLight;
+        private MaterialProperty foliageSubsurfaceColorSaturate;
+        private MaterialProperty alphaMap;
+        private MaterialProperty alphaIncrease;
+        private MaterialProperty subsurfaceColor;
+        private MaterialProperty subsurfaceColorSaturate;
+        private MaterialProperty thicknessScale;
+        private MaterialProperty roughnessScale;
+        private MaterialProperty reflectanceScale;
+        private MaterialProperty transmissionNdotL;
+        private MaterialProperty vertexAORemap;
+        private MaterialProperty tintPalette;
+        private MaterialProperty localTintPalette;
+        private MaterialProperty tintValue;
+        private MaterialProperty tintScale;
+        private MaterialProperty localTintColor;
+        private MaterialProperty tintAOHeightRatio;
+        private MaterialProperty tintAORemap;
+        private MaterialProperty tintHeightContrast;
+        private MaterialProperty treeHeight;
+        private MaterialProperty foliageTintMode;
+        private MaterialProperty foliageUseBakedNormals;
+        private MaterialProperty sssIntensity;
+        private MaterialProperty fresnelIntensity;
+        private MaterialProperty fresnelExp;
+        private MaterialProperty grassSpecular;
+        private MaterialProperty baseColorTip;
+        private MaterialProperty tipMaskPow;
+        private MaterialProperty heightAO;
+        private MaterialProperty heightAOFallOff;
+        private MaterialProperty tlNormalWeight;
+        private MaterialProperty ssShadowIntensity;
+        private MaterialProperty ssShadowDistance;
+        private MaterialProperty groundFadeIntensity;
+        private MaterialProperty noiseMap;
+        private MaterialProperty variationIntensity01;
+        private MaterialProperty variationIntensity02;
+        private MaterialProperty variation01Height;
+        private MaterialProperty variation02Height;
+        private MaterialProperty variation01;
+        private MaterialProperty variation02;
         private MaterialProperty normalMap;
         private MaterialProperty normalScale;
         private MaterialProperty emissionMap;
@@ -102,6 +148,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty dstBlend;
         private MaterialProperty zWrite;
         private MaterialProperty zTest;
+        private MaterialProperty responsiveAA;
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
@@ -119,6 +166,7 @@ namespace Burt.RenderPipeline.Editor
             DrawSubsurfaceInputs(material);
             DrawFabricInputs(material);
             DrawSilkInputs(material);
+            DrawFoliageInputs(material);
             DrawEmissionInputs();
         }
 
@@ -134,9 +182,68 @@ namespace Burt.RenderPipeline.Editor
                 return;
             }
 
+            MigrateFabricRoughness(material);
             BurtShaderGUIUtility.UpdateEmissionFlag(material);
             ClampSubsurfaceScatteringMode(material);
             ApplySurfaceOptions(material);
+        }
+
+        private static void MigrateFabricRoughness(Material material)
+        {
+            if ((!IsFabricShader(material) && !IsSilkShader(material)) || !material.HasProperty("_Roughness"))
+            {
+                return;
+            }
+
+            if (HasSerializedFloat(material, "_Roughness") || !TryGetSerializedFloat(material, "_Smoothness", out var legacySmoothness))
+            {
+                return;
+            }
+
+            material.SetFloat("_Roughness", 1f - Mathf.Clamp01(legacySmoothness));
+            EditorUtility.SetDirty(material);
+        }
+
+        private static bool HasSerializedFloat(Material material, string propertyName)
+        {
+            return TryGetSerializedFloat(material, propertyName, out _);
+        }
+
+        private static bool TryGetSerializedFloat(Material material, string propertyName, out float value)
+        {
+            value = 0f;
+            if (material == null || string.IsNullOrEmpty(propertyName))
+            {
+                return false;
+            }
+
+            var serializedObject = new SerializedObject(material);
+            var floats = serializedObject.FindProperty("m_SavedProperties.m_Floats");
+            if (floats == null || !floats.isArray)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < floats.arraySize; i++)
+            {
+                var entry = floats.GetArrayElementAtIndex(i);
+                var name = entry.FindPropertyRelative("first");
+                if (name == null || name.stringValue != propertyName)
+                {
+                    continue;
+                }
+
+                var floatValue = entry.FindPropertyRelative("second");
+                if (floatValue == null)
+                {
+                    return false;
+                }
+
+                value = floatValue.floatValue;
+                return true;
+            }
+
+            return false;
         }
 
         private void CacheProperties()
@@ -147,6 +254,7 @@ namespace Burt.RenderPipeline.Editor
             metallic = Find("_Metallic");
             anisotropy = Find("_Anisotropy");
             smoothness = Find("_Smoothness");
+            roughness = Find("_Roughness");
             occlusionStrength = Find("_OcclusionStrength");
             reflectance = Find("_Reflectance");
             clearCoatMask = Find("_ClearCoatMask");
@@ -169,10 +277,50 @@ namespace Burt.RenderPipeline.Editor
             facingColor = Find("_FacingColor");
             tangentColor = Find("_TangentColor");
             falloff = Find("_Falloff");
-            thinFilmThicknessMap = Find("_ThinFilmThicknessMap");
-            thinFilmThickness = Find("_ThinFilmThickness");
-            thinFilmFactorMask = Find("_ThinFilmFactorMask");
-            thinFilmFactor = Find("_ThinFilmFactor");
+            foliageTransmissionColor = Find("_FoliageTransmissionColor");
+            foliageTransmissionWeight = Find("_FoliageTransmissionWeight");
+            foliageThickness = Find("_FoliageThickness");
+            foliageBackLight = Find("_FoliageBackLight");
+            foliageSubsurfaceColorSaturate = Find("_FoliageSubsurfaceColorSaturate");
+            alphaMap = Find("_AlphaMap");
+            alphaIncrease = Find("_AlphaIncrease");
+            subsurfaceColor = Find("_SubsurfaceColor");
+            subsurfaceColorSaturate = Find("_SubsurfaceColorSaturate");
+            thicknessScale = Find("_ThicknessScale");
+            roughnessScale = Find("_RoughnessScale");
+            reflectanceScale = Find("_ReflectanceScale");
+            transmissionNdotL = Find("_TransmissionNdotL");
+            vertexAORemap = Find("_VertexAORemap");
+            tintPalette = Find("_TintPalette");
+            localTintPalette = Find("_LocalTintPalette");
+            tintValue = Find("_TintValue");
+            tintScale = Find("_TintScale");
+            localTintColor = Find("_LocalTintColor");
+            tintAOHeightRatio = Find("_TintAOHeightRatio");
+            tintAORemap = Find("_TintAORemap");
+            tintHeightContrast = Find("_TintHeightContrast");
+            treeHeight = Find("_TreeHeight");
+            foliageTintMode = Find("_FoliageTintMode");
+            foliageUseBakedNormals = Find("_FoliageUseBakedNormals");
+            sssIntensity = Find("_SSSIntensity");
+            fresnelIntensity = Find("_FresnelIntensity");
+            fresnelExp = Find("_FresnelExp");
+            grassSpecular = Find("_Specular");
+            baseColorTip = Find("_BaseColorTip");
+            tipMaskPow = Find("_TipMaskPow");
+            heightAO = Find("_HeightAO");
+            heightAOFallOff = Find("_HeightAOFallOff");
+            tlNormalWeight = Find("_TLNormalWeight");
+            ssShadowIntensity = Find("_SSShadowIntensity");
+            ssShadowDistance = Find("_SSShadowDistance");
+            groundFadeIntensity = Find("_GroundFadeIntensity");
+            noiseMap = Find("_NoiseMap");
+            variationIntensity01 = Find("_VariationIntensity01");
+            variationIntensity02 = Find("_VariationIntensity02");
+            variation01Height = Find("_Variation01Height");
+            variation02Height = Find("_Variation02Height");
+            variation01 = Find("_Variation01");
+            variation02 = Find("_Variation02");
             normalMap = Find("_NormalMap");
             normalScale = Find("_NormalScale");
             emissionMap = Find("_EmissionMap");
@@ -187,6 +335,7 @@ namespace Burt.RenderPipeline.Editor
             dstBlend = Find("_DstBlend");
             zWrite = Find("_ZWrite");
             zTest = Find("_ZTest");
+            responsiveAA = Find("_ResponsiveAA");
         }
 
         private MaterialProperty Find(string propertyName)
@@ -233,6 +382,7 @@ namespace Burt.RenderPipeline.Editor
 
             DrawDoubleSidedOptions(material);
             DrawAlphaClipProperty();
+            DrawResponsiveAAProperty();
 
             if (cutoff != null)
             {
@@ -346,14 +496,20 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawTexture(MaskMapLabel, maskMap);
+            bool usesRoughness = IsFabricShader(material) || IsSilkShader(material);
+            bool usesFoliage = IsFoliageShader(material);
             if (maskMap != null)
             {
                 BurtShaderGUIUtility.DrawChannelHint(IsSubsurfaceShader(material)
                     ? "Channels: G Occlusion | A Smoothness. R Metallic is ignored by Subsurface skin."
-                    : "Channels: R Metallic | G Occlusion | B Reserved | A Smoothness");
+                    : usesFoliage
+                        ? "Channels: G Occlusion | B Thickness | A Roughness. R Metallic is ignored by Foliage."
+                    : usesRoughness
+                        ? "Channels: R Metallic | G Occlusion | B Reserved | A Roughness"
+                        : "Channels: R Metallic | G Occlusion | B Reserved | A Smoothness");
             }
 
-            if (!IsSubsurfaceShader(material))
+            if (!IsSubsurfaceShader(material) && !usesFoliage)
             {
                 BurtShaderGUIUtility.DrawSubHeader("Lit");
                 DrawProperty(metallic);
@@ -361,9 +517,13 @@ namespace Burt.RenderPipeline.Editor
             }
 
             BurtShaderGUIUtility.DrawSubHeader("Shared");
-            DrawProperty(smoothness);
+            if (!usesFoliage)
+            {
+                DrawProperty(usesRoughness ? roughness : smoothness);
+            }
+
             DrawProperty(occlusionStrength);
-            if (!IsSubsurfaceShader(material))
+            if (!IsSubsurfaceShader(material) && !usesFoliage)
             {
                 DrawProperty(reflectance);
             }
@@ -411,9 +571,100 @@ namespace Burt.RenderPipeline.Editor
             DrawProperty(facingColor);
             DrawProperty(tangentColor);
             DrawProperty(falloff);
-            DrawTextureWithExtra(ThinFilmThicknessMapLabel, thinFilmThicknessMap, thinFilmThickness);
-            DrawTextureWithExtra(ThinFilmFactorMaskLabel, thinFilmFactorMask, thinFilmFactor);
             EditorGUILayout.HelpBox("Silk uses the Fabric deferred model with the silk flag set and keeps anisotropic specular through the shared PBR path.", MessageType.None);
+            BurtShaderGUIUtility.EndSection();
+        }
+
+        private void DrawFoliageInputs(Material material)
+        {
+            if (!IsFoliageShader(material))
+            {
+                return;
+            }
+
+            if (!BurtShaderGUIUtility.BeginSection(FoliageLabel, ref showFoliageInputs))
+            {
+                return;
+            }
+
+            bool hasXRenderFoliageInputs = subsurfaceColor != null ||
+                subsurfaceColorSaturate != null ||
+                thicknessScale != null ||
+                roughnessScale != null ||
+                reflectanceScale != null ||
+                transmissionNdotL != null;
+
+            if (hasXRenderFoliageInputs)
+            {
+                BurtShaderGUIUtility.DrawSubHeader("XRender Foliage");
+                DrawTexture(AlphaMapLabel, alphaMap);
+                DrawProperty(alphaIncrease);
+                DrawProperty(subsurfaceColor);
+                DrawProperty(subsurfaceColorSaturate);
+                DrawProperty(thicknessScale);
+                DrawProperty(roughnessScale);
+                DrawProperty(reflectanceScale);
+                DrawProperty(transmissionNdotL);
+                DrawProperty(foliageBackLight);
+
+                if (!IsGrassShader(material))
+                {
+                    BurtShaderGUIUtility.DrawSubHeader("Foliage Tint");
+                    DrawTexture(TintPaletteLabel, tintPalette);
+                    DrawTexture(LocalTintPaletteLabel, localTintPalette);
+                    DrawProperty(foliageTintMode);
+                    DrawProperty(tintValue);
+                    DrawProperty(tintScale);
+                    DrawProperty(localTintColor);
+                    DrawProperty(tintAOHeightRatio);
+                    DrawProperty(tintAORemap);
+                    DrawProperty(tintHeightContrast);
+                    DrawProperty(vertexAORemap);
+                    DrawProperty(treeHeight);
+                    DrawProperty(foliageUseBakedNormals);
+                }
+            }
+            else
+            {
+                BurtShaderGUIUtility.DrawSubHeader("Legacy Foliage");
+                DrawProperty(foliageTransmissionColor);
+                DrawProperty(foliageTransmissionWeight);
+                DrawProperty(foliageThickness);
+                DrawProperty(foliageBackLight);
+                DrawProperty(foliageSubsurfaceColorSaturate);
+            }
+
+            if (IsGrassShader(material))
+            {
+                BurtShaderGUIUtility.DrawSubHeader("Grass Surface");
+                DrawProperty(baseColorTip);
+                DrawProperty(tipMaskPow);
+                DrawProperty(roughness);
+                DrawProperty(heightAO);
+                DrawProperty(heightAOFallOff);
+                DrawProperty(tlNormalWeight);
+                DrawProperty(ssShadowIntensity);
+                DrawProperty(ssShadowDistance);
+                DrawProperty(groundFadeIntensity);
+
+                BurtShaderGUIUtility.DrawSubHeader("Grass Variation");
+                DrawTexture(NoiseMapLabel, noiseMap);
+                DrawProperty(variationIntensity01);
+                DrawProperty(variation01Height);
+                DrawProperty(variation01);
+                DrawProperty(variationIntensity02);
+                DrawProperty(variation02Height);
+                DrawProperty(variation02);
+
+                BurtShaderGUIUtility.DrawSubHeader("Grass SSS");
+                DrawProperty(sssIntensity);
+                DrawProperty(fresnelIntensity);
+                DrawProperty(fresnelExp);
+                DrawProperty(grassSpecular);
+                DrawProperty(reflectance);
+            }
+
+            EditorGUILayout.HelpBox("Foliage uses Mask B as thickness and Mask A as roughness. Deferred GBuffer keeps transmission color, weight, thickness, wrap, NdotL, and specular scale for the lighting pass.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -725,6 +976,30 @@ namespace Burt.RenderPipeline.Editor
             }
         }
 
+        private void DrawResponsiveAAProperty()
+        {
+            if (responsiveAA == null)
+            {
+                return;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUI.showMixedValue = responsiveAA.hasMixedValue;
+            bool responsive = EditorGUILayout.Toggle(ResponsiveAALabel, responsiveAA.floatValue >= 0.5f);
+            EditorGUI.showMixedValue = false;
+            if (!EditorGUI.EndChangeCheck())
+            {
+                return;
+            }
+
+            materialEditor.RegisterPropertyChangeUndo(ResponsiveAALabel.text);
+            responsiveAA.floatValue = responsive ? 1.0f : 0.0f;
+            foreach (Object target in materialEditor.targets)
+            {
+                ApplySurfaceOptions(target as Material);
+            }
+        }
+
         private bool ShouldDrawResolvedState()
         {
             return surface != null && srcBlend != null && dstBlend != null && zWrite != null && zTest != null;
@@ -774,6 +1049,11 @@ namespace Burt.RenderPipeline.Editor
                 return IsTransparentMaterial(material) ? "PBR Transparent Fabric" : "PBR Fabric / Deferred GBuffer";
             }
 
+            if (IsFoliageShader(material))
+            {
+                return IsTransparentMaterial(material) ? "PBR Transparent Foliage" : "PBR Foliage / Deferred GBuffer";
+            }
+
             return IsTransparentMaterial(material) ? "PBR Transparent" : "PBR Lit / Deferred GBuffer";
         }
 
@@ -803,6 +1083,25 @@ namespace Burt.RenderPipeline.Editor
             return material != null &&
                 material.shader != null &&
                 material.shader.name.IndexOf("Silk", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsFoliageShader(Material material)
+        {
+            if (material == null || material.shader == null)
+            {
+                return false;
+            }
+
+            var shaderName = material.shader.name;
+            return shaderName.IndexOf("Foliage", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                shaderName.IndexOf("Grass", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsGrassShader(Material material)
+        {
+            return material != null &&
+                material.shader != null &&
+                material.shader.name.IndexOf("Grass", System.StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static BurtRenderPipelineAsset GetActiveBurtAsset()
@@ -888,6 +1187,8 @@ namespace Burt.RenderPipeline.Editor
             }
 
             ApplyDoubleSidedNormalState(material);
+            ApplyGBufferStencilState(material);
+            ApplyFoliageKeywords(material);
             BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
 
             material.SetOverrideTag("RenderType", transparent ? "Transparent" : "Opaque");
@@ -902,6 +1203,68 @@ namespace Burt.RenderPipeline.Editor
 
             material.SetShaderPassEnabled("ShadowCaster", !transparent);
             material.SetShaderPassEnabled("BurtForward", true);
+        }
+
+        private static void ApplyGBufferStencilState(Material material)
+        {
+            if (material == null || !material.HasProperty("_BurtGBufferStencilRef") || !material.HasProperty("_BurtGBufferStencilWriteMask"))
+            {
+                return;
+            }
+
+            int stencilRef = ResolveGBufferStencilModel(material);
+            int writeMask = 7;
+            if (material.HasProperty("_ResponsiveAA") && material.GetFloat("_ResponsiveAA") >= 0.5f)
+            {
+                stencilRef |= 16;
+                writeMask |= 16;
+            }
+
+            material.SetFloat("_BurtGBufferStencilRef", stencilRef);
+            material.SetFloat("_BurtGBufferStencilWriteMask", writeMask);
+        }
+
+        private static void ApplyFoliageKeywords(Material material)
+        {
+            if (material == null || !IsFoliageShader(material))
+            {
+                return;
+            }
+
+            bool useBakedNormals = material.HasProperty("_FoliageUseBakedNormals") && material.GetFloat("_FoliageUseBakedNormals") >= 0.5f;
+            SetKeyword(material, "BURT_FOLIAGE_USE_BAKED_NORMALS", useBakedNormals);
+        }
+
+        private static void SetKeyword(Material material, string keyword, bool enabled)
+        {
+            if (enabled)
+            {
+                material.EnableKeyword(keyword);
+            }
+            else
+            {
+                material.DisableKeyword(keyword);
+            }
+        }
+
+        private static int ResolveGBufferStencilModel(Material material)
+        {
+            if (IsClearCoatShader(material))
+            {
+                return 2;
+            }
+
+            if (IsSubsurfaceShader(material))
+            {
+                return 3;
+            }
+
+            if (IsFoliageShader(material))
+            {
+                return 5;
+            }
+
+            return IsFabricShader(material) || IsSilkShader(material) ? 4 : 0;
         }
 
         private static void MigrateLegacyTransparentShader(Material material)

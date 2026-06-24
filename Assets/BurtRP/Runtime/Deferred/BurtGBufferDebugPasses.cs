@@ -92,6 +92,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                     return BurtGBufferDebugViewMode.SubsurfaceThickness;
                 case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
                     return BurtGBufferDebugViewMode.SubsurfaceProfileIndex;
+                case BurtShadingDebugMode.GBufferFoliageTransmissionColor:
+                    return BurtGBufferDebugViewMode.FoliageTransmissionColor;
+                case BurtShadingDebugMode.GBufferFoliageTransmissionWeight:
+                    return BurtGBufferDebugViewMode.FoliageTransmissionWeight;
+                case BurtShadingDebugMode.GBufferFoliageThickness:
+                    return BurtGBufferDebugViewMode.FoliageThickness;
+                case BurtShadingDebugMode.GBufferFoliageTransmissionNdotL:
+                    return BurtGBufferDebugViewMode.FoliageTransmissionNdotL;
+                case BurtShadingDebugMode.GBufferFoliageSpecularScale:
+                    return BurtGBufferDebugViewMode.FoliageSpecularScale;
+                case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
+                    return BurtGBufferDebugViewMode.FoliageScreenSpaceShadowIntensity;
                 case BurtShadingDebugMode.GBufferClearCoatNormalWS:
                     return BurtGBufferDebugViewMode.ClearCoatNormalWS;
                 case BurtShadingDebugMode.GBufferClearCoatRoughness:

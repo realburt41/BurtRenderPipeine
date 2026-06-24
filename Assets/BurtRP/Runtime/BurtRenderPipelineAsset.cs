@@ -40,7 +40,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         Anisotropy = 24,
         TangentWS = 25,
         SubsurfaceThickness = 26,
-        SubsurfaceProfileIndex = 27
+        SubsurfaceProfileIndex = 27,
+        FoliageTransmissionColor = 28,
+        FoliageTransmissionWeight = 29,
+        FoliageThickness = 30,
+        FoliageTransmissionNdotL = 31,
+        FoliageSpecularScale = 32,
+        FoliageScreenSpaceShadowIntensity = 33
     }
 
     [CreateAssetMenu(menuName = "Rendering/Burt Render Pipeline Asset", fileName = "BurtRenderPipelineAsset")] // 让 Unity 可以通过 Create 菜单创建 BurtRenderPipelineAsset。

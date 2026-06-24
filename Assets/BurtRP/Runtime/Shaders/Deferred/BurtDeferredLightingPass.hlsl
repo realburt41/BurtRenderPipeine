@@ -14,8 +14,12 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
 
 Texture2D<float> _BurtScreenSpaceAmbientOcclusionTexture;
+Texture2D<float4> _BurtGIDiffuseIndirectTexture;
+Texture2D<float4> _BurtGIBackfaceDiffuseIndirectTexture;
+Texture2D<float4> _BurtGIRoughSpecularIndirectTexture;
 float _BurtScreenSpaceAmbientOcclusionEnabled;
 float _BurtDeferredSubsurfaceDiffuseLuminanceOutputEnabled;
+float4 _BurtGIApplyIndirectParams; // x=diffuse enabled, y=intensity, z=backface enabled, w=rough-specular enabled.
 
 float BurtSampleDeferredScreenSpaceAmbientOcclusion(float2 screenUV)
 {
@@ -28,6 +32,71 @@ float BurtSampleDeferredScreenSpaceAmbientOcclusion(float2 screenUV)
     int2 pixelCoord = clamp((int2)floor(screenUV * (float2)textureSize), int2(0, 0), textureSize - 1);
     float ao = _BurtScreenSpaceAmbientOcclusionTexture.Load(int3(pixelCoord, 0));
     return saturate(ao);
+}
+
+float BurtResolveDeferredMaterialScreenSpaceAmbientOcclusion(float2 screenUV, BurtGBufferData gbufferData)
+{
+    float screenSpaceAmbientOcclusion = BurtSampleDeferredScreenSpaceAmbientOcclusion(screenUV);
+#if defined(BURT_DEFERRED_SHADING_MODEL_FOLIAGE)
+    return saturate(lerp(1.0f, screenSpaceAmbientOcclusion, max(BurtGetFoliageScreenSpaceShadowIntensity(gbufferData), 0.0f)));
+#else
+    return screenSpaceAmbientOcclusion;
+#endif
+}
+
+float3 BurtSampleDeferredGIDiffuseIndirect(float2 screenUV)
+{
+    if (_BurtGIApplyIndirectParams.x < 0.5f)
+    {
+        return 0.0f;
+    }
+
+    return max(BURT_SAMPLE_TEXTURE2D_CLAMP(_BurtGIDiffuseIndirectTexture, screenUV).rgb, 0.0f) * max(_BurtGIApplyIndirectParams.y, 0.0f);
+}
+
+float3 BurtSampleDeferredGIBackfaceDiffuseIndirect(float2 screenUV)
+{
+    if (_BurtGIApplyIndirectParams.z < 0.5f)
+    {
+        return 0.0f;
+    }
+
+    return max(BURT_SAMPLE_TEXTURE2D_CLAMP(_BurtGIBackfaceDiffuseIndirectTexture, screenUV).rgb, 0.0f) * max(_BurtGIApplyIndirectParams.y, 0.0f);
+}
+
+float3 BurtSampleDeferredGIRoughSpecularIndirect(float2 screenUV)
+{
+    if (_BurtGIApplyIndirectParams.w < 0.5f)
+    {
+        return 0.0f;
+    }
+
+    return max(BURT_SAMPLE_TEXTURE2D_CLAMP(_BurtGIRoughSpecularIndirectTexture, screenUV).rgb, 0.0f) * max(_BurtGIApplyIndirectParams.y, 0.0f);
+}
+
+float BurtDeferredGIBackfaceBlend(BurtGBufferData gbufferData)
+{
+#if defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
+    return saturate(BurtGetSubsurfaceThickness(gbufferData) * 0.65f + BurtGetSubsurfaceAmbient(gbufferData) * 0.35f);
+#elif defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
+    return 0.45f;
+#else
+    return 0.0f;
+#endif
+}
+
+void BurtApplyDeferredGIIndirect(float2 screenUV, BurtGBufferData gbufferData, inout BurtPBRShadingComponents components)
+{
+    float3 diffuseIndirect = BurtSampleDeferredGIDiffuseIndirect(screenUV);
+    float3 backfaceDiffuseIndirect = BurtSampleDeferredGIBackfaceDiffuseIndirect(screenUV);
+    float3 roughSpecularIndirect = BurtSampleDeferredGIRoughSpecularIndirect(screenUV);
+    diffuseIndirect = lerp(diffuseIndirect, backfaceDiffuseIndirect, BurtDeferredGIBackfaceBlend(gbufferData));
+
+    float roughSpecularBlend = smoothstep(0.35f, 0.92f, saturate(gbufferData.perceptualRoughness));
+    components.indirectDiffuse += diffuseIndirect;
+    components.indirectSpecular += roughSpecularIndirect * roughSpecularBlend;
+    components.indirectLighting = components.indirectDiffuse + components.indirectSpecular;
+    components.lighting = components.directLighting + components.indirectLighting;
 }
 
 float BurtEvaluateDeferredOutputAlpha(BurtPBRShadingComponents components)
@@ -152,10 +221,12 @@ float4 Frag(Varyings input) : SV_Target
 #endif
 
     float shadowAttenuation = BurtSampleMainLightShadow(shadowPositionWS, shadowNormalWS);
-    BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
+    int perObjectShadowObjectIndex = BurtSampleDeferredPerObjectShadowObjectIndex(screenUV);
+    float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(shadowPositionWS, shadowNormalWS, perObjectShadowObjectIndex);
+    BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation);
 
     BurtGBufferData shadingGBufferData = gbufferData;
-    float screenSpaceAmbientOcclusion = BurtSampleDeferredScreenSpaceAmbientOcclusion(screenUV);
+    float screenSpaceAmbientOcclusion = BurtResolveDeferredMaterialScreenSpaceAmbientOcclusion(screenUV, shadingGBufferData);
     shadingGBufferData.occlusion = min(saturate(shadingGBufferData.occlusion), screenSpaceAmbientOcclusion);
 
 #if defined(BURT_ENABLE_SHADING_DEBUG)
@@ -172,6 +243,7 @@ float4 Frag(Varyings input) : SV_Target
         positionWS,
         shadowPositionWS,
         screenUV);
+    BurtApplyDeferredGIIndirect(screenUV, shadingGBufferData, pbrComponents);
 
     float3 finalColor = pbrComponents.lighting + gbufferData.emission;
     float3 finalPreExposedColor = BurtApplyPreExposure(finalColor);
@@ -251,7 +323,6 @@ float4 Frag(Varyings input) : SV_Target
         debugData.shadowReceiverDepthDelta,
         debugData.shadowPCSSBlockerFraction);
 
-    int perObjectShadowObjectIndex = BurtSampleDeferredPerObjectShadowObjectIndex(screenUV);
     BurtFillPerObjectShadowShadingDebugData(
         shadowPositionWS,
         shadowNormalWS,
@@ -285,6 +356,11 @@ float4 Frag(Varyings input) : SV_Target
     debugData.indirectSpecularEnvBRDF = debugLightingComponents.indirectSpecularEnvBRDF;
     debugData.subsurfaceProfileIndex = pbrComponents.subsurfaceProfileIndex;
     debugData.subsurfaceTransmission = pbrComponents.subsurfaceTransmission;
+    debugData.subsurfaceDirectTransmission = pbrComponents.subsurfaceDirectTransmission;
+    debugData.subsurfaceTransmissionBRDF = pbrComponents.subsurfaceTransmissionBRDF;
+    debugData.subsurfaceTransmissionShadow = pbrComponents.subsurfaceTransmissionShadow;
+    debugData.subsurfaceTransmissionPhase = pbrComponents.subsurfaceTransmissionPhase;
+    debugData.subsurfaceTransmissionThickness = pbrComponents.subsurfaceTransmissionThickness;
     debugData.subsurfaceKernelWeight = pbrComponents.subsurfaceKernelWeight;
     debugData.subsurfaceIndirect = pbrComponents.subsurfaceIndirect;
     debugData.hairPrimaryLobe = pbrComponents.hairPrimaryLobe;

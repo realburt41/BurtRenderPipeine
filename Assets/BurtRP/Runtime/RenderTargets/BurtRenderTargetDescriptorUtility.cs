@@ -205,7 +205,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
         public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
         {
-            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32); // GBuffer0 第一版保存 baseColor.rgb 和 occlusion.a，普通 8 位通道足够起步。
+            var format = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf)
+                ? RenderTextureFormat.ARGBHalf
+                : RenderTextureFormat.ARGB32;
+            return CreateGBufferDescriptor(camera, format);
         }
 
         public static RenderTextureDescriptor CreateGBuffer1Descriptor(Camera camera) // 定义创建 Deferred GBuffer1 RT 描述的函数。
@@ -333,6 +336,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
             descriptor.autoGenerateMips = false;
+            descriptor.enableRandomWrite = true;
             descriptor.sRGB = false;
             return descriptor;
         }
@@ -354,6 +358,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
         public static RenderTextureDescriptor CreateFurBlurTemporalDescriptor(Camera camera)
         {
             return CreateFurBlurColorDescriptor(camera);
+        }
+
+        public static RenderTextureDescriptor CreateFurBlurVelocityDescriptor(Camera camera)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            descriptor.colorFormat = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf)
+                ? RenderTextureFormat.ARGBHalf
+                : RenderTextureFormat.ARGB32;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
         }
 
         public static int CalculateMipCount(int width, int height)

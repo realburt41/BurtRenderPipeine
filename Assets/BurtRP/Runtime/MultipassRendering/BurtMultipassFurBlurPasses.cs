@@ -136,6 +136,39 @@ namespace Burt.RenderPipeline
         }
     }
 
+    internal sealed class BurtAllocateFurBlurVelocityPass : BurtRenderPass
+    {
+        public override string Name => "Burt Allocate Fur Blur Velocity";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.Allocate;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.WriteFurBlurVelocity();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var target = context != null ? context.FurBlurVelocityTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurVelocityName);
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurVelocityDescriptor(context.Request != null ? context.Request.Camera : null);
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId, descriptor, FilterMode.Bilinear);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId, target.Identifier);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
     internal sealed class BurtClearFurBlurPropertyPass : BurtRenderPass
     {
         public override string Name => "Burt Clear Fur Blur Property";
@@ -165,6 +198,39 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(propertyTarget.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.ClearRenderTarget(false, true, BurtFurBlurPassUtility.FurBlurPropertyClearColor);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal sealed class BurtClearFurBlurVelocityPass : BurtRenderPass
+    {
+        public override string Name => "Burt Clear Fur Blur Velocity";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.Clear;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.WriteFurBlurVelocity();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var velocityTarget = context != null ? context.FurBlurVelocityTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurVelocityName);
+            if (!velocityTarget.IsValid)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetRenderTarget(velocityTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
+            cmd.ClearRenderTarget(false, true, Color.clear);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -201,6 +267,46 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(propertyTarget.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             BurtMultipassRenderer.DrawAll(cmd, context, BurtMultipassShaderPass.FurBlurProperty, RenderQueueRange.opaque);
+            cmd.EndSample(Name);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal sealed class BurtDrawMultipassFurBlurVelocityPass : BurtRenderPass
+    {
+        public override string Name => "Burt Draw Multipass Fur Blur Velocity";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.DrawRenderers;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadCameraDepth();
+            builder.WriteFurBlurVelocity();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var velocityTarget = context != null ? context.FurBlurVelocityTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurVelocityName);
+            var cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
+            if (!velocityTarget.IsValid || !cameraDepthTarget.IsValid || context == null)
+            {
+                return;
+            }
+
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurVelocityDescriptor(camera);
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.BeginSample(Name);
+            cmd.SetRenderTarget(velocityTarget.Identifier, cameraDepthTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
+            BurtFurBlurPassUtility.UploadMotionVectorGlobals(cmd, context.Request, descriptor.width, descriptor.height);
+            BurtMultipassRenderer.DrawAll(cmd, context, BurtMultipassShaderPass.FurBlurVelocity, RenderQueueRange.opaque);
             cmd.EndSample(Name);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
@@ -262,12 +368,336 @@ namespace Burt.RenderPipeline
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(context.Request != null ? context.Request.Camera : null);
+            var settings = BurtFurBlurPassUtility.ResolveSettings();
             var cmd = CommandBufferPool.Get(Name);
             cmd.SetRenderTarget(target.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, source.Identifier);
-            cmd.SetGlobalVector(BurtFurBlurPassUtility.ScreenSizeId, BurtFurBlurPassUtility.CreateScreenSizeVector(descriptor.width, descriptor.height));
+            BurtFurBlurPassUtility.UploadCommonGlobals(cmd, context.Request, descriptor.width, descriptor.height, settings, false, false, 0);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, DilatePassIndex, MeshTopology.Triangles, 3, 1);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private Material GetMaterial()
+        {
+            return BurtFurBlurPassUtility.GetMaterial(ref material, ref hasLoggedMissingShader);
+        }
+    }
+
+    internal sealed class BurtFurBlurInitTileArgsPass : BurtRenderPass
+    {
+        private ComputeShader computeShader;
+        private bool hasLoggedMissingComputeShader;
+        private bool hasLoggedMissingKernel;
+
+        public override string Name => "Burt Fur Blur Init Tile Args";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.GlobalState;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtFurBlurPassUtility.ShouldUseTiledFurBlur(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.WriteBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || !BurtFurBlurPassUtility.ShouldUseTiledFurBlur(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var args = context.FurBlurArgsBuffer;
+            if (!args.IsValid || !args.HasBuffer)
+            {
+                return;
+            }
+
+            var shader = GetComputeShader();
+            if (shader == null || !BurtFurBlurPassUtility.TryFindTiledComputeKernel(shader, "InitArgsCS", ref hasLoggedMissingKernel, out var kernel))
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
+            cmd.DispatchCompute(shader, kernel, 1, 1, 1);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private ComputeShader GetComputeShader()
+        {
+            return BurtFurBlurPassUtility.GetTiledComputeShader(ref computeShader, ref hasLoggedMissingComputeShader);
+        }
+    }
+
+    internal sealed class BurtFurBlurTiledSetupPass : BurtRenderPass
+    {
+        private ComputeShader computeShader;
+        private bool hasLoggedMissingComputeShader;
+        private bool hasLoggedMissingKernel;
+
+        public override string Name => "Burt Fur Blur Tiled Setup";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.GlobalState;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtFurBlurPassUtility.ShouldUseTiledFurBlur(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadFurBlurProperty();
+            builder.WriteFurBlurPropertyTemp();
+            builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+            builder.WriteBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+            builder.WriteBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (!TryGetTargets(context, out var property, out var propertyTemp, out var args, out var tiles))
+            {
+                return;
+            }
+
+            var shader = GetComputeShader();
+            if (shader == null || !BurtFurBlurPassUtility.TryFindTiledComputeKernel(shader, "SetupCS", ref hasLoggedMissingKernel, out var kernel))
+            {
+                return;
+            }
+
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
+            var groupsX = Mathf.CeilToInt(Mathf.Max(1, descriptor.width) / (float)BurtFurBlurPassUtility.TileThreadSize);
+            var groupsY = Mathf.CeilToInt(Mathf.Max(1, descriptor.height) / (float)BurtFurBlurPassUtility.TileThreadSize);
+            var settings = BurtFurBlurPassUtility.ResolveSettings();
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, property.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtFurBlurPassUtility.PropertyTempRWTextureId, propertyTemp.Identifier);
+            cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
+            cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileDataBufferId, tiles.Buffer);
+            cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ScreenSizeId, BurtFurBlurPassUtility.CreateScreenSizeVector(descriptor.width, descriptor.height));
+            cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ParamsId, new Vector4(settings.RadiusCm, settings.DepthThresholdEye, settings.DirectionDilationThreshold, settings.ThetaFeedback));
+            cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private bool TryGetTargets(
+            BurtRenderGraphContext context,
+            out BurtRenderTargetHandle property,
+            out BurtRenderTargetHandle propertyTemp,
+            out BurtRenderBufferHandle args,
+            out BurtRenderBufferHandle tiles)
+        {
+            property = context != null ? context.FurBlurPropertyTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
+            propertyTemp = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            args = context != null ? context.FurBlurArgsBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+            tiles = context != null ? context.FurBlurTileDataBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
+            return BurtFurBlurPassUtility.ShouldUseTiledFurBlur(context != null ? context.Request : null, context != null ? context.Asset : null) &&
+                property.IsValid &&
+                propertyTemp.IsValid &&
+                args.IsValid &&
+                args.HasBuffer &&
+                tiles.IsValid &&
+                tiles.HasBuffer;
+        }
+
+        private ComputeShader GetComputeShader()
+        {
+            return BurtFurBlurPassUtility.GetTiledComputeShader(ref computeShader, ref hasLoggedMissingComputeShader);
+        }
+    }
+
+    internal sealed class BurtFurBlurFillTileArgsPass : BurtRenderPass
+    {
+        private ComputeShader computeShader;
+        private bool hasLoggedMissingComputeShader;
+        private bool hasLoggedMissingKernel;
+
+        public override string Name => "Burt Fur Blur Fill Tile Args";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.GlobalState;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtFurBlurPassUtility.ShouldUseTiledFurBlur(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+            builder.WriteBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || !BurtFurBlurPassUtility.ShouldUseTiledFurBlur(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var args = context.FurBlurArgsBuffer;
+            if (!args.IsValid || !args.HasBuffer)
+            {
+                return;
+            }
+
+            var shader = GetComputeShader();
+            if (shader == null || !BurtFurBlurPassUtility.TryFindTiledComputeKernel(shader, "FillArgsPS", ref hasLoggedMissingKernel, out var kernel))
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
+            cmd.DispatchCompute(shader, kernel, 1, 1, 1);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private ComputeShader GetComputeShader()
+        {
+            return BurtFurBlurPassUtility.GetTiledComputeShader(ref computeShader, ref hasLoggedMissingComputeShader);
+        }
+    }
+
+    internal sealed class BurtFurBlurTiledDilatePass : BurtRenderPass
+    {
+        private ComputeShader computeShader;
+        private bool hasLoggedMissingComputeShader;
+        private bool hasLoggedMissingKernel;
+
+        public override string Name => "Burt Fur Blur Tiled Dilate";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.GlobalState;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtFurBlurPassUtility.ShouldUseTiledFurBlur(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadFurBlurPropertyTemp();
+            builder.WriteFurBlurProperty();
+            builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+            builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (!TryGetTargets(context, out var property, out var propertyTemp, out var args, out var tiles))
+            {
+                return;
+            }
+
+            var shader = GetComputeShader();
+            if (shader == null || !BurtFurBlurPassUtility.TryFindTiledComputeKernel(shader, "DilateCS", ref hasLoggedMissingKernel, out var kernel))
+            {
+                return;
+            }
+
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
+            var settings = BurtFurBlurPassUtility.ResolveSettings();
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId, propertyTemp.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtFurBlurPassUtility.PropertyRWTextureId, property.Identifier);
+            cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
+            cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileDataBufferId, tiles.Buffer);
+            cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ScreenSizeId, BurtFurBlurPassUtility.CreateScreenSizeVector(descriptor.width, descriptor.height));
+            cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ParamsId, new Vector4(settings.RadiusCm, settings.DepthThresholdEye, settings.DirectionDilationThreshold, settings.ThetaFeedback));
+            cmd.DispatchCompute(shader, kernel, args.Buffer, 0);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private bool TryGetTargets(
+            BurtRenderGraphContext context,
+            out BurtRenderTargetHandle property,
+            out BurtRenderTargetHandle propertyTemp,
+            out BurtRenderBufferHandle args,
+            out BurtRenderBufferHandle tiles)
+        {
+            property = context != null ? context.FurBlurPropertyTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
+            propertyTemp = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            args = context != null ? context.FurBlurArgsBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+            tiles = context != null ? context.FurBlurTileDataBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
+            return BurtFurBlurPassUtility.ShouldUseTiledFurBlur(context != null ? context.Request : null, context != null ? context.Asset : null) &&
+                property.IsValid &&
+                propertyTemp.IsValid &&
+                args.IsValid &&
+                args.HasBuffer &&
+                tiles.IsValid &&
+                tiles.HasBuffer;
+        }
+
+        private ComputeShader GetComputeShader()
+        {
+            return BurtFurBlurPassUtility.GetTiledComputeShader(ref computeShader, ref hasLoggedMissingComputeShader);
+        }
+    }
+
+    internal sealed class BurtFurBlurThetaTemporalPass : BurtRenderPass
+    {
+        private const int ThetaTemporalPassIndex = 5;
+        private Material material;
+        private bool hasLoggedMissingShader;
+
+        public override string Name => "Burt Fur Blur Theta Temporal";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.FullScreen;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadFurBlurProperty();
+            builder.ReadFurBlurVelocity();
+            builder.WriteFurBlurPropertyTemp();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var propertyTarget = context != null ? context.FurBlurPropertyTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
+            var propertyTempTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            if (context == null || !propertyTarget.IsValid || !propertyTempTarget.IsValid)
+            {
+                return;
+            }
+
+            var drawMaterial = GetMaterial();
+            if (drawMaterial == null)
+            {
+                return;
+            }
+
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
+            var history = BurtFurBlurHistoryUtility.EnsureHistoryTextures(context.Request, out var historyValid);
+            var settings = BurtFurBlurPassUtility.ResolveSettings();
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetRenderTarget(propertyTempTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, propertyTarget.Identifier);
+            BurtFurBlurPassUtility.BindVelocityTexture(cmd, context);
+            cmd.SetGlobalTexture(BurtFurBlurPassUtility.PropertyHistoryTextureId, history.Property != null ? new RenderTargetIdentifier(history.Property) : propertyTarget.Identifier);
+            BurtFurBlurPassUtility.UploadCommonGlobals(cmd, context.Request, descriptor.width, descriptor.height, settings, historyValid, historyValid, history.HistoryAge);
+            cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, ThetaTemporalPassIndex, MeshTopology.Triangles, 3, 1);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -281,6 +711,7 @@ namespace Burt.RenderPipeline
     internal sealed class BurtFurBlurPass : BurtRenderPass
     {
         private const int BlurPassIndex = 0;
+        private const int TiledBlurPassIndex = 6;
         private Material material;
         private bool hasLoggedMissingShader;
 
@@ -296,13 +727,24 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadCameraColor();
-            builder.ReadFurBlurProperty();
+            builder.ReadFurBlurPropertyTemp();
             builder.WriteFurBlurColor();
+            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(builder.Request, builder.Asset))
+            {
+                builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+                builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
+            }
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!BurtFurBlurPassUtility.TryGetFullScreenTargets(context, out var cameraColorTarget, out _, out var propertyTarget, out var colorTarget, out _))
+            if (!BurtFurBlurPassUtility.TryGetFullScreenTargets(context, out var cameraColorTarget, out _, out _, out var colorTarget, out _))
+            {
+                return;
+            }
+
+            var propertyTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            if (!propertyTarget.IsValid)
             {
                 return;
             }
@@ -314,13 +756,27 @@ namespace Burt.RenderPipeline
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurColorDescriptor(context.Request != null ? context.Request.Camera : null);
+            var settings = BurtFurBlurPassUtility.ResolveSettings();
             var cmd = CommandBufferPool.Get(Name);
             cmd.SetRenderTarget(colorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
+            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(context.Request, context.Asset))
+            {
+                cmd.ClearRenderTarget(false, true, Color.clear);
+            }
+
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraColorTextureId, cameraColorTarget.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, propertyTarget.Identifier);
-            cmd.SetGlobalVector(BurtFurBlurPassUtility.ScreenSizeId, BurtFurBlurPassUtility.CreateScreenSizeVector(descriptor.width, descriptor.height));
-            cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, BlurPassIndex, MeshTopology.Triangles, 3, 1);
+            BurtFurBlurPassUtility.UploadCommonGlobals(cmd, context.Request, descriptor.width, descriptor.height, settings, false, false, 0);
+            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(context.Request, context.Asset) &&
+                BurtFurBlurPassUtility.TryBindTileBuffers(cmd, context))
+            {
+                cmd.DrawProceduralIndirect(Matrix4x4.identity, drawMaterial, TiledBlurPassIndex, MeshTopology.Triangles, context.FurBlurArgsBuffer.Buffer, 3 * sizeof(uint));
+            }
+            else
+            {
+                cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, BlurPassIndex, MeshTopology.Triangles, 3, 1);
+            }
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -334,6 +790,7 @@ namespace Burt.RenderPipeline
     internal sealed class BurtFurBlurTemporalPass : BurtRenderPass
     {
         private const int TemporalPassIndex = 3;
+        private const int TiledTemporalPassIndex = 7;
         private Material material;
         private bool hasLoggedMissingShader;
 
@@ -349,13 +806,25 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadFurBlurColor();
-            builder.ReadFurBlurProperty();
+            builder.ReadFurBlurPropertyTemp();
+            builder.ReadFurBlurVelocity();
             builder.WriteFurBlurTemporal();
+            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(builder.Request, builder.Asset))
+            {
+                builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+                builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
+            }
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!BurtFurBlurPassUtility.TryGetFullScreenTargets(context, out _, out _, out var propertyTarget, out var colorTarget, out var temporalTarget))
+            if (!BurtFurBlurPassUtility.TryGetFullScreenTargets(context, out _, out _, out _, out var colorTarget, out var temporalTarget))
+            {
+                return;
+            }
+
+            var propertyTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            if (!propertyTarget.IsValid)
             {
                 return;
             }
@@ -368,16 +837,34 @@ namespace Burt.RenderPipeline
 
             var camera = context.Request != null ? context.Request.Camera : null;
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurTemporalDescriptor(camera);
-            var history = BurtFurBlurHistoryUtility.EnsureHistoryTextures(context.Request, out var historyValid);
+            var history = BurtFurBlurHistoryUtility.GetPendingHistoryTextures(context.Request);
+            var status = BurtFurBlurHistoryUtility.GetHistoryStatus(camera);
+            var colorHistoryValid = status.HasHistory && history.Color != null;
+            var propertyHistoryValid = status.HasPropertyHistory && history.Property != null;
+            var settings = BurtFurBlurPassUtility.ResolveSettings();
             var cmd = CommandBufferPool.Get(Name);
             cmd.SetRenderTarget(temporalTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
+            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(context.Request, context.Asset))
+            {
+                cmd.ClearRenderTarget(false, true, Color.clear);
+            }
+
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurColorTextureId, colorTarget.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, propertyTarget.Identifier);
+            BurtFurBlurPassUtility.BindVelocityTexture(cmd, context);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurHistoryTextureId, history.Color != null ? new RenderTargetIdentifier(history.Color) : colorTarget.Identifier);
-            cmd.SetGlobalVector(BurtFurBlurPassUtility.ScreenSizeId, BurtFurBlurPassUtility.CreateScreenSizeVector(descriptor.width, descriptor.height));
-            cmd.SetGlobalVector(BurtFurBlurPassUtility.HistoryParamsId, new Vector4(historyValid ? 1f : 0f, BurtFurBlurHistoryUtility.DefaultFeedback, history.HistoryAge, 0f));
-            cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, TemporalPassIndex, MeshTopology.Triangles, 3, 1);
+            cmd.SetGlobalTexture(BurtFurBlurPassUtility.PropertyHistoryTextureId, history.Property != null ? new RenderTargetIdentifier(history.Property) : propertyTarget.Identifier);
+            BurtFurBlurPassUtility.UploadCommonGlobals(cmd, context.Request, descriptor.width, descriptor.height, settings, colorHistoryValid, propertyHistoryValid, history.HistoryAge);
+            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(context.Request, context.Asset) &&
+                BurtFurBlurPassUtility.TryBindTileBuffers(cmd, context))
+            {
+                cmd.DrawProceduralIndirect(Matrix4x4.identity, drawMaterial, TiledTemporalPassIndex, MeshTopology.Triangles, context.FurBlurArgsBuffer.Buffer, 3 * sizeof(uint));
+            }
+            else
+            {
+                cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, TemporalPassIndex, MeshTopology.Triangles, 3, 1);
+            }
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -402,24 +889,27 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadFurBlurTemporal();
+            builder.ReadFurBlurPropertyTemp();
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
             var temporalTarget = context != null ? context.FurBlurTemporalTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTemporalName);
-            if (context == null || !temporalTarget.IsValid)
+            var propertyTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            if (context == null || !temporalTarget.IsValid || !propertyTarget.IsValid)
             {
                 return;
             }
 
             var history = BurtFurBlurHistoryUtility.GetPendingHistoryTextures(context.Request);
-            if (history.Color == null)
+            if (history.Color == null || history.Property == null)
             {
                 return;
             }
 
             var cmd = CommandBufferPool.Get(Name);
             cmd.CopyTexture(temporalTarget.Identifier, new RenderTargetIdentifier(history.Color));
+            cmd.CopyTexture(propertyTarget.Identifier, new RenderTargetIdentifier(history.Property));
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
             BurtFurBlurHistoryUtility.MarkHistoryValid(context.Request != null ? context.Request.Camera : null);
@@ -429,6 +919,7 @@ namespace Burt.RenderPipeline
     internal sealed class BurtFurBlurCompositePass : BurtRenderPass
     {
         private const int CompositePassIndex = 1;
+        private const int TiledCompositePassIndex = 8;
         private Material material;
         private bool hasLoggedMissingShader;
 
@@ -446,6 +937,11 @@ namespace Burt.RenderPipeline
             builder.ReadFurBlurTemporal();
             builder.ReadCameraColor();
             builder.WriteCameraColor();
+            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(builder.Request, builder.Asset))
+            {
+                builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
+                builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
+            }
         }
 
         public override void Execute(BurtRenderGraphContext context)
@@ -466,7 +962,15 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, temporalTarget.Identifier);
-            cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, CompositePassIndex, MeshTopology.Triangles, 3, 1);
+            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(context.Request, context.Asset) &&
+                BurtFurBlurPassUtility.TryBindTileBuffers(cmd, context))
+            {
+                cmd.DrawProceduralIndirect(Matrix4x4.identity, drawMaterial, TiledCompositePassIndex, MeshTopology.Triangles, context.FurBlurArgsBuffer.Buffer, 3 * sizeof(uint));
+            }
+            else
+            {
+                cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, CompositePassIndex, MeshTopology.Triangles, 3, 1);
+            }
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -495,16 +999,23 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadCameraColor();
-            builder.ReadFurBlurProperty();
+            builder.ReadFurBlurPropertyTemp();
             builder.ReadFurBlurColor();
             builder.ReadFurBlurTemporal();
+            builder.ReadFurBlurVelocity();
             builder.WriteCameraColor();
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
             if (!BurtFurBlurPassUtility.ShouldUseFurBlurDebugView(context != null ? context.Request : null, context != null ? context.Asset : null) ||
-                !BurtFurBlurPassUtility.TryGetFullScreenTargets(context, out _, out var cameraColorTarget, out var propertyTarget, out var colorTarget, out var temporalTarget))
+                !BurtFurBlurPassUtility.TryGetFullScreenTargets(context, out _, out var cameraColorTarget, out _, out var colorTarget, out var temporalTarget))
+            {
+                return;
+            }
+
+            var propertyTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            if (!propertyTarget.IsValid)
             {
                 return;
             }
@@ -518,16 +1029,18 @@ namespace Burt.RenderPipeline
             var camera = context.Request != null ? context.Request.Camera : null;
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
             var status = BurtFurBlurHistoryUtility.GetHistoryStatus(camera);
-            var history = BurtFurBlurHistoryUtility.GetCurrentHistoryTexture(context.Request, out _, out _);
+            var history = BurtFurBlurHistoryUtility.GetPendingHistoryTextures(context.Request);
+            var settings = BurtFurBlurPassUtility.ResolveSettings();
             var cmd = CommandBufferPool.Get(Name);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, propertyTarget.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurColorTextureId, colorTarget.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, temporalTarget.Identifier);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurHistoryTextureId, history != null ? new RenderTargetIdentifier(history) : temporalTarget.Identifier);
-            cmd.SetGlobalVector(BurtFurBlurPassUtility.ScreenSizeId, BurtFurBlurPassUtility.CreateScreenSizeVector(descriptor.width, descriptor.height));
-            cmd.SetGlobalVector(BurtFurBlurPassUtility.HistoryParamsId, new Vector4(status.HasHistory ? 1f : 0f, BurtFurBlurHistoryUtility.DefaultFeedback, status.HistoryAge, 0f));
+            BurtFurBlurPassUtility.BindVelocityTexture(cmd, context);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurHistoryTextureId, history.Color != null ? new RenderTargetIdentifier(history.Color) : temporalTarget.Identifier);
+            cmd.SetGlobalTexture(BurtFurBlurPassUtility.PropertyHistoryTextureId, history.Property != null ? new RenderTargetIdentifier(history.Property) : propertyTarget.Identifier);
+            BurtFurBlurPassUtility.UploadCommonGlobals(cmd, context.Request, descriptor.width, descriptor.height, settings, status.HasHistory, status.HasPropertyHistory, status.HistoryAge);
             cmd.SetGlobalInt(BurtFurBlurPassUtility.DebugModeId, BurtFurBlurPassUtility.ResolveFurBlurShaderDebugMode());
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, DebugPassIndex, MeshTopology.Triangles, 3, 1);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
@@ -566,6 +1079,37 @@ namespace Burt.RenderPipeline
 
             var cmd = CommandBufferPool.Get(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal sealed class BurtReleaseFurBlurVelocityPass : BurtRenderPass
+    {
+        public override string Name => "Burt Release Fur Blur Velocity";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.Release;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadFurBlurVelocity();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var target = context != null ? context.FurBlurVelocityTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurVelocityName);
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -664,10 +1208,43 @@ namespace Burt.RenderPipeline
         }
     }
 
+    internal readonly struct BurtFurBlurSettings
+    {
+        public const float DefaultRadiusCm = 2.0f;
+        public const float DefaultDepthThresholdEye = 0.02f;
+        public const float DefaultDirectionDilationThreshold = 0.5f;
+        public const float DefaultThetaFeedback = 0.75f;
+        public const float DefaultTemporalFeedback = BurtFurBlurHistoryUtility.DefaultFeedback;
+        public const bool DefaultTiledBlur = false;
+
+        public static readonly BurtFurBlurSettings Default = new BurtFurBlurSettings(true, DefaultTiledBlur, DefaultRadiusCm, DefaultDepthThresholdEye, DefaultDirectionDilationThreshold, DefaultThetaFeedback, DefaultTemporalFeedback);
+
+        public bool Enabled { get; }
+        public bool TiledBlur { get; }
+        public float RadiusCm { get; }
+        public float DepthThresholdEye { get; }
+        public float DirectionDilationThreshold { get; }
+        public float ThetaFeedback { get; }
+        public float TemporalFeedback { get; }
+
+        public BurtFurBlurSettings(bool enabled, bool tiledBlur, float radiusCm, float depthThresholdEye, float directionDilationThreshold, float thetaFeedback, float temporalFeedback)
+        {
+            Enabled = enabled;
+            TiledBlur = tiledBlur;
+            RadiusCm = Mathf.Clamp(radiusCm, 0f, 8f);
+            DepthThresholdEye = Mathf.Clamp(depthThresholdEye, 0.001f, 0.2f);
+            DirectionDilationThreshold = Mathf.Clamp01(directionDilationThreshold);
+            ThetaFeedback = Mathf.Clamp(thetaFeedback, 0f, 0.98f);
+            TemporalFeedback = Mathf.Clamp(temporalFeedback, 0f, 0.98f);
+        }
+    }
+
     internal static class BurtFurBlurPassUtility
     {
         public const string ShaderName = "Hidden/BurtRP/FurBlur";
+        public const string TiledComputeShaderResourcePath = "BurtFurBlurTiled";
         public const float DefaultTemporalFeedback = BurtFurBlurHistoryUtility.DefaultFeedback;
+        public const int TileThreadSize = 8;
 
         private const int OpaqueRenderQueueMax = 2500;
         private const string FurBlurPropertyShaderPassName = "Burt Multipass Fur Blur Property";
@@ -677,10 +1254,24 @@ namespace Burt.RenderPipeline
 
         public static readonly int ScreenSizeId = Shader.PropertyToID("_BurtFurBlurScreenSize");
         public static readonly int HistoryParamsId = Shader.PropertyToID("_BurtFurBlurHistoryParams");
+        public static readonly int ParamsId = Shader.PropertyToID("_BurtFurBlurParams");
+        public static readonly int TemporalParamsId = Shader.PropertyToID("_BurtFurBlurTemporalParams");
+        public static readonly int PropertyHistoryTextureId = Shader.PropertyToID("_BurtFurBlurPropertyHistoryTexture");
+        public static readonly int PreviousNonJitteredViewProjectionId = Shader.PropertyToID("_BurtFurBlurPreviousNonJitteredViewProjection");
+        public static readonly int CurrentNonJitteredViewProjectionId = Shader.PropertyToID("_BurtFurBlurCurrentNonJitteredViewProjection");
+        public static readonly int InverseCurrentNonJitteredViewProjectionId = Shader.PropertyToID("_BurtFurBlurInverseCurrentNonJitteredViewProjection");
+        public static readonly int JitterId = Shader.PropertyToID("_BurtFurBlurJitter");
         public static readonly int DebugModeId = Shader.PropertyToID("_BurtFurBlurDebugMode");
+        public static readonly int PreviousObjectToWorldId = Shader.PropertyToID("_BurtFurBlurPreviousObjectToWorld");
+        public static readonly int PropertyRWTextureId = Shader.PropertyToID("_BurtFurBlurPropertyRWTexture");
+        public static readonly int PropertyTempRWTextureId = Shader.PropertyToID("_BurtFurBlurPropertyTempRWTexture");
+        public static readonly int TileArgsBufferId = Shader.PropertyToID("_BurtFurBlurArgsBuffer");
+        public static readonly int TileDataBufferId = Shader.PropertyToID("_BurtFurBlurTileDataBuffer");
 
         private static readonly Color ReversedZFarClearColor = new Color(0f, 0f, 0f, 1f);
         private static readonly Color ForwardZFarClearColor = new Color(0f, 1f, 0f, 1f);
+        private static int tiledComputeAvailabilityFrame = -1;
+        private static bool tiledComputeAvailable;
         private static int cachedFurBlurFeatureFrame = -1;
         private static int cachedFurBlurFeatureCameraId;
         private static int cachedFurBlurFeatureCullingMask;
@@ -705,6 +1296,16 @@ namespace Burt.RenderPipeline
             return HasVisibleFurBlurCandidate(request);
         }
 
+        public static bool ShouldUseTiledFurBlur(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldUseFurBlur(request, asset) && SupportsTiledPropertyFormat() && IsTiledComputeAvailable();
+        }
+
+        public static bool ShouldUseTiledBlurDraw(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ResolveSettings().TiledBlur && ShouldUseTiledFurBlur(request, asset);
+        }
+
         public static bool ShouldUseFurBlurDebugView(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
             return ShouldUseFurBlur(request, asset) && IsFurBlurDebugMode(BurtShadingDebugSettings.Mode);
@@ -717,7 +1318,8 @@ namespace Burt.RenderPipeline
                 mode == BurtShadingDebugMode.FurBlurCurrent ||
                 mode == BurtShadingDebugMode.FurBlurTemporal ||
                 mode == BurtShadingDebugMode.FurBlurHistory ||
-                mode == BurtShadingDebugMode.FurBlurDiagnostic;
+                mode == BurtShadingDebugMode.FurBlurDiagnostic ||
+                mode == BurtShadingDebugMode.FurBlurReprojection;
         }
 
         public static int ResolveFurBlurShaderDebugMode()
@@ -736,6 +1338,8 @@ namespace Burt.RenderPipeline
                     return 5;
                 case BurtShadingDebugMode.FurBlurDiagnostic:
                     return 6;
+                case BurtShadingDebugMode.FurBlurReprojection:
+                    return 7;
                 default:
                     return 0;
             }
@@ -749,6 +1353,21 @@ namespace Burt.RenderPipeline
         public static string ResolveFurBlurShaderStatusLabel()
         {
             return Shader.Find(ShaderName) != null ? "Ready" : "Missing(" + ShaderName + ")";
+        }
+
+        public static string ResolveFurBlurTiledStatusLabel()
+        {
+            if (!SupportsTiledPropertyFormat())
+            {
+                return "FullscreenDilateFallbackMissingRGFloatUAV";
+            }
+
+            if (!IsTiledComputeAvailable())
+            {
+                return "FullscreenDilateFallbackMissing(" + TiledComputeShaderResourcePath + ")";
+            }
+
+            return ResolveSettings().TiledBlur ? "TiledSetupFillArgsIndirectDilateIndirectBlur" : "TiledSetupFillArgsIndirectDilate";
         }
 
         public static string ResolveFurBlurCandidateGateLabel(BurtRenderRequest request, BurtRenderPipelineAsset asset)
@@ -767,6 +1386,116 @@ namespace Burt.RenderPipeline
             var safeWidth = Mathf.Max(1, width);
             var safeHeight = Mathf.Max(1, height);
             return new Vector4(safeWidth, safeHeight, 1f / safeWidth, 1f / safeHeight);
+        }
+
+        public static BurtRenderBufferDescriptor CreateTileArgsBufferDescriptor()
+        {
+            return new BurtRenderBufferDescriptor(
+                8,
+                sizeof(uint),
+                GraphicsBuffer.Target.IndirectArguments | GraphicsBuffer.Target.Structured,
+                "_BurtFurBlurArgsBuffer");
+        }
+
+        public static BurtRenderBufferDescriptor CreateTileDataBufferDescriptor(Camera camera)
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
+            var tileCountX = Mathf.CeilToInt(Mathf.Max(1, descriptor.width) / (float)TileThreadSize);
+            var tileCountY = Mathf.CeilToInt(Mathf.Max(1, descriptor.height) / (float)TileThreadSize);
+            var tileCount = Mathf.Max(1, tileCountX * tileCountY);
+            return new BurtRenderBufferDescriptor(
+                tileCount * 2,
+                sizeof(uint),
+                GraphicsBuffer.Target.Structured,
+                "_BurtFurBlurTileDataBuffer");
+        }
+
+        public static BurtFurBlurSettings ResolveSettings()
+        {
+            var component = GetFurBlurVolumeComponent();
+            if (component == null || !component.active)
+            {
+                return BurtFurBlurSettings.Default;
+            }
+
+            return new BurtFurBlurSettings(
+                component.enabled.value,
+                component.tiledBlur.value,
+                component.radiusCm.value,
+                component.depthThresholdEye.value,
+                component.directionDilationThreshold.value,
+                component.thetaFeedback.value,
+                component.temporalFeedback.value);
+        }
+
+        public static void UploadCommonGlobals(
+            CommandBuffer cmd,
+            BurtRenderRequest request,
+            int width,
+            int height,
+            BurtFurBlurSettings settings,
+            bool colorHistoryValid,
+            bool propertyHistoryValid,
+            int historyAge)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            ResolveTemporalMatrices(request, out var previousNonJitteredViewProjection, out var inverseCurrentNonJitteredViewProjection, out var jitter, out var jitterPixels);
+            cmd.SetGlobalVector(ScreenSizeId, CreateScreenSizeVector(width, height));
+            cmd.SetGlobalVector(ParamsId, new Vector4(settings.RadiusCm, settings.DepthThresholdEye, settings.DirectionDilationThreshold, settings.ThetaFeedback));
+            cmd.SetGlobalVector(HistoryParamsId, new Vector4(colorHistoryValid ? 1f : 0f, settings.TemporalFeedback, historyAge, 0f));
+            cmd.SetGlobalVector(TemporalParamsId, new Vector4(colorHistoryValid ? 1f : 0f, propertyHistoryValid ? 1f : 0f, historyAge, settings.Enabled ? 1f : 0f));
+            cmd.SetGlobalMatrix(PreviousNonJitteredViewProjectionId, previousNonJitteredViewProjection);
+            cmd.SetGlobalMatrix(InverseCurrentNonJitteredViewProjectionId, inverseCurrentNonJitteredViewProjection);
+            cmd.SetGlobalVector(JitterId, new Vector4(jitter.x, jitter.y, jitterPixels.x, jitterPixels.y));
+        }
+
+        public static void UploadMotionVectorGlobals(CommandBuffer cmd, BurtRenderRequest request, int width, int height)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            ResolveMotionVectorMatrices(request, out var currentNonJitteredViewProjection, out var previousNonJitteredViewProjection);
+            cmd.SetGlobalVector(ScreenSizeId, CreateScreenSizeVector(width, height));
+            cmd.SetGlobalMatrix(CurrentNonJitteredViewProjectionId, currentNonJitteredViewProjection);
+            cmd.SetGlobalMatrix(PreviousNonJitteredViewProjectionId, previousNonJitteredViewProjection);
+        }
+
+        public static void BindVelocityTexture(CommandBuffer cmd, BurtRenderGraphContext context)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            var velocityTarget = context != null ? context.FurBlurVelocityTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurVelocityName);
+            if (velocityTarget.IsValid)
+            {
+                cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId, velocityTarget.Identifier);
+            }
+        }
+
+        public static bool TryBindTileBuffers(CommandBuffer cmd, BurtRenderGraphContext context)
+        {
+            if (cmd == null || context == null)
+            {
+                return false;
+            }
+
+            var args = context.FurBlurArgsBuffer;
+            var tiles = context.FurBlurTileDataBuffer;
+            if (!args.IsValid || !args.HasBuffer || !tiles.IsValid || !tiles.HasBuffer)
+            {
+                return false;
+            }
+
+            cmd.SetGlobalBuffer(TileDataBufferId, tiles.Buffer);
+            return true;
         }
 
         public static bool TryGetFullScreenTargets(
@@ -817,6 +1546,46 @@ namespace Burt.RenderPipeline
             return cachedMaterial;
         }
 
+        public static ComputeShader GetTiledComputeShader(ref ComputeShader shader, ref bool hasLoggedMissingComputeShader)
+        {
+            if (shader != null)
+            {
+                return shader;
+            }
+
+            shader = Resources.Load<ComputeShader>(TiledComputeShaderResourcePath);
+            if (shader == null && !hasLoggedMissingComputeShader)
+            {
+                Debug.LogWarning("BurtRP could not find compute shader resource: " + TiledComputeShaderResourcePath);
+                hasLoggedMissingComputeShader = true;
+            }
+
+            return shader;
+        }
+
+        public static bool TryFindTiledComputeKernel(ComputeShader shader, string kernelName, ref bool hasLoggedMissingKernel, out int kernel)
+        {
+            kernel = -1;
+            if (shader == null)
+            {
+                return false;
+            }
+
+            if (!shader.HasKernel(kernelName))
+            {
+                if (!hasLoggedMissingKernel)
+                {
+                    Debug.LogWarning("BurtRP could not find FurBlur tiled compute kernel: " + kernelName);
+                    hasLoggedMissingKernel = true;
+                }
+
+                return false;
+            }
+
+            kernel = shader.FindKernel(kernelName);
+            return kernel >= 0;
+        }
+
         private static bool ShouldUseFurBlurBase(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
             if (request == null || !request.IsValid || asset == null)
@@ -829,7 +1598,108 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            return asset.RendererMode == BurtRendererMode.Deferred;
+            return asset.RendererMode == BurtRendererMode.Deferred && ResolveSettings().Enabled;
+        }
+
+        private static bool IsTiledComputeAvailable()
+        {
+            var frame = Time.frameCount;
+            if (tiledComputeAvailabilityFrame == frame)
+            {
+                return tiledComputeAvailable;
+            }
+
+            tiledComputeAvailabilityFrame = frame;
+            var shader = Resources.Load<ComputeShader>(TiledComputeShaderResourcePath);
+            tiledComputeAvailable = shader != null &&
+                shader.HasKernel("InitArgsCS") &&
+                shader.HasKernel("SetupCS") &&
+                shader.HasKernel("FillArgsPS") &&
+                shader.HasKernel("DilateCS");
+            return tiledComputeAvailable;
+        }
+
+        private static bool SupportsTiledPropertyFormat()
+        {
+            return SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGFloat);
+        }
+
+        private static BurtFurBlurVolumeComponent GetFurBlurVolumeComponent()
+        {
+            var volumeManager = VolumeManager.instance;
+            var stack = volumeManager != null ? volumeManager.stack : null;
+            return stack != null ? stack.GetComponent<BurtFurBlurVolumeComponent>() : null;
+        }
+
+        private static void ResolveTemporalMatrices(
+            BurtRenderRequest request,
+            out Matrix4x4 previousNonJitteredViewProjection,
+            out Matrix4x4 inverseCurrentNonJitteredViewProjection,
+            out Vector2 jitter,
+            out Vector2 jitterPixels)
+        {
+            var temporalAA = request != null ? request.TemporalAA : null;
+            if (temporalAA != null && !object.ReferenceEquals(temporalAA, BurtTemporalAARequestState.Disabled))
+            {
+                previousNonJitteredViewProjection = temporalAA.PreviousNonJitteredViewProjectionMatrix;
+                inverseCurrentNonJitteredViewProjection = temporalAA.InverseCurrentNonJitteredViewProjectionMatrix;
+                jitter = temporalAA.Enabled ? temporalAA.Jitter : Vector2.zero;
+                jitterPixels = temporalAA.Enabled ? temporalAA.JitterPixels : Vector2.zero;
+                return;
+            }
+
+            var camera = request != null ? request.Camera : null;
+            if (camera == null)
+            {
+                previousNonJitteredViewProjection = Matrix4x4.identity;
+                inverseCurrentNonJitteredViewProjection = Matrix4x4.identity;
+                jitter = Vector2.zero;
+                jitterPixels = Vector2.zero;
+                return;
+            }
+
+            var projectionMatrix = camera.nonJitteredProjectionMatrix;
+            if (projectionMatrix == Matrix4x4.zero)
+            {
+                projectionMatrix = camera.projectionMatrix;
+            }
+
+            var viewProjection = GL.GetGPUProjectionMatrix(projectionMatrix, true) * camera.worldToCameraMatrix;
+            previousNonJitteredViewProjection = viewProjection;
+            inverseCurrentNonJitteredViewProjection = viewProjection.inverse;
+            jitter = Vector2.zero;
+            jitterPixels = Vector2.zero;
+        }
+
+        private static void ResolveMotionVectorMatrices(
+            BurtRenderRequest request,
+            out Matrix4x4 currentNonJitteredViewProjection,
+            out Matrix4x4 previousNonJitteredViewProjection)
+        {
+            var temporalAA = request != null ? request.TemporalAA : null;
+            if (temporalAA != null && !object.ReferenceEquals(temporalAA, BurtTemporalAARequestState.Disabled))
+            {
+                currentNonJitteredViewProjection = temporalAA.CurrentNonJitteredViewProjectionMatrix;
+                previousNonJitteredViewProjection = temporalAA.PreviousNonJitteredViewProjectionMatrix;
+                return;
+            }
+
+            var camera = request != null ? request.Camera : null;
+            if (camera == null)
+            {
+                currentNonJitteredViewProjection = Matrix4x4.identity;
+                previousNonJitteredViewProjection = Matrix4x4.identity;
+                return;
+            }
+
+            var projectionMatrix = camera.nonJitteredProjectionMatrix;
+            if (projectionMatrix == Matrix4x4.zero)
+            {
+                projectionMatrix = camera.projectionMatrix;
+            }
+
+            currentNonJitteredViewProjection = GL.GetGPUProjectionMatrix(projectionMatrix, true) * camera.worldToCameraMatrix;
+            previousNonJitteredViewProjection = currentNonJitteredViewProjection;
         }
 
         private static bool HasVisibleFurBlurCandidate(BurtRenderRequest request)
@@ -982,11 +1852,13 @@ namespace Burt.RenderPipeline
     internal readonly struct BurtFurBlurHistoryTextures
     {
         public RenderTexture Color { get; }
+        public RenderTexture Property { get; }
         public int HistoryAge { get; }
 
-        public BurtFurBlurHistoryTextures(RenderTexture color, int historyAge)
+        public BurtFurBlurHistoryTextures(RenderTexture color, RenderTexture property, int historyAge)
         {
             Color = color;
+            Property = property;
             HistoryAge = historyAge;
         }
     }
@@ -995,30 +1867,45 @@ namespace Burt.RenderPipeline
     {
         public bool HasHistory { get; }
         public bool DescriptorMatches { get; }
+        public bool HasPropertyHistory { get; }
+        public bool PropertyDescriptorMatches { get; }
         public int HistoryAge { get; }
         public int FrameIndex { get; }
         public RenderTextureFormat Format { get; }
+        public RenderTextureFormat PropertyFormat { get; }
         public int Width { get; }
         public int Height { get; }
+        public int PropertyWidth { get; }
+        public int PropertyHeight { get; }
         public string Reason { get; }
 
         public BurtFurBlurHistoryStatus(
             bool hasHistory,
             bool descriptorMatches,
+            bool hasPropertyHistory,
+            bool propertyDescriptorMatches,
             int historyAge,
             int frameIndex,
             RenderTextureFormat format,
+            RenderTextureFormat propertyFormat,
             int width,
             int height,
+            int propertyWidth,
+            int propertyHeight,
             string reason)
         {
             HasHistory = hasHistory;
             DescriptorMatches = descriptorMatches;
+            HasPropertyHistory = hasPropertyHistory;
+            PropertyDescriptorMatches = propertyDescriptorMatches;
             HistoryAge = historyAge;
             FrameIndex = frameIndex;
             Format = format;
+            PropertyFormat = propertyFormat;
             Width = width;
             Height = height;
+            PropertyWidth = propertyWidth;
+            PropertyHeight = propertyHeight;
             Reason = reason;
         }
     }
@@ -1041,16 +1928,20 @@ namespace Burt.RenderPipeline
             var camera = request != null ? request.Camera : null;
             if (camera == null)
             {
-                return new BurtFurBlurHistoryTextures(null, 0);
+                return new BurtFurBlurHistoryTextures(null, null, 0);
             }
 
             var state = GetOrCreateState(camera.GetInstanceID());
             state.Camera = camera;
             PruneDisposedCameraStates();
             var descriptor = CreateHistoryDescriptor(camera);
-            var descriptorMatches = state.ColorHistory != null && Matches(state.Descriptor, descriptor);
+            var propertyDescriptor = CreatePropertyHistoryDescriptor(camera);
+            var colorDescriptorMatches = state.ColorHistory != null && Matches(state.Descriptor, descriptor);
+            var propertyDescriptorMatches = state.PropertyHistory != null && Matches(state.PropertyDescriptor, propertyDescriptor);
+            var descriptorMatches = colorDescriptorMatches && propertyDescriptorMatches;
             GetTargetSize(camera, out var targetWidth, out var targetHeight);
-            var invalidationReason = ResolveInvalidationReason(camera, state, camera.projectionMatrix, targetWidth, targetHeight, descriptorMatches);
+            var projectionMatrix = ResolveHistoryProjectionMatrix(request, camera);
+            var invalidationReason = ResolveInvalidationReason(camera, state, projectionMatrix, targetWidth, targetHeight, descriptorMatches);
 
             if (!descriptorMatches)
             {
@@ -1064,18 +1955,25 @@ namespace Burt.RenderPipeline
                 SetAllocationInvalidationReason(state, "HistoryAllocated");
             }
 
+            if (state.PropertyHistory == null)
+            {
+                state.PropertyDescriptor = propertyDescriptor;
+                state.PropertyHistory = CreateHistoryTexture(propertyDescriptor, "Burt Fur Blur Property History " + camera.GetInstanceID(), FilterMode.Point);
+                SetAllocationInvalidationReason(state, "PropertyHistoryAllocated");
+            }
+
             if (!string.IsNullOrEmpty(invalidationReason))
             {
                 InvalidateState(state, invalidationReason);
             }
 
             state.FrameIndex++;
-            state.CurrentProjectionMatrix = camera.projectionMatrix;
+            state.CurrentProjectionMatrix = projectionMatrix;
             CaptureCurrentCameraState(camera, state, targetWidth, targetHeight);
 
             var historyAge = state.HasValidHistory && state.FirstValidFrameIndex > 0 ? Mathf.Max(0, state.FrameIndex - state.FirstValidFrameIndex + 1) : 0;
-            historyValid = state.HasValidHistory && state.HasPreviousCameraState && state.ColorHistory != null;
-            return new BurtFurBlurHistoryTextures(state.ColorHistory, historyAge);
+            historyValid = state.HasValidHistory && state.HasPreviousCameraState && state.ColorHistory != null && state.PropertyHistory != null;
+            return new BurtFurBlurHistoryTextures(state.ColorHistory, state.PropertyHistory, historyAge);
         }
 
         public static RenderTexture GetCurrentHistoryTexture(BurtRenderRequest request, out bool historyValid, out int historyAge)
@@ -1098,11 +1996,11 @@ namespace Burt.RenderPipeline
             var camera = request != null ? request.Camera : null;
             if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
             {
-                return new BurtFurBlurHistoryTextures(null, 0);
+                return new BurtFurBlurHistoryTextures(null, null, 0);
             }
 
             var historyAge = state.HasValidHistory && state.FirstValidFrameIndex > 0 ? Mathf.Max(0, state.FrameIndex - state.FirstValidFrameIndex + 1) : 0;
-            return new BurtFurBlurHistoryTextures(state.ColorHistory, historyAge);
+            return new BurtFurBlurHistoryTextures(state.ColorHistory, state.PropertyHistory, historyAge);
         }
 
         public static void MarkHistoryValid(Camera camera)
@@ -1137,20 +2035,27 @@ namespace Burt.RenderPipeline
         {
             if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
             {
-                return new BurtFurBlurHistoryStatus(false, false, 0, 0, RenderTextureFormat.Default, 0, 0, "NoCameraOrHistory");
+                return new BurtFurBlurHistoryStatus(false, false, false, false, 0, 0, RenderTextureFormat.Default, RenderTextureFormat.Default, 0, 0, 0, 0, "NoCameraOrHistory");
             }
 
             var descriptor = CreateHistoryDescriptor(camera);
+            var propertyDescriptor = CreatePropertyHistoryDescriptor(camera);
             var hasHistory = state.ColorHistory != null;
+            var hasPropertyHistory = state.PropertyHistory != null;
             var historyAge = state.HasValidHistory && state.FirstValidFrameIndex > 0 ? Mathf.Max(0, state.FrameIndex - state.FirstValidFrameIndex + 1) : 0;
             return new BurtFurBlurHistoryStatus(
                 state.HasValidHistory && hasHistory,
                 hasHistory && Matches(state.Descriptor, descriptor),
+                state.HasValidHistory && hasPropertyHistory,
+                hasPropertyHistory && Matches(state.PropertyDescriptor, propertyDescriptor),
                 historyAge,
                 state.FrameIndex,
                 hasHistory ? state.ColorHistory.format : RenderTextureFormat.Default,
+                hasPropertyHistory ? state.PropertyHistory.format : RenderTextureFormat.Default,
                 hasHistory ? state.ColorHistory.width : 0,
                 hasHistory ? state.ColorHistory.height : 0,
+                hasPropertyHistory ? state.PropertyHistory.width : 0,
+                hasPropertyHistory ? state.PropertyHistory.height : 0,
                 string.IsNullOrEmpty(state.LastInvalidationReason) ? "None" : state.LastInvalidationReason);
         }
 
@@ -1162,6 +2067,27 @@ namespace Burt.RenderPipeline
             descriptor.useMipMap = false;
             descriptor.autoGenerateMips = false;
             return descriptor;
+        }
+
+        private static RenderTextureDescriptor CreatePropertyHistoryDescriptor(Camera camera)
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            return descriptor;
+        }
+
+        private static Matrix4x4 ResolveHistoryProjectionMatrix(BurtRenderRequest request, Camera camera)
+        {
+            var temporalAA = request != null ? request.TemporalAA : null;
+            if (temporalAA != null && !object.ReferenceEquals(temporalAA, BurtTemporalAARequestState.Disabled))
+            {
+                return temporalAA.NonJitteredProjectionMatrix;
+            }
+
+            return camera != null ? camera.projectionMatrix : Matrix4x4.identity;
         }
 
         private static CameraState GetOrCreateState(int cameraId)
@@ -1212,7 +2138,9 @@ namespace Burt.RenderPipeline
             }
 
             ReleaseTexture(state.ColorHistory);
+            ReleaseTexture(state.PropertyHistory);
             state.ColorHistory = null;
+            state.PropertyHistory = null;
             state.HasValidHistory = false;
             state.HasPreviousCameraState = false;
             state.FirstValidFrameIndex = 0;
@@ -1396,7 +2324,9 @@ namespace Burt.RenderPipeline
         {
             public Camera Camera;
             public RenderTexture ColorHistory;
+            public RenderTexture PropertyHistory;
             public RenderTextureDescriptor Descriptor;
+            public RenderTextureDescriptor PropertyDescriptor;
             public bool HasValidHistory;
             public bool HasPreviousCameraState;
             public int FrameIndex;

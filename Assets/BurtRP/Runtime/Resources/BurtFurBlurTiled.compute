@@ -1,0 +1,178 @@
+#pragma kernel InitArgsCS
+#pragma kernel SetupCS
+#pragma kernel FillArgsPS
+#pragma kernel DilateCS
+
+#include "UnityCG.cginc"
+
+#define BURT_FUR_TILE_SIZE 8
+#define BURT_FUR_VALID_THETA_EPSILON 1e-5
+#define BURT_TWO_PI 6.28318530717958647692
+
+Texture2D<float4> _BurtFurBlurPropertyTexture;
+Texture2D<float4> _BurtFurBlurPropertyTempTexture;
+RWTexture2D<float2> _BurtFurBlurPropertyRWTexture;
+RWTexture2D<float2> _BurtFurBlurPropertyTempRWTexture;
+RWStructuredBuffer<uint> _BurtFurBlurArgsBuffer;
+RWStructuredBuffer<uint> _BurtFurBlurTileDataBuffer;
+
+float4 _BurtFurBlurScreenSize;
+float4 _BurtFurBlurParams;
+
+groupshared uint BurtFurTileActive;
+
+bool BurtFurInBounds(int2 pixel)
+{
+    int2 screenSize = max((int2)_BurtFurBlurScreenSize.xy, int2(1, 1));
+    return all(pixel >= 0) && all(pixel < screenSize);
+}
+
+bool BurtFurIsValidProperty(float4 property)
+{
+    return property.r > BURT_FUR_VALID_THETA_EPSILON;
+}
+
+float2 BurtDecodeFurDir(float theta)
+{
+    float angle = theta * BURT_TWO_PI;
+    float s;
+    float c;
+    sincos(angle, s, c);
+    return float2(c, s);
+}
+
+bool BurtFurDepthIsNearer(float sampleDepth, float referenceDepth)
+{
+#if UNITY_REVERSED_Z
+    return sampleDepth > referenceDepth;
+#else
+    return sampleDepth < referenceDepth;
+#endif
+}
+
+[numthreads(1, 1, 1)]
+void InitArgsCS()
+{
+    _BurtFurBlurArgsBuffer[0] = 0;
+    _BurtFurBlurArgsBuffer[1] = 1;
+    _BurtFurBlurArgsBuffer[2] = 1;
+    _BurtFurBlurArgsBuffer[3] = 0;
+    _BurtFurBlurArgsBuffer[4] = 0;
+    _BurtFurBlurArgsBuffer[5] = 0;
+    _BurtFurBlurArgsBuffer[6] = 0;
+    _BurtFurBlurArgsBuffer[7] = 0;
+}
+
+[numthreads(1, 1, 1)]
+void FillArgsPS()
+{
+    uint groupCount = _BurtFurBlurArgsBuffer[0];
+    _BurtFurBlurArgsBuffer[1] = 1;
+    _BurtFurBlurArgsBuffer[2] = 1;
+    _BurtFurBlurArgsBuffer[3] = 6;
+    _BurtFurBlurArgsBuffer[4] = groupCount;
+    _BurtFurBlurArgsBuffer[5] = 0;
+    _BurtFurBlurArgsBuffer[6] = 0;
+    _BurtFurBlurArgsBuffer[7] = 0;
+}
+
+[numthreads(BURT_FUR_TILE_SIZE, BURT_FUR_TILE_SIZE, 1)]
+void SetupCS(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    if (groupIndex == 0)
+    {
+        BurtFurTileActive = 0;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    int2 pixel = int2(dispatchThreadID.xy);
+    bool inBounds = BurtFurInBounds(pixel);
+    float4 property = float4(0.0, 0.0, 0.0, 1.0);
+
+    if (inBounds)
+    {
+        property = _BurtFurBlurPropertyTexture.Load(int3(pixel, 0));
+        _BurtFurBlurPropertyTempRWTexture[pixel] = property.rg;
+        if (BurtFurIsValidProperty(property))
+        {
+            InterlockedOr(BurtFurTileActive, 1);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex == 0 && BurtFurTileActive != 0)
+    {
+        uint indexToStore = 0;
+        InterlockedAdd(_BurtFurBlurArgsBuffer[0], 1, indexToStore);
+        _BurtFurBlurTileDataBuffer[indexToStore * 2 + 0] = groupID.x;
+        _BurtFurBlurTileDataBuffer[indexToStore * 2 + 1] = groupID.y;
+    }
+}
+
+[numthreads(BURT_FUR_TILE_SIZE * BURT_FUR_TILE_SIZE, 1, 1)]
+void DilateCS(uint3 indirectGroupID : SV_GroupID, uint groupIndex : SV_GroupIndex)
+{
+    uint tileIndex = indirectGroupID.x * 2;
+    int2 groupID = int2(_BurtFurBlurTileDataBuffer[tileIndex + 0], _BurtFurBlurTileDataBuffer[tileIndex + 1]);
+    int2 groupPixel = groupID * BURT_FUR_TILE_SIZE;
+    int2 localPixel = int2((int)(groupIndex & (BURT_FUR_TILE_SIZE - 1)), (int)(groupIndex >> 3));
+    int2 pixel = groupPixel + localPixel;
+
+    if (!BurtFurInBounds(pixel))
+    {
+        return;
+    }
+
+    float4 center = _BurtFurBlurPropertyTempTexture.Load(int3(pixel, 0));
+    if (BurtFurIsValidProperty(center))
+    {
+        _BurtFurBlurPropertyRWTexture[pixel] = center.rg;
+        return;
+    }
+
+    float4 best = center;
+    bool hasBest = false;
+    float directionThreshold = saturate(_BurtFurBlurParams.z);
+
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            if (x == 0 && y == 0)
+            {
+                continue;
+            }
+
+            int2 samplePixel = pixel + int2(x, y);
+            if (!BurtFurInBounds(samplePixel))
+            {
+                continue;
+            }
+
+            float4 sampleProperty = _BurtFurBlurPropertyTempTexture.Load(int3(samplePixel, 0));
+            if (!BurtFurIsValidProperty(sampleProperty))
+            {
+                continue;
+            }
+
+            float2 offsetDirection = normalize(float2(x, y));
+            float directionAlignment = abs(dot(BurtDecodeFurDir(sampleProperty.r), offsetDirection));
+            if (directionAlignment < directionThreshold)
+            {
+                continue;
+            }
+
+            if (!hasBest || BurtFurDepthIsNearer(sampleProperty.g, best.g))
+            {
+                best = sampleProperty;
+                hasBest = true;
+            }
+        }
+    }
+
+    _BurtFurBlurPropertyRWTexture[pixel] = (hasBest ? best : center).rg;
+}

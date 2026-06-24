@@ -3,22 +3,18 @@ Shader "BurtRP/Silk"
     Properties
     {
         _BaseMap ("Base Map", 2D) = "white" {}
-        _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
+        [HDR] _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
         _FacingColor ("Facing Color", Color) = (1, 1, 1, 1)
         _TangentColor ("Tangent Color", Color) = (1, 1, 1, 1)
         _Falloff ("Falloff", Range(0, 1)) = 0
-        _MaskMap ("Mask Map (R Metallic, G Occlusion, A Smoothness)", 2D) = "white" {}
+        _MaskMap ("Mask Map (R Metallic, G Occlusion, A Roughness)", 2D) = "white" {}
         [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
         _NormalScale ("Normal Scale", Range(0, 2)) = 1
         _Reflectance ("Reflectance", Range(0, 1)) = 0.5
         _Metallic ("Metallic", Range(0, 1)) = 0
         _Anisotropy ("Anisotropy", Range(-0.999, 0.999)) = 0
-        _Smoothness ("Smoothness", Range(0, 1)) = 0.5
+        _Roughness ("Roughness", Range(0, 1)) = 1
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
-        _ThinFilmThicknessMap ("Thin Film Thickness Map", 2D) = "white" {}
-        _ThinFilmThickness ("Thin Film Thickness", Range(0, 1)) = 0.27
-        _ThinFilmFactorMask ("Thin Film Factor Mask", 2D) = "white" {}
-        _ThinFilmFactor ("Thin Film Factor", Range(0, 2)) = 1
         _EmissionMap ("Emission Map", 2D) = "white" {}
         [HDR]_EmissionColor ("Emission Color", Color) = (0, 0, 0, 1)
         [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 0
@@ -33,6 +29,9 @@ Shader "BurtRP/Silk"
         [HideInInspector] _DstBlend ("Destination Blend", Float) = 0
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
+        [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 4
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 7
     }
 
     SubShader
@@ -84,15 +83,46 @@ Shader "BurtRP/Silk"
 
         Pass
         {
+            Name "Burt Silk Motion Vectors"
+            Tags { "LightMode" = "BurtMotionVectors" }
+
+            ZWrite Off
+            ZTest Always
+            Cull [_Cull]
+
+            Stencil
+            {
+                Ref 8
+                ReadMask 8
+                WriteMask 8
+                Comp Always
+                Pass Replace
+            }
+
+            HLSLPROGRAM
+            #pragma vertex VertMotionVector
+            #pragma fragment FragMotionVector
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "Burt Silk GBuffer"
             Tags { "LightMode" = "BurtGBuffer" }
             ZWrite On
             ZTest LEqual
             Stencil
             {
-                Ref 4
+                Ref [_BurtGBufferStencilRef]
                 ReadMask 7
-                WriteMask 7
+                WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
             }

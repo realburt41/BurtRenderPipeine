@@ -1,0 +1,44 @@
+#pragma kernel BuildPrevUseCountCS
+
+Texture2D<float4> _BurtTAAVelocityTexture;
+RWTexture2D<int> _BurtTAAPrevUseCountTexture;
+float4 _BurtTAATexelSize;
+
+void BurtTaaAddUseCount(int2 pixel, float weight, int2 textureSize)
+{
+    if (pixel.x < 0 || pixel.y < 0 || pixel.x >= textureSize.x || pixel.y >= textureSize.y)
+    {
+        return;
+    }
+
+    int add = (int)round(saturate(weight) * 255.0);
+    if (add > 0)
+    {
+        InterlockedAdd(_BurtTAAPrevUseCountTexture[pixel], add);
+    }
+}
+
+[numthreads(8, 8, 1)]
+void BuildPrevUseCountCS(uint3 id : SV_DispatchThreadID)
+{
+    int2 textureSize = int2((int)_BurtTAATexelSize.z, (int)_BurtTAATexelSize.w);
+    int2 pixel = int2(id.xy);
+    if (pixel.x >= textureSize.x || pixel.y >= textureSize.y)
+    {
+        return;
+    }
+
+    float2 uv = (float2(pixel) + 0.5) * _BurtTAATexelSize.xy;
+    float4 velocityData = _BurtTAAVelocityTexture.Load(int3(pixel, 0));
+    float2 historyUv = uv + velocityData.xy;
+    float historyInBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
+    float2 samplePosition = historyUv * _BurtTAATexelSize.zw - 0.5;
+    float2 basePixelFloat = floor(samplePosition);
+    float2 blend = saturate(samplePosition - basePixelFloat);
+    int2 basePixel = int2(basePixelFloat);
+
+    BurtTaaAddUseCount(basePixel + int2(0, 0), (1.0 - blend.x) * (1.0 - blend.y) * historyInBounds, textureSize);
+    BurtTaaAddUseCount(basePixel + int2(1, 0), blend.x * (1.0 - blend.y) * historyInBounds, textureSize);
+    BurtTaaAddUseCount(basePixel + int2(0, 1), (1.0 - blend.x) * blend.y * historyInBounds, textureSize);
+    BurtTaaAddUseCount(basePixel + int2(1, 1), blend.x * blend.y * historyInBounds, textureSize);
+}

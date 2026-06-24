@@ -418,6 +418,7 @@ MonoBehaviour:
   - {fileID: -5376049901750720449}
   - {fileID: 9153360420279958332}
   - {fileID: 2718075953073365877}
+  - {fileID: 3018446027813319552}
 --- !u!114 &1128726436058786600
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -664,6 +665,40 @@ MonoBehaviour:
   screenProbeApplyStrength:
     m_OverrideState: 0
     m_Value: 0
+--- !u!114 &3018446027813319552
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39ab5f95a1b5444ba878a458c4bdf233, type: 3}
+  m_Name: BurtFurBlurVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  enabled:
+    m_OverrideState: 1
+    m_Value: 1
+  tiledBlur:
+    m_OverrideState: 0
+    m_Value: 0
+  radiusCm:
+    m_OverrideState: 1
+    m_Value: 2
+  depthThresholdEye:
+    m_OverrideState: 1
+    m_Value: 0.02
+  directionDilationThreshold:
+    m_OverrideState: 1
+    m_Value: 0.5
+  thetaFeedback:
+    m_OverrideState: 1
+    m_Value: 0.75
+  temporalFeedback:
+    m_OverrideState: 1
+    m_Value: 0.85
 --- !u!114 &3971589225541114367
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -777,6 +812,9 @@ MonoBehaviour:
   disocclusionFeedbackScale:
     m_OverrideState: 0
     m_Value: 0.18
+  upscaleFactor:
+    m_OverrideState: 0
+    m_Value: 1
   motionEdgeResponsiveStrength:
     m_OverrideState: 0
     m_Value: 1.2

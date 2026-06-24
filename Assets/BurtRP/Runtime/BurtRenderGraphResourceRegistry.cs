@@ -112,6 +112,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceGlobalIlluminationTextureId = Shader.PropertyToID(ScreenSpaceGlobalIlluminationTextureShaderName);
 
+        public const string BurtGIBackfaceDiffuseIndirectName = "BurtGIBackfaceDiffuseIndirect";
+
+        public const string BurtGIBackfaceDiffuseIndirectTextureShaderName = "_BurtGIBackfaceDiffuseIndirectTexture";
+
+        public static readonly int BurtGIBackfaceDiffuseIndirectTextureId = Shader.PropertyToID(BurtGIBackfaceDiffuseIndirectTextureShaderName);
+
+        public const string BurtGIRoughSpecularIndirectName = "BurtGIRoughSpecularIndirect";
+
+        public const string BurtGIRoughSpecularIndirectTextureShaderName = "_BurtGIRoughSpecularIndirectTexture";
+
+        public static readonly int BurtGIRoughSpecularIndirectTextureId = Shader.PropertyToID(BurtGIRoughSpecularIndirectTextureShaderName);
+
         public const string BurtGITemporalDiagnosticsName = "BurtGITemporalDiagnostics";
 
         public const string BurtGITemporalDiagnosticsTextureShaderName = "_BurtGITemporalDiagnosticsTexture";
@@ -228,6 +240,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int FurBlurTemporalTextureId = Shader.PropertyToID(FurBlurTemporalTextureShaderName);
 
+        public const string FurBlurVelocityName = "FurBlurVelocity";
+
+        public const string FurBlurVelocityTextureShaderName = "_BurtFurBlurVelocityTexture";
+
+        public static readonly int FurBlurVelocityTextureId = Shader.PropertyToID(FurBlurVelocityTextureShaderName);
+
         public const string FurBlurHistoryName = "FurBlurHistory";
 
         public const string FurBlurPersistentHistoryName = "FurBlurPersistentHistory";
@@ -235,6 +253,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string FurBlurHistoryTextureShaderName = "_BurtFurBlurHistoryTexture";
 
         public static readonly int FurBlurHistoryTextureId = Shader.PropertyToID(FurBlurHistoryTextureShaderName);
+
+        public const string FurBlurArgsBufferName = "FurBlurArgsBuffer";
+
+        public const string FurBlurTileDataBufferName = "FurBlurTileDataBuffer";
 
         public const string ScreenSpaceSubsurfaceBurleyArgsBufferName = "ScreenSpaceSubsurfaceBurleyArgsBuffer";
 
@@ -261,6 +283,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string LightingGlobalsName = "LightingGlobals"; // 定义灯光全局状态的逻辑资源名，用来让 Setup Lighting 和 Shading Pass 建立依赖。
 
         public const string ShadowGlobalsName = "ShadowGlobals"; // 定义阴影全局状态的逻辑资源名，用来描述 shadow matrix、shadow strength 等 shader 全局变量。
+
+        public const string BurtGIApplyIndirectGlobalsName = "BurtGIApplyIndirectGlobals";
 
         public const string AdditionalLightBufferName = "AdditionalLightBuffer"; // Future structured buffer for multi-light data when tiled/cluster lighting replaces global arrays.
 
@@ -778,6 +802,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(ScreenSpaceGlobalIlluminationName);
         }
 
+        public BurtRenderTargetHandle RegisterBurtGIBackfaceDiffuseIndirectTexture()
+        {
+            return RegisterBurtGIBackfaceDiffuseIndirect(new RenderTargetIdentifier(BurtGIBackfaceDiffuseIndirectTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIBackfaceDiffuseIndirect(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIBackfaceDiffuseIndirectName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIBackfaceDiffuseIndirect()
+        {
+            return GetRenderTarget(BurtGIBackfaceDiffuseIndirectName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRoughSpecularIndirectTexture()
+        {
+            return RegisterBurtGIRoughSpecularIndirect(new RenderTargetIdentifier(BurtGIRoughSpecularIndirectTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRoughSpecularIndirect(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRoughSpecularIndirectName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRoughSpecularIndirect()
+        {
+            return GetRenderTarget(BurtGIRoughSpecularIndirectName);
+        }
+
         public BurtRenderTargetHandle RegisterBurtGITemporalDiagnosticsTexture()
         {
             return RegisterBurtGITemporalDiagnostics(new RenderTargetIdentifier(BurtGITemporalDiagnosticsTextureId));
@@ -1061,6 +1115,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetFurBlurTemporal()
         {
             return GetRenderTarget(FurBlurTemporalName);
+        }
+
+        public BurtRenderTargetHandle RegisterFurBlurVelocityTexture()
+        {
+            return RegisterFurBlurVelocity(new RenderTargetIdentifier(FurBlurVelocityTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterFurBlurVelocity(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(FurBlurVelocityName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetFurBlurVelocity()
+        {
+            return GetRenderTarget(FurBlurVelocityName);
         }
 
         public BurtRenderTargetHandle RegisterMainLightShadowMapTexture() // 定义注册 BurtRP 主光阴影图临时 RT 的快捷函数。

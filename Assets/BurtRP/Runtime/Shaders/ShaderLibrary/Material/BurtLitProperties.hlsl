@@ -40,6 +40,8 @@ CBUFFER_START(UnityPerMaterial)
     // 保存光滑度标量，最终 smoothness 会等于这个标量乘以 Mask Map 的 A 通道。
     float _Smoothness;
 
+    float _Roughness;
+
     // 保存环境遮蔽强度，0 表示忽略 Mask Map 的 AO，1 表示完全使用 Mask Map 的 AO。
     float _OcclusionStrength;
 
@@ -80,11 +82,89 @@ CBUFFER_START(UnityPerMaterial)
 
     float _Falloff;
 
-    float4 _ThinFilmThicknessMap_ST;
+    float4 _FoliageTransmissionColor;
 
-    float _ThinFilmThickness;
+    float _FoliageTransmissionWeight;
 
-    float _ThinFilmFactor;
+    float _FoliageThickness;
+
+    float _FoliageBackLight;
+
+    float _FoliageSubsurfaceColorSaturate;
+
+    float4 _SubsurfaceColor;
+
+    float _SubsurfaceColorSaturate;
+
+    float _ThicknessScale;
+
+    float _RoughnessScale;
+
+    float _ReflectanceScale;
+
+    float _TransmissionNdotL;
+
+    float _SSSIntensity;
+
+    float _FresnelIntensity;
+
+    float _FresnelExp;
+
+    float _Specular;
+
+    float _AlphaIncrease;
+
+    float4 _AlphaMap_ST;
+
+    float4 _VertexAORemap;
+
+    float _TintValue;
+
+    float _TintScale;
+
+    float4 _LocalTintColor;
+
+    float _TintAOHeightRatio;
+
+    float4 _TintAORemap;
+
+    float _TintHeightContrast;
+
+    float _TreeHeight;
+
+    float _FoliageTintMode;
+
+    float _FoliageUseBakedNormals;
+
+    float4 _BaseColorTip;
+
+    float _TipMaskPow;
+
+    float _HeightAO;
+
+    float _HeightAOFallOff;
+
+    float _TLNormalWeight;
+
+    float _SSShadowIntensity;
+
+    float _SSShadowDistance;
+
+    float _GroundFadeIntensity;
+
+    float4 _NoiseMap_ST;
+
+    float _VariationIntensity01;
+
+    float _VariationIntensity02;
+
+    float _Variation01Height;
+
+    float _Variation02Height;
+
+    float4 _Variation01;
+
+    float4 _Variation02;
 
     // 保存自发光颜色，Forward 用它和 Emission Map 相乘。
     float4 _EmissionColor;

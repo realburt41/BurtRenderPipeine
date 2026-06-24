@@ -116,6 +116,9 @@ float4 FragShadow(ShadowVaryings input) : SV_Target
     float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
     #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
         BurtApplyAlphaClip(saturate(baseColor.a - saturate(_ShadowCutOff)), _AlphaClip, 0.0f);
+    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)
+        float alpha = BURT_SAMPLE_TEXTURE2D_REPEAT(_AlphaMap, input.baseMapUV).r;
+        BurtApplyAlphaClip(alpha, _AlphaClip, _Cutoff);
     #else
         BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);
     #endif

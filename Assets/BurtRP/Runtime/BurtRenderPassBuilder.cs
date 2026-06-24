@@ -406,6 +406,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
         }
 
+        public BurtRenderTargetHandle ReadBurtGIBackfaceDiffuseIndirect()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGIBackfaceDiffuseIndirect()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName);
+        }
+
+        public BurtRenderTargetHandle ReadBurtGIRoughSpecularIndirect()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGIRoughSpecularIndirect()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectName);
+        }
+
         public BurtRenderTargetHandle ReadBurtGITemporalDiagnostics()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
@@ -594,6 +614,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteFurBlurTemporal()
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.FurBlurTemporalName);
+        }
+
+        public BurtRenderTargetHandle ReadFurBlurVelocity()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.FurBlurVelocityName);
+        }
+
+        public BurtRenderTargetHandle WriteFurBlurVelocity()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.FurBlurVelocityName);
         }
 
         public BurtRenderTargetHandle ReadMainLightShadowMap() // 定义声明读取 MainLightShadowMap 的快捷函数。

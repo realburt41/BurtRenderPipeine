@@ -58,6 +58,9 @@ Shader "BurtRP/Clear Coat"
         [HideInInspector] _DstBlend ("Destination Blend", Float) = 0
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
+        [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 2
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 7
     }
 
     // Defines the runtime SubShader used by BurtRP.
@@ -106,6 +109,37 @@ Shader "BurtRP/Clear Coat"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
 
             // Ends the HLSL program for this pass.
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Clear Coat Motion Vectors"
+            Tags { "LightMode" = "BurtMotionVectors" }
+
+            ZWrite Off
+            ZTest Always
+            Cull [_Cull]
+
+            Stencil
+            {
+                Ref 8
+                ReadMask 8
+                WriteMask 8
+                Comp Always
+                Pass Replace
+            }
+
+            HLSLPROGRAM
+            #pragma vertex VertMotionVector
+            #pragma fragment FragMotionVector
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
             ENDHLSL
         }
 
@@ -172,9 +206,9 @@ Shader "BurtRP/Clear Coat"
             // Deferred stencil layout: 2 = Clear Coat. Deferred Lighting has a matching Ref 2 pass.
             Stencil
             {
-                Ref 2
+                Ref [_BurtGBufferStencilRef]
                 ReadMask 7
-                WriteMask 7
+                WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
             }

@@ -399,6 +399,7 @@ namespace Burt.RenderPipeline
             };
             cmd.SetRenderTarget(colorTargets, cameraDepth.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
 
@@ -707,6 +708,11 @@ namespace Burt.RenderPipeline
             builder.WriteScreenSpaceSubsurfaceSetup();
             builder.WriteScreenSpaceSubsurfaceProfileIDAndType();
             builder.WriteScreenSpaceSubsurfaceTemp();
+            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceSeparable(builder.Request, builder.Asset) &&
+                !BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceDebugView(builder.Request, builder.Asset))
+            {
+                builder.AllowUnconsumedRenderTargetWrite(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName);
+            }
             builder.WriteScreenSpaceSubsurfaceBlur();
             if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(builder.Request, builder.Asset))
             {
@@ -2788,6 +2794,7 @@ namespace Burt.RenderPipeline
 
             cmd.SetRenderTarget(velocityTarget, cameraDepthTarget.Identifier);
             SetViewport(cmd, context);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             cmd.Clear();
 

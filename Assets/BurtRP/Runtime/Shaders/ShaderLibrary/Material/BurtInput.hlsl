@@ -9,12 +9,14 @@ Texture2D _BaseMap;
 
 // 声明 Mask Map 贴图，Forward PBR 会把 R 当金属度、G 当环境遮蔽、A 当光滑度。
 Texture2D _MaskMap;
+Texture2D _AlphaMap;
+Texture2D _TintPalette;
+Texture2D _LocalTintPalette;
+Texture2D _NoiseMap;
 Texture2D _IDMap;
 Texture2D _GradientMap;
 Texture2D _FuzzMap;
 Texture2D _FuzzMask;
-Texture2D _ThinFilmThicknessMap;
-Texture2D _ThinFilmFactorMask;
 
 // 定义 XRender / Frostbite 风格的默认 reflectance，0.5 会映射到常见非金属 F0=0.04。
 static const float BURT_INPUT_DEFAULT_REFLECTANCE = 0.5f;
@@ -26,7 +28,8 @@ static const float BURT_SHADING_MODEL_HAIR = 1.0f;
 static const float BURT_SHADING_MODEL_CLEAR_COAT = 2.0f;
 static const float BURT_SHADING_MODEL_SUBSURFACE = 3.0f;
 static const float BURT_SHADING_MODEL_FABRIC = 4.0f;
-static const float BURT_SHADING_MODEL_MAX_ENCODED = 4.0f;
+static const float BURT_SHADING_MODEL_FOLIAGE = 5.0f;
+static const float BURT_SHADING_MODEL_MAX_ENCODED = 5.0f;
 
 static const float BURT_SUBSURFACE_POWER_MIN = 0.5f;
 static const float BURT_SUBSURFACE_POWER_MAX = 8.0f;
@@ -65,6 +68,11 @@ bool BurtIsSubsurfaceShadingModel(float shadingModelID)
 bool BurtIsFabricShadingModel(float shadingModelID)
 {
     return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_FABRIC) < 0.5f;
+}
+
+bool BurtIsFoliageShadingModel(float shadingModelID)
+{
+    return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_FOLIAGE) < 0.5f;
 }
 
 // 保存光照函数需要的材质表面属性。
@@ -142,9 +150,23 @@ struct BurtSurfaceData
 
     float fabricFalloff;
 
-    float fabricThinFilmThickness;
+    float3 foliageTransmissionColor;
 
-    float fabricThinFilmFactor;
+    float foliageTransmissionWeight;
+
+    float foliageThickness;
+
+    float foliageBackLight;
+
+    float foliageTransmissionNdotL;
+
+    float foliageSpecularScale;
+
+    float foliageUseSpecularColor;
+
+    float foliageScreenSpaceShadowIntensity;
+
+    float foliageIsGrass;
 };
 
 float BurtClampSubsurfacePower(float power)
@@ -200,8 +222,15 @@ void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
     surfaceData.fabricFacingColor = float3(1.0f, 1.0f, 1.0f);
     surfaceData.fabricTangentColor = float3(1.0f, 1.0f, 1.0f);
     surfaceData.fabricFalloff = 0.0f;
-    surfaceData.fabricThinFilmThickness = 0.27f;
-    surfaceData.fabricThinFilmFactor = 0.0f;
+    surfaceData.foliageTransmissionColor = float3(0.55f, 0.85f, 0.35f);
+    surfaceData.foliageTransmissionWeight = 0.45f;
+    surfaceData.foliageThickness = 0.5f;
+    surfaceData.foliageBackLight = 0.5f;
+    surfaceData.foliageTransmissionNdotL = 0.5f;
+    surfaceData.foliageSpecularScale = 1.0f;
+    surfaceData.foliageUseSpecularColor = 0.0f;
+    surfaceData.foliageScreenSpaceShadowIntensity = 0.0f;
+    surfaceData.foliageIsGrass = 0.0f;
 }
 
 // 保存片元级几何输入，后续高光、雾效、附加光等功能会继续扩展这个结构。
@@ -256,6 +285,11 @@ float BurtResolveSmoothness(float smoothness, float4 maskMap)
 {
     // 默认白色 Mask Map 的 A 为 1，所以最终结果会保持 _Smoothness 标量原值。
     return saturate(smoothness * maskMap.a);
+}
+
+float BurtResolveFabricRoughness(float roughness, float4 maskMap)
+{
+    return clamp(saturate(roughness * maskMap.a), 0.045f, 1.0f);
 }
 
 // 根据 Mask Map 和强度参数计算最终环境遮蔽。
@@ -483,25 +517,66 @@ BurtSurfaceData BurtApplyFabricSurfaceSemantics(BurtSurfaceData surfaceData, flo
     return surfaceData;
 }
 
+BurtSurfaceData BurtApplyFoliageSurfaceSemantics(
+    BurtSurfaceData surfaceData,
+    float3 transmissionColor,
+    float transmissionWeight,
+    float thickness,
+    float backLight,
+    float transmissionNdotL,
+    float specularScale,
+    float useSpecularColor)
+{
+    surfaceData.metallic = 0.0f;
+    surfaceData.anisotropy = 0.0f;
+    surfaceData.foliageTransmissionColor = max(transmissionColor, float3(0.0f, 0.0f, 0.0f));
+    surfaceData.foliageTransmissionWeight = saturate(transmissionWeight);
+    surfaceData.foliageThickness = saturate(thickness);
+    surfaceData.foliageBackLight = saturate(backLight);
+    surfaceData.foliageTransmissionNdotL = saturate(transmissionNdotL);
+    surfaceData.foliageSpecularScale = saturate(specularScale);
+    surfaceData.foliageUseSpecularColor = saturate(useSpecularColor);
+    surfaceData.foliageScreenSpaceShadowIntensity = 0.0f;
+    surfaceData.foliageIsGrass = 0.0f;
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_FOLIAGE;
+    return surfaceData;
+}
+
+BurtSurfaceData BurtApplyFoliageSurfaceSemantics(
+    BurtSurfaceData surfaceData,
+    float3 transmissionColor,
+    float transmissionWeight,
+    float thickness,
+    float backLight)
+{
+    return BurtApplyFoliageSurfaceSemantics(surfaceData, transmissionColor, transmissionWeight, thickness, backLight, 0.5f, 1.0f, 0.0f);
+}
+
+float3 BurtEvaluateSilkFresnelColor(float3 facingColor, float3 tangentColor, float falloff, float nDotV)
+{
+    float clampedFalloff = saturate(falloff);
+    float exponent = clampedFalloff < 0.5f
+        ? rcp(1.0f + 18.0f * (0.5f - clampedFalloff))
+        : 1.0f + 18.0f * (clampedFalloff - 0.5f);
+    float lerpFactor = pow(saturate(nDotV), exponent);
+    return max(lerp(max(tangentColor, float3(0.0f, 0.0f, 0.0f)), max(facingColor, float3(0.0f, 0.0f, 0.0f)), lerpFactor), float3(0.0f, 0.0f, 0.0f));
+}
+
 BurtSurfaceData BurtApplySilkSurfaceSemantics(
     BurtSurfaceData surfaceData,
     float anisotropy,
     float3 facingColor,
     float3 tangentColor,
     float falloff,
-    float thinFilmThickness,
-    float thinFilmFactor)
+    float nDotV)
 {
     surfaceData.anisotropy = clamp(anisotropy, -1.0f, 1.0f);
     surfaceData.fabricIsSilk = 1.0f;
     surfaceData.fabricFuzzWeight = 0.0f;
-    surfaceData.fabricFuzzColor = max(lerp(facingColor, tangentColor, saturate(falloff)), float3(0.0f, 0.0f, 0.0f));
-    surfaceData.fabricFuzzRoughness = saturate(thinFilmThickness);
+    surfaceData.fabricFuzzColor = BurtEvaluateSilkFresnelColor(facingColor, tangentColor, falloff, nDotV);
     surfaceData.fabricFacingColor = max(facingColor, float3(0.0f, 0.0f, 0.0f));
     surfaceData.fabricTangentColor = max(tangentColor, float3(0.0f, 0.0f, 0.0f));
     surfaceData.fabricFalloff = saturate(falloff);
-    surfaceData.fabricThinFilmThickness = saturate(thinFilmThickness);
-    surfaceData.fabricThinFilmFactor = saturate(thinFilmFactor);
     surfaceData.shadingModelID = BURT_SHADING_MODEL_FABRIC;
     return surfaceData;
 }
@@ -538,6 +613,14 @@ BurtSurfaceData BurtCreateSurfaceData(float4 baseColor, float reflectance, float
     BurtInitializeSubsurfaceSurfaceData(surfaceData);
 
     // 返回填充完成的表面数据。
+    return surfaceData;
+}
+
+BurtSurfaceData BurtCreateFabricSurfaceData(float4 baseColor, float reflectance, float roughness, float metallic, float4 maskMap, float occlusionStrength)
+{
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, reflectance, 1.0f, metallic, maskMap, occlusionStrength);
+    surfaceData.smoothness = saturate(1.0f - BurtResolveFabricRoughness(roughness, maskMap));
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_FABRIC;
     return surfaceData;
 }
 

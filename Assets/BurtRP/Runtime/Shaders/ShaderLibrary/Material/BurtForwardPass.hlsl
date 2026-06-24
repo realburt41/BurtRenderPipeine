@@ -22,6 +22,9 @@ struct Attributes
     float3 normalOS : NORMAL;
     float4 tangentOS : TANGENT;
     float2 uv0 : TEXCOORD0;
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    float4 color : COLOR;
+#endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 uv1 : TEXCOORD1;
 #endif
@@ -45,6 +48,9 @@ struct Varyings
     float2 uv0 : TEXCOORD7;
     float2 uv1 : TEXCOORD8;
     float3 positionOS : TEXCOORD9;
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    float4 vertexColor : TEXCOORD7;
+    float3 positionOS : TEXCOORD8;
 #endif
 };
 
@@ -71,6 +77,9 @@ Varyings Vert(Attributes input)
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     output.uv0 = input.uv0;
     output.uv1 = input.uv1;
+    output.positionOS = positionOS.xyz;
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    output.vertexColor = input.color;
     output.positionOS = positionOS.xyz;
 #endif
     return output;
@@ -219,6 +228,11 @@ void BurtFillForwardShadingDebugData(
     debugData.indirectSpecularEnvBRDF = pbrComponents.indirectSpecularEnvBRDF;
     debugData.subsurfaceProfileIndex = pbrComponents.subsurfaceProfileIndex;
     debugData.subsurfaceTransmission = pbrComponents.subsurfaceTransmission;
+    debugData.subsurfaceDirectTransmission = pbrComponents.subsurfaceDirectTransmission;
+    debugData.subsurfaceTransmissionBRDF = pbrComponents.subsurfaceTransmissionBRDF;
+    debugData.subsurfaceTransmissionShadow = pbrComponents.subsurfaceTransmissionShadow;
+    debugData.subsurfaceTransmissionPhase = pbrComponents.subsurfaceTransmissionPhase;
+    debugData.subsurfaceTransmissionThickness = pbrComponents.subsurfaceTransmissionThickness;
     debugData.subsurfaceKernelWeight = pbrComponents.subsurfaceKernelWeight;
     debugData.subsurfaceIndirect = pbrComponents.subsurfaceIndirect;
     debugData.hairPrimaryLobe = pbrComponents.hairPrimaryLobe;
@@ -250,21 +264,39 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
     float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
     float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS, maskMap);
 #else
-    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.baseMapUV, input.positionWS, input.positionOS, input.vertexColor);
+    #else
+        float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
+    #endif
 #endif
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
+#else
+    float alpha = BurtEvaluateMaterialPassOpacity(baseColor.a, input.baseMapUV, input.positionWS);
+    BurtApplyMaterialPassAlphaClip(alpha, _AlphaClip, _Cutoff, input.positionCS);
+    baseColor.a = alpha;
+#endif
 
     float3 normalWS = BurtGetForwardNormalWS(input, facing);
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        normalWS = BurtApplyFoliageMaterialNormalWS(normalWS, input.positionWS, input.vertexColor);
+    #endif
     float3 shadingDirectionWS = BurtGetForwardShadingDirectionWS(input, normalWS, facing);
     float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
 #else
     float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
-    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV);
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, normalWS, viewDirectionWS, input.positionWS, input.positionOS, input.vertexColor);
+    #else
+        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, normalWS, viewDirectionWS, input.positionWS);
+    #endif
 #endif
     float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
-    BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
+    float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(input.positionWS, normalWS);
+    BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation);
     BurtSurfaceData shadingSurfaceData = surfaceData;
 
 #if defined(BURT_ENABLE_SHADING_DEBUG)

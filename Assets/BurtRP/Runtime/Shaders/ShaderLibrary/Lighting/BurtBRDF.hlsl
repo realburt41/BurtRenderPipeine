@@ -163,20 +163,31 @@ float3 BurtSampleSubsurfaceTransmissionProfile(float profileIndex, float materia
 {
     float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(profileIndex);
     float extinctionScale = BurtDecodeSubsurfaceProfileExtinctionScale(profileTransmission.x);
-    float opticalThickness = lerp(1.0f, 0.08f, saturate(materialThickness));
-    float3 fallback = exp2(-1.442695f * extinctionScale * opticalThickness).xxx;
+    float profileThickness = lerp(0.1f, 1.0f, saturate(materialThickness));
+    float3 fallback = exp2(-1.442695f * extinctionScale * profileThickness).xxx;
     if (!BurtUseSubsurfaceProfileParamLut())
     {
         return fallback;
     }
 
-    float samplePosition = saturate(opticalThickness) * (BURT_SUBSURFACE_PROFILE_PARAM_TRANSMISSION_PROFILE_SIZE - 1.0f);
+    float samplePosition = saturate(profileThickness / BURT_SUBSURFACE_MAX_TRANSMISSION_PROFILE_DISTANCE) * (BURT_SUBSURFACE_PROFILE_PARAM_TRANSMISSION_PROFILE_SIZE - 1.0f);
     float lowerSample = floor(samplePosition);
     float upperSample = min(lowerSample + 1.0f, BURT_SUBSURFACE_PROFILE_PARAM_TRANSMISSION_PROFILE_SIZE - 1.0f);
     float sampleT = samplePosition - lowerSample;
     float3 lower = BurtFetchSubsurfaceProfileParam(BURT_SUBSURFACE_PROFILE_PARAM_TRANSMISSION_PROFILE_OFFSET + lowerSample, profileIndex).rgb;
     float3 upper = BurtFetchSubsurfaceProfileParam(BURT_SUBSURFACE_PROFILE_PARAM_TRANSMISSION_PROFILE_OFFSET + upperSample, profileIndex).rgb;
     return max(lerp(lower, upper, sampleT), float3(0.0f, 0.0f, 0.0f));
+}
+
+float3 BurtSampleSubsurfaceTransmissionThroughput(float profileIndex, float materialThickness)
+{
+    float3 throughput = BurtSampleSubsurfaceTransmissionProfile(profileIndex, materialThickness);
+    if (!BurtUseSubsurfaceProfileParamLut())
+    {
+        throughput *= max(BurtLoadSubsurfaceProfileTransmissionTint(profileIndex).rgb, float3(0.0f, 0.0f, 0.0f));
+    }
+
+    return max(throughput, float3(0.0f, 0.0f, 0.0f));
 }
 
 float BurtEvaluateSubsurfaceProfileIntensity(float3 profileColor)
@@ -188,7 +199,7 @@ float BurtHenyeyGreensteinPhase(float anisotropy, float cosTheta)
 {
     float g = clamp(anisotropy, -0.99f, 0.99f);
     float g2 = g * g;
-    float denominator = pow(max(1.0f + g2 - 2.0f * g * cosTheta, 0.001f), 1.5f);
+    float denominator = pow(max(1.0f + g2 + 2.0f * g * cosTheta, 0.001f), 1.5f);
     return (1.0f - g2) / max(4.0f * BURT_PI * denominator, BURT_EPSILON);
 }
 #endif
@@ -422,6 +433,26 @@ float3 f90;
     float fabricFuzzRoughness;
 
     float3 fabricFuzzColor;
+
+    float foliageActive;
+
+    float3 foliageTransmissionColor;
+
+    float foliageTransmissionWeight;
+
+    float foliageThickness;
+
+    float foliageBackLight;
+
+    float foliageTransmissionNdotL;
+
+    float foliageSpecularScale;
+
+    float foliageUseSpecularColor;
+
+    float foliageScreenSpaceShadowIntensity;
+
+    float foliageIsGrass;
 };
 
 // Prepares PBR material data from surface inputs.
@@ -429,10 +460,10 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
 {
     BurtPBRMaterialData materialData;
 
-#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
+#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL || BURT_ACTIVE_FOLIAGE_SHADING_MODEL
     materialData.metallic = 0.0f;
-#elif BURT_ENABLE_SUBSURFACE_SHADING
-    if (BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID))
+#elif BURT_ENABLE_SUBSURFACE_SHADING || BURT_ENABLE_FOLIAGE_SHADING
+    if (BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID) || BurtIsActiveFoliageShadingModel(surfaceData.shadingModelID))
     {
         materialData.metallic = 0.0f;
     }
@@ -444,10 +475,10 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
     materialData.metallic = saturate(surfaceData.metallic);
 #endif
     materialData.baseColor = surfaceData.baseColor.rgb;
-#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
+#if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL || BURT_ACTIVE_FOLIAGE_SHADING_MODEL
     materialData.anisotropy = 0.0f;
-#elif BURT_ENABLE_SUBSURFACE_SHADING
-    materialData.anisotropy = BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID) ? 0.0f : clamp(surfaceData.anisotropy, -1.0f, 1.0f);
+#elif BURT_ENABLE_SUBSURFACE_SHADING || BURT_ENABLE_FOLIAGE_SHADING
+    materialData.anisotropy = (BurtIsActiveSubsurfaceShadingModel(surfaceData.shadingModelID) || BurtIsActiveFoliageShadingModel(surfaceData.shadingModelID)) ? 0.0f : clamp(surfaceData.anisotropy, -1.0f, 1.0f);
 #else
     materialData.anisotropy = clamp(surfaceData.anisotropy, -1.0f, 1.0f);
 #endif
@@ -503,6 +534,18 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
     materialData.fabricFuzzWeight = saturate(surfaceData.fabricFuzzWeight);
     materialData.fabricFuzzRoughness = ClampPerceptualRoughness(surfaceData.fabricFuzzRoughness);
     materialData.fabricFuzzColor = max(surfaceData.fabricFuzzColor, float3(0.0f, 0.0f, 0.0f));
+    materialData.foliageActive = BurtIsFoliageShadingModel(surfaceData.shadingModelID) ? 1.0f : 0.0f;
+    materialData.foliageTransmissionColor = max(surfaceData.foliageTransmissionColor, float3(0.0f, 0.0f, 0.0f));
+    materialData.foliageTransmissionWeight = surfaceData.foliageIsGrass > 0.5f
+        ? max(surfaceData.foliageTransmissionWeight, 0.0f)
+        : saturate(surfaceData.foliageTransmissionWeight);
+    materialData.foliageThickness = saturate(surfaceData.foliageThickness);
+    materialData.foliageBackLight = saturate(surfaceData.foliageBackLight);
+    materialData.foliageTransmissionNdotL = saturate(surfaceData.foliageTransmissionNdotL);
+    materialData.foliageSpecularScale = saturate(surfaceData.foliageSpecularScale);
+    materialData.foliageUseSpecularColor = saturate(surfaceData.foliageUseSpecularColor);
+    materialData.foliageScreenSpaceShadowIntensity = max(surfaceData.foliageScreenSpaceShadowIntensity, 0.0f);
+    materialData.foliageIsGrass = saturate(surfaceData.foliageIsGrass);
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
     materialData.reflectance = BURT_SUBSURFACE_FIXED_REFLECTANCE;
 #elif BURT_ENABLE_SUBSURFACE_SHADING
@@ -526,6 +569,12 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
     materialData.diffuseColor = DiffuseColorFromBaseColor(diffuseBaseColor, materialData.metallic);
     materialData.f0 = DielectricReflectanceToF0(materialData.baseColor, materialData.reflectance, materialData.metallic);
     materialData.f90 = ApproximateF90(materialData.f0);
+    if (materialData.foliageActive > 0.5f)
+    {
+        materialData.f90 = materialData.foliageUseSpecularColor > 0.5f
+            ? saturate(materialData.baseColor * materialData.foliageSpecularScale)
+            : saturate((materialData.baseColor * 0.9f + 0.1f) * materialData.foliageSpecularScale * 3.0f);
+    }
 
     return materialData;
 }
@@ -646,7 +695,7 @@ float SlabLobe_Diffuse(BurtPBRMaterialData materialData, float noV, float noL, f
 return Fd_Diffuse_Burley(materialData.perceptualRoughness, noV, noL, voH);
 #else
     // 默认沿用当前 Lambert 结果，避免本轮整理改变已�?diffuse 观感
-return materialData.fabricActive > 0.5f ? Fd_Lambert_Fabric(materialData.perceptualRoughness) : Fd_Lambert();
+return Fd_Lambert();
 #endif
 }
 
@@ -664,6 +713,12 @@ float3 F_Schlick(float3 f0, float u)
 return F_Schlick(f0, float3(1.0f, 1.0f, 1.0f), u);
 }
 
+float3 F_Schlick_UE(float3 specularColor, float voH)
+{
+    float fc = Pow5(1.0f - saturate(voH));
+    return saturate(50.0f * specularColor.g) * fc + (1.0f - fc) * specularColor;
+}
+
 // 出处：XRender/Shaders/Library/BRDF.hlsl::F_Schlick_UE；BurtRP 直接高光使用这个名字便于�?XRender 溯源
 float3 F_Schlick_UE(float3 f0, float3 f90, float voH)
 {
@@ -674,6 +729,20 @@ return F_Schlick(f0, f90, voH);
 float3 F_Schlick_Fabric(float3 f0, float f90, float u)
 {
     return f0 + (f90 - f0) * Pow4(1.0f - saturate(u));
+}
+
+float BurtClothEnergyLookup(float roughness, float noV)
+{
+    float c = saturate(noV);
+    float r = saturate(roughness);
+    return (0.526422f / ((-0.227114f + r) * (-0.968835f + r) * ((5.38869f - 20.2835f * c) * r) - (-1.18761f - ((2.58744f - c) * c)))) + 0.0615456f;
+}
+
+float BurtComputeWrappedDiffuseLighting(float noL, float wrap)
+{
+    float safeWrap = saturate(wrap);
+    float denominator = (1.0f + safeWrap) * (1.0f + safeWrap);
+    return saturate((noL + safeWrap) / max(denominator, BURT_EPSILON));
 }
 
 float BurtRefractBlendClearCoatApprox(float voH)
@@ -720,6 +789,19 @@ float denom = (noH * a2 - noH) * noH + 1.0f;
 
     // 分母只做极小保护，避免高 smoothness 时峰值被 1e-6 这类通用 epsilon 截断
 return a2 / max(BURT_PI * denom * denom, BURT_GGX_DISTRIBUTION_DENOMINATOR_EPSILON);
+}
+
+float D_Charlie(float linearRoughness, float noH)
+{
+    float invAlpha = rcp_safe(max(linearRoughness, 0.001f));
+    float cos2h = noH * noH;
+    float sin2h = max(1.0f - cos2h, 0.001f);
+    return (2.0f + invAlpha) * pow(sin2h, invAlpha * 0.5f) * (0.5f * BURT_INV_PI);
+}
+
+float V_Neubelt(float noV, float noL)
+{
+    return rcp_safe(4.0f * (saturate(noL) + saturate(noV) - saturate(noL) * saturate(noV)));
 }
 
 // 出处：XRender/Shaders/Library/BRDF.hlsl::Vis_SmithJointApprox；返�?G / (4 * NoV * NoL)
@@ -953,6 +1035,13 @@ float unusedDirectEnergyPreservation;
 
     GetSpecularEnergyTerms(materialData.f0, materialData.f90, materialData.perceptualRoughness, geometryData.nDotV, energyTerms.indirectSpecularEnergyCompensation, energyTerms.energyPreservation);
 
+    if (materialData.fabricActive > 0.0001f)
+    {
+        energyTerms.directSpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
+        energyTerms.indirectSpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
+        energyTerms.energyPreservation = 1.0f;
+    }
+
     // 返回集中准备好的能量项，后续光照函数只消费结构体，不再重复采�?FG LUT
 return energyTerms;
 }
@@ -1073,7 +1162,9 @@ float xoH = dot(geometryData.tangentWS, h);
     GetAnisotropicRoughness(terms.linearRoughness, materialData.anisotropy, ax, ay);
     terms.d = D_GGX_Anisotropic(ax, ay, terms.nDotH, xoH, yoH);
     terms.visibility = Vis_SmithJointAnisotropic(ax, ay, terms.nDotV, terms.nDotL, xoV, xoL, yoV, yoL);
-    terms.fresnel = F_Schlick_UE(materialData.f0, materialData.f90, terms.vDotH);
+    terms.fresnel = materialData.fabricActive > 0.5f && materialData.fabricIsSilk > 0.5f
+        ? F_Schlick_UE(materialData.fabricFuzzColor, terms.vDotH)
+        : F_Schlick_UE(materialData.f0, materialData.f90, terms.vDotH);
 
     terms.diffuseLobe = SlabLobe_Diffuse(materialData, terms.nDotV, terms.nDotL, terms.vDotH);
     terms.diffuseBRDF = materialData.diffuseColor * terms.diffuseLobe * energyTerms.energyPreservation;
@@ -1089,12 +1180,103 @@ float3 diffuse;
     // 保存直接镜面高光最终贡献，已经包含灯光颜色、NdotL 和阴影衰减
 float3 specular;
 
+float3 transmission;
+
     // 保存 XRender EnergyPreservation，表�?specular 顶层之后底层 diffuse 还能保留的能量比例
 float energyPreservation;
+
+float3 transmissionBRDF;
+float3 transmissionThroughput;
+float transmissionLobe;
+float transmissionPhase;
+float transmissionShadow;
+float transmissionThickness;
 
     // 保存直接 BRDF 中间项，Debug View 可以拆开查看 D / V / F �?diffuse/specular BRDF�?
     BurtDirectBRDFTerms brdfTerms;
 };
+
+float BurtResolveSubsurfaceProfileThickness(float materialThickness)
+{
+    return lerp(0.1f, 1.0f, saturate(materialThickness));
+}
+
+float3 BurtEvaluateSubsurfaceProfileTransmissionBRDF(
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    float3 lightDirectionWS)
+{
+#if BURT_ENABLE_SUBSURFACE_SHADING
+    float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(materialData.subsurfaceProfileIndex);
+    float3 transmissionThroughput = BurtSampleSubsurfaceTransmissionThroughput(
+        materialData.subsurfaceProfileIndex,
+        materialData.subsurfaceThickness);
+    float oneOverIOR = clamp(profileTransmission.w, 0.01f, 1.0f);
+    float scatteringDistribution = clamp(profileTransmission.z, -0.99f, 0.99f);
+    float3 refractedView = refract(geometryData.viewDirectionWS, -geometryData.normalWS, oneOverIOR);
+    refractedView = dot(refractedView, refractedView) > BURT_EPSILON
+        ? BurtSafeNormalize(refractedView)
+        : BurtSafeNormalize(geometryData.viewDirectionWS);
+    float phase = BurtHenyeyGreensteinPhase(scatteringDistribution, dot(BurtSafeNormalize(lightDirectionWS), refractedView));
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
+    if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
+    {
+        return max(materialData.baseColor * transmissionThroughput * phase, float3(0.0f, 0.0f, 0.0f));
+    }
+
+    return max(transmissionThroughput * phase, float3(0.0f, 0.0f, 0.0f));
+#else
+    return max(materialData.baseColor * transmissionThroughput * phase, float3(0.0f, 0.0f, 0.0f));
+#endif
+#else
+    return float3(0.0f, 0.0f, 0.0f);
+#endif
+}
+
+void BurtEvaluateSubsurfaceProfileTransmissionTerms(
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    float3 lightDirectionWS,
+    out float3 transmissionBRDF,
+    out float3 transmissionThroughput,
+    out float transmissionLobe,
+    out float transmissionPhase,
+    out float transmissionThickness)
+{
+#if BURT_ENABLE_SUBSURFACE_SHADING
+    float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(materialData.subsurfaceProfileIndex);
+    transmissionThickness = BurtResolveSubsurfaceProfileThickness(materialData.subsurfaceThickness);
+    transmissionThroughput = BurtSampleSubsurfaceTransmissionThroughput(
+        materialData.subsurfaceProfileIndex,
+        materialData.subsurfaceThickness);
+    float oneOverIOR = clamp(profileTransmission.w, 0.01f, 1.0f);
+    float scatteringDistribution = clamp(profileTransmission.z, -0.99f, 0.99f);
+    float3 refractedView = refract(geometryData.viewDirectionWS, -geometryData.normalWS, oneOverIOR);
+    refractedView = dot(refractedView, refractedView) > BURT_EPSILON
+        ? BurtSafeNormalize(refractedView)
+        : BurtSafeNormalize(geometryData.viewDirectionWS);
+    transmissionPhase = BurtHenyeyGreensteinPhase(scatteringDistribution, dot(BurtSafeNormalize(lightDirectionWS), refractedView));
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
+    if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
+    {
+        transmissionBRDF = max(materialData.baseColor * transmissionThroughput * transmissionPhase, float3(0.0f, 0.0f, 0.0f));
+    }
+    else
+    {
+        transmissionBRDF = max(transmissionThroughput * transmissionPhase, float3(0.0f, 0.0f, 0.0f));
+    }
+#else
+    transmissionBRDF = max(materialData.baseColor * transmissionThroughput * transmissionPhase, float3(0.0f, 0.0f, 0.0f));
+#endif
+    transmissionLobe = BurtEvaluateSubsurfaceProfileIntensity(transmissionBRDF);
+#else
+    transmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    transmissionThroughput = float3(0.0f, 0.0f, 0.0f);
+    transmissionLobe = 0.0f;
+    transmissionPhase = 0.0f;
+    transmissionThickness = 0.0f;
+#endif
+}
 
 void BurtApplySubsurfaceDirectPBR(
     inout BurtDirectPBRComponents components,
@@ -1102,7 +1284,8 @@ void BurtApplySubsurfaceDirectPBR(
     BurtPBRGeometryData geometryData,
     float3 lightColor,
     float3 lightDirectionWS,
-    float shadowAttenuation)
+    float shadowAttenuation,
+    float transmissionShadowAttenuation)
 {
 #if BURT_ENABLE_SUBSURFACE_SHADING
     float subsurfaceStrength = BurtGetSubsurfaceMaterialWeight(materialData);
@@ -1121,6 +1304,29 @@ void BurtApplySubsurfaceDirectPBR(
     float wrappedDiffuseLobe = SlabLobe_Diffuse(materialData, geometryData.nDotV, wrappedNoL, vDotH);
 
     float curvature = saturate(materialData.subsurface3SCurvature);
+    float3 profileTransmissionBRDF;
+    float3 profileTransmissionThroughput;
+    float profileTransmissionLobe;
+    float profileTransmissionPhase;
+    float profileTransmissionThickness;
+    BurtEvaluateSubsurfaceProfileTransmissionTerms(
+        materialData,
+        geometryData,
+        l,
+        profileTransmissionBRDF,
+        profileTransmissionThroughput,
+        profileTransmissionLobe,
+        profileTransmissionPhase,
+        profileTransmissionThickness);
+    float transmissionShadow = saturate(transmissionShadowAttenuation);
+    float3 profileTransmission = profileTransmissionBRDF * lightColor * transmissionShadow;
+    components.transmission = lerp(components.transmission, profileTransmission, subsurfaceStrength);
+    components.transmissionBRDF = lerp(components.transmissionBRDF, profileTransmissionBRDF, subsurfaceStrength);
+    components.transmissionThroughput = lerp(components.transmissionThroughput, profileTransmissionThroughput, subsurfaceStrength);
+    components.transmissionLobe = lerp(components.transmissionLobe, profileTransmissionLobe, subsurfaceStrength);
+    components.transmissionPhase = lerp(components.transmissionPhase, profileTransmissionPhase, subsurfaceStrength);
+    components.transmissionShadow = lerp(components.transmissionShadow, transmissionShadow, subsurfaceStrength);
+    components.transmissionThickness = lerp(components.transmissionThickness, profileTransmissionThickness, subsurfaceStrength);
     if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
     {
         float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(rawNoL, curvature, materialData.subsurfaceProfileIndex);
@@ -1128,10 +1334,14 @@ void BurtApplySubsurfaceDirectPBR(
         float3 preintegratedDiffuseBRDF = materialData.diffuseColor * lutScatter * BURT_INV_PI;
         float3 preintegratedDiffuse = preintegratedDiffuseBRDF * lightColor * shadowAttenuation;
         float targetDiffuseLobe = BurtEvaluateSubsurfaceProfileIntensity(lutScatter) * BURT_INV_PI;
+        targetDiffuseLobe = max(targetDiffuseLobe, profileTransmissionLobe);
+        float3 resolvedDiffuse = lerp(components.diffuse, preintegratedDiffuse, lutWeight) + profileTransmission;
+        float3 resolvedDiffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, preintegratedDiffuseBRDF, lutWeight) + profileTransmissionBRDF;
+        float resolvedDiffuseLobe = max(lerp(components.brdfTerms.diffuseLobe, targetDiffuseLobe, lutWeight), profileTransmissionLobe);
 
-        components.diffuse = lerp(components.diffuse, lerp(components.diffuse, preintegratedDiffuse, lutWeight), subsurfaceStrength);
-        components.brdfTerms.diffuseLobe = lerp(components.brdfTerms.diffuseLobe, lerp(components.brdfTerms.diffuseLobe, targetDiffuseLobe, lutWeight), subsurfaceStrength);
-        components.brdfTerms.diffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, lerp(components.brdfTerms.diffuseBRDF, preintegratedDiffuseBRDF, lutWeight), subsurfaceStrength);
+        components.diffuse = lerp(components.diffuse, resolvedDiffuse, subsurfaceStrength);
+        components.brdfTerms.diffuseLobe = lerp(components.brdfTerms.diffuseLobe, resolvedDiffuseLobe, subsurfaceStrength);
+        components.brdfTerms.diffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, resolvedDiffuseBRDF, subsurfaceStrength);
         return;
     }
 
@@ -1141,8 +1351,6 @@ void BurtApplySubsurfaceDirectPBR(
     float3 diffuseTint = max(BurtLoadSubsurfaceProfileTransmissionTint(materialData.subsurfaceProfileIndex).rgb, float3(0.0f, 0.0f, 0.0f));
 #endif
     float4 dualSpecular = BurtLoadSubsurfaceProfileDualSpecular(materialData.subsurfaceProfileIndex);
-    float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(materialData.subsurfaceProfileIndex);
-    float4 profileTransmissionTint = BurtLoadSubsurfaceProfileTransmissionTint(materialData.subsurfaceProfileIndex);
     float lobeMix = saturate(dualSpecular.z);
     float lobe0Roughness = ClampPerceptualRoughness(materialData.perceptualRoughness * max(dualSpecular.x * BURT_SUBSURFACE_MAX_DUAL_SPECULAR_ROUGHNESS, 0.01f));
     float lobe1Roughness = ClampPerceptualRoughness(materialData.perceptualRoughness * max(dualSpecular.y * BURT_SUBSURFACE_MAX_DUAL_SPECULAR_ROUGHNESS, 0.01f));
@@ -1157,31 +1365,12 @@ void BurtApplySubsurfaceDirectPBR(
     float3 wrappedDiffuseBRDF = materialData.diffuseColor * diffuseTint * lerp(wrappedDiffuseLobe, scatterIntensity * BURT_INV_PI, lutWeight) * dualEnergyPreservation;
     float3 wrappedDiffuse = wrappedDiffuseBRDF * lightColor * lerp(wrappedNoL * shadowAttenuation, shadowAttenuation, lutWeight);
 
-    float thickness = saturate(materialData.subsurfaceThickness);
-    float backFacing = saturate(-rawNoL);
-    float extinctionScale = BurtDecodeSubsurfaceProfileExtinctionScale(profileTransmission.x);
-    float transmissionNormalScale = saturate(profileTransmission.y);
-    float scatteringDistribution = BurtDecodeSubsurfaceProfileScatteringDistribution(profileTransmission.z);
-    float oneOverIOR = clamp(profileTransmission.w, 0.01f, 1.0f);
-    float3 refractedView = refract(v, -n, oneOverIOR);
-    refractedView = dot(refractedView, refractedView) > BURT_EPSILON
-        ? BurtSafeNormalize(refractedView)
-        : BurtSafeNormalize(v - n * transmissionNormalScale);
-    float3 distortedBackDirection = BurtSafeNormalize(-l + n * lerp(materialData.subsurfaceDistortion, transmissionNormalScale, 0.65f));
-    float transmissionFacing = pow(saturate(dot(v, distortedBackDirection)), BurtClampSubsurfacePower(materialData.subsurfacePower));
-    float phase = BurtHenyeyGreensteinPhase(scatteringDistribution, dot(l, -refractedView));
-    float normalizedPhase = saturate(phase * (4.0f * BURT_PI));
-    float3 profileTransmittance = BurtSampleSubsurfaceTransmissionProfile(materialData.subsurfaceProfileIndex, thickness);
-    float transmissionVisibility = transmissionFacing * lerp(0.15f, 1.0f, thickness) * lerp(0.25f, 1.0f, backFacing);
-    float transmissionLobe = transmissionVisibility * lerp(BURT_INV_PI, normalizedPhase, 0.85f);
-    float shadowVisibility = saturate(shadowAttenuation);
-    float softenedShadowVisibility = shadowVisibility * lerp(shadowVisibility, sqrt(shadowVisibility), saturate(thickness) * 0.35f);
-    float transmissionShadow = softenedShadowVisibility * lerp(0.82f, 1.0f, backFacing);
-    float3 profileTint = max(profileTransmissionTint.rgb, float3(0.0f, 0.0f, 0.0f));
-    float transmissionIntensity = BurtEvaluateSubsurfaceProfileIntensity(profileTransmittance);
-    float3 transmissionThroughput = max(materialData.baseColor * profileTint, float3(0.0f, 0.0f, 0.0f)) * transmissionIntensity;
-    float3 transmissionBRDF = transmissionThroughput * transmissionLobe * dualEnergyPreservation;
-    float3 transmission = transmissionBRDF * lightColor * transmissionShadow;
+    profileTransmissionBRDF *= dualEnergyPreservation;
+    profileTransmission *= dualEnergyPreservation;
+    components.transmission *= dualEnergyPreservation;
+    components.transmissionBRDF *= dualEnergyPreservation;
+    profileTransmissionLobe *= dualEnergyPreservation;
+    components.transmissionLobe *= dualEnergyPreservation;
 
     float lobe0A2 = LinearRoughnessToA2(PerceptualRoughnessToLinearRoughness(lobe0Roughness));
     float lobe1A2 = LinearRoughnessToA2(PerceptualRoughnessToLinearRoughness(lobe1Roughness));
@@ -1193,18 +1382,19 @@ void BurtApplySubsurfaceDirectPBR(
     float lightVisibility = components.brdfTerms.nDotL * shadowAttenuation;
     float3 dualSpecularContribution = dualSpecularBRDF * lightColor * lightVisibility;
 
-    float3 targetDiffuse = wrappedDiffuse + transmission;
-    float targetDiffuseLobe = max(wrappedDiffuseLobe, transmissionLobe);
-    float3 targetDiffuseBRDF = wrappedDiffuseBRDF + transmissionBRDF * transmissionShadow;
+    float3 targetDiffuse = wrappedDiffuse + profileTransmission;
+    float targetDiffuseLobe = max(wrappedDiffuseLobe, profileTransmissionLobe);
+    float3 targetDiffuseBRDF = wrappedDiffuseBRDF + profileTransmissionBRDF;
 #if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
     if (!BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
     {
         // 5S/4S match XRender's post-process SSS path: direct diffuse stays as
         // ordinary diffuse, while profile diffusion/tint is applied by the
-        // screen-space subsurface pass. Keep the dual-specular profile override.
-        targetDiffuse = components.diffuse;
-        targetDiffuseLobe = components.brdfTerms.diffuseLobe;
-        targetDiffuseBRDF = components.brdfTerms.diffuseBRDF;
+        // screen-space subsurface pass. Profile transmission is a direct-light
+        // lobe and stays in the deferred subsurface input.
+        targetDiffuse = components.diffuse + profileTransmission;
+        targetDiffuseLobe = max(components.brdfTerms.diffuseLobe, profileTransmissionLobe);
+        targetDiffuseBRDF = components.brdfTerms.diffuseBRDF + profileTransmissionBRDF;
     }
 #endif
     components.diffuse = lerp(components.diffuse, targetDiffuse, subsurfaceStrength);
@@ -1219,6 +1409,24 @@ void BurtApplySubsurfaceDirectPBR(
     components.brdfTerms.d = lerp(components.brdfTerms.d, dualD, subsurfaceStrength);
     components.brdfTerms.visibility = lerp(components.brdfTerms.visibility, dualVisibility, subsurfaceStrength);
 #endif
+}
+
+void BurtApplySubsurfaceDirectPBR(
+    inout BurtDirectPBRComponents components,
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    float3 lightColor,
+    float3 lightDirectionWS,
+    float shadowAttenuation)
+{
+    BurtApplySubsurfaceDirectPBR(
+        components,
+        materialData,
+        geometryData,
+        lightColor,
+        lightDirectionWS,
+        shadowAttenuation,
+        shadowAttenuation);
 }
 
 void BurtApplyFabricDirectPBR(
@@ -1242,17 +1450,128 @@ void BurtApplyFabricDirectPBR(
     }
 
     float3 n = geometryData.normalWS;
+    float3 v = geometryData.viewDirectionWS;
     float3 l = BurtSafeNormalize(lightDirectionWS);
+    float3 h = BurtSafeNormalize(l + v);
     float noL = saturate(dot(n, l));
     float noV = saturate(geometryData.nDotV);
-    float3 fuzzFresnel = F_Schlick_Fabric(float3(0.0f, 0.0f, 0.0f), 1.0f, noV);
-    float fuzzDiffuseLobe = Fd_Lambert_Fabric(materialData.fabricFuzzRoughness);
-    float3 fuzzBRDF = materialData.fabricFuzzColor * fuzzWeight * fuzzFresnel * fuzzDiffuseLobe;
-    float3 fuzzLighting = fuzzBRDF * lightColor * noL * shadowAttenuation;
+    float noH = saturate(dot(n, h));
+    float loH = saturate(dot(l, h));
+    float fuzzRoughness = ClampPerceptualRoughness(materialData.fabricFuzzRoughness);
+    float fuzzLinearRoughness = PerceptualRoughnessToLinearRoughness(fuzzRoughness);
+    float fuzzD = D_Charlie(fuzzLinearRoughness, noH);
+    float fuzzVisibility = V_Neubelt(noV, noL);
+    float3 fuzzFresnel = F_Schlick_UE(materialData.fabricFuzzColor, loH);
+    float3 fuzzBRDF = fuzzD * fuzzVisibility * fuzzFresnel;
+    float3 fuzzSpecular = fuzzBRDF * lightColor * noL * shadowAttenuation;
+    float fuzzEnergyPreservation = saturate(1.0f - BurtClothEnergyLookup(fuzzRoughness, noV));
+    float baseLayerWeight = lerp(1.0f, fuzzEnergyPreservation, fuzzWeight);
 
-    components.diffuse += fuzzLighting;
-    components.brdfTerms.diffuseBRDF += fuzzBRDF;
-    components.brdfTerms.diffuseLobe = max(components.brdfTerms.diffuseLobe, fuzzDiffuseLobe);
+    components.diffuse *= baseLayerWeight;
+    components.specular = components.specular * baseLayerWeight + fuzzSpecular * fuzzWeight;
+    components.energyPreservation = saturate(components.energyPreservation * baseLayerWeight);
+    components.brdfTerms.diffuseBRDF *= baseLayerWeight;
+    components.brdfTerms.specularBRDF = components.brdfTerms.specularBRDF * baseLayerWeight + fuzzBRDF * fuzzWeight;
+    components.brdfTerms.perceptualRoughness = lerp(components.brdfTerms.perceptualRoughness, fuzzRoughness, fuzzWeight);
+    components.brdfTerms.linearRoughness = lerp(components.brdfTerms.linearRoughness, fuzzLinearRoughness, fuzzWeight);
+    components.brdfTerms.a2 = lerp(components.brdfTerms.a2, LinearRoughnessToA2(fuzzLinearRoughness), fuzzWeight);
+    components.brdfTerms.d = lerp(components.brdfTerms.d, fuzzD, fuzzWeight);
+    components.brdfTerms.visibility = lerp(components.brdfTerms.visibility, fuzzVisibility, fuzzWeight);
+    components.brdfTerms.fresnel = lerp(components.brdfTerms.fresnel, fuzzFresnel, fuzzWeight);
+#endif
+}
+
+void BurtApplySilkWrappedDiffuseDirectPBR(
+    inout BurtDirectPBRComponents components,
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    float3 lightColor,
+    float3 lightDirectionWS,
+    float shadowAttenuation)
+{
+#if BURT_ENABLE_FABRIC_SHADING
+    if (materialData.fabricActive <= 0.0001f || materialData.fabricIsSilk <= 0.5f)
+    {
+        return;
+    }
+
+    float3 l = BurtSafeNormalize(lightDirectionWS);
+    float rawNoL = dot(geometryData.normalWS, l);
+    float wrappedNoL = BurtComputeWrappedDiffuseLighting(-rawNoL, cos(BURT_PI * (5.0f / 12.0f)));
+    float3 wrappedDiffuse = components.brdfTerms.diffuseBRDF * lightColor * wrappedNoL * shadowAttenuation;
+
+    components.diffuse += wrappedDiffuse;
+#endif
+}
+
+void BurtApplyFoliageDirectPBR(
+    inout BurtDirectPBRComponents components,
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    float3 lightColor,
+    float3 lightDirectionWS,
+    float shadowAttenuation,
+    float transmissionShadowAttenuation)
+{
+#if BURT_ENABLE_FOLIAGE_SHADING
+    if (materialData.foliageActive <= 0.0001f)
+    {
+        return;
+    }
+
+    float transmissionWeight = materialData.foliageIsGrass > 0.5f
+        ? max(materialData.foliageTransmissionWeight, 0.0f)
+        : saturate(materialData.foliageTransmissionWeight);
+    if (transmissionWeight <= 0.0001f)
+    {
+        return;
+    }
+
+    float3 n = geometryData.normalWS;
+    float3 v = geometryData.viewDirectionWS;
+    float3 l = BurtSafeNormalize(lightDirectionWS);
+    if (materialData.foliageIsGrass > 0.5f)
+    {
+        float voL = dot(v, l);
+        float phase = (-voL) * 0.5f + 0.5f;
+        float transLightVoL = saturate(Pow5(phase));
+        float average = (materialData.baseColor.r + materialData.baseColor.g + materialData.baseColor.b) * 0.3333f;
+        float3 sssColor = saturate((materialData.baseColor - average.xxx) * 0.35f + materialData.baseColor);
+        float3 sssLight = sssColor * transLightVoL * transmissionWeight * lightColor * saturate(transmissionShadowAttenuation);
+        float3 baseDiffuse = components.diffuse;
+        float3 blendedDiffuse = lerp(baseDiffuse, sssLight, 0.35f);
+        float3 addedTransmission = max(blendedDiffuse - baseDiffuse, float3(0.0f, 0.0f, 0.0f));
+
+        components.transmission += addedTransmission;
+        components.transmissionBRDF += sssColor * transLightVoL * transmissionWeight;
+        components.transmissionThroughput = max(components.transmissionThroughput, sssColor);
+        components.transmissionLobe = max(components.transmissionLobe, transLightVoL * transmissionWeight);
+        components.transmissionShadow = min(components.transmissionShadow, saturate(transmissionShadowAttenuation));
+        components.transmissionThickness = max(components.transmissionThickness, saturate(materialData.foliageThickness));
+        components.diffuse = blendedDiffuse;
+        components.brdfTerms.diffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, sssColor * transLightVoL * transmissionWeight, 0.35f);
+        components.brdfTerms.diffuseLobe = max(components.brdfTerms.diffuseLobe, transLightVoL * transmissionWeight);
+        return;
+    }
+
+    float voL = dot(v, l);
+    float noL = dot(n, l);
+    float wrap = saturate(materialData.foliageTransmissionNdotL);
+    float wrapNoL = saturate((-noL + wrap) / max((1.0f + wrap) * (1.0f + wrap), BURT_EPSILON));
+    float scatter = D_GGX(0.36f, saturate(-voL));
+    float lobe = max(scatter * wrapNoL, 0.0f);
+    float3 transmissionBRDF = max(materialData.foliageTransmissionColor, float3(0.0f, 0.0f, 0.0f)) * transmissionWeight * lobe;
+    float3 transmission = transmissionBRDF * lightColor * saturate(transmissionShadowAttenuation);
+
+    components.transmission += transmission;
+    components.transmissionBRDF += transmissionBRDF;
+    components.transmissionThroughput = max(components.transmissionThroughput, materialData.foliageTransmissionColor);
+    components.transmissionLobe = max(components.transmissionLobe, lobe);
+    components.transmissionShadow = min(components.transmissionShadow, saturate(transmissionShadowAttenuation));
+    components.transmissionThickness = max(components.transmissionThickness, saturate(materialData.foliageThickness));
+    components.diffuse += transmission;
+    components.brdfTerms.diffuseBRDF += transmissionBRDF;
+    components.brdfTerms.diffuseLobe = max(components.brdfTerms.diffuseLobe, lobe * transmissionWeight);
 #endif
 }
 
@@ -1264,26 +1583,56 @@ BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
     float directSpecularPerceptualRoughness,
     float3 lightColor,
     float3 lightDirectionWS,
-    float shadowAttenuation)
+    float shadowAttenuation,
+    float transmissionShadowAttenuation)
 {
     BurtDirectPBRComponents components;
     components.diffuse = float3(0.0f, 0.0f, 0.0f);
     components.specular = float3(0.0f, 0.0f, 0.0f);
+    components.transmission = float3(0.0f, 0.0f, 0.0f);
     components.energyPreservation = 1.0f;
+    components.transmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.transmissionThroughput = float3(0.0f, 0.0f, 0.0f);
+    components.transmissionLobe = 0.0f;
+    components.transmissionPhase = 0.0f;
+    components.transmissionShadow = saturate(transmissionShadowAttenuation);
+    components.transmissionThickness = 0.0f;
     components.brdfTerms = BurtEvaluateDirectBRDFTerms(materialData, geometryData, energyTerms, directSpecularPerceptualRoughness, lightDirectionWS);
     components.energyPreservation = energyTerms.energyPreservation;
 
     // 合并灯光可见性；NdotL 控制受光角度，shadowAttenuation 控制阴影
-float lightVisibility = components.brdfTerms.nDotL * shadowAttenuation;
+    float lightVisibility = components.brdfTerms.nDotL * shadowAttenuation;
 
     components.diffuse = components.brdfTerms.diffuseBRDF * lightColor * lightVisibility;
     components.specular = components.brdfTerms.specularBRDF * lightColor * lightVisibility;
 
-    BurtApplySubsurfaceDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation);
+    BurtApplySilkWrappedDiffuseDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation);
+    BurtApplySubsurfaceDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation, transmissionShadowAttenuation);
+    BurtApplyFoliageDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation, transmissionShadowAttenuation);
     BurtApplyFabricDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation);
 
     // 返回拆分后的直接光结果
-return components;
+    return components;
+}
+
+BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    BurtPBREnergyTerms energyTerms,
+    float directSpecularPerceptualRoughness,
+    float3 lightColor,
+    float3 lightDirectionWS,
+    float shadowAttenuation)
+{
+    return BurtEvaluateDirectPBRComponents(
+        materialData,
+        geometryData,
+        energyTerms,
+        directSpecularPerceptualRoughness,
+        lightColor,
+        lightDirectionWS,
+        shadowAttenuation,
+        shadowAttenuation);
 }
 
 // Evaluates split direct PBR lighting from surface inputs.
@@ -1300,13 +1649,13 @@ BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
     BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(normalWS, viewDirectionWS);
 
     // 直接高光�?roughness 单独包含 Specular AA，不回写材质 Base.Roughness
-float directSpecularPerceptualRoughness = GetDirectSpecularPerceptualRoughness(materialData, geometryData);
+    float directSpecularPerceptualRoughness = GetDirectSpecularPerceptualRoughness(materialData, geometryData);
 
     // 一次性准备直�?间接高光补偿�?EnergyPreservation，避免多个光照函数重复查 FG LUT�?
     BurtPBREnergyTerms energyTerms = BurtPreparePBREnergyTerms(materialData, geometryData, directSpecularPerceptualRoughness);
 
     // 复用准备数据版本，保�?Forward 和未�?Deferred 的直接光入口一致
-return BurtEvaluateDirectPBRComponents(materialData, geometryData, energyTerms, directSpecularPerceptualRoughness, lightColor, lightDirectionWS, shadowAttenuation);
+    return BurtEvaluateDirectPBRComponents(materialData, geometryData, energyTerms, directSpecularPerceptualRoughness, lightColor, lightDirectionWS, shadowAttenuation);
 }
 
 // 计算单个方向光对当前表面�?PBR 直接光贡献
@@ -1322,7 +1671,7 @@ float3 BurtEvaluateDirectPBR(
     BurtDirectPBRComponents components = BurtEvaluateDirectPBRComponents(surfaceData, lightColor, lightDirectionWS, normalWS, viewDirectionWS, shadowAttenuation);
 
     // 把直接漫反射和直接高光相加，得到旧接口需要的总直接光
-return components.diffuse + components.specular;
+    return components.diffuse + components.specular;
 }
 
 #endif // BURT_BRDF_INCLUDED // 结束 BurtBRDF.hlsl �?include guard�?

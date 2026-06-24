@@ -164,6 +164,33 @@ Shader "Hidden/BurtRP/DeferredLighting"
             #pragma fragment Frag
             ENDHLSL
         }
+
+        // Foliage pass: only shades stencil/model id 5 pixels and adds them after the Lit pass.
+        Pass
+        {
+            Name "Burt Deferred Foliage Lighting"
+            Tags { "LightMode" = "BurtDeferredFoliageLighting" }
+            Cull Off
+            ZWrite Off
+            ZTest Always
+            Stencil
+            {
+                Ref 5
+                ReadMask 7
+                Comp Equal
+                Pass Keep
+            }
+            Blend One One
+
+            HLSLPROGRAM
+            #define BURT_DEFERRED_SHADING_MODEL_FOLIAGE 1
+            #pragma target 4.5
+            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
+            #pragma vertex Vert
+            #pragma fragment Frag
+            ENDHLSL
+        }
     }
 
     // Disable fallback so missing deferred lighting fails visibly instead of using an unrelated shader.

@@ -19,6 +19,11 @@ Texture2D _FlowDirectionMap;
 Texture2D _EmissiveMap;
 Texture2DArray _FlowDirectionMapSegmentArray;
 
+float4x4 _BurtFurBlurCurrentNonJitteredViewProjection;
+float4x4 _BurtFurBlurPreviousNonJitteredViewProjection;
+float4x4 _BurtFurBlurPreviousObjectToWorld;
+float4 _BurtFurBlurScreenSize;
+
 static const float BURT_MULTIPASS_FUR_REFERENCE_LAYER_COUNT = 16.0f;
 static const float BURT_TWO_PI = 6.28318530717958647692f;
 static const float BURT_INV_TWO_PI = 0.15915494309189535f;
@@ -54,6 +59,17 @@ struct BurtMultipassFurGBufferOutput
     float4 gbuffer3 : SV_Target3;
     float4 gbuffer4 : SV_Target4;
     float4 objectIndex : SV_Target5;
+};
+
+struct BurtMultipassFurVelocityVaryings
+{
+    float4 positionCS : SV_POSITION;
+    float4 currentClipNoJitter : TEXCOORD0;
+    float4 previousClipNoJitter : TEXCOORD1;
+    float2 uv0 : TEXCOORD2;
+    float2 uv1 : TEXCOORD3;
+    float layerIndex : TEXCOORD4;
+    float velocityValid : TEXCOORD5;
 };
 
 float4 BurtEncodeMultipassFurPerObjectShadowObjectIndexTarget()
@@ -244,6 +260,39 @@ BurtMultipassFurVaryings VertMultipassFur(BurtMultipassFurAttributes input)
     output.uv1 = input.uv1;
     output.layerIndex = layerIndex;
     output.furDirectionWS = BurtSafeNormalize(UnityObjectToWorldDir(furDirectionOS));
+    return output;
+}
+
+float2 BurtMultipassFurClipToUv(float4 clipPosition)
+{
+    float2 uv = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
+    uv = uv * 0.5f + 0.5f;
+    #if UNITY_UV_STARTS_AT_TOP
+        uv.y = 1.0f - uv.y;
+    #endif
+    return uv;
+}
+
+BurtMultipassFurVelocityVaryings VertMultipassFurVelocity(BurtMultipassFurAttributes input)
+{
+    UNITY_SETUP_INSTANCE_ID(input);
+
+    float layerIndex = BurtMultipassFurLayerIndex();
+    float4 positionOS = input.positionOS;
+    float3 furDirectionOS;
+    positionOS.xyz += BurtCalculateMultipassFurOffsetOS(input, layerIndex, furDirectionOS);
+
+    float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
+    float4 previousWorld = mul(_BurtFurBlurPreviousObjectToWorld, positionOS);
+
+    BurtMultipassFurVelocityVaryings output;
+    output.positionCS = UnityObjectToClipPos(positionOS);
+    output.currentClipNoJitter = mul(_BurtFurBlurCurrentNonJitteredViewProjection, currentWorld);
+    output.previousClipNoJitter = mul(_BurtFurBlurPreviousNonJitteredViewProjection, previousWorld);
+    output.uv0 = input.uv0;
+    output.uv1 = input.uv1;
+    output.layerIndex = layerIndex;
+    output.velocityValid = step(0.5f, layerIndex);
     return output;
 }
 
@@ -448,6 +497,38 @@ float4 FragMultipassFurBlurProperty(BurtMultipassFurVaryings input) : SV_Target
     }
 
     return float4(theta, input.positionCS.z, 0.0f, 1.0f);
+}
+
+float4 FragMultipassFurBlurVelocity(BurtMultipassFurVelocityVaryings input) : SV_Target
+{
+    float4 baseMap = BURT_SAMPLE_TEXTURE2D_REPEAT(_BaseMap, BurtMultipassFurPanner(input.uv0 * _BaseMapPanner.xy, _BaseMapPanner.zw));
+    float furAtten = BurtMultipassFurAttenuation(input.layerIndex);
+    float4 baseColor = baseMap * _BaseColor;
+    baseColor = lerp(baseColor * lerp(float4(1.0f, 1.0f, 1.0f, 1.0f), _DarkColor, baseColor.a), baseColor, furAtten);
+    float flowUVSource = _FlowTexUV2 > 0.5f ? 1.0f : 0.0f;
+    float2 flowUV = lerp(input.uv0, input.uv1, flowUVSource) * _FlowTilling.xx * 0.1f;
+    flowUV += BurtMultipassFurPanner(flowUV, _FlowPanner.xy);
+    float flowValue = BURT_SAMPLE_TEXTURE2D_REPEAT(_FlowTex, flowUV).r;
+    float furAlphaOffset = pow(max(furAtten * 2.0f, 0.0f), 0.8f + _FurTickness);
+    furAlphaOffset = pow(max(furAlphaOffset, 0.0f), _FurTicknessCurve);
+    float flowAlpha = input.layerIndex == 0.0f ? 1.0f : saturate(flowValue - furAlphaOffset);
+    float dither = BurtMultipassFurHash12(floor(input.uv0 * 8192.0f + input.layerIndex * float2(17.0f, 31.0f)));
+    baseColor.a = (input.layerIndex == 0.0f ? 1.0f : (flowAlpha > dither ? 1.0f : 0.0f)) * baseColor.a;
+    BurtApplyMultipassFurClip(baseColor.a, input.positionCS);
+
+    clip(_FurBlurEnabled - 0.5f);
+    clip(input.velocityValid - 0.5f);
+
+    float valid = step(1e-5f, input.currentClipNoJitter.w) * step(1e-5f, input.previousClipNoJitter.w);
+    float2 currentUv = BurtMultipassFurClipToUv(input.currentClipNoJitter);
+    float2 previousUv = BurtMultipassFurClipToUv(input.previousClipNoJitter);
+    valid *= step(0.0f, currentUv.x) * step(currentUv.x, 1.0f) * step(0.0f, currentUv.y) * step(currentUv.y, 1.0f);
+    valid *= step(0.0f, previousUv.x) * step(previousUv.x, 1.0f) * step(0.0f, previousUv.y) * step(previousUv.y, 1.0f);
+
+    float2 velocity = previousUv - currentUv;
+    float2 velocityPixels = abs(velocity * _BurtFurBlurScreenSize.xy);
+    float keepVelocity = step(0.02f, max(velocityPixels.x, velocityPixels.y));
+    return float4(velocity * valid * keepVelocity, valid, 1.0f);
 }
 
 #endif // BURT_MULTIPASS_FUR_PASS_INCLUDED
