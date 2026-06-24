@@ -878,12 +878,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return "PostProcessFrameworkDisabledInAsset";
             }
 
+            var temporalAA = GetTemporalAAVolumeComponent();
+            if (IsTemporalAAExplicitlyDisabledByVolume(temporalAA))
+            {
+                return "TemporalAAVolumeEnabledFalse";
+            }
+
             if (HasTemporalAAEnabledByCameraData(request))
             {
                 return null;
             }
 
-            var temporalAA = GetTemporalAAVolumeComponent();
             if (temporalAA == null)
             {
                 return "TemporalAAVolumeMissing";
@@ -925,6 +930,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             var temporalAA = GetTemporalAAVolumeComponent();
+            if (IsTemporalAAExplicitlyDisabledByVolume(temporalAA))
+            {
+                return BurtTemporalAASettings.Default;
+            }
+
             if (temporalAA == null || !temporalAA.IsEnabled())
             {
                 return HasTemporalAAEnabledByCameraData(request)
@@ -1168,6 +1178,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
         internal static bool HasActiveTemporalAASource(BurtRenderRequest request)
         {
+            if (IsTemporalAAExplicitlyDisabledByVolume())
+            {
+                return false;
+            }
+
             return HasActiveTemporalAAVolume() || HasTemporalAAEnabledByCameraData(request);
         }
 
@@ -1179,6 +1194,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
         internal static string ResolveTemporalAASourceLabel(BurtRenderRequest request)
         {
+            if (IsTemporalAAExplicitlyDisabledByVolume())
+            {
+                return HasTemporalAAEnabledByCameraData(request) ? "DisabledByVolumeOverride(CameraDataSuppressed)" : "DisabledByVolumeOverride";
+            }
+
             var volumeEnabled = HasActiveTemporalAAVolume();
             var cameraDataEnabled = HasTemporalAAEnabledByCameraData(request);
             if (volumeEnabled && cameraDataEnabled)
@@ -1206,7 +1226,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 ",EnabledOverride=" + temporalAA.enabled.overrideState +
                 ",EnabledValue=" + temporalAA.enabled.value +
                 ",JitterScale=" + temporalAA.jitterScale.value.ToString("0.###") +
-                ",IsEnabled=" + temporalAA.IsEnabled();
+                ",IsEnabled=" + temporalAA.IsEnabled() +
+                ",ExplicitDisable=" + IsTemporalAAExplicitlyDisabledByVolume(temporalAA);
+        }
+
+        internal static bool IsTemporalAAExplicitlyDisabledByVolume()
+        {
+            return IsTemporalAAExplicitlyDisabledByVolume(GetTemporalAAVolumeComponent());
+        }
+
+        private static bool IsTemporalAAExplicitlyDisabledByVolume(BurtTemporalAAVolumeComponent temporalAA)
+        {
+            return temporalAA != null && temporalAA.active && temporalAA.enabled.overrideState && !temporalAA.enabled.value;
         }
 
         private static BurtTonemappingVolumeComponent GetTonemappingVolumeComponent() // 定义从 Unity VolumeStack 读取 BurtRP Tonemapping 组件的辅助函数。

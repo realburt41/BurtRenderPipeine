@@ -1660,6 +1660,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var bloomPrefilterBypassThreshold = BurtPostProcessUtility.ShouldBypassBloomPrefilterThreshold(bloomSettings);
 
             var temporalAA = request != null ? request.TemporalAA : null;
+            var temporalAAEnabled = temporalAA != null && temporalAA.Enabled;
             var temporalAASettings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
             var temporalAADisabledReason = BurtTemporalAAUtility.ResolveTemporalAADiagnosticDisabledReason(request, asset, renderOptions);
             var temporalAASource = BurtPostProcessUtility.ResolveTemporalAASourceLabel(request);
@@ -1769,11 +1770,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" BloomDebugSuppressedByShadingDebug=").Append(bloomDebugView != BurtBloomDebugView.Disabled && suppressedByShadingDebug); // Shading debug 优先级更高时，Bloom debug 不覆盖画面。
 
-            builder.Append(" TAAEnabled=").Append(temporalAA != null && temporalAA.Enabled);
+            builder.Append(" TAAEnabled=").Append(temporalAAEnabled);
             builder.Append(" TAAReason=").Append(temporalAADisabledReason);
             builder.Append(" TAASource=").Append(temporalAASource);
             builder.Append(" TAAVolume=").Append(temporalAAVolumeState);
-            builder.Append(" TAAHistoryValid=").Append(temporalAA != null && temporalAA.HistoryValid);
+            builder.Append(" TAAHistoryValid=").Append(temporalAAEnabled && temporalAA.HistoryValid);
             builder.Append(" TAAHistoryAllocated=").Append(temporalHistory.HasHistory);
             builder.Append(" TAAHistoryMatches=").Append(temporalHistory.DescriptorMatches);
             builder.Append(" TAADepthHistoryAllocated=").Append(temporalHistory.HasDepthHistory);
@@ -1806,8 +1807,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAAFinalBlitYFlip=").Append(FormatFloat(finalBlitYFlip));
             builder.Append(" TAADebugYFlip=").Append(FormatFloat(temporalAADebugYFlip));
             builder.Append(" TAAUVSpace=XRenderFullscreenPlatformSampleUv;HistoryDepthVelocityFeedbackSameOrientation;FinalCameraColorTemporalAACopy;FinalBlitHandlesDisplayFlip;BurtVelocityPrevMinusCurrentHistoryUvPlusVelocity");
-            builder.Append(" TAAFilter=Current3x3ProjectionJitterFilter");
-            builder.Append(" TAANote=XRenderTSRAccumulationParity;DecimateMaxUseCountDepth;VelocitySignInternalToBurt;NoEdgeVelocityValidityDrop;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3ProjectionJitterFilter;ResolveBlendXRenderStrict;StaticBlend05;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout27;StencilObjectMotionBit8;StrictStencilResponsiveBit16;StrictParallaxRejection;StaticDepthHistoryFallback;StaticHistoryDepthGate;StaticHistoryAvailabilityRelaxed;XRenderSigmaClamp15;NoDynamicSafetyResponsive;NoResolveSharpen;ComputePrevUseCount;ResponsiveAADisocclusionRestored;MaterialMotionVectorsPass;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUMetadataDebug489_491;XRenderPointCurrentLoad;XRenderFinalAlpha");
+            builder.Append(" TAAFilter=").Append(temporalAAEnabled ? "Current3x3ProjectionJitterFilter" : "Disabled");
+            builder.Append(" TAANote=").Append(temporalAAEnabled ? "XRenderTSRAccumulationParity;DecimateMaxUseCountDepth;VelocitySignInternalToBurt;NoEdgeVelocityValidityDrop;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3ProjectionJitterFilter;ResolveBlendXRenderStrict;StaticBlend05;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout27;StencilObjectMotionBit8;StrictStencilResponsiveBit16;StrictParallaxRejection;StaticDepthHistoryFallback;StaticHistoryDepthGate;StaticHistoryAvailabilityRelaxed;XRenderSigmaClamp15;NoDynamicSafetyResponsive;NoResolveSharpen;ComputePrevUseCount;ResponsiveAADisocclusionRestored;MaterialMotionVectorsPass;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUMetadataDebug489_491;XRenderPointCurrentLoad;XRenderFinalAlpha" : "Disabled");
 
             builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
 

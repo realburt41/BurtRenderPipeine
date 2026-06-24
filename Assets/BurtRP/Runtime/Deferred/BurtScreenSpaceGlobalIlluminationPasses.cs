@@ -623,7 +623,7 @@ namespace Burt.RenderPipeline
                     backfaceDiffuseTarget.Identifier,
                     roughSpecularTarget.Identifier,
                 },
-                cameraDepthTarget.Identifier);
+                new RenderTargetIdentifier(BuiltinRenderTextureType.None));
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.SetGlobalTexture(BurtGITextureId, burtGITarget.Identifier);
