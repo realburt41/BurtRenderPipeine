@@ -4,10 +4,10 @@ Shader "BurtRP/Foliage"
     {
         _BaseMap ("Base Map", 2D) = "white" {}
         [HDR] _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
-        _MaskMap ("Mask Map (R Unused, G Occlusion, B Thickness, A Roughness)", 2D) = "white" {}
+        _MaskMap ("Legacy Mask Map", 2D) = "white" {}
         _AlphaMap ("Alpha Map", 2D) = "white" {}
         _AlphaIncrease ("Alpha Distance Increase", Range(0, 1)) = 0.4
-        [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
+        _NormalMap ("NSR Map (RG Normal, B Thickness, A Roughness)", 2D) = "bump" {}
         _NormalScale ("Normal Scale", Range(0, 2)) = 1
         _Reflectance ("Reflectance", Range(0, 1)) = 0.35
         _Smoothness ("Smoothness", Range(0, 1)) = 0.45
@@ -33,7 +33,8 @@ Shader "BurtRP/Foliage"
         _TintAORemap ("Tint AO Remap", Vector) = (0.754, 1, 0, 0)
         _TintHeightContrast ("Tint Height Contrast", Range(0.1, 10)) = 1
         _TreeHeight ("Tree Height", Float) = 25
-        _FoliageTintMode ("Tint Mode (0 Local, 1 Constant, 2 Object X)", Range(0, 2)) = 0
+        _CustomEnum ("Tint Type", Float) = 0
+        [HideInInspector] _FoliageTintMode ("Legacy Tint Mode", Float) = 0
         [Toggle(BURT_FOLIAGE_USE_BAKED_NORMALS)] _FoliageUseBakedNormals ("Use Baked Normals", Float) = 0
         _EmissionMap ("Emission Map", 2D) = "white" {}
         [HDR]_EmissionColor ("Emission Color", Color) = (0, 0, 0, 1)

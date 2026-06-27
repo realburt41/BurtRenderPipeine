@@ -57,6 +57,11 @@
                 #endif
             }
 
+            bool BurtSSRCompositeIsExcludedShadingModel(float shadingModelID)
+            {
+                return BurtIsActiveHairShadingModel(shadingModelID) || BurtIsActiveFurShadingModel(shadingModelID);
+            }
+
             float BurtSSRCompositeLuminance(float3 color)
             {
                 return dot(max(color, 0.0), float3(0.2126, 0.7152, 0.0722));
@@ -98,7 +103,7 @@
                 }
 
                 BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
-                if (BurtIsActiveHairShadingModel(sampleGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(sampleGBuffer.shadingModelID))
                 {
                     return 0.0;
                 }
@@ -130,7 +135,7 @@
                 }
 
                 BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
-                if (BurtIsActiveHairShadingModel(sampleGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(sampleGBuffer.shadingModelID))
                 {
                     return 0.0;
                 }
@@ -152,7 +157,7 @@
 
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.shadingModelID))
                 {
                     return 0.0;
                 }
@@ -225,7 +230,7 @@
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.shadingModelID))
                 {
                     return 0.0;
                 }
@@ -329,7 +334,7 @@
                 }
 
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.shadingModelID))
                 {
                     return centerSSR.rgb;
                 }
@@ -618,7 +623,7 @@
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.shadingModelID))
                 {
                     return 0.0;
                 }
@@ -645,7 +650,7 @@
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.shadingModelID))
                 {
                     return float3(0.0, 0.0, 0.0);
                 }
@@ -729,7 +734,7 @@
                 }
 
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.shadingModelID))
                 {
                     return compositeDelta;
                 }

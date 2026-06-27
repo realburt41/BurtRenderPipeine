@@ -695,10 +695,10 @@ MonoBehaviour:
     m_Value: 0.5
   thetaFeedback:
     m_OverrideState: 1
-    m_Value: 0.75
+    m_Value: 0.96
   temporalFeedback:
     m_OverrideState: 1
-    m_Value: 0.85
+    m_Value: 0.96
 --- !u!114 &3971589225541114367
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -754,7 +754,7 @@ MonoBehaviour:
   active: 1
   enabled:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 1
   feedback:
     m_OverrideState: 0
     m_Value: 0.93

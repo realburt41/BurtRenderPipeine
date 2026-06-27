@@ -18,6 +18,7 @@ namespace Burt.RenderPipeline
         private static readonly int PerObjectShadowRows3Id = Shader.PropertyToID("_BurtPerObjectShadowRows3");
         private static readonly int PerObjectShadowAtlasRectsId = Shader.PropertyToID("_BurtPerObjectShadowAtlasRects");
         private static readonly int PerObjectShadowSliceParamsId = Shader.PropertyToID("_BurtPerObjectShadowSliceParams");
+        private static readonly int PerObjectShadowSliceDepthParamsId = Shader.PropertyToID("_BurtPerObjectShadowSliceDepthParams");
         private static readonly int PerObjectShadowParamsId = Shader.PropertyToID("_BurtPerObjectShadowParams");
         private static readonly int PerObjectShadowTexelSizeId = Shader.PropertyToID("_BurtPerObjectShadowTexelSize");
         internal static readonly int PerObjectShadowObjectIndexId = Shader.PropertyToID("_BurtPerObjectShadowObjectIndex");
@@ -35,6 +36,7 @@ namespace Burt.RenderPipeline
         private static readonly Matrix4x4[] DisabledWorldToShadowMatrices = CreateIdentityMatrixArray();
         private static readonly Vector4[] DisabledAtlasRects = CreateDefaultAtlasRectArray();
         private static readonly Vector4[] DisabledSliceParams = new Vector4[MaxSlices];
+        private static readonly Vector4[] DisabledSliceDepthParams = new Vector4[MaxSlices];
         private static readonly Vector4[] WorldToShadowRows0 = new Vector4[MaxSlices];
         private static readonly Vector4[] WorldToShadowRows1 = new Vector4[MaxSlices];
         private static readonly Vector4[] WorldToShadowRows2 = new Vector4[MaxSlices];
@@ -191,11 +193,13 @@ namespace Burt.RenderPipeline
             var matrices = DisabledWorldToShadowMatrices;
             var atlasRects = DisabledAtlasRects;
             var sliceParams = DisabledSliceParams;
+            var sliceDepthParams = DisabledSliceDepthParams;
             for (var sliceIndex = 0; sliceIndex < MaxSlices; sliceIndex++)
             {
                 matrices[sliceIndex] = Matrix4x4.identity;
                 atlasRects[sliceIndex] = new Vector4(0f, 0f, 1f, 1f);
                 sliceParams[sliceIndex] = Vector4.zero;
+                sliceDepthParams[sliceIndex] = Vector4.zero;
             }
 
             for (var sliceIndex = 0; sliceIndex < Mathf.Min(preparedData.SliceCount, MaxSlices); sliceIndex++)
@@ -213,6 +217,11 @@ namespace Burt.RenderPipeline
                     Mathf.Max(0f, slice.ReceiverDepthBias),
                     Mathf.Max(0f, slice.ReceiverNormalBias),
                     Mathf.Max(0f, slice.WorldTexelSize));
+                sliceDepthParams[sliceIndex] = new Vector4(
+                    Mathf.Max(0.001f, slice.DepthRangeWorld),
+                    Mathf.Max(0f, slice.WorldTexelSize),
+                    0f,
+                    1f);
             }
 
             UploadPerObjectShadowArrays(
@@ -221,6 +230,7 @@ namespace Burt.RenderPipeline
                 matrices,
                 atlasRects,
                 sliceParams,
+                sliceDepthParams,
                 new Vector4(Mathf.Clamp(preparedData.SliceCount, 0, MaxSlices), preparedData.AtlasWidth, preparedData.AtlasHeight, 0f),
                 new Vector4(1f / Mathf.Max(1, preparedData.AtlasWidth), 1f / Mathf.Max(1, preparedData.AtlasHeight), Mathf.Max(1, preparedData.AtlasWidth), Mathf.Max(1, preparedData.AtlasHeight)));
         }
@@ -251,6 +261,7 @@ namespace Burt.RenderPipeline
                 DisabledWorldToShadowMatrices,
                 DisabledAtlasRects,
                 DisabledSliceParams,
+                DisabledSliceDepthParams,
                 Vector4.zero,
                 Vector4.zero);
         }
@@ -346,6 +357,7 @@ namespace Burt.RenderPipeline
             slice.ReceiverDepthBias = component.ReceiverDepthBias;
             slice.ReceiverNormalBias = component.NormalBias * CalculateWorldTexelSize(paddedExtents, component.SliceResolution);
             slice.WorldTexelSize = CalculateWorldTexelSize(paddedExtents, component.SliceResolution);
+            slice.DepthRangeWorld = Mathf.Max(0.001f, paddedExtents.z * 2f);
             slice.Index = sliceIndex;
             slice.Component = component;
             return true;
@@ -503,6 +515,7 @@ namespace Burt.RenderPipeline
             Matrix4x4[] worldToShadowMatrices,
             Vector4[] atlasRects,
             Vector4[] sliceParams,
+            Vector4[] sliceDepthParams,
             Vector4 shadowParams,
             Vector4 texelSize)
         {
@@ -515,6 +528,7 @@ namespace Burt.RenderPipeline
                 material.SetVectorArray(PerObjectShadowRows3Id, WorldToShadowRows3);
                 material.SetVectorArray(PerObjectShadowAtlasRectsId, atlasRects);
                 material.SetVectorArray(PerObjectShadowSliceParamsId, sliceParams);
+                material.SetVectorArray(PerObjectShadowSliceDepthParamsId, sliceDepthParams);
                 material.SetVector(PerObjectShadowParamsId, shadowParams);
                 material.SetVector(PerObjectShadowTexelSizeId, texelSize);
             }
@@ -527,6 +541,7 @@ namespace Burt.RenderPipeline
                 cmd.SetGlobalVectorArray(PerObjectShadowRows3Id, WorldToShadowRows3);
                 cmd.SetGlobalVectorArray(PerObjectShadowAtlasRectsId, atlasRects);
                 cmd.SetGlobalVectorArray(PerObjectShadowSliceParamsId, sliceParams);
+                cmd.SetGlobalVectorArray(PerObjectShadowSliceDepthParamsId, sliceDepthParams);
                 cmd.SetGlobalVector(PerObjectShadowParamsId, shadowParams);
                 cmd.SetGlobalVector(PerObjectShadowTexelSizeId, texelSize);
             }
@@ -650,6 +665,7 @@ namespace Burt.RenderPipeline
         public float ReceiverDepthBias;
         public float ReceiverNormalBias;
         public float WorldTexelSize;
+        public float DepthRangeWorld;
         public Rect Viewport;
         public Vector4 AtlasRect;
         public Matrix4x4 ViewMatrix;
@@ -667,6 +683,7 @@ namespace Burt.RenderPipeline
             ReceiverDepthBias = 0f;
             ReceiverNormalBias = 0f;
             WorldTexelSize = 0f;
+            DepthRangeWorld = 0f;
             Viewport = default;
             AtlasRect = new Vector4(0f, 0f, 1f, 1f);
             ViewMatrix = Matrix4x4.identity;

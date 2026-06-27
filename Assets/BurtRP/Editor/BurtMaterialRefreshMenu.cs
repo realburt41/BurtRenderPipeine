@@ -110,6 +110,7 @@ namespace Burt.RenderPipeline.Editor
                 case "BurtRP/Lit":
                 case "BurtRP/Clear Coat":
                 case "BurtRP/Subsurface":
+                case "BurtRP/Environment/EV_Trunk":
                     BurtLitShaderGUI.ValidateMaterialState(material);
                     return true;
                 case "BurtRP/Hair":

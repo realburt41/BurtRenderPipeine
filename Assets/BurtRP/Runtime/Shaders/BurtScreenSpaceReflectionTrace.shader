@@ -1609,7 +1609,7 @@
                 }
 
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID) || BurtIsActiveFurShadingModel(gbufferData.shadingModelID))
                 {
                     bool traceDebugMode = (debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 31);
                     return traceDebugMode ? float4(0.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 0.0);

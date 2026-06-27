@@ -100,6 +100,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceAmbientOcclusionTextureId = Shader.PropertyToID(ScreenSpaceAmbientOcclusionTextureShaderName);
 
+        public const string ScreenSpaceShadowName = "ScreenSpaceShadow";
+
+        public const string ScreenSpaceShadowTextureShaderName = "_BurtScreenSpaceShadowTexture";
+
+        public static readonly int ScreenSpaceShadowTextureId = Shader.PropertyToID(ScreenSpaceShadowTextureShaderName);
+
         public const string ScreenSpaceGlobalIlluminationRawName = "ScreenSpaceGlobalIlluminationRaw";
 
         public const string ScreenSpaceGlobalIlluminationRawTextureShaderName = "_BurtScreenSpaceGlobalIlluminationRawTexture";
@@ -770,6 +776,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetScreenSpaceAmbientOcclusion()
         {
             return GetRenderTarget(ScreenSpaceAmbientOcclusionName);
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceShadowTexture()
+        {
+            return RegisterScreenSpaceShadow(new RenderTargetIdentifier(ScreenSpaceShadowTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceShadow(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceShadowName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceShadow()
+        {
+            return GetRenderTarget(ScreenSpaceShadowName);
         }
 
         public BurtRenderTargetHandle RegisterScreenSpaceGlobalIlluminationRawTexture()

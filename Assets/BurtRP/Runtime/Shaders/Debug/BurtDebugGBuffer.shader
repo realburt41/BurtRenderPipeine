@@ -150,10 +150,11 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                     float isClearCoat = BurtIsClearCoatShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
                     float isSubsurface = BurtIsSubsurfaceShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
                     float isFoliage = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float isFur = BurtIsFurShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
                     return float4(
-                        0.6f * isHair + 0.1f * isSubsurface + 0.18f * isFoliage,
-                        0.1f * isHair + 0.45f * isClearCoat + 0.55f * isSubsurface + 0.85f * isFoliage,
-                        0.5f * isHair + 0.7f * isClearCoat + 0.15f * isSubsurface + 0.18f * isFoliage,
+                        0.6f * isHair + 0.1f * isSubsurface + 0.18f * isFoliage + 0.95f * isFur,
+                        0.1f * isHair + 0.45f * isClearCoat + 0.55f * isSubsurface + 0.85f * isFoliage + 0.45f * isFur,
+                        0.5f * isHair + 0.7f * isClearCoat + 0.15f * isSubsurface + 0.18f * isFoliage + 0.1f * isFur,
                         1.0f);
                 }
 

@@ -22,6 +22,7 @@ namespace Burt.RenderPipeline
     public sealed class BurtMultipassRenderer : MonoBehaviour
     {
         public const int MaxMultipassLayerCount = 32;
+        public const string SupportedShaderName = "BurtRP/Multipass Fur";
         private const int DefaultMultipassLayerCount = 16;
 
         private const int MaxShaderPassTypeCount = 7;
@@ -30,6 +31,10 @@ namespace Burt.RenderPipeline
         private static MaterialPropertyBlock s_DrawPropertyBlock;
         private static readonly int FurScaleId = Shader.PropertyToID("_FurScale");
         private static readonly int FurMaxCountId = Shader.PropertyToID("_FurMaxCount");
+        private static readonly int FurPreviousSkinnedMeshValidId = Shader.PropertyToID("_BurtFurBlurPreviousSkinnedMeshValid");
+        private static int skinnedRendererCount;
+        private static int bakedSkinnedMeshCount;
+        private static int bakedSkinnedMeshCountFrame = -1;
 
 #if UNITY_EDITOR
         internal static bool s_ForceGlobal32Layer;
@@ -40,40 +45,20 @@ namespace Burt.RenderPipeline
         {
             new[]
             {
-                "Burt Multipass Fur Forward",
-                "Burt Lit Forward",
-                "Burt Hair Forward",
-                "Burt Subsurface Forward",
-                "Burt Unlit Forward",
-                "BurtForward"
+                "Burt Multipass Fur Forward"
+            },
+            Array.Empty<string>(),
+            new[]
+            {
+                "Burt Multipass Fur Depth Only"
             },
             new[]
             {
-                "Burt Unlit Forward Only",
-                "BurtForwardOnly"
+                "Burt Multipass Fur Shadow Caster"
             },
             new[]
             {
-                "Burt Multipass Fur Depth Only",
-                "Burt Lit Depth Only",
-                "Burt Hair Depth Only",
-                "Burt Depth Only",
-                "BurtDepthOnly"
-            },
-            new[]
-            {
-                "Burt Multipass Fur Shadow Caster",
-                "Burt Lit Shadow Caster",
-                "Burt Hair Shadow Caster",
-                "Burt Unlit Shadow Caster",
-                "ShadowCaster"
-            },
-            new[]
-            {
-                "Burt Multipass Fur GBuffer",
-                "Burt Lit GBuffer",
-                "Burt Hair GBuffer",
-                "BurtGBuffer"
+                "Burt Multipass Fur GBuffer"
             },
             new[]
             {
@@ -95,10 +80,6 @@ namespace Burt.RenderPipeline
         [Tooltip("Per-material shell layer counts. Used only when Support Different Pass Count is enabled.")]
         [SerializeField]
         public int[] m_LayerCountList = Array.Empty<int>();
-
-        [Tooltip("Optional material overrides for each renderer material slot.")]
-        [SerializeField]
-        public Material[] m_OverrideMaterials = Array.Empty<Material>();
 
         [Tooltip("Distance fade curve. The evaluated value is multiplied by the original layer count.")]
         public AnimationCurve m_DistanceFadeCurve = AnimationCurve.Linear(0.0f, 1.0f, 100.0f, 1.0f);
@@ -125,6 +106,16 @@ namespace Burt.RenderPipeline
         private bool hasCapturedObjectToWorld;
         private int previousObjectToWorldFrame = -1;
         private int capturedObjectToWorldFrame = -1;
+        private Mesh bakedSkinnedMesh;
+        private int bakedSkinnedMeshFrame = -1;
+        private bool bakedSkinnedMeshValid;
+        private bool bakedSkinnedMeshHasPreviousPositions;
+        private readonly List<Vector3> previousBakedSkinnedVertices = new List<Vector3>();
+        private readonly List<Vector3> currentBakedSkinnedVertices = new List<Vector3>();
+        private readonly List<Vector3> previousBakedSkinnedNormals = new List<Vector3>();
+        private readonly List<Vector3> currentBakedSkinnedNormals = new List<Vector3>();
+        private readonly List<Vector4> previousBakedSkinnedTangents = new List<Vector4>();
+        private readonly List<Vector4> currentBakedSkinnedTangents = new List<Vector4>();
 
 #if UNITY_EDITOR
         private int editorLod;
@@ -133,6 +124,12 @@ namespace Burt.RenderPipeline
         public bool IsVisible => m_Renderer != null && m_Renderer.isVisible;
 
         internal static IReadOnlyList<BurtMultipassRenderer> RegisteredRenderers => s_Renderers;
+
+        internal static int RegisteredRendererCount => s_Renderers.Count;
+
+        internal static int RegisteredSkinnedRendererCount => skinnedRendererCount;
+
+        internal static int BakedSkinnedMeshCountThisFrame => bakedSkinnedMeshCountFrame == Time.frameCount ? bakedSkinnedMeshCount : 0;
 
         public int LayerCount => Mathf.Clamp(m_LayerCount, 1, MaxMultipassLayerCount);
 
@@ -169,31 +166,6 @@ namespace Burt.RenderPipeline
         public AnimationCurve GetDistanceFadeCurve(int submeshIndex = 0)
         {
             return m_DistanceFadeCurve;
-        }
-
-        public Material[] GetOverrideMaterials()
-        {
-            return m_OverrideMaterials;
-        }
-
-        public void SetOverrideMaterial(int submeshIndex, Material material)
-        {
-            EnsureRenderer();
-            SyncSubmeshConfiguration();
-            if (m_OverrideMaterials == null || submeshIndex < 0 || submeshIndex >= m_OverrideMaterials.Length)
-            {
-                Debug.LogError($"SetOverrideMaterial exceed on {name}.", this);
-                return;
-            }
-
-            if (m_OverrideMaterials[submeshIndex] == material)
-            {
-                return;
-            }
-
-            m_OverrideMaterials[submeshIndex] = material;
-            cacheDirty = true;
-            OnMaterialChanged();
         }
 
         public void SetForce32Layer(bool enable, int layerCount = MaxMultipassLayerCount)
@@ -267,6 +239,12 @@ namespace Burt.RenderPipeline
         private void OnDisable()
         {
             Unregister(this);
+            ReleaseBakedSkinnedMesh();
+        }
+
+        private void OnDestroy()
+        {
+            ReleaseBakedSkinnedMesh();
         }
 
         private void OnValidate()
@@ -305,11 +283,6 @@ namespace Burt.RenderPipeline
                 m_LayerCountList = Array.Empty<int>();
             }
 
-            if (m_OverrideMaterials == null)
-            {
-                m_OverrideMaterials = Array.Empty<Material>();
-            }
-
             if (m_LayerCountList.Length != materialCount)
             {
                 var oldLength = m_LayerCountList.Length;
@@ -323,11 +296,6 @@ namespace Burt.RenderPipeline
             for (var i = 0; i < m_LayerCountList.Length; i++)
             {
                 m_LayerCountList[i] = Mathf.Clamp(m_LayerCountList[i], 1, MaxMultipassLayerCount);
-            }
-
-            if (m_OverrideMaterials.Length != materialCount)
-            {
-                Array.Resize(ref m_OverrideMaterials, materialCount);
             }
 
             if (m_DistanceFadeCurve == null)
@@ -361,8 +329,8 @@ namespace Burt.RenderPipeline
                     }
                 }
 
-                var material = ResolveMaterial(materials, submeshIndex);
-                if (material == null)
+                var material = materials != null && submeshIndex < materials.Length ? materials[submeshIndex] : null;
+                if (!IsSupportedMaterial(material))
                 {
                     continue;
                 }
@@ -374,17 +342,11 @@ namespace Burt.RenderPipeline
             }
         }
 
-        private Material ResolveMaterial(Material[] materials, int submeshIndex)
+        public static bool IsSupportedMaterial(Material material)
         {
-            if (m_OverrideMaterials != null &&
-                submeshIndex >= 0 &&
-                submeshIndex < m_OverrideMaterials.Length &&
-                m_OverrideMaterials[submeshIndex] != null)
-            {
-                return m_OverrideMaterials[submeshIndex];
-            }
-
-            return materials != null && submeshIndex >= 0 && submeshIndex < materials.Length ? materials[submeshIndex] : null;
+            return material != null &&
+                material.shader != null &&
+                string.Equals(material.shader.name, SupportedShaderName, StringComparison.Ordinal);
         }
 
         private static void AddMaterialPasses(Material material, string[] names, List<int> target)
@@ -412,20 +374,17 @@ namespace Burt.RenderPipeline
             {
                 for (var i = 0; i < materials.Length; i++)
                 {
-                    var material = materials[i];
-                    hash = hash * 31 + (material != null ? material.GetInstanceID() : 0);
+                    hash = AppendMaterialHash(hash, materials[i]);
                 }
             }
 
-            if (m_OverrideMaterials != null)
-            {
-                for (var i = 0; i < m_OverrideMaterials.Length; i++)
-                {
-                    var material = m_OverrideMaterials[i];
-                    hash = hash * 31 + (material != null ? material.GetInstanceID() : 0);
-                }
-            }
+            return hash;
+        }
 
+        private static int AppendMaterialHash(int hash, Material material)
+        {
+            hash = hash * 31 + (material != null ? material.GetInstanceID() : 0);
+            hash = hash * 31 + (material != null && material.shader != null ? material.shader.GetInstanceID() : 0);
             return hash;
         }
 
@@ -446,6 +405,10 @@ namespace Burt.RenderPipeline
 
             renderer.registered = true;
             s_Renderers.Add(renderer);
+            if (renderer.m_Renderer is SkinnedMeshRenderer)
+            {
+                skinnedRendererCount++;
+            }
         }
 
         private static void Unregister(BurtMultipassRenderer renderer)
@@ -457,6 +420,10 @@ namespace Burt.RenderPipeline
 
             renderer.registered = false;
             s_Renderers.Remove(renderer);
+            if (renderer.m_Renderer is SkinnedMeshRenderer)
+            {
+                skinnedRendererCount = Mathf.Max(0, skinnedRendererCount - 1);
+            }
         }
 
         internal static void DrawAll(
@@ -558,12 +525,13 @@ namespace Burt.RenderPipeline
             var rootTransform = GetRootTransform();
             var instanceMatrix = ResolveRendererMatrix(renderer, rootTransform);
             var previousMatrix = ResolvePreviousObjectToWorld(instanceMatrix);
+            var previousSkinnedMeshValid = renderer is SkinnedMeshRenderer && bakedSkinnedMeshHasPreviousPositions;
             FillInstanceMatrices(instanceMatrix, MaxMultipassLayerCount);
 
             var submeshCount = Mathf.Min(materials.Length, mesh.subMeshCount);
             for (var submeshIndex = 0; submeshIndex < submeshCount; submeshIndex++)
             {
-                var material = ResolveMaterial(materials, submeshIndex);
+                var material = materials[submeshIndex];
                 if (!CanDrawMaterial(material, range))
                 {
                     continue;
@@ -586,9 +554,10 @@ namespace Burt.RenderPipeline
                 var propertyBlock = GetDrawPropertyBlock();
                 propertyBlock.Clear();
                 renderer.GetPropertyBlock(propertyBlock, submeshIndex);
-                propertyBlock.SetVector(FurScaleId, rootTransform.lossyScale);
+                propertyBlock.SetVector(FurScaleId, ResolveFurScale(rootTransform));
                 propertyBlock.SetInteger(FurMaxCountId, layerCount);
                 propertyBlock.SetMatrix(BurtFurBlurPassUtility.PreviousObjectToWorldId, previousMatrix);
+                propertyBlock.SetFloat(FurPreviousSkinnedMeshValidId, previousSkinnedMeshValid ? 1f : 0f);
                 for (var passIndex = 0; passIndex < passList.Count; passIndex++)
                 {
                     cmd.DrawMeshInstanced(
@@ -685,16 +654,105 @@ namespace Burt.RenderPipeline
             return s_DrawPropertyBlock;
         }
 
-        private static Mesh ResolveMesh(Renderer renderer)
+        private Mesh ResolveMesh(Renderer renderer)
         {
             var skinnedMeshRenderer = renderer as SkinnedMeshRenderer;
             if (skinnedMeshRenderer != null)
             {
-                return skinnedMeshRenderer.sharedMesh;
+                return ResolveBakedSkinnedMesh(skinnedMeshRenderer);
             }
 
             var meshFilter = renderer != null ? renderer.GetComponent<MeshFilter>() : null;
             return meshFilter != null ? meshFilter.sharedMesh : null;
+        }
+
+        private Mesh ResolveBakedSkinnedMesh(SkinnedMeshRenderer skinnedMeshRenderer)
+        {
+            if (skinnedMeshRenderer == null || skinnedMeshRenderer.sharedMesh == null)
+            {
+                bakedSkinnedMeshValid = false;
+                bakedSkinnedMeshHasPreviousPositions = false;
+                ClearBakedSkinnedMeshCaches();
+                return null;
+            }
+
+            var frame = Time.frameCount;
+            if (bakedSkinnedMeshValid && bakedSkinnedMeshFrame == frame && bakedSkinnedMesh != null)
+            {
+                return bakedSkinnedMesh;
+            }
+
+            var previousFrame = bakedSkinnedMeshFrame;
+            var canUsePreviousPositions = bakedSkinnedMeshValid && bakedSkinnedMesh != null && previousFrame >= 0 && frame - previousFrame == 1;
+            previousBakedSkinnedVertices.Clear();
+            previousBakedSkinnedNormals.Clear();
+            previousBakedSkinnedTangents.Clear();
+            if (canUsePreviousPositions)
+            {
+                bakedSkinnedMesh.GetVertices(previousBakedSkinnedVertices);
+                bakedSkinnedMesh.GetNormals(previousBakedSkinnedNormals);
+                bakedSkinnedMesh.GetTangents(previousBakedSkinnedTangents);
+            }
+
+            if (bakedSkinnedMesh == null)
+            {
+                bakedSkinnedMesh = new Mesh
+                {
+                    name = skinnedMeshRenderer.sharedMesh.name + " Burt Multipass Baked"
+                };
+                bakedSkinnedMesh.MarkDynamic();
+            }
+            else
+            {
+                bakedSkinnedMesh.Clear(false);
+            }
+
+            skinnedMeshRenderer.BakeMesh(bakedSkinnedMesh);
+            currentBakedSkinnedVertices.Clear();
+            currentBakedSkinnedNormals.Clear();
+            currentBakedSkinnedTangents.Clear();
+            bakedSkinnedMesh.GetVertices(currentBakedSkinnedVertices);
+            bakedSkinnedMesh.GetNormals(currentBakedSkinnedNormals);
+            bakedSkinnedMesh.GetTangents(currentBakedSkinnedTangents);
+            bakedSkinnedMeshHasPreviousPositions = canUsePreviousPositions &&
+                previousBakedSkinnedVertices.Count == currentBakedSkinnedVertices.Count;
+            if (!bakedSkinnedMeshHasPreviousPositions)
+            {
+                previousBakedSkinnedVertices.Clear();
+                previousBakedSkinnedVertices.AddRange(currentBakedSkinnedVertices);
+            }
+
+            if (previousBakedSkinnedNormals.Count != currentBakedSkinnedVertices.Count)
+            {
+                previousBakedSkinnedNormals.Clear();
+                if (currentBakedSkinnedNormals.Count == currentBakedSkinnedVertices.Count)
+                {
+                    previousBakedSkinnedNormals.AddRange(currentBakedSkinnedNormals);
+                }
+            }
+
+            if (previousBakedSkinnedTangents.Count != currentBakedSkinnedVertices.Count)
+            {
+                previousBakedSkinnedTangents.Clear();
+                if (currentBakedSkinnedTangents.Count == currentBakedSkinnedVertices.Count)
+                {
+                    previousBakedSkinnedTangents.AddRange(currentBakedSkinnedTangents);
+                }
+            }
+
+            bakedSkinnedMesh.SetUVs(4, previousBakedSkinnedVertices);
+            bakedSkinnedMesh.SetUVs(5, previousBakedSkinnedNormals);
+            bakedSkinnedMesh.SetUVs(6, previousBakedSkinnedTangents);
+            bakedSkinnedMeshFrame = frame;
+            bakedSkinnedMeshValid = true;
+            if (bakedSkinnedMeshCountFrame != frame)
+            {
+                bakedSkinnedMeshCountFrame = frame;
+                bakedSkinnedMeshCount = 0;
+            }
+
+            bakedSkinnedMeshCount++;
+            return bakedSkinnedMesh;
         }
 
         private static void EnsureMaterialInstancing(Material material)
@@ -713,7 +771,21 @@ namespace Burt.RenderPipeline
                 return renderer.transform.localToWorldMatrix;
             }
 
+            var skinnedMeshRenderer = renderer as SkinnedMeshRenderer;
+            if (skinnedMeshRenderer != null && skinnedMeshRenderer.transform != null)
+            {
+                return skinnedMeshRenderer.transform.localToWorldMatrix;
+            }
+
             return rootTransform != null ? rootTransform.localToWorldMatrix : Matrix4x4.identity;
+        }
+
+        private static Vector4 ResolveFurScale(Transform rootTransform)
+        {
+            var scale = rootTransform != null ? rootTransform.lossyScale : Vector3.one;
+            var scalarScale = Mathf.Max(Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y)), Mathf.Abs(scale.z));
+            scalarScale = Mathf.Max(scalarScale, 0.0001f);
+            return new Vector4(scalarScale, scalarScale, scalarScale, 1.0f);
         }
 
         private static void FillInstanceMatrices(Matrix4x4 matrix, int layerCount)
@@ -726,7 +798,7 @@ namespace Burt.RenderPipeline
 
         private static bool CanDrawMaterial(Material material, RenderQueueRange range)
         {
-            if (material == null)
+            if (!IsSupportedMaterial(material))
             {
                 return false;
             }
@@ -759,6 +831,43 @@ namespace Burt.RenderPipeline
             }
 
             return (int)RenderQueue.Geometry;
+        }
+
+        private void ReleaseBakedSkinnedMesh()
+        {
+            if (bakedSkinnedMesh == null)
+            {
+                bakedSkinnedMeshValid = false;
+                bakedSkinnedMeshFrame = -1;
+                bakedSkinnedMeshHasPreviousPositions = false;
+                ClearBakedSkinnedMeshCaches();
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                Destroy(bakedSkinnedMesh);
+            }
+            else
+            {
+                DestroyImmediate(bakedSkinnedMesh);
+            }
+
+            bakedSkinnedMesh = null;
+            bakedSkinnedMeshValid = false;
+            bakedSkinnedMeshFrame = -1;
+            bakedSkinnedMeshHasPreviousPositions = false;
+            ClearBakedSkinnedMeshCaches();
+        }
+
+        private void ClearBakedSkinnedMeshCaches()
+        {
+            previousBakedSkinnedVertices.Clear();
+            currentBakedSkinnedVertices.Clear();
+            previousBakedSkinnedNormals.Clear();
+            currentBakedSkinnedNormals.Clear();
+            previousBakedSkinnedTangents.Clear();
+            currentBakedSkinnedTangents.Clear();
         }
     }
 }

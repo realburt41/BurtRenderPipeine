@@ -12,6 +12,7 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEmission.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMaterialShadingModelPassCommon.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkVertexAnimation.hlsl"
 
 int _BurtPerObjectShadowObjectIndex;
 
@@ -21,7 +22,7 @@ struct GBufferAttributes
     float3 normalOS : NORMAL;
     float4 tangentOS : TANGENT;
     float2 uv0 : TEXCOORD0;
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
     float4 color : COLOR;
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
@@ -49,7 +50,7 @@ struct GBufferVaryings
     float3 positionWS : TEXCOORD8;
 #else
     float3 positionWS : TEXCOORD5;
-    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         float4 vertexColor : TEXCOORD6;
         float3 positionOS : TEXCOORD7;
     #endif
@@ -100,6 +101,9 @@ GBufferVaryings VertGBuffer(GBufferAttributes input)
 {
     UNITY_SETUP_INSTANCE_ID(input);
     float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+        positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+    #endif
 
     GBufferVaryings output;
     output.positionCS = UnityObjectToClipPos(positionOS);
@@ -109,7 +113,7 @@ GBufferVaryings VertGBuffer(GBufferAttributes input)
     output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
     output.maskMapUV = BurtTransformMaskMapUV(input.uv0, _MaskMap_ST);
     output.positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
-    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         output.vertexColor = input.color;
         output.positionOS = positionOS.xyz;
     #endif
@@ -182,6 +186,8 @@ GBufferFragmentOutput FragGBuffer(GBufferVaryings input, fixed facing : VFACE)
     float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
     float3 baseNormalWS = BurtGetMaterialPassNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, facing);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, baseNormalWS, viewDirectionWS, input.positionWS, input.positionOS, input.vertexColor);
+    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, baseNormalWS, viewDirectionWS, input.positionWS, input.positionOS, input.vertexColor);
     #else
         BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, baseNormalWS, viewDirectionWS, input.positionWS);

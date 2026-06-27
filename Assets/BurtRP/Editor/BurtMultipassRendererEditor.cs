@@ -8,7 +8,6 @@ internal sealed class BurtMultipassRendererEditor : Editor
     private SerializedProperty layerCount;
     private SerializedProperty supportDifferentPassCount;
     private SerializedProperty layerCountList;
-    private SerializedProperty overrideMaterials;
     private SerializedProperty distanceFadeCurve;
     private SerializedProperty renderingLayerMask;
 
@@ -17,7 +16,6 @@ internal sealed class BurtMultipassRendererEditor : Editor
         layerCount = serializedObject.FindProperty("m_LayerCount");
         supportDifferentPassCount = serializedObject.FindProperty("m_SupportDifferentPassCount");
         layerCountList = serializedObject.FindProperty("m_LayerCountList");
-        overrideMaterials = serializedObject.FindProperty("m_OverrideMaterials");
         distanceFadeCurve = serializedObject.FindProperty("m_DistanceFadeCurve");
         renderingLayerMask = serializedObject.FindProperty("m_RenderingLayerMask");
     }
@@ -33,7 +31,7 @@ internal sealed class BurtMultipassRendererEditor : Editor
             EditorGUILayout.PropertyField(layerCountList, new GUIContent("Layer Count List"), true);
         }
 
-        EditorGUILayout.PropertyField(overrideMaterials, new GUIContent("Override Materials"), true);
+        DrawShaderSupportWarning();
         EditorGUILayout.PropertyField(distanceFadeCurve, new GUIContent("Distance Fade Curve"));
         EditorGUILayout.PropertyField(renderingLayerMask, new GUIContent("Rendering Layer Mask"));
 
@@ -69,5 +67,51 @@ internal sealed class BurtMultipassRendererEditor : Editor
                 }
             }
         }
+    }
+
+    private void DrawShaderSupportWarning()
+    {
+        for (var targetIndex = 0; targetIndex < targets.Length; targetIndex++)
+        {
+            var multipassRenderer = targets[targetIndex] as BurtMultipassRenderer;
+            var unsupportedMaterial = FindFirstUnsupportedMaterial(multipassRenderer);
+            if (unsupportedMaterial == null)
+            {
+                continue;
+            }
+
+            var shaderName = unsupportedMaterial.shader != null ? unsupportedMaterial.shader.name : "<none>";
+            EditorGUILayout.HelpBox(
+                $"Only materials using shader \"{BurtMultipassRenderer.SupportedShaderName}\" are drawn by this component. " +
+                $"\"{unsupportedMaterial.name}\" uses \"{shaderName}\" and will be ignored.",
+                MessageType.Warning);
+            return;
+        }
+
+        EditorGUILayout.HelpBox(
+            $"Supported shader: \"{BurtMultipassRenderer.SupportedShaderName}\".",
+            MessageType.Info);
+    }
+
+    private static Material FindFirstUnsupportedMaterial(BurtMultipassRenderer multipassRenderer)
+    {
+        if (multipassRenderer == null)
+        {
+            return null;
+        }
+
+        var renderer = multipassRenderer.GetComponent<Renderer>();
+        var sharedMaterials = renderer != null ? renderer.sharedMaterials : null;
+        var materialCount = sharedMaterials != null ? sharedMaterials.Length : 0;
+        for (var materialIndex = 0; materialIndex < materialCount; materialIndex++)
+        {
+            var material = sharedMaterials[materialIndex];
+            if (material != null && !BurtMultipassRenderer.IsSupportedMaterial(material))
+            {
+                return material;
+            }
+        }
+
+        return null;
     }
 }

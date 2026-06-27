@@ -85,13 +85,14 @@ Material:
     - _AlphaClip: 0
     - _Anisotropy: -0.77
     - _BumpScale: 1
+    - _BurtGBufferStencilRef: 4
+    - _BurtGBufferStencilWriteMask: 7
     - _Cull: 2
     - _Cutoff: 0.5
     - _DetailNormalMapScale: 1
     - _DoubleSidedEnable: 0
     - _DoubleSidedNormalMode: 0
     - _DstBlend: 0
-    - _Falloff: 0
     - _FuzzAmount: 0.746
     - _FuzzRoughness: 0.75
     - _GlossMapScale: 1
@@ -103,6 +104,7 @@ Material:
     - _OcclusionStrength: 0.443
     - _Parallax: 0.02
     - _Reflectance: 0.5
+    - _ResponsiveAA: 0
     - _Roughness: 0.696
     - _Smoothness: 0.304
     - _SmoothnessTextureChannel: 0
@@ -119,5 +121,4 @@ Material:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FacingColor: {r: 1, g: 1, b: 1, a: 1}
     - _FuzzColor: {r: 0.5924529, g: 0.5924529, b: 0.5924529, a: 1}
-    - _TangentColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

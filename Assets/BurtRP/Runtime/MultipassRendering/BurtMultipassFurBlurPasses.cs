@@ -111,7 +111,7 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -121,6 +121,11 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
+            if (context == null || !BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(context.Request, context.Asset))
+            {
+                return;
+            }
+
             var target = context != null ? context.FurBlurTemporalTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTemporalName);
             if (!target.IsValid)
             {
@@ -171,6 +176,10 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtClearFurBlurPropertyPass : BurtRenderPass
     {
+        private const int SetupDepthPassIndex = 8;
+        private Material material;
+        private bool hasLoggedMissingShader;
+
         public override string Name => "Burt Clear Fur Blur Property";
 
         public override BurtRenderPassKind Kind => BurtRenderPassKind.Clear;
@@ -182,6 +191,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
+            builder.ReadCameraDepth();
             builder.WriteFurBlurProperty();
         }
 
@@ -189,17 +199,34 @@ namespace Burt.RenderPipeline
         {
             var propertyTarget = context != null ? context.FurBlurPropertyTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
             var cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
-            if (!propertyTarget.IsValid || !cameraDepthTarget.IsValid)
+            if (context == null || !propertyTarget.IsValid || !cameraDepthTarget.IsValid)
             {
                 return;
             }
 
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
+            var drawMaterial = GetMaterial();
             var cmd = CommandBufferPool.Get(Name);
-            cmd.SetRenderTarget(propertyTarget.Identifier, cameraDepthTarget.Identifier);
-            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
-            cmd.ClearRenderTarget(false, true, BurtFurBlurPassUtility.FurBlurPropertyClearColor);
+            cmd.SetRenderTarget(propertyTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
+            if (drawMaterial != null)
+            {
+                cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
+                cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, SetupDepthPassIndex, MeshTopology.Triangles, 3, 1);
+            }
+            else
+            {
+                cmd.ClearRenderTarget(false, true, BurtFurBlurPassUtility.FurBlurPropertyClearColor);
+            }
+
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
+        }
+
+        private Material GetMaterial()
+        {
+            return BurtFurBlurPassUtility.GetMaterial(ref material, ref hasLoggedMissingShader);
         }
     }
 
@@ -661,7 +688,7 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlurThetaTemporal(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -673,6 +700,11 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
+            if (context == null || !BurtFurBlurPassUtility.ShouldUseFurBlurThetaTemporal(context.Request, context.Asset))
+            {
+                return;
+            }
+
             var propertyTarget = context != null ? context.FurBlurPropertyTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
             var propertyTempTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
             if (context == null || !propertyTarget.IsValid || !propertyTempTarget.IsValid)
@@ -727,7 +759,15 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadCameraColor();
-            builder.ReadFurBlurPropertyTemp();
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurThetaTemporal(builder.Request, builder.Asset))
+            {
+                builder.ReadFurBlurPropertyTemp();
+            }
+            else
+            {
+                builder.ReadFurBlurProperty();
+            }
+
             builder.WriteFurBlurColor();
             if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(builder.Request, builder.Asset))
             {
@@ -743,7 +783,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var propertyTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            var propertyTarget = BurtFurBlurPassUtility.ResolveActiveFurBlurPropertyTarget(context);
             if (!propertyTarget.IsValid)
             {
                 return;
@@ -800,13 +840,21 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(builder.Request, builder.Asset))
             {
                 return;
             }
 
             builder.ReadFurBlurColor();
-            builder.ReadFurBlurPropertyTemp();
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurThetaTemporal(builder.Request, builder.Asset))
+            {
+                builder.ReadFurBlurPropertyTemp();
+            }
+            else
+            {
+                builder.ReadFurBlurProperty();
+            }
+
             builder.ReadFurBlurVelocity();
             builder.WriteFurBlurTemporal();
             if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(builder.Request, builder.Asset))
@@ -818,12 +866,17 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
+            if (context == null || !BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(context.Request, context.Asset))
+            {
+                return;
+            }
+
             if (!BurtFurBlurPassUtility.TryGetFullScreenTargets(context, out _, out _, out _, out var colorTarget, out var temporalTarget))
             {
                 return;
             }
 
-            var propertyTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            var propertyTarget = BurtFurBlurPassUtility.ResolveActiveFurBlurPropertyTarget(context);
             if (!propertyTarget.IsValid)
             {
                 return;
@@ -837,8 +890,19 @@ namespace Burt.RenderPipeline
 
             var camera = context.Request != null ? context.Request.Camera : null;
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurTemporalDescriptor(camera);
-            var history = BurtFurBlurHistoryUtility.GetPendingHistoryTextures(context.Request);
-            var status = BurtFurBlurHistoryUtility.GetHistoryStatus(camera);
+            BurtFurBlurHistoryTextures history;
+            BurtFurBlurHistoryStatus status;
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurThetaTemporal(context.Request, context.Asset))
+            {
+                history = BurtFurBlurHistoryUtility.GetPendingHistoryTextures(context.Request);
+                status = BurtFurBlurHistoryUtility.GetHistoryStatus(camera);
+            }
+            else
+            {
+                history = BurtFurBlurHistoryUtility.EnsureHistoryTextures(context.Request, out _);
+                status = BurtFurBlurHistoryUtility.GetHistoryStatus(camera);
+            }
+
             var colorHistoryValid = status.HasHistory && history.Color != null;
             var propertyHistoryValid = status.HasPropertyHistory && history.Property != null;
             var settings = BurtFurBlurPassUtility.ResolveSettings();
@@ -883,20 +947,42 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlurAnyTemporal(builder.Request, builder.Asset))
             {
                 return;
             }
 
-            builder.ReadFurBlurTemporal();
-            builder.ReadFurBlurPropertyTemp();
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(builder.Request, builder.Asset))
+            {
+                builder.ReadFurBlurTemporal();
+            }
+            else
+            {
+                builder.ReadFurBlurColor();
+            }
+
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurThetaTemporal(builder.Request, builder.Asset))
+            {
+                builder.ReadFurBlurPropertyTemp();
+            }
+            else
+            {
+                builder.ReadFurBlurProperty();
+            }
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            var temporalTarget = context != null ? context.FurBlurTemporalTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTemporalName);
-            var propertyTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
-            if (context == null || !temporalTarget.IsValid || !propertyTarget.IsValid)
+            if (context == null || !BurtFurBlurPassUtility.ShouldUseFurBlurAnyTemporal(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var colorSourceTarget = BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(context.Request, context.Asset)
+                ? context.FurBlurTemporalTarget
+                : context.FurBlurColorTarget;
+            var propertyTarget = BurtFurBlurPassUtility.ResolveActiveFurBlurPropertyTarget(context);
+            if (!colorSourceTarget.IsValid || !propertyTarget.IsValid)
             {
                 return;
             }
@@ -908,7 +994,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(Name);
-            cmd.CopyTexture(temporalTarget.Identifier, new RenderTargetIdentifier(history.Color));
+            cmd.CopyTexture(colorSourceTarget.Identifier, new RenderTargetIdentifier(history.Color));
             cmd.CopyTexture(propertyTarget.Identifier, new RenderTargetIdentifier(history.Property));
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
@@ -919,7 +1005,6 @@ namespace Burt.RenderPipeline
     internal sealed class BurtFurBlurCompositePass : BurtRenderPass
     {
         private const int CompositePassIndex = 1;
-        private const int TiledCompositePassIndex = 8;
         private Material material;
         private bool hasLoggedMissingShader;
 
@@ -934,19 +1019,37 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            builder.ReadFurBlurTemporal();
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(builder.Request, builder.Asset))
+            {
+                builder.ReadFurBlurTemporal();
+            }
+            else
+            {
+                builder.ReadFurBlurColor();
+            }
+
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurThetaTemporal(builder.Request, builder.Asset))
+            {
+                builder.ReadFurBlurPropertyTemp();
+            }
+            else
+            {
+                builder.ReadFurBlurProperty();
+            }
+
             builder.ReadCameraColor();
             builder.WriteCameraColor();
-            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(builder.Request, builder.Asset))
-            {
-                builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
-                builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
-            }
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!BurtFurBlurPassUtility.TryGetFullScreenTargets(context, out _, out var cameraColorTarget, out _, out _, out var temporalTarget))
+            if (!BurtFurBlurPassUtility.TryGetFullScreenTargets(context, out _, out var cameraColorTarget, out _, out var colorTarget, out var temporalTarget))
+            {
+                return;
+            }
+
+            var propertyTarget = BurtFurBlurPassUtility.ResolveActiveFurBlurPropertyTarget(context);
+            if (!propertyTarget.IsValid)
             {
                 return;
             }
@@ -961,16 +1064,10 @@ namespace Burt.RenderPipeline
             var cmd = CommandBufferPool.Get(Name);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, temporalTarget.Identifier);
-            if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(context.Request, context.Asset) &&
-                BurtFurBlurPassUtility.TryBindTileBuffers(cmd, context))
-            {
-                cmd.DrawProceduralIndirect(Matrix4x4.identity, drawMaterial, TiledCompositePassIndex, MeshTopology.Triangles, context.FurBlurArgsBuffer.Buffer, 3 * sizeof(uint));
-            }
-            else
-            {
-                cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, CompositePassIndex, MeshTopology.Triangles, 3, 1);
-            }
+            var compositeSource = BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(context.Request, context.Asset) ? temporalTarget : colorTarget;
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, compositeSource.Identifier);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, propertyTarget.Identifier);
+            cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, CompositePassIndex, MeshTopology.Triangles, 3, 1);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -999,9 +1096,21 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadCameraColor();
-            builder.ReadFurBlurPropertyTemp();
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurThetaTemporal(builder.Request, builder.Asset))
+            {
+                builder.ReadFurBlurPropertyTemp();
+            }
+            else
+            {
+                builder.ReadFurBlurProperty();
+            }
+
             builder.ReadFurBlurColor();
-            builder.ReadFurBlurTemporal();
+            if (BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(builder.Request, builder.Asset))
+            {
+                builder.ReadFurBlurTemporal();
+            }
+
             builder.ReadFurBlurVelocity();
             builder.WriteCameraColor();
         }
@@ -1014,7 +1123,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var propertyTarget = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            var propertyTarget = BurtFurBlurPassUtility.ResolveActiveFurBlurPropertyTarget(context);
             if (!propertyTarget.IsValid)
             {
                 return;
@@ -1036,9 +1145,10 @@ namespace Burt.RenderPipeline
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, propertyTarget.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurColorTextureId, colorTarget.Identifier);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, temporalTarget.Identifier);
+            var temporalSource = BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(context.Request, context.Asset) ? temporalTarget : colorTarget;
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, temporalSource.Identifier);
             BurtFurBlurPassUtility.BindVelocityTexture(cmd, context);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurHistoryTextureId, history.Color != null ? new RenderTargetIdentifier(history.Color) : temporalTarget.Identifier);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurHistoryTextureId, history.Color != null ? new RenderTargetIdentifier(history.Color) : temporalSource.Identifier);
             cmd.SetGlobalTexture(BurtFurBlurPassUtility.PropertyHistoryTextureId, history.Property != null ? new RenderTargetIdentifier(history.Property) : propertyTarget.Identifier);
             BurtFurBlurPassUtility.UploadCommonGlobals(cmd, context.Request, descriptor.width, descriptor.height, settings, status.HasHistory, status.HasPropertyHistory, status.HistoryAge);
             cmd.SetGlobalInt(BurtFurBlurPassUtility.DebugModeId, BurtFurBlurPassUtility.ResolveFurBlurShaderDebugMode());
@@ -1061,7 +1171,7 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtFurBlurPassUtility.ShouldUseFurBlur(builder.Request, builder.Asset))
+            if (!BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -1071,6 +1181,11 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
+            if (context == null || !BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(context.Request, context.Asset))
+            {
+                return;
+            }
+
             var target = context != null ? context.FurBlurTemporalTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTemporalName);
             if (!target.IsValid)
             {
@@ -1211,29 +1326,35 @@ namespace Burt.RenderPipeline
     internal readonly struct BurtFurBlurSettings
     {
         public const float DefaultRadiusCm = 2.0f;
-        public const float DefaultDepthThresholdEye = 0.02f;
+        public const float DefaultDepthThresholdEye = 0.001f;
         public const float DefaultDirectionDilationThreshold = 0.5f;
-        public const float DefaultThetaFeedback = 0.75f;
-        public const float DefaultTemporalFeedback = BurtFurBlurHistoryUtility.DefaultFeedback;
+        public const float DefaultThetaFeedback = 0.96f;
+        public const float DefaultTemporalFeedback = 0.96f;
         public const bool DefaultTiledBlur = false;
+        public const bool DefaultThetaTemporal = false;
+        public const bool DefaultColorTemporal = false;
 
-        public static readonly BurtFurBlurSettings Default = new BurtFurBlurSettings(true, DefaultTiledBlur, DefaultRadiusCm, DefaultDepthThresholdEye, DefaultDirectionDilationThreshold, DefaultThetaFeedback, DefaultTemporalFeedback);
+        public static readonly BurtFurBlurSettings Default = new BurtFurBlurSettings(true, DefaultTiledBlur, DefaultRadiusCm, DefaultDepthThresholdEye, DefaultDirectionDilationThreshold, DefaultThetaTemporal, DefaultColorTemporal, DefaultThetaFeedback, DefaultTemporalFeedback);
 
         public bool Enabled { get; }
         public bool TiledBlur { get; }
         public float RadiusCm { get; }
         public float DepthThresholdEye { get; }
         public float DirectionDilationThreshold { get; }
+        public bool ThetaTemporal { get; }
+        public bool ColorTemporal { get; }
         public float ThetaFeedback { get; }
         public float TemporalFeedback { get; }
 
-        public BurtFurBlurSettings(bool enabled, bool tiledBlur, float radiusCm, float depthThresholdEye, float directionDilationThreshold, float thetaFeedback, float temporalFeedback)
+        public BurtFurBlurSettings(bool enabled, bool tiledBlur, float radiusCm, float depthThresholdEye, float directionDilationThreshold, bool thetaTemporal, bool colorTemporal, float thetaFeedback, float temporalFeedback)
         {
             Enabled = enabled;
             TiledBlur = tiledBlur;
             RadiusCm = Mathf.Clamp(radiusCm, 0f, 8f);
-            DepthThresholdEye = Mathf.Clamp(depthThresholdEye, 0.001f, 0.2f);
+            DepthThresholdEye = Mathf.Clamp(depthThresholdEye, 0.0001f, 0.2f);
             DirectionDilationThreshold = Mathf.Clamp01(directionDilationThreshold);
+            ThetaTemporal = thetaTemporal;
+            ColorTemporal = colorTemporal;
             ThetaFeedback = Mathf.Clamp(thetaFeedback, 0f, 0.98f);
             TemporalFeedback = Mathf.Clamp(temporalFeedback, 0f, 0.98f);
         }
@@ -1243,7 +1364,7 @@ namespace Burt.RenderPipeline
     {
         public const string ShaderName = "Hidden/BurtRP/FurBlur";
         public const string TiledComputeShaderResourcePath = "BurtFurBlurTiled";
-        public const float DefaultTemporalFeedback = BurtFurBlurHistoryUtility.DefaultFeedback;
+        public const float DefaultTemporalFeedback = BurtFurBlurSettings.DefaultTemporalFeedback;
         public const int TileThreadSize = 8;
 
         private const int OpaqueRenderQueueMax = 2500;
@@ -1304,6 +1425,21 @@ namespace Burt.RenderPipeline
         public static bool ShouldUseTiledBlurDraw(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
             return ResolveSettings().TiledBlur && ShouldUseTiledFurBlur(request, asset);
+        }
+
+        public static bool ShouldUseFurBlurThetaTemporal(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldUseFurBlur(request, asset) && ResolveSettings().ThetaTemporal;
+        }
+
+        public static bool ShouldUseFurBlurColorTemporal(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldUseFurBlur(request, asset) && ResolveSettings().ColorTemporal;
+        }
+
+        public static bool ShouldUseFurBlurAnyTemporal(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldUseFurBlur(request, asset) && (ResolveSettings().ThetaTemporal || ResolveSettings().ColorTemporal);
         }
 
         public static bool ShouldUseFurBlurDebugView(BurtRenderRequest request, BurtRenderPipelineAsset asset)
@@ -1424,6 +1560,8 @@ namespace Burt.RenderPipeline
                 component.radiusCm.value,
                 component.depthThresholdEye.value,
                 component.directionDilationThreshold.value,
+                component.thetaTemporal.value,
+                component.colorTemporal.value,
                 component.thetaFeedback.value,
                 component.temporalFeedback.value);
         }
@@ -1444,9 +1582,11 @@ namespace Burt.RenderPipeline
             }
 
             ResolveTemporalMatrices(request, out var previousNonJitteredViewProjection, out var inverseCurrentNonJitteredViewProjection, out var jitter, out var jitterPixels);
+            var temporalAA = request != null ? request.TemporalAA : null;
+            var historyExposureCorrection = temporalAA != null ? Mathf.Max(temporalAA.HistoryExposureCorrection, 0f) : 1f;
             cmd.SetGlobalVector(ScreenSizeId, CreateScreenSizeVector(width, height));
             cmd.SetGlobalVector(ParamsId, new Vector4(settings.RadiusCm, settings.DepthThresholdEye, settings.DirectionDilationThreshold, settings.ThetaFeedback));
-            cmd.SetGlobalVector(HistoryParamsId, new Vector4(colorHistoryValid ? 1f : 0f, settings.TemporalFeedback, historyAge, 0f));
+            cmd.SetGlobalVector(HistoryParamsId, new Vector4(colorHistoryValid ? 1f : 0f, settings.TemporalFeedback, historyAge, historyExposureCorrection));
             cmd.SetGlobalVector(TemporalParamsId, new Vector4(colorHistoryValid ? 1f : 0f, propertyHistoryValid ? 1f : 0f, historyAge, settings.Enabled ? 1f : 0f));
             cmd.SetGlobalMatrix(PreviousNonJitteredViewProjectionId, previousNonJitteredViewProjection);
             cmd.SetGlobalMatrix(InverseCurrentNonJitteredViewProjectionId, inverseCurrentNonJitteredViewProjection);
@@ -1478,6 +1618,18 @@ namespace Burt.RenderPipeline
             {
                 cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId, velocityTarget.Identifier);
             }
+        }
+
+        public static BurtRenderTargetHandle ResolveActiveFurBlurPropertyTarget(BurtRenderGraphContext context)
+        {
+            if (context == null)
+            {
+                return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
+            }
+
+            return ShouldUseFurBlurThetaTemporal(context.Request, context.Asset)
+                ? context.FurBlurPropertyTempTarget
+                : context.FurBlurPropertyTarget;
         }
 
         public static bool TryBindTileBuffers(CommandBuffer cmd, BurtRenderGraphContext context)
@@ -1912,7 +2064,7 @@ namespace Burt.RenderPipeline
 
     internal static class BurtFurBlurHistoryUtility
     {
-        public const float DefaultFeedback = 0.85f;
+        public const float DefaultFeedback = 0.96f;
 
         private const float ProjectionEpsilon = 0.0001f;
         private const float CameraCutPositionThreshold = 0.5f;

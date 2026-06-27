@@ -46,6 +46,8 @@ namespace Burt.RenderPipeline
         private static readonly int CameraDepthId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int ScreenSpaceAmbientOcclusionId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionTextureId;
         private static readonly int ScreenSpaceAmbientOcclusionEnabledId = Shader.PropertyToID("_BurtScreenSpaceAmbientOcclusionEnabled");
+        private static readonly int ScreenSpaceShadowId = BurtRenderGraphResourceRegistry.ScreenSpaceShadowTextureId;
+        private static readonly int ScreenSpaceShadowEnabledId = Shader.PropertyToID("_BurtScreenSpaceShadowEnabled");
         private static readonly int AdditionalLightBufferId = Shader.PropertyToID("_BurtAdditionalLightBuffer");
         private static readonly int AdditionalLightBufferEnabledId = Shader.PropertyToID("_BurtAdditionalLightBufferEnabled");
         private static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseViewProjectionMatrix");
@@ -90,6 +92,11 @@ namespace Burt.RenderPipeline
             if (BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(builder.Request, builder.Asset))
             {
                 builder.ReadScreenSpaceAmbientOcclusion();
+            }
+
+            if (BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadow(builder.Request, builder.Asset))
+            {
+                builder.ReadScreenSpaceShadow();
             }
 
             if (ShouldUseBurtGIApplyIndirect(builder.Request, builder.Asset, builder.ResourceRegistry))
@@ -173,6 +180,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBufferObjectIndexId, gbufferObjectIndexTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier);
             BindScreenSpaceAmbientOcclusion(context, cmd, material);
+            BindScreenSpaceShadow(context, cmd, material);
             BindBurtGIApplyIndirect(context, cmd, material);
             BindAdditionalLightBuffer(context, cmd, material);
             BindRuntimeTiledLighting(context, cmd);
@@ -235,6 +243,32 @@ namespace Burt.RenderPipeline
             if (material != null)
             {
                 material.SetFloat(ScreenSpaceAmbientOcclusionEnabledId, enabled ? 1f : 0f);
+            }
+        }
+
+        private static void BindScreenSpaceShadow(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
+        {
+            var enabled = false;
+            var target = context != null
+                ? context.ScreenSpaceShadowTarget
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceShadowName);
+
+            if (context != null &&
+                target.IsValid &&
+                BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadow(context.Request, context.Asset))
+            {
+                cmd.SetGlobalTexture(ScreenSpaceShadowId, target.Identifier);
+                enabled = true;
+            }
+            else
+            {
+                cmd.SetGlobalTexture(ScreenSpaceShadowId, Texture2D.whiteTexture);
+            }
+
+            cmd.SetGlobalFloat(ScreenSpaceShadowEnabledId, enabled ? 1f : 0f);
+            if (material != null)
+            {
+                material.SetFloat(ScreenSpaceShadowEnabledId, enabled ? 1f : 0f);
             }
         }
 
@@ -696,6 +730,14 @@ namespace Burt.RenderPipeline
     {
         public BurtDeferredFoliageLightingPass()
             : base("Burt Deferred Foliage Lighting", 5, true)
+        {
+        }
+    }
+
+    internal sealed class BurtDeferredFurLightingPass : BurtDeferredLightingPass
+    {
+        public BurtDeferredFurLightingPass()
+            : base("Burt Deferred Fur Lighting", 6, true)
         {
         }
     }

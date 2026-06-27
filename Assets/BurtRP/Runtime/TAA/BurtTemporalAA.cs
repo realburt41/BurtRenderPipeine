@@ -6,60 +6,28 @@ namespace Burt.RenderPipeline
 {
     public readonly struct BurtTemporalAASettings
     {
-        public static readonly BurtTemporalAASettings Default = new BurtTemporalAASettings(false, 0.93f, 1.0f, 0.95f, 0.04f, 0.28f, 1.15f, 1.25f, 1.35f, 16f, 56f, 0.22f, 0.96f, 0.06f, 0.5f, 0f, 0.875f, 0.65f, 0.35f, 0.18f, 1.2f, 1.1f, 1.15f, 0.12f, 1.0f);
+        public static readonly BurtTemporalAASettings Default = new BurtTemporalAASettings(false, 1.0f, 0.04f, 0.35f, 1.2f, 1.1f, 1.15f, 0.12f, 1.0f);
 
         public bool Enabled { get; }
-        public float Feedback { get; }
         public float JitterScale { get; }
-        public float ClampStrength { get; }
         public float Sharpness { get; }
-        public float StaticEdgeRelaxation { get; }
-        public float LumaRejectionStrength { get; }
-        public float ClipRejectionStrength { get; }
-        public float DepthRejectionStrength { get; }
-        public float MotionRejectionStart { get; }
-        public float MotionRejectionRange { get; }
-        public float HistoryConfidenceWeight { get; }
-        public float HistoryConfidenceBoost { get; }
-        public float ConfidenceGrowth { get; }
-        public float AntiFlickering { get; }
-        public float MotionVectorRejection { get; }
-        public float BaseBlendFactor { get; }
-        public float ResponsiveRejectionStrength { get; }
         public float UntrustedMotionFeedbackScale { get; }
-        public float DisocclusionFeedbackScale { get; }
         public float MotionEdgeResponsiveStrength { get; }
         public float DepthEdgeResponsiveStrength { get; }
         public float HistoryClampTightness { get; }
         public float DepthWeightedFilterFloor { get; }
         public float UpscaleFactor { get; }
 
-        public BurtTemporalAASettings(bool enabled, float feedback, float jitterScale, float clampStrength, float sharpness, float staticEdgeRelaxation)
-            : this(enabled, feedback, jitterScale, clampStrength, sharpness, staticEdgeRelaxation, 1.15f, 1.25f, 1.35f, 16f, 56f, 0.22f, 0.96f, 0.06f, 0.5f, 0f, 0.875f, 0.65f, 0.35f, 0.18f, 1.2f, 1.1f, 1.15f, 0.12f, 1.0f)
+        public BurtTemporalAASettings(bool enabled, float jitterScale, float sharpness)
+            : this(enabled, jitterScale, sharpness, 0.35f, 1.2f, 1.1f, 1.15f, 0.12f, 1.0f)
         {
         }
 
         public BurtTemporalAASettings(
             bool enabled,
-            float feedback,
             float jitterScale,
-            float clampStrength,
             float sharpness,
-            float staticEdgeRelaxation,
-            float lumaRejectionStrength,
-            float clipRejectionStrength,
-            float depthRejectionStrength,
-            float motionRejectionStart,
-            float motionRejectionRange,
-            float historyConfidenceWeight,
-            float historyConfidenceBoost,
-            float confidenceGrowth,
-            float antiFlickering,
-            float motionVectorRejection,
-            float baseBlendFactor,
-            float responsiveRejectionStrength,
             float untrustedMotionFeedbackScale,
-            float disocclusionFeedbackScale,
             float motionEdgeResponsiveStrength,
             float depthEdgeResponsiveStrength,
             float historyClampTightness,
@@ -67,25 +35,9 @@ namespace Burt.RenderPipeline
             float upscaleFactor)
         {
             Enabled = enabled;
-            Feedback = feedback;
             JitterScale = jitterScale;
-            ClampStrength = clampStrength;
             Sharpness = sharpness;
-            StaticEdgeRelaxation = staticEdgeRelaxation;
-            LumaRejectionStrength = lumaRejectionStrength;
-            ClipRejectionStrength = clipRejectionStrength;
-            DepthRejectionStrength = depthRejectionStrength;
-            MotionRejectionStart = motionRejectionStart;
-            MotionRejectionRange = motionRejectionRange;
-            HistoryConfidenceWeight = historyConfidenceWeight;
-            HistoryConfidenceBoost = historyConfidenceBoost;
-            ConfidenceGrowth = confidenceGrowth;
-            AntiFlickering = antiFlickering;
-            MotionVectorRejection = motionVectorRejection;
-            BaseBlendFactor = baseBlendFactor;
-            ResponsiveRejectionStrength = responsiveRejectionStrength;
             UntrustedMotionFeedbackScale = untrustedMotionFeedbackScale;
-            DisocclusionFeedbackScale = disocclusionFeedbackScale;
             MotionEdgeResponsiveStrength = motionEdgeResponsiveStrength;
             DepthEdgeResponsiveStrength = depthEdgeResponsiveStrength;
             HistoryClampTightness = historyClampTightness;
@@ -97,25 +49,9 @@ namespace Burt.RenderPipeline
         {
             return new BurtTemporalAASettings(
                 Enabled,
-                Feedback,
                 jitterScale,
-                ClampStrength,
                 Sharpness,
-                StaticEdgeRelaxation,
-                LumaRejectionStrength,
-                ClipRejectionStrength,
-                DepthRejectionStrength,
-                MotionRejectionStart,
-                MotionRejectionRange,
-                HistoryConfidenceWeight,
-                HistoryConfidenceBoost,
-                ConfidenceGrowth,
-                AntiFlickering,
-                MotionVectorRejection,
-                BaseBlendFactor,
-                ResponsiveRejectionStrength,
                 UntrustedMotionFeedbackScale,
-                DisocclusionFeedbackScale,
                 MotionEdgeResponsiveStrength,
                 DepthEdgeResponsiveStrength,
                 HistoryClampTightness,
@@ -224,15 +160,11 @@ namespace Burt.RenderPipeline
     {
         public RenderTexture Color { get; }
         public RenderTexture Depth { get; }
-        public RenderTexture Confidence { get; }
-        public RenderTexture AntiFlicker { get; }
 
-        public BurtTemporalAAHistoryTextures(RenderTexture color, RenderTexture depth, RenderTexture confidence, RenderTexture antiFlicker)
+        public BurtTemporalAAHistoryTextures(RenderTexture color, RenderTexture depth)
         {
             Color = color;
             Depth = depth;
-            Confidence = confidence;
-            AntiFlicker = antiFlicker;
         }
     }
 
@@ -242,10 +174,6 @@ namespace Burt.RenderPipeline
         public bool DescriptorMatches { get; }
         public bool HasDepthHistory { get; }
         public bool DepthDescriptorMatches { get; }
-        public bool HasConfidenceHistory { get; }
-        public bool ConfidenceDescriptorMatches { get; }
-        public bool HasAntiFlickerHistory { get; }
-        public bool AntiFlickerDescriptorMatches { get; }
         public int Width { get; }
         public int Height { get; }
         public RenderTextureFormat Format { get; }
@@ -258,10 +186,6 @@ namespace Burt.RenderPipeline
             bool descriptorMatches,
             bool hasDepthHistory,
             bool depthDescriptorMatches,
-            bool hasConfidenceHistory,
-            bool confidenceDescriptorMatches,
-            bool hasAntiFlickerHistory,
-            bool antiFlickerDescriptorMatches,
             int width,
             int height,
             RenderTextureFormat format,
@@ -273,10 +197,6 @@ namespace Burt.RenderPipeline
             DescriptorMatches = descriptorMatches;
             HasDepthHistory = hasDepthHistory;
             DepthDescriptorMatches = depthDescriptorMatches;
-            HasConfidenceHistory = hasConfidenceHistory;
-            ConfidenceDescriptorMatches = confidenceDescriptorMatches;
-            HasAntiFlickerHistory = hasAntiFlickerHistory;
-            AntiFlickerDescriptorMatches = antiFlickerDescriptorMatches;
             Width = width;
             Height = height;
             Format = format;
@@ -293,7 +213,7 @@ namespace Burt.RenderPipeline
         private const int HaltonSequenceLength = 8;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
-        private const int HistoryLayoutVersion = 27;
+        private const int HistoryLayoutVersion = 30;
 
         private sealed class CameraState
         {
@@ -321,12 +241,8 @@ namespace Burt.RenderPipeline
             public Matrix4x4 PreviousNonJitteredProjectionMatrix = Matrix4x4.identity;
             public RenderTexture ColorHistory;
             public RenderTexture DepthHistory;
-            public RenderTexture ConfidenceHistory;
-            public RenderTexture AntiFlickerHistory;
             public RenderTextureDescriptor ColorDescriptor;
             public RenderTextureDescriptor DepthDescriptor;
-            public RenderTextureDescriptor ConfidenceDescriptor;
-            public RenderTextureDescriptor AntiFlickerDescriptor;
             public int HistoryLayoutVersion;
             public bool HasValidHistory;
             public bool HasPreviousCameraState;
@@ -441,14 +357,10 @@ namespace Burt.RenderPipeline
             var historyExposureCorrection = currentPreExposure / Mathf.Max(previousPreExposure, 0.0001f);
             var colorDescriptor = CreateColorHistoryDescriptor(camera);
             var depthDescriptor = CreateScalarHistoryDescriptor(camera);
-            var confidenceDescriptor = CreateScalarHistoryDescriptor(camera);
-            var antiFlickerDescriptor = CreateAntiFlickerHistoryDescriptor(camera);
             var colorMatches = state.ColorHistory != null && Matches(state.ColorDescriptor, colorDescriptor);
             var depthMatches = state.DepthHistory != null && Matches(state.DepthDescriptor, depthDescriptor);
-            var confidenceMatches = state.ConfidenceHistory != null && Matches(state.ConfidenceDescriptor, confidenceDescriptor);
-            var antiFlickerMatches = state.AntiFlickerHistory != null && Matches(state.AntiFlickerDescriptor, antiFlickerDescriptor);
             var layoutMatches = state.HistoryLayoutVersion == HistoryLayoutVersion;
-            var descriptorsMatch = colorMatches && depthMatches && confidenceMatches && antiFlickerMatches && layoutMatches;
+            var descriptorsMatch = colorMatches && depthMatches && layoutMatches;
             var targetTextureId = GetTargetTextureId(camera);
             GetTargetSize(camera, out var targetWidth, out var targetHeight);
             var renderScale = CalculateRenderScale(camera, colorDescriptor);
@@ -615,15 +527,13 @@ namespace Burt.RenderPipeline
             historyValid = false;
             if (camera == null)
             {
-                return new BurtTemporalAAHistoryTextures(null, null, null, null);
+                return new BurtTemporalAAHistoryTextures(null, null);
             }
 
             var state = GetOrCreateState(camera.GetInstanceID());
             state.Camera = camera;
             var colorDescriptor = CreateColorHistoryDescriptor(camera);
             var depthDescriptor = CreateScalarHistoryDescriptor(camera);
-            var confidenceDescriptor = CreateScalarHistoryDescriptor(camera);
-            var antiFlickerDescriptor = CreateAntiFlickerHistoryDescriptor(camera);
 
             if (state.ColorHistory == null || !Matches(state.ColorDescriptor, colorDescriptor))
             {
@@ -645,28 +555,8 @@ namespace Burt.RenderPipeline
                 SetAllocationInvalidationReason(state, "DepthHistoryAllocated");
             }
 
-            if (state.ConfidenceHistory == null || !Matches(state.ConfidenceDescriptor, confidenceDescriptor))
-            {
-                ReleaseTexture(state.ConfidenceHistory);
-                state.ConfidenceDescriptor = confidenceDescriptor;
-                state.ConfidenceHistory = CreateHistoryTexture(confidenceDescriptor, "Burt TAA Confidence History " + camera.GetInstanceID(), FilterMode.Bilinear);
-                state.HasValidHistory = false;
-                state.FirstValidFrameIndex = 0;
-                SetAllocationInvalidationReason(state, "ConfidenceHistoryAllocated");
-            }
-
-            if (state.AntiFlickerHistory == null || !Matches(state.AntiFlickerDescriptor, antiFlickerDescriptor))
-            {
-                ReleaseTexture(state.AntiFlickerHistory);
-                state.AntiFlickerDescriptor = antiFlickerDescriptor;
-                state.AntiFlickerHistory = CreateHistoryTexture(antiFlickerDescriptor, "Burt TAA Anti Flicker History " + camera.GetInstanceID(), FilterMode.Point);
-                state.HasValidHistory = false;
-                state.FirstValidFrameIndex = 0;
-                SetAllocationInvalidationReason(state, "AntiFlickerHistoryAllocated");
-            }
-
             historyValid = state.HasValidHistory;
-            return new BurtTemporalAAHistoryTextures(state.ColorHistory, state.DepthHistory, state.ConfidenceHistory, state.AntiFlickerHistory);
+            return new BurtTemporalAAHistoryTextures(state.ColorHistory, state.DepthHistory);
         }
 
         public static RenderTexture EnsureHistoryTexture(Camera camera, out bool historyValid)
@@ -719,10 +609,8 @@ namespace Burt.RenderPipeline
 
             var colorDescriptor = CreateColorHistoryDescriptor(camera);
             var depthDescriptor = CreateScalarHistoryDescriptor(camera);
-            var confidenceDescriptor = CreateScalarHistoryDescriptor(camera);
             var hasColor = state.ColorHistory != null;
             var hasDepth = state.DepthHistory != null;
-            var hasConfidence = state.ConfidenceHistory != null;
             var historyAge = state.HasValidHistory && state.FirstValidFrameIndex > 0 ? Mathf.Max(0, state.FrameIndex - state.FirstValidFrameIndex + 1) : 0;
 
             return new BurtTemporalAAHistoryStatus(
@@ -730,10 +618,6 @@ namespace Burt.RenderPipeline
                 hasColor && Matches(state.ColorDescriptor, colorDescriptor),
                 hasDepth,
                 hasDepth && Matches(state.DepthDescriptor, depthDescriptor),
-                hasConfidence,
-                hasConfidence && Matches(state.ConfidenceDescriptor, confidenceDescriptor),
-                state.AntiFlickerHistory != null,
-                state.AntiFlickerHistory != null && Matches(state.AntiFlickerDescriptor, CreateAntiFlickerHistoryDescriptor(camera)),
                 hasColor ? state.ColorHistory.width : 0,
                 hasColor ? state.ColorHistory.height : 0,
                 hasColor ? state.ColorHistory.format : RenderTextureFormat.Default,
@@ -744,7 +628,7 @@ namespace Burt.RenderPipeline
 
         private static BurtTemporalAAHistoryStatus CreateEmptyHistoryStatus(string reason)
         {
-            return new BurtTemporalAAHistoryStatus(false, false, false, false, false, false, false, false, 0, 0, RenderTextureFormat.Default, 0, 0, reason);
+            return new BurtTemporalAAHistoryStatus(false, false, false, false, 0, 0, RenderTextureFormat.Default, 0, 0, reason);
         }
 
         private static CameraState GetOrCreateState(int cameraId)
@@ -803,19 +687,6 @@ namespace Burt.RenderPipeline
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
             ApplyTemporalAAUpscaleFactor(ref descriptor);
             descriptor.colorFormat = RenderTextureFormat.RFloat;
-            descriptor.depthBufferBits = 0;
-            descriptor.msaaSamples = 1;
-            descriptor.useMipMap = false;
-            descriptor.autoGenerateMips = false;
-            descriptor.sRGB = false;
-            return descriptor;
-        }
-
-        private static RenderTextureDescriptor CreateAntiFlickerHistoryDescriptor(Camera camera)
-        {
-            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
-            ApplyTemporalAAUpscaleFactor(ref descriptor);
-            descriptor.colorFormat = RenderTextureFormat.RGHalf;
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
@@ -992,7 +863,7 @@ namespace Burt.RenderPipeline
 
         private static bool IsAllocationInvalidationReason(string reason)
         {
-            return string.IsNullOrEmpty(reason) || reason == "HistoryAllocated" || reason == "DepthHistoryAllocated" || reason == "ConfidenceHistoryAllocated" || reason == "AntiFlickerHistoryAllocated";
+            return string.IsNullOrEmpty(reason) || reason == "HistoryAllocated" || reason == "DepthHistoryAllocated";
         }
 
         private static int GetTargetTextureId(Camera camera)
@@ -1123,12 +994,8 @@ namespace Burt.RenderPipeline
 
             ReleaseTexture(state.ColorHistory);
             ReleaseTexture(state.DepthHistory);
-            ReleaseTexture(state.ConfidenceHistory);
-            ReleaseTexture(state.AntiFlickerHistory);
             state.ColorHistory = null;
             state.DepthHistory = null;
-            state.ConfidenceHistory = null;
-            state.AntiFlickerHistory = null;
             state.HistoryLayoutVersion = 0;
             state.HasValidHistory = false;
             state.FirstValidFrameIndex = 0;

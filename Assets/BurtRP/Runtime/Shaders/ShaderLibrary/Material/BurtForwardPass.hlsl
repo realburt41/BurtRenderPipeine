@@ -15,6 +15,7 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMaterialShadingModelPassCommon.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkVertexAnimation.hlsl"
 
 struct Attributes
 {
@@ -22,7 +23,7 @@ struct Attributes
     float3 normalOS : NORMAL;
     float4 tangentOS : TANGENT;
     float2 uv0 : TEXCOORD0;
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
     float4 color : COLOR;
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
@@ -48,7 +49,7 @@ struct Varyings
     float2 uv0 : TEXCOORD7;
     float2 uv1 : TEXCOORD8;
     float3 positionOS : TEXCOORD9;
-#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
     float4 vertexColor : TEXCOORD7;
     float3 positionOS : TEXCOORD8;
 #endif
@@ -58,6 +59,9 @@ Varyings Vert(Attributes input)
 {
     UNITY_SETUP_INSTANCE_ID(input);
     float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+        positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+    #endif
 
     Varyings output;
     output.positionCS = UnityObjectToClipPos(positionOS);
@@ -78,7 +82,7 @@ Varyings Vert(Attributes input)
     output.uv0 = input.uv0;
     output.uv1 = input.uv1;
     output.positionOS = positionOS.xyz;
-#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
     output.vertexColor = input.color;
     output.positionOS = positionOS.xyz;
 #endif
@@ -290,13 +294,16 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
     float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
         BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, normalWS, viewDirectionWS, input.positionWS, input.positionOS, input.vertexColor);
+    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, normalWS, viewDirectionWS, input.positionWS, input.positionOS, input.vertexColor);
     #else
         BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, normalWS, viewDirectionWS, input.positionWS);
     #endif
 #endif
     float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
-    float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(input.positionWS, normalWS);
-    BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation);
+    float transmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(input.positionWS, -1.0f);
+    float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex, transmissionThickness);
+    BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation, transmissionThickness);
     BurtSurfaceData shadingSurfaceData = surfaceData;
 
 #if defined(BURT_ENABLE_SHADING_DEBUG)

@@ -11,6 +11,7 @@ Shader "Hidden/BurtRP/FurBlur"
     Texture2D _BurtFurBlurHistoryTexture;
     Texture2D _BurtFurBlurPropertyHistoryTexture;
     Texture2D _BurtFurBlurVelocityTexture;
+    UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
     #if SHADER_TARGET >= 45
     StructuredBuffer<uint> _BurtFurBlurTileDataBuffer;
     #endif
@@ -26,7 +27,7 @@ Shader "Hidden/BurtRP/FurBlur"
     static const float BURT_TWO_PI = 6.28318530717958647692;
     static const int BURT_FUR_BLUR_SAMPLE_COUNT = 3;
     static const float BURT_METER_TO_CENTIMETER = 100.0;
-    static const float BURT_FUR_VALID_THETA_EPSILON = 1e-5;
+    static const float BURT_FUR_VALID_THETA_EPSILON = 1e-8;
     static const float BURT_FUR_TEMPORAL_DIRECTION_MIN_DOT = 0.4;
 
     struct Attributes
@@ -120,9 +121,17 @@ Shader "Hidden/BurtRP/FurBlur"
 
     bool BurtFurDepthAllowsBlur(float sampleDepth, float centerDepth)
     {
-        float sampleEyeDepth = LinearEyeDepth(sampleDepth);
-        float centerEyeDepth = LinearEyeDepth(centerDepth);
-        return abs(sampleEyeDepth - centerEyeDepth) <= max(_BurtFurBlurParams.y, 1e-5);
+        return abs(sampleDepth - centerDepth) <= max(_BurtFurBlurParams.y, 1e-6);
+    }
+
+    bool BurtFurDepthOccludesBlur(float sampleDepth, float centerDepth)
+    {
+        float threshold = max(_BurtFurBlurParams.y, 1e-6);
+        #if UNITY_REVERSED_Z
+            return sampleDepth > centerDepth - threshold;
+        #else
+            return sampleDepth < centerDepth + threshold;
+        #endif
     }
 
     float4 BurtSampleFurProperty(float2 uv)
@@ -200,6 +209,12 @@ Shader "Hidden/BurtRP/FurBlur"
         return dot(currentDir, historyDir) >= BURT_FUR_TEMPORAL_DIRECTION_MIN_DOT;
     }
 
+    float4 FragSetupDepth(Varyings input) : SV_Target
+    {
+        float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.uv);
+        return float4(0.0, rawDepth, 0.0, 1.0);
+    }
+
     float4 FragBlur(Varyings input) : SV_Target
     {
         float2 uv = input.uv;
@@ -222,26 +237,22 @@ Shader "Hidden/BurtRP/FurBlur"
 
         for (int i = 1; i <= BURT_FUR_BLUR_SAMPLE_COUNT; i++)
         {
-            float2 positiveUv = saturate(uv + furStep * i);
-            float2 negativeUv = saturate(uv - furStep * i);
+            float2 positiveUv = uv + furStep * i;
+            float2 negativeUv = uv - furStep * i;
             if (!occludedPos)
             {
-                float4 sampleProperty = BurtSampleFurProperty(positiveUv);
-                occludedPos = !BurtIsValidFurProperty(sampleProperty) || !BurtFurDepthAllowsBlur(sampleProperty.g, centerDepth);
-                if (!occludedPos)
-                {
-                    blur += float4(BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtCameraColorTexture, positiveUv, 0.0).rgb, 1.0);
-                }
+                float4 sampleColor = BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtCameraColorTexture, positiveUv, 0.0);
+                float sampleDepth = BurtSampleFurProperty(positiveUv).g;
+                occludedPos = BurtFurDepthOccludesBlur(sampleDepth, centerDepth);
+                blur += float4(sampleColor.rgb, 1.0);
             }
 
             if (!occludedNeg)
             {
-                float4 sampleProperty = BurtSampleFurProperty(negativeUv);
-                occludedNeg = !BurtIsValidFurProperty(sampleProperty) || !BurtFurDepthAllowsBlur(sampleProperty.g, centerDepth);
-                if (!occludedNeg)
-                {
-                    blur += float4(BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtCameraColorTexture, negativeUv, 0.0).rgb, 1.0);
-                }
+                float4 sampleColor = BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtCameraColorTexture, negativeUv, 0.0);
+                float sampleDepth = BurtSampleFurProperty(negativeUv).g;
+                occludedNeg = BurtFurDepthOccludesBlur(sampleDepth, centerDepth);
+                blur += float4(sampleColor.rgb, 1.0);
             }
         }
 
@@ -250,7 +261,14 @@ Shader "Hidden/BurtRP/FurBlur"
 
     float4 FragComposite(Varyings input) : SV_Target
     {
-        return BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtFurBlurTemporalTexture, input.uv, 0.0);
+        float4 property = BurtSampleFurProperty(input.uv);
+        if (!BurtIsValidFurProperty(property))
+        {
+            return 0.0;
+        }
+
+        float4 blurResult = BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtFurBlurTemporalTexture, input.uv, 0.0);
+        return float4(blurResult.rgb, 1.0);
     }
 
     float4 FragDilate(Varyings input) : SV_Target
@@ -301,6 +319,9 @@ Shader "Hidden/BurtRP/FurBlur"
         return hasBest ? best : center;
     }
 
+    float2 BurtFurFilterCurrentDirection(float2 uv);
+    void BurtFurCurrentDirectionNeighborhood(float2 uv, out float2 minimumDir, out float2 maximumDir);
+
     float4 FragThetaTemporal(Varyings input) : SV_Target
     {
         float2 uv = input.uv;
@@ -329,17 +350,167 @@ Shader "Hidden/BurtRP/FurBlur"
         }
 
         float feedback = saturate(_BurtFurBlurParams.w);
-        float2 currentDir = BurtDecodeFurDir(current.r);
+        float2 filteredDir = BurtFurFilterCurrentDirection(uv);
         float2 historyDir = BurtDecodeFurDir(history.r);
-        float2 blendedDir = lerp(currentDir, historyDir, feedback);
+        float2 minimumDir;
+        float2 maximumDir;
+        BurtFurCurrentDirectionNeighborhood(uv, minimumDir, maximumDir);
+        historyDir = clamp(historyDir, minimumDir, maximumDir);
+        float2 blendedDir = lerp(historyDir, filteredDir, saturate(1.0 - feedback));
         float blendedLengthSquared = dot(blendedDir, blendedDir);
-        float2 stableDir = blendedLengthSquared > BURT_FUR_VALID_THETA_EPSILON ? blendedDir * rsqrt(blendedLengthSquared) : currentDir;
+        float2 stableDir = blendedLengthSquared > BURT_FUR_VALID_THETA_EPSILON ? blendedDir * rsqrt(blendedLengthSquared) : BurtDecodeFurDir(current.r);
 
         float stableDepth = lerp(current.g, history.g, feedback * 0.25);
         return float4(BurtEncodeFurDir(stableDir), stableDepth, current.b, current.a);
     }
 
-    void BurtFurCurrentNeighborhood(float2 uv, out float3 minimumColor, out float3 maximumColor)
+    float3 BurtFurRgbToYCoCg(float3 rgb)
+    {
+        float y = dot(rgb, float3(1.0, 2.0, 1.0));
+        float co = dot(rgb, float3(2.0, 0.0, -2.0));
+        float cg = dot(rgb, float3(-1.0, 2.0, -1.0));
+        return float3(y, co, cg);
+    }
+
+    float3 BurtFurYCoCgToRgb(float3 ycocg)
+    {
+        float y = ycocg.x * 0.25;
+        float co = ycocg.y * 0.25;
+        float cg = ycocg.z * 0.25;
+        return float3(y + co - cg, y + cg, y - co - cg);
+    }
+
+    float4 BurtFurTransformSceneColor(float4 color)
+    {
+        return float4(BurtFurRgbToYCoCg(color.rgb), color.a);
+    }
+
+    float4 BurtFurTransformBackToSceneColor(float4 color)
+    {
+        return float4(BurtFurYCoCgToRgb(color.rgb), color.a);
+    }
+
+    float BurtFurSceneColorLuma4(float4 color)
+    {
+        return color.x;
+    }
+
+    float BurtFurHdrWeight(float4 transformedColor)
+    {
+        return rcp(max(transformedColor.x, 0.0) + 4.0);
+    }
+
+    float2 BurtFurWeightedLerpFactors(float historyWeight, float currentWeight, float currentBlend)
+    {
+        float historyBlend = saturate(1.0 - currentBlend) * historyWeight;
+        float filteredBlend = saturate(currentBlend) * currentWeight;
+        float rcpBlend = rcp(max(historyBlend + filteredBlend, 1e-6));
+        return float2(historyBlend, filteredBlend) * rcpBlend;
+    }
+
+    float BurtFurPlusWeight(float2 pixelOffset)
+    {
+        float2 jitterPixels = _BurtFurBlurJitter.zw;
+        float2 delta = pixelOffset - jitterPixels;
+        return exp(-2.29 * dot(delta, delta));
+    }
+
+    void BurtFurComputePlusWeights(out float upWeight, out float leftWeight, out float centerWeight, out float rightWeight, out float downWeight)
+    {
+        upWeight = BurtFurPlusWeight(float2(0.0, -1.0));
+        leftWeight = BurtFurPlusWeight(float2(-1.0, 0.0));
+        centerWeight = BurtFurPlusWeight(float2(0.0, 0.0));
+        rightWeight = BurtFurPlusWeight(float2(1.0, 0.0));
+        downWeight = BurtFurPlusWeight(float2(0.0, 1.0));
+        float total = max(upWeight + leftWeight + centerWeight + rightWeight + downWeight, 1e-6);
+        upWeight /= total;
+        leftWeight /= total;
+        centerWeight /= total;
+        rightWeight /= total;
+        downWeight /= total;
+    }
+
+    float4 BurtSampleFurTemporalColor(float2 uv, float2 pixelOffset)
+    {
+        return BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtFurBlurColorTexture, uv + pixelOffset * _BurtFurBlurScreenSize.zw, 0.0);
+    }
+
+    float4 BurtFurFilterCurrentColor(float2 uv)
+    {
+        float upWeight;
+        float leftWeight;
+        float centerWeight;
+        float rightWeight;
+        float downWeight;
+        BurtFurComputePlusWeights(upWeight, leftWeight, centerWeight, rightWeight, downWeight);
+
+        float4 filtered = 0.0;
+        filtered += BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(0.0, -1.0))) * upWeight;
+        filtered += BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(-1.0, 0.0))) * leftWeight;
+        filtered += BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(0.0, 0.0))) * centerWeight;
+        filtered += BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(1.0, 0.0))) * rightWeight;
+        filtered += BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(0.0, 1.0))) * downWeight;
+        return filtered;
+    }
+
+    float2 BurtSampleFurTemporalDirection(float2 uv, float2 pixelOffset)
+    {
+        float theta = BurtSampleFurProperty(uv + pixelOffset * _BurtFurBlurScreenSize.zw).r;
+        return theta > BURT_FUR_VALID_THETA_EPSILON ? BurtDecodeFurDir(theta) : 0.0;
+    }
+
+    float2 BurtFurFilterCurrentDirection(float2 uv)
+    {
+        float upWeight;
+        float leftWeight;
+        float centerWeight;
+        float rightWeight;
+        float downWeight;
+        BurtFurComputePlusWeights(upWeight, leftWeight, centerWeight, rightWeight, downWeight);
+
+        float2 upDir = BurtSampleFurTemporalDirection(uv, float2(0.0, -1.0));
+        float2 leftDir = BurtSampleFurTemporalDirection(uv, float2(-1.0, 0.0));
+        float2 centerDir = BurtSampleFurTemporalDirection(uv, float2(0.0, 0.0));
+        float2 rightDir = BurtSampleFurTemporalDirection(uv, float2(1.0, 0.0));
+        float2 downDir = BurtSampleFurTemporalDirection(uv, float2(0.0, 1.0));
+
+        float upValid = step(BURT_FUR_VALID_THETA_EPSILON, dot(upDir, upDir));
+        float leftValid = step(BURT_FUR_VALID_THETA_EPSILON, dot(leftDir, leftDir));
+        float centerValid = step(BURT_FUR_VALID_THETA_EPSILON, dot(centerDir, centerDir));
+        float rightValid = step(BURT_FUR_VALID_THETA_EPSILON, dot(rightDir, rightDir));
+        float downValid = step(BURT_FUR_VALID_THETA_EPSILON, dot(downDir, downDir));
+        float weightSum = upWeight * upValid + leftWeight * leftValid + centerWeight * centerValid + rightWeight * rightValid + downWeight * downValid;
+        float2 filtered = upDir * upWeight * upValid +
+            leftDir * leftWeight * leftValid +
+            centerDir * centerWeight * centerValid +
+            rightDir * rightWeight * rightValid +
+            downDir * downWeight * downValid;
+        return weightSum > 1e-6 ? filtered / weightSum : centerDir;
+    }
+
+    void BurtFurCurrentDirectionNeighborhood(float2 uv, out float2 minimumDir, out float2 maximumDir)
+    {
+        float2 upDir = BurtSampleFurTemporalDirection(uv, float2(0.0, -1.0));
+        float2 leftDir = BurtSampleFurTemporalDirection(uv, float2(-1.0, 0.0));
+        float2 centerDir = BurtSampleFurTemporalDirection(uv, float2(0.0, 0.0));
+        float2 rightDir = BurtSampleFurTemporalDirection(uv, float2(1.0, 0.0));
+        float2 downDir = BurtSampleFurTemporalDirection(uv, float2(0.0, 1.0));
+        minimumDir = min(min(min(upDir, leftDir), centerDir), min(rightDir, downDir));
+        maximumDir = max(max(max(upDir, leftDir), centerDir), max(rightDir, downDir));
+    }
+
+    void BurtFurCurrentNeighborhood(float2 uv, out float4 minimumColor, out float4 maximumColor)
+    {
+        float4 upColor = BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(0.0, -1.0)));
+        float4 leftColor = BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(-1.0, 0.0)));
+        float4 centerColor = BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(0.0, 0.0)));
+        float4 rightColor = BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(1.0, 0.0)));
+        float4 downColor = BurtFurTransformSceneColor(BurtSampleFurTemporalColor(uv, float2(0.0, 1.0)));
+        minimumColor = min(min(min(upColor, leftColor), centerColor), min(rightColor, downColor));
+        maximumColor = max(max(max(upColor, leftColor), centerColor), max(rightColor, downColor));
+    }
+
+    void BurtFurCurrentNeighborhoodRgb(float2 uv, out float3 minimumColor, out float3 maximumColor)
     {
         float2 texel = _BurtFurBlurScreenSize.zw;
         minimumColor = float3(1e20, 1e20, 1e20);
@@ -391,17 +562,30 @@ Shader "Hidden/BurtRP/FurBlur"
             return current;
         }
 
-        float4 history = BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtFurBlurHistoryTexture, historyUv, 0.0);
-        if (history.a <= 0.0)
+        float4 rawHistory = BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtFurBlurHistoryTexture, historyUv, 0.0);
+        if (rawHistory.a <= 0.0)
         {
             return current;
         }
 
-        float3 minimumColor;
-        float3 maximumColor;
+        float historyExposureCorrection = _BurtFurBlurHistoryParams.w > 0.0 ? _BurtFurBlurHistoryParams.w : 1.0;
+        rawHistory.rgb *= historyExposureCorrection;
+        float4 filteredCurrent = BurtFurFilterCurrentColor(uv);
+        float4 transformedCurrent = BurtFurTransformSceneColor(current);
+        float4 history = BurtFurTransformSceneColor(rawHistory);
+        float4 minimumColor;
+        float4 maximumColor;
         BurtFurCurrentNeighborhood(uv, minimumColor, maximumColor);
-        float3 clampedHistory = clamp(history.rgb, minimumColor, maximumColor);
-        return float4(lerp(current.rgb, clampedHistory, feedback), current.a);
+        float4 clampedHistory = clamp(history, minimumColor, maximumColor);
+
+        float lumaContrast = BurtFurSceneColorLuma4(maximumColor) - BurtFurSceneColorLuma4(minimumColor);
+        float addAliasing = saturate(rcp(1.0 + lumaContrast * 128.0));
+        filteredCurrent = lerp(filteredCurrent, transformedCurrent, addAliasing);
+
+        float currentBlend = saturate(1.0 - feedback);
+        float2 blendWeights = BurtFurWeightedLerpFactors(BurtFurHdrWeight(clampedHistory), BurtFurHdrWeight(filteredCurrent), currentBlend);
+        float4 result = BurtFurTransformBackToSceneColor(clampedHistory * blendWeights.x + filteredCurrent * blendWeights.y);
+        return float4(result.rgb, current.a);
     }
 
     float3 BurtFurDebugDirection(float theta)
@@ -585,16 +769,15 @@ Shader "Hidden/BurtRP/FurBlur"
 
         Pass
         {
-            Name "Burt Fur Blur Composite Tiled"
+            Name "Burt Fur Blur Setup Depth"
             Cull Off
             ZWrite Off
             ZTest Always
-            Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha
 
             HLSLPROGRAM
-            #pragma target 4.5
-            #pragma vertex VertTiled
-            #pragma fragment FragComposite
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment FragSetupDepth
             ENDHLSL
         }
     }

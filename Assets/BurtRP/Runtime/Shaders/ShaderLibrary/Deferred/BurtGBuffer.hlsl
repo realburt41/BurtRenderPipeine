@@ -173,7 +173,7 @@ return BurtSafeNormalize(n);
 // each model bucket away from both edges: Fabric/Silk at metallic=0 otherwise
 // lands on the 4/5 boundary, and half/UNorm RT quantization can decode it as
 // the previous shading model.
-static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 6.0f;
+static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 7.0f;
 static const float BURT_GBUFFER_SHADING_MODEL_PACK_BIAS = 0.02f;
 static const float BURT_GBUFFER_SHADING_MODEL_PACK_SCALE = 1.0f - 2.0f * BURT_GBUFFER_SHADING_MODEL_PACK_BIAS;
 
@@ -570,6 +570,13 @@ BurtSurfaceData BurtApplyHairGBufferSurfaceSemantics(BurtSurfaceData surfaceData
     return BurtApplyHairGBufferSurfaceSemantics(surfaceData, hairScatter, 1.0f);
 }
 
+BurtSurfaceData BurtApplyFurGBufferSurfaceSemantics(BurtSurfaceData surfaceData)
+{
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_FUR;
+    surfaceData.metallic = 0.0f;
+    return surfaceData;
+}
+
 BurtGBufferData BurtCreateGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float3 emission)
 {
     float3 safeNormalWS = BurtSafeNormalize(normalWS);
@@ -595,6 +602,12 @@ BurtGBufferData BurtCreateHairGBufferData(BurtSurfaceData surfaceData, float3 st
 BurtGBufferData BurtCreateHairGBufferData(BurtSurfaceData surfaceData, float3 strandDirectionWS, float3 emission)
 {
     return BurtCreateHairGBufferData(surfaceData, strandDirectionWS, strandDirectionWS, strandDirectionWS, emission);
+}
+
+BurtGBufferData BurtCreateFurGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 emission)
+{
+    surfaceData = BurtApplyFurGBufferSurfaceSemantics(surfaceData);
+    return BurtCreateGBufferData(surfaceData, normalWS, tangentWS, emission);
 }
 
 BurtGBufferData BurtCreateClearCoatGBufferData(BurtSurfaceData surfaceData, float3 normalWS, float4 tangentWS, float3 clearCoatNormalWS, float3 emission)

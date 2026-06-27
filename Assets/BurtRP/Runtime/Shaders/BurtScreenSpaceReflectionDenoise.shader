@@ -70,7 +70,7 @@
                 BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
 
                 int debugMode = (int)_BurtSSRParams1.z;
-                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID))
+                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID) || BurtIsActiveFurShadingModel(centerGBuffer.shadingModelID))
                 {
                     bool traceDebugMode = (debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 31);
                     return traceDebugMode ? float4(0.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 0.0);

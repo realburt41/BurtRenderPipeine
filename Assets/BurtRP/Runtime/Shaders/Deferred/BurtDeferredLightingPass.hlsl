@@ -14,10 +14,12 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
 
 Texture2D<float> _BurtScreenSpaceAmbientOcclusionTexture;
+Texture2D<float> _BurtScreenSpaceShadowTexture;
 Texture2D<float4> _BurtGIDiffuseIndirectTexture;
 Texture2D<float4> _BurtGIBackfaceDiffuseIndirectTexture;
 Texture2D<float4> _BurtGIRoughSpecularIndirectTexture;
 float _BurtScreenSpaceAmbientOcclusionEnabled;
+float _BurtScreenSpaceShadowEnabled;
 float _BurtDeferredSubsurfaceDiffuseLuminanceOutputEnabled;
 float4 _BurtGIApplyIndirectParams; // x=diffuse enabled, y=intensity, z=backface enabled, w=rough-specular enabled.
 
@@ -41,6 +43,26 @@ float BurtResolveDeferredMaterialScreenSpaceAmbientOcclusion(float2 screenUV, Bu
     return saturate(lerp(1.0f, screenSpaceAmbientOcclusion, max(BurtGetFoliageScreenSpaceShadowIntensity(gbufferData), 0.0f)));
 #else
     return screenSpaceAmbientOcclusion;
+#endif
+}
+
+float BurtSampleDeferredScreenSpaceShadow(float2 screenUV)
+{
+    if (_BurtScreenSpaceShadowEnabled < 0.5f)
+    {
+        return 1.0f;
+    }
+
+    return saturate(BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtScreenSpaceShadowTexture, screenUV, 0.0f));
+}
+
+float BurtResolveDeferredMaterialScreenSpaceShadow(float2 screenUV, BurtGBufferData gbufferData)
+{
+#if defined(BURT_DEFERRED_SHADING_MODEL_FOLIAGE)
+    float screenSpaceShadow = BurtSampleDeferredScreenSpaceShadow(screenUV);
+    return saturate(lerp(1.0f, screenSpaceShadow, max(BurtGetFoliageScreenSpaceShadowIntensity(gbufferData), 0.0f)));
+#else
+    return 1.0f;
 #endif
 }
 
@@ -74,12 +96,14 @@ float3 BurtSampleDeferredGIRoughSpecularIndirect(float2 screenUV)
     return max(BURT_SAMPLE_TEXTURE2D_CLAMP(_BurtGIRoughSpecularIndirectTexture, screenUV).rgb, 0.0f) * max(_BurtGIApplyIndirectParams.y, 0.0f);
 }
 
-float BurtDeferredGIBackfaceBlend(BurtGBufferData gbufferData)
+float BurtDeferredGIBackfaceDiffuseBlend(BurtGBufferData gbufferData)
 {
 #if defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
-    return saturate(BurtGetSubsurfaceThickness(gbufferData) * 0.65f + BurtGetSubsurfaceAmbient(gbufferData) * 0.35f);
+    return 0.0f;
 #elif defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
     return 0.45f;
+#elif defined(BURT_DEFERRED_SHADING_MODEL_FUR)
+    return 0.0f;
 #else
     return 0.0f;
 #endif
@@ -90,12 +114,23 @@ void BurtApplyDeferredGIIndirect(float2 screenUV, BurtGBufferData gbufferData, i
     float3 diffuseIndirect = BurtSampleDeferredGIDiffuseIndirect(screenUV);
     float3 backfaceDiffuseIndirect = BurtSampleDeferredGIBackfaceDiffuseIndirect(screenUV);
     float3 roughSpecularIndirect = BurtSampleDeferredGIRoughSpecularIndirect(screenUV);
-    diffuseIndirect = lerp(diffuseIndirect, backfaceDiffuseIndirect, BurtDeferredGIBackfaceBlend(gbufferData));
+    diffuseIndirect = lerp(diffuseIndirect, backfaceDiffuseIndirect, BurtDeferredGIBackfaceDiffuseBlend(gbufferData));
 
     float roughSpecularBlend = smoothstep(0.35f, 0.92f, saturate(gbufferData.perceptualRoughness));
+    float3 subsurfaceIndirectTransmission = max(components.subsurfaceIndirectTransmission, float3(0.0f, 0.0f, 0.0f));
+    float3 subsurfaceIndirectTransmissionForLighting = subsurfaceIndirectTransmission;
+#if defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
+    if (BurtGetSubsurfaceStrength(gbufferData) > 0.0001f &&
+        !BurtIsSubsurface3SPreIntegratedMode(BurtGetSubsurfaceScatteringMode(gbufferData)))
+    {
+        subsurfaceIndirectTransmissionForLighting = float3(0.0f, 0.0f, 0.0f);
+    }
+#endif
+    components.subsurfaceIndirectTransmission = subsurfaceIndirectTransmission;
     components.indirectDiffuse += diffuseIndirect;
     components.indirectSpecular += roughSpecularIndirect * roughSpecularBlend;
-    components.indirectLighting = components.indirectDiffuse + components.indirectSpecular;
+    components.subsurfaceIndirect = components.indirectDiffuse;
+    components.indirectLighting = components.indirectDiffuse + components.indirectSpecular + subsurfaceIndirectTransmissionForLighting;
     components.lighting = components.directLighting + components.indirectLighting;
 }
 
@@ -141,6 +176,8 @@ BurtPBRShadingComponents BurtEvaluateDeferredLightingShadingModelComponents(
 {
 #if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
     return BurtEvaluateHairShadingComponentsFromGBuffer(gbufferData, mainLight, viewDirectionWS, positionWS, shadowPositionWS, screenUV);
+#elif defined(BURT_DEFERRED_SHADING_MODEL_FUR)
+    return BurtEvaluateFurShadingComponentsFromGBuffer(gbufferData, mainLight, viewDirectionWS, positionWS, shadowPositionWS, screenUV);
 #else
     return BurtEvaluatePBRShadingComponentsFromGBuffer(gbufferData, mainLight, viewDirectionWS, positionWS, shadowPositionWS, screenUV);
 #endif
@@ -151,6 +188,8 @@ float BurtGetDeferredLightingDebugMaterialChannel(BurtGBufferData gbufferData)
 {
 #if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
     return BurtGetHairScatter(gbufferData);
+#elif defined(BURT_DEFERRED_SHADING_MODEL_FUR)
+    return 0.0f;
 #elif defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
     return 1.0f;
 #else
@@ -221,9 +260,11 @@ float4 Frag(Varyings input) : SV_Target
 #endif
 
     float shadowAttenuation = BurtSampleMainLightShadow(shadowPositionWS, shadowNormalWS);
+    shadowAttenuation *= BurtResolveDeferredMaterialScreenSpaceShadow(screenUV, gbufferData);
     int perObjectShadowObjectIndex = BurtSampleDeferredPerObjectShadowObjectIndex(screenUV);
-    float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(shadowPositionWS, shadowNormalWS, perObjectShadowObjectIndex);
-    BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation);
+    float transmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(positionWS, perObjectShadowObjectIndex, -1.0f);
+    float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(positionWS, shadowNormalWS, perObjectShadowObjectIndex, transmissionThickness);
+    BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation, transmissionThickness);
 
     BurtGBufferData shadingGBufferData = gbufferData;
     float screenSpaceAmbientOcclusion = BurtResolveDeferredMaterialScreenSpaceAmbientOcclusion(screenUV, shadingGBufferData);

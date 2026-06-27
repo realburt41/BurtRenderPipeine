@@ -2,6 +2,8 @@
 #ifndef BURT_MOTION_VECTOR_PASS_INCLUDED
 #define BURT_MOTION_VECTOR_PASS_INCLUDED
 
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkVertexAnimation.hlsl"
+
 sampler2D _BaseMap;
 sampler2D _BurtTAACurrentDepthTexture;
 float4x4 _BurtTAACurrentViewProjection;
@@ -38,6 +40,9 @@ struct MotionVectorAttributes
     float4 positionOS : POSITION;
     float3 normalOS : NORMAL;
     float2 uv0 : TEXCOORD0;
+    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+        float4 color : COLOR;
+    #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -81,8 +86,14 @@ MotionVectorVaryings VertMotionVector(MotionVectorAttributes input)
     UNITY_SETUP_INSTANCE_ID(input);
 
     float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
-    float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
-    float4 previousObjectWorld = mul(unity_MatrixPreviousM, positionOS);
+    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+        float previousTimeSeconds = max(_Time.y - unity_DeltaTime.x, 0.0f);
+        float4 currentWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.color, unity_ObjectToWorld, _Time.y);
+        float4 previousObjectWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.color, unity_MatrixPreviousM, previousTimeSeconds);
+    #else
+        float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
+        float4 previousObjectWorld = mul(unity_MatrixPreviousM, positionOS);
+    #endif
 
     float forceNoMotion = step(unity_MotionVectorsParams.y, 0.5);
     float cameraMotion = step(unity_MotionVectorsParams.w, 0.5);
@@ -131,12 +142,9 @@ float4 FragMotionVector(MotionVectorVaryings input) : SV_Target
     float visible = surfaceValid * currentInBounds * motionInBounds * step(abs(currentEyeDepth - sceneEyeDepth), depthTolerance);
     clip(visible - 0.5);
 
-    if (previousAvailable < 0.5)
-    {
-        return float4(2.0, 2.0, 1.0, 0.0);
-    }
+    clip(previousAvailable - 0.5);
 
-    float2 velocity = previousUv - currentUv;
+    float2 velocity = currentUv - previousUv;
     float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
     float keepVelocity = step(0.02, max(velocityPixels.x, velocityPixels.y));
     clip(keepVelocity - 0.5);

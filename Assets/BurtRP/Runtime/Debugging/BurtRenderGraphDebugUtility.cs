@@ -1456,6 +1456,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                     AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionFinal", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
                 }
 
+                if (BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadow(request, asset))
+                {
+                    var ssShadowSettings = BurtScreenSpaceShadowPassUtility.ResolveScreenSpaceShadowSettings(request, asset);
+                    AppendDescriptorLine(builder, "ScreenSpaceShadow", BurtRenderTargetDescriptorUtility.CreateScreenSpaceShadowDescriptor(camera, ssShadowSettings.DownsampleFactor), resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceShadowName);
+                }
+                else
+                {
+                    AppendSkippedRenderTargetLine(builder, "ScreenSpaceShadow", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceShadowName);
+                }
+
                 if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset))
                 {
                     var burtGISettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
@@ -1570,6 +1580,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionRaw", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName);
 
                 AppendSkippedRenderTargetLine(builder, "ScreenSpaceAmbientOcclusionFinal", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName);
+
+                AppendSkippedRenderTargetLine(builder, "ScreenSpaceShadow", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceShadowName);
 
                 AppendSkippedRenderTargetLine(builder, "ScreenSpaceGlobalIlluminationRaw", resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName);
 
@@ -1779,22 +1791,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAAHistoryMatches=").Append(temporalHistory.DescriptorMatches);
             builder.Append(" TAADepthHistoryAllocated=").Append(temporalHistory.HasDepthHistory);
             builder.Append(" TAADepthHistoryMatches=").Append(temporalHistory.DepthDescriptorMatches);
-            builder.Append(" TAAConfidenceHistoryAllocated=").Append(temporalHistory.HasConfidenceHistory);
-            builder.Append(" TAAConfidenceHistoryMatches=").Append(temporalHistory.ConfidenceDescriptorMatches);
-            builder.Append(" TAAAntiFlickerHistoryAllocated=").Append(temporalHistory.HasAntiFlickerHistory);
-            builder.Append(" TAAAntiFlickerHistoryMatches=").Append(temporalHistory.AntiFlickerDescriptorMatches);
             builder.Append(" TAAHistoryAge=").Append(temporalHistory.HistoryAge);
             builder.Append(" TAAFrame=").Append(temporalAA != null ? temporalAA.FrameIndex.ToString() : temporalHistory.FrameIndex.ToString());
             builder.Append(" TAAHistoryReason=").Append(temporalHistory.LastInvalidationReason);
             builder.Append(" TAAJitter=").Append(temporalAA != null ? temporalAA.JitterPixels.ToString("F3") : "<none>");
-            builder.Append(" TAAFeedback=").Append(temporalAASettings.Feedback.ToString("0.###"));
             builder.Append(" TAAJitterScale=").Append(temporalAASettings.JitterScale.ToString("0.###"));
-            builder.Append(" TAAClamp=").Append(temporalAASettings.ClampStrength.ToString("0.###"));
             builder.Append(" TAASharpness=").Append(temporalAASettings.Sharpness.ToString("0.###"));
-            builder.Append(" TAAStaticRelax=").Append(temporalAASettings.StaticEdgeRelaxation.ToString("0.###"));
-            builder.Append(" TAAAntiFlicker=").Append(temporalAASettings.AntiFlickering.ToString("0.###"));
-            builder.Append(" TAAMVReject=").Append(temporalAASettings.MotionVectorRejection.ToString("0.###"));
-            builder.Append(" TAABaseBlend=").Append(temporalAASettings.BaseBlendFactor.ToString("0.###"));
+            builder.Append(" TAAUntrustedMVScale=").Append(temporalAASettings.UntrustedMotionFeedbackScale.ToString("0.###"));
             builder.Append(" TAAMotionEdge=").Append(temporalAASettings.MotionEdgeResponsiveStrength.ToString("0.###"));
             builder.Append(" TAADepthEdge=").Append(temporalAASettings.DepthEdgeResponsiveStrength.ToString("0.###"));
             builder.Append(" TAAClampTight=").Append(temporalAASettings.HistoryClampTightness.ToString("0.###"));
@@ -1806,9 +1809,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAADebugMode=").Append(BurtTemporalAAUtility.IsTemporalAADebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
             builder.Append(" TAAFinalBlitYFlip=").Append(FormatFloat(finalBlitYFlip));
             builder.Append(" TAADebugYFlip=").Append(FormatFloat(temporalAADebugYFlip));
-            builder.Append(" TAAUVSpace=XRenderFullscreenPlatformSampleUv;HistoryDepthVelocityFeedbackSameOrientation;FinalCameraColorTemporalAACopy;FinalBlitHandlesDisplayFlip;BurtVelocityPrevMinusCurrentHistoryUvPlusVelocity");
+            builder.Append(" TAAUVSpace=XRenderFullscreenPlatformSampleUv;HistoryDepthVelocityFeedbackSameOrientation;FinalCameraColorTemporalAACopy;FinalBlitHandlesDisplayFlip;XRenderVelocityCurrentMinusPreviousHistoryUvMinusVelocity");
             builder.Append(" TAAFilter=").Append(temporalAAEnabled ? "Current3x3ProjectionJitterFilter" : "Disabled");
-            builder.Append(" TAANote=").Append(temporalAAEnabled ? "XRenderTSRAccumulationParity;DecimateMaxUseCountDepth;VelocitySignInternalToBurt;NoEdgeVelocityValidityDrop;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3ProjectionJitterFilter;ResolveBlendXRenderStrict;StaticBlend05;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout27;StencilObjectMotionBit8;StrictStencilResponsiveBit16;StrictParallaxRejection;StaticDepthHistoryFallback;StaticHistoryDepthGate;StaticHistoryAvailabilityRelaxed;XRenderSigmaClamp15;NoDynamicSafetyResponsive;NoResolveSharpen;ComputePrevUseCount;ResponsiveAADisocclusionRestored;MaterialMotionVectorsPass;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUMetadataDebug489_491;XRenderPointCurrentLoad;XRenderFinalAlpha" : "Disabled");
+            builder.Append(" TAANote=").Append(temporalAAEnabled ? "XRenderTSRAccumulationParity;ResolveXRenderSlim;ColorDepthHistoryOnly;DecimateMaxUseCountDepthCompute;VelocityCurrentMinusPrevious;NoEdgeVelocityValidityDrop;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3ProjectionJitterFilter;ResolveBlendXRenderStrict;StaticBlend05;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout30;StencilObjectMotionBit8RequiresValidVelocity;StrictStencilResponsiveBit16;StrictParallaxRejection;StaticDepthHistoryFallback;StaticHistoryDepthGate;StaticHistoryAvailabilityRelaxed;XRenderSigmaClamp15;NoDynamicSafetyResponsive;NoResolveSharpen;ComputePrevUseCount;ResponsiveAADisocclusionRestored;MaterialMotionVectorsPass;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUMetadataDebug489_491;XRenderPointCurrentLoad;XRenderFinalAlpha" : "Disabled");
 
             builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
 
@@ -1826,6 +1829,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var isDeferred = IsDeferredRequest(request, asset); // 判断当前 request 是否真的处于 Deferred 路径。
             var ssaoSettings = BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionSettings(request, asset);
+            var ssShadowSettings = BurtScreenSpaceShadowPassUtility.ResolveScreenSpaceShadowSettings(request, asset);
             var ssaoHistory = BurtScreenSpaceAmbientOcclusionHistoryUtility.GetHistoryStatus(request != null ? request.Camera : null);
             var burtGISettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
             var burtGIScreenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(request, asset);
@@ -1834,8 +1838,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             var furBlurSettings = BurtFurBlurPassUtility.ResolveSettings();
             var temporalAA = request != null ? request.TemporalAA : null;
             var ssaoEnabled = isDeferred && ssaoSettings.Enabled;
+            var ssShadowEnabled = isDeferred && ssShadowSettings.Enabled;
             var burtGIEnabled = isDeferred && burtGISettings.Enabled;
             var furBlurEnabled = isDeferred && BurtFurBlurPassUtility.ShouldUseFurBlur(request, asset);
+            var furBlurThetaTemporalEnabled = furBlurEnabled && furBlurSettings.ThetaTemporal;
+            var furBlurColorTemporalEnabled = furBlurEnabled && furBlurSettings.ColorTemporal;
+            var furBlurTiledSetupEnabled = furBlurEnabled && BurtFurBlurPassUtility.ShouldUseTiledFurBlur(request, asset);
+            var furBlurTiledBlurDrawEnabled = furBlurEnabled && BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(request, asset);
+            var furBlurSetupStage = furBlurTiledSetupEnabled ? "PropertyVelocityTiledSetupFillArgsIndirectDilate" : "PropertyVelocityFullscreenDilate2";
+            var furBlurPropertyStage = furBlurThetaTemporalEnabled ? "ThetaTAAStableProperty" : "CurrentProperty";
+            var furBlurBlurStage = furBlurTiledBlurDrawEnabled ? "IndirectBlur" : "Blur";
+            var furBlurResultStage = furBlurColorTemporalEnabled ? "ResultTAAComposite" : "CompositeCurrent";
+            var furBlurPath = furBlurEnabled ? (furBlurSetupStage + furBlurPropertyStage + furBlurBlurStage + furBlurResultStage) : "Disabled";
+            var furBlurTemporalLabel = "FurVelocityFallbackCameraDepthReprojection;ThetaTAA=" +
+                (furBlurThetaTemporalEnabled ? "On" : "Off") +
+                ";ResultTAA=" +
+                (furBlurColorTemporalEnabled ? "On" : "Off");
             var ssaoDebugRequested = BurtScreenSpaceAmbientOcclusionPassUtility.IsScreenSpaceAmbientOcclusionDebugMode(BurtShadingDebugSettings.Mode);
             var ssaoDebugPassRequested = isDeferred && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusionDebugView(request, asset);
             var burtGIDebugPassRequested = isDeferred && BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationDebugView(request, asset);
@@ -1858,6 +1876,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" SSAORawRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionRawName));
 
             builder.Append(" SSAOFinalRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionName));
+
+            builder.Append(" SSShadowRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.ScreenSpaceShadowName));
 
             builder.Append(" SSAODebugMode=").Append(BurtScreenSpaceAmbientOcclusionPassUtility.ResolveScreenSpaceAmbientOcclusionDebugModeLabel());
 
@@ -2061,6 +2081,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSAOFirstValidFrame=").Append(ssaoHistory.FirstValidFrameIndex);
                 builder.Append(" SSAOLastInvalidationFrame=").Append(ssaoHistory.LastInvalidationFrameIndex);
                 builder.Append(" SSAOHistoryReason=").Append(ssaoHistory.LastInvalidationReason);
+                builder.Append(" SSShadowEnabled=").Append(ssShadowSettings.Enabled);
+                builder.Append(" SSShadowTracePassExpected=").Append(ssShadowEnabled);
+                builder.Append(" SSShadowOutputTarget=ScreenSpaceShadow");
+                builder.Append(" SSShadowOutputSemantic=MainLightScreenSpaceVisibilityFoliageWeighted");
+                builder.Append(" SSShadowSamples=").Append(ssShadowSettings.SampleCount);
+                builder.Append(" SSShadowDownsampleFactor=").Append(ssShadowSettings.DownsampleFactor);
+                builder.Append(" SSShadowHalfResolution=").Append(ssShadowSettings.HalfResolution);
+                builder.Append(" SSShadowQuarterResolution=").Append(ssShadowSettings.QuarterResolution);
+                builder.Append(" SSShadowMaxDistance=").Append(FormatFloat(ssShadowSettings.MaxDistance));
+                builder.Append(" SSShadowDepthOffset=").Append(FormatFloat(ssShadowSettings.DepthOffset));
+                builder.Append(" SSShadowThickness=").Append(FormatFloat(ssShadowSettings.Thickness));
+                builder.Append(" SSShadowBilinearThreshold=").Append(FormatFloat(ssShadowSettings.BilinearThreshold));
+                builder.Append(" SSShadowBilinearSamplingOffset=").Append(ssShadowSettings.BilinearSamplingOffset);
+                builder.Append(" SSShadowIntensity=").Append(FormatFloat(ssShadowSettings.Intensity));
+                builder.Append(" SSShadowGrassContrast=").Append(FormatFloat(ssShadowSettings.GrassContrast));
+                builder.Append(" SSShadowDetailContrast=").Append(FormatFloat(ssShadowSettings.DetailContrast));
+                builder.Append(" SSShadowFoliageContrast=").Append(FormatFloat(ssShadowSettings.FoliageContrast));
+                builder.Append(" SSShadowCharacterContrast=").Append(FormatFloat(ssShadowSettings.CharacterContrast));
+                builder.Append(" SSShadowFadeDistance=").Append(FormatFloat(ssShadowSettings.FadeDistance));
+                builder.Append(" SSShadowFadeRadius=").Append(FormatFloat(ssShadowSettings.FadeRadius));
                 builder.Append(" BurtGIEnabled=").Append(burtGISettings.Enabled);
                 builder.Append(" BurtGISuppressedByShadingDebug=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationSuppressedByShadingDebug());
                 builder.Append(" BurtGIDebugPassRequested=").Append(burtGIDebugPassRequested);
@@ -2125,8 +2165,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGIHistoryReason=").Append(burtGIHistory.LastInvalidationReason);
                 builder.Append(" FurBlurEnabled=").Append(furBlurEnabled);
                 builder.Append(" FurBlurCandidateGate=").Append(BurtFurBlurPassUtility.ResolveFurBlurCandidateGateLabel(request, asset));
-                builder.Append(" FurBlurPath=").Append(furBlurEnabled ? (BurtFurBlurPassUtility.ShouldUseTiledFurBlur(request, asset) ? (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(request, asset) ? "PropertyVelocityTiledSetupFillArgsIndirectDilateThetaTAAStablePropertyIndirectBlurResultTAAComposite" : "PropertyVelocityTiledSetupFillArgsIndirectDilateThetaTAAStablePropertyBlurResultTAAComposite") : "PropertyVelocityFullscreenDilate2ThetaTAAStablePropertyBlurResultTAAComposite") : "Disabled");
-                builder.Append(" FurBlurTemporal=FurVelocityFallbackCameraDepthReprojection;ThetaTAA;ResultTAA");
+                builder.Append(" FurBlurPath=").Append(furBlurPath);
+                builder.Append(" MultipassRenderers=").Append(BurtMultipassRenderer.RegisteredRendererCount);
+                builder.Append(" MultipassSkinnedRenderers=").Append(BurtMultipassRenderer.RegisteredSkinnedRendererCount);
+                builder.Append(" MultipassBakedSkinnedMeshes=").Append(BurtMultipassRenderer.BakedSkinnedMeshCountThisFrame);
+                builder.Append(" FurBlurTemporal=").Append(furBlurTemporalLabel);
+                builder.Append(" FurBlurThetaTemporal=").Append(furBlurSettings.ThetaTemporal);
+                builder.Append(" FurBlurColorTemporal=").Append(furBlurSettings.ColorTemporal);
                 builder.Append(" FurBlurObjectVelocity=MultipassFurVelocityRT");
                 builder.Append(" FurBlurTiled=").Append(BurtFurBlurPassUtility.ResolveFurBlurTiledStatusLabel());
                 builder.Append(" FurBlurDebugMode=").Append(BurtFurBlurPassUtility.ResolveFurBlurDebugModeLabel());
@@ -2144,7 +2189,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" FurBlurDirectionDilationThreshold=").Append(FormatFloat(furBlurSettings.DirectionDilationThreshold));
                 builder.Append(" FurBlurThetaFeedback=").Append(FormatFloat(furBlurSettings.ThetaFeedback));
                 builder.Append(" FurBlurTemporalFeedback=").Append(FormatFloat(furBlurSettings.TemporalFeedback));
-                builder.Append(" FurBlurDepthEncoding=DeviceDepthSVPositionZ");
+                builder.Append(" FurBlurDepthEncoding=SceneDeviceDepthInitializedFromCameraDepth;FurPixelsOverrideWithSVPositionZ");
                 builder.Append(" FurBlurReversedZ=").Append(SystemInfo.usesReversedZBuffer);
                 builder.Append(" SSREnabled=").Append(ssrSettings.Enabled);
                 builder.Append(" SSRSuppressedByShadingDebug=").Append(ssrSuppressedByShadingDebug);

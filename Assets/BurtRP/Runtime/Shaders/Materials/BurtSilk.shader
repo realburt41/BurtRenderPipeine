@@ -5,8 +5,6 @@ Shader "BurtRP/Silk"
         _BaseMap ("Base Map", 2D) = "white" {}
         [HDR] _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
         _FacingColor ("Facing Color", Color) = (1, 1, 1, 1)
-        _TangentColor ("Tangent Color", Color) = (1, 1, 1, 1)
-        _Falloff ("Falloff", Range(0, 1)) = 0
         _MaskMap ("Mask Map (R Metallic, G Occlusion, A Roughness)", 2D) = "white" {}
         [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
         _NormalScale ("Normal Scale", Range(0, 2)) = 1

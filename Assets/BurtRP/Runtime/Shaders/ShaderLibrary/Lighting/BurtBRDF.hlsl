@@ -159,11 +159,38 @@ float BurtDecodeSubsurfaceProfileScatteringDistribution(float encodedScatteringD
     return clamp(encodedScatteringDistribution * 2.0f - 1.0f, -0.99f, 0.99f);
 }
 
-float3 BurtSampleSubsurfaceTransmissionProfile(float profileIndex, float materialThickness)
+float BurtResolveSubsurfaceProfileThickness(float materialThickness)
+{
+    return lerp(0.1f, 1.0f, saturate(materialThickness));
+}
+
+float BurtResolveSubsurfaceProfileThickness(float materialThickness, float resolvedTransmissionThickness)
+{
+    return resolvedTransmissionThickness >= 0.0f
+        ? clamp(resolvedTransmissionThickness, 0.0f, BURT_SUBSURFACE_MAX_TRANSMISSION_PROFILE_DISTANCE)
+        : BurtResolveSubsurfaceProfileThickness(materialThickness);
+}
+
+bool BurtHasResolvedSubsurfaceTransmissionThickness(float resolvedTransmissionThickness)
+{
+    return resolvedTransmissionThickness >= 0.0f;
+}
+
+float BurtResolveSubsurfaceTransmissionLightingThickness(
+    float materialThickness,
+    float resolvedTransmissionThickness,
+    float nDotL)
+{
+    float thickness = BurtResolveSubsurfaceProfileThickness(materialThickness, resolvedTransmissionThickness);
+    float threshold = lerp(0.1f, 0.01f, abs(nDotL));
+    return clamp(max(thickness, threshold), 0.001f, BURT_SUBSURFACE_MAX_TRANSMISSION_PROFILE_DISTANCE);
+}
+
+float3 BurtSampleSubsurfaceTransmissionProfileByThickness(float profileIndex, float profileThickness)
 {
     float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(profileIndex);
     float extinctionScale = BurtDecodeSubsurfaceProfileExtinctionScale(profileTransmission.x);
-    float profileThickness = lerp(0.1f, 1.0f, saturate(materialThickness));
+    profileThickness = clamp(profileThickness, 0.0f, BURT_SUBSURFACE_MAX_TRANSMISSION_PROFILE_DISTANCE);
     float3 fallback = exp2(-1.442695f * extinctionScale * profileThickness).xxx;
     if (!BurtUseSubsurfaceProfileParamLut())
     {
@@ -179,15 +206,32 @@ float3 BurtSampleSubsurfaceTransmissionProfile(float profileIndex, float materia
     return max(lerp(lower, upper, sampleT), float3(0.0f, 0.0f, 0.0f));
 }
 
-float3 BurtSampleSubsurfaceTransmissionThroughput(float profileIndex, float materialThickness)
+float3 BurtSampleSubsurfaceTransmissionProfile(float profileIndex, float materialThickness)
 {
-    float3 throughput = BurtSampleSubsurfaceTransmissionProfile(profileIndex, materialThickness);
+    return BurtSampleSubsurfaceTransmissionProfileByThickness(profileIndex, BurtResolveSubsurfaceProfileThickness(materialThickness));
+}
+
+float3 BurtSampleSubsurfaceTransmissionThroughputByThickness(float profileIndex, float profileThickness)
+{
+    float3 throughput = BurtSampleSubsurfaceTransmissionProfileByThickness(profileIndex, profileThickness);
     if (!BurtUseSubsurfaceProfileParamLut())
     {
         throughput *= max(BurtLoadSubsurfaceProfileTransmissionTint(profileIndex).rgb, float3(0.0f, 0.0f, 0.0f));
     }
 
     return max(throughput, float3(0.0f, 0.0f, 0.0f));
+}
+
+float3 BurtSampleSubsurfaceTransmissionThroughput(float profileIndex, float materialThickness)
+{
+    return BurtSampleSubsurfaceTransmissionThroughputByThickness(profileIndex, BurtResolveSubsurfaceProfileThickness(materialThickness));
+}
+
+float3 BurtEvaluateSubsurfaceProfileTransmittanceByExtinction(float profileIndex, float thickness)
+{
+    float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(profileIndex);
+    float extinctionScale = BurtDecodeSubsurfaceProfileExtinctionScale(profileTransmission.x);
+    return max(exp2(-1.442695f * extinctionScale * max(thickness, 0.0f)).xxx, float3(0.0f, 0.0f, 0.0f));
 }
 
 float BurtEvaluateSubsurfaceProfileIntensity(float3 profileColor)
@@ -202,6 +246,7 @@ float BurtHenyeyGreensteinPhase(float anisotropy, float cosTheta)
     float denominator = pow(max(1.0f + g2 + 2.0f * g * cosTheta, 0.001f), 1.5f);
     return (1.0f - g2) / max(4.0f * BURT_PI * denominator, BURT_EPSILON);
 }
+
 #endif
 
 // 出处：XRender/Shaders/Library/BRDF.hlsl::rcp_safe；用安全倒数保护 BRDF 分母，避�?0 产生 NaN
@@ -1196,9 +1241,21 @@ float transmissionThickness;
     BurtDirectBRDFTerms brdfTerms;
 };
 
-float BurtResolveSubsurfaceProfileThickness(float materialThickness)
+float3 BurtEvaluateSubsurfaceTransmissionBRDFColor(
+    BurtPBRMaterialData materialData,
+    float3 transmissionThroughput,
+    float transmissionPhase)
 {
-    return lerp(0.1f, 1.0f, saturate(materialThickness));
+#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
+    if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
+    {
+        return max(materialData.baseColor * transmissionThroughput * transmissionPhase, float3(0.0f, 0.0f, 0.0f));
+    }
+
+    return max(transmissionThroughput * transmissionPhase, float3(0.0f, 0.0f, 0.0f));
+#else
+    return max(materialData.baseColor * transmissionThroughput * transmissionPhase, float3(0.0f, 0.0f, 0.0f));
+#endif
 }
 
 float3 BurtEvaluateSubsurfaceProfileTransmissionBRDF(
@@ -1212,24 +1269,62 @@ float3 BurtEvaluateSubsurfaceProfileTransmissionBRDF(
         materialData.subsurfaceProfileIndex,
         materialData.subsurfaceThickness);
     float oneOverIOR = clamp(profileTransmission.w, 0.01f, 1.0f);
-    float scatteringDistribution = clamp(profileTransmission.z, -0.99f, 0.99f);
+    float scatteringDistribution = BurtDecodeSubsurfaceProfileScatteringDistribution(profileTransmission.z);
     float3 refractedView = refract(geometryData.viewDirectionWS, -geometryData.normalWS, oneOverIOR);
     refractedView = dot(refractedView, refractedView) > BURT_EPSILON
         ? BurtSafeNormalize(refractedView)
         : BurtSafeNormalize(geometryData.viewDirectionWS);
     float phase = BurtHenyeyGreensteinPhase(scatteringDistribution, dot(BurtSafeNormalize(lightDirectionWS), refractedView));
-#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
-    if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
-    {
-        return max(materialData.baseColor * transmissionThroughput * phase, float3(0.0f, 0.0f, 0.0f));
-    }
-
-    return max(transmissionThroughput * phase, float3(0.0f, 0.0f, 0.0f));
-#else
-    return max(materialData.baseColor * transmissionThroughput * phase, float3(0.0f, 0.0f, 0.0f));
-#endif
+    return BurtEvaluateSubsurfaceTransmissionBRDFColor(materialData, transmissionThroughput, phase);
 #else
     return float3(0.0f, 0.0f, 0.0f);
+#endif
+}
+
+void BurtEvaluateSubsurfaceProfileTransmissionTerms(
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    float3 lightDirectionWS,
+    float resolvedTransmissionThickness,
+    float transmissionShadowAttenuation,
+    out float3 transmissionBRDF,
+    out float3 transmissionThroughput,
+    out float transmissionLobe,
+    out float transmissionPhase,
+    out float transmissionThickness)
+{
+#if BURT_ENABLE_SUBSURFACE_SHADING
+    if (!BurtHasResolvedSubsurfaceTransmissionThickness(resolvedTransmissionThickness))
+    {
+        transmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+        transmissionThroughput = float3(0.0f, 0.0f, 0.0f);
+        transmissionLobe = 0.0f;
+        transmissionPhase = 0.0f;
+        transmissionThickness = 0.0f;
+        return;
+    }
+
+    float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(materialData.subsurfaceProfileIndex);
+    float nDotL = dot(geometryData.normalWS, BurtSafeNormalize(lightDirectionWS));
+    transmissionThickness = BurtResolveSubsurfaceTransmissionLightingThickness(materialData.subsurfaceThickness, resolvedTransmissionThickness, nDotL);
+    transmissionThroughput = BurtSampleSubsurfaceTransmissionThroughputByThickness(
+        materialData.subsurfaceProfileIndex,
+        transmissionThickness);
+    float oneOverIOR = clamp(profileTransmission.w, 0.01f, 1.0f);
+    float scatteringDistribution = BurtDecodeSubsurfaceProfileScatteringDistribution(profileTransmission.z);
+    float3 refractedView = refract(geometryData.viewDirectionWS, -geometryData.normalWS, oneOverIOR);
+    refractedView = dot(refractedView, refractedView) > BURT_EPSILON
+        ? BurtSafeNormalize(refractedView)
+        : BurtSafeNormalize(geometryData.viewDirectionWS);
+    transmissionPhase = BurtHenyeyGreensteinPhase(scatteringDistribution, dot(BurtSafeNormalize(lightDirectionWS), refractedView));
+    transmissionBRDF = BurtEvaluateSubsurfaceTransmissionBRDFColor(materialData, transmissionThroughput, transmissionPhase);
+    transmissionLobe = BurtEvaluateSubsurfaceProfileIntensity(transmissionBRDF);
+#else
+    transmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    transmissionThroughput = float3(0.0f, 0.0f, 0.0f);
+    transmissionLobe = 0.0f;
+    transmissionPhase = 0.0f;
+    transmissionThickness = 0.0f;
 #endif
 }
 
@@ -1243,39 +1338,17 @@ void BurtEvaluateSubsurfaceProfileTransmissionTerms(
     out float transmissionPhase,
     out float transmissionThickness)
 {
-#if BURT_ENABLE_SUBSURFACE_SHADING
-    float4 profileTransmission = BurtLoadSubsurfaceProfileTransmission(materialData.subsurfaceProfileIndex);
-    transmissionThickness = BurtResolveSubsurfaceProfileThickness(materialData.subsurfaceThickness);
-    transmissionThroughput = BurtSampleSubsurfaceTransmissionThroughput(
-        materialData.subsurfaceProfileIndex,
-        materialData.subsurfaceThickness);
-    float oneOverIOR = clamp(profileTransmission.w, 0.01f, 1.0f);
-    float scatteringDistribution = clamp(profileTransmission.z, -0.99f, 0.99f);
-    float3 refractedView = refract(geometryData.viewDirectionWS, -geometryData.normalWS, oneOverIOR);
-    refractedView = dot(refractedView, refractedView) > BURT_EPSILON
-        ? BurtSafeNormalize(refractedView)
-        : BurtSafeNormalize(geometryData.viewDirectionWS);
-    transmissionPhase = BurtHenyeyGreensteinPhase(scatteringDistribution, dot(BurtSafeNormalize(lightDirectionWS), refractedView));
-#if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
-    if (BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
-    {
-        transmissionBRDF = max(materialData.baseColor * transmissionThroughput * transmissionPhase, float3(0.0f, 0.0f, 0.0f));
-    }
-    else
-    {
-        transmissionBRDF = max(transmissionThroughput * transmissionPhase, float3(0.0f, 0.0f, 0.0f));
-    }
-#else
-    transmissionBRDF = max(materialData.baseColor * transmissionThroughput * transmissionPhase, float3(0.0f, 0.0f, 0.0f));
-#endif
-    transmissionLobe = BurtEvaluateSubsurfaceProfileIntensity(transmissionBRDF);
-#else
-    transmissionBRDF = float3(0.0f, 0.0f, 0.0f);
-    transmissionThroughput = float3(0.0f, 0.0f, 0.0f);
-    transmissionLobe = 0.0f;
-    transmissionPhase = 0.0f;
-    transmissionThickness = 0.0f;
-#endif
+    BurtEvaluateSubsurfaceProfileTransmissionTerms(
+        materialData,
+        geometryData,
+        lightDirectionWS,
+        -1.0f,
+        1.0f,
+        transmissionBRDF,
+        transmissionThroughput,
+        transmissionLobe,
+        transmissionPhase,
+        transmissionThickness);
 }
 
 void BurtApplySubsurfaceDirectPBR(
@@ -1285,7 +1358,8 @@ void BurtApplySubsurfaceDirectPBR(
     float3 lightColor,
     float3 lightDirectionWS,
     float shadowAttenuation,
-    float transmissionShadowAttenuation)
+    float transmissionShadowAttenuation,
+    float resolvedTransmissionThickness)
 {
 #if BURT_ENABLE_SUBSURFACE_SHADING
     float subsurfaceStrength = BurtGetSubsurfaceMaterialWeight(materialData);
@@ -1313,13 +1387,16 @@ void BurtApplySubsurfaceDirectPBR(
         materialData,
         geometryData,
         l,
+        resolvedTransmissionThickness,
+        transmissionShadowAttenuation,
         profileTransmissionBRDF,
         profileTransmissionThroughput,
         profileTransmissionLobe,
         profileTransmissionPhase,
         profileTransmissionThickness);
     float transmissionShadow = saturate(transmissionShadowAttenuation);
-    float3 profileTransmission = profileTransmissionBRDF * lightColor * transmissionShadow;
+    float transmissionVisibility = BurtHasResolvedSubsurfaceTransmissionThickness(resolvedTransmissionThickness) ? transmissionShadow : 1.0f;
+    float3 profileTransmission = profileTransmissionBRDF * lightColor * transmissionVisibility;
     components.transmission = lerp(components.transmission, profileTransmission, subsurfaceStrength);
     components.transmissionBRDF = lerp(components.transmissionBRDF, profileTransmissionBRDF, subsurfaceStrength);
     components.transmissionThroughput = lerp(components.transmissionThroughput, profileTransmissionThroughput, subsurfaceStrength);
@@ -1334,10 +1411,9 @@ void BurtApplySubsurfaceDirectPBR(
         float3 preintegratedDiffuseBRDF = materialData.diffuseColor * lutScatter * BURT_INV_PI;
         float3 preintegratedDiffuse = preintegratedDiffuseBRDF * lightColor * shadowAttenuation;
         float targetDiffuseLobe = BurtEvaluateSubsurfaceProfileIntensity(lutScatter) * BURT_INV_PI;
-        targetDiffuseLobe = max(targetDiffuseLobe, profileTransmissionLobe);
-        float3 resolvedDiffuse = lerp(components.diffuse, preintegratedDiffuse, lutWeight) + profileTransmission;
-        float3 resolvedDiffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, preintegratedDiffuseBRDF, lutWeight) + profileTransmissionBRDF;
-        float resolvedDiffuseLobe = max(lerp(components.brdfTerms.diffuseLobe, targetDiffuseLobe, lutWeight), profileTransmissionLobe);
+        float3 resolvedDiffuse = lerp(components.diffuse, preintegratedDiffuse, lutWeight);
+        float3 resolvedDiffuseBRDF = lerp(components.brdfTerms.diffuseBRDF, preintegratedDiffuseBRDF, lutWeight);
+        float resolvedDiffuseLobe = lerp(components.brdfTerms.diffuseLobe, targetDiffuseLobe, lutWeight);
 
         components.diffuse = lerp(components.diffuse, resolvedDiffuse, subsurfaceStrength);
         components.brdfTerms.diffuseLobe = lerp(components.brdfTerms.diffuseLobe, resolvedDiffuseLobe, subsurfaceStrength);
@@ -1382,9 +1458,9 @@ void BurtApplySubsurfaceDirectPBR(
     float lightVisibility = components.brdfTerms.nDotL * shadowAttenuation;
     float3 dualSpecularContribution = dualSpecularBRDF * lightColor * lightVisibility;
 
-    float3 targetDiffuse = wrappedDiffuse + profileTransmission;
-    float targetDiffuseLobe = max(wrappedDiffuseLobe, profileTransmissionLobe);
-    float3 targetDiffuseBRDF = wrappedDiffuseBRDF + profileTransmissionBRDF;
+    float3 targetDiffuse = wrappedDiffuse;
+    float targetDiffuseLobe = wrappedDiffuseLobe;
+    float3 targetDiffuseBRDF = wrappedDiffuseBRDF;
 #if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
     if (!BurtIsSubsurface3SPreIntegratedMode(materialData.subsurfaceScatteringMode))
     {
@@ -1392,9 +1468,9 @@ void BurtApplySubsurfaceDirectPBR(
         // ordinary diffuse, while profile diffusion/tint is applied by the
         // screen-space subsurface pass. Profile transmission is a direct-light
         // lobe and stays in the deferred subsurface input.
-        targetDiffuse = components.diffuse + profileTransmission;
-        targetDiffuseLobe = max(components.brdfTerms.diffuseLobe, profileTransmissionLobe);
-        targetDiffuseBRDF = components.brdfTerms.diffuseBRDF + profileTransmissionBRDF;
+        targetDiffuse = components.diffuse;
+        targetDiffuseLobe = components.brdfTerms.diffuseLobe;
+        targetDiffuseBRDF = components.brdfTerms.diffuseBRDF;
     }
 #endif
     components.diffuse = lerp(components.diffuse, targetDiffuse, subsurfaceStrength);
@@ -1426,7 +1502,8 @@ void BurtApplySubsurfaceDirectPBR(
         lightColor,
         lightDirectionWS,
         shadowAttenuation,
-        shadowAttenuation);
+        shadowAttenuation,
+        -1.0f);
 }
 
 void BurtApplyFabricDirectPBR(
@@ -1575,6 +1652,26 @@ void BurtApplyFoliageDirectPBR(
 #endif
 }
 
+void BurtApplyFoliageDirectPBR(
+    inout BurtDirectPBRComponents components,
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    float3 lightColor,
+    float3 lightDirectionWS,
+    float shadowAttenuation,
+    float transmissionShadowAttenuation,
+    float resolvedTransmissionThickness)
+{
+    BurtApplyFoliageDirectPBR(
+        components,
+        materialData,
+        geometryData,
+        lightColor,
+        lightDirectionWS,
+        shadowAttenuation,
+        transmissionShadowAttenuation);
+}
+
 // Evaluates a single light from prepared PBR data.
 BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
     BurtPBRMaterialData materialData,
@@ -1584,7 +1681,8 @@ BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
     float3 lightColor,
     float3 lightDirectionWS,
     float shadowAttenuation,
-    float transmissionShadowAttenuation)
+    float transmissionShadowAttenuation,
+    float resolvedTransmissionThickness)
 {
     BurtDirectPBRComponents components;
     components.diffuse = float3(0.0f, 0.0f, 0.0f);
@@ -1607,12 +1705,34 @@ BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
     components.specular = components.brdfTerms.specularBRDF * lightColor * lightVisibility;
 
     BurtApplySilkWrappedDiffuseDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation);
-    BurtApplySubsurfaceDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation, transmissionShadowAttenuation);
+    BurtApplySubsurfaceDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation, transmissionShadowAttenuation, resolvedTransmissionThickness);
     BurtApplyFoliageDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation, transmissionShadowAttenuation);
     BurtApplyFabricDirectPBR(components, materialData, geometryData, lightColor, lightDirectionWS, shadowAttenuation);
 
     // 返回拆分后的直接光结果
     return components;
+}
+
+BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
+    BurtPBRMaterialData materialData,
+    BurtPBRGeometryData geometryData,
+    BurtPBREnergyTerms energyTerms,
+    float directSpecularPerceptualRoughness,
+    float3 lightColor,
+    float3 lightDirectionWS,
+    float shadowAttenuation,
+    float transmissionShadowAttenuation)
+{
+    return BurtEvaluateDirectPBRComponents(
+        materialData,
+        geometryData,
+        energyTerms,
+        directSpecularPerceptualRoughness,
+        lightColor,
+        lightDirectionWS,
+        shadowAttenuation,
+        transmissionShadowAttenuation,
+        -1.0f);
 }
 
 BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
@@ -1632,7 +1752,8 @@ BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
         lightColor,
         lightDirectionWS,
         shadowAttenuation,
-        shadowAttenuation);
+        shadowAttenuation,
+        -1.0f);
 }
 
 // Evaluates split direct PBR lighting from surface inputs.
@@ -1653,6 +1774,7 @@ BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
 
     // 一次性准备直�?间接高光补偿�?EnergyPreservation，避免多个光照函数重复查 FG LUT�?
     BurtPBREnergyTerms energyTerms = BurtPreparePBREnergyTerms(materialData, geometryData, directSpecularPerceptualRoughness);
+    return BurtEvaluateDirectPBRComponents(materialData, geometryData, energyTerms, directSpecularPerceptualRoughness, lightColor, lightDirectionWS, shadowAttenuation);
 
     // 复用准备数据版本，保�?Forward 和未�?Deferred 的直接光入口一致
     return BurtEvaluateDirectPBRComponents(materialData, geometryData, energyTerms, directSpecularPerceptualRoughness, lightColor, lightDirectionWS, shadowAttenuation);

@@ -78,10 +78,6 @@ CBUFFER_START(UnityPerMaterial)
 
     float4 _FacingColor;
 
-    float4 _TangentColor;
-
-    float _Falloff;
-
     float4 _FoliageTransmissionColor;
 
     float _FoliageTransmissionWeight;
@@ -131,6 +127,30 @@ CBUFFER_START(UnityPerMaterial)
     float _TintHeightContrast;
 
     float _TreeHeight;
+
+    float _MaxBendAngle;
+
+    float _SwayIntensity;
+
+    float _BendMaskPow;
+
+    float _ToTrunkMaskPow;
+
+    float _TerrainBlend_TerrainTog;
+
+    float _TerrainBlend_BlendHeight;
+
+    float _TerrainBlendEnable;
+
+    float _TerrainBlendHeight;
+
+    float4 _TerrainBlendDetailHeight;
+
+    float _AlphaCutoffEnable;
+
+    float _AlphaCutoff;
+
+    float _CustomEnum;
 
     float _FoliageTintMode;
 

@@ -43,6 +43,8 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
+    - _BurtGBufferStencilRef: 3
+    - _BurtGBufferStencilWriteMask: 7
     - _Cull: 2
     - _Cutoff: 0.5
     - _DoubleSidedEnable: 0
@@ -50,6 +52,7 @@ Material:
     - _DstBlend: 0
     - _NormalScale: 0.334
     - _OcclusionStrength: 1
+    - _ResponsiveAA: 0
     - _Smoothness: 1
     - _SrcBlend: 1
     - _Subsurface3SCurvatureBias: 0.534
@@ -59,7 +62,7 @@ Material:
     - _SubsurfacePower: 1.52
     - _SubsurfaceProfileIndex: 0
     - _SubsurfaceScatteringMode: 1
-    - _SubsurfaceThickness: 0
+    - _SubsurfaceThickness: 1
     - _Surface: 0
     - _ZTest: 4
     - _ZWrite: 1

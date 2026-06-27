@@ -108,7 +108,7 @@ float BurtEvaluateFabricFuzzWeight(float2 uv0)
 BurtSurfaceData BurtApplyFabricPassSurfaceSemantics(BurtSurfaceData surfaceData, float4 maskMap, float2 uv0, float nDotV)
 {
 #if defined(BURT_MATERIAL_SELECTED_FABRIC_IS_SILK)
-    return BurtApplySilkSurfaceSemantics(surfaceData, _Anisotropy, _FacingColor.rgb, _TangentColor.rgb, _Falloff, nDotV);
+    return BurtApplySilkSurfaceSemantics(surfaceData, _Anisotropy, _FacingColor.rgb);
 #else
     float fabricFuzzRoughness = ClampPerceptualRoughness(saturate(maskMap.a) * _FuzzRoughness);
     return BurtApplyFabricSurfaceSemantics(surfaceData, BurtEvaluateFabricFuzzWeight(uv0), BurtEvaluateFabricFuzzColor(uv0), fabricFuzzRoughness);
@@ -167,14 +167,55 @@ float BurtEvaluateFoliageNormalizedHeight(float3 positionOS, float3 positionWS)
     return saturate(positionOS.y / height);
 }
 
+float BurtResolveFoliageTintMode()
+{
+    float tintMode = _CustomEnum;
+    if (tintMode < 0.5f && _FoliageTintMode > 0.5f)
+    {
+        tintMode = _FoliageTintMode;
+    }
+
+    return clamp(round(tintMode), 0.0f, 2.0f);
+}
+
 float BurtEvaluateFoliageTintValue()
 {
-    if (_FoliageTintMode > 1.5f)
+    float tintMode = BurtResolveFoliageTintMode();
+    if (tintMode > 1.5f)
     {
         return saturate(unity_ObjectToWorld._m30);
     }
 
     return saturate(_TintValue);
+}
+
+float4 BurtSampleFoliageNSRMap(float2 baseMapUV)
+{
+    return BurtSampleNormalMap(baseMapUV);
+}
+
+float4 BurtResolveFoliageSurfaceMap(float2 baseMapUV, float4 fallbackMap)
+{
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    return BurtSampleFoliageNSRMap(baseMapUV);
+#else
+    return fallbackMap;
+#endif
+}
+
+float3 BurtSampleFoliageNSRNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS, float normalScale, float facing, float4 doubleSidedNormalModeConstants)
+{
+    if (normalScale <= 0.0f)
+    {
+        float3 neutralNormalTS = BurtApplyDoubleSidedNormalMode(float3(0.0f, 0.0f, 1.0f), facing, doubleSidedNormalModeConstants);
+        return BurtTransformTangentToWorld(neutralNormalTS, normalWS, tangentWS);
+    }
+
+    float4 nsrMap = BurtSampleFoliageNSRMap(normalMapUV);
+    float4 packedNormal = float4(1.0f, nsrMap.g, 1.0f, nsrMap.r);
+    float3 normalTS = BurtUnpackNormalScale(packedNormal, normalScale);
+    normalTS = BurtApplyDoubleSidedNormalMode(normalTS, facing, doubleSidedNormalModeConstants);
+    return BurtTransformTangentToWorld(normalTS, normalWS, tangentWS);
 }
 
 float4 BurtEvaluateMaterialPassBaseColor(float2 baseMapUV, float3 positionWS, float3 positionOS, float4 vertexColor)
@@ -203,8 +244,9 @@ float4 BurtEvaluateMaterialPassBaseColor(float2 baseMapUV, float3 positionWS, fl
         float heightScale = BurtMaterialSafePow(BurtEvaluateFoliageNormalizedHeight(positionOS, positionWS), _TintHeightContrast);
         float aoScale = BurtMaterialRangeRemap(_TintAORemap.x, _TintAORemap.y, BurtMaterialPow3(saturate(vertexColor.a)));
         float localScale = lerp(aoScale, heightScale, saturate(_TintAOHeightRatio)) * max(_TintScale, 0.0f);
+        float tintMode = BurtResolveFoliageTintMode();
 
-        if (_FoliageTintMode < 0.5f)
+        if (tintMode < 0.5f)
         {
             baseColor.rgb = lerp(baseColor.rgb, BurtMaterialOverlayBlend(baseColor.rgb, _LocalTintColor.rgb), saturate(localScale));
         }
@@ -361,6 +403,28 @@ float BurtEvaluateMaterialPassOpacity(float alpha, float2 baseMapUV, float3 posi
 }
 #endif
 
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+float BurtEvaluateTrunkVertexAO(float4 vertexColor)
+{
+    return saturate((saturate(vertexColor.a) - _VertexAORemap.x) / max(_VertexAORemap.y - _VertexAORemap.x, BURT_EPSILON));
+}
+
+BurtSurfaceData BurtApplyTrunkXRenderSurfaceSemantics(BurtSurfaceData surfaceData, float4 maskMap, float4 vertexColor)
+{
+    float mapOcclusion = saturate(maskMap.g);
+    float vertexAO = BurtEvaluateTrunkVertexAO(vertexColor);
+
+    surfaceData.metallic = 0.0f;
+    surfaceData.anisotropy = 0.0f;
+    surfaceData.reflectance = saturate(_Specular);
+    surfaceData.smoothness = saturate(1.0f - saturate(maskMap.a));
+    surfaceData.occlusion = min(mapOcclusion, vertexAO);
+    surfaceData.height = 0.5f;
+    surfaceData.shadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
+    return surfaceData;
+}
+#endif
+
 float BurtEvaluateMaterialPassRegularOpacity(float alpha, float cutoff)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
@@ -417,6 +481,9 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, floa
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
     BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
     return BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, maskMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, saturate(_Specular), 1.0f, 0.0f, float4(0.0f, maskMap.g, 0.5f, 1.0f), 1.0f);
+    return BurtApplyTrunkXRenderSurfaceSemantics(surfaceData, maskMap, float4(1.0f, 1.0f, 1.0f, 1.0f));
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
     BurtSurfaceData surfaceData = BurtCreateFabricSurfaceData(baseColor, _Reflectance, _Roughness, _Metallic, maskMap, _OcclusionStrength);
     return surfaceData;
@@ -439,6 +506,10 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, floa
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
     BurtSurfaceData surfaceData = BurtCreateFabricSurfaceData(baseColor, _Reflectance, _Roughness, _Metallic, maskMap, _OcclusionStrength);
     return BurtApplyFabricPassSurfaceSemantics(surfaceData, maskMap, uv0);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
+    float4 foliageMap = BurtResolveFoliageSurfaceMap(uv0, maskMap);
+    return BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, foliageMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
 #else
     return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
 #endif
@@ -452,7 +523,8 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 baseColor, floa
     return BurtApplyFabricPassSurfaceSemantics(surfaceData, maskMap, uv0, nDotV);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
     BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
-    return BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, maskMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
+    float4 foliageMap = BurtResolveFoliageSurfaceMap(uv0, maskMap);
+    return BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, foliageMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
 #else
     return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
 #endif
@@ -496,7 +568,8 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
     return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, uv0, geometryNormalWS, viewDirectionWS);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
     BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
-    return BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, maskMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
+    float4 foliageMap = BurtResolveFoliageSurfaceMap(uv0, maskMap);
+    return BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, foliageMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
 #else
     return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
 #endif
@@ -514,9 +587,13 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
     BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, _Reflectance, _Smoothness, 0.0f, maskMap, _OcclusionStrength);
-    surfaceData = BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, maskMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
+    float4 foliageMap = BurtResolveFoliageSurfaceMap(uv0, maskMap);
+    surfaceData = BurtApplyFoliageXRenderSurfaceSemantics(surfaceData, baseColor, foliageMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
     surfaceData = BurtApplyFoliageMaterialExtras(surfaceData, positionWS, positionOS, vertexColor);
     return BurtApplyGrassXRenderSurfaceSemantics(surfaceData, normalWS, viewDirectionWS, positionWS, vertexColor);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+    BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, saturate(_Specular), 1.0f, 0.0f, float4(0.0f, maskMap.g, 0.5f, 1.0f), 1.0f);
+    return BurtApplyTrunkXRenderSurfaceSemantics(surfaceData, maskMap, vertexColor);
 #else
     return BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, uv0, normalWS, viewDirectionWS);
 #endif
@@ -543,7 +620,11 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
 
 float3 BurtGetMaterialPassNormalWS(float2 normalMapUV, float3 normalWS, float4 tangentWS, float facing)
 {
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    return BurtSampleFoliageNSRNormalWS(normalMapUV, normalWS, tangentWS, _NormalScale, facing, _DoubleSidedNormalModeConstants);
+#else
     return BurtSampleNormalWS(normalMapUV, normalWS, tangentWS, _NormalScale, facing, _DoubleSidedNormalModeConstants);
+#endif
 }
 
 float3 BurtGetMaterialPassGeometryNormalWS(float3 normalWS, float facing)

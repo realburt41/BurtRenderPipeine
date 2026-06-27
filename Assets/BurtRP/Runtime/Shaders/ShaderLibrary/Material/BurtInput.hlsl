@@ -22,14 +22,15 @@ Texture2D _FuzzMask;
 static const float BURT_INPUT_DEFAULT_REFLECTANCE = 0.5f;
 static const float BURT_SUBSURFACE_FIXED_REFLECTANCE = 0.42f;
 
-// Deferred shading model ids. 0 keeps old Default Lit behavior; 1 is the first experimental Hair path.
+// Deferred shading model ids. 0 keeps old Default Lit behavior.
 static const float BURT_SHADING_MODEL_DEFAULT_LIT = 0.0f;
 static const float BURT_SHADING_MODEL_HAIR = 1.0f;
 static const float BURT_SHADING_MODEL_CLEAR_COAT = 2.0f;
 static const float BURT_SHADING_MODEL_SUBSURFACE = 3.0f;
 static const float BURT_SHADING_MODEL_FABRIC = 4.0f;
 static const float BURT_SHADING_MODEL_FOLIAGE = 5.0f;
-static const float BURT_SHADING_MODEL_MAX_ENCODED = 5.0f;
+static const float BURT_SHADING_MODEL_FUR = 6.0f;
+static const float BURT_SHADING_MODEL_MAX_ENCODED = 6.0f;
 
 static const float BURT_SUBSURFACE_POWER_MIN = 0.5f;
 static const float BURT_SUBSURFACE_POWER_MAX = 8.0f;
@@ -73,6 +74,11 @@ bool BurtIsFabricShadingModel(float shadingModelID)
 bool BurtIsFoliageShadingModel(float shadingModelID)
 {
     return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_FOLIAGE) < 0.5f;
+}
+
+bool BurtIsFurShadingModel(float shadingModelID)
+{
+    return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_FUR) < 0.5f;
 }
 
 // 保存光照函数需要的材质表面属性。
@@ -146,10 +152,6 @@ struct BurtSurfaceData
 
     float3 fabricFacingColor;
 
-    float3 fabricTangentColor;
-
-    float fabricFalloff;
-
     float3 foliageTransmissionColor;
 
     float foliageTransmissionWeight;
@@ -220,8 +222,6 @@ void BurtInitializeSubsurfaceSurfaceData(inout BurtSurfaceData surfaceData)
     surfaceData.fabricFuzzRoughness = 0.75f;
     surfaceData.fabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
     surfaceData.fabricFacingColor = float3(1.0f, 1.0f, 1.0f);
-    surfaceData.fabricTangentColor = float3(1.0f, 1.0f, 1.0f);
-    surfaceData.fabricFalloff = 0.0f;
     surfaceData.foliageTransmissionColor = float3(0.55f, 0.85f, 0.35f);
     surfaceData.foliageTransmissionWeight = 0.45f;
     surfaceData.foliageThickness = 0.5f;
@@ -552,31 +552,16 @@ BurtSurfaceData BurtApplyFoliageSurfaceSemantics(
     return BurtApplyFoliageSurfaceSemantics(surfaceData, transmissionColor, transmissionWeight, thickness, backLight, 0.5f, 1.0f, 0.0f);
 }
 
-float3 BurtEvaluateSilkFresnelColor(float3 facingColor, float3 tangentColor, float falloff, float nDotV)
-{
-    float clampedFalloff = saturate(falloff);
-    float exponent = clampedFalloff < 0.5f
-        ? rcp(1.0f + 18.0f * (0.5f - clampedFalloff))
-        : 1.0f + 18.0f * (clampedFalloff - 0.5f);
-    float lerpFactor = pow(saturate(nDotV), exponent);
-    return max(lerp(max(tangentColor, float3(0.0f, 0.0f, 0.0f)), max(facingColor, float3(0.0f, 0.0f, 0.0f)), lerpFactor), float3(0.0f, 0.0f, 0.0f));
-}
-
 BurtSurfaceData BurtApplySilkSurfaceSemantics(
     BurtSurfaceData surfaceData,
     float anisotropy,
-    float3 facingColor,
-    float3 tangentColor,
-    float falloff,
-    float nDotV)
+    float3 facingColor)
 {
     surfaceData.anisotropy = clamp(anisotropy, -1.0f, 1.0f);
     surfaceData.fabricIsSilk = 1.0f;
     surfaceData.fabricFuzzWeight = 0.0f;
-    surfaceData.fabricFuzzColor = BurtEvaluateSilkFresnelColor(facingColor, tangentColor, falloff, nDotV);
+    surfaceData.fabricFuzzColor = max(facingColor, float3(0.0f, 0.0f, 0.0f));
     surfaceData.fabricFacingColor = max(facingColor, float3(0.0f, 0.0f, 0.0f));
-    surfaceData.fabricTangentColor = max(tangentColor, float3(0.0f, 0.0f, 0.0f));
-    surfaceData.fabricFalloff = saturate(falloff);
     surfaceData.shadingModelID = BURT_SHADING_MODEL_FABRIC;
     return surfaceData;
 }

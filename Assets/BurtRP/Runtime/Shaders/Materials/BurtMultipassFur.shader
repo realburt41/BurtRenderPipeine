@@ -61,6 +61,8 @@ Shader "BurtRP/Multipass Fur"
         [HideInInspector] _DstBlend ("Destination Blend", Float) = 0
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 6
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 7
     }
 
     SubShader
@@ -84,7 +86,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma multi_compile_instancing
             #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #define BURT_MATERIAL_SHADING_MODEL_FUR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
@@ -107,7 +109,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma target 4.5
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #define BURT_MATERIAL_SHADING_MODEL_FUR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
@@ -122,9 +124,9 @@ Shader "BurtRP/Multipass Fur"
 
             Stencil
             {
-                Ref 0
+                Ref [_BurtGBufferStencilRef]
                 ReadMask 7
-                WriteMask 7
+                WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
             }
@@ -137,7 +139,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma multi_compile_instancing
             #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #define BURT_MATERIAL_SHADING_MODEL_FUR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
@@ -159,7 +161,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma multi_compile_instancing
             #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #define BURT_MATERIAL_SHADING_MODEL_FUR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
@@ -180,7 +182,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma multi_compile_instancing
             #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #define BURT_MATERIAL_SHADING_MODEL_FUR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
@@ -201,7 +203,7 @@ Shader "BurtRP/Multipass Fur"
             #pragma multi_compile_instancing
             #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
-            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #define BURT_MATERIAL_SHADING_MODEL_FUR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }

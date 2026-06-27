@@ -15,12 +15,14 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent FabricLabel = new GUIContent("Fabric");
         private static readonly GUIContent SilkLabel = new GUIContent("Silk");
         private static readonly GUIContent FoliageLabel = new GUIContent("Foliage");
+        private static readonly GUIContent TrunkLabel = new GUIContent("Trunk");
         private static readonly GUIContent NormalLabel = new GUIContent("Normal");
         private static readonly GUIContent EmissionLabel = new GUIContent("Emission");
 
         private static readonly GUIContent BaseMapLabel = new GUIContent("Base Map", "Albedo RGB and alpha for clipping or transparent materials.");
         private static readonly GUIContent MaskMapLabel = new GUIContent("Mask Map", "R Metallic, G Occlusion, B Reserved, A Smoothness or Roughness for Fabric/Silk.");
         private static readonly GUIContent NormalMapLabel = new GUIContent("Normal Map");
+        private static readonly GUIContent FoliageNSRMapLabel = new GUIContent("NSR Map", "XRender foliage packed map: R/G normal, B thickness, A roughness.");
         private static readonly GUIContent ClearCoatNormalMapLabel = new GUIContent("Clear Coat Normal Map");
         private static readonly GUIContent FuzzMapLabel = new GUIContent("Fuzz Map");
         private static readonly GUIContent FuzzMaskLabel = new GUIContent("Fuzz Amount Mask");
@@ -36,6 +38,8 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent DoubleSidedLabel = new GUIContent("Double Sided", "Render both front and back faces by switching culling off.");
         private static readonly GUIContent DoubleSidedNormalModeLabel = new GUIContent("Double Sided Normal Mode", "Back-face normal mode, matching XRender: None, Flip, or Mirror in tangent space.");
         private static readonly GUIContent SurfaceTypeLabel = new GUIContent("Surface Type");
+        private static readonly GUIContent FoliageTintModeLabel = new GUIContent("Tint Type");
+        private static readonly GUIContent TrunkMaskMapLabel = new GUIContent("MOHR Map", "XRender trunk packed map: G occlusion and A roughness. R metallic and B thickness are ignored by the current trunk material model.");
         private static readonly GUIContent RenderQueueLabel = new GUIContent("Render Queue");
         private static readonly GUIContent CullLabel = new GUIContent("Cull");
         private static readonly GUIContent ZWriteLabel = new GUIContent("ZWrite");
@@ -46,6 +50,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly string[] SurfaceTypeNames = { "Opaque", "Transparent" };
         private static readonly string[] DoubleSidedNormalModeNames = { "None", "Flip", "Mirror" };
         private static readonly string[] SubsurfaceScatteringModeNames = { "5S Burley", "4S Separable", "3S Preintegrated" };
+        private static readonly string[] FoliageTintModeNames = { "Only Local", "Constant Tint", "Tint Map" };
         private const string SubsurfaceProfileGuidTag = "BurtSubsurfaceProfileGuid";
         private static bool showSurfaceOptions = true;
         private static bool showBaseInputs = true;
@@ -55,6 +60,7 @@ namespace Burt.RenderPipeline.Editor
         private static bool showFabricInputs = true;
         private static bool showSilkInputs = true;
         private static bool showFoliageInputs = true;
+        private static bool showTrunkInputs = true;
         private static bool showNormalInputs = true;
         private static bool showEmissionInputs = true;
 
@@ -88,8 +94,6 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty fuzzAmount;
         private MaterialProperty fuzzRoughness;
         private MaterialProperty facingColor;
-        private MaterialProperty tangentColor;
-        private MaterialProperty falloff;
         private MaterialProperty foliageTransmissionColor;
         private MaterialProperty foliageTransmissionWeight;
         private MaterialProperty foliageThickness;
@@ -114,7 +118,14 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty tintHeightContrast;
         private MaterialProperty treeHeight;
         private MaterialProperty foliageTintMode;
+        private MaterialProperty foliageTintModeLegacy;
         private MaterialProperty foliageUseBakedNormals;
+        private MaterialProperty maxBendAngle;
+        private MaterialProperty swayIntensity;
+        private MaterialProperty bendMaskPow;
+        private MaterialProperty toTrunkMaskPow;
+        private MaterialProperty terrainBlendTerrainTog;
+        private MaterialProperty terrainBlendBlendHeight;
         private MaterialProperty sssIntensity;
         private MaterialProperty fresnelIntensity;
         private MaterialProperty fresnelExp;
@@ -158,15 +169,18 @@ namespace Burt.RenderPipeline.Editor
 
             Material material = materialEditor.target as Material;
             MigrateLegacyTransparentShader(material);
+            SyncFoliageTintModeProperties(material);
+            SyncTrunkXRenderCompatibilityProperties(material);
             DrawSurfaceOptions(material);
             DrawBaseInputs();
             DrawPbrInputs(material);
-            DrawNormalInputs();
+            DrawNormalInputs(material);
             DrawClearCoatInputs(material);
             DrawSubsurfaceInputs(material);
             DrawFabricInputs(material);
             DrawSilkInputs(material);
             DrawFoliageInputs(material);
+            DrawTrunkInputs(material);
             DrawEmissionInputs();
         }
 
@@ -183,6 +197,8 @@ namespace Burt.RenderPipeline.Editor
             }
 
             MigrateFabricRoughness(material);
+            SyncFoliageTintModeProperties(material);
+            SyncTrunkXRenderCompatibilityProperties(material);
             BurtShaderGUIUtility.UpdateEmissionFlag(material);
             ClampSubsurfaceScatteringMode(material);
             ApplySurfaceOptions(material);
@@ -202,6 +218,88 @@ namespace Burt.RenderPipeline.Editor
 
             material.SetFloat("_Roughness", 1f - Mathf.Clamp01(legacySmoothness));
             EditorUtility.SetDirty(material);
+        }
+
+        private static void SyncFoliageTintModeProperties(Material material)
+        {
+            if (material == null || !IsFoliageShader(material) || IsGrassShader(material) || !material.HasProperty("_CustomEnum"))
+            {
+                return;
+            }
+
+            float tintMode = Mathf.Clamp(Mathf.Round(material.GetFloat("_CustomEnum")), 0.0f, 2.0f);
+            if (!HasSerializedFloat(material, "_CustomEnum") &&
+                material.HasProperty("_FoliageTintMode") &&
+                TryGetSerializedFloat(material, "_FoliageTintMode", out var legacyTintMode))
+            {
+                tintMode = Mathf.Clamp(Mathf.Round(legacyTintMode), 0.0f, 2.0f);
+            }
+
+            bool changed = SetMaterialFloatIfDifferent(material, "_CustomEnum", tintMode);
+            changed |= SetMaterialFloatIfDifferent(material, "_FoliageTintMode", tintMode);
+            if (changed)
+            {
+                EditorUtility.SetDirty(material);
+            }
+        }
+
+        private static void SyncTrunkXRenderCompatibilityProperties(Material material)
+        {
+            if (material == null || !IsTrunkShader(material))
+            {
+                return;
+            }
+
+            bool changed = false;
+            if (!HasSerializedFloat(material, "_AlphaClip") &&
+                material.HasProperty("_AlphaClip") &&
+                TryGetSerializedFloat(material, "_AlphaCutoffEnable", out var alphaCutoffEnable))
+            {
+                changed |= SetMaterialFloatIfDifferent(material, "_AlphaClip", alphaCutoffEnable >= 0.5f ? 1.0f : 0.0f);
+            }
+
+            if (!HasSerializedFloat(material, "_Cutoff") &&
+                material.HasProperty("_Cutoff") &&
+                TryGetSerializedFloat(material, "_AlphaCutoff", out var alphaCutoff))
+            {
+                changed |= SetMaterialFloatIfDifferent(material, "_Cutoff", Mathf.Clamp01(alphaCutoff));
+            }
+
+            if (!HasSerializedFloat(material, "_TerrainBlend_TerrainTog") &&
+                material.HasProperty("_TerrainBlend_TerrainTog") &&
+                TryGetSerializedFloat(material, "_TerrainBlendEnable", out var terrainBlendEnable))
+            {
+                changed |= SetMaterialFloatIfDifferent(material, "_TerrainBlend_TerrainTog", terrainBlendEnable >= 0.5f ? 1.0f : 0.0f);
+            }
+
+            if (!HasSerializedFloat(material, "_TerrainBlend_BlendHeight") &&
+                material.HasProperty("_TerrainBlend_BlendHeight") &&
+                TryGetSerializedFloat(material, "_TerrainBlendHeight", out var terrainBlendHeight))
+            {
+                changed |= SetMaterialFloatIfDifferent(material, "_TerrainBlend_BlendHeight", Mathf.Max(0.001f, terrainBlendHeight));
+            }
+
+            if (changed)
+            {
+                BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
+                EditorUtility.SetDirty(material);
+            }
+        }
+
+        private static bool SetMaterialFloatIfDifferent(Material material, string propertyName, float value)
+        {
+            if (material == null || !material.HasProperty(propertyName))
+            {
+                return false;
+            }
+
+            if (Mathf.Approximately(material.GetFloat(propertyName), value))
+            {
+                return false;
+            }
+
+            material.SetFloat(propertyName, value);
+            return true;
         }
 
         private static bool HasSerializedFloat(Material material, string propertyName)
@@ -275,8 +373,6 @@ namespace Burt.RenderPipeline.Editor
             fuzzAmount = Find("_FuzzAmount");
             fuzzRoughness = Find("_FuzzRoughness");
             facingColor = Find("_FacingColor");
-            tangentColor = Find("_TangentColor");
-            falloff = Find("_Falloff");
             foliageTransmissionColor = Find("_FoliageTransmissionColor");
             foliageTransmissionWeight = Find("_FoliageTransmissionWeight");
             foliageThickness = Find("_FoliageThickness");
@@ -300,8 +396,15 @@ namespace Burt.RenderPipeline.Editor
             tintAORemap = Find("_TintAORemap");
             tintHeightContrast = Find("_TintHeightContrast");
             treeHeight = Find("_TreeHeight");
-            foliageTintMode = Find("_FoliageTintMode");
+            foliageTintMode = Find("_CustomEnum");
+            foliageTintModeLegacy = Find("_FoliageTintMode");
             foliageUseBakedNormals = Find("_FoliageUseBakedNormals");
+            maxBendAngle = Find("_MaxBendAngle");
+            swayIntensity = Find("_SwayIntensity");
+            bendMaskPow = Find("_BendMaskPow");
+            toTrunkMaskPow = Find("_ToTrunkMaskPow");
+            terrainBlendTerrainTog = Find("_TerrainBlend_TerrainTog");
+            terrainBlendBlendHeight = Find("_TerrainBlend_BlendHeight");
             sssIntensity = Find("_SSSIntensity");
             fresnelIntensity = Find("_FresnelIntensity");
             fresnelExp = Find("_FresnelExp");
@@ -495,13 +598,25 @@ namespace Burt.RenderPipeline.Editor
                 return;
             }
 
-            DrawTexture(MaskMapLabel, maskMap);
-            bool usesRoughness = IsFabricShader(material) || IsSilkShader(material);
+            bool usesTrunk = IsTrunkShader(material);
+            bool usesRoughness = IsFabricShader(material) || IsSilkShader(material) || usesTrunk;
             bool usesFoliage = IsFoliageShader(material);
-            if (maskMap != null)
+            bool usesTreeFoliage = usesFoliage && !IsGrassShader(material);
+            if (!usesTreeFoliage)
+            {
+                DrawTexture(usesTrunk ? TrunkMaskMapLabel : MaskMapLabel, maskMap);
+            }
+
+            if (usesTreeFoliage)
+            {
+                BurtShaderGUIUtility.DrawChannelHint("Tree Foliage uses the NSR Map for R/G normal, B thickness, and A roughness; vertex color A drives AO.");
+            }
+            else if (maskMap != null)
             {
                 BurtShaderGUIUtility.DrawChannelHint(IsSubsurfaceShader(material)
                     ? "Channels: G Occlusion | A Smoothness. R Metallic is ignored by Subsurface skin."
+                    : usesTrunk
+                        ? "Channels: G Occlusion | A Roughness. R Metallic and B Thickness are ignored; vertex color A is remapped as AO."
                     : usesFoliage
                         ? "Channels: G Occlusion | B Thickness | A Roughness. R Metallic is ignored by Foliage."
                     : usesRoughness
@@ -509,26 +624,32 @@ namespace Burt.RenderPipeline.Editor
                         : "Channels: R Metallic | G Occlusion | B Reserved | A Smoothness");
             }
 
-            if (!IsSubsurfaceShader(material) && !usesFoliage)
+            if (!IsSubsurfaceShader(material) && !usesFoliage && !usesTrunk)
             {
                 BurtShaderGUIUtility.DrawSubHeader("Lit");
                 DrawProperty(metallic);
                 DrawProperty(anisotropy);
             }
 
-            BurtShaderGUIUtility.DrawSubHeader("Shared");
-            if (!usesFoliage)
+            if (!usesTreeFoliage)
             {
-                DrawProperty(usesRoughness ? roughness : smoothness);
-            }
+                BurtShaderGUIUtility.DrawSubHeader("Shared");
+                if (!usesFoliage && !usesTrunk)
+                {
+                    DrawProperty(usesRoughness ? roughness : smoothness);
+                }
 
-            DrawProperty(occlusionStrength);
-            if (!IsSubsurfaceShader(material) && !usesFoliage)
+                if (!usesTrunk)
+                {
+                    DrawProperty(occlusionStrength);
+                }
+            }
+            if (!IsSubsurfaceShader(material) && !usesFoliage && !usesTrunk)
             {
                 DrawProperty(reflectance);
             }
 
-            if (maskMap != null)
+            if (!usesTreeFoliage && maskMap != null)
             {
                 EditorGUILayout.HelpBox("Mask channels are multiplied by scalar values below, matching BurtRP GBuffer and Forward sampling.", MessageType.None);
             }
@@ -569,9 +690,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawProperty(facingColor);
-            DrawProperty(tangentColor);
-            DrawProperty(falloff);
-            EditorGUILayout.HelpBox("Silk uses the Fabric deferred model with the silk flag set and keeps anisotropic specular through the shared PBR path.", MessageType.None);
+            EditorGUILayout.HelpBox("Silk uses the Fabric deferred model with the silk flag set; Facing Color tints the anisotropic silk specular.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -610,12 +729,24 @@ namespace Burt.RenderPipeline.Editor
                 if (!IsGrassShader(material))
                 {
                     BurtShaderGUIUtility.DrawSubHeader("Foliage Tint");
-                    DrawTexture(TintPaletteLabel, tintPalette);
-                    DrawTexture(LocalTintPaletteLabel, localTintPalette);
-                    DrawProperty(foliageTintMode);
-                    DrawProperty(tintValue);
+                    DrawFoliageTintMode(material);
+                    int tintMode = GetFoliageTintModeValue(material);
+                    if (tintMode > 0)
+                    {
+                        DrawTexture(TintPaletteLabel, tintPalette);
+                        DrawTexture(LocalTintPaletteLabel, localTintPalette);
+                        if (tintMode == 1)
+                        {
+                            DrawProperty(tintValue);
+                        }
+                    }
+
                     DrawProperty(tintScale);
-                    DrawProperty(localTintColor);
+                    if (tintMode == 0)
+                    {
+                        DrawProperty(localTintColor);
+                    }
+
                     DrawProperty(tintAOHeightRatio);
                     DrawProperty(tintAORemap);
                     DrawProperty(tintHeightContrast);
@@ -665,6 +796,40 @@ namespace Burt.RenderPipeline.Editor
             }
 
             EditorGUILayout.HelpBox("Foliage uses Mask B as thickness and Mask A as roughness. Deferred GBuffer keeps transmission color, weight, thickness, wrap, NdotL, and specular scale for the lighting pass.", MessageType.None);
+            BurtShaderGUIUtility.EndSection();
+        }
+
+        private void DrawTrunkInputs(Material material)
+        {
+            if (!IsTrunkShader(material))
+            {
+                return;
+            }
+
+            if (!BurtShaderGUIUtility.BeginSection(TrunkLabel, ref showTrunkInputs))
+            {
+                return;
+            }
+
+            BurtShaderGUIUtility.DrawSubHeader("Surface");
+            DrawProperty(grassSpecular);
+            DrawProperty(vertexAORemap);
+            BurtShaderGUIUtility.DrawChannelHint("XRender EV_Trunk uses non-metallic DefaultLit, Mask A as roughness, and min(Mask G, Vertex A remap) for AO.");
+
+            BurtShaderGUIUtility.DrawSubHeader("Wind");
+            DrawProperty(treeHeight);
+            DrawProperty(maxBendAngle);
+            DrawProperty(swayIntensity);
+            DrawProperty(bendMaskPow);
+            DrawProperty(toTrunkMaskPow);
+
+            BurtShaderGUIUtility.DrawSubHeader("Terrain Blend");
+            DrawProperty(terrainBlendTerrainTog);
+            using (new EditorGUI.DisabledScope(terrainBlendTerrainTog != null && terrainBlendTerrainTog.floatValue < 0.5f))
+            {
+                DrawProperty(terrainBlendBlendHeight);
+            }
+
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -905,14 +1070,20 @@ namespace Burt.RenderPipeline.Editor
             EditorUtility.SetDirty(pipelineAsset);
         }
 
-        private void DrawNormalInputs()
+        private void DrawNormalInputs(Material material)
         {
             if (!BurtShaderGUIUtility.BeginSection(NormalLabel, ref showNormalInputs))
             {
                 return;
             }
 
-            DrawTextureWithExtra(NormalMapLabel, normalMap, normalScale);
+            bool usesTreeFoliage = IsFoliageShader(material) && !IsGrassShader(material);
+            DrawTextureWithExtra(usesTreeFoliage ? FoliageNSRMapLabel : NormalMapLabel, normalMap, normalScale);
+            if (usesTreeFoliage && normalMap != null)
+            {
+                BurtShaderGUIUtility.DrawChannelHint("Channels: R/G normal | B thickness | A roughness. Use the XRender packed texture, not a Unity normal-map import.");
+            }
+
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -949,6 +1120,74 @@ namespace Burt.RenderPipeline.Editor
         private void DrawTexture(GUIContent label, MaterialProperty texture)
         {
             BurtShaderGUIUtility.DrawTexture(materialEditor, label, texture);
+        }
+
+        private void DrawFoliageTintMode(Material material)
+        {
+            MaterialProperty tintModeProperty = foliageTintMode ?? foliageTintModeLegacy;
+            if (tintModeProperty == null)
+            {
+                return;
+            }
+
+            EditorGUI.showMixedValue = tintModeProperty.hasMixedValue;
+            int tintMode = GetFoliageTintModeValue(material);
+            EditorGUI.BeginChangeCheck();
+            int newTintMode = EditorGUILayout.Popup(FoliageTintModeLabel, tintMode, FoliageTintModeNames);
+            EditorGUI.showMixedValue = false;
+
+            if (!EditorGUI.EndChangeCheck())
+            {
+                return;
+            }
+
+            materialEditor.RegisterPropertyChangeUndo(FoliageTintModeLabel.text);
+            if (foliageTintMode != null)
+            {
+                foliageTintMode.floatValue = newTintMode;
+            }
+
+            if (foliageTintModeLegacy != null)
+            {
+                foliageTintModeLegacy.floatValue = newTintMode;
+            }
+
+            foreach (Object target in materialEditor.targets)
+            {
+                Material targetMaterial = target as Material;
+                if (targetMaterial == null)
+                {
+                    continue;
+                }
+
+                bool changed = SetMaterialFloatIfDifferent(targetMaterial, "_CustomEnum", newTintMode);
+                changed |= SetMaterialFloatIfDifferent(targetMaterial, "_FoliageTintMode", newTintMode);
+                if (changed)
+                {
+                    EditorUtility.SetDirty(targetMaterial);
+                }
+            }
+        }
+
+        private int GetFoliageTintModeValue(Material material)
+        {
+            if (material != null && material.HasProperty("_CustomEnum"))
+            {
+                return Mathf.Clamp(Mathf.RoundToInt(material.GetFloat("_CustomEnum")), 0, FoliageTintModeNames.Length - 1);
+            }
+
+            if (material != null && material.HasProperty("_FoliageTintMode"))
+            {
+                return Mathf.Clamp(Mathf.RoundToInt(material.GetFloat("_FoliageTintMode")), 0, FoliageTintModeNames.Length - 1);
+            }
+
+            MaterialProperty tintModeProperty = foliageTintMode ?? foliageTintModeLegacy;
+            if (tintModeProperty != null && !tintModeProperty.hasMixedValue)
+            {
+                return Mathf.Clamp(Mathf.RoundToInt(tintModeProperty.floatValue), 0, FoliageTintModeNames.Length - 1);
+            }
+
+            return 0;
         }
 
         private void DrawProperty(MaterialProperty property)
@@ -1054,6 +1293,11 @@ namespace Burt.RenderPipeline.Editor
                 return IsTransparentMaterial(material) ? "PBR Transparent Foliage" : "PBR Foliage / Deferred GBuffer";
             }
 
+            if (IsTrunkShader(material))
+            {
+                return IsTransparentMaterial(material) ? "PBR Transparent Trunk" : "PBR Trunk / DefaultLit GBuffer";
+            }
+
             return IsTransparentMaterial(material) ? "PBR Transparent" : "PBR Lit / Deferred GBuffer";
         }
 
@@ -1102,6 +1346,13 @@ namespace Burt.RenderPipeline.Editor
             return material != null &&
                 material.shader != null &&
                 material.shader.name.IndexOf("Grass", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsTrunkShader(Material material)
+        {
+            return material != null &&
+                material.shader != null &&
+                material.shader.name.IndexOf("Trunk", System.StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static BurtRenderPipelineAsset GetActiveBurtAsset()

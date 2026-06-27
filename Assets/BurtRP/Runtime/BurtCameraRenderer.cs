@@ -6,6 +6,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
     public sealed class BurtCameraRenderer // 定义单个 request 的执行器，它负责驱动 Assembler 和 RenderGraph。
     {
         private static readonly int HairDitherFrameIndexId = Shader.PropertyToID("_BurtHairDitherFrameIndex");
+        private const string BlueNoiseScalarTextureResourcePath = "BlueNoise/STBlueNoise_scalar_128x128x64";
+        private static readonly int BlueNoiseScalarTextureId = Shader.PropertyToID("_BurtBlueNoiseScalarTexture");
+        private static readonly int BlueNoiseDimensionsId = Shader.PropertyToID("_BurtBlueNoiseDimensions");
+        private static readonly int BlueNoiseModuloMasksId = Shader.PropertyToID("_BurtBlueNoiseModuloMasks");
+        private static readonly int BlueNoiseScalarTextureValidId = Shader.PropertyToID("_BurtBlueNoiseScalarTextureValid");
+        private static readonly int BlueNoiseFrameIndexId = Shader.PropertyToID("_BurtBlueNoiseFrameIndex");
+        private static Texture2D blueNoiseScalarTexture;
+        private static bool blueNoiseScalarTextureLoaded;
+        private static Vector4 blueNoiseDimensions = new Vector4(1.0f, 1.0f, 1.0f, 0.0f);
+        private static Vector4 blueNoiseModuloMasks = Vector4.zero;
 
         private readonly BurtRenderGraph renderGraph = new BurtRenderGraph(); // 创建一个可复用的 RenderGraph，用来承载当前 request 的 Pass 列表和资源表。
 
@@ -50,6 +60,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
             var temporalAA = BurtTemporalAAUtility.PrepareRequest(request, asset, safeRenderOptions);
             request.SetTemporalAA(temporalAA);
             Shader.SetGlobalFloat(HairDitherFrameIndexId, temporalAA.Enabled ? temporalAA.FrameIndex : 0);
+            BindBlueNoiseGlobals();
 
             try
             {
@@ -102,6 +113,45 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             BurtTemporalAAUtility.CommitRequest(request);
             renderGraph.FlushDeferredResourceReleases(); // Release graph-owned GraphicsBuffers only after queued draw commands have been submitted.
+        }
+
+        private static void BindBlueNoiseGlobals()
+        {
+            if (!blueNoiseScalarTextureLoaded)
+            {
+                blueNoiseScalarTextureLoaded = true;
+                blueNoiseScalarTexture = Resources.Load<Texture2D>(BlueNoiseScalarTextureResourcePath);
+
+                if (blueNoiseScalarTexture != null)
+                {
+                    var width = Mathf.Max(1, blueNoiseScalarTexture.width);
+                    var height = Mathf.Max(1, blueNoiseScalarTexture.height);
+                    var depth = Mathf.Max(1, height / width);
+                    blueNoiseDimensions = new Vector4(width, width, depth, 0.0f);
+                    blueNoiseModuloMasks = new Vector4(
+                        CreateModuloMask(width),
+                        CreateModuloMask(width),
+                        CreateModuloMask(depth),
+                        0.0f);
+                }
+            }
+
+            Shader.SetGlobalTexture(BlueNoiseScalarTextureId, blueNoiseScalarTexture != null ? blueNoiseScalarTexture : Texture2D.grayTexture);
+            Shader.SetGlobalVector(BlueNoiseDimensionsId, blueNoiseDimensions);
+            Shader.SetGlobalVector(BlueNoiseModuloMasksId, blueNoiseModuloMasks);
+            Shader.SetGlobalFloat(BlueNoiseScalarTextureValidId, blueNoiseScalarTexture != null ? 1.0f : 0.0f);
+            Shader.SetGlobalFloat(BlueNoiseFrameIndexId, Time.frameCount);
+        }
+
+        private static int CreateModuloMask(int dimension)
+        {
+            var powerOfTwo = Mathf.NextPowerOfTwo(Mathf.Max(1, dimension));
+            if (powerOfTwo > dimension)
+            {
+                powerOfTwo >>= 1;
+            }
+
+            return Mathf.Max(0, powerOfTwo - 1);
         }
 
         private static bool ShouldCaptureRenderGraphDebug(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 判断当前 request 是否需要生成 RenderGraph Debug 文本。

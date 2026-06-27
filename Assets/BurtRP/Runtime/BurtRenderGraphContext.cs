@@ -233,6 +233,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle ScreenSpaceShadowTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceShadowName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceShadow();
+            }
+        }
+
         public BurtRenderTargetHandle ScreenSpaceGlobalIlluminationRawTarget
         {
             get

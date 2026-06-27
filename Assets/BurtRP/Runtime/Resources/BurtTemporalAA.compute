@@ -1,8 +1,27 @@
 #pragma kernel BuildPrevUseCountCS
+#pragma kernel DecimateHistoryCS
 
 Texture2D<float4> _BurtTAAVelocityTexture;
+Texture2D<float> _BurtTAACurrentDepthTexture;
+Texture2D<float> _BurtTAADepthHistoryTexture;
 RWTexture2D<int> _BurtTAAPrevUseCountTexture;
+RWTexture2D<float2> _BurtTAAParallaxRejectionTexture;
 float4 _BurtTAATexelSize;
+float4 _ZBufferParams;
+
+float BurtTaaValidSurfaceWeight(float rawDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return step(1e-6, rawDepth);
+#else
+    return 1.0 - step(1.0 - 1e-6, rawDepth);
+#endif
+}
+
+float BurtTaaLinearEyeDepth(float rawDepth)
+{
+    return max(rcp(_ZBufferParams.z * rawDepth + _ZBufferParams.w), 1e-4);
+}
 
 void BurtTaaAddUseCount(int2 pixel, float weight, int2 textureSize)
 {
@@ -30,7 +49,7 @@ void BuildPrevUseCountCS(uint3 id : SV_DispatchThreadID)
 
     float2 uv = (float2(pixel) + 0.5) * _BurtTAATexelSize.xy;
     float4 velocityData = _BurtTAAVelocityTexture.Load(int3(pixel, 0));
-    float2 historyUv = uv + velocityData.xy;
+    float2 historyUv = uv - velocityData.xy;
     float historyInBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
     float2 samplePosition = historyUv * _BurtTAATexelSize.zw - 0.5;
     float2 basePixelFloat = floor(samplePosition);
@@ -41,4 +60,59 @@ void BuildPrevUseCountCS(uint3 id : SV_DispatchThreadID)
     BurtTaaAddUseCount(basePixel + int2(1, 0), blend.x * (1.0 - blend.y) * historyInBounds, textureSize);
     BurtTaaAddUseCount(basePixel + int2(0, 1), (1.0 - blend.x) * blend.y * historyInBounds, textureSize);
     BurtTaaAddUseCount(basePixel + int2(1, 1), blend.x * blend.y * historyInBounds, textureSize);
+}
+
+[numthreads(8, 8, 1)]
+void DecimateHistoryCS(uint3 id : SV_DispatchThreadID)
+{
+    int2 textureSize = int2((int)_BurtTAATexelSize.z, (int)_BurtTAATexelSize.w);
+    int2 pixel = int2(id.xy);
+    if (pixel.x >= textureSize.x || pixel.y >= textureSize.y)
+    {
+        return;
+    }
+
+    float2 uv = (float2(pixel) + 0.5) * _BurtTAATexelSize.xy;
+    float4 velocityData = _BurtTAAVelocityTexture.Load(int3(pixel, 0));
+    float2 historyUv = uv - velocityData.xy;
+    float currentRawDepth = BurtTaaValidSurfaceWeight(velocityData.w) > 0.5 ? velocityData.w : _BurtTAACurrentDepthTexture.Load(int3(pixel, 0));
+    float currentLinearDepth = BurtTaaLinearEyeDepth(currentRawDepth);
+    float2 samplePosition = historyUv * _BurtTAATexelSize.zw - 0.5;
+    float2 basePixelFloat = floor(samplePosition);
+    float2 blend = saturate(samplePosition - basePixelFloat);
+    int2 basePixel = int2(basePixelFloat);
+    float finalRejection = 0.0;
+    float historyGhosting = 0.0;
+    float depthRejectionSum = 0.0;
+
+    [unroll]
+    for (int y = 0; y < 2; y++)
+    {
+        float wy = y == 0 ? (1.0 - blend.y) : blend.y;
+        [unroll]
+        for (int x = 0; x < 2; x++)
+        {
+            float wx = x == 0 ? (1.0 - blend.x) : blend.x;
+            int2 samplePixel = basePixel + int2(x, y);
+            bool pixelInBounds = samplePixel.x >= 0 && samplePixel.y >= 0 && samplePixel.x < textureSize.x && samplePixel.y < textureSize.y;
+            if (!pixelInBounds)
+            {
+                continue;
+            }
+
+            float weight = wx * wy;
+            float previousUseCount = max(0, _BurtTAAPrevUseCountTexture[samplePixel]) * (1.0 / 255.0);
+            float historyGhostingRejection = saturate(1.0 - abs(previousUseCount - 1.0));
+            float previousRawDepth = _BurtTAADepthHistoryTexture.Load(int3(samplePixel, 0));
+            float previousLinearDepth = BurtTaaLinearEyeDepth(previousRawDepth);
+            float depthDelta = abs(currentLinearDepth - previousLinearDepth);
+            float depthRejection = saturate(2.0 - 4.0 * depthDelta / previousLinearDepth);
+            float tapRejection = max(historyGhostingRejection, depthRejection);
+            finalRejection += tapRejection * weight;
+            historyGhosting += historyGhostingRejection * weight;
+            depthRejectionSum += depthRejection * weight;
+        }
+    }
+
+    _BurtTAAParallaxRejectionTexture[pixel] = float2(saturate(finalRejection), saturate(max(historyGhosting, depthRejectionSum)));
 }

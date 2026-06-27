@@ -6,6 +6,7 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairDither.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkVertexAnimation.hlsl"
 
 #if !defined(BURT_DEPTH_ONLY_ALPHA_CLIP)
     #if defined(BURT_ALPHA_CLIP)
@@ -19,6 +20,9 @@ struct DepthAttributes
 {
     float4 positionOS : POSITION;
     float3 normalOS : NORMAL;
+    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+        float4 color : COLOR;
+    #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 
 #if BURT_DEPTH_ONLY_ALPHA_CLIP
@@ -42,6 +46,9 @@ DepthVaryings VertDepth(DepthAttributes input)
 {
     UNITY_SETUP_INSTANCE_ID(input);
     float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+        positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+    #endif
 
     DepthVaryings output;
     output.positionCS = UnityObjectToClipPos(positionOS);

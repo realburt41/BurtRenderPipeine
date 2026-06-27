@@ -102,6 +102,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     resources.RegisterScreenSpaceAmbientOcclusionTexture();
                 }
 
+                if (ShouldRegisterScreenSpaceShadow(request, asset))
+                {
+                    resources.RegisterScreenSpaceShadowTexture();
+                }
+
                 if (ShouldRegisterScreenSpaceGlobalIllumination(request, asset))
                 {
                     resources.RegisterScreenSpaceGlobalIlluminationRawTexture();
@@ -271,6 +276,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderPipelineAsset asset)
         {
             return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(request, asset);
+        }
+
+        private static bool ShouldRegisterScreenSpaceShadow(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) && BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadow(request, asset);
         }
 
         private static bool ShouldRegisterScreenSpaceGlobalIllumination(

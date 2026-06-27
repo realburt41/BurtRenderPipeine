@@ -95,12 +95,9 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
                     discard;
                 }
 
-                if (previousAvailable < 0.5)
-                {
-                    return float4(2.0, 2.0, 0.0, 0.0);
-                }
+                clip(previousAvailable - 0.5);
 
-                float2 velocity = previousUv - currentUv;
+                float2 velocity = currentUv - previousUv;
                 float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
                 float keepVelocity = step(0.02, max(velocityPixels.x, velocityPixels.y));
                 clip(keepVelocity - 0.5);

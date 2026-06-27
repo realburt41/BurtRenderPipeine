@@ -59,6 +59,11 @@
                 #endif
             }
 
+            bool BurtSSRTemporalIsExcludedShadingModel(float shadingModelID)
+            {
+                return BurtIsActiveHairShadingModel(shadingModelID) || BurtIsActiveFurShadingModel(shadingModelID);
+            }
+
             float BurtSSRTemporalLuminance(float3 color)
             {
                 return dot(max(color, 0.0), float3(0.2126, 0.7152, 0.0722));
@@ -262,7 +267,7 @@
 
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, currentRawDepth);
                 BurtGBufferData currentGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
-                if (BurtIsActiveHairShadingModel(currentGBuffer.shadingModelID))
+                if (BurtSSRTemporalIsExcludedShadingModel(currentGBuffer.shadingModelID))
                 {
                     return float4(0.0, 0.0, 0.0, 0.0);
                 }
@@ -460,10 +465,15 @@
                 return output;
             }
 
+            bool BurtSSRTemporalIsExcludedShadingModel(float shadingModelID)
+            {
+                return BurtIsActiveHairShadingModel(shadingModelID) || BurtIsActiveFurShadingModel(shadingModelID);
+            }
+
             float4 FragCopyNormalRoughnessHistory(Varyings input) : SV_Target
             {
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(input.screenUV));
-                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID))
+                if (BurtSSRTemporalIsExcludedShadingModel(gbufferData.shadingModelID))
                 {
                     return 0.0;
                 }
@@ -517,6 +527,11 @@
                 output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
                 output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
                 return output;
+            }
+
+            bool BurtSSRTemporalIsExcludedShadingModel(float shadingModelID)
+            {
+                return BurtIsActiveHairShadingModel(shadingModelID) || BurtIsActiveFurShadingModel(shadingModelID);
             }
 
             bool BurtSSRTemporalMomentIsSkyDepth(float rawDepth)
@@ -688,7 +703,7 @@
                     }
 
                     BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
-                    if (BurtIsActiveHairShadingModel(sampleGBuffer.shadingModelID))
+                    if (BurtSSRTemporalIsExcludedShadingModel(sampleGBuffer.shadingModelID))
                     {
                         continue;
                     }
@@ -727,7 +742,7 @@
 
                 float historyValid = saturate(_BurtSSRTemporalParams0.y);
                 BurtGBufferData currentGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(input.screenUV));
-                if (BurtIsActiveHairShadingModel(currentGBuffer.shadingModelID))
+                if (BurtSSRTemporalIsExcludedShadingModel(currentGBuffer.shadingModelID))
                 {
                     return 0.0;
                 }
