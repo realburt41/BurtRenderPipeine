@@ -29,7 +29,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
 
         ENDHLSL
 
-        // Default Lit pass: writes stencil/model id 0 and clears the lighting target for the later additive model passes.
+        // Default Lit pass: XRender-style high stencil bits, 32 = DefaultLit.
         Pass
         {
             Name "Burt Deferred Lit Lighting"
@@ -39,8 +39,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
             ZTest Always
             Stencil
             {
-                Ref 0
-                ReadMask 7
+                Ref 32
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }
@@ -49,14 +49,13 @@ Shader "Hidden/BurtRP/DeferredLighting"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_DEFAULT_LIT 1
             #pragma target 4.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
         }
 
-        // Hair pass: only shades stencil/model id 1 pixels and adds them after the Lit pass.
+        // Hair pass: Burt uses XRender's unused Transmission slot, 96 = Hair.
         Pass
         {
             Name "Burt Deferred Hair Lighting"
@@ -66,8 +65,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
             ZTest Always
             Stencil
             {
-                Ref 1
-                ReadMask 7
+                Ref 96
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }
@@ -76,14 +75,13 @@ Shader "Hidden/BurtRP/DeferredLighting"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_HAIR 1
             #pragma target 4.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
         }
 
-        // Clear Coat pass: only shades stencil/model id 2 pixels and adds them after the Lit pass.
+        // Clear Coat pass: XRender-style high stencil bits, 128 = Coat.
         Pass
         {
             Name "Burt Deferred Clear Coat Lighting"
@@ -93,8 +91,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
             ZTest Always
             Stencil
             {
-                Ref 2
-                ReadMask 7
+                Ref 128
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }
@@ -103,14 +101,13 @@ Shader "Hidden/BurtRP/DeferredLighting"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT 1
             #pragma target 4.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
         }
 
-        // Subsurface pass: only shades stencil/model id 3 pixels and adds them after the Lit pass.
+        // Subsurface pass: XRender-style high stencil bits, 64 = Subsurface.
         Pass
         {
             Name "Burt Deferred Subsurface Lighting"
@@ -120,8 +117,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
             ZTest Always
             Stencil
             {
-                Ref 3
-                ReadMask 7
+                Ref 64
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }
@@ -131,14 +128,13 @@ Shader "Hidden/BurtRP/DeferredLighting"
             #define BURT_DEFERRED_SHADING_MODEL_SUBSURFACE 1
             #define BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT 1
             #pragma target 4.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
         }
 
-        // Fabric pass: only shades stencil/model id 4 pixels and adds them after the Lit pass.
+        // Fabric pass: XRender-style high stencil bits, 160 = Fabric.
         Pass
         {
             Name "Burt Deferred Fabric Lighting"
@@ -148,8 +144,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
             ZTest Always
             Stencil
             {
-                Ref 4
-                ReadMask 7
+                Ref 160
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }
@@ -158,14 +154,13 @@ Shader "Hidden/BurtRP/DeferredLighting"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_FABRIC 1
             #pragma target 4.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
         }
 
-        // Foliage pass: only shades stencil/model id 5 pixels and adds them after the Lit pass.
+        // Foliage pass: XRender-style high stencil bits, 192 = Foliage.
         Pass
         {
             Name "Burt Deferred Foliage Lighting"
@@ -175,8 +170,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
             ZTest Always
             Stencil
             {
-                Ref 5
-                ReadMask 7
+                Ref 192
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }
@@ -185,14 +180,13 @@ Shader "Hidden/BurtRP/DeferredLighting"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_FOLIAGE 1
             #pragma target 4.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
         }
 
-        // Fur pass: only shades stencil/model id 6 pixels and adds them after the Lit pass.
+        // Fur pass: XRender-style high stencil bits, 224 = Fur.
         Pass
         {
             Name "Burt Deferred Fur Lighting"
@@ -202,8 +196,8 @@ Shader "Hidden/BurtRP/DeferredLighting"
             ZTest Always
             Stencil
             {
-                Ref 6
-                ReadMask 7
+                Ref 224
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }
@@ -212,7 +206,6 @@ Shader "Hidden/BurtRP/DeferredLighting"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_FUR 1
             #pragma target 4.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag

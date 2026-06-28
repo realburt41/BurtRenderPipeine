@@ -519,7 +519,7 @@ float4 FragMultipassFurForward(BurtMultipassFurVaryings input, fixed facing : VF
     float3 shadingDirectionWS = BurtGetMultipassFurShadingDirectionWS(input);
     float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
     BurtSurfaceData surfaceData = BurtCreateMultipassFurSurfaceData(baseColor, baseMap, maskMap, furAtten);
-    float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
+    float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
     BurtGBufferData furGBufferData = BurtCreateFurGBufferData(surfaceData, normalWS, float4(shadingDirectionWS, 1.0f), float3(0.0f, 0.0f, 0.0f));
     BurtPBRShadingComponents pbrComponents = BurtEvaluateFurShadingComponentsFromGBuffer(furGBufferData, mainLight, viewDirectionWS, input.positionWS);

@@ -655,7 +655,7 @@ Light:
   m_BounceIntensity: 1
   m_ColorTemperature: 6570
   m_UseColorTemperature: 0
-  m_BoundingSphereOverride: {x: 1.0000001, y: 1.0000001, z: 1.0000001, w: 0.9999999}
+  m_BoundingSphereOverride: {x: 0, y: 6.162977e-33, z: 7.06521e+35, w: 1.5052984e-36}
   m_UseBoundingSphereOverride: 0
   m_UseViewFrustumForShadowCasterCull: 1
   m_ShadowRadius: 0
@@ -870,7 +870,7 @@ PrefabInstance:
     - target: {fileID: -3801706451896346929, guid: 90a6df37d194067498e876e6899e80be,
         type: 3}
       propertyPath: m_RenderingLayerMask
-      value: 1
+      value: 4194304
       objectReference: {fileID: 0}
     - target: {fileID: -3801706451896346929, guid: 90a6df37d194067498e876e6899e80be,
         type: 3}
@@ -1240,7 +1240,7 @@ Transform:
   m_GameObject: {fileID: 1148666740}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.199, y: -0.025, z: 1.017}
+  m_LocalPosition: {x: 0.199, y: -0.414, z: 1.017}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1989,7 +1989,7 @@ Transform:
   m_GameObject: {fileID: 2104118997}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0.99998087, z: -0, w: 0.0061936723}
-  m_LocalPosition: {x: 0.723, y: 0.053, z: -0.352}
+  m_LocalPosition: {x: 0.723, y: -0.661, z: -0.352}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -2003,7 +2003,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2104118997}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a9ac4034810f48d6b5d82a4795bc1d64, type: 3}
   m_Name: 
@@ -2013,6 +2013,7 @@ MonoBehaviour:
   padding: 0.02
   strength: 1
   receiverDepthBias: 0.0005
+  receiverDistance: 3
   normalBias: 5
   includeInactiveRenderers: 0
 --- !u!1001 &863042904802504782

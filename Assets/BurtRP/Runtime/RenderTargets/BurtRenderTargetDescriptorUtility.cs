@@ -224,30 +224,39 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
         public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
         {
-            var format = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf)
-                ? RenderTextureFormat.ARGBHalf
-                : RenderTextureFormat.ARGB32;
-            return CreateGBufferDescriptor(camera, format);
+            var graphicsFormat = SelectGBufferBaseColorGraphicsFormat();
+            if (graphicsFormat != GraphicsFormat.None)
+            {
+                return CreateGBufferDescriptor(camera, graphicsFormat);
+            }
+
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32, QualitySettings.activeColorSpace == ColorSpace.Linear);
         }
 
         public static RenderTextureDescriptor CreateGBuffer1Descriptor(Camera camera) // 定义创建 Deferred GBuffer1 RT 描述的函数。
         {
-            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf); // GBuffer1 保存 oct normal.rg、metallic.b、smoothness.a；直接高光对法线量化很敏感，所以用 16 位通道避免格子状高光。
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false); // GBuffer1 保存 oct normal.rg、metallic.b、smoothness.a；直接高光对法线量化很敏感，所以用 16 位通道避免格子状高光。
         }
 
         public static RenderTextureDescriptor CreateGBuffer2Descriptor(Camera camera) // 定义创建 Deferred GBuffer2 RT 描述的函数。
         {
-            return CreateGBufferDescriptor(camera, RenderTextureFormat.DefaultHDR); // GBuffer2 第一版保存 emission.rgb 和 reflectance.a，使用 HDR 避免自发光过早被截断。
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false); // GBuffer2 保存 emission.rgb 和 reflectance.a；固定 ARGBHalf，避免 DefaultHDR 回落到无 alpha HDR 格式。
         }
 
         public static RenderTextureDescriptor CreateGBuffer3Descriptor(Camera camera)
         {
-            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf);
+            var graphicsFormat = SelectGBufferLinear8GraphicsFormat();
+            if (graphicsFormat != GraphicsFormat.None)
+            {
+                return CreateGBufferDescriptor(camera, graphicsFormat);
+            }
+
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false);
         }
 
         public static RenderTextureDescriptor CreateGBuffer4Descriptor(Camera camera)
         {
-            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf);
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false);
         }
 
         public static RenderTextureDescriptor CreateGBufferObjectIndexDescriptor(Camera camera)
@@ -255,19 +264,63 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             var format = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.R8)
                 ? RenderTextureFormat.R8
                 : RenderTextureFormat.RFloat;
-            var descriptor = CreateGBufferDescriptor(camera, format);
+            var descriptor = CreateGBufferDescriptor(camera, format, false);
             descriptor.sRGB = false;
+            return descriptor;
+        }
+
+        private static GraphicsFormat SelectGBufferBaseColorGraphicsFormat()
+        {
+            if (QualitySettings.activeColorSpace == ColorSpace.Linear &&
+                IsSupportedGBufferGraphicsFormat(GraphicsFormat.R8G8B8A8_SRGB))
+            {
+                return GraphicsFormat.R8G8B8A8_SRGB;
+            }
+
+            return SelectGBufferLinear8GraphicsFormat();
+        }
+
+        private static GraphicsFormat SelectGBufferLinear8GraphicsFormat()
+        {
+            return IsSupportedGBufferGraphicsFormat(GraphicsFormat.R8G8B8A8_UNorm)
+                ? GraphicsFormat.R8G8B8A8_UNorm
+                : GraphicsFormat.None;
+        }
+
+        private static bool IsSupportedGBufferGraphicsFormat(GraphicsFormat format)
+        {
+            return SystemInfo.IsFormatSupported(format, FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(format, FormatUsage.Sample);
+        }
+
+        private static RenderTextureDescriptor CreateGBufferDescriptor(
+            Camera camera,
+            GraphicsFormat format)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            descriptor.graphicsFormat = format;
+            ConfigureGBufferDescriptor(ref descriptor);
             return descriptor;
         }
 
         private static RenderTextureDescriptor CreateGBufferDescriptor( // 定义创建 GBuffer RT 描述的共用函数，保证五张 GBuffer 尺寸和采样设置一致。
             Camera camera, // 接收当前相机，用来匹配渲染尺寸和 targetTexture 尺寸。
-            RenderTextureFormat format) // 接收当前 GBuffer 需要使用的颜色格式。
+            RenderTextureFormat format, // 接收当前 GBuffer 需要使用的颜色格式。
+            bool sRGB = false)
         {
             var descriptor = CreateCameraColorDescriptor(camera); // 先复用 CameraColor 的尺寸、targetTexture 尺寸和基础采样设置。
 
             descriptor.colorFormat = format; // 覆盖颜色格式，因为 GBuffer 布局由 Deferred 自己决定，不跟随相机 HDR 开关。
 
+            descriptor.sRGB = sRGB;
+
+            ConfigureGBufferDescriptor(ref descriptor);
+
+            return descriptor; // 返回创建好的 GBuffer RT 描述，供后续 Allocate GBuffer Pass 使用。
+        }
+
+        private static void ConfigureGBufferDescriptor(ref RenderTextureDescriptor descriptor)
+        {
             descriptor.depthBufferBits = 0; // GBuffer 颜色目标不持有深度缓冲，Deferred 会复用独立 CameraDepth。
 
             descriptor.msaaSamples = 1; // Deferred 第一版不支持 MSAA GBuffer，先固定为 1 避免 MRT 采样数不一致。
@@ -275,8 +328,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.useMipMap = false; // GBuffer 不需要 mipmap，关闭后减少显存和生成成本。
 
             descriptor.autoGenerateMips = false; // GBuffer 不自动生成 mipmap，避免 Unity 做无意义的后处理。
-
-            return descriptor; // 返回创建好的 GBuffer RT 描述，供后续 Allocate GBuffer Pass 使用。
         }
 
         public static RenderTextureDescriptor CreateCameraDepthDescriptor(Camera camera) // 定义创建相机深度 RT 描述的函数。
@@ -308,6 +359,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.autoGenerateMips = false; // 深度缓冲不生成 mipmap，避免 Unity 做额外工作。
 
             return descriptor; // 返回创建好的深度 RT 描述，供分配 Pass 使用。
+        }
+
+        public static RenderTextureDescriptor CreateDeferredLightingDepthDescriptor(Camera camera)
+        {
+            var cameraColorDescriptor = CreateCameraColorDescriptor(camera);
+            var descriptor = new RenderTextureDescriptor(
+                cameraColorDescriptor.width,
+                cameraColorDescriptor.height,
+                RenderTextureFormat.RFloat,
+                0);
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
         }
 
         private static GraphicsFormat SelectCameraDepthStencilFormat()

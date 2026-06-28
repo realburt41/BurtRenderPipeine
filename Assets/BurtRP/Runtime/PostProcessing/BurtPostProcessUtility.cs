@@ -949,8 +949,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 temporalAA.untrustedMotionFeedbackScale.value,
                 temporalAA.motionEdgeResponsiveStrength.value,
                 temporalAA.depthEdgeResponsiveStrength.value,
-                temporalAA.historyClampTightness.value,
-                temporalAA.depthWeightedFilterFloor.value,
                 temporalAA.upscaleFactor.value);
         }
 
@@ -964,8 +962,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 defaults.UntrustedMotionFeedbackScale,
                 defaults.MotionEdgeResponsiveStrength,
                 defaults.DepthEdgeResponsiveStrength,
-                defaults.HistoryClampTightness,
-                defaults.DepthWeightedFilterFloor,
                 defaults.UpscaleFactor);
         }
 
@@ -1151,12 +1147,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 .Append(" TAAVelocity=").Append(temporalAA != null ? temporalAA.VelocityMode.ToString() : BurtTemporalAAVelocityMode.Disabled.ToString())
                 .Append(" TAAObjectMVPass=").Append(temporalAA != null && temporalAA.ObjectMotionVectorPassDrawn)
                 .Append(" TAAJitterScale=").Append(temporalAASettings.JitterScale.ToString("0.###"))
-                .Append(" TAASharpness=").Append(temporalAASettings.Sharpness.ToString("0.###"))
+                .Append(" TAAUpscaleSharpness=").Append(temporalAASettings.Sharpness.ToString("0.###"))
                 .Append(" TAAUntrustedMVScale=").Append(temporalAASettings.UntrustedMotionFeedbackScale.ToString("0.###"))
                 .Append(" TAAMotionEdge=").Append(temporalAASettings.MotionEdgeResponsiveStrength.ToString("0.###"))
                 .Append(" TAADepthEdge=").Append(temporalAASettings.DepthEdgeResponsiveStrength.ToString("0.###"))
-                .Append(" TAAClampTight=").Append(temporalAASettings.HistoryClampTightness.ToString("0.###"))
-                .Append(" TAADepthFilterFloor=").Append(temporalAASettings.DepthWeightedFilterFloor.ToString("0.###"))
                 .Append(" TAAUpscaleFactor=").Append(temporalAASettings.UpscaleFactor.ToString("0.###"))
                 .Append(" TAADebugMode=").Append(temporalAADebugRequested ? BurtShadingDebugSettings.Mode.ToString() : "Disabled")
                 .Append(" TAADebugActive=").Append(temporalAADebugRequested && temporalAAEnabled)
@@ -1164,7 +1158,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 .Append(" TAADebugYFlip=").Append(temporalAADebugYFlip.ToString("0.###"))
                 .Append(" TAAUVSpace=XRenderFullscreenPlatformSampleUv;HistoryDepthVelocityFeedbackSameOrientation;FinalCameraColorTemporalAACopy;FinalBlitHandlesDisplayFlip;XRenderVelocityCurrentMinusPreviousHistoryUvMinusVelocity")
                 .Append(" TAAFilter=").Append(temporalAAEnabled ? "Current3x3ProjectionJitterFilter" : "Disabled")
-                .Append(" TAANote=").Append(temporalAAEnabled ? "XRenderTSRAccumulationParity;ResolveXRenderSlim;ColorDepthHistoryOnly;DecimateMaxUseCountDepthCompute;VelocityCurrentMinusPrevious;NoEdgeVelocityValidityDrop;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3ProjectionJitterFilter;ResolveBlendXRenderStrict;StaticBlend05;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout30;StencilObjectMotionBit8RequiresValidVelocity;StrictStencilResponsiveBit16;StrictParallaxRejection;StaticDepthHistoryFallback;StaticHistoryDepthGate;StaticHistoryAvailabilityRelaxed;XRenderSigmaClamp15;NoDynamicSafetyResponsive;NoResolveSharpen;ComputePrevUseCount;ResponsiveAADisocclusionRestored;MaterialMotionVectorsPass;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUMetadataDebug489_491;XRenderPointCurrentLoad;XRenderFinalAlpha" : "Disabled");
+                .Append(" TAANote=").Append(temporalAAEnabled ? "XRenderTSRAccumulationParity;ResolveXRenderCompute;ComputeDilateDecimate;StencilMaskComputeFallback;FragmentDebugFallback;ColorDepthHistoryOnly;VelocityCurrentMinusPrevious;ValidObjectVelocityOnly;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3ProjectionJitterFilter;ResolveMetadataDepthGhostingGate;MotionResponsiveBlend;StaticBlend05;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout30;ParallaxCoverageDepthGate;XRenderSigmaClamp15;NoResolveSharpen;UIntPrevUseCountUAV;ScalarParallaxRejection;MaterialMotionVectorsPass;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUDebugClosure489_491;HistoryValidReason;XRenderPointCurrentLoad;XRenderFinalAlpha" : "Disabled");
             Debug.Log(logBuilder.ToString()); // 输出后处理执行摘要，说明当前模式、曝光倍率、颜色调整、Bloom 和 TAA 状态。
         }
 
@@ -1406,7 +1400,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
     {
         public const float MinExposure = 0.0001f;
         public const float MaxExposure = 65504f;
-        public const float TemporalAAInvalidationEVThreshold = 1.0f;
+        public const float TemporalAAInvalidationEVThreshold = 2.0f;
 
         public static readonly int PreExposureId = Shader.PropertyToID("_BurtPreExposure");
         public static readonly int InvPreExposureId = Shader.PropertyToID("_BurtInvPreExposure");

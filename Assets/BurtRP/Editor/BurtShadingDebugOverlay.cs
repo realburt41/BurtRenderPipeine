@@ -217,6 +217,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Per Object Shadow Depth";
                 case BurtShadingDebugMode.PerObjectShadowCompare:
                     return "Per Object Shadow Compare";
+                case BurtShadingDebugMode.PerObjectShadowTransmissionDepth:
+                    return "Per Object Transmission Depth";
+                case BurtShadingDebugMode.PerObjectShadowTransmissionThickness:
+                    return "Per Object Transmission Thickness";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw:
                     return "SSAO Raw";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal:
@@ -233,6 +237,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSAO Surface Stability";
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare:
                     return "SSAO Diagnostic Compare";
+                case BurtShadingDebugMode.ScreenSpaceShadow:
+                    return "SS Shadow";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw:
                     return "BurtGI Raw";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal:
@@ -454,7 +460,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 case BurtShadingDebugMode.TemporalAAVelocity:
                     return "TAA Velocity";
                 case BurtShadingDebugMode.TemporalAAConfidence:
-                    return "TAA Confidence";
+                    return "TAA History Availability";
                 case BurtShadingDebugMode.TemporalAACurrentDepth:
                     return "TAA Current Depth";
                 case BurtShadingDebugMode.TemporalAADepthHistory:
@@ -468,9 +474,9 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 case BurtShadingDebugMode.TemporalAARawVelocity:
                     return "TAA Raw Velocity";
                 case BurtShadingDebugMode.TemporalAAUpdatedConfidence:
-                    return "TAA Updated Confidence";
+                    return "TAA History Acceptance";
                 case BurtShadingDebugMode.TemporalAAStaticRelax:
-                    return "TAA Static Relax";
+                    return "TAA Depth Continuity";
                 case BurtShadingDebugMode.TemporalAALumaRejection:
                     return "TAA Luma Reject";
                 case BurtShadingDebugMode.TemporalAAClipRejection:
@@ -482,7 +488,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 case BurtShadingDebugMode.TemporalAAMotionRejection:
                     return "TAA Motion Reject";
                 case BurtShadingDebugMode.TemporalAAConfidenceGate:
-                    return "TAA Confidence Gate";
+                    return "TAA Blend Factors";
                 case BurtShadingDebugMode.TemporalAAVelocitySource:
                     return "TAA Velocity Source";
                 case BurtShadingDebugMode.TemporalAAGBufferNormal:
@@ -490,7 +496,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 case BurtShadingDebugMode.TemporalAAParallaxRejection:
                     return "TAA Parallax Rejection";
                 case BurtShadingDebugMode.TemporalAAAntiFlicker:
-                    return "TAA Anti Flicker";
+                    return "TAA Stable History";
                 case BurtShadingDebugMode.TemporalAAHistoryCoverage:
                     return "TAA History Coverage";
                 case BurtShadingDebugMode.TemporalAAPrevUseCount:
@@ -711,6 +717,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.PerObjectShadowUV,
             BurtShadingDebugMode.PerObjectShadowDepth,
             BurtShadingDebugMode.PerObjectShadowCompare,
+            BurtShadingDebugMode.PerObjectShadowTransmissionDepth,
+            BurtShadingDebugMode.PerObjectShadowTransmissionThickness,
             BurtShadingDebugMode.PerObjectShadowAtlas
         });
 
@@ -835,6 +843,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability,
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare
+        });
+
+        public static readonly BurtShadingDebugGroup ScreenSpaceShadow = new BurtShadingDebugGroup("Screen Space Shadow", "SS Shadow", new[]
+        {
+            BurtShadingDebugMode.ScreenSpaceShadow
         });
 
         public static readonly BurtShadingDebugGroup ScreenSpaceGlobalIllumination = new BurtShadingDebugGroup("Screen Space Global Illumination", "BurtGI", new[]
@@ -1063,6 +1076,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         public BurtPostProcessDebugOverlay()
             : base(
                 BurtShadingDebugSSAODropdown.Id,
+                BurtShadingDebugScreenSpaceShadowDropdown.Id,
                 BurtShadingDebugBurtGIDropdown.Id,
                 BurtShadingDebugSSSDropdown.Id,
                 BurtShadingDebugFurBlurDropdown.Id,
@@ -1270,6 +1284,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public BurtShadingDebugSSAODropdown() // Unity 通过无参构造创建 ToolbarElement。
             : base(BurtShadingDebugGroups.ScreenSpaceAmbientOcclusion) // 绑定 SSAO 后处理调试分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugScreenSpaceShadowDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/SSShadow";
+
+        public BurtShadingDebugScreenSpaceShadowDropdown()
+            : base(BurtShadingDebugGroups.ScreenSpaceShadow)
         {
         }
     }

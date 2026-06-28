@@ -51,6 +51,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle DeferredLightingDepthTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.DeferredLightingDepthName);
+                }
+
+                return ResourceRegistry.GetDeferredLightingDepth();
+            }
+        }
+
         public BurtRenderTargetHandle PostProcessColorTarget // 定义读取 PostProcessColor 的快捷属性，方便后处理 Pass 不直接操作资源名。
         {
             get // 定义属性 getter，每次访问时从资源注册表读取最新的 PostProcessColor。

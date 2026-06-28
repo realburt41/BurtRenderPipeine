@@ -3,6 +3,7 @@
 #define BURT_FORWARD_PASS_INCLUDED
 
 #define BURT_FORWARD_SINGLE_SHADING_MODEL 1
+#define BURT_ENABLE_SHADING_DEBUG 1
 
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
@@ -176,18 +177,25 @@ void BurtFillForwardShadingDebugData(
     debugData.directSpecularColor = pbrComponents.directSpecular;
     debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
     debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
-    debugData.additionalUnshadowedColor = BurtEvaluateForwardAdditionalUnshadowedDebug(shadingSurfaceData, input, normalWS, shadingDirectionWS, viewDirectionWS, facing);
+    debugData.additionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+        ? BurtEvaluateForwardAdditionalUnshadowedDebug(shadingSurfaceData, input, normalWS, shadingDirectionWS, viewDirectionWS, facing)
+        : float3(0.0f, 0.0f, 0.0f);
     debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
     debugData.indirectSpecularColor = pbrComponents.indirectSpecular;
     debugData.shadowAttenuation = shadowAttenuation;
-    debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, normalWS);
-    BurtFillAdditionalLightShadowProjectionDebugData(
-        positionWS,
-        normalWS,
-        debugData.additionalShadowFaceColor,
-        debugData.additionalShadowUVColor,
-        debugData.additionalShadowDepthColor,
-        debugData.additionalShadowDepthDeltaColor);
+    debugData.additionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
+        ? BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, normalWS)
+        : 1.0f;
+    if (BurtNeedsAdditionalShadowProjectionShadingDebug())
+    {
+        BurtFillAdditionalLightShadowProjectionDebugData(
+            positionWS,
+            normalWS,
+            debugData.additionalShadowFaceColor,
+            debugData.additionalShadowUVColor,
+            debugData.additionalShadowDepthColor,
+            debugData.additionalShadowDepthDeltaColor);
+    }
 
     BurtFillMainLightShadowShadingDebugData(
         positionWS,
@@ -207,7 +215,9 @@ void BurtFillForwardShadingDebugData(
         debugData.perObjectShadowSliceColor,
         debugData.perObjectShadowUVColor,
         debugData.perObjectShadowDepthColor,
-        debugData.perObjectShadowCompareColor);
+        debugData.perObjectShadowCompareColor,
+        debugData.perObjectShadowTransmissionDepthColor,
+        debugData.perObjectShadowTransmissionThicknessColor);
 
     debugData.ambientOcclusion = surfaceData.occlusion;
     debugData.emissionColor = emissionColor;
@@ -300,7 +310,7 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
         BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, normalWS, viewDirectionWS, input.positionWS);
     #endif
 #endif
-    float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
+    float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
     float transmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(input.positionWS, -1.0f);
     float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex, transmissionThickness);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation, transmissionThickness);
@@ -361,7 +371,9 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
     debugData.directSpecularColor = debugLightingComponents.directSpecular;
     debugData.additionalDiffuseColor = debugLightingComponents.additionalDiffuse;
     debugData.additionalSpecularColor = debugLightingComponents.additionalSpecular;
-    debugData.additionalUnshadowedColor = BurtEvaluateForwardAdditionalUnshadowedDebug(debugLightingSurfaceData, input, normalWS, shadingDirectionWS, viewDirectionWS, facing);
+    debugData.additionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+        ? BurtEvaluateForwardAdditionalUnshadowedDebug(debugLightingSurfaceData, input, normalWS, shadingDirectionWS, viewDirectionWS, facing)
+        : float3(0.0f, 0.0f, 0.0f);
     debugData.indirectDiffuseColor = debugLightingComponents.indirectDiffuse;
     debugData.indirectSpecularColor = debugLightingComponents.indirectSpecular;
     debugData.perceptualRoughness = debugLightingComponents.perceptualRoughness;

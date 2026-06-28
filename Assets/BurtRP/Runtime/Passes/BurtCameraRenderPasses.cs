@@ -47,6 +47,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         private static readonly ShaderTagId UniversalForwardOnly = new ShaderTagId("UniversalForwardOnly"); // 定义 URP ForwardOnly LightMode，方便 Unsupported Pass 报告 URP 专用材质。
 
         private static readonly ShaderTagId LightweightForward = new ShaderTagId("LightweightForward"); // 定义旧 LWRP Forward LightMode，方便 Unsupported Pass 报告旧 SRP 材质。
+        private static readonly int UnityWorldToCameraId = Shader.PropertyToID("unity_WorldToCamera");
+        private static readonly int UnityCameraToWorldId = Shader.PropertyToID("unity_CameraToWorld");
 
 
 
@@ -165,6 +167,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
 
             cmd.SetViewProjectionMatrices(temporalAA.ViewMatrix, temporalAA.JitteredProjectionMatrix);
+            var worldToCameraMatrix = Matrix4x4.Scale(new Vector3(1f, 1f, -1f)) * temporalAA.ViewMatrix;
+            cmd.SetGlobalMatrix(UnityWorldToCameraId, worldToCameraMatrix);
+            cmd.SetGlobalMatrix(UnityCameraToWorldId, worldToCameraMatrix.inverse);
+        }
+
+        public static bool IsTemporalAAEnabled(BurtRenderGraphContext context)
+        {
+            var temporalAA = context != null && context.Request != null ? context.Request.TemporalAA : null;
+            return temporalAA != null && temporalAA.Enabled;
         }
 
         public static void BindMainLightShadowMapIfValid(BurtRenderGraphContext context, CommandBuffer cmd) // 把当前 request 的主光 shadow map 绑定到全局纹理槽。
@@ -1034,7 +1045,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 }
 
                 CommandBufferPool.Release(cmd);
-                ResetMainLightShadowCasterState(renderContext, camera);
+                ResetMainLightShadowCasterState(context, renderContext, camera);
             }
 
             UploadMainLightShadowReceiverGlobals(
@@ -1070,7 +1081,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             CommandBufferPool.Release(cmd);
         }
 
-        private static void ResetMainLightShadowCasterState(ScriptableRenderContext renderContext, Camera camera)
+        private static void ResetMainLightShadowCasterState(BurtRenderGraphContext context, ScriptableRenderContext renderContext, Camera camera)
         {
             var cmd = CommandBufferPool.Get("Burt Reset Main Light Shadow Caster State");
             cmd.SetGlobalDepthBias(0f, 0f);
@@ -1083,10 +1094,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             cmd.SetGlobalVector(UnityShadowBiasId, Vector4.zero);
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             renderContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
 
-            if (camera != null)
+            if (camera != null && !BurtDrawingSettingsUtility.IsTemporalAAEnabled(context))
             {
                 renderContext.SetupCameraProperties(camera);
             }
@@ -2086,7 +2098,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             finally
             {
                 CommandBufferPool.Release(cmd);
-                ResetAdditionalLightShadowCasterState(context.ScriptableContext, camera);
+                ResetAdditionalLightShadowCasterState(context, context.ScriptableContext, camera);
             }
 
             UploadAdditionalLightShadowReceiverGlobals(context.ScriptableContext, atlasTarget, lightingData);
@@ -2165,7 +2177,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             CommandBufferPool.Release(cmd);
         }
 
-        private static void ResetAdditionalLightShadowCasterState(ScriptableRenderContext renderContext, Camera camera)
+        private static void ResetAdditionalLightShadowCasterState(BurtRenderGraphContext context, ScriptableRenderContext renderContext, Camera camera)
         {
             var cmd = CommandBufferPool.Get("Burt Reset Additional Light Shadow Caster State");
             cmd.DisableScissorRect();
@@ -2179,10 +2191,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             cmd.SetGlobalVector(UnityShadowBiasId, Vector4.zero);
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             renderContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
 
-            if (camera != null)
+            if (camera != null && !BurtDrawingSettingsUtility.IsTemporalAAEnabled(context))
             {
                 renderContext.SetupCameraProperties(camera);
             }

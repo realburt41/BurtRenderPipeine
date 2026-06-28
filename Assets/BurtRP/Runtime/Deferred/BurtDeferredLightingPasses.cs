@@ -3,6 +3,141 @@ using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline
 {
+    internal sealed class BurtAllocateDeferredLightingDepthPass : BurtRenderPass
+    {
+        public override string Name => "Burt Allocate Deferred Lighting Depth";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.WriteDeferredLightingDepth();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var target = context != null
+                ? context.DeferredLightingDepthTarget
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.DeferredLightingDepthName);
+            if (context == null || !target.IsValid)
+            {
+                return;
+            }
+
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateDeferredLightingDepthDescriptor(camera);
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.DeferredLightingDepthTextureId, descriptor, FilterMode.Point);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.DeferredLightingDepthTextureId, target.Identifier);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal sealed class BurtCopyDeferredLightingDepthPass : BurtRenderPass
+    {
+        private const int CopyDepthPassIndex = 0;
+        private const string DepthCopyShaderName = BurtHiZDepthPassUtility.HiZDepthShaderName;
+        private static readonly int CameraDepthId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
+        private Material depthCopyMaterial;
+        private bool hasLoggedMissingShader;
+
+        public override string Name => "Burt Copy Deferred Lighting Depth";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.ReadCameraDepth();
+            builder.WriteDeferredLightingDepth();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            var cameraDepthTarget = context.CameraDepthTarget;
+            var deferredLightingDepthTarget = context.DeferredLightingDepthTarget;
+            if (!cameraDepthTarget.IsValid || !deferredLightingDepthTarget.IsValid)
+            {
+                return;
+            }
+
+            var material = GetDepthCopyMaterial();
+            if (material == null)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetRenderTarget(deferredLightingDepthTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
+            cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier);
+            cmd.DrawProcedural(Matrix4x4.identity, material, CopyDepthPassIndex, MeshTopology.Triangles, 3, 1);
+            cmd.SetGlobalTexture(CameraDepthId, deferredLightingDepthTarget.Identifier);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private Material GetDepthCopyMaterial()
+        {
+            if (depthCopyMaterial != null)
+            {
+                return depthCopyMaterial;
+            }
+
+            var shader = Shader.Find(DepthCopyShaderName);
+            if (shader == null)
+            {
+                if (!hasLoggedMissingShader)
+                {
+                    Debug.LogWarning("BurtRP could not find shader: " + DepthCopyShaderName);
+                    hasLoggedMissingShader = true;
+                }
+
+                return null;
+            }
+
+            depthCopyMaterial = new Material(shader)
+            {
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            return depthCopyMaterial;
+        }
+    }
+
+    internal sealed class BurtReleaseDeferredLightingDepthPass : BurtRenderPass
+    {
+        public override string Name => "Burt Release Deferred Lighting Depth";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.ReadCameraDepth();
+            builder.ReadDeferredLightingDepth();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var target = context != null
+                ? context.DeferredLightingDepthTarget
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.DeferredLightingDepthName);
+            if (context == null || !target.IsValid)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            var cameraDepthTarget = context.CameraDepthTarget;
+            if (cameraDepthTarget.IsValid)
+            {
+                cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
+            }
+
+            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.DeferredLightingDepthTextureId);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
     internal sealed class BurtClearDeferredLightingTargetPass : BurtRenderPass
     {
         public override string Name => "Burt Clear Deferred Lighting Target";
@@ -88,6 +223,7 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer4();
             builder.ReadGBufferObjectIndex();
             builder.ReadCameraDepth();
+            builder.ReadDeferredLightingDepth();
 
             if (BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(builder.Request, builder.Asset))
             {
@@ -158,6 +294,7 @@ namespace Burt.RenderPipeline
                     out var gbuffer2Target,
                     out var gbuffer3Target,
                     out var gbuffer4Target,
+                    out var deferredLightingDepthTarget,
                     out var gbufferObjectIndexTarget))
             {
                 return;
@@ -170,7 +307,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(Name);
-            cmd.SetRenderTarget(cameraColorTarget.Identifier);
+            cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
@@ -178,7 +315,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
             cmd.SetGlobalTexture(GBufferObjectIndexId, gbufferObjectIndexTarget.Identifier);
-            cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier);
+            cmd.SetGlobalTexture(CameraDepthId, deferredLightingDepthTarget.Identifier);
             BindScreenSpaceAmbientOcclusion(context, cmd, material);
             BindScreenSpaceShadow(context, cmd, material);
             BindBurtGIApplyIndirect(context, cmd, material);
@@ -190,6 +327,7 @@ namespace Burt.RenderPipeline
             UploadCameraReconstructionGlobals(context, cmd, material);
             BindSubsurfaceDiffuseLuminanceOutput(context, cmd, material);
             cmd.DrawProcedural(Matrix4x4.identity, material, shaderPassIndex, MeshTopology.Triangles, 3, 1);
+            cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -203,6 +341,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2Target,
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle deferredLightingDepthTarget,
             out BurtRenderTargetHandle gbufferObjectIndexTarget)
         {
             cameraColorTarget = context != null ? context.CameraColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraColorName);
@@ -212,6 +351,7 @@ namespace Burt.RenderPipeline
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            deferredLightingDepthTarget = context != null ? context.DeferredLightingDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.DeferredLightingDepthName);
             gbufferObjectIndexTarget = context != null ? context.GBufferObjectIndexTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBufferObjectIndexName);
 
             return cameraColorTarget.IsValid &&
@@ -221,6 +361,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target.IsValid &&
                 gbuffer3Target.IsValid &&
                 gbuffer4Target.IsValid &&
+                deferredLightingDepthTarget.IsValid &&
                 gbufferObjectIndexTarget.IsValid;
         }
 

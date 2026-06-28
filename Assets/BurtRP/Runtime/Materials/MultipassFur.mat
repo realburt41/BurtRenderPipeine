@@ -61,8 +61,8 @@ Material:
     m_Floats:
     - _AlphaClip: 1
     - _Anisotropy: 0
-    - _BurtGBufferStencilRef: 6
-    - _BurtGBufferStencilWriteMask: 7
+    - _BurtGBufferStencilRef: 224
+    - _BurtGBufferStencilWriteMask: 224
     - _Cull: 2
     - _Cutoff: 0.01
     - _DstBlend: 0
@@ -75,7 +75,7 @@ Material:
     - _FlowTexUV2: 0
     - _FlowTilling: 7
     - _FurAttenuation: 0.3
-    - _FurBlurDistance: 5
+    - _FurBlurDistance: 8
     - _FurBlurEnabled: 1
     - _FurExpand: 0
     - _FurGravityDirection: 0

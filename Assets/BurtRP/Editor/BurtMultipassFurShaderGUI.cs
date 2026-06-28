@@ -7,6 +7,8 @@ namespace Burt.RenderPipeline.Editor
     public sealed class BurtMultipassFurShaderGUI : ShaderGUI
     {
         private const string DirectionMapKeyword = "BURT_MULTIPASS_FUR_USE_DIRECTION_MAP";
+        private const int GBufferStencilFurRef = 0xE0;
+        private const int GBufferStencilShadingModelMask = 0xE0;
 
         private static readonly GUIContent SurfaceOptionsLabel = new GUIContent("Multipass Fur Surface Options");
         private static readonly GUIContent BaseInputsLabel = new GUIContent("Base Inputs");
@@ -129,6 +131,18 @@ namespace Burt.RenderPipeline.Editor
             ApplyFurMaterialOptions(material);
             UpdateEmissiveFlag(material);
             ApplyDirectionMapKeyword(material);
+            ApplyGBufferStencilState(material);
+        }
+
+        private static void ApplyGBufferStencilState(Material material)
+        {
+            if (material == null || !material.HasProperty("_BurtGBufferStencilRef") || !material.HasProperty("_BurtGBufferStencilWriteMask"))
+            {
+                return;
+            }
+
+            material.SetFloat("_BurtGBufferStencilRef", GBufferStencilFurRef);
+            material.SetFloat("_BurtGBufferStencilWriteMask", GBufferStencilShadingModelMask);
         }
 
         private void CacheProperties()

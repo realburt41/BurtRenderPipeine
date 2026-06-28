@@ -21,8 +21,6 @@ namespace Burt.RenderPipeline
         [Title("Edge Rejection")]
         public ClampedFloatParameter motionEdgeResponsiveStrength = new ClampedFloatParameter(1.2f, 0f, 3f);
         public ClampedFloatParameter depthEdgeResponsiveStrength = new ClampedFloatParameter(1.1f, 0f, 3f);
-        public ClampedFloatParameter historyClampTightness = new ClampedFloatParameter(1.15f, 0f, 2f);
-        public ClampedFloatParameter depthWeightedFilterFloor = new ClampedFloatParameter(0.12f, 0f, 0.5f);
 
         [Title("Debug Temporal")]
         public BoolParameter debugFreezeJitter = new BoolParameter(false);

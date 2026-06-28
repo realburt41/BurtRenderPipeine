@@ -419,6 +419,7 @@ MonoBehaviour:
   - {fileID: 9153360420279958332}
   - {fileID: 2718075953073365877}
   - {fileID: 3018446027813319552}
+  - {fileID: 7039378954940126186}
 --- !u!114 &1128726436058786600
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -682,8 +683,8 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 1
   tiledBlur:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 1
   radiusCm:
     m_OverrideState: 1
     m_Value: 2
@@ -693,6 +694,12 @@ MonoBehaviour:
   directionDilationThreshold:
     m_OverrideState: 1
     m_Value: 0.5
+  thetaTemporal:
+    m_OverrideState: 1
+    m_Value: 1
+  colorTemporal:
+    m_OverrideState: 1
+    m_Value: 1
   thetaFeedback:
     m_OverrideState: 1
     m_Value: 0.96
@@ -739,6 +746,67 @@ MonoBehaviour:
   toneCurveAmount:
     m_OverrideState: 0
     m_Value: 1
+--- !u!114 &7039378954940126186
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4d5f6b7a8c914f02a36e4d1b90c2a7e5, type: 3}
+  m_Name: BurtScreenSpaceShadowVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  enabled:
+    m_OverrideState: 1
+    m_Value: 0
+  intensity:
+    m_OverrideState: 1
+    m_Value: 1
+  sampleCount:
+    m_OverrideState: 0
+    m_Value: 32
+  maxDistance:
+    m_OverrideState: 0
+    m_Value: 5
+  depthOffset:
+    m_OverrideState: 0
+    m_Value: 0.5
+  grassContrast:
+    m_OverrideState: 0
+    m_Value: 0.8
+  detailContrast:
+    m_OverrideState: 0
+    m_Value: 0.8
+  foliageContrast:
+    m_OverrideState: 0
+    m_Value: 0.8
+  characterContrast:
+    m_OverrideState: 0
+    m_Value: 0.8
+  thickness:
+    m_OverrideState: 0
+    m_Value: 0.5
+  bilinearThreshold:
+    m_OverrideState: 0
+    m_Value: 2
+  bilinearSamplingOffset:
+    m_OverrideState: 0
+    m_Value: 1
+  fadeDistance:
+    m_OverrideState: 0
+    m_Value: 80
+  fadeRadius:
+    m_OverrideState: 0
+    m_Value: 50
+  halfResolution:
+    m_OverrideState: 0
+    m_Value: 0
+  quarterResolution:
+    m_OverrideState: 0
+    m_Value: 0
 --- !u!114 &9113136322530897853
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -755,63 +823,15 @@ MonoBehaviour:
   enabled:
     m_OverrideState: 1
     m_Value: 1
-  feedback:
-    m_OverrideState: 0
-    m_Value: 0.93
   jitterScale:
     m_OverrideState: 0
     m_Value: 1
-  clampStrength:
-    m_OverrideState: 0
-    m_Value: 0.95
   sharpness:
     m_OverrideState: 0
     m_Value: 0.04
-  staticEdgeRelaxation:
-    m_OverrideState: 0
-    m_Value: 0.28
-  lumaRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.15
-  clipRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.25
-  depthRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 1.35
-  motionRejectionStart:
-    m_OverrideState: 0
-    m_Value: 16
-  motionRejectionRange:
-    m_OverrideState: 0
-    m_Value: 56
-  historyConfidenceWeight:
-    m_OverrideState: 0
-    m_Value: 0.22
-  historyConfidenceBoost:
-    m_OverrideState: 0
-    m_Value: 0.96
-  confidenceGrowth:
-    m_OverrideState: 0
-    m_Value: 0.06
-  antiFlickering:
-    m_OverrideState: 0
-    m_Value: 0.5
-  motionVectorRejection:
-    m_OverrideState: 0
-    m_Value: 0
-  baseBlendFactor:
-    m_OverrideState: 0
-    m_Value: 0.875
-  responsiveRejectionStrength:
-    m_OverrideState: 0
-    m_Value: 0.65
   untrustedMotionFeedbackScale:
     m_OverrideState: 0
     m_Value: 0.35
-  disocclusionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.18
   upscaleFactor:
     m_OverrideState: 0
     m_Value: 1

@@ -114,12 +114,12 @@ Shader "BurtRP/UnlitColor"
 
             // 声明片元 shader 函数名是 Frag。
             #pragma fragment Frag
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #define BURT_ENABLE_SHADING_DEBUG 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
-#if defined(BURT_SHADING_DEBUG)
+#if defined(BURT_ENABLE_SHADING_DEBUG)
             #define BURT_FORWARD_SINGLE_SHADING_MODEL 1
             #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
@@ -173,25 +173,34 @@ Shader "BurtRP/UnlitColor"
             float4 Frag(Varyings input) : SV_Target
             {
 #if defined(BURT_ENABLE_SHADING_DEBUG)
+                if (BurtIsShadingDebugEnabled())
+                {
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
                 float3 normalWS = BurtSafeNormalize(input.normalWS);
                 float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS, normalWS));
+                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex));
                 BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.positionWS);
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
-                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
+                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
                 debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
                 debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
-                debugData.additionalUnshadowedColor = pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular;
-                debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS);
-                BurtFillAdditionalLightShadowProjectionDebugData(
-                    input.positionWS,
-                    normalWS,
-                    debugData.additionalShadowFaceColor,
-                    debugData.additionalShadowUVColor,
-                    debugData.additionalShadowDepthColor,
-                    debugData.additionalShadowDepthDeltaColor);
+                debugData.additionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+                    ? pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular
+                    : float3(0.0f, 0.0f, 0.0f);
+                debugData.additionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
+                    ? BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS)
+                    : 1.0f;
+                if (BurtNeedsAdditionalShadowProjectionShadingDebug())
+                {
+                    BurtFillAdditionalLightShadowProjectionDebugData(
+                        input.positionWS,
+                        normalWS,
+                        debugData.additionalShadowFaceColor,
+                        debugData.additionalShadowUVColor,
+                        debugData.additionalShadowDepthColor,
+                        debugData.additionalShadowDepthDeltaColor);
+                }
                 debugData.finalLightingColor = _BaseColor.rgb;
 
                 BurtFillMainLightShadowShadingDebugData(
@@ -212,12 +221,15 @@ Shader "BurtRP/UnlitColor"
                     debugData.perObjectShadowSliceColor,
                     debugData.perObjectShadowUVColor,
                     debugData.perObjectShadowDepthColor,
-                    debugData.perObjectShadowCompareColor);
+                    debugData.perObjectShadowCompareColor,
+                    debugData.perObjectShadowTransmissionDepthColor,
+                    debugData.perObjectShadowTransmissionThicknessColor);
 
                 float3 debugColor;
                 if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
                 {
                     return float4(debugColor, surfaceData.alpha);
+                }
                 }
 #endif
 
@@ -252,12 +264,12 @@ Shader "BurtRP/UnlitColor"
 
             // 声明片元 shader 函数名是 FragForwardOnly。
             #pragma fragment FragForwardOnly
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #define BURT_ENABLE_SHADING_DEBUG 1
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
-#if defined(BURT_SHADING_DEBUG)
+#if defined(BURT_ENABLE_SHADING_DEBUG)
             #define BURT_FORWARD_SINGLE_SHADING_MODEL 1
             #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
@@ -311,25 +323,34 @@ Shader "BurtRP/UnlitColor"
             float4 FragForwardOnly(ForwardOnlyVaryings input) : SV_Target
             {
 #if defined(BURT_ENABLE_SHADING_DEBUG)
+                if (BurtIsShadingDebugEnabled())
+                {
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
                 float3 normalWS = BurtSafeNormalize(input.normalWS);
                 float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS, normalWS));
+                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex));
                 BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.positionWS);
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
-                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS);
+                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
                 debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
                 debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
-                debugData.additionalUnshadowedColor = pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular;
-                debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS);
-                BurtFillAdditionalLightShadowProjectionDebugData(
-                    input.positionWS,
-                    normalWS,
-                    debugData.additionalShadowFaceColor,
-                    debugData.additionalShadowUVColor,
-                    debugData.additionalShadowDepthColor,
-                    debugData.additionalShadowDepthDeltaColor);
+                debugData.additionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+                    ? pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular
+                    : float3(0.0f, 0.0f, 0.0f);
+                debugData.additionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
+                    ? BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS)
+                    : 1.0f;
+                if (BurtNeedsAdditionalShadowProjectionShadingDebug())
+                {
+                    BurtFillAdditionalLightShadowProjectionDebugData(
+                        input.positionWS,
+                        normalWS,
+                        debugData.additionalShadowFaceColor,
+                        debugData.additionalShadowUVColor,
+                        debugData.additionalShadowDepthColor,
+                        debugData.additionalShadowDepthDeltaColor);
+                }
                 debugData.finalLightingColor = _BaseColor.rgb;
 
                 BurtFillMainLightShadowShadingDebugData(
@@ -350,12 +371,15 @@ Shader "BurtRP/UnlitColor"
                     debugData.perObjectShadowSliceColor,
                     debugData.perObjectShadowUVColor,
                     debugData.perObjectShadowDepthColor,
-                    debugData.perObjectShadowCompareColor);
+                    debugData.perObjectShadowCompareColor,
+                    debugData.perObjectShadowTransmissionDepthColor,
+                    debugData.perObjectShadowTransmissionThicknessColor);
 
                 float3 debugColor;
                 if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
                 {
                     return float4(debugColor, surfaceData.alpha);
+                }
                 }
 #endif
 

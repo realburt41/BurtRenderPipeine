@@ -10,6 +10,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateGBuffer3Pass = new BurtAllocateGBuffer3Pass();
         private readonly BurtRenderPass allocateGBuffer4Pass = new BurtAllocateGBuffer4Pass();
         private readonly BurtRenderPass allocateGBufferObjectIndexPass = new BurtAllocateGBufferObjectIndexPass();
+        private readonly BurtRenderPass allocateDeferredLightingDepthPass = new BurtAllocateDeferredLightingDepthPass();
+        private readonly BurtRenderPass copyDeferredLightingDepthPass = new BurtCopyDeferredLightingDepthPass();
         private readonly BurtRenderPass allocateScreenSpaceAmbientOcclusionRawPass = new BurtAllocateScreenSpaceAmbientOcclusionRawPass();
         private readonly BurtRenderPass allocateScreenSpaceAmbientOcclusionPass = new BurtAllocateScreenSpaceAmbientOcclusionPass();
         private readonly BurtRenderPass screenSpaceAmbientOcclusionTracePass = new BurtScreenSpaceAmbientOcclusionTracePass();
@@ -71,7 +73,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass furBlurInitTileArgsPass = new BurtFurBlurInitTileArgsPass();
         private readonly BurtRenderPass furBlurTiledSetupPass = new BurtFurBlurTiledSetupPass();
         private readonly BurtRenderPass furBlurFillTileArgsPass = new BurtFurBlurFillTileArgsPass();
-        private readonly BurtRenderPass furBlurTiledDilatePass = new BurtFurBlurTiledDilatePass();
+        private readonly BurtRenderPass furBlurTiledDilateToTempPass = new BurtFurBlurTiledDilatePass(true);
+        private readonly BurtRenderPass furBlurTiledDilateToPropertyPass = new BurtFurBlurTiledDilatePass(false);
         private readonly BurtRenderPass furBlurDilateToTempPass = new BurtFurBlurDilatePass(true);
         private readonly BurtRenderPass furBlurDilateToPropertyPass = new BurtFurBlurDilatePass(false);
         private readonly BurtRenderPass furBlurThetaTemporalPass = new BurtFurBlurThetaTemporalPass();
@@ -165,6 +168,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass debugTileLightViewPass = new BurtDebugTileLightViewPass();
         private readonly BurtRenderPass debugClusterLightVolumePass = new BurtDebugClusterLightVolumePass();
         private readonly BurtRenderPass debugScreenSpaceAmbientOcclusionPass = new BurtDebugScreenSpaceAmbientOcclusionPass();
+        private readonly BurtRenderPass debugScreenSpaceShadowPass = new BurtDebugScreenSpaceShadowPass();
         private readonly BurtRenderPass debugScreenSpaceGlobalIlluminationPass = new BurtDebugScreenSpaceGlobalIlluminationPass();
         private readonly BurtRenderPass debugScreenSpaceSubsurfacePass = new BurtDebugScreenSpaceSubsurfacePass();
         private readonly BurtRenderPass debugScreenSpaceReflectionHiZDiagnosticsPass = new BurtScreenSpaceReflectionHiZDiagnosticsPass();
@@ -185,6 +189,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass releaseGBuffer3Pass = new BurtReleaseGBuffer3Pass();
         private readonly BurtRenderPass releaseGBuffer4Pass = new BurtReleaseGBuffer4Pass();
         private readonly BurtRenderPass releaseGBufferObjectIndexPass = new BurtReleaseGBufferObjectIndexPass();
+        private readonly BurtRenderPass releaseDeferredLightingDepthPass = new BurtReleaseDeferredLightingDepthPass();
         private readonly BurtRenderPass releaseFurBlurTemporalPass = new BurtReleaseFurBlurTemporalPass();
         private readonly BurtRenderPass releaseFurBlurVelocityPass = new BurtReleaseFurBlurVelocityPass();
         private readonly BurtRenderPass releaseFurBlurColorPass = new BurtReleaseFurBlurColorPass();
@@ -228,6 +233,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             var usePerObjectShadow = BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(request, asset);
             AddCameraAllocationPasses(graph, safeRenderOptions); // 先申请 CameraColor 和 CameraDepth，确保 GBuffer MRT 可以使用独立深度。
             AddGBufferAllocationPasses(graph, useLocalGBufferTargets); // 再申请五张 GBuffer，给后面的 MRT 绑定和清理阶段准备真实 RT。
+            AddDeferredLightingDepthAllocationPass(graph, useLocalGBufferTargets);
             AddFurBlurAllocationPasses(graph, request, asset, useLocalGBufferTargets);
             AddHiZAllocationPass(graph, useHiZDepth);
 
@@ -256,7 +262,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             AddScreenSpaceAmbientOcclusionPasses(graph, request, asset, useLocalGBufferTargets);
             AddScreenSpaceShadowPasses(graph, request, asset, useLocalGBufferTargets);
             AddScreenSpaceGlobalIlluminationPasses(graph, request, asset, useLocalGBufferTargets, safeRenderOptions);
+            AddDeferredLightingDepthCopyPass(graph, useLocalGBufferTargets);
             AddDeferredLightingPass(graph, request, asset, useLocalGBufferTargets); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
+            AddDeferredLightingDepthReleasePass(graph, useLocalGBufferTargets);
             AddScreenSpaceGlobalIlluminationFinalReleaseAfterLighting(graph, request, asset, useLocalGBufferTargets, safeRenderOptions);
             AddFurBlurPasses(graph, request, asset, useLocalGBufferTargets);
             AddDeferredForwardOnlyOpaqueFallback(graph, asset); // 根据资产开关决定是否绘制不能写入 GBuffer 的前向专用不透明物体。
@@ -368,6 +376,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.AddPass(allocateGBuffer3Pass);
             graph.AddPass(allocateGBuffer4Pass);
             graph.AddPass(allocateGBufferObjectIndexPass);
+        }
+
+        private void AddDeferredLightingDepthAllocationPass(
+            BurtRenderGraph graph,
+            bool useLocalGBufferTargets)
+        {
+            if (!useLocalGBufferTargets)
+            {
+                return;
+            }
+
+            graph.AddPass(allocateDeferredLightingDepthPass);
         }
 
         private void AddHiZAllocationPass(
@@ -535,7 +555,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(furBlurInitTileArgsPass);
                 graph.AddPass(furBlurTiledSetupPass);
                 graph.AddPass(furBlurFillTileArgsPass);
-                graph.AddPass(furBlurTiledDilatePass);
+                graph.AddPass(furBlurTiledDilateToTempPass);
+                graph.AddPass(furBlurTiledDilateToPropertyPass);
             }
             else
             {
@@ -854,6 +875,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.AddPass(deferredFurLightingPass);
         }
 
+        private void AddDeferredLightingDepthCopyPass(
+            BurtRenderGraph graph,
+            bool useLocalGBufferTargets)
+        {
+            if (!useLocalGBufferTargets)
+            {
+                return;
+            }
+
+            graph.AddPass(copyDeferredLightingDepthPass);
+        }
+
+        private void AddDeferredLightingDepthReleasePass(
+            BurtRenderGraph graph,
+            bool useLocalGBufferTargets)
+        {
+            if (!useLocalGBufferTargets)
+            {
+                return;
+            }
+
+            graph.AddPass(releaseDeferredLightingDepthPass);
+        }
+
         private void AddFurBlurPasses(
             BurtRenderGraph graph,
             BurtRenderRequest request,
@@ -991,6 +1036,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             if (ShouldUseScreenSpaceAmbientOcclusionDebugView(request, asset, useLocalGBufferTargets))
             {
                 graph.AddPass(debugScreenSpaceAmbientOcclusionPass);
+            }
+
+            if (ShouldUseScreenSpaceShadowDebugView(request, asset, useLocalGBufferTargets))
+            {
+                graph.AddPass(debugScreenSpaceShadowPass);
             }
 
             if (ShouldUseScreenSpaceGlobalIlluminationDebugView(request, asset, useLocalGBufferTargets))
@@ -1503,6 +1553,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             bool useLocalGBufferTargets)
         {
             return useLocalGBufferTargets && BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusionDebugView(request, asset);
+        }
+
+        private static bool ShouldUseScreenSpaceShadowDebugView(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool useLocalGBufferTargets)
+        {
+            return useLocalGBufferTargets && BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadowDebugView(request, asset);
         }
 
         private static bool ShouldUseScreenSpaceSubsurfaceDebugView(

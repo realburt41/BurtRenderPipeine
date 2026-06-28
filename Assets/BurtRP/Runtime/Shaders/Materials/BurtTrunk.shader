@@ -1,4 +1,4 @@
-Shader "BurtRP/Environment/EV_Trunk"
+Shader "BurtRP/Trunk"
 {
     Properties
     {
@@ -39,8 +39,8 @@ Shader "BurtRP/Environment/EV_Trunk"
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
-        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 0
-        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 7
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 32
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
     }
 
     SubShader
@@ -131,7 +131,7 @@ Shader "BurtRP/Environment/EV_Trunk"
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 7
+                ReadMask 224
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
@@ -167,7 +167,6 @@ Shader "BurtRP/Environment/EV_Trunk"
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
             #pragma target 3.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #define BURT_MATERIAL_SHADING_MODEL_TRUNK 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"

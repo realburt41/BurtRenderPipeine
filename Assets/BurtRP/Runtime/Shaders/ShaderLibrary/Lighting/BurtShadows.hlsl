@@ -898,6 +898,8 @@ float3 BurtGetPerObjectShadowSliceDebugColor(int sliceIndex)
     return float3(0.25f, 0.25f, 0.25f);
 }
 
+static const float BURT_PER_OBJECT_SHADOW_TRANSMISSION_DEBUG_MAX_THICKNESS = 10.0f;
+
 void BurtFillPerObjectShadowProjectionDebugData(
     float3 positionWS,
     float3 normalWS,
@@ -941,6 +943,58 @@ void BurtFillPerObjectShadowProjectionDebugData(
     uvColor = float3(saturate(BurtClampPerObjectShadowUVToRect(projectedShadowCoord.xy, sliceIndex)), insideAtlas ? 1.0f : 0.0f);
     depthColor = float3(saturate(receiverDepth), saturate(rawDepth), saturate(compareVisibility));
     compareColor = float3(compareVisibility, compareVisibility, compareVisibility);
+}
+
+void BurtFillPerObjectShadowTransmissionDebugData(
+    float3 positionWS,
+    int objectIndex,
+    out float3 transmissionDepthColor,
+    out float3 transmissionThicknessColor)
+{
+    transmissionDepthColor = float3(0.0f, 0.0f, 0.0f);
+    transmissionThicknessColor = float3(0.0f, 0.0f, 0.0f);
+
+    int sliceCount = BurtGetPerObjectShadowSliceCount();
+    int safeObjectIndex = max(objectIndex, 0);
+    float objectIndexDebug = saturate((float)safeObjectIndex / max((float)sliceCount, 1.0f));
+    if (safeObjectIndex <= 0)
+    {
+        return;
+    }
+
+    int sliceIndex = BurtDecodePerObjectShadowSliceIndex(safeObjectIndex);
+    if (sliceIndex < 0)
+    {
+        transmissionThicknessColor = float3(objectIndexDebug, 0.0f, 0.25f);
+        return;
+    }
+
+    float4 depthParams = _BurtPerObjectShadowSliceDepthParams[sliceIndex];
+    if (depthParams.w <= 0.5f || depthParams.x <= 0.0001f)
+    {
+        transmissionThicknessColor = float3(objectIndexDebug, 0.0f, 0.5f);
+        return;
+    }
+
+    float4 shadowCoord = BurtTransformWorldToPerObjectShadowSlice(float4(positionWS, 1.0f), sliceIndex);
+    float safeW = abs(shadowCoord.w) > 0.00001f ? shadowCoord.w : (shadowCoord.w < 0.0f ? -0.00001f : 0.00001f);
+    float3 projectedShadowCoord = shadowCoord.xyz / safeW;
+    float surfaceDepth = saturate(projectedShadowCoord.z);
+    if (!BurtIsInsidePerObjectShadowAtlas(projectedShadowCoord, sliceIndex))
+    {
+        transmissionDepthColor = float3(surfaceDepth, 0.0f, 0.0f);
+        transmissionThicknessColor = float3(objectIndexDebug, 0.0f, 0.75f);
+        return;
+    }
+
+    float rawDepth = BurtSamplePerObjectShadowRawDepth(projectedShadowCoord.xy, sliceIndex);
+    float depthDelta = max(saturate(rawDepth) - surfaceDepth, 0.0f);
+    float thickness = clamp(saturate(depthDelta) * max(depthParams.x, 0.001f), 0.0f, BURT_PER_OBJECT_SHADOW_TRANSMISSION_DEBUG_MAX_THICKNESS);
+    transmissionDepthColor = float3(surfaceDepth, saturate(rawDepth), saturate(depthDelta * 16.0f));
+    transmissionThicknessColor = float3(
+        objectIndexDebug,
+        saturate(thickness / BURT_PER_OBJECT_SHADOW_TRANSMISSION_DEBUG_MAX_THICKNESS),
+        1.0f);
 }
 
 float BurtSamplePerObjectShadowPCF(float3 projectedShadowCoord, int sliceIndex)
@@ -1071,6 +1125,11 @@ float BurtSamplePerObjectShadowExcludingSlice(float3 positionWS, float3 normalWS
     }
 
     return visibility;
+}
+
+float BurtSamplePerObjectShadow(float3 positionWS, float3 normalWS, int objectIndex)
+{
+    return BurtSamplePerObjectShadow(positionWS, normalWS);
 }
 
 float BurtSamplePerObjectShadow(float3 positionWS)
@@ -1243,9 +1302,14 @@ float BurtSampleMainLightTransmissionShadow(float3 positionWS, float3 normalWS)
     return BurtSampleMainLightTransmissionShadow(positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
 }
 
+float BurtSampleMainLightShadow(float3 positionWS, float3 normalWS, int objectIndex)
+{
+    return min(BurtSampleMainLightShadowWithoutPerObject(positionWS), BurtSamplePerObjectShadow(positionWS, normalWS, objectIndex));
+}
+
 float BurtSampleMainLightShadow(float3 positionWS, float3 normalWS)
 {
-    return min(BurtSampleMainLightShadowWithoutPerObject(positionWS), BurtSamplePerObjectShadow(positionWS, normalWS));
+    return BurtSampleMainLightShadow(positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
 }
 
 float BurtSampleMainLightShadow(float3 positionWS)

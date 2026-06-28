@@ -17,9 +17,10 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 2000
+  m_CustomRenderQueue: 2450
   stringTagMap:
-    RenderType: Opaque
+    QUEUE: AlphaTest
+    RenderType: TransparentCutout
   disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
@@ -45,6 +46,8 @@ Material:
     m_Floats:
     - _AlphaClip: 1
     - _Anisotropy: 0
+    - _BurtGBufferStencilRef: 32
+    - _BurtGBufferStencilWriteMask: 224
     - _Cull: 2
     - _Cutoff: 0.564
     - _DoubleSidedEnable: 0
@@ -54,6 +57,7 @@ Material:
     - _NormalScale: 0
     - _OcclusionStrength: 1
     - _Reflectance: 0.5
+    - _ResponsiveAA: 0
     - _Smoothness: 0.704
     - _SrcBlend: 1
     - _Surface: 0

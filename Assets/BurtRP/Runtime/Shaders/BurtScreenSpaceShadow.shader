@@ -15,6 +15,7 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
             float4 _BurtSSShadowContrastParams; // x grass, y detail, z foliage, w character.
             float4 _BurtSSShadowTraceScreenSize;
             float4 _BurtMainLightDirection;
+            sampler2D _BurtScreenSpaceShadowTexture;
 
             #define BURT_SS_SHADOW_PIXEL_GRASS 2u
             #define BURT_SS_SHADOW_PIXEL_DETAIL 3u
@@ -256,6 +257,12 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
                 float shadow = BurtSSShadowTrace(input.screenUV);
                 return float4(shadow, shadow, shadow, 1.0f);
             }
+
+            float4 FragDebug(Varyings input) : SV_Target
+            {
+                float shadow = tex2D(_BurtScreenSpaceShadowTexture, input.screenUV).r;
+                return float4(saturate(shadow).xxx, 1.0f);
+            }
         ENDHLSL
 
         Pass
@@ -269,6 +276,20 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
             #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment FragTrace
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Screen Space Shadow Debug"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment FragDebug
             ENDHLSL
         }
     }

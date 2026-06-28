@@ -59,8 +59,8 @@ Shader "BurtRP/Clear Coat"
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
-        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 2
-        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 7
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 128
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
     }
 
     // Defines the runtime SubShader used by BurtRP.
@@ -203,11 +203,11 @@ Shader "BurtRP/Clear Coat"
             // 如果前面已经跑过 Depth Prepass，LEqual 会让等深度片元通过；如果没跑过，也能正常建立 CameraDepth。
             ZTest LEqual
 
-            // Deferred stencil layout: 2 = Clear Coat. Deferred Lighting has a matching Ref 2 pass.
+            // Deferred stencil layout matches XRender high bits: 128 = Clear Coat.
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 7
+                ReadMask 224
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
@@ -274,7 +274,6 @@ Shader "BurtRP/Clear Coat"
 
             // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
             #pragma target 3.0
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
 
             // Selects the shared Forward shading model before BurtLighting.hlsl is included.
             #define BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT 1

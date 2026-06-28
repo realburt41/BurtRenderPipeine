@@ -141,9 +141,9 @@ Shader "BurtRP/Hair"
 
             Stencil
             {
-                Ref 1
-                ReadMask 7
-                WriteMask 7
+                Ref 96
+                ReadMask 224
+                WriteMask 224
                 Comp Always
                 Pass Replace
             }
@@ -177,7 +177,6 @@ Shader "BurtRP/Hair"
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
             #pragma target 3.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
 
             #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairProperties.hlsl"

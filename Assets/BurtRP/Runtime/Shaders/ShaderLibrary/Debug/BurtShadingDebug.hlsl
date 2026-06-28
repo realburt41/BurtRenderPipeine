@@ -100,6 +100,8 @@ static const float BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_SLICE = 477.0f;
 static const float BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_UV = 478.0f;
 static const float BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_DEPTH = 479.0f;
 static const float BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_COMPARE = 480.0f;
+static const float BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_TRANSMISSION_DEPTH = 481.0f;
+static const float BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_TRANSMISSION_THICKNESS = 493.0f;
 static const float BURT_SHADING_DEBUG_SUBSURFACE_PROFILE_SLOT_COUNT = 8.0f;
 
 // 保存片元已经算好的调试数据，避免 Debug View 重新计算一套和正常渲染不一致的光照。
@@ -148,6 +150,8 @@ struct BurtShadingDebugData
     float3 perObjectShadowUVColor;
     float3 perObjectShadowDepthColor;
     float3 perObjectShadowCompareColor;
+    float3 perObjectShadowTransmissionDepthColor;
+    float3 perObjectShadowTransmissionThicknessColor;
 
     // 保存当前像素命中的 CSM cascade 调试颜色。
     float3 shadowCascadeColor;
@@ -312,6 +316,39 @@ bool BurtIsSameShadingDebugMode(float mode, float expectedMode) // 判断当前�
     return abs(mode - expectedMode) < 0.5f; // 用半个整数范围做比较，避免 float/int 上传转换产生精度边界问题。
 }
 
+bool BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+{
+    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_LIGHTING_UNSHADOWED);
+}
+
+bool BurtNeedsAdditionalShadowAttenuationShadingDebug()
+{
+    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_ATTENUATION);
+}
+
+bool BurtNeedsAdditionalShadowProjectionShadingDebug()
+{
+    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_FACE)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_UV)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH_DELTA);
+}
+
+bool BurtNeedsPerObjectShadowProjectionShadingDebug()
+{
+    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_OBJECT_INDEX)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_SLICE)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_UV)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_DEPTH)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_COMPARE);
+}
+
+bool BurtNeedsPerObjectShadowTransmissionShadingDebug()
+{
+    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_TRANSMISSION_DEPTH)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_TRANSMISSION_THICKNESS);
+}
+
 float3 BurtEncodeNormalWSForDebug(float3 normalWS) // 把世界空间法线编码成可以显示到屏幕上的 RGB 颜色。
 {
     float3 safeNormalWS = BurtSafeNormalize(normalWS); // 先安全归一化，避免插值或贴图采样造成长度偏差。
@@ -343,6 +380,8 @@ BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为�
     data.perObjectShadowUVColor = float3(0.0f, 0.0f, 0.0f);
     data.perObjectShadowDepthColor = float3(0.0f, 0.0f, 0.0f);
     data.perObjectShadowCompareColor = float3(0.0f, 0.0f, 0.0f);
+    data.perObjectShadowTransmissionDepthColor = float3(0.0f, 0.0f, 0.0f);
+    data.perObjectShadowTransmissionThicknessColor = float3(0.0f, 0.0f, 0.0f);
     data.shadowCascadeColor = float3(0.0f, 0.0f, 0.0f);
     data.shadowCascadeBlend = 0.0f;
     data.shadowDistanceFade = 0.0f;
@@ -451,38 +490,51 @@ void BurtFillPerObjectShadowShadingDebugData(
     out float3 sliceColor,
     out float3 uvColor,
     out float3 depthColor,
-    out float3 compareColor)
+    out float3 compareColor,
+    out float3 transmissionDepthColor,
+    out float3 transmissionThicknessColor)
 {
     objectIndexColor = float3(0.0f, 0.0f, 0.0f);
     sliceColor = float3(0.0f, 0.0f, 0.0f);
     uvColor = float3(0.0f, 0.0f, 0.0f);
     depthColor = float3(0.0f, 0.0f, 0.0f);
     compareColor = float3(0.0f, 0.0f, 0.0f);
+    transmissionDepthColor = float3(0.0f, 0.0f, 0.0f);
+    transmissionThicknessColor = float3(0.0f, 0.0f, 0.0f);
 
     if (!BurtIsShadingDebugEnabled())
     {
         return;
     }
 
-    bool needsPerObjectShadowDebug = BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_OBJECT_INDEX)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_SLICE)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_UV)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_DEPTH)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_COMPARE);
-    if (!needsPerObjectShadowDebug)
+    bool needsProjectionDebug = BurtNeedsPerObjectShadowProjectionShadingDebug();
+    bool needsTransmissionDebug = BurtNeedsPerObjectShadowTransmissionShadingDebug();
+    if (!needsProjectionDebug && !needsTransmissionDebug)
     {
         return;
     }
 
-    BurtFillPerObjectShadowProjectionDebugData(
-        positionWS,
-        normalWS,
-        objectIndex,
-        objectIndexColor,
-        sliceColor,
-        uvColor,
-        depthColor,
-        compareColor);
+    if (needsProjectionDebug)
+    {
+        BurtFillPerObjectShadowProjectionDebugData(
+            positionWS,
+            normalWS,
+            objectIndex,
+            objectIndexColor,
+            sliceColor,
+            uvColor,
+            depthColor,
+            compareColor);
+    }
+
+    if (needsTransmissionDebug)
+    {
+        BurtFillPerObjectShadowTransmissionDebugData(
+            positionWS,
+            objectIndex,
+            transmissionDepthColor,
+            transmissionThicknessColor);
+    }
 }
 
 bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadingDebugData data, out float3 debugColor) // 尝试根据当前模式生成材质调试颜色。
@@ -960,6 +1012,18 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_COMPARE))
     {
         debugColor = saturate(data.perObjectShadowCompareColor);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_TRANSMISSION_DEPTH))
+    {
+        debugColor = saturate(data.perObjectShadowTransmissionDepthColor);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_TRANSMISSION_THICKNESS))
+    {
+        debugColor = saturate(data.perObjectShadowTransmissionThicknessColor);
         return true;
     }
 

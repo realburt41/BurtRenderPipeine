@@ -1207,8 +1207,8 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             ZTest Always
             Stencil
             {
-                Ref 3
-                ReadMask 3
+                Ref 64
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }
@@ -1253,8 +1253,8 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             ZTest Always
             Stencil
             {
-                Ref 3
-                ReadMask 3
+                Ref 64
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }
@@ -1312,8 +1312,8 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             ZTest Always
             Stencil
             {
-                Ref 3
-                ReadMask 3
+                Ref 64
+                ReadMask 224
                 Comp Equal
                 Pass Keep
             }

@@ -240,7 +240,9 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                 if (debugMode == 29)
                 {
                     float isFoliage = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
-                    return BurtDebugScalar(BurtGetFoliageTransmissionWeight(gbufferData) * isFoliage * 0.1f);
+                    float foliageWeight = BurtGetFoliageTransmissionWeight(gbufferData);
+                    float visibleFoliageWeight = gbufferData.foliageIsGrass > 0.5f ? foliageWeight * 0.1f : foliageWeight;
+                    return BurtDebugScalar(visibleFoliageWeight * isFoliage);
                 }
 
                 if (debugMode == 30)

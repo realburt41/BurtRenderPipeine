@@ -232,6 +232,105 @@ namespace Burt.RenderPipeline
         }
     }
 
+    internal sealed class BurtDebugScreenSpaceShadowPass : BurtRenderPass
+    {
+        private const string ScreenSpaceShadowShaderName = "Hidden/BurtRP/ScreenSpaceShadow";
+        private const int DebugPassIndex = 1;
+
+        private static readonly int ScreenSpaceShadowTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceShadowTextureId;
+
+        private Material screenSpaceShadowMaterial;
+        private bool hasLoggedMissingShader;
+        private bool hasLoggedMissingShaderPass;
+
+        public override string Name => "Burt Debug Screen Space Shadow";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.FullScreen;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadowDebugView(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadScreenSpaceShadow();
+            builder.WriteCameraColor();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null || !BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadowDebugView(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var cameraColorTarget = context.CameraColorTarget;
+            var shadowTarget = context.ScreenSpaceShadowTarget;
+            if (!cameraColorTarget.IsValid || !shadowTarget.IsValid)
+            {
+                return;
+            }
+
+            var material = GetScreenSpaceShadowMaterial();
+            if (material == null || !HasRequiredShaderPass(material))
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            var camera = context.Request != null ? context.Request.Camera : null;
+            cmd.SetRenderTarget(cameraColorTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.SetGlobalTexture(ScreenSpaceShadowTextureId, shadowTarget.Identifier);
+            cmd.DrawProcedural(Matrix4x4.identity, material, DebugPassIndex, MeshTopology.Triangles, 3, 1);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private Material GetScreenSpaceShadowMaterial()
+        {
+            if (screenSpaceShadowMaterial != null)
+            {
+                return screenSpaceShadowMaterial;
+            }
+
+            var shader = Shader.Find(ScreenSpaceShadowShaderName);
+            if (shader == null)
+            {
+                if (!hasLoggedMissingShader)
+                {
+                    Debug.LogWarning("BurtRP could not find shader: " + ScreenSpaceShadowShaderName);
+                    hasLoggedMissingShader = true;
+                }
+
+                return null;
+            }
+
+            screenSpaceShadowMaterial = new Material(shader)
+            {
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            return screenSpaceShadowMaterial;
+        }
+
+        private bool HasRequiredShaderPass(Material material)
+        {
+            if (material != null && DebugPassIndex >= 0 && DebugPassIndex < material.passCount)
+            {
+                return true;
+            }
+
+            if (!hasLoggedMissingShaderPass)
+            {
+                Debug.LogWarning("BurtRP screen-space shadow shader pass missing: " + ScreenSpaceShadowShaderName + " pass " + DebugPassIndex);
+                hasLoggedMissingShaderPass = true;
+            }
+
+            return false;
+        }
+    }
+
     internal sealed class BurtReleaseScreenSpaceShadowPass : BurtRenderPass
     {
         public override string Name => "Burt Release Screen Space Shadow";
@@ -328,6 +427,21 @@ namespace Burt.RenderPipeline
         public static bool ShouldUseScreenSpaceShadow(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
             return ResolveScreenSpaceShadowSettings(request, asset).Enabled;
+        }
+
+        public static bool ShouldUseScreenSpaceShadowDebugView(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return IsScreenSpaceShadowDebugMode(BurtShadingDebugSettings.Mode) && ShouldUseScreenSpaceShadow(request, asset);
+        }
+
+        public static bool IsScreenSpaceShadowDebugMode(BurtShadingDebugMode mode)
+        {
+            return mode == BurtShadingDebugMode.ScreenSpaceShadow;
+        }
+
+        public static string ResolveScreenSpaceShadowDebugModeLabel()
+        {
+            return IsScreenSpaceShadowDebugMode(BurtShadingDebugSettings.Mode) ? "ScreenSpaceShadow" : "Disabled";
         }
 
         public static BurtScreenSpaceShadowSettings ResolveScreenSpaceShadowSettings(BurtRenderRequest request, BurtRenderPipelineAsset asset)

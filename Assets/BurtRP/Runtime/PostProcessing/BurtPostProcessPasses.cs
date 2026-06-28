@@ -55,7 +55,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
     {
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy"; // 定义后处理 shader 的查找名称，必须和 shader 文件里的 Shader 名称一致。
         private const string TemporalAAComputeShaderResourcePath = "BurtTemporalAA";
-
         private const int MaxBloomMipCount = 8; // 第一版 Bloom 最多申请 8 级临时 RT，避免动态 RenderGraph 资源注册过重。
 
         private const int MaxBloomGaussianSamples = BurtPostProcessUtility.BloomGaussianMaxSamples; // Match XRender PC GaussianBlur sample cap.
@@ -101,10 +100,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAAVelocityTextureId = Shader.PropertyToID("_BurtTAAVelocityTexture");
         private static readonly int TemporalAADilatedVelocityTextureId = Shader.PropertyToID("_BurtTAADilatedVelocityTexture");
         private static readonly int TemporalAAPrevUseCountTextureId = Shader.PropertyToID("_BurtTAAPrevUseCountTexture");
+        private static readonly int TemporalAAPrevUseCountUintTextureId = Shader.PropertyToID("_BurtTAAPrevUseCountUintTexture");
+        private static readonly int TemporalAAPrevUseCountOutputTextureId = Shader.PropertyToID("_BurtTAAPrevUseCountOutputTexture");
         private static readonly int TemporalAAMetadataTextureId = Shader.PropertyToID("_BurtTAAMetadataTexture");
-        private static readonly int TemporalAAStencilTextureId = Shader.PropertyToID("_BurtTAAStencilTexture");
+        private static readonly int TemporalAAStencilMaskTextureId = Shader.PropertyToID("_BurtTAAStencilMaskTexture");
         private static readonly int TemporalAAResolveTextureId = Shader.PropertyToID("_BurtTAAResolveTexture");
         private static readonly int TemporalAAParallaxRejectionTextureId = Shader.PropertyToID("_BurtTAAParallaxRejectionTexture");
+        private static readonly int TemporalAAParallaxRejectionOutputTextureId = Shader.PropertyToID("_BurtTAAParallaxRejectionOutputTexture");
         private static readonly int TemporalAAUpscaleCurrentTextureId = Shader.PropertyToID("_BurtTAAUpscaleCurrentTexture");
         private static readonly int TemporalAAUpscaleTexelSizeId = Shader.PropertyToID("_BurtTAAUpscaleTexelSize");
         private static readonly int TemporalAAUpscaleParamsId = Shader.PropertyToID("_BurtTAAUpscaleParams");
@@ -227,7 +229,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private Material postProcessMaterial;
         private static ComputeShader temporalAAComputeShader;
-
         private bool hasLoggedMissingShader; // 记录缺失 shader 警告是否已经输出，避免 Console 每帧刷屏。
         private static bool hasLoggedMissingTemporalAAComputeShader;
         private static bool hasLoggedMissingTemporalAAComputeKernel;
@@ -575,6 +576,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var cameraTargetWidth = Mathf.Max(1, colorDescriptor.width);
             var cameraTargetHeight = Mathf.Max(1, colorDescriptor.height);
             var useTemporalAAUpscale = width != cameraTargetWidth || height != cameraTargetHeight;
+            var useTemporalAAComputeDilateDecimate = CanUseTemporalAAComputeDilateDecimatePath();
             colorDescriptor.width = width;
             colorDescriptor.height = height;
             colorDescriptor.depthBufferBits = 0;
@@ -582,14 +584,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             colorDescriptor.useMipMap = false;
             colorDescriptor.autoGenerateMips = false;
 
+            var resolveDescriptor = colorDescriptor;
+            resolveDescriptor.enableRandomWrite = SystemInfo.supportsComputeShaders;
+
             var scalarDescriptor = colorDescriptor;
             scalarDescriptor.colorFormat = RenderTextureFormat.RFloat;
             scalarDescriptor.sRGB = false;
 
             var parallaxDescriptor = colorDescriptor;
-            parallaxDescriptor.colorFormat = RenderTextureFormat.RGHalf;
             parallaxDescriptor.sRGB = false;
-            parallaxDescriptor.enableRandomWrite = true;
+            if (useTemporalAAComputeDilateDecimate)
+            {
+                parallaxDescriptor.graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat;
+                parallaxDescriptor.enableRandomWrite = true;
+            }
+            else
+            {
+                parallaxDescriptor.colorFormat = RenderTextureFormat.RGHalf;
+            }
 
             var metadataDescriptor = colorDescriptor;
             metadataDescriptor.colorFormat = RenderTextureFormat.ARGB32;
@@ -599,38 +611,57 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             velocityDescriptor.colorFormat = RenderTextureFormat.ARGBHalf;
             velocityDescriptor.sRGB = false;
 
+            var dilatedVelocityDescriptor = velocityDescriptor;
+            dilatedVelocityDescriptor.enableRandomWrite = useTemporalAAComputeDilateDecimate;
+
             var prevUseCountDescriptor = colorDescriptor;
-            prevUseCountDescriptor.colorFormat = RenderTextureFormat.RInt;
+            prevUseCountDescriptor.colorFormat = RenderTextureFormat.RFloat;
             prevUseCountDescriptor.sRGB = false;
-            prevUseCountDescriptor.enableRandomWrite = true;
             prevUseCountDescriptor.useMipMap = false;
             prevUseCountDescriptor.autoGenerateMips = false;
 
+            var prevUseCountUintDescriptor = colorDescriptor;
+            prevUseCountUintDescriptor.graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R32_UInt;
+            prevUseCountUintDescriptor.sRGB = false;
+            prevUseCountUintDescriptor.useMipMap = false;
+            prevUseCountUintDescriptor.autoGenerateMips = false;
+            prevUseCountUintDescriptor.enableRandomWrite = true;
+
             cmd.GetTemporaryRT(TemporalAACurrentDepthTextureId, scalarDescriptor, FilterMode.Point);
             cmd.GetTemporaryRT(TemporalAAVelocityTextureId, velocityDescriptor, FilterMode.Point);
-            cmd.GetTemporaryRT(TemporalAADilatedVelocityTextureId, velocityDescriptor, FilterMode.Point);
+            cmd.GetTemporaryRT(TemporalAADilatedVelocityTextureId, dilatedVelocityDescriptor, FilterMode.Point);
             cmd.GetTemporaryRT(TemporalAAPrevUseCountTextureId, prevUseCountDescriptor, FilterMode.Point);
+            cmd.GetTemporaryRT(TemporalAAStencilMaskTextureId, scalarDescriptor, FilterMode.Point);
+            if (useTemporalAAComputeDilateDecimate)
+            {
+                cmd.GetTemporaryRT(TemporalAAPrevUseCountUintTextureId, prevUseCountUintDescriptor, FilterMode.Point);
+            }
+
             cmd.GetTemporaryRT(TemporalAAMetadataTextureId, metadataDescriptor, FilterMode.Point);
-            cmd.GetTemporaryRT(TemporalAAResolveTextureId, colorDescriptor, FilterMode.Bilinear);
+            cmd.GetTemporaryRT(TemporalAAResolveTextureId, resolveDescriptor, FilterMode.Bilinear);
             cmd.GetTemporaryRT(TemporalAAParallaxRejectionTextureId, parallaxDescriptor, FilterMode.Bilinear);
             if (useTemporalAADebug)
             {
-                cmd.GetTemporaryRT(TemporalAADebugTextureId, colorDescriptor, FilterMode.Bilinear);
+                cmd.GetTemporaryRT(TemporalAADebugTextureId, resolveDescriptor, FilterMode.Bilinear);
             }
 
             var currentDepth = new RenderTargetIdentifier(TemporalAACurrentDepthTextureId);
             var velocity = new RenderTargetIdentifier(TemporalAAVelocityTextureId);
             var dilatedVelocity = new RenderTargetIdentifier(TemporalAADilatedVelocityTextureId);
             var prevUseCount = new RenderTargetIdentifier(TemporalAAPrevUseCountTextureId);
+            var prevUseCountUint = new RenderTargetIdentifier(TemporalAAPrevUseCountUintTextureId);
+            var stencilMask = new RenderTargetIdentifier(TemporalAAStencilMaskTextureId);
             var metadata = new RenderTargetIdentifier(TemporalAAMetadataTextureId);
             var resolveTarget = new RenderTargetIdentifier(TemporalAAResolveTextureId);
             var parallaxRejection = new RenderTargetIdentifier(TemporalAAParallaxRejectionTextureId);
             var debugTarget = new RenderTargetIdentifier(TemporalAADebugTextureId);
 
+            cmd.SetGlobalTexture(TemporalAAStencilMaskTextureId, stencilMask);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.SetGlobalVector(TemporalAAStencilTexelSizeId, new Vector4(1f / cameraTargetWidth, 1f / cameraTargetHeight, cameraTargetWidth, cameraTargetHeight));
             cmd.SetGlobalVector(TemporalAAUpscaleTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
-            cmd.SetGlobalVector(TemporalAAUpscaleParamsId, new Vector4(cameraTargetWidth, cameraTargetHeight, cameraTargetWidth / (float)width, cameraTargetHeight / (float)height));
+            var temporalAAUpscaleParams = new Vector4(cameraTargetWidth, cameraTargetHeight, cameraTargetWidth / (float)width, cameraTargetHeight / (float)height);
+            cmd.SetGlobalVector(TemporalAAUpscaleParamsId, temporalAAUpscaleParams);
             SetTemporalAAGlobals(cmd, temporalAA, width, height, historyValid);
 
             cmd.SetRenderTarget(currentDepth);
@@ -642,40 +673,68 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACameraVelocity), MeshTopology.Triangles, 3, 1);
 
+            cmd.SetRenderTarget(stencilMask);
+            SetTemporalAAViewport(cmd, width, height);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+
             var drewObjectMotionVectors = DrawTemporalAAObjectMotionVectors(context, cmd, camera, velocity, cameraDepthTarget, width, height, !useTemporalAAUpscale);
             temporalAA.ObjectMotionVectorPassDrawn = drewObjectMotionVectors;
             temporalAA.VelocityMode = drewObjectMotionVectors ? BurtTemporalAAVelocityMode.CameraAndObject : BurtTemporalAAVelocityMode.CameraOnly;
 
-            cmd.SetRenderTarget(dilatedVelocity);
-            SetTemporalAAViewport(cmd, width, height);
-            cmd.SetGlobalTexture(TemporalAAVelocityTextureId, velocity);
-            cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
-            cmd.SetGlobalTexture(TemporalAAStencilTextureId, cameraDepthTarget.Identifier, RenderTextureSubElement.Stencil);
-            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAVelocityDilation), MeshTopology.Triangles, 3, 1);
-
-            cmd.SetRenderTarget(prevUseCount);
-            SetTemporalAAViewport(cmd, width, height);
-            cmd.ClearRenderTarget(false, true, Color.clear);
-
-            if (!TryExecuteTemporalAAPrevUseCountCompute(cmd, dilatedVelocity, prevUseCount, width, height))
-            {
-                cmd.SetRenderTarget(cameraColorTarget.Identifier);
-                SetTemporalAAViewport(cmd, width, height);
-                cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
-                cmd.SetRandomWriteTarget(1, prevUseCount);
-                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAABuildPrevUseCount), MeshTopology.Triangles, 3, 1);
-                cmd.ClearRandomWriteTargets();
-            }
-
             var blackTexture = new RenderTargetIdentifier(Texture2D.blackTexture);
-            if (!TryExecuteTemporalAADecimateHistoryCompute(cmd, dilatedVelocity, currentDepth, historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth, prevUseCount, parallaxRejection, width, height))
+            var historyDepthForDecimate = historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth;
+            if (useTemporalAAComputeDilateDecimate)
             {
+                ExecuteTemporalAADilateVelocityCompute(
+                    cmd,
+                    currentDepth,
+                    velocity,
+                    stencilMask,
+                    dilatedVelocity,
+                    prevUseCountUint,
+                    temporalAA,
+                    width,
+                    height,
+                    cameraTargetWidth,
+                    cameraTargetHeight);
+
+                cmd.SetRenderTarget(prevUseCount);
+                SetTemporalAAViewport(cmd, width, height);
+                cmd.ClearRenderTarget(false, true, Color.clear);
+                cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAABuildPrevUseCount), MeshTopology.Triangles, 3, 1);
+
+                ExecuteTemporalAADecimateHistoryCompute(
+                    cmd,
+                    dilatedVelocity,
+                    prevUseCountUint,
+                    currentDepth,
+                    historyDepthForDecimate,
+                    parallaxRejection,
+                    width,
+                    height);
+            }
+            else
+            {
+                cmd.SetRenderTarget(dilatedVelocity);
+                SetTemporalAAViewport(cmd, width, height);
+                cmd.SetGlobalTexture(TemporalAAVelocityTextureId, velocity);
+                cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
+                cmd.SetGlobalTexture(TemporalAAStencilMaskTextureId, stencilMask);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAVelocityDilation), MeshTopology.Triangles, 3, 1);
+
+                cmd.SetRenderTarget(prevUseCount);
+                SetTemporalAAViewport(cmd, width, height);
+                cmd.ClearRenderTarget(false, true, Color.clear);
+                cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAABuildPrevUseCount), MeshTopology.Triangles, 3, 1);
+
                 cmd.SetRenderTarget(parallaxRejection);
                 SetTemporalAAViewport(cmd, width, height);
                 cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
                 cmd.SetGlobalTexture(TemporalAAPrevUseCountTextureId, prevUseCount);
                 cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
-                cmd.SetGlobalTexture(TemporalAADepthHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth);
+                cmd.SetGlobalTexture(TemporalAADepthHistoryTextureId, historyDepthForDecimate);
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAADecimateHistory), MeshTopology.Triangles, 3, 1);
             }
 
@@ -685,13 +744,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
             cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
             cmd.SetGlobalTexture(TemporalAAParallaxRejectionTextureId, parallaxRejection);
-            cmd.SetGlobalTexture(TemporalAAStencilTextureId, cameraDepthTarget.Identifier, RenderTextureSubElement.Stencil);
+            cmd.SetGlobalTexture(TemporalAAStencilMaskTextureId, stencilMask);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAMetadata), MeshTopology.Triangles, 3, 1);
 
             var hasGBuffer1 = context.GBuffer1Target.IsValid;
+            var historyColorTarget = historyValid ? new RenderTargetIdentifier(histories.Color) : cameraColorTarget.Identifier;
+            var historyDepthTarget = historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth;
             cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier);
-            cmd.SetGlobalTexture(TemporalAAHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.Color) : cameraColorTarget.Identifier);
-            cmd.SetGlobalTexture(TemporalAADepthHistoryTextureId, historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth);
+            cmd.SetGlobalTexture(TemporalAAHistoryTextureId, historyColorTarget);
+            cmd.SetGlobalTexture(TemporalAADepthHistoryTextureId, historyDepthTarget);
             cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
             cmd.SetGlobalTexture(TemporalAARawVelocityTextureId, velocity);
             cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
@@ -702,9 +763,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.GBuffer1Id, hasGBuffer1 ? context.GBuffer1Target.Identifier : blackTexture);
             cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
 
-            cmd.SetRenderTarget(resolveTarget);
-            SetTemporalAAViewport(cmd, width, height);
-            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAResolve), MeshTopology.Triangles, 3, 1);
+            if (!TryExecuteTemporalAAResolveCompute(
+                cmd,
+                cameraColorTarget.Identifier,
+                historyColorTarget,
+                historyDepthTarget,
+                dilatedVelocity,
+                parallaxRejection,
+                metadata,
+                stencilMask,
+                resolveTarget,
+                temporalAA,
+                historyValid,
+                width,
+                height,
+                cameraTargetWidth,
+                cameraTargetHeight))
+            {
+                cmd.SetRenderTarget(resolveTarget);
+                SetTemporalAAViewport(cmd, width, height);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAResolve), MeshTopology.Triangles, 3, 1);
+            }
 
             if (useTemporalAADebug)
             {
@@ -749,7 +828,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.ReleaseTemporaryRT(TemporalAAParallaxRejectionTextureId);
             cmd.ReleaseTemporaryRT(TemporalAAResolveTextureId);
             cmd.ReleaseTemporaryRT(TemporalAAMetadataTextureId);
+            if (useTemporalAAComputeDilateDecimate)
+            {
+                cmd.ReleaseTemporaryRT(TemporalAAPrevUseCountUintTextureId);
+            }
+
             cmd.ReleaseTemporaryRT(TemporalAAPrevUseCountTextureId);
+            cmd.ReleaseTemporaryRT(TemporalAAStencilMaskTextureId);
             cmd.ReleaseTemporaryRT(TemporalAADilatedVelocityTextureId);
             cmd.ReleaseTemporaryRT(TemporalAAVelocityTextureId);
             cmd.ReleaseTemporaryRT(TemporalAACurrentDepthTextureId);
@@ -769,7 +854,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalVector(TemporalAAParamsId, new Vector4(0f, 0f, historyValid ? 1f : 0f, temporalAA.FrameIndex));
             cmd.SetGlobalVector(TemporalAAParams2Id, new Vector4(temporalAA.Settings.Sharpness, temporalAA.Settings.JitterScale, 0f, 0f));
             cmd.SetGlobalVector(TemporalAAResponsiveParamsId, new Vector4(0f, temporalAA.Settings.UntrustedMotionFeedbackScale, 0f, 0f));
-            cmd.SetGlobalVector(TemporalAAEdgeParamsId, new Vector4(temporalAA.Settings.MotionEdgeResponsiveStrength, temporalAA.Settings.DepthEdgeResponsiveStrength, temporalAA.Settings.HistoryClampTightness, temporalAA.Settings.DepthWeightedFilterFloor));
+            cmd.SetGlobalVector(TemporalAAEdgeParamsId, new Vector4(temporalAA.Settings.MotionEdgeResponsiveStrength, temporalAA.Settings.DepthEdgeResponsiveStrength, 0f, 0f));
             cmd.SetGlobalFloat(TemporalAAHistoryExposureCorrectionId, temporalAA.HistoryExposureCorrection);
 
             ComputeTemporalAACurrentSampleWeights(temporalAA.Jitter, out var weights0, out var weights1, out var weights2);
@@ -778,58 +863,128 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalVector(TemporalAACurrentSampleWeights2Id, weights2);
         }
 
-        private static bool TryExecuteTemporalAAPrevUseCountCompute(
-            CommandBuffer cmd,
-            RenderTargetIdentifier velocity,
-            RenderTargetIdentifier prevUseCount,
-            int width,
-            int height)
+        private static bool CanUseTemporalAAComputeDilateDecimatePath()
         {
-            if (cmd == null || !SystemInfo.supportsComputeShaders)
+            if (!SystemInfo.supportsComputeShaders ||
+                !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R32_UInt, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
+                !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
+                !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
             {
                 return false;
             }
 
             var shader = GetTemporalAAComputeShader();
-            if (shader == null || !TryFindTemporalAAComputeKernel(shader, "BuildPrevUseCountCS", out var kernel))
-            {
-                return false;
-            }
-
-            cmd.SetComputeTextureParam(shader, kernel, TemporalAAVelocityTextureId, velocity);
-            cmd.SetComputeTextureParam(shader, kernel, TemporalAAPrevUseCountTextureId, prevUseCount);
-            cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
-            cmd.DispatchCompute(shader, kernel, Mathf.CeilToInt(width / 8f), Mathf.CeilToInt(height / 8f), 1);
-            return true;
+            int clearKernel;
+            int dilateKernel;
+            int decimateKernel;
+            return shader != null &&
+                TryFindTemporalAAComputeKernel(shader, "ClearPrevUseCountAACS", out clearKernel) &&
+                TryFindTemporalAAComputeKernel(shader, "DilateVelocityAACS", out dilateKernel) &&
+                TryFindTemporalAAComputeKernel(shader, "DecimateHistoryAACS", out decimateKernel);
         }
 
-        private static bool TryExecuteTemporalAADecimateHistoryCompute(
+        private static void ExecuteTemporalAADilateVelocityCompute(
             CommandBuffer cmd,
-            RenderTargetIdentifier velocity,
             RenderTargetIdentifier currentDepth,
-            RenderTargetIdentifier depthHistory,
-            RenderTargetIdentifier prevUseCount,
+            RenderTargetIdentifier rawVelocity,
+            RenderTargetIdentifier stencilMask,
+            RenderTargetIdentifier dilatedVelocity,
+            RenderTargetIdentifier prevUseCountUint,
+            BurtTemporalAARequestState temporalAA,
+            int width,
+            int height,
+            int stencilWidth,
+            int stencilHeight)
+        {
+            var shader = GetTemporalAAComputeShader();
+            var clearKernel = shader.FindKernel("ClearPrevUseCountAACS");
+            cmd.SetComputeTextureParam(shader, clearKernel, TemporalAAPrevUseCountOutputTextureId, prevUseCountUint);
+            cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
+            cmd.DispatchCompute(shader, clearKernel, Mathf.CeilToInt(width / 8f), Mathf.CeilToInt(height / 8f), 1);
+
+            var kernel = shader.FindKernel("DilateVelocityAACS");
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAACurrentDepthTextureId, currentDepth);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAARawVelocityTextureId, rawVelocity);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAStencilMaskTextureId, stencilMask);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAADilatedVelocityTextureId, dilatedVelocity);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAPrevUseCountOutputTextureId, prevUseCountUint);
+            cmd.SetComputeMatrixParam(shader, TemporalAAInverseCurrentNonJitteredViewProjectionId, temporalAA != null ? temporalAA.InverseCurrentNonJitteredViewProjectionMatrix : Matrix4x4.identity);
+            cmd.SetComputeMatrixParam(shader, TemporalAAPreviousNonJitteredViewProjectionId, temporalAA != null ? temporalAA.PreviousNonJitteredViewProjectionMatrix : Matrix4x4.identity);
+            var jitter = temporalAA != null ? temporalAA.Jitter : Vector2.zero;
+            cmd.SetComputeVectorParam(shader, TemporalAAJitterId, new Vector4(jitter.x, jitter.y, temporalAA != null ? temporalAA.JitterPixels.x : 0f, temporalAA != null ? temporalAA.JitterPixels.y : 0f));
+            cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
+            cmd.SetComputeVectorParam(shader, TemporalAAStencilTexelSizeId, new Vector4(1f / Mathf.Max(1, stencilWidth), 1f / Mathf.Max(1, stencilHeight), stencilWidth, stencilHeight));
+            cmd.DispatchCompute(shader, kernel, Mathf.CeilToInt(width / 8f), Mathf.CeilToInt(height / 8f), 1);
+        }
+
+        private static void ExecuteTemporalAADecimateHistoryCompute(
+            CommandBuffer cmd,
+            RenderTargetIdentifier dilatedVelocity,
+            RenderTargetIdentifier prevUseCountUint,
+            RenderTargetIdentifier currentDepth,
+            RenderTargetIdentifier historyDepth,
             RenderTargetIdentifier parallaxRejection,
             int width,
             int height)
         {
+            var shader = GetTemporalAAComputeShader();
+            var kernel = shader.FindKernel("DecimateHistoryAACS");
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAVelocityTextureId, dilatedVelocity);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAPrevUseCountUintTextureId, prevUseCountUint);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAACurrentDepthTextureId, currentDepth);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAADepthHistoryTextureId, historyDepth);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAParallaxRejectionOutputTextureId, parallaxRejection);
+            cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
+            cmd.DispatchCompute(shader, kernel, Mathf.CeilToInt(width / 8f), Mathf.CeilToInt(height / 8f), 1);
+        }
+
+        private static bool TryExecuteTemporalAAResolveCompute(
+            CommandBuffer cmd,
+            RenderTargetIdentifier source,
+            RenderTargetIdentifier history,
+            RenderTargetIdentifier historyDepth,
+            RenderTargetIdentifier velocity,
+            RenderTargetIdentifier parallaxRejection,
+            RenderTargetIdentifier metadata,
+            RenderTargetIdentifier stencilMask,
+            RenderTargetIdentifier resolveTarget,
+            BurtTemporalAARequestState temporalAA,
+            bool historyValid,
+            int width,
+            int height,
+            int stencilWidth,
+            int stencilHeight)
+        {
             if (cmd == null || !SystemInfo.supportsComputeShaders)
             {
                 return false;
             }
 
             var shader = GetTemporalAAComputeShader();
-            if (shader == null || !TryFindTemporalAAComputeKernel(shader, "DecimateHistoryCS", out var kernel))
+            if (shader == null || !TryFindTemporalAAComputeKernel(shader, "ResolveTemporalAACS", out var kernel))
             {
                 return false;
             }
 
+            cmd.SetComputeTextureParam(shader, kernel, SourceTextureId, source);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAHistoryTextureId, history);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAADepthHistoryTextureId, historyDepth);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAVelocityTextureId, velocity);
-            cmd.SetComputeTextureParam(shader, kernel, TemporalAACurrentDepthTextureId, currentDepth);
-            cmd.SetComputeTextureParam(shader, kernel, TemporalAADepthHistoryTextureId, depthHistory);
-            cmd.SetComputeTextureParam(shader, kernel, TemporalAAPrevUseCountTextureId, prevUseCount);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAParallaxRejectionTextureId, parallaxRejection);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAMetadataTextureId, metadata);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAStencilMaskTextureId, stencilMask);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAResolveTextureId, resolveTarget);
             cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
+            cmd.SetComputeVectorParam(shader, TemporalAAStencilTexelSizeId, new Vector4(1f / Mathf.Max(1, stencilWidth), 1f / Mathf.Max(1, stencilHeight), stencilWidth, stencilHeight));
+            cmd.SetComputeVectorParam(shader, TemporalAAParamsId, new Vector4(0f, 0f, historyValid ? 1f : 0f, temporalAA != null ? temporalAA.FrameIndex : 0f));
+            cmd.SetComputeFloatParam(shader, TemporalAAHistoryExposureCorrectionId, temporalAA != null ? temporalAA.HistoryExposureCorrection : 1f);
+
+            var jitter = temporalAA != null ? temporalAA.Jitter : Vector2.zero;
+            ComputeTemporalAACurrentSampleWeights(jitter, out var weights0, out var weights1, out var weights2);
+            cmd.SetComputeVectorParam(shader, TemporalAACurrentSampleWeights0Id, weights0);
+            cmd.SetComputeVectorParam(shader, TemporalAACurrentSampleWeights1Id, weights1);
+            cmd.SetComputeVectorParam(shader, TemporalAACurrentSampleWeights2Id, weights2);
+
             cmd.DispatchCompute(shader, kernel, Mathf.CeilToInt(width / 8f), Mathf.CeilToInt(height / 8f), 1);
             return true;
         }

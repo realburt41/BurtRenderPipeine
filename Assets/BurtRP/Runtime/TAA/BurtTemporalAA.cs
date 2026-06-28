@@ -6,7 +6,7 @@ namespace Burt.RenderPipeline
 {
     public readonly struct BurtTemporalAASettings
     {
-        public static readonly BurtTemporalAASettings Default = new BurtTemporalAASettings(false, 1.0f, 0.04f, 0.35f, 1.2f, 1.1f, 1.15f, 0.12f, 1.0f);
+        public static readonly BurtTemporalAASettings Default = new BurtTemporalAASettings(false, 1.0f, 0.04f, 0.35f, 1.2f, 1.1f, 1.0f);
 
         public bool Enabled { get; }
         public float JitterScale { get; }
@@ -14,12 +14,10 @@ namespace Burt.RenderPipeline
         public float UntrustedMotionFeedbackScale { get; }
         public float MotionEdgeResponsiveStrength { get; }
         public float DepthEdgeResponsiveStrength { get; }
-        public float HistoryClampTightness { get; }
-        public float DepthWeightedFilterFloor { get; }
         public float UpscaleFactor { get; }
 
         public BurtTemporalAASettings(bool enabled, float jitterScale, float sharpness)
-            : this(enabled, jitterScale, sharpness, 0.35f, 1.2f, 1.1f, 1.15f, 0.12f, 1.0f)
+            : this(enabled, jitterScale, sharpness, 0.35f, 1.2f, 1.1f, 1.0f)
         {
         }
 
@@ -30,8 +28,6 @@ namespace Burt.RenderPipeline
             float untrustedMotionFeedbackScale,
             float motionEdgeResponsiveStrength,
             float depthEdgeResponsiveStrength,
-            float historyClampTightness,
-            float depthWeightedFilterFloor,
             float upscaleFactor)
         {
             Enabled = enabled;
@@ -40,8 +36,6 @@ namespace Burt.RenderPipeline
             UntrustedMotionFeedbackScale = untrustedMotionFeedbackScale;
             MotionEdgeResponsiveStrength = motionEdgeResponsiveStrength;
             DepthEdgeResponsiveStrength = depthEdgeResponsiveStrength;
-            HistoryClampTightness = historyClampTightness;
-            DepthWeightedFilterFloor = depthWeightedFilterFloor;
             UpscaleFactor = Mathf.Clamp(upscaleFactor, 1f, 2f);
         }
 
@@ -54,8 +48,6 @@ namespace Burt.RenderPipeline
                 UntrustedMotionFeedbackScale,
                 MotionEdgeResponsiveStrength,
                 DepthEdgeResponsiveStrength,
-                HistoryClampTightness,
-                DepthWeightedFilterFloor,
                 UpscaleFactor);
         }
     }
@@ -210,6 +202,7 @@ namespace Burt.RenderPipeline
     {
         private const float ProjectionChangeEpsilon = 0.0001f;
         private const float TemporalAAPostProcessSignatureEpsilon = 0.001f;
+        private const float SceneViewJitterScaleMultiplier = 0.5f;
         private const int HaltonSequenceLength = 8;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
@@ -315,6 +308,16 @@ namespace Burt.RenderPipeline
                 : settings;
         }
 
+        private static BurtTemporalAASettings ApplyTemporalAAViewJitterScale(BurtTemporalAASettings settings, Camera camera)
+        {
+            if (camera != null && camera.cameraType == CameraType.SceneView)
+            {
+                return settings.WithJitterScale(settings.JitterScale * SceneViewJitterScaleMultiplier);
+            }
+
+            return settings;
+        }
+
         private static BurtTemporalAAVolumeComponent GetTemporalAAVolumeComponent()
         {
             var volumeManager = VolumeManager.instance;
@@ -345,6 +348,7 @@ namespace Burt.RenderPipeline
             }
 
             var settings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
+            settings = ApplyTemporalAAViewJitterScale(settings, camera);
             settings = ApplyTemporalAADebugOverrides(settings, out var jitterFrameOverride);
             var cameraId = camera.GetInstanceID();
             var state = GetOrCreateState(cameraId);
@@ -612,9 +616,11 @@ namespace Burt.RenderPipeline
             var hasColor = state.ColorHistory != null;
             var hasDepth = state.DepthHistory != null;
             var historyAge = state.HasValidHistory && state.FirstValidFrameIndex > 0 ? Mathf.Max(0, state.FrameIndex - state.FirstValidFrameIndex + 1) : 0;
+            var hasUsableHistory = state.HasValidHistory && hasColor;
+            var statusReason = hasUsableHistory && historyAge > 0 ? "HistoryValid" : state.LastInvalidationReason;
 
             return new BurtTemporalAAHistoryStatus(
-                state.HasValidHistory && hasColor,
+                hasUsableHistory,
                 hasColor && Matches(state.ColorDescriptor, colorDescriptor),
                 hasDepth,
                 hasDepth && Matches(state.DepthDescriptor, depthDescriptor),
@@ -623,7 +629,7 @@ namespace Burt.RenderPipeline
                 hasColor ? state.ColorHistory.format : RenderTextureFormat.Default,
                 state.FrameIndex,
                 historyAge,
-                state.LastInvalidationReason);
+                statusReason);
         }
 
         private static BurtTemporalAAHistoryStatus CreateEmptyHistoryStatus(string reason)

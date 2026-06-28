@@ -55,8 +55,8 @@ Shader "BurtRP/Lit"
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
-        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 0
-        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 7
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 32
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
     }
 
     // Defines the runtime SubShader used by BurtRP.
@@ -207,7 +207,7 @@ Shader "BurtRP/Lit"
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 7
+                ReadMask 224
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
@@ -276,7 +276,6 @@ Shader "BurtRP/Lit"
 
             // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
             #pragma target 3.5
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
 
             // Selects the shared Forward shading model before BurtLighting.hlsl is included.
             #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1

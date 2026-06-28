@@ -18,6 +18,7 @@ RWStructuredBuffer<uint> _BurtFurBlurTileDataBuffer;
 
 float4 _BurtFurBlurScreenSize;
 float4 _BurtFurBlurParams;
+float4 _BurtFurBlurTileParams;
 
 groupshared uint BurtFurTileActive;
 
@@ -66,7 +67,9 @@ void InitArgsCS()
 [numthreads(1, 1, 1)]
 void FillArgsPS()
 {
-    uint groupCount = _BurtFurBlurArgsBuffer[0];
+    uint maxTileCount = (uint)max(round(_BurtFurBlurTileParams.x), 1.0);
+    uint groupCount = min(_BurtFurBlurArgsBuffer[0], maxTileCount);
+    _BurtFurBlurArgsBuffer[0] = groupCount;
     _BurtFurBlurArgsBuffer[1] = 1;
     _BurtFurBlurArgsBuffer[2] = 1;
     _BurtFurBlurArgsBuffer[3] = 6;
@@ -93,7 +96,6 @@ void SetupCS(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_
     if (inBounds)
     {
         property = _BurtFurBlurPropertyTexture.Load(int3(pixel, 0));
-        _BurtFurBlurPropertyTempRWTexture[pixel] = property.rg;
         if (BurtFurIsValidProperty(property))
         {
             InterlockedOr(BurtFurTileActive, 1);
@@ -104,16 +106,26 @@ void SetupCS(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_
 
     if (groupIndex == 0 && BurtFurTileActive != 0)
     {
+        uint maxTileCount = (uint)max(round(_BurtFurBlurTileParams.x), 1.0);
         uint indexToStore = 0;
         InterlockedAdd(_BurtFurBlurArgsBuffer[0], 1, indexToStore);
-        _BurtFurBlurTileDataBuffer[indexToStore * 2 + 0] = groupID.x;
-        _BurtFurBlurTileDataBuffer[indexToStore * 2 + 1] = groupID.y;
+        if (indexToStore < maxTileCount)
+        {
+            _BurtFurBlurTileDataBuffer[indexToStore * 2 + 0] = groupID.x;
+            _BurtFurBlurTileDataBuffer[indexToStore * 2 + 1] = groupID.y;
+        }
     }
 }
 
 [numthreads(BURT_FUR_TILE_SIZE * BURT_FUR_TILE_SIZE, 1, 1)]
 void DilateCS(uint3 indirectGroupID : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
+    uint maxTileCount = (uint)max(round(_BurtFurBlurTileParams.x), 1.0);
+    if (indirectGroupID.x >= maxTileCount)
+    {
+        return;
+    }
+
     uint tileIndex = indirectGroupID.x * 2;
     int2 groupID = int2(_BurtFurBlurTileDataBuffer[tileIndex + 0], _BurtFurBlurTileDataBuffer[tileIndex + 1]);
     int2 groupPixel = groupID * BURT_FUR_TILE_SIZE;

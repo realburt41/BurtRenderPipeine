@@ -39,6 +39,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent DoubleSidedNormalModeLabel = new GUIContent("Double Sided Normal Mode", "Back-face normal mode, matching XRender: None, Flip, or Mirror in tangent space.");
         private static readonly GUIContent SurfaceTypeLabel = new GUIContent("Surface Type");
         private static readonly GUIContent FoliageTintModeLabel = new GUIContent("Tint Type");
+        private static readonly GUIContent FoliageUseBakedNormalsLabel = new GUIContent("Use Baked Normals", "Enable the XRender foliage baked-normal path and its ShadowCaster scale adjustment.");
         private static readonly GUIContent TrunkMaskMapLabel = new GUIContent("MOHR Map", "XRender trunk packed map: G occlusion and A roughness. R metallic and B thickness are ignored by the current trunk material model.");
         private static readonly GUIContent RenderQueueLabel = new GUIContent("Render Queue");
         private static readonly GUIContent CullLabel = new GUIContent("Cull");
@@ -52,6 +53,13 @@ namespace Burt.RenderPipeline.Editor
         private static readonly string[] SubsurfaceScatteringModeNames = { "5S Burley", "4S Separable", "3S Preintegrated" };
         private static readonly string[] FoliageTintModeNames = { "Only Local", "Constant Tint", "Tint Map" };
         private const string SubsurfaceProfileGuidTag = "BurtSubsurfaceProfileGuid";
+        private const int GBufferStencilShadingModelMask = 0xE0;
+        private const int GBufferStencilResponsiveAABit = 0x10;
+        private const int GBufferStencilDefaultLitRef = 0x20;
+        private const int GBufferStencilSubsurfaceRef = 0x40;
+        private const int GBufferStencilClearCoatRef = 0x80;
+        private const int GBufferStencilFabricRef = 0xA0;
+        private const int GBufferStencilFoliageRef = 0xC0;
         private static bool showSurfaceOptions = true;
         private static bool showBaseInputs = true;
         private static bool showPbrMaskInputs = true;
@@ -172,7 +180,7 @@ namespace Burt.RenderPipeline.Editor
             SyncFoliageTintModeProperties(material);
             SyncTrunkXRenderCompatibilityProperties(material);
             DrawSurfaceOptions(material);
-            DrawBaseInputs();
+            DrawBaseInputs(material);
             DrawPbrInputs(material);
             DrawNormalInputs(material);
             DrawClearCoatInputs(material);
@@ -453,20 +461,31 @@ namespace Burt.RenderPipeline.Editor
                 return;
             }
 
-            bool transparent = IsTransparentMaterial(material);
+            bool fixedOpaqueCutout = UsesFixedOpaqueCutoutSurface(material);
+            bool transparent = IsTransparentMaterial(material) && !fixedOpaqueCutout;
             if (surface != null)
             {
-                EditorGUI.BeginChangeCheck();
-                EditorGUI.showMixedValue = surface.hasMixedValue;
-                int surfaceValue = EditorGUILayout.Popup(SurfaceTypeLabel, Mathf.Clamp((int)surface.floatValue, 0, SurfaceTypeNames.Length - 1), SurfaceTypeNames);
-                EditorGUI.showMixedValue = false;
-                if (EditorGUI.EndChangeCheck())
+                if (fixedOpaqueCutout)
                 {
-                    materialEditor.RegisterPropertyChangeUndo(SurfaceTypeLabel.text);
-                    surface.floatValue = surfaceValue;
-                    foreach (Object target in materialEditor.targets)
+                    using (new EditorGUI.DisabledScope(true))
                     {
-                        ApplySurfaceOptions(target as Material);
+                        EditorGUILayout.Popup(SurfaceTypeLabel, 0, SurfaceTypeNames);
+                    }
+                }
+                else
+                {
+                    EditorGUI.BeginChangeCheck();
+                    EditorGUI.showMixedValue = surface.hasMixedValue;
+                    int surfaceValue = EditorGUILayout.Popup(SurfaceTypeLabel, Mathf.Clamp((int)surface.floatValue, 0, SurfaceTypeNames.Length - 1), SurfaceTypeNames);
+                    EditorGUI.showMixedValue = false;
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        materialEditor.RegisterPropertyChangeUndo(SurfaceTypeLabel.text);
+                        surface.floatValue = surfaceValue;
+                        foreach (Object target in materialEditor.targets)
+                        {
+                            ApplySurfaceOptions(target as Material);
+                        }
                     }
                 }
             }
@@ -580,14 +599,22 @@ namespace Burt.RenderPipeline.Editor
             }
         }
 
-        private void DrawBaseInputs()
+        private void DrawBaseInputs(Material material)
         {
             if (!BurtShaderGUIUtility.BeginSection(BaseInputsLabel, ref showBaseInputs))
             {
                 return;
             }
 
-            DrawTextureWithColor(BaseMapLabel, baseMap, baseColor);
+            if (IsFoliageShader(material) && !IsGrassShader(material))
+            {
+                DrawTexture(BaseMapLabel, baseMap);
+            }
+            else
+            {
+                DrawTextureWithColor(BaseMapLabel, baseMap, baseColor);
+            }
+
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -718,6 +745,11 @@ namespace Burt.RenderPipeline.Editor
                 BurtShaderGUIUtility.DrawSubHeader("XRender Foliage");
                 DrawTexture(AlphaMapLabel, alphaMap);
                 DrawProperty(alphaIncrease);
+                if (!IsGrassShader(material))
+                {
+                    DrawFoliageUseBakedNormalsProperty(material);
+                }
+
                 DrawProperty(subsurfaceColor);
                 DrawProperty(subsurfaceColorSaturate);
                 DrawProperty(thicknessScale);
@@ -752,7 +784,6 @@ namespace Burt.RenderPipeline.Editor
                     DrawProperty(tintHeightContrast);
                     DrawProperty(vertexAORemap);
                     DrawProperty(treeHeight);
-                    DrawProperty(foliageUseBakedNormals);
                 }
             }
             else
@@ -1195,6 +1226,55 @@ namespace Burt.RenderPipeline.Editor
             BurtShaderGUIUtility.DrawProperty(materialEditor, property);
         }
 
+        private void DrawFoliageUseBakedNormalsProperty(Material material)
+        {
+            if (foliageUseBakedNormals != null)
+            {
+                EditorGUI.BeginChangeCheck();
+                EditorGUI.showMixedValue = foliageUseBakedNormals.hasMixedValue;
+                bool useBakedNormals = EditorGUILayout.Toggle(FoliageUseBakedNormalsLabel, foliageUseBakedNormals.floatValue >= 0.5f);
+                EditorGUI.showMixedValue = false;
+                if (!EditorGUI.EndChangeCheck())
+                {
+                    return;
+                }
+
+                materialEditor.RegisterPropertyChangeUndo(FoliageUseBakedNormalsLabel.text);
+                foliageUseBakedNormals.floatValue = useBakedNormals ? 1.0f : 0.0f;
+                foreach (Object target in materialEditor.targets)
+                {
+                    ApplySurfaceOptions(target as Material);
+                }
+
+                return;
+            }
+
+            if (material == null || !material.HasProperty("_FoliageUseBakedNormals"))
+            {
+                return;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            bool fallbackUseBakedNormals = EditorGUILayout.Toggle(FoliageUseBakedNormalsLabel, material.GetFloat("_FoliageUseBakedNormals") >= 0.5f);
+            if (!EditorGUI.EndChangeCheck())
+            {
+                return;
+            }
+
+            materialEditor.RegisterPropertyChangeUndo(FoliageUseBakedNormalsLabel.text);
+            foreach (Object target in materialEditor.targets)
+            {
+                if (target is not Material targetMaterial || !targetMaterial.HasProperty("_FoliageUseBakedNormals"))
+                {
+                    continue;
+                }
+
+                targetMaterial.SetFloat("_FoliageUseBakedNormals", fallbackUseBakedNormals ? 1.0f : 0.0f);
+                ApplySurfaceOptions(targetMaterial);
+                EditorUtility.SetDirty(targetMaterial);
+            }
+        }
+
         private void DrawAlphaClipProperty()
         {
             if (alphaClip == null)
@@ -1264,6 +1344,16 @@ namespace Burt.RenderPipeline.Editor
             }
 
             return material.shader != null && material.shader.name.IndexOf("Transparent", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool UsesFixedOpaqueCutoutSurface(Material material)
+        {
+            return IsFoliageShader(material) || IsTrunkShader(material);
+        }
+
+        private static bool IsAlphaClippedMaterial(Material material)
+        {
+            return material != null && material.HasProperty("_AlphaClip") && material.GetFloat("_AlphaClip") >= 0.5f;
         }
 
         private static string GetShadingModelName(Material material)
@@ -1406,7 +1496,7 @@ namespace Burt.RenderPipeline.Editor
                 return;
             }
 
-            bool transparent = IsTransparentMaterial(material);
+            bool transparent = IsTransparentMaterial(material) && !UsesFixedOpaqueCutoutSurface(material);
             if (material.HasProperty("_Surface"))
             {
                 material.SetFloat("_Surface", transparent ? 1.0f : 0.0f);
@@ -1442,9 +1532,10 @@ namespace Burt.RenderPipeline.Editor
             ApplyFoliageKeywords(material);
             BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
 
-            material.SetOverrideTag("RenderType", transparent ? "Transparent" : "Opaque");
-            material.SetOverrideTag("Queue", transparent ? "Transparent" : string.Empty);
-            material.renderQueue = transparent ? (int)RenderQueue.Transparent : (int)RenderQueue.Geometry;
+            bool alphaClipped = IsAlphaClippedMaterial(material);
+            material.SetOverrideTag("RenderType", transparent ? "Transparent" : alphaClipped ? "TransparentCutout" : "Opaque");
+            material.SetOverrideTag("Queue", transparent ? "Transparent" : alphaClipped ? "AlphaTest" : string.Empty);
+            material.renderQueue = transparent ? (int)RenderQueue.Transparent : alphaClipped ? (int)RenderQueue.AlphaTest : (int)RenderQueue.Geometry;
             material.SetShaderPassEnabled("BurtDepthOnly", !transparent);
             material.SetShaderPassEnabled("BurtGBuffer", !transparent);
             if (IsSubsurfaceShader(material))
@@ -1464,11 +1555,11 @@ namespace Burt.RenderPipeline.Editor
             }
 
             int stencilRef = ResolveGBufferStencilModel(material);
-            int writeMask = 7;
-            if (material.HasProperty("_ResponsiveAA") && material.GetFloat("_ResponsiveAA") >= 0.5f)
+            int writeMask = GBufferStencilShadingModelMask;
+            if (!IsFoliageShader(material) && material.HasProperty("_ResponsiveAA") && material.GetFloat("_ResponsiveAA") >= 0.5f)
             {
-                stencilRef |= 16;
-                writeMask |= 16;
+                stencilRef |= GBufferStencilResponsiveAABit;
+                writeMask |= GBufferStencilResponsiveAABit;
             }
 
             material.SetFloat("_BurtGBufferStencilRef", stencilRef);
@@ -1502,20 +1593,20 @@ namespace Burt.RenderPipeline.Editor
         {
             if (IsClearCoatShader(material))
             {
-                return 2;
+                return GBufferStencilClearCoatRef;
             }
 
             if (IsSubsurfaceShader(material))
             {
-                return 3;
+                return GBufferStencilSubsurfaceRef;
             }
 
             if (IsFoliageShader(material))
             {
-                return 5;
+                return GBufferStencilFoliageRef;
             }
 
-            return IsFabricShader(material) || IsSilkShader(material) ? 4 : 0;
+            return IsFabricShader(material) || IsSilkShader(material) ? GBufferStencilFabricRef : GBufferStencilDefaultLitRef;
         }
 
         private static void MigrateLegacyTransparentShader(Material material)

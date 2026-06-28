@@ -22,6 +22,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int CameraDepthTextureId = Shader.PropertyToID(CameraDepthTextureShaderName); // 把 shader 名称转换成整数 ID，CommandBuffer 使用整数 ID 会更稳定也更高效。
 
+        public const string DeferredLightingDepthName = "DeferredLightingDepth";
+
+        public const string DeferredLightingDepthTextureShaderName = "_BurtDeferredLightingDepthTexture";
+
+        public static readonly int DeferredLightingDepthTextureId = Shader.PropertyToID(DeferredLightingDepthTextureShaderName);
+
         public const string PostProcessColorName = "PostProcessColor"; // 定义后处理中间颜色目标的统一资源名，No-op Copy 和后续效果链会通过它做 ping-pong。
 
         public const string PostProcessColorTextureShaderName = "_BurtPostProcessColorTexture"; // 定义后处理中间颜色 RT 暴露给 shader 的全局纹理名称。
@@ -581,6 +587,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetCameraDepth() // 定义读取 CameraDepth 的快捷函数。
         {
             return GetRenderTarget(CameraDepthName); // 使用统一名称从资源表读取相机深度目标。
+        }
+
+        public BurtRenderTargetHandle RegisterDeferredLightingDepthTexture()
+        {
+            return RegisterDeferredLightingDepth(new RenderTargetIdentifier(DeferredLightingDepthTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterDeferredLightingDepth(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(DeferredLightingDepthName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetDeferredLightingDepth()
+        {
+            return GetRenderTarget(DeferredLightingDepthName);
         }
 
         public BurtRenderTargetHandle RegisterPostProcessColorTexture() // 定义注册 BurtRP 后处理中间颜色临时 RT 的快捷函数。

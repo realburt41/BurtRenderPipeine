@@ -48,7 +48,7 @@ Shader "BurtRP/Multipass Fur"
         [Enum(X,0,Y,1,Z,2)] _FurGravityDirection ("Fur Gravity Direction", Float) = 0
         _FurGravityIntensity ("Fur Gravity Intensity", Range(-1, 1)) = 0
         [Toggle] _FurBlurEnabled ("Fur Blur Enabled", Float) = 1
-        _FurBlurDistance ("Fur Blur Distance", Float) = 10
+        _FurBlurDistance ("Fur Blur Distance", Float) = 8
 
         [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 1
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.01
@@ -61,8 +61,8 @@ Shader "BurtRP/Multipass Fur"
         [HideInInspector] _DstBlend ("Destination Blend", Float) = 0
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
-        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 6
-        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 7
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 224
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
     }
 
     SubShader
@@ -125,7 +125,7 @@ Shader "BurtRP/Multipass Fur"
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 7
+                ReadMask 224
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace

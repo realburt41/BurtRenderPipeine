@@ -4,6 +4,7 @@
 #define BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL 1
 #define BURT_USE_ADDITIONAL_LIGHT_BUFFER 1
 #define BURT_USE_TILED_LIGHTING 1
+#define BURT_ENABLE_SHADING_DEBUG 1
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
@@ -160,12 +161,6 @@ Varyings Vert(Attributes input)
     return output;
 }
 
-void BurtClipDeferredLightingPassShadingModel(float shadingModelID)
-{
-    float modelDelta = abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID);
-    clip(0.5f - modelDelta);
-}
-
 BurtPBRShadingComponents BurtEvaluateDeferredLightingShadingModelComponents(
     BurtGBufferData gbufferData,
     BurtLight mainLight,
@@ -241,8 +236,6 @@ float4 Frag(Varyings input) : SV_Target
 {
     float2 screenUV = input.screenUV;
 
-    BurtClipDeferredLightingPassShadingModel(BurtSampleDeferredShadingModelID(screenUV));
-
     BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
     BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
     gbufferData.shadingModelID = BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID;
@@ -259,9 +252,9 @@ float4 Frag(Varyings input) : SV_Target
     shadowNormalWS = BurtGetHairGeometryNormalWS(gbufferData);
 #endif
 
-    float shadowAttenuation = BurtSampleMainLightShadow(shadowPositionWS, shadowNormalWS);
-    shadowAttenuation *= BurtResolveDeferredMaterialScreenSpaceShadow(screenUV, gbufferData);
     int perObjectShadowObjectIndex = BurtSampleDeferredPerObjectShadowObjectIndex(screenUV);
+    float shadowAttenuation = BurtSampleMainLightShadow(shadowPositionWS, shadowNormalWS, perObjectShadowObjectIndex);
+    shadowAttenuation *= BurtResolveDeferredMaterialScreenSpaceShadow(screenUV, gbufferData);
     float transmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(positionWS, perObjectShadowObjectIndex, -1.0f);
     float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(positionWS, shadowNormalWS, perObjectShadowObjectIndex, transmissionThickness);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation, transmissionThickness);
@@ -339,20 +332,27 @@ float4 Frag(Varyings input) : SV_Target
     debugData.directSpecularColor = debugLightingComponents.directSpecular;
     debugData.additionalDiffuseColor = debugLightingComponents.additionalDiffuse;
     debugData.additionalSpecularColor = debugLightingComponents.additionalSpecular;
-    debugData.additionalUnshadowedColor = BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(shadingGBufferData, viewDirectionWS, positionWS, screenUV);
+    debugData.additionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+        ? BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(shadingGBufferData, viewDirectionWS, positionWS, screenUV)
+        : float3(0.0f, 0.0f, 0.0f);
     debugData.indirectDiffuseColor = debugLightingComponents.indirectDiffuse;
     debugData.indirectSpecularColor = debugLightingComponents.indirectSpecular;
     debugData.shadowAttenuation = shadowAttenuation;
-    debugData.additionalShadowAttenuation = BurtEvaluateAdditionalShadowAttenuationDebug(shadowPositionWS, deferredAONormalWS, screenUV);
+    debugData.additionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
+        ? BurtEvaluateAdditionalShadowAttenuationDebug(shadowPositionWS, deferredAONormalWS, screenUV)
+        : 1.0f;
 
-    BurtFillAdditionalLightShadowProjectionDebugData(
-        shadowPositionWS,
-        deferredAONormalWS,
-        screenUV,
-        debugData.additionalShadowFaceColor,
-        debugData.additionalShadowUVColor,
-        debugData.additionalShadowDepthColor,
-        debugData.additionalShadowDepthDeltaColor);
+    if (BurtNeedsAdditionalShadowProjectionShadingDebug())
+    {
+        BurtFillAdditionalLightShadowProjectionDebugData(
+            shadowPositionWS,
+            deferredAONormalWS,
+            screenUV,
+            debugData.additionalShadowFaceColor,
+            debugData.additionalShadowUVColor,
+            debugData.additionalShadowDepthColor,
+            debugData.additionalShadowDepthDeltaColor);
+    }
 
     BurtFillMainLightShadowShadingDebugData(
         shadowPositionWS,
@@ -372,7 +372,9 @@ float4 Frag(Varyings input) : SV_Target
         debugData.perObjectShadowSliceColor,
         debugData.perObjectShadowUVColor,
         debugData.perObjectShadowDepthColor,
-        debugData.perObjectShadowCompareColor);
+        debugData.perObjectShadowCompareColor,
+        debugData.perObjectShadowTransmissionDepthColor,
+        debugData.perObjectShadowTransmissionThicknessColor);
 
     debugData.ambientOcclusion = shadingGBufferData.occlusion;
     debugData.emissionColor = gbufferData.emission;

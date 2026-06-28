@@ -136,7 +136,8 @@ BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
 
 float BurtSampleDeferredShadingModelID(float2 screenUV)
 {
-    // Fast path for split lighting passes: read only GBuffer1.b to reject the wrong shading model before sampling all GBuffer/depth data.
+    // Compatibility path for fullscreen passes that still need per-pixel model branching.
+    // Split deferred lighting is filtered by stencil instead of sampling this value.
     float packedShadingModelAndMaterial = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV).b;
     float shadingModelID;
     BurtDecodeMetallicAndShadingModelFromGBuffer(packedShadingModelAndMaterial, shadingModelID);

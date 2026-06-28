@@ -482,7 +482,6 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadFurBlurProperty();
-            builder.WriteFurBlurPropertyTemp();
             builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
             builder.WriteBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
             builder.WriteBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
@@ -490,7 +489,7 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var property, out var propertyTemp, out var args, out var tiles))
+            if (!TryGetTargets(context, out var property, out var args, out var tiles))
             {
                 return;
             }
@@ -509,10 +508,10 @@ namespace Burt.RenderPipeline
 
             var cmd = CommandBufferPool.Get(Name);
             cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, property.Identifier);
-            cmd.SetComputeTextureParam(shader, kernel, BurtFurBlurPassUtility.PropertyTempRWTextureId, propertyTemp.Identifier);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileDataBufferId, tiles.Buffer);
             cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ScreenSizeId, BurtFurBlurPassUtility.CreateScreenSizeVector(descriptor.width, descriptor.height));
+            cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.TileParamsId, BurtFurBlurPassUtility.CreateTileParamsVector(camera));
             cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ParamsId, new Vector4(settings.RadiusCm, settings.DepthThresholdEye, settings.DirectionDilationThreshold, settings.ThetaFeedback));
             cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
@@ -522,17 +521,14 @@ namespace Burt.RenderPipeline
         private bool TryGetTargets(
             BurtRenderGraphContext context,
             out BurtRenderTargetHandle property,
-            out BurtRenderTargetHandle propertyTemp,
             out BurtRenderBufferHandle args,
             out BurtRenderBufferHandle tiles)
         {
             property = context != null ? context.FurBlurPropertyTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
-            propertyTemp = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
             args = context != null ? context.FurBlurArgsBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
             tiles = context != null ? context.FurBlurTileDataBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
             return BurtFurBlurPassUtility.ShouldUseTiledFurBlur(context != null ? context.Request : null, context != null ? context.Asset : null) &&
                 property.IsValid &&
-                propertyTemp.IsValid &&
                 args.IsValid &&
                 args.HasBuffer &&
                 tiles.IsValid &&
@@ -587,6 +583,7 @@ namespace Burt.RenderPipeline
 
             var cmd = CommandBufferPool.Get(Name);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
+            cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.TileParamsId, BurtFurBlurPassUtility.CreateTileParamsVector(context.Request != null ? context.Request.Camera : null));
             cmd.DispatchCompute(shader, kernel, 1, 1, 1);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
@@ -600,11 +597,17 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtFurBlurTiledDilatePass : BurtRenderPass
     {
+        private readonly bool writeTemp;
         private ComputeShader computeShader;
         private bool hasLoggedMissingComputeShader;
         private bool hasLoggedMissingKernel;
 
-        public override string Name => "Burt Fur Blur Tiled Dilate";
+        public BurtFurBlurTiledDilatePass(bool writeTemp)
+        {
+            this.writeTemp = writeTemp;
+        }
+
+        public override string Name => writeTemp ? "Burt Fur Blur Tiled Dilate A" : "Burt Fur Blur Tiled Dilate B";
 
         public override BurtRenderPassKind Kind => BurtRenderPassKind.GlobalState;
 
@@ -615,15 +618,24 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            builder.ReadFurBlurPropertyTemp();
-            builder.WriteFurBlurProperty();
+            if (writeTemp)
+            {
+                builder.ReadFurBlurProperty();
+                builder.WriteFurBlurPropertyTemp();
+            }
+            else
+            {
+                builder.ReadFurBlurPropertyTemp();
+                builder.WriteFurBlurProperty();
+            }
+
             builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
             builder.ReadBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var property, out var propertyTemp, out var args, out var tiles))
+            if (!TryGetTargets(context, out var source, out var target, out var args, out var tiles))
             {
                 return;
             }
@@ -639,11 +651,12 @@ namespace Burt.RenderPipeline
             var settings = BurtFurBlurPassUtility.ResolveSettings();
 
             var cmd = CommandBufferPool.Get(Name);
-            cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId, propertyTemp.Identifier);
-            cmd.SetComputeTextureParam(shader, kernel, BurtFurBlurPassUtility.PropertyRWTextureId, property.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId, source.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtFurBlurPassUtility.PropertyRWTextureId, target.Identifier);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileDataBufferId, tiles.Buffer);
             cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ScreenSizeId, BurtFurBlurPassUtility.CreateScreenSizeVector(descriptor.width, descriptor.height));
+            cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.TileParamsId, BurtFurBlurPassUtility.CreateTileParamsVector(camera));
             cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ParamsId, new Vector4(settings.RadiusCm, settings.DepthThresholdEye, settings.DirectionDilationThreshold, settings.ThetaFeedback));
             cmd.DispatchCompute(shader, kernel, args.Buffer, 0);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
@@ -652,18 +665,20 @@ namespace Burt.RenderPipeline
 
         private bool TryGetTargets(
             BurtRenderGraphContext context,
-            out BurtRenderTargetHandle property,
-            out BurtRenderTargetHandle propertyTemp,
+            out BurtRenderTargetHandle source,
+            out BurtRenderTargetHandle target,
             out BurtRenderBufferHandle args,
             out BurtRenderBufferHandle tiles)
         {
-            property = context != null ? context.FurBlurPropertyTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
-            propertyTemp = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            var property = context != null ? context.FurBlurPropertyTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
+            var propertyTemp = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
+            source = writeTemp ? property : propertyTemp;
+            target = writeTemp ? propertyTemp : property;
             args = context != null ? context.FurBlurArgsBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
             tiles = context != null ? context.FurBlurTileDataBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
             return BurtFurBlurPassUtility.ShouldUseTiledFurBlur(context != null ? context.Request : null, context != null ? context.Asset : null) &&
-                property.IsValid &&
-                propertyTemp.IsValid &&
+                source.IsValid &&
+                target.IsValid &&
                 args.IsValid &&
                 args.HasBuffer &&
                 tiles.IsValid &&
@@ -1388,6 +1403,7 @@ namespace Burt.RenderPipeline
         public static readonly int PropertyTempRWTextureId = Shader.PropertyToID("_BurtFurBlurPropertyTempRWTexture");
         public static readonly int TileArgsBufferId = Shader.PropertyToID("_BurtFurBlurArgsBuffer");
         public static readonly int TileDataBufferId = Shader.PropertyToID("_BurtFurBlurTileDataBuffer");
+        public static readonly int TileParamsId = Shader.PropertyToID("_BurtFurBlurTileParams");
 
         private static readonly Color ReversedZFarClearColor = new Color(0f, 0f, 0f, 1f);
         private static readonly Color ForwardZFarClearColor = new Color(0f, 1f, 0f, 1f);
@@ -1503,7 +1519,7 @@ namespace Burt.RenderPipeline
                 return "FullscreenDilateFallbackMissing(" + TiledComputeShaderResourcePath + ")";
             }
 
-            return ResolveSettings().TiledBlur ? "TiledSetupFillArgsIndirectDilateIndirectBlur" : "TiledSetupFillArgsIndirectDilate";
+            return ResolveSettings().TiledBlur ? "TiledSetupFillArgsIndirectDilate2IndirectBlur" : "TiledSetupFillArgsIndirectDilate2";
         }
 
         public static string ResolveFurBlurCandidateGateLabel(BurtRenderRequest request, BurtRenderPipelineAsset asset)
@@ -1535,15 +1551,25 @@ namespace Burt.RenderPipeline
 
         public static BurtRenderBufferDescriptor CreateTileDataBufferDescriptor(Camera camera)
         {
-            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
-            var tileCountX = Mathf.CeilToInt(Mathf.Max(1, descriptor.width) / (float)TileThreadSize);
-            var tileCountY = Mathf.CeilToInt(Mathf.Max(1, descriptor.height) / (float)TileThreadSize);
-            var tileCount = Mathf.Max(1, tileCountX * tileCountY);
+            var tileCount = CalculateTileCount(camera);
             return new BurtRenderBufferDescriptor(
                 tileCount * 2,
                 sizeof(uint),
                 GraphicsBuffer.Target.Structured,
                 "_BurtFurBlurTileDataBuffer");
+        }
+
+        public static Vector4 CreateTileParamsVector(Camera camera)
+        {
+            return new Vector4(CalculateTileCount(camera), 0f, 0f, 0f);
+        }
+
+        public static int CalculateTileCount(Camera camera)
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
+            var tileCountX = Mathf.CeilToInt(Mathf.Max(1, descriptor.width) / (float)TileThreadSize);
+            var tileCountY = Mathf.CeilToInt(Mathf.Max(1, descriptor.height) / (float)TileThreadSize);
+            return Mathf.Max(1, tileCountX * tileCountY);
         }
 
         public static BurtFurBlurSettings ResolveSettings()
@@ -1773,7 +1799,8 @@ namespace Burt.RenderPipeline
 
         private static bool SupportsTiledPropertyFormat()
         {
-            return SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGFloat);
+            return SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGFloat) &&
+                SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.RGFloat);
         }
 
         private static BurtFurBlurVolumeComponent GetFurBlurVolumeComponent()

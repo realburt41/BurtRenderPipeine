@@ -85,8 +85,8 @@ Material:
     - _AlphaClip: 0
     - _Anisotropy: -0.77
     - _BumpScale: 1
-    - _BurtGBufferStencilRef: 4
-    - _BurtGBufferStencilWriteMask: 7
+    - _BurtGBufferStencilRef: 160
+    - _BurtGBufferStencilWriteMask: 224
     - _Cull: 2
     - _Cutoff: 0.5
     - _DetailNormalMapScale: 1

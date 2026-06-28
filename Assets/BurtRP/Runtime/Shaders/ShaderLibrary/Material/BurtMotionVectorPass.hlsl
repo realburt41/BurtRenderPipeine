@@ -5,6 +5,7 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkVertexAnimation.hlsl"
 
 sampler2D _BaseMap;
+sampler2D _AlphaMap;
 sampler2D _BurtTAACurrentDepthTexture;
 float4x4 _BurtTAACurrentViewProjection;
 float4x4 _BurtTAACurrentNonJitteredViewProjection;
@@ -35,6 +36,22 @@ void BurtMotionVectorApplyAlphaClip(float alpha)
     #endif
 }
 
+float BurtMotionVectorEvaluateOpacity(float alpha, float2 baseMapUV, float3 positionWS)
+{
+#if defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    float alphaMap = tex2D(_AlphaMap, baseMapUV).r;
+    float distanceToCamera = distance(_WorldSpaceCameraPos.xyz, positionWS);
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        float distanceFactor = saturate(distanceToCamera / 150.0f);
+    #else
+        float distanceFactor = saturate((distanceToCamera - 20.0f) / 200.0f);
+    #endif
+    return saturate(alphaMap + alphaMap * distanceFactor * max(_AlphaIncrease, 0.0f));
+#else
+    return alpha;
+#endif
+}
+
 struct MotionVectorAttributes
 {
     float4 positionOS : POSITION;
@@ -54,6 +71,7 @@ struct MotionVectorVaryings
     float4 previousClipNoJitter : TEXCOORD2;
     float2 baseMapUV : TEXCOORD3;
     float sourceConfidence : TEXCOORD4;
+    float3 positionWS : TEXCOORD5;
 };
 
 float2 BurtTaaClipToUv(float4 clipPosition)
@@ -115,13 +133,15 @@ MotionVectorVaryings VertMotionVector(MotionVectorAttributes input)
     output.previousClipNoJitter = mul(_BurtTAAPreviousNonJitteredViewProjection, previousWorld);
     output.baseMapUV = BurtMotionVectorTransformBaseMapUV(input.uv0);
     output.sourceConfidence = objectMoved;
+    output.positionWS = currentWorld.xyz;
     return output;
 }
 
 float4 FragMotionVector(MotionVectorVaryings input) : SV_Target
 {
     float4 baseColor = BurtMotionVectorSampleBaseMap(input.baseMapUV) * _BaseColor;
-    BurtMotionVectorApplyAlphaClip(baseColor.a);
+    float alpha = BurtMotionVectorEvaluateOpacity(baseColor.a, input.baseMapUV, input.positionWS);
+    BurtMotionVectorApplyAlphaClip(alpha);
     clip(input.sourceConfidence - 0.5);
 
     float currentRawDepth = BurtTaaDeviceDepth(input.currentClip);

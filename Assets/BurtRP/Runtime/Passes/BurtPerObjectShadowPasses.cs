@@ -291,7 +291,7 @@ namespace Burt.RenderPipeline
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
         }
 
-        public static void ResetShadowCasterState(ScriptableRenderContext renderContext, Camera camera)
+        public static void ResetShadowCasterState(BurtRenderGraphContext context, ScriptableRenderContext renderContext, Camera camera)
         {
             var cmd = CommandBufferPool.Get("Burt Reset Per Object Shadow Caster State");
             cmd.SetGlobalDepthBias(0f, 0f);
@@ -304,10 +304,11 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalVector(UnityShadowBiasId, Vector4.zero);
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             renderContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
 
-            if (camera != null)
+            if (camera != null && !BurtDrawingSettingsUtility.IsTemporalAAEnabled(context))
             {
                 renderContext.SetupCameraProperties(camera);
             }
@@ -349,15 +350,19 @@ namespace Burt.RenderPipeline
             }
 
             var paddedExtents = boundsSVS.extents + new Vector3(component.Padding, component.Padding, 0f);
+            var shadowCasterDepth = Mathf.Max(0.001f, boundsSVS.extents.z * 2f);
+            var receiverDepth = shadowCasterDepth + component.ReceiverDistance;
+            var projectionExtents = new Vector3(paddedExtents.x, paddedExtents.y, receiverDepth * 0.5f);
             var nearPlaneCenterWS = shadowViewToWorldForBounds.MultiplyPoint3x4(boundsSVS.center + Vector3.back * boundsSVS.extents.z);
             slice.ViewMatrix = CreateWorldToShadowViewMatrix(nearPlaneCenterWS, lightRotation);
-            slice.ProjectionMatrix = CreateShadowViewToClipMatrix(paddedExtents);
+            slice.ProjectionMatrix = CreateShadowViewToClipMatrix(projectionExtents);
             slice.SliceResolution = component.SliceResolution;
             slice.Strength = component.Strength;
             slice.ReceiverDepthBias = component.ReceiverDepthBias;
-            slice.ReceiverNormalBias = component.NormalBias * CalculateWorldTexelSize(paddedExtents, component.SliceResolution);
-            slice.WorldTexelSize = CalculateWorldTexelSize(paddedExtents, component.SliceResolution);
-            slice.DepthRangeWorld = Mathf.Max(0.001f, paddedExtents.z * 2f);
+            slice.ReceiverDistance = component.ReceiverDistance;
+            slice.ReceiverNormalBias = component.NormalBias * CalculateWorldTexelSize(projectionExtents, component.SliceResolution);
+            slice.WorldTexelSize = CalculateWorldTexelSize(projectionExtents, component.SliceResolution);
+            slice.DepthRangeWorld = receiverDepth;
             slice.Index = sliceIndex;
             slice.Component = component;
             return true;
@@ -663,6 +668,7 @@ namespace Burt.RenderPipeline
         public int SliceResolution;
         public float Strength;
         public float ReceiverDepthBias;
+        public float ReceiverDistance;
         public float ReceiverNormalBias;
         public float WorldTexelSize;
         public float DepthRangeWorld;
@@ -681,6 +687,7 @@ namespace Burt.RenderPipeline
             SliceResolution = BurtPerObjectShadowUtility.DefaultSliceResolution;
             Strength = 0f;
             ReceiverDepthBias = 0f;
+            ReceiverDistance = 0f;
             ReceiverNormalBias = 0f;
             WorldTexelSize = 0f;
             DepthRangeWorld = 0f;
@@ -819,7 +826,7 @@ namespace Burt.RenderPipeline
             finally
             {
                 CommandBufferPool.Release(cmd);
-                BurtPerObjectShadowUtility.ResetShadowCasterState(context.ScriptableContext, camera);
+                BurtPerObjectShadowUtility.ResetShadowCasterState(context, context.ScriptableContext, camera);
             }
 
             UploadPerObjectShadowReceiverGlobals(context.ScriptableContext, atlasTarget, preparedData);

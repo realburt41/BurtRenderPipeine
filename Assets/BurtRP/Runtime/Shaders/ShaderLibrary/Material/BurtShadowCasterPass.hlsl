@@ -15,6 +15,14 @@
     #endif
 #endif
 
+#if !defined(BURT_SHADOW_CASTER_USES_BASE_MAP_UV)
+    #if BURT_SHADOW_CASTER_ALPHA_CLIP || defined(BURT_MATERIAL_SHADING_MODEL_HAIR) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        #define BURT_SHADOW_CASTER_USES_BASE_MAP_UV 1
+    #else
+        #define BURT_SHADOW_CASTER_USES_BASE_MAP_UV 0
+    #endif
+#endif
+
 float4 _BurtMainLightDirection;
 float4 _BurtShadowCasterLightPosition;
 float _BurtCastingPunctualLightShadow;
@@ -31,20 +39,18 @@ struct ShadowAttributes
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         float4 color : COLOR;
     #endif
-    UNITY_VERTEX_INPUT_INSTANCE_ID
-
-#if BURT_SHADOW_CASTER_ALPHA_CLIP
+    #if BURT_SHADOW_CASTER_USES_BASE_MAP_UV
     float2 uv0 : TEXCOORD0;
-#endif
+    #endif
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct ShadowVaryings
 {
     float4 positionCS : SV_POSITION;
-
-#if BURT_SHADOW_CASTER_ALPHA_CLIP
+    #if BURT_SHADOW_CASTER_USES_BASE_MAP_UV
     float2 baseMapUV : TEXCOORD0;
-#endif
+    #endif
 };
 
 float3 ApplyBurtShadowCasterNormalBias(float4 positionOS, float3 normalOS)
@@ -93,6 +99,9 @@ ShadowVaryings VertShadow(ShadowAttributes input)
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
     #endif
+    #if (defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)) && defined(BURT_FOLIAGE_USE_BAKED_NORMALS)
+        positionOS.xyz *= 0.98f;
+    #endif
 
     ShadowVaryings output;
     float3 biasedPositionWS = ApplyBurtShadowCasterNormalBias(positionOS, input.normalOS);
@@ -106,13 +115,13 @@ ShadowVaryings VertShadow(ShadowAttributes input)
     #endif
 #endif
 
-#if BURT_SHADOW_CASTER_ALPHA_CLIP
+    #if BURT_SHADOW_CASTER_USES_BASE_MAP_UV
     #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
         output.baseMapUV = input.uv0;
     #else
         output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
     #endif
-#endif
+    #endif
 
     return output;
 }

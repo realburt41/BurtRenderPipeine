@@ -106,6 +106,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         PerObjectShadowUV = 478, // Per-object shadow debug: projected atlas UV.
         PerObjectShadowDepth = 479, // Per-object shadow debug: receiver depth, stored depth, and compare visibility.
         PerObjectShadowCompare = 480, // Per-object shadow debug: hardware shadow compare visibility.
+        PerObjectShadowTransmissionDepth = 481, // Per-object shadow debug: transmission surface depth, stored depth, and depth delta.
         ScreenSpaceAmbientOcclusionRaw = 302, // SSAO debug: raw visibility before blur and final power/intensity curve.
         ScreenSpaceAmbientOcclusionFinal = 303, // SSAO debug: final power/intensity-curved AO texture consumed by deferred lighting.
         ScreenSpaceAmbientOcclusionOverlay = 304, // SSAO debug: final AO multiplied over the current camera color.
@@ -130,27 +131,27 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         TemporalAAHistoryUV = 323, // TAA debug: history UV and in-bounds state.
         TemporalAADifference = 324, // TAA debug: current frame versus history difference.
         TemporalAAVelocity = 325, // TAA debug: reprojection velocity, gray means zero motion.
-        TemporalAAConfidence = 326, // TAA debug: accumulated history confidence.
+        TemporalAAConfidence = 326, // TAA debug: history availability after history-valid and UV-in-bounds checks.
         TemporalAACurrentDepth = 327, // TAA debug: TAA-owned current depth texture.
         TemporalAADepthHistory = 328, // TAA debug: previous-frame depth history.
         TemporalAADepthDelta = 329, // TAA debug: current/history depth disagreement.
         TemporalAACurrentColor = 330, // TAA debug: jittered current color before resolve.
         TemporalAAResolvedColor = 331, // TAA debug: resolved TAA output before history update.
         TemporalAARawVelocity = 332, // TAA debug: raw camera/object velocity before dilation.
-        TemporalAAUpdatedConfidence = 333, // TAA debug: current-frame confidence after validity update.
-        TemporalAAStaticRelax = 334, // TAA debug: static edge relaxation applied to rejection.
+        TemporalAAUpdatedConfidence = 333, // TAA debug: final history acceptance after parallax and coverage checks.
+        TemporalAAStaticRelax = 334, // TAA debug: current/history depth continuity for static geometry.
         TemporalAALumaRejection = 335, // TAA debug: luma rejection contribution.
         TemporalAAClipRejection = 336, // TAA debug: color box / variance clip rejection contribution.
         TemporalAADepthRejection = 337, // TAA debug: depth and depth-range rejection contribution.
         TemporalAANormalRejection = 338, // TAA debug: GBuffer normal edge rejection contribution.
         TemporalAAMotionRejection = 339, // TAA debug: velocity-length rejection contribution.
-        TemporalAAConfidenceGate = 340, // TAA debug: history confidence gate and boost.
+        TemporalAAConfidenceGate = 340, // TAA debug: current blend, history feedback, and history acceptance.
         TemporalAAVelocitySource = 341, // TAA debug: raw velocity source, object motion vectors highlight in white.
         TemporalAAGBufferNormal = 342, // TAA debug: decoded Deferred GBuffer normal sampled by TAA.
         TemporalAAParallaxRejection = 343, // TAA debug: XRender-style parallax/depth history validity mask.
-        TemporalAAAntiFlicker = 344, // TAA debug: persistent anti-flicker luma history.
-        TemporalAAHistoryCoverage = 345, // TAA debug: history coverage / PrevUseCount-style reuse validity.
-        TemporalAAResponsiveMask = 346, // TAA debug: responsive mask that lowers history feedback.
+        TemporalAAAntiFlicker = 344, // TAA debug: stable history acceptance from PrevUseCount and depth continuity.
+        TemporalAAHistoryCoverage = 345, // TAA debug: history coverage from PrevUseCount-style reuse validity.
+        TemporalAAResponsiveMask = 346, // TAA debug: responsive mask, source strength, and geometry break gate.
         ScreenSpaceReflectionVisibilityAlpha = 347, // SSR debug: resolved visibility before material Fresnel/roughness weighting.
         ScreenSpaceReflectionMaterialWeight = 348, // SSR debug: material Fresnel/roughness/intensity weight applied during composite.
         ScreenSpaceReflectionRoughnessMip = 349, // SSR debug: roughness-selected mip level used for reflection color.
@@ -288,7 +289,9 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         FurBlurTemporal = 485, // Fur blur debug: fur blur after temporal resolve.
         FurBlurHistory = 486, // Fur blur debug: previous fur blur history texture.
         FurBlurDiagnostic = 487, // Fur blur debug: red = valid property, green = temporal alpha, blue = history age.
-        FurBlurReprojection = 488 // Fur blur debug: red = reprojected, green = property-compatible, blue = property history valid.
+        FurBlurReprojection = 488, // Fur blur debug: red = reprojected, green = property-compatible, blue = property history valid.
+        ScreenSpaceShadow = 492, // SS Shadow debug: final screen-space main-light visibility texture consumed by deferred foliage lighting.
+        PerObjectShadowTransmissionThickness = 493 // Per-object shadow debug: transmission object index, resolved thickness, and validity state.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -413,11 +416,14 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.PerObjectShadowUV:
                 case BurtShadingDebugMode.PerObjectShadowDepth:
                 case BurtShadingDebugMode.PerObjectShadowCompare:
+                case BurtShadingDebugMode.PerObjectShadowTransmissionDepth:
+                case BurtShadingDebugMode.PerObjectShadowTransmissionThickness:
                 case BurtShadingDebugMode.CameraDepth:
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw:
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal:
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay:
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference:
+                case BurtShadingDebugMode.ScreenSpaceShadow:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio:
@@ -514,7 +520,8 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 || mode == BurtShadingDebugMode.ShadowPCSSBlockerFraction
                 || mode == BurtShadingDebugMode.MainLightShadow
                 || mode == BurtShadingDebugMode.PerObjectShadowAtlas
-                || (mode >= BurtShadingDebugMode.PerObjectShadowObjectIndex && mode <= BurtShadingDebugMode.PerObjectShadowCompare);
+                || (mode >= BurtShadingDebugMode.PerObjectShadowObjectIndex && mode <= BurtShadingDebugMode.PerObjectShadowTransmissionDepth)
+                || mode == BurtShadingDebugMode.PerObjectShadowTransmissionThickness;
         }
 
         public static void ApplyGlobalShaderProperties() // 把当前 shading debug 状态上传给 shader。

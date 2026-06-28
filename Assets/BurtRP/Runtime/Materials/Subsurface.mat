@@ -43,8 +43,8 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
-    - _BurtGBufferStencilRef: 3
-    - _BurtGBufferStencilWriteMask: 7
+    - _BurtGBufferStencilRef: 64
+    - _BurtGBufferStencilWriteMask: 224
     - _Cull: 2
     - _Cutoff: 0.5
     - _DoubleSidedEnable: 0

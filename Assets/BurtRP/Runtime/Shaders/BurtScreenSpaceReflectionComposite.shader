@@ -19,7 +19,6 @@
 
             #include "UnityCG.cginc"
             #include "ShaderLibrary/BurtDeferred.hlsl"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 
             sampler2D _BurtSSRCameraColorCopyTexture;
             sampler2D _BurtScreenSpaceReflectionTemporalColorTexture;
@@ -28,6 +27,20 @@
             float4 _BurtSSRParams0; // z=intensity, w=roughnessFade
             float4 _BurtSSRParams1; // y=maxMip, z=debugMode, w=edgeFadeWidth
             static const float BurtSSRCompositeHistoryMax = 32.0;
+
+            float4 _BurtAmbientLightColor;
+
+            TextureCube _BurtSkyReflectionTexture;
+            float4 _BurtSkyReflectionHDR;
+            float _BurtSkyReflectionIntensity;
+            float4 _BurtSkyReflectionTint;
+            float _BurtSkyReflectionEnabled;
+            float _BurtSkyReflectionOverride;
+            float _BurtSkyReflectionMaxMip;
+            float4 _BurtSkyReflectionRotation;
+
+            float _BurtSkyLowerHemisphereEnabled;
+            float4 _BurtSkyLowerHemisphereSpecularColor;
 
             struct Attributes
             {
@@ -700,6 +713,108 @@
                 return baseSpecularScale;
             }
 
+            float3 BurtSSRCompositeAmbientFallbackColor()
+            {
+                return max(_BurtAmbientLightColor.rgb, float3(0.0, 0.0, 0.0));
+            }
+
+            float3 BurtSSRCompositeSelectFallbackIfBlack(float3 sampledColor, float3 fallbackColor)
+            {
+                float useSampledColor = step(0.0001, BurtSSRCompositeLuminance(sampledColor));
+                return lerp(max(fallbackColor, 0.0), max(sampledColor, 0.0), useSampledColor);
+            }
+
+            float3 BurtSSRCompositeApplySkyLowerHemisphere(float3 sourceColor, float3 directionWS, float4 lowerHemisphereColor)
+            {
+                float lowerBlend = (_BurtSkyLowerHemisphereEnabled > 0.5 && BurtSafeNormalize(directionWS).y < 0.0) ? saturate(lowerHemisphereColor.a) : 0.0;
+                return lerp(max(sourceColor, 0.0), max(lowerHemisphereColor.rgb, 0.0), lowerBlend);
+            }
+
+            float3 BurtSSRCompositeRotateSkyReflectionDirection(float3 directionWS)
+            {
+                float3 safeDirectionWS = BurtSafeNormalize(directionWS);
+                float cosPhi = _BurtSkyReflectionRotation.x;
+                float sinPhi = _BurtSkyReflectionRotation.y;
+                float3 rotDirX = float3(cosPhi, 0.0, -sinPhi);
+                float3 rotDirZ = float3(sinPhi, 0.0, cosPhi);
+                return BurtSafeNormalize(float3(dot(rotDirX, safeDirectionWS), safeDirectionWS.y, dot(rotDirZ, safeDirectionWS)));
+            }
+
+            float BurtSSRCompositeComputeReflectionCaptureMipFromRoughness(float perceptualRoughness, float cubemapMaxMipIndex)
+            {
+                const float reflectionCaptureSpecularMipMaxIndex = 8.0;
+                float specularMipMaxIndex = min(max(cubemapMaxMipIndex, 0.0), reflectionCaptureSpecularMipMaxIndex);
+                float safeRoughness = max(saturate(perceptualRoughness), BURT_MIN_PERCEPTUAL_ROUGHNESS);
+                float levelFrom1x1 = 1.0 - 1.2 * log2(safeRoughness);
+                return clamp(specularMipMaxIndex - 1.0 - levelFrom1x1, 0.0, specularMipMaxIndex);
+            }
+
+            float3 BurtSSRCompositeSampleIndirectSpecularRadiance(float3 reflectionDirectionWS, float roughness)
+            {
+                float3 safeReflectionDirectionWS = BurtSafeNormalize(reflectionDirectionWS);
+
+                if (_BurtSkyReflectionEnabled > 0.5)
+                {
+                    float3 skySampleDirectionWS = BurtSSRCompositeRotateSkyReflectionDirection(safeReflectionDirectionWS);
+                    float skyReflectionMipLevel = BurtSSRCompositeComputeReflectionCaptureMipFromRoughness(roughness, max(_BurtSkyReflectionMaxMip, 0.0));
+                    float4 encodedSkyReflection = BURT_SAMPLE_TEXTURECUBE_LOD_CLAMP(_BurtSkyReflectionTexture, skySampleDirectionWS, skyReflectionMipLevel);
+                    float3 skyReflectionRadiance =
+                        DecodeHDR(encodedSkyReflection, _BurtSkyReflectionHDR) *
+                        max(_BurtSkyReflectionTint.rgb, 0.0) *
+                        max(_BurtSkyReflectionIntensity, 0.0);
+                    skyReflectionRadiance = BurtSSRCompositeApplySkyLowerHemisphere(skyReflectionRadiance, safeReflectionDirectionWS, _BurtSkyLowerHemisphereSpecularColor);
+                    return max(skyReflectionRadiance, 0.0);
+                }
+
+                if (_BurtSkyReflectionOverride > 0.5)
+                {
+                    return BurtSSRCompositeApplySkyLowerHemisphere(float3(0.0, 0.0, 0.0), safeReflectionDirectionWS, _BurtSkyLowerHemisphereSpecularColor);
+                }
+
+                const float legacyUnitySpecCubeMaxMip = 6.0;
+                float legacyUnitySpecCubeMipLevel = BurtSSRCompositeComputeReflectionCaptureMipFromRoughness(roughness, legacyUnitySpecCubeMaxMip);
+                float4 encodedSpecular = BURT_SAMPLE_TEXTURECUBE_LOD_CLAMP(unity_SpecCube0, safeReflectionDirectionWS, legacyUnitySpecCubeMipLevel);
+                float3 specularRadiance = DecodeHDR(encodedSpecular, unity_SpecCube0_HDR);
+                return BurtSSRCompositeSelectFallbackIfBlack(specularRadiance, BurtSSRCompositeAmbientFallbackColor());
+            }
+
+            float3 BurtSSRCompositeEvaluateIBLSpecular(BurtPBRMaterialData materialData, BurtPBRGeometryData geometryData, float roughness)
+            {
+                float3 reflectionDirectionWS = BurtGetIndirectSpecularReflectionDirectionWS(geometryData, materialData.anisotropy, roughness);
+                float3 radiance = BurtSSRCompositeSampleIndirectSpecularRadiance(reflectionDirectionWS, roughness);
+                float2 dfg = GetSpecularDFGTerms(roughness, geometryData.nDotV);
+                float3 envBRDF = EvalSpecularDFG(materialData.f0, materialData.f90, dfg);
+                float3 energyCompensation;
+                float energyPreservation;
+                GetSpecularEnergyTerms(materialData.f0, materialData.f90, roughness, geometryData.nDotV, energyCompensation, energyPreservation);
+                if (materialData.fabricActive > 0.0001)
+                {
+                    energyCompensation = float3(1.0, 1.0, 1.0);
+                }
+
+                float specularOcclusion = GetIndirectSpecularOcclusion(geometryData.nDotV, materialData.occlusion, roughness);
+                return radiance * envBRDF * energyCompensation * specularOcclusion;
+            }
+
+            #if BURT_ENABLE_CLEAR_COAT_SHADING
+            BurtPBRMaterialData BurtSSRCompositeCreateClearCoatMaterialData(BurtPBRMaterialData materialData)
+            {
+                BurtPBRMaterialData clearCoatMaterialData = materialData;
+                clearCoatMaterialData.baseColor = float3(1.0, 1.0, 1.0);
+                clearCoatMaterialData.metallic = 0.0;
+                clearCoatMaterialData.anisotropy = 0.0;
+                clearCoatMaterialData.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
+                clearCoatMaterialData.diffuseColor = float3(0.0, 0.0, 0.0);
+                clearCoatMaterialData.f0 = float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0);
+                clearCoatMaterialData.f90 = float3(1.0, 1.0, 1.0);
+                clearCoatMaterialData.perceptualRoughness = ClampPerceptualRoughness(materialData.clearCoatRoughness);
+                clearCoatMaterialData.linearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatMaterialData.perceptualRoughness);
+                clearCoatMaterialData.a2 = LinearRoughnessToA2(clearCoatMaterialData.linearRoughness);
+                clearCoatMaterialData.clearCoatMask = 0.0;
+                return clearCoatMaterialData;
+            }
+            #endif
+
             float3 BurtSSRComputeCameraIBLSpecularFallback(float2 screenUV)
             {
                 float rawDepth = BurtSampleDeferredRawDepth(screenUV);
@@ -711,9 +826,29 @@
                 BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
-                BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(gbufferData, viewDirectionWS);
-                BurtIndirectPBRComponents indirectComponents = BurtEvaluatePBRIndirectFromCore(coreData);
-                return max(indirectComponents.specular, float3(0.0, 0.0, 0.0));
+                BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
+                BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(gbufferData, viewDirectionWS);
+                float baseRoughness = ClampPerceptualRoughness(materialData.perceptualRoughness);
+                float3 baseSpecular = BurtSSRCompositeEvaluateIBLSpecular(materialData, geometryData, baseRoughness);
+
+                #if BURT_ENABLE_CLEAR_COAT_SHADING
+                    float clearCoatMask = saturate(materialData.clearCoatMask);
+                    if (clearCoatMask > 0.0001)
+                    {
+                        BurtPBRMaterialData clearCoatMaterialData = BurtSSRCompositeCreateClearCoatMaterialData(materialData);
+                        float3 clearCoatNormalWS = BurtGetClearCoatNormalWS(gbufferData);
+                        BurtPBRGeometryData clearCoatGeometryData = BurtPreparePBRGeometryData(clearCoatNormalWS, gbufferData.tangentWS, viewDirectionWS);
+                        float3 topLayerSpecular = BurtSSRCompositeEvaluateIBLSpecular(clearCoatMaterialData, clearCoatGeometryData, clearCoatMaterialData.perceptualRoughness);
+                        float2 clearCoatDFG = GetSpecularDFGTerms(clearCoatMaterialData.perceptualRoughness, clearCoatGeometryData.nDotV);
+                        float3 clearCoatEnvFresnel = EvalSpecularDFG(clearCoatMaterialData.f0, clearCoatMaterialData.f90, clearCoatDFG);
+                        float3 layerTransmission =
+                            BurtClearCoatFresnelTransmission(clearCoatEnvFresnel) *
+                            BurtSimpleClearCoatTransmittanceFromView(clearCoatGeometryData.nDotV, materialData.metallic, materialData.baseColor);
+                        return max(lerp(baseSpecular, baseSpecular * layerTransmission, clearCoatMask) + topLayerSpecular * clearCoatMask, 0.0);
+                    }
+                #endif
+
+                return max(baseSpecular, float3(0.0, 0.0, 0.0));
             }
 
             float3 BurtSSRCompositeFillPositiveHole(

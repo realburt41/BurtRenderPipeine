@@ -122,6 +122,9 @@ BurtSurfaceData BurtApplyFabricPassSurfaceSemantics(BurtSurfaceData surfaceData,
 #endif
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+float4 _VegetationBoundsMin;
+float4 _VegetationBoundsMax;
+
 float3 BurtApplyFoliageSaturation(float3 color, float saturationBoost)
 {
     float luminance = PerceivedLuminance(color);
@@ -163,7 +166,9 @@ float3 BurtResolveFoliageObjectUpWS()
 
 float BurtEvaluateFoliageNormalizedHeight(float3 positionOS, float3 positionWS)
 {
-    float height = max(_TreeHeight, BURT_EPSILON);
+    float vegetationHeight = _VegetationBoundsMax.y - _VegetationBoundsMin.y;
+    float height = vegetationHeight > 0.0001f ? vegetationHeight : _TreeHeight;
+    height = max(height, BURT_EPSILON);
     return saturate(positionOS.y / height);
 }
 
@@ -240,6 +245,7 @@ float4 BurtEvaluateMaterialPassBaseColor(float2 baseMapUV, float3 positionWS, fl
         grassColor = lerp(grassColor, BurtMaterialOverlayBlend(grassColor, _BaseColorTip.rgb), BurtMaterialSafePow(heightMask, _TipMaskPow));
         baseColor.rgb = saturate(lerp(grassColor, grassColor * 0.85f, saturate(_GroundFadeIntensity)));
     #else
+        baseColor.rgb = baseMap.rgb;
         float tintMask = saturate(baseMap.a);
         float heightScale = BurtMaterialSafePow(BurtEvaluateFoliageNormalizedHeight(positionOS, positionWS), _TintHeightContrast);
         float aoScale = BurtMaterialRangeRemap(_TintAORemap.x, _TintAORemap.y, BurtMaterialPow3(saturate(vertexColor.a)));
@@ -257,7 +263,7 @@ float4 BurtEvaluateMaterialPassBaseColor(float2 baseMapUV, float3 positionWS, fl
             float3 globalTintColor = BURT_SAMPLE_TEXTURE2D_CLAMP(_TintPalette, tintUV).rgb;
             float3 localTintColor = BURT_SAMPLE_TEXTURE2D_CLAMP(_LocalTintPalette, tintUV).rgb;
             float3 tintColor = lerp(globalTintColor, localTintColor, saturate(localScale));
-            baseColor.rgb = baseMap.rgb * _BaseColor.rgb * lerp(1.0f, 2.0f * tintColor, tintMask);
+            baseColor.rgb = baseMap.rgb * lerp(1.0f, 2.0f * tintColor, tintMask);
         }
     #endif
 #endif

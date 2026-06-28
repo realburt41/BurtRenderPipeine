@@ -10,6 +10,7 @@ namespace Burt.RenderPipeline
     {
         public const int MinSliceResolution = 64;
         public const int MaxSliceResolution = 4096;
+        public const float DefaultReceiverDistance = 3f;
         public const float DefaultNormalBias = 5f;
         internal const uint MainLightRenderingLayerMask = 0xFFu;
         internal const uint PerObjectShadowRenderingLayerMask = 1u << 22;
@@ -29,6 +30,9 @@ namespace Burt.RenderPipeline
 
         [SerializeField]
         private float receiverDepthBias = 0.0005f;
+
+        [SerializeField]
+        private float receiverDistance = DefaultReceiverDistance;
 
         [SerializeField]
         private float normalBias = DefaultNormalBias;
@@ -54,6 +58,8 @@ namespace Burt.RenderPipeline
         public float Strength => Mathf.Clamp01(strength);
 
         public float ReceiverDepthBias => Mathf.Max(0f, receiverDepthBias);
+
+        public float ReceiverDistance => Mathf.Max(0f, receiverDistance);
 
         public float NormalBias => Mathf.Max(0f, normalBias);
 
@@ -84,6 +90,7 @@ namespace Burt.RenderPipeline
             padding = Mathf.Max(0f, padding);
             strength = Mathf.Clamp01(strength);
             receiverDepthBias = Mathf.Max(0f, receiverDepthBias);
+            receiverDistance = Mathf.Max(0f, receiverDistance);
             normalBias = Mathf.Max(0f, normalBias);
 
             if (isActiveAndEnabled)

@@ -16,6 +16,14 @@
     #endif
 #endif
 
+#if !defined(BURT_DEPTH_ONLY_USES_BASE_MAP_UV)
+    #if BURT_DEPTH_ONLY_ALPHA_CLIP || defined(BURT_MATERIAL_SHADING_MODEL_HAIR) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        #define BURT_DEPTH_ONLY_USES_BASE_MAP_UV 1
+    #else
+        #define BURT_DEPTH_ONLY_USES_BASE_MAP_UV 0
+    #endif
+#endif
+
 struct DepthAttributes
 {
     float4 positionOS : POSITION;
@@ -23,23 +31,21 @@ struct DepthAttributes
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         float4 color : COLOR;
     #endif
-    UNITY_VERTEX_INPUT_INSTANCE_ID
-
-#if BURT_DEPTH_ONLY_ALPHA_CLIP
+    #if BURT_DEPTH_ONLY_USES_BASE_MAP_UV
     float2 uv0 : TEXCOORD0;
-#endif
+    #endif
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct DepthVaryings
 {
     float4 positionCS : SV_POSITION;
-
-#if BURT_DEPTH_ONLY_ALPHA_CLIP
+    #if BURT_DEPTH_ONLY_USES_BASE_MAP_UV
     float2 baseMapUV : TEXCOORD0;
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)
         float3 positionWS : TEXCOORD1;
     #endif
-#endif
+    #endif
 };
 
 DepthVaryings VertDepth(DepthAttributes input)
@@ -53,7 +59,7 @@ DepthVaryings VertDepth(DepthAttributes input)
     DepthVaryings output;
     output.positionCS = UnityObjectToClipPos(positionOS);
 
-#if BURT_DEPTH_ONLY_ALPHA_CLIP
+    #if BURT_DEPTH_ONLY_USES_BASE_MAP_UV
     #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
         output.baseMapUV = input.uv0;
     #else
@@ -62,7 +68,7 @@ DepthVaryings VertDepth(DepthAttributes input)
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)
         output.positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
     #endif
-#endif
+    #endif
 
     return output;
 }

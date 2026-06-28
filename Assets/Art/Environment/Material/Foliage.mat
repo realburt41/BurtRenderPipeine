@@ -17,9 +17,10 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 2000
+  m_CustomRenderQueue: 2450
   stringTagMap:
-    RenderType: Opaque
+    QUEUE: AlphaTest
+    RenderType: TransparentCutout
   disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
@@ -90,10 +91,10 @@ Material:
     - _AlphaClip: 1
     - _AlphaIncrease: 0.4
     - _BumpScale: 1
-    - _BurtGBufferStencilRef: 21
-    - _BurtGBufferStencilWriteMask: 23
+    - _BurtGBufferStencilRef: 192
+    - _BurtGBufferStencilWriteMask: 224
     - _Cull: 0
-    - _CustomEnum: 2
+    - _CustomEnum: 1
     - _Cutoff: 0.5
     - _DetailNormalMapScale: 1
     - _DoubleSidedEnable: 1
@@ -102,7 +103,7 @@ Material:
     - _FoliageBackLight: 0.55
     - _FoliageSubsurfaceColorSaturate: 0.6
     - _FoliageThickness: 0.5
-    - _FoliageTintMode: 2
+    - _FoliageTintMode: 1
     - _FoliageTransmissionWeight: 0.55
     - _FoliageUseBakedNormals: 0
     - _GlossMapScale: 1
@@ -115,7 +116,7 @@ Material:
     - _Parallax: 0.02
     - _Reflectance: 0.35
     - _ReflectanceScale: 0.725
-    - _ResponsiveAA: 1
+    - _ResponsiveAA: 0
     - _RoughnessScale: 0.98
     - _Smoothness: 0.45
     - _SmoothnessTextureChannel: 0
@@ -127,7 +128,7 @@ Material:
     - _TintAOHeightRatio: 0.556
     - _TintHeightContrast: 1
     - _TintScale: 0.427
-    - _TintValue: 0.627
+    - _TintValue: 0.461
     - _TransmissionNdotL: 0.5
     - _TreeHeight: 25
     - _UVSec: 0

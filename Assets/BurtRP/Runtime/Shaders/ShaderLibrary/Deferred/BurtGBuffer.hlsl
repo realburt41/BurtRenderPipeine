@@ -2,6 +2,22 @@
 #ifndef BURT_GBUFFER_INCLUDED // 开�?include guard，防止同一�?shader 编译单元里重复定�?GBuffer 工具
 #define BURT_GBUFFER_INCLUDED // 标记 BurtGBuffer.hlsl 已经被包含过，后续重�?include 会被跳过�?
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtBRDF.hlsl" // 引入 BurtSurfaceData、PBR 准备结构�?XRender 风格 reflectance/F0/roughness 工具�?
+// Authoritative BurtRP deferred GBuffer layout contract.
+// GBuffer0: low-precision base payload. rgb = linear baseColor in 0..1, a = occlusion in 0..1. Backed by R8G8B8A8_SRGB/UNorm.
+// GBuffer1: main direction/material payload. rg = oct-encoded directionWS, b = compatibility packed(shadingModelID, material channel), a = smoothness.
+// GBuffer2: HDR/light payload. rgb = emission, a = reflectance. Backed by ARGBHalf.
+// GBuffer3: low-precision per-model custom payload. Every channel must be 0..1 and safe for R8G8B8A8_UNorm.
+//   Default/ClearCoat: clearCoatNormal.xy, clearCoatMask, clearCoatRoughness.
+//   Hair/Fur: primarySpecularColor.rgb, pack(secondaryRoughness, shadowFillStrength).
+//   Subsurface: reserved white rgb, pack(power, ambient) or 3S curvature.
+//   Fabric/Silk: fuzzColor.rgb, fuzzWeight.
+//   Foliage/Grass: transmissionColor.rgb, transmissionWeight or grass transmissionWeight * 0.1.
+// GBuffer4: higher-precision per-model custom payload. Direction/profile/anisotropy packing lives here until it is proven R8-safe.
+//   Default/ClearCoat: tangent.xy, anisotropy, reserved.
+//   Hair/Fur: secondarySpecularColor.rgb, pack(primaryShift, secondaryShift, backLight).
+//   Subsurface: tangent.xy, pack(distortion, mode), pack(thickness, profileIndex).
+//   Fabric/Silk: tangent.xy, anisotropy, pack(fuzzRoughness, isSilk).
+//   Foliage/Grass: screenSpaceShadowIntensity, reserved, pack(backLight, transmissionNdotL), thickness.
 // GBuffer0 约定：rgb = baseColor，a = occlusion；baseColor 保持材质基础色，不预乘灯光或能量项�?// GBuffer1 约定：rg = octahedron directionWS，b = packed(shadingModelID, material channel)，a = smoothness；Default Lit �?normal，Hair �?strand direction�?// GBuffer2 约定：rgb = emission，a = reflectance；emission 建议使用 HDR RT，reflectance 继续�?XRender 语义重建 F0，不直接�?F0�?// GBuffer3 stores Clear Coat top-layer normalWS/mask/roughness, or Subsurface tint.rgb + packed power/distortion.
 // GBuffer4 stores base tangentWS in rg, signed anisotropy in b, and packed Subsurface thickness/profile index in a.
 
@@ -169,10 +185,12 @@ float t = saturate(-n.z);
 return BurtSafeNormalize(n);
 }
 
-// GBuffer1.b stores shading model + material scalar in one half channel. Keep
-// each model bucket away from both edges: Fabric/Silk at metallic=0 otherwise
-// lands on the 4/5 boundary, and half/UNorm RT quantization can decode it as
-// the previous shading model.
+// Deferred lighting uses XRender-style high stencil bits for the authoritative
+// shading model id. GBuffer1.b keeps this compatibility pack only for legacy
+// fullscreen consumers that still need to branch per pixel.
+// Keep each model bucket away from both edges: Fabric/Silk at metallic=0
+// otherwise lands on the 4/5 boundary, and half/UNorm RT quantization can
+// decode it as the previous shading model.
 static const float BURT_GBUFFER_SHADING_MODEL_PACK_COUNT = 7.0f;
 static const float BURT_GBUFFER_SHADING_MODEL_PACK_BIAS = 0.02f;
 static const float BURT_GBUFFER_SHADING_MODEL_PACK_SCALE = 1.0f - 2.0f * BURT_GBUFFER_SHADING_MODEL_PACK_BIAS;
@@ -1192,18 +1210,23 @@ float4 BurtEncodeGBuffer4(BurtGBufferData data)
         0.0f);
 }
 
+float4 BurtClampGBuffer3LowPrecisionPayload(float4 payload)
+{
+    return saturate(payload);
+}
+
 // Encodes semantic GBuffer data into the five MRT payloads.
 BurtEncodedGBuffer BurtEncodeGBuffer(BurtGBufferData data)
 {
     BurtEncodedGBuffer encoded;
 
-    encoded.gbuffer0 = float4(max(data.baseColor, float3(0.0f, 0.0f, 0.0f)), saturate(data.occlusion));
+    encoded.gbuffer0 = float4(saturate(data.baseColor), saturate(data.occlusion));
 
     encoded.gbuffer1 = float4(BurtEncodeNormalWSForGBuffer(data.normalWS), BurtEncodeMetallicAndShadingModelForGBuffer(data.materialChannel, data.shadingModelID), saturate(data.smoothness));
 
     encoded.gbuffer2 = float4(max(data.emission, float3(0.0f, 0.0f, 0.0f)), saturate(data.reflectance));
 
-    encoded.gbuffer3 = BurtEncodeGBuffer3(data);
+    encoded.gbuffer3 = BurtClampGBuffer3LowPrecisionPayload(BurtEncodeGBuffer3(data));
     encoded.gbuffer4 = BurtEncodeGBuffer4(data);
 
     return encoded;
