@@ -123,6 +123,7 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(shadowTarget.Identifier);
             cmd.SetViewport(new Rect(0f, 0f, Mathf.Max(1, traceDescriptor.width), Mathf.Max(1, traceDescriptor.height)));
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
@@ -237,7 +238,13 @@ namespace Burt.RenderPipeline
         private const string ScreenSpaceShadowShaderName = "Hidden/BurtRP/ScreenSpaceShadow";
         private const int DebugPassIndex = 1;
 
+        private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
+        private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
+        private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
+        private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
+        private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
         private static readonly int ScreenSpaceShadowTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceShadowTextureId;
+        private static readonly int DebugModeId = Shader.PropertyToID("_BurtSSShadowDebugMode");
 
         private Material screenSpaceShadowMaterial;
         private bool hasLoggedMissingShader;
@@ -255,6 +262,15 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadScreenSpaceShadow();
+            if (BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadowFinalMultiplierDebugView())
+            {
+                builder.ReadGBuffer0();
+                builder.ReadGBuffer1();
+                builder.ReadGBuffer2();
+                builder.ReadGBuffer3();
+                builder.ReadGBuffer4();
+            }
+
             builder.WriteCameraColor();
         }
 
@@ -272,6 +288,22 @@ namespace Burt.RenderPipeline
                 return;
             }
 
+            var requiresGBuffer = BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadowFinalMultiplierDebugView();
+            var gbuffer0Target = context.GBuffer0Target;
+            var gbuffer1Target = context.GBuffer1Target;
+            var gbuffer2Target = context.GBuffer2Target;
+            var gbuffer3Target = context.GBuffer3Target;
+            var gbuffer4Target = context.GBuffer4Target;
+            if (requiresGBuffer &&
+                (!gbuffer0Target.IsValid ||
+                    !gbuffer1Target.IsValid ||
+                    !gbuffer2Target.IsValid ||
+                    !gbuffer3Target.IsValid ||
+                    !gbuffer4Target.IsValid))
+            {
+                return;
+            }
+
             var material = GetScreenSpaceShadowMaterial();
             if (material == null || !HasRequiredShaderPass(material))
             {
@@ -283,6 +315,16 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(ScreenSpaceShadowTextureId, shadowTarget.Identifier);
+            cmd.SetGlobalInt(DebugModeId, BurtScreenSpaceShadowPassUtility.ResolveScreenSpaceShadowShaderDebugMode());
+            if (requiresGBuffer)
+            {
+                cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
+                cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
+                cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
+                cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
+                cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+            }
+
             cmd.DrawProcedural(Matrix4x4.identity, material, DebugPassIndex, MeshTopology.Triangles, 3, 1);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
@@ -436,12 +478,30 @@ namespace Burt.RenderPipeline
 
         public static bool IsScreenSpaceShadowDebugMode(BurtShadingDebugMode mode)
         {
-            return mode == BurtShadingDebugMode.ScreenSpaceShadow;
+            return mode == BurtShadingDebugMode.ScreenSpaceShadow || mode == BurtShadingDebugMode.ScreenSpaceShadowFinalMultiplier;
+        }
+
+        public static bool ShouldUseScreenSpaceShadowFinalMultiplierDebugView()
+        {
+            return BurtShadingDebugSettings.Mode == BurtShadingDebugMode.ScreenSpaceShadowFinalMultiplier;
+        }
+
+        public static int ResolveScreenSpaceShadowShaderDebugMode()
+        {
+            return ShouldUseScreenSpaceShadowFinalMultiplierDebugView() ? 1 : 0;
         }
 
         public static string ResolveScreenSpaceShadowDebugModeLabel()
         {
-            return IsScreenSpaceShadowDebugMode(BurtShadingDebugSettings.Mode) ? "ScreenSpaceShadow" : "Disabled";
+            switch (BurtShadingDebugSettings.Mode)
+            {
+                case BurtShadingDebugMode.ScreenSpaceShadow:
+                    return "ScreenSpaceShadow";
+                case BurtShadingDebugMode.ScreenSpaceShadowFinalMultiplier:
+                    return "ScreenSpaceShadowFinalMultiplier";
+                default:
+                    return "Disabled";
+            }
         }
 
         public static BurtScreenSpaceShadowSettings ResolveScreenSpaceShadowSettings(BurtRenderRequest request, BurtRenderPipelineAsset asset)

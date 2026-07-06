@@ -33,6 +33,12 @@ Shader "BurtRP/Foliage"
         _TintAORemap ("Tint AO Remap", Vector) = (0.754, 1, 0, 0)
         _TintHeightContrast ("Tint Height Contrast", Range(0.1, 10)) = 1
         _TreeHeight ("Tree Height", Float) = 25
+        _MaxBendAngle ("Max Bend Angle", Range(0, 3)) = 0
+        _SwayIntensity ("Sway Intensity", Range(0, 1)) = 0.05
+        _FlutterTipFrequency ("Flutter Tip Frequency", Range(0, 0.7)) = 0.08
+        _FlutterTipIntensity ("Flutter Tip Intensity", Range(0, 15)) = 0.2
+        _BendMaskPow ("Bend Mask Power", Range(0.1, 3)) = 1
+        _ToTrunkMaskPow ("Distance To Trunk Power", Range(0.1, 5)) = 1
         _CustomEnum ("Tint Type", Float) = 0
         [HideInInspector] _FoliageTintMode ("Legacy Tint Mode", Float) = 0
         [Toggle(BURT_FOLIAGE_USE_BAKED_NORMALS)] _FoliageUseBakedNormals ("Use Baked Normals", Float) = 0

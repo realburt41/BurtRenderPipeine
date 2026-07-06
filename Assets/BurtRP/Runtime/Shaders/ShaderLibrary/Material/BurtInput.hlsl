@@ -9,6 +9,7 @@ Texture2D _BaseMap;
 
 // 声明 Mask Map 贴图，Forward PBR 会把 R 当金属度、G 当环境遮蔽、A 当光滑度。
 Texture2D _MaskMap;
+Texture2D _SubsurfaceThicknessMap;
 Texture2D _AlphaMap;
 Texture2D _TintPalette;
 Texture2D _LocalTintPalette;
@@ -285,6 +286,11 @@ float BurtResolveSmoothness(float smoothness, float4 maskMap)
 {
     // 默认白色 Mask Map 的 A 为 1，所以最终结果会保持 _Smoothness 标量原值。
     return saturate(smoothness * maskMap.a);
+}
+
+float BurtSampleSubsurfaceThicknessMap(float2 baseMapUV)
+{
+    return BURT_SAMPLE_TEXTURE2D_REPEAT(_SubsurfaceThicknessMap, baseMapUV).r;
 }
 
 float BurtResolveFabricRoughness(float roughness, float4 maskMap)

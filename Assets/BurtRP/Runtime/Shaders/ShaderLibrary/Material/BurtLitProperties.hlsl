@@ -132,6 +132,10 @@ CBUFFER_START(UnityPerMaterial)
 
     float _SwayIntensity;
 
+    float _FlutterTipFrequency;
+
+    float _FlutterTipIntensity;
+
     float _BendMaskPow;
 
     float _ToTrunkMaskPow;

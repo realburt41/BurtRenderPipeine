@@ -12,7 +12,7 @@
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragDenoise
 
@@ -67,7 +67,7 @@
                 }
 
                 float centerLinearDepth = LinearEyeDepth(centerDepth);
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
 
                 int debugMode = (int)_BurtSSRParams1.z;
                 if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID) || BurtIsActiveFurShadingModel(centerGBuffer.shadingModelID))
@@ -124,7 +124,7 @@
                     }
 
                     float sampleLinearDepth = LinearEyeDepth(sampleDepth);
-                    BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
+                    BurtGBufferData sampleGBuffer = BurtSampleDeferredGBufferData(sampleUV);
                     float normalWeight = saturate(dot(centerNormal, BurtGetReflectionNormalWS(sampleGBuffer)));
                     normalWeight *= normalWeight * normalWeight;
                     float depthTolerance = max(centerLinearDepth * 0.015, 0.01);

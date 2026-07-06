@@ -103,6 +103,8 @@ GBufferVaryings VertGBuffer(GBufferAttributes input)
     float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        positionOS = BurtApplyFoliageVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
     #endif
 
     GBufferVaryings output;
@@ -206,7 +208,7 @@ SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings input, fix
     BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
 
     float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
-    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap);
+    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV);
     float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
 
     SubsurfaceForwardFragmentOutput output;

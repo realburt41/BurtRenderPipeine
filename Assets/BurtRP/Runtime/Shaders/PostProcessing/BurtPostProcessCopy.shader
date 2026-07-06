@@ -1286,17 +1286,21 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float historyValidity = tex2D(_BurtTAAParallaxRejectionTexture, uv).r;
                 float historyUseCount = BurtTaaLoadPrevUseCount(historyUv);
                 float historyCoverage = saturate(1.0 - abs(historyUseCount - 1.0));
-                float finalRejection = saturate(min(historyValidity, depthContinuity) * finalHistoryAvailability);
+                float finalRejection = saturate(historyValidity * finalHistoryAvailability);
                 uint stencil = BurtTaaLoadStencil(uv);
                 float4 taaMetadata = tex2D(_BurtTAAMetadataTexture, uv);
                 float outOfBoundsBreak = saturate(1.0 - inBounds);
                 float depthBreak = saturate(1.0 - depthContinuity);
                 float parallaxBreak = saturate(1.0 - historyValidity);
                 float coverageBreak = saturate(1.0 - historyCoverage);
-                float geometryBreak = saturate(max(taaMetadata.a, max(max(max(parallaxBreak, coverageBreak), outOfBoundsBreak), depthBreak)));
+                float historyBreak = saturate(max(max(parallaxBreak, depthBreak), coverageBreak));
+                float metadataBreak = saturate(taaMetadata.a);
+                float geometryBreak = saturate(max(metadataBreak, max(historyBreak, outOfBoundsBreak)));
                 float motionPixels = length(velocityData.xy * _BurtTAATexelSize.zw);
-                float stencilResponsive = ((stencil & 16u) != 0u ? 1.0 : 0.0) * BurtTaaValidSurfaceWeight(closestDepth) * smoothstep(0.35, 2.50, motionPixels);
-                float responsiveStrength = saturate(max(stencilResponsive, taaMetadata.g));
+                float surfaceWeight = BurtTaaValidSurfaceWeight(closestDepth);
+                float stencilResponsive = ((stencil & 16u) != 0u ? 1.0 : 0.0) * surfaceWeight;
+                float metadataResponsive = saturate(taaMetadata.g) * surfaceWeight;
+                float responsiveStrength = saturate(max(stencilResponsive, metadataResponsive));
                 float responsiveMask = responsiveStrength * finalHistoryAvailability;
 
                 float3 moment1 = neighborhoodSum * (1.0 / 9.0);
@@ -1317,12 +1321,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 1e-4)));
                 float xrenderBaseBlend = max(0.05, lumaContrast);
                 float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
-                float motionResponsive = saturate(max(responsiveStrength, smoothstep(0.10, 1.50, motionPixels)));
-                float softGeometryBlend = lerp(0.06, 0.22, saturate(max(responsiveStrength, motionPixels / 12.0)));
-                float hardGeometryBreak = smoothstep(0.70, 0.96, max(max(parallaxBreak, depthBreak), coverageBreak)) * finalHistoryAvailability * motionResponsive;
-                currentBlend = max(currentBlend, responsiveMask * 0.25);
-                currentBlend = max(currentBlend, geometryBreak * softGeometryBlend * finalHistoryAvailability);
-                currentBlend = lerp(currentBlend, 1.0, hardGeometryBreak);
+                float responsiveMotion = smoothstep(0.35, 2.5, motionPixels) * stencilResponsive;
+                float responsiveCurrentBlend = lerp(0.25, 0.65, responsiveMotion);
+                currentBlend = lerp(currentBlend, max(currentBlend, responsiveCurrentBlend), responsiveMask);
                 currentBlend = saturate(currentBlend);
                 currentBlend = lerp(1.0, currentBlend, finalHistoryAvailability);
 
@@ -1475,6 +1476,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float4x4 _BurtTAAInverseCurrentNonJitteredViewProjection;
             float4x4 _BurtTAACurrentNonJitteredViewProjection;
             float4x4 _BurtTAAPreviousNonJitteredViewProjection;
+            float4x4 _BurtTAAClipToPreviousClip;
             float4 _BurtTAAJitter;
             float4 _BurtTAATexelSize;
 
@@ -1532,9 +1534,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     currentFrameJitter.y = -currentFrameJitter.y;
                 #endif
                 clip.xy -= currentFrameJitter;
-                float4 world = mul(_BurtTAAInverseCurrentNonJitteredViewProjection, clip);
-                world.xyz /= max(abs(world.w), 1e-6);
-                float4 previousClip = mul(_BurtTAAPreviousNonJitteredViewProjection, float4(world.xyz, 1.0));
+                float4 previousClip = mul(_BurtTAAClipToPreviousClip, clip);
                 float2 currentUv = BurtTaaClipToUv(clip);
                 float2 previousUv = BurtTaaClipToUv(previousClip);
                 float surfaceValid = BurtTaaValidSurfaceWeight(rawDepth);
@@ -1542,8 +1542,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 previousAvailable *= step(0.0, previousUv.x) * step(previousUv.x, 1.0) * step(0.0, previousUv.y) * step(previousUv.y, 1.0);
                 float2 velocity = currentUv - previousUv;
                 float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
-                float keepVelocity = step(0.02, max(velocityPixels.x, velocityPixels.y));
-                velocity *= keepVelocity;
+                velocity *= step(float2(0.02, 0.02), velocityPixels);
                 velocity = lerp(velocity * surfaceValid, float2(2.0, 2.0), surfaceValid * (1.0 - previousAvailable));
                 return float4(velocity, surfaceValid * previousAvailable, 0.0);
             }
@@ -1568,6 +1567,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             Texture2D<float> _BurtTAAStencilMaskTexture;
             float4x4 _BurtTAAInverseCurrentNonJitteredViewProjection;
             float4x4 _BurtTAAPreviousNonJitteredViewProjection;
+            float4x4 _BurtTAAClipToPreviousClip;
             float4 _BurtTAAJitter;
             float4 _BurtTAATexelSize;
             float4 _BurtTAAStencilTexelSize;
@@ -1634,17 +1634,14 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     currentFrameJitter.y = -currentFrameJitter.y;
                 #endif
                 clip.xy -= currentFrameJitter;
-                float4 world = mul(_BurtTAAInverseCurrentNonJitteredViewProjection, clip);
-                world.xyz /= max(abs(world.w), 1e-6);
-                float4 previousClip = mul(_BurtTAAPreviousNonJitteredViewProjection, float4(world.xyz, 1.0));
+                float4 previousClip = mul(_BurtTAAClipToPreviousClip, clip);
                 float2 currentUv = BurtTaaClipToUv(clip);
                 float2 previousUv = BurtTaaClipToUv(previousClip);
                 available = BurtTaaValidSurfaceWeight(rawDepth) * step(1e-5, previousClip.w);
                 available *= step(0.0, previousUv.x) * step(previousUv.x, 1.0) * step(0.0, previousUv.y) * step(previousUv.y, 1.0);
                 float2 velocity = currentUv - previousUv;
                 float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
-                float keepVelocity = step(0.02, max(velocityPixels.x, velocityPixels.y));
-                return velocity * keepVelocity;
+                return velocity * step(float2(0.02, 0.02), velocityPixels);
             }
 
             uint BurtTaaLoadStencil(float2 uv)
@@ -1702,8 +1699,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float2 closestUv = saturate(uv + closestOffset * _BurtTAATexelSize.xy);
                 float4 objectVelocity = tex2D(_BurtTAAVelocityTexture, closestUv);
                 float stencilObjectMotion = (BurtTaaLoadStencil(closestUv) & 8u) != 0u ? 1.0 : 0.0;
-                float rawObjectMotion = step(0.75, objectVelocity.w);
-                float objectVelocityValid = max(stencilObjectMotion, rawObjectMotion) * objectVelocity.z * rawObjectMotion;
+                float rawObjectMotion = step(0.75, objectVelocity.w) * objectVelocity.z;
+                float objectVelocityValid = max(stencilObjectMotion, rawObjectMotion) * rawObjectMotion;
                 finalVelocity = lerp(finalVelocity, objectVelocity.xy, objectVelocityValid);
                 float available = max(staticAvailable, objectVelocityValid);
                 float2 historyUv = uv - finalVelocity;
@@ -2433,7 +2430,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float edgeResponsive = saturate(max(depthEdgeResponsive, velocityEdgeResponsive) * geometryBreak);
                 float responsive = saturate(max(movingObjectResponsive, untrustedObjectMotion * saturate(_BurtTAAResponsiveParams.y)));
                 responsive = max(responsive, edgeResponsive);
-                float stencilResponsive = ((stencil & 16u) != 0u ? 1.0 : 0.0) * surfaceWeight * saturate(max(edgeResponsive, smoothstep(0.35, 2.50, motionPixels)));
+                float stencilResponsive = ((stencil & 16u) != 0u ? 1.0 : 0.0) * surfaceWeight;
                 responsive = max(responsive, stencilResponsive);
 
                 return float4(saturate(trustedObjectMotion), saturate(responsive), saturate(untrustedObjectMotion), saturate(geometryBreak));
@@ -2629,6 +2626,77 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 currentBlend = saturate(currentBlend * lerp(0.45, 1.0, currentGuide));
                 float3 color = lerp(reconstructed, current, currentBlend);
                 return float4(max(color, 0.0), 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Temporal AA Build Stencil Mask"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+
+            sampler2D _BurtTAAVelocityTexture;
+            Texture2D _BurtGBuffer1;
+            float _BurtTAAHasGBuffer;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                #if UNITY_UV_STARTS_AT_TOP
+                    uv.y = 1.0 - uv.y;
+                #endif
+                output.uv = uv;
+                return output;
+            }
+
+            float BurtTaaDecodeShadingModelFromGBuffer(float packedValue)
+            {
+                const float packCount = 7.0;
+                float scaled = saturate(packedValue) * packCount;
+                return floor(min(scaled, packCount - 1e-5));
+            }
+
+            float BurtTaaFoliageResponsiveMask(float2 uv)
+            {
+                if (_BurtTAAHasGBuffer < 0.5)
+                {
+                    return 0.0;
+                }
+
+                uint width;
+                uint height;
+                _BurtGBuffer1.GetDimensions(width, height);
+                if (width == 0u || height == 0u)
+                {
+                    return 0.0;
+                }
+
+                float2 textureSize = float2(width, height);
+                int2 size = int2(textureSize);
+                int2 pixel = clamp(int2(uv * textureSize), int2(0, 0), size - 1);
+                float shadingModel = BurtTaaDecodeShadingModelFromGBuffer(_BurtGBuffer1.Load(int3(pixel, 0)).b);
+                return 1.0 - step(0.5, abs(shadingModel - 5.0));
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float4 velocity = tex2D(_BurtTAAVelocityTexture, input.uv);
+                float objectMotion = step(0.75, velocity.w) * velocity.z;
+                float responsive = BurtTaaFoliageResponsiveMask(input.uv);
+                return float4(objectMotion * 8.0 + responsive * 16.0, 0.0, 0.0, 0.0);
             }
             ENDHLSL
         }

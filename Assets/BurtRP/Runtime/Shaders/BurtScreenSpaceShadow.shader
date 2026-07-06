@@ -15,6 +15,7 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
             float4 _BurtSSShadowContrastParams; // x grass, y detail, z foliage, w character.
             float4 _BurtSSShadowTraceScreenSize;
             float4 _BurtMainLightDirection;
+            int _BurtSSShadowDebugMode;
             sampler2D _BurtScreenSpaceShadowTexture;
 
             #define BURT_SS_SHADOW_PIXEL_GRASS 2u
@@ -57,7 +58,7 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
 
             BurtGBufferData BurtSSShadowSampleGBufferData(float2 screenUV)
             {
-                return BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                return BurtSampleDeferredGBufferData(screenUV);
             }
 
             uint BurtSSShadowClassifyMaterial(BurtGBufferData data)
@@ -261,6 +262,17 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
             float4 FragDebug(Varyings input) : SV_Target
             {
                 float shadow = tex2D(_BurtScreenSpaceShadowTexture, input.screenUV).r;
+                if (_BurtSSShadowDebugMode == 1)
+                {
+                    BurtGBufferData gbufferData = BurtSSShadowSampleGBufferData(input.screenUV);
+                #if BURT_ENABLE_FOLIAGE_SHADING
+                    if (BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID))
+                    {
+                        shadow = lerp(1.0f, shadow, max(BurtGetFoliageScreenSpaceShadowIntensity(gbufferData), 0.0f));
+                    }
+                #endif
+                }
+
                 return float4(saturate(shadow).xxx, 1.0f);
             }
         ENDHLSL
@@ -273,7 +285,7 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragTrace
             ENDHLSL
@@ -287,7 +299,7 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragDebug
             ENDHLSL

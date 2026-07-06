@@ -81,7 +81,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             AutoExposureFinalReduce = 14,
             AutoExposureDebug = 15,
             TemporalAAMetadata = 16,
-            TemporalAAUpscale = 17
+            TemporalAAUpscale = 17,
+            TemporalAABuildStencilMask = 18
         }
 
         private static int ShaderPass(PostProcessShaderPass pass)
@@ -117,6 +118,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAACurrentNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAACurrentNonJitteredViewProjection");
         private static readonly int TemporalAAInverseCurrentViewProjectionId = Shader.PropertyToID("_BurtTAAInverseCurrentViewProjection");
         private static readonly int TemporalAAInverseCurrentNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAAInverseCurrentNonJitteredViewProjection");
+        private static readonly int TemporalAAClipToPreviousClipId = Shader.PropertyToID("_BurtTAAClipToPreviousClip");
         private static readonly int TemporalAAJitterId = Shader.PropertyToID("_BurtTAAJitter");
         private static readonly int TemporalAATexelSizeId = Shader.PropertyToID("_BurtTAATexelSize");
         private static readonly int TemporalAAParamsId = Shader.PropertyToID("_BurtTAAParams");
@@ -655,10 +657,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var resolveTarget = new RenderTargetIdentifier(TemporalAAResolveTextureId);
             var parallaxRejection = new RenderTargetIdentifier(TemporalAAParallaxRejectionTextureId);
             var debugTarget = new RenderTargetIdentifier(TemporalAADebugTextureId);
+            var blackTexture = new RenderTargetIdentifier(Texture2D.blackTexture);
+            var hasGBuffer1 = context.GBuffer1Target.IsValid;
 
             cmd.SetGlobalTexture(TemporalAAStencilMaskTextureId, stencilMask);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
-            cmd.SetGlobalVector(TemporalAAStencilTexelSizeId, new Vector4(1f / cameraTargetWidth, 1f / cameraTargetHeight, cameraTargetWidth, cameraTargetHeight));
+            cmd.SetGlobalVector(TemporalAAStencilTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
             cmd.SetGlobalVector(TemporalAAUpscaleTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
             var temporalAAUpscaleParams = new Vector4(cameraTargetWidth, cameraTargetHeight, cameraTargetWidth / (float)width, cameraTargetHeight / (float)height);
             cmd.SetGlobalVector(TemporalAAUpscaleParamsId, temporalAAUpscaleParams);
@@ -681,7 +685,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             temporalAA.ObjectMotionVectorPassDrawn = drewObjectMotionVectors;
             temporalAA.VelocityMode = drewObjectMotionVectors ? BurtTemporalAAVelocityMode.CameraAndObject : BurtTemporalAAVelocityMode.CameraOnly;
 
-            var blackTexture = new RenderTargetIdentifier(Texture2D.blackTexture);
+            cmd.SetRenderTarget(stencilMask);
+            SetTemporalAAViewport(cmd, width, height);
+            cmd.SetGlobalTexture(TemporalAAVelocityTextureId, velocity);
+            cmd.SetGlobalFloat(TemporalAAHasGBufferId, hasGBuffer1 ? 1f : 0f);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.GBuffer1Id, hasGBuffer1 ? context.GBuffer1Target.Identifier : blackTexture);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAABuildStencilMask), MeshTopology.Triangles, 3, 1);
+            cmd.SetGlobalTexture(TemporalAAStencilMaskTextureId, stencilMask);
+
             var historyDepthForDecimate = historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth;
             if (useTemporalAAComputeDilateDecimate)
             {
@@ -695,8 +706,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     temporalAA,
                     width,
                     height,
-                    cameraTargetWidth,
-                    cameraTargetHeight);
+                    width,
+                    height);
 
                 cmd.SetRenderTarget(prevUseCount);
                 SetTemporalAAViewport(cmd, width, height);
@@ -747,7 +758,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(TemporalAAStencilMaskTextureId, stencilMask);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAMetadata), MeshTopology.Triangles, 3, 1);
 
-            var hasGBuffer1 = context.GBuffer1Target.IsValid;
             var historyColorTarget = historyValid ? new RenderTargetIdentifier(histories.Color) : cameraColorTarget.Identifier;
             var historyDepthTarget = historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth;
             cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier);
@@ -777,8 +787,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 historyValid,
                 width,
                 height,
-                cameraTargetWidth,
-                cameraTargetHeight))
+                width,
+                height))
             {
                 cmd.SetRenderTarget(resolveTarget);
                 SetTemporalAAViewport(cmd, width, height);
@@ -849,6 +859,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalMatrix(TemporalAACurrentNonJitteredViewProjectionId, temporalAA.CurrentNonJitteredViewProjectionMatrix);
             cmd.SetGlobalMatrix(TemporalAAInverseCurrentViewProjectionId, temporalAA.InverseCurrentViewProjectionMatrix);
             cmd.SetGlobalMatrix(TemporalAAInverseCurrentNonJitteredViewProjectionId, temporalAA.InverseCurrentNonJitteredViewProjectionMatrix);
+            cmd.SetGlobalMatrix(TemporalAAClipToPreviousClipId, temporalAA.ClipToPreviousClipMatrix);
             cmd.SetGlobalVector(TemporalAAJitterId, new Vector4(temporalAA.Jitter.x, temporalAA.Jitter.y, temporalAA.JitterPixels.x, temporalAA.JitterPixels.y));
             cmd.SetGlobalVector(TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
             cmd.SetGlobalVector(TemporalAAParamsId, new Vector4(0f, 0f, historyValid ? 1f : 0f, temporalAA.FrameIndex));
@@ -910,6 +921,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAPrevUseCountOutputTextureId, prevUseCountUint);
             cmd.SetComputeMatrixParam(shader, TemporalAAInverseCurrentNonJitteredViewProjectionId, temporalAA != null ? temporalAA.InverseCurrentNonJitteredViewProjectionMatrix : Matrix4x4.identity);
             cmd.SetComputeMatrixParam(shader, TemporalAAPreviousNonJitteredViewProjectionId, temporalAA != null ? temporalAA.PreviousNonJitteredViewProjectionMatrix : Matrix4x4.identity);
+            cmd.SetComputeMatrixParam(shader, TemporalAAClipToPreviousClipId, temporalAA != null ? temporalAA.ClipToPreviousClipMatrix : Matrix4x4.identity);
             var jitter = temporalAA != null ? temporalAA.Jitter : Vector2.zero;
             cmd.SetComputeVectorParam(shader, TemporalAAJitterId, new Vector4(jitter.x, jitter.y, temporalAA != null ? temporalAA.JitterPixels.x : 0f, temporalAA != null ? temporalAA.JitterPixels.y : 0f));
             cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));

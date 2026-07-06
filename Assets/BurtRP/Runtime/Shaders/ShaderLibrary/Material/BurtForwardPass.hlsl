@@ -56,12 +56,23 @@ struct Varyings
 #endif
 };
 
+float BurtResolveForwardMaterialFoliageMicroShadow(BurtSurfaceData surfaceData)
+{
+#if BURT_ENABLE_FOLIAGE_SHADING
+    return BurtIsFoliageShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.occlusion) : 1.0f;
+#else
+    return 1.0f;
+#endif
+}
+
 Varyings Vert(Attributes input)
 {
     UNITY_SETUP_INSTANCE_ID(input);
     float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        positionOS = BurtApplyFoliageVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
     #endif
 
     Varyings output;
@@ -249,6 +260,12 @@ void BurtFillForwardShadingDebugData(
     debugData.subsurfaceTransmissionThickness = pbrComponents.subsurfaceTransmissionThickness;
     debugData.subsurfaceKernelWeight = pbrComponents.subsurfaceKernelWeight;
     debugData.subsurfaceIndirect = pbrComponents.subsurfaceIndirect;
+    debugData.foliageMask = pbrComponents.foliageMask;
+    debugData.foliageTransmission = pbrComponents.foliageTransmission;
+    debugData.foliageDirectTransmission = pbrComponents.foliageDirectTransmission;
+    debugData.foliageTransmissionBRDF = pbrComponents.foliageTransmissionBRDF;
+    debugData.foliageTransmissionShadow = pbrComponents.foliageTransmissionShadow;
+    debugData.foliageSpecularBRDF = pbrComponents.foliageSpecularBRDF;
     debugData.hairPrimaryLobe = pbrComponents.hairPrimaryLobe;
     debugData.hairSecondaryLobe = pbrComponents.hairSecondaryLobe;
     debugData.hairTransmissionLobe = pbrComponents.hairTransmissionLobe;
@@ -311,6 +328,7 @@ float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
     #endif
 #endif
     float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
+    shadowAttenuation *= BurtResolveForwardMaterialFoliageMicroShadow(surfaceData);
     float transmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(input.positionWS, -1.0f);
     float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex, transmissionThickness);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation, transmissionThickness);

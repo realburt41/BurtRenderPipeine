@@ -171,7 +171,7 @@ float BurtResolveSubsurfaceProfileThickness(float materialThickness)
 float BurtResolveSubsurfaceProfileThickness(float materialThickness, float resolvedTransmissionThickness)
 {
     return resolvedTransmissionThickness >= 0.0f
-        ? clamp(resolvedTransmissionThickness, 0.0f, BURT_SUBSURFACE_MAX_TRANSMISSION_PROFILE_DISTANCE)
+        ? clamp(resolvedTransmissionThickness * BurtResolveSubsurfaceProfileThickness(materialThickness), 0.0f, BURT_SUBSURFACE_MAX_TRANSMISSION_PROFILE_DISTANCE)
         : BurtResolveSubsurfaceProfileThickness(materialThickness);
 }
 
@@ -620,9 +620,7 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtSurfaceData surfaceData)
     materialData.f90 = ApproximateF90(materialData.f0);
     if (materialData.foliageActive > 0.5f)
     {
-        materialData.f90 = materialData.foliageUseSpecularColor > 0.5f
-            ? saturate(materialData.baseColor * materialData.foliageSpecularScale)
-            : saturate((materialData.baseColor * 0.9f + 0.1f) * materialData.foliageSpecularScale * 3.0f);
+        materialData.f90 = saturate(materialData.baseColor * materialData.foliageSpecularScale);
     }
 
     return materialData;

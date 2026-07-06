@@ -27,6 +27,7 @@ Shader "BurtRP/Subsurface"
         // 定义环境遮蔽强度，0 表示忽略 Mask Map 的 G 通道，1 表示完全使用 G 通道。
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
         _SubsurfaceThickness ("Subsurface Thickness", Range(0, 1)) = 0.5
+        [NoScaleOffset] _SubsurfaceThicknessMap ("Subsurface Thickness Map", 2D) = "white" {}
         _SubsurfacePower ("Subsurface Power", Range(0.5, 8)) = 3
         _SubsurfaceDistortion ("Subsurface Distortion", Range(0, 1)) = 0.35
         _SubsurfaceAmbient ("Subsurface Ambient", Range(0, 1)) = 0.35

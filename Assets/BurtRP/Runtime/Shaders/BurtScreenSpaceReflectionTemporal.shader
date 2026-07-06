@@ -12,7 +12,7 @@
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragTemporal
 
@@ -266,7 +266,7 @@
                 }
 
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, currentRawDepth);
-                BurtGBufferData currentGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData currentGBuffer = BurtSampleDeferredGBufferData(screenUV);
                 if (BurtSSRTemporalIsExcludedShadingModel(currentGBuffer.shadingModelID))
                 {
                     return float4(0.0, 0.0, 0.0, 0.0);
@@ -354,7 +354,7 @@
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragCopyTemporalColor
 
@@ -397,7 +397,7 @@
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragCopyDepthHistory
 
@@ -439,7 +439,7 @@
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragCopyNormalRoughnessHistory
 
@@ -472,7 +472,7 @@
 
             float4 FragCopyNormalRoughnessHistory(Varyings input) : SV_Target
             {
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(input.screenUV));
+                BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(input.screenUV);
                 if (BurtSSRTemporalIsExcludedShadingModel(gbufferData.shadingModelID))
                 {
                     return 0.0;
@@ -492,7 +492,7 @@
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragCopyMomentHistory
 
@@ -702,7 +702,7 @@
                         continue;
                     }
 
-                    BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
+                    BurtGBufferData sampleGBuffer = BurtSampleDeferredGBufferData(sampleUV);
                     if (BurtSSRTemporalIsExcludedShadingModel(sampleGBuffer.shadingModelID))
                     {
                         continue;
@@ -741,7 +741,7 @@
                 }
 
                 float historyValid = saturate(_BurtSSRTemporalParams0.y);
-                BurtGBufferData currentGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(input.screenUV));
+                BurtGBufferData currentGBuffer = BurtSampleDeferredGBufferData(input.screenUV);
                 if (BurtSSRTemporalIsExcludedShadingModel(currentGBuffer.shadingModelID))
                 {
                     return 0.0;

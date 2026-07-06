@@ -22,6 +22,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int CameraDepthTextureId = Shader.PropertyToID(CameraDepthTextureShaderName); // 把 shader 名称转换成整数 ID，CommandBuffer 使用整数 ID 会更稳定也更高效。
 
+        public const string DeferredStencilTextureShaderName = "_BurtDeferredStencilTexture";
+
+        public static readonly int DeferredStencilTextureId = Shader.PropertyToID(DeferredStencilTextureShaderName);
+
+        public const string DeferredStencilTexelSizeShaderName = "_BurtDeferredStencilTexelSize";
+
+        public static readonly int DeferredStencilTexelSizeId = Shader.PropertyToID(DeferredStencilTexelSizeShaderName);
+
         public const string DeferredLightingDepthName = "DeferredLightingDepth";
 
         public const string DeferredLightingDepthTextureShaderName = "_BurtDeferredLightingDepthTexture";

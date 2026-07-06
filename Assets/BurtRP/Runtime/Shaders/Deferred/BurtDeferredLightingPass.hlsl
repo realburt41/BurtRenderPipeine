@@ -59,9 +59,18 @@ float BurtSampleDeferredScreenSpaceShadow(float2 screenUV)
 
 float BurtResolveDeferredMaterialScreenSpaceShadow(float2 screenUV, BurtGBufferData gbufferData)
 {
-#if defined(BURT_DEFERRED_SHADING_MODEL_FOLIAGE)
     float screenSpaceShadow = BurtSampleDeferredScreenSpaceShadow(screenUV);
+#if defined(BURT_DEFERRED_SHADING_MODEL_FOLIAGE)
     return saturate(lerp(1.0f, screenSpaceShadow, max(BurtGetFoliageScreenSpaceShadowIntensity(gbufferData), 0.0f)));
+#else
+    return screenSpaceShadow;
+#endif
+}
+
+float BurtResolveDeferredMaterialFoliageMicroShadow(BurtGBufferData gbufferData)
+{
+#if defined(BURT_DEFERRED_SHADING_MODEL_FOLIAGE)
+    return saturate(gbufferData.occlusion);
 #else
     return 1.0f;
 #endif
@@ -255,6 +264,7 @@ float4 Frag(Varyings input) : SV_Target
     int perObjectShadowObjectIndex = BurtSampleDeferredPerObjectShadowObjectIndex(screenUV);
     float shadowAttenuation = BurtSampleMainLightShadow(shadowPositionWS, shadowNormalWS, perObjectShadowObjectIndex);
     shadowAttenuation *= BurtResolveDeferredMaterialScreenSpaceShadow(screenUV, gbufferData);
+    shadowAttenuation *= BurtResolveDeferredMaterialFoliageMicroShadow(gbufferData);
     float transmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(positionWS, perObjectShadowObjectIndex, -1.0f);
     float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(positionWS, shadowNormalWS, perObjectShadowObjectIndex, transmissionThickness);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation, transmissionThickness);
@@ -406,6 +416,12 @@ float4 Frag(Varyings input) : SV_Target
     debugData.subsurfaceTransmissionThickness = pbrComponents.subsurfaceTransmissionThickness;
     debugData.subsurfaceKernelWeight = pbrComponents.subsurfaceKernelWeight;
     debugData.subsurfaceIndirect = pbrComponents.subsurfaceIndirect;
+    debugData.foliageMask = pbrComponents.foliageMask;
+    debugData.foliageTransmission = pbrComponents.foliageTransmission;
+    debugData.foliageDirectTransmission = pbrComponents.foliageDirectTransmission;
+    debugData.foliageTransmissionBRDF = pbrComponents.foliageTransmissionBRDF;
+    debugData.foliageTransmissionShadow = pbrComponents.foliageTransmissionShadow;
+    debugData.foliageSpecularBRDF = pbrComponents.foliageSpecularBRDF;
     debugData.hairPrimaryLobe = pbrComponents.hairPrimaryLobe;
     debugData.hairSecondaryLobe = pbrComponents.hairSecondaryLobe;
     debugData.hairTransmissionLobe = pbrComponents.hairTransmissionLobe;

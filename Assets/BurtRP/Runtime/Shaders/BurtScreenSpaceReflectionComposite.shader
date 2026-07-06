@@ -13,7 +13,7 @@
             Blend One Zero
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragComposite
 
@@ -115,7 +115,7 @@
                     return 0.0;
                 }
 
-                BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
+                BurtGBufferData sampleGBuffer = BurtSampleDeferredGBufferData(sampleUV);
                 if (BurtSSRCompositeIsExcludedShadingModel(sampleGBuffer.shadingModelID))
                 {
                     return 0.0;
@@ -147,7 +147,7 @@
                     return 0.0;
                 }
 
-                BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
+                BurtGBufferData sampleGBuffer = BurtSampleDeferredGBufferData(sampleUV);
                 if (BurtSSRCompositeIsExcludedShadingModel(sampleGBuffer.shadingModelID))
                 {
                     return 0.0;
@@ -169,7 +169,7 @@
                 }
 
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
                 if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.shadingModelID))
                 {
                     return 0.0;
@@ -242,7 +242,7 @@
                     return 0.0;
                 }
 
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
                 if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.shadingModelID))
                 {
                     return 0.0;
@@ -346,7 +346,7 @@
                     return centerSSR.rgb;
                 }
 
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
                 if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.shadingModelID))
                 {
                     return centerSSR.rgb;
@@ -430,7 +430,7 @@
                     return 0.0;
                 }
 
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
                 float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
                 float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
@@ -511,7 +511,7 @@
                     return 1.0;
                 }
 
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
                 float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
                 float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
@@ -567,7 +567,7 @@
                     return 0.0;
                 }
 
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
                 float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
                 float receiverMaterialGate = smoothstep(0.04, 0.28, materialWeight) * (1.0 - smoothstep(0.42, 0.82, centerRoughness));
                 if (receiverMaterialGate <= 0.0001)
@@ -635,7 +635,7 @@
                     return 0.0;
                 }
 
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
                 if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.shadingModelID))
                 {
                     return 0.0;
@@ -662,7 +662,7 @@
                     return float3(0.0, 0.0, 0.0);
                 }
 
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
                 if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.shadingModelID))
                 {
                     return float3(0.0, 0.0, 0.0);
@@ -823,7 +823,7 @@
                     return float3(0.0, 0.0, 0.0);
                 }
 
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
                 BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
@@ -868,7 +868,7 @@
                     return compositeDelta;
                 }
 
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
                 if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.shadingModelID))
                 {
                     return compositeDelta;
@@ -971,7 +971,7 @@
                     return finalColor;
                 }
 
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
                 float centerMetallic = saturate(centerGBuffer.metallic);
                 float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
                 float lowRoughnessReceiverGate = saturate(materialWeight) * (1.0 - smoothstep(0.34, 0.78, centerRoughness));
@@ -1059,7 +1059,7 @@
                     return 0.0;
                 }
 
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
                 float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
                 float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);

@@ -104,6 +104,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                     return BurtGBufferDebugViewMode.FoliageSpecularScale;
                 case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
                     return BurtGBufferDebugViewMode.FoliageScreenSpaceShadowIntensity;
+                case BurtShadingDebugMode.GBufferStencilRaw:
+                    return BurtGBufferDebugViewMode.StencilRaw;
+                case BurtShadingDebugMode.GBufferStencilShadingModel:
+                    return BurtGBufferDebugViewMode.StencilShadingModel;
                 case BurtShadingDebugMode.GBufferClearCoatNormalWS:
                     return BurtGBufferDebugViewMode.ClearCoatNormalWS;
                 case BurtShadingDebugMode.GBufferClearCoatRoughness:
@@ -182,6 +186,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier); // 把当前 request 的 CameraDepth 绑定给调试 shader。
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalFloat(DebugModeId, debugMode); // 上传调试模式，让 shader 选择显示原始 GBuffer 或解码后的材质分量。
             cmd.SetGlobalFloat(DebugYFlipId, debugYFlip); // 上传固定为 0 的调试翻转值，避免 GBuffer Debug 在 Deferred 平台 UV 修正后再次翻转。
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，把 GBuffer 调试结果写入 CameraColor。

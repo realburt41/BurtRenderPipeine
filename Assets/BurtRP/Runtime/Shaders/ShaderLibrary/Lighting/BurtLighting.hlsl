@@ -1833,6 +1833,18 @@ float hairScatter;
     float3 subsurfaceIndirect;
 
     float3 subsurfaceIndirectTransmission;
+
+    float foliageMask;
+
+    float3 foliageTransmission;
+
+    float3 foliageDirectTransmission;
+
+    float3 foliageTransmissionBRDF;
+
+    float foliageTransmissionShadow;
+
+    float3 foliageSpecularBRDF;
 };
 
 // Direct stage shared by main and additional lights.
@@ -2283,6 +2295,13 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = indirectComponents.subsurfaceIndirect;
     components.subsurfaceIndirectTransmission = indirectComponents.subsurfaceIndirectTransmission;
+    float foliageMask = coreData.materialData.foliageActive > 0.5f ? 1.0f : 0.0f;
+    components.foliageMask = foliageMask;
+    components.foliageTransmission = max(directComponents.transmissionThroughput, float3(0.0f, 0.0f, 0.0f)) * foliageMask;
+    components.foliageDirectTransmission = directComponents.transmission * foliageMask;
+    components.foliageTransmissionBRDF = directComponents.transmissionBRDF * foliageMask;
+    components.foliageTransmissionShadow = lerp(1.0f, directComponents.transmissionShadow, foliageMask);
+    components.foliageSpecularBRDF = directComponents.brdfTerms.specularBRDF * foliageMask;
 
 #if BURT_ENABLE_SUBSURFACE_SHADING
     if (BurtGetSubsurfaceMaterialWeight(coreData.materialData) > 0.0001f)
@@ -3069,6 +3088,12 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageMask = 0.0f;
+    components.foliageTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.foliageTransmissionShadow = 1.0f;
+    components.foliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
     return components;
 }
 
@@ -3133,6 +3158,12 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageMask = 0.0f;
+    components.foliageTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.foliageTransmissionShadow = 1.0f;
+    components.foliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
     return components;
 }
 
@@ -3196,6 +3227,12 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageMask = 0.0f;
+    components.foliageTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.foliageTransmissionShadow = 1.0f;
+    components.foliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
     return components;
 }
 
@@ -3259,6 +3296,12 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     components.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     components.subsurfaceIndirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageMask = 0.0f;
+    components.foliageTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    components.foliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    components.foliageTransmissionShadow = 1.0f;
+    components.foliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
     return components;
 }
 #endif

@@ -28,7 +28,7 @@ struct DepthAttributes
 {
     float4 positionOS : POSITION;
     float3 normalOS : NORMAL;
-    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
         float4 color : COLOR;
     #endif
     #if BURT_DEPTH_ONLY_USES_BASE_MAP_UV
@@ -54,6 +54,8 @@ DepthVaryings VertDepth(DepthAttributes input)
     float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+    #elif defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        positionOS = BurtApplyFoliageVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
     #endif
 
     DepthVaryings output;

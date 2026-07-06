@@ -129,6 +129,20 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "GBuffer Foliage Specular";
                 case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
                     return "GBuffer Foliage SS Shadow";
+                case BurtShadingDebugMode.GBufferStencilRaw:
+                    return "GBuffer Stencil Raw";
+                case BurtShadingDebugMode.GBufferStencilShadingModel:
+                    return "GBuffer Stencil Shading Model";
+                case BurtShadingDebugMode.FoliageTransmission:
+                    return "Foliage Transmission";
+                case BurtShadingDebugMode.FoliageDirectTransmission:
+                    return "Foliage Direct Transmission";
+                case BurtShadingDebugMode.FoliageTransmissionBRDF:
+                    return "Foliage Transmission BRDF";
+                case BurtShadingDebugMode.FoliageTransmissionShadow:
+                    return "Foliage Transmission Shadow";
+                case BurtShadingDebugMode.FoliageSpecularBRDF:
+                    return "Foliage Specular BRDF";
                 case BurtShadingDebugMode.GBufferAnisotropy:
                     return "GBuffer Anisotropy";
                 case BurtShadingDebugMode.GBufferTangentWS:
@@ -239,6 +253,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "SSAO Diagnostic Compare";
                 case BurtShadingDebugMode.ScreenSpaceShadow:
                     return "SS Shadow";
+                case BurtShadingDebugMode.ScreenSpaceShadowFinalMultiplier:
+                    return "SS Shadow Final Multiplier";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw:
                     return "BurtGI Raw";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal:
@@ -615,6 +631,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.GBufferFoliageTransmissionNdotL,
             BurtShadingDebugMode.GBufferFoliageSpecularScale,
             BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity,
+            BurtShadingDebugMode.GBufferStencilRaw,
+            BurtShadingDebugMode.GBufferStencilShadingModel,
             BurtShadingDebugMode.GBufferAnisotropy,
             BurtShadingDebugMode.GBufferTangentWS
         });
@@ -643,6 +661,15 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.HairTransmissionLobe, // Hair 背光透射近似 lobe。
             BurtShadingDebugMode.HairScatter, // Hair 当前参与 lighting 的 scatter。
             BurtShadingDebugMode.HairAdditionalLighting // Hair 追加光直接贡献。
+        });
+
+        public static readonly BurtShadingDebugGroup Foliage = new BurtShadingDebugGroup("Foliage", "Foliage", new[]
+        {
+            BurtShadingDebugMode.FoliageTransmission,
+            BurtShadingDebugMode.FoliageDirectTransmission,
+            BurtShadingDebugMode.FoliageTransmissionBRDF,
+            BurtShadingDebugMode.FoliageTransmissionShadow,
+            BurtShadingDebugMode.FoliageSpecularBRDF
         });
 
         public static readonly BurtShadingDebugGroup Subsurface = new BurtShadingDebugGroup("Subsurface", "SSS", new[]
@@ -847,7 +874,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public static readonly BurtShadingDebugGroup ScreenSpaceShadow = new BurtShadingDebugGroup("Screen Space Shadow", "SS Shadow", new[]
         {
-            BurtShadingDebugMode.ScreenSpaceShadow
+            BurtShadingDebugMode.ScreenSpaceShadow,
+            BurtShadingDebugMode.ScreenSpaceShadowFinalMultiplier
         });
 
         public static readonly BurtShadingDebugGroup ScreenSpaceGlobalIllumination = new BurtShadingDebugGroup("Screen Space Global Illumination", "BurtGI", new[]
@@ -1051,6 +1079,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 BurtShadingDebugSpecularAADropdown.Id,
                 BurtShadingDebugBRDFDropdown.Id,
                 BurtShadingDebugHairDropdown.Id,
+                BurtShadingDebugFoliageDropdown.Id,
                 BurtShadingDebugSubsurfaceDropdown.Id,
                 BurtShadingDebugIBLDropdown.Id)
         {
@@ -1196,6 +1225,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public BurtShadingDebugHairDropdown() // Unity 通过无参构造创建 ToolbarElement。
             : base(BurtShadingDebugGroups.Hair) // 绑定 Hair lobes 分类。
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugFoliageDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Foliage";
+
+        public BurtShadingDebugFoliageDropdown()
+            : base(BurtShadingDebugGroups.Foliage)
         {
         }
     }
@@ -1842,6 +1882,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return BurtGBufferDebugViewMode.FoliageSpecularScale;
                 case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
                     return BurtGBufferDebugViewMode.FoliageScreenSpaceShadowIntensity;
+                case BurtShadingDebugMode.GBufferStencilRaw:
+                    return BurtGBufferDebugViewMode.StencilRaw;
+                case BurtShadingDebugMode.GBufferStencilShadingModel:
+                    return BurtGBufferDebugViewMode.StencilShadingModel;
                 case BurtShadingDebugMode.GBufferAnisotropy:
                     return BurtGBufferDebugViewMode.Anisotropy;
                 case BurtShadingDebugMode.GBufferTangentWS:

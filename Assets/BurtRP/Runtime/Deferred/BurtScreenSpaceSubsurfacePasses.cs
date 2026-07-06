@@ -575,12 +575,11 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(builder.Request, builder.Asset))
+            if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(builder.Request, builder.Asset))
             {
                 return;
             }
 
-            builder.ReadCameraDepth();
             builder.ReadScreenSpaceSubsurfaceBaseColor();
             builder.ReadGBuffer1();
             builder.WriteScreenSpaceSubsurfaceMask();
@@ -589,12 +588,10 @@ namespace Burt.RenderPipeline
         public override void Execute(BurtRenderGraphContext context)
         {
             var mask = context != null ? context.ScreenSpaceSubsurfaceMaskTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
-            var cameraDepth = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
             var baseColor = context != null ? context.ScreenSpaceSubsurfaceBaseColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBaseColorName);
             var gbuffer1 = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name);
             if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(context != null ? context.Request : null, context != null ? context.Asset : null) ||
                 !mask.IsValid ||
-                !cameraDepth.IsValid ||
                 !baseColor.IsValid ||
                 !gbuffer1.IsValid)
             {
@@ -609,7 +606,7 @@ namespace Burt.RenderPipeline
 
             var cmd = CommandBufferPool.Get(Name);
             BurtScreenSpaceSubsurfacePassUtility.BindMaskInputs(cmd, context, baseColor, gbuffer1);
-            cmd.SetRenderTarget(mask.Identifier, cameraDepth.Identifier);
+            cmd.SetRenderTarget(mask.Identifier);
             BurtScreenSpaceSubsurfacePassUtility.SetViewport(cmd, context);
             cmd.ClearRenderTarget(false, true, Color.clear);
             cmd.DrawProcedural(Matrix4x4.identity, maskMaterial, MaskPassIndex, MeshTopology.Triangles, 3, 1);
@@ -2100,6 +2097,11 @@ namespace Burt.RenderPipeline
 
             var shaderLooksSubsurface = material.shader.name == SubsurfaceMaterialShaderName ||
                 material.shader.name.IndexOf("Subsurface", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!shaderLooksSubsurface || !material.HasProperty(SubsurfaceScatteringModeMaterialId))
+            {
+                return false;
+            }
+
             scatteringMode = ResolveSubsurfaceScatteringMode(material);
             if (scatteringMode == SubsurfaceScatteringMode3SPreintegrated)
             {

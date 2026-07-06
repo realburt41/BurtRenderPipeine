@@ -204,6 +204,7 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(ssrColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, colorDescriptor.width, colorDescriptor.height);
             BindInputs(cmd, cameraColorTarget, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, hiZDepthTarget);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             UploadCameraGlobals(cmd, camera, colorDescriptor, hiZMipCount);
             UploadSettings(cmd, settings, hiZMipCount, hasUsableHiZDepth, hiZTraceForShader);
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
@@ -412,6 +413,7 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(ssrDenoisedColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
@@ -573,6 +575,7 @@ namespace Burt.RenderPipeline
 
             var cmd = CommandBufferPool.Get(Name);
             BindInputs(cmd, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, ssrDenoisedColorTarget);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             UploadTemporalGlobals(cmd, camera, history, settings, width, height, historyValid);
 
             cmd.SetRenderTarget(ssrTemporalColorTarget.Identifier);
@@ -785,6 +788,7 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BindInputs(cmd, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, ssrTemporalColorTarget);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalTexture(SSRCameraColorCopyTextureId, new RenderTargetIdentifier(SSRCameraColorCopyTextureId));
             UploadCameraGlobals(cmd, camera, width, height);
             UploadSettings(cmd, settings, maxMip);
@@ -981,6 +985,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
             cmd.SetGlobalTexture(HiZDepthTextureId, hiZDepthTarget.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalVector(SSRHiZDiagnosticsParamsId, new Vector4(debugMode, maxMip, diagnosticMip, 512f));
             UploadCameraGlobals(cmd, camera, colorDescriptor);
             cmd.SetGlobalVector(SSRHiZTraceParams0Id, new Vector4(settings.MaxDistance, settings.Thickness, settings.MaxSteps, settings.RoughnessFade));

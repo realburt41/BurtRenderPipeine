@@ -458,6 +458,7 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(rawTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             BindGBufferInputs(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target);
             UploadCameraGlobals(cmd, context.Request, camera, descriptor);
             UploadSettings(cmd, settings);
@@ -626,6 +627,7 @@ namespace Burt.RenderPipeline
                 new RenderTargetIdentifier(BuiltinRenderTextureType.None));
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalTexture(BurtGITextureId, burtGITarget.Identifier);
             BindGBufferInputs(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target);
             UploadCameraGlobals(cmd, context.Request, camera, descriptor);
@@ -897,6 +899,7 @@ namespace Burt.RenderPipeline
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(BurtGICameraColorCopyTextureId, new RenderTargetIdentifier(BurtGICameraColorCopyTextureId));
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalTexture(BurtGITextureId, burtGITarget.Identifier);
             UploadCameraGlobals(cmd, context.Request, camera, burtGIDescriptor);
             UploadSettings(cmd, settings);
@@ -1003,6 +1006,7 @@ namespace Burt.RenderPipeline
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
             cmd.SetGlobalTexture(BurtGIRawTextureId, rawTarget.Identifier);
             cmd.SetGlobalTexture(BurtGITextureId, burtGITarget.Identifier);

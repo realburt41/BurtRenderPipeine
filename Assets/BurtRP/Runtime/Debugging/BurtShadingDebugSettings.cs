@@ -64,6 +64,13 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         GBufferFoliageTransmissionNdotL = 156,
         GBufferFoliageSpecularScale = 157,
         GBufferFoliageScreenSpaceShadowIntensity = 158,
+        GBufferStencilRaw = 159,
+        GBufferStencilShadingModel = 160,
+        FoliageTransmission = 161,
+        FoliageDirectTransmission = 162,
+        FoliageTransmissionBRDF = 163,
+        FoliageTransmissionShadow = 164,
+        FoliageSpecularBRDF = 165,
         DetailLighting = 200, // 光照调试：参考 XRender Detail Lighting，用 0.18 中灰 BaseColor 重新计算光照，方便只看明暗细节。
         IndirectLighting = 201, // 光照调试：只显示 PBR 间接光，方便检查 SH 漫反射和 Reflection Probe 镜面反射。
         DirectDiffuse = 202, // 光照调试：只显示直接漫反射，方便检查 NdotL、阴影和 1/PI。
@@ -290,8 +297,9 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         FurBlurHistory = 486, // Fur blur debug: previous fur blur history texture.
         FurBlurDiagnostic = 487, // Fur blur debug: red = valid property, green = temporal alpha, blue = history age.
         FurBlurReprojection = 488, // Fur blur debug: red = reprojected, green = property-compatible, blue = property history valid.
-        ScreenSpaceShadow = 492, // SS Shadow debug: final screen-space main-light visibility texture consumed by deferred foliage lighting.
-        PerObjectShadowTransmissionThickness = 493 // Per-object shadow debug: transmission object index, resolved thickness, and validity state.
+        ScreenSpaceShadow = 492, // SS Shadow debug: screen-space main-light visibility texture consumed by deferred lighting.
+        PerObjectShadowTransmissionThickness = 493, // Per-object shadow debug: transmission object index, resolved thickness, and validity state.
+        ScreenSpaceShadowFinalMultiplier = 494 // SS Shadow debug: final deferred main-light multiplier after material-specific weighting.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -370,6 +378,13 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.GBufferFoliageTransmissionNdotL:
                 case BurtShadingDebugMode.GBufferFoliageSpecularScale:
                 case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
+                case BurtShadingDebugMode.GBufferStencilRaw:
+                case BurtShadingDebugMode.GBufferStencilShadingModel:
+                case BurtShadingDebugMode.FoliageTransmission:
+                case BurtShadingDebugMode.FoliageDirectTransmission:
+                case BurtShadingDebugMode.FoliageTransmissionBRDF:
+                case BurtShadingDebugMode.FoliageTransmissionShadow:
+                case BurtShadingDebugMode.FoliageSpecularBRDF:
                 case BurtShadingDebugMode.SpecularAARoughness:
                 case BurtShadingDebugMode.DirectBRDFD:
                 case BurtShadingDebugMode.DirectBRDFVisibility:
@@ -424,6 +439,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay:
                 case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference:
                 case BurtShadingDebugMode.ScreenSpaceShadow:
+                case BurtShadingDebugMode.ScreenSpaceShadowFinalMultiplier:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio:

@@ -305,7 +305,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     }
 
                     BurtEncodedGBuffer sampleEncodedGBuffer = BurtSampleEncodedGBuffer(sampleUV);
-                    BurtPBRMaterialData sampleMaterialData = BurtPreparePBRMaterialData(BurtDecodeGBuffer(sampleEncodedGBuffer));
+                    BurtPBRMaterialData sampleMaterialData = BurtPreparePBRMaterialData(BurtDecodeDeferredGBuffer(sampleEncodedGBuffer, sampleUV));
                     float3 sampleDiffuse = max(sampleMaterialData.diffuseColor, 0.0f);
                     float sampleDiffuseLuma = dot(sampleDiffuse, lumaWeights);
                     float sampleChroma = BurtGIComputeDiffuseChroma(sampleDiffuse);
@@ -439,7 +439,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 }
 
                 BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
+                BurtGBufferData gbufferData = BurtDecodeDeferredGBuffer(encodedGBuffer, screenUV);
                 BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
                 float3 normalWS = BurtSafeNormalize(gbufferData.normalWS);
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
@@ -525,7 +525,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     }
 
                     BurtEncodedGBuffer sampleEncodedGBuffer = BurtSampleEncodedGBuffer(sampleUV);
-                    BurtPBRMaterialData sampleMaterialData = BurtPreparePBRMaterialData(BurtDecodeGBuffer(sampleEncodedGBuffer));
+                    BurtPBRMaterialData sampleMaterialData = BurtPreparePBRMaterialData(BurtDecodeDeferredGBuffer(sampleEncodedGBuffer, sampleUV));
                     float3 sampleRadiance = BurtGIEstimateSampleDiffuseRadiance(sampleMaterialData, sampleNormalWS, sampleEncodedGBuffer.gbuffer2.rgb);
                     sampleRadiance = BurtGITintRadianceByDiffuseAlbedo(sampleRadiance, sampleMaterialData);
                     sampleRadiance *= BurtGIComputeDiffuseSourceWeight(sampleMaterialData);
@@ -834,7 +834,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 }
 
                 BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
+                BurtGBufferData gbufferData = BurtDecodeDeferredGBuffer(encodedGBuffer, screenUV);
                 BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
                 float3 normalWS = BurtGetGBufferDirectionWS(gbufferData);
                 float4 finalBurtGI = tex2D(_BurtScreenSpaceGlobalIlluminationTexture, screenUV);
@@ -1036,7 +1036,7 @@ Shader "Hidden/BurtRP/BurtGI"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragTrace
             ENDHLSL
@@ -1050,7 +1050,7 @@ Shader "Hidden/BurtRP/BurtGI"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragBlur
             ENDHLSL
@@ -1064,7 +1064,7 @@ Shader "Hidden/BurtRP/BurtGI"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragComposite
             ENDHLSL
@@ -1078,7 +1078,7 @@ Shader "Hidden/BurtRP/BurtGI"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragDebug
             ENDHLSL
@@ -1092,7 +1092,7 @@ Shader "Hidden/BurtRP/BurtGI"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragTemporal
             ENDHLSL
@@ -1106,7 +1106,7 @@ Shader "Hidden/BurtRP/BurtGI"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragCopyDepthNormal
             ENDHLSL
@@ -1120,7 +1120,7 @@ Shader "Hidden/BurtRP/BurtGI"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragCopyTemporalFinal
             ENDHLSL
@@ -1134,7 +1134,7 @@ Shader "Hidden/BurtRP/BurtGI"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragTemporalDiagnostics
             ENDHLSL
@@ -1148,7 +1148,7 @@ Shader "Hidden/BurtRP/BurtGI"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragResolveIndirectChannels
             ENDHLSL

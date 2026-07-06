@@ -12,7 +12,7 @@
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragSSR
 
@@ -342,7 +342,7 @@
 
             float BurtSSRHitNormalWeight(float2 hitUV, float3 reflectionDirectionWS)
             {
-                BurtGBufferData hitGBufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(hitUV));
+                BurtGBufferData hitGBufferData = BurtSampleDeferredGBufferData(hitUV);
                 float3 hitNormalWS = BurtGetReflectionNormalWS(hitGBufferData);
                 float frontFaceWeight = smoothstep(-0.15, 0.15, dot(-reflectionDirectionWS, hitNormalWS));
                 return lerp(0.35, 1.0, frontFaceWeight);
@@ -938,7 +938,7 @@
                 }
 
                 float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
-                BurtGBufferData sampleGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(sampleUV));
+                BurtGBufferData sampleGBuffer = BurtSampleDeferredGBufferData(sampleUV);
                 float normalSupport = saturate(dot(centerNormal, BurtGetReflectionNormalWS(sampleGBuffer)));
                 normalSupport *= normalSupport;
                 float depthSupport = 1.0 - smoothstep(depthTolerance * 0.5, depthTolerance, abs(sampleLinearDepth - centerLinearDepth));
@@ -954,7 +954,7 @@
                 }
 
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
-                BurtGBufferData centerGBuffer = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(hitUV));
+                BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(hitUV);
                 float3 centerNormal = BurtGetReflectionNormalWS(centerGBuffer);
                 float depthTolerance = max(centerLinearDepth * 0.025, 0.035);
                 float2 rayPixels = rayDeltaUV * _BurtSSRSourceTexelSize.zw;
@@ -1608,7 +1608,7 @@
                     return debugMode != 0 ? float4(0.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 0.0);
                 }
 
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
                 if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID) || BurtIsActiveFurShadingModel(gbufferData.shadingModelID))
                 {
                     bool traceDebugMode = (debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 31);

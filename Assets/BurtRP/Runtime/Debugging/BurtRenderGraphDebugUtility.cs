@@ -1829,7 +1829,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAADebugYFlip=").Append(FormatFloat(temporalAADebugYFlip));
             builder.Append(" TAAUVSpace=XRenderFullscreenPlatformSampleUv;HistoryDepthVelocityFeedbackSameOrientation;FinalCameraColorTemporalAACopy;FinalBlitHandlesDisplayFlip;XRenderVelocityCurrentMinusPreviousHistoryUvMinusVelocity");
             builder.Append(" TAAFilter=").Append(temporalAAEnabled ? "Current3x3ProjectionJitterFilter" : "Disabled");
-            builder.Append(" TAANote=").Append(temporalAAEnabled ? "XRenderTSRAccumulationParity;ResolveXRenderCompute;ComputeDilateDecimate;StencilMaskComputeFallback;FragmentDebugFallback;ColorDepthHistoryOnly;VelocityCurrentMinusPrevious;ValidObjectVelocityOnly;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ResolveKeeps3x3ProjectionJitterFilter;ResolveMetadataDepthGhostingGate;MotionResponsiveBlend;StaticHistoryProtectedBreak;StaticBlend05;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout30;ParallaxCoverageDepthGate;XRenderSigmaClamp15;NoResolveSharpen;UIntPrevUseCountUAV;ScalarParallaxRejection;MaterialMotionVectorsPass;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUDebugClosure489_491;HistoryValidReason;XRenderPointCurrentLoad;XRenderFinalAlpha" : "Disabled");
+            builder.Append(" TAANote=").Append(temporalAAEnabled ? "XRenderTSRAccumulationParity;ResolveXRenderCompute;ComputeDilateDecimate;StencilMaskComputeFallback;FragmentDebugFallback;ColorDepthHistoryOnly;VelocityCurrentMinusPrevious;ValidObjectVelocityOnly;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ClipToPrevClipCameraRelative;XRenderPerAxisVelocityThreshold;ResolveKeeps3x3ProjectionJitterFilter;XRenderSingleRejectionBlendFactor;XRenderCatmullRom9TapCompute;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout30;ParallaxCoverageDepthGate;XRenderSigmaClamp15;NoResolveSharpen;UIntPrevUseCountUAV;ScalarParallaxRejection;MaterialMotionVectorsPass;ObjectVelocityPerAxisThreshold;TAAStencilMaskFromRawVelocity;TAAStencilMaskFoliageResponsiveFromGBuffer;ResponsiveMotionCurrentBlend;ObjectVelocityRawFallbackForDerivedStencil;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUDebugClosure489_491;HistoryValidReason;XRenderPointCurrentLoad;XRenderFinalAlpha" : "Disabled");
 
             builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
 
@@ -2117,7 +2117,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSShadowTracePassExpected=").Append(ssShadowEnabled);
                 builder.Append(" SSShadowDebugPassRequested=").Append(ssShadowDebugPassRequested);
                 builder.Append(" SSShadowOutputTarget=ScreenSpaceShadow");
-                builder.Append(" SSShadowOutputSemantic=MainLightScreenSpaceVisibilityFoliageWeighted");
+                builder.Append(" SSShadowOutputSemantic=MainLightScreenSpaceVisibilityDeferredWithFoliageWeight");
                 builder.Append(" SSShadowSamples=").Append(ssShadowSettings.SampleCount);
                 builder.Append(" SSShadowDownsampleFactor=").Append(ssShadowSettings.DownsampleFactor);
                 builder.Append(" SSShadowHalfResolution=").Append(ssShadowSettings.HalfResolution);

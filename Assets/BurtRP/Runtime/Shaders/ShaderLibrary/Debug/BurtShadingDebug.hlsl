@@ -65,6 +65,11 @@ static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_SHADOW = 150.
 static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_PHASE = 151.0f;
 static const float BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_THICKNESS = 152.0f;
 static const float BURT_SHADING_DEBUG_MODE_GBUFFER_FOLIAGE_SCREEN_SPACE_SHADOW_INTENSITY = 158.0f;
+static const float BURT_SHADING_DEBUG_MODE_FOLIAGE_TRANSMISSION = 161.0f;
+static const float BURT_SHADING_DEBUG_MODE_FOLIAGE_DIRECT_TRANSMISSION = 162.0f;
+static const float BURT_SHADING_DEBUG_MODE_FOLIAGE_TRANSMISSION_BRDF = 163.0f;
+static const float BURT_SHADING_DEBUG_MODE_FOLIAGE_TRANSMISSION_SHADOW = 164.0f;
+static const float BURT_SHADING_DEBUG_MODE_FOLIAGE_SPECULAR_BRDF = 165.0f;
 static const float BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING = 200.0f; // 对应 C# BurtShadingDebugMode.DetailLighting，用 0.18 中灰 BaseColor 显示光照细节。
 static const float BURT_SHADING_DEBUG_MODE_INDIRECT_LIGHTING = 201.0f; // 对应 C# BurtShadingDebugMode.IndirectLighting，用来显示 PBR 间接光。
 static const float BURT_SHADING_DEBUG_MODE_DIRECT_DIFFUSE = 202.0f; // 对应 C# BurtShadingDebugMode.DirectDiffuse，用来显示直接漫反射。
@@ -304,6 +309,18 @@ struct BurtShadingDebugData
 
     float3 subsurfaceIndirect;
 
+    float foliageMask;
+
+    float3 foliageTransmission;
+
+    float3 foliageDirectTransmission;
+
+    float3 foliageTransmissionBRDF;
+
+    float foliageTransmissionShadow;
+
+    float3 foliageSpecularBRDF;
+
 };
 
 bool BurtIsShadingDebugEnabled() // 判断当前是否启用了任意 shading debug 模式。
@@ -438,6 +455,12 @@ BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为�
     data.subsurfaceTransmissionThickness = 0.0f;
     data.subsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
     data.subsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
+    data.foliageMask = 0.0f;
+    data.foliageTransmission = float3(0.0f, 0.0f, 0.0f);
+    data.foliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    data.foliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    data.foliageTransmissionShadow = 1.0f;
+    data.foliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
     return data;
 }
 
@@ -762,7 +785,7 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_TRANSMISSION_THICKNESS))
     {
-        debugColor = saturate(data.subsurfaceTransmissionThickness).xxx;
+        debugColor = saturate(data.subsurfaceTransmissionThickness * 0.1f).xxx;
         return true;
     }
 
@@ -775,6 +798,37 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SUBSURFACE_INDIRECT))
     {
         debugColor = max(data.subsurfaceIndirect, float3(0.0f, 0.0f, 0.0f));
+        return true;
+    }
+
+    float foliageMask = saturate(max(data.foliageMask, BurtIsFoliageShadingModel(surfaceData.shadingModelID) ? 1.0f : 0.0f));
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_FOLIAGE_TRANSMISSION))
+    {
+        debugColor = saturate(data.foliageTransmission) * foliageMask;
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_FOLIAGE_DIRECT_TRANSMISSION))
+    {
+        debugColor = max(data.foliageDirectTransmission, float3(0.0f, 0.0f, 0.0f)) * foliageMask;
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_FOLIAGE_TRANSMISSION_BRDF))
+    {
+        debugColor = saturate(data.foliageTransmissionBRDF) * foliageMask;
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_FOLIAGE_TRANSMISSION_SHADOW))
+    {
+        debugColor = data.foliageTransmissionShadow.xxx * foliageMask;
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_FOLIAGE_SPECULAR_BRDF))
+    {
+        debugColor = saturate(data.foliageSpecularBRDF) * foliageMask;
         return true;
     }
 

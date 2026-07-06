@@ -111,7 +111,6 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            builder.ReadCameraDepth();
             builder.ReadDeferredLightingDepth();
         }
 
@@ -263,16 +262,6 @@ namespace Burt.RenderPipeline
             if (BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset))
             {
                 builder.ReadMainLightShadowMap();
-            }
-
-            if (BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(builder.Request))
-            {
-                builder.ReadAdditionalLightShadowAtlas();
-            }
-
-            if (BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(builder.Request, builder.Asset))
-            {
-                builder.ReadPerObjectShadowAtlas();
             }
 
             if (readsExistingCameraColor)

@@ -35,6 +35,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent SubsurfaceScatteringModeLabel = new GUIContent("SSS Algorithm", "Choose 5S Burley, 4S Separable screen-space skin scattering, or 3S Preintegrated skin shading.");
         private static readonly GUIContent SubsurfaceProfileLabel = new GUIContent("Subsurface Profile", "Drag a BurtSubsurfaceProfile asset here. The material stores the resolved profile slot for the shader.");
         private static readonly GUIContent SubsurfaceProfileIndexLabel = new GUIContent("Subsurface Profile Index", "Runtime slot used by the shader. 0 is the default profile, 1-7 are the pipeline profile list.");
+        private static readonly GUIContent SubsurfaceThicknessMapLabel = new GUIContent("Subsurface Thickness Map", "R controls local skin thickness for 4S/5S transmission and profile lookup.");
         private static readonly GUIContent DoubleSidedLabel = new GUIContent("Double Sided", "Render both front and back faces by switching culling off.");
         private static readonly GUIContent DoubleSidedNormalModeLabel = new GUIContent("Double Sided Normal Mode", "Back-face normal mode, matching XRender: None, Flip, or Mirror in tangent space.");
         private static readonly GUIContent SurfaceTypeLabel = new GUIContent("Surface Type");
@@ -89,6 +90,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty clearCoatNormalMap;
         private MaterialProperty clearCoatNormalScale;
         private MaterialProperty subsurfaceThickness;
+        private MaterialProperty subsurfaceThicknessMap;
         private MaterialProperty subsurfacePower;
         private MaterialProperty subsurfaceDistortion;
         private MaterialProperty subsurfaceAmbient;
@@ -130,6 +132,8 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty foliageUseBakedNormals;
         private MaterialProperty maxBendAngle;
         private MaterialProperty swayIntensity;
+        private MaterialProperty flutterTipFrequency;
+        private MaterialProperty flutterTipIntensity;
         private MaterialProperty bendMaskPow;
         private MaterialProperty toTrunkMaskPow;
         private MaterialProperty terrainBlendTerrainTog;
@@ -368,6 +372,7 @@ namespace Burt.RenderPipeline.Editor
             clearCoatNormalMap = Find("_ClearCoatNormalMap");
             clearCoatNormalScale = Find("_ClearCoatNormalScale");
             subsurfaceThickness = Find("_SubsurfaceThickness");
+            subsurfaceThicknessMap = Find("_SubsurfaceThicknessMap");
             subsurfacePower = Find("_SubsurfacePower");
             subsurfaceDistortion = Find("_SubsurfaceDistortion");
             subsurfaceAmbient = Find("_SubsurfaceAmbient");
@@ -409,6 +414,8 @@ namespace Burt.RenderPipeline.Editor
             foliageUseBakedNormals = Find("_FoliageUseBakedNormals");
             maxBendAngle = Find("_MaxBendAngle");
             swayIntensity = Find("_SwayIntensity");
+            flutterTipFrequency = Find("_FlutterTipFrequency");
+            flutterTipIntensity = Find("_FlutterTipIntensity");
             bendMaskPow = Find("_BendMaskPow");
             toTrunkMaskPow = Find("_ToTrunkMaskPow");
             terrainBlendTerrainTog = Find("_TerrainBlend_TerrainTog");
@@ -641,7 +648,7 @@ namespace Burt.RenderPipeline.Editor
             else if (maskMap != null)
             {
                 BurtShaderGUIUtility.DrawChannelHint(IsSubsurfaceShader(material)
-                    ? "Channels: G Occlusion | A Smoothness. R Metallic is ignored by Subsurface skin."
+                    ? "Channels: G Occlusion / 3S Curvature | A Smoothness. Thickness uses Subsurface Thickness Map R."
                     : usesTrunk
                         ? "Channels: G Occlusion | A Roughness. R Metallic and B Thickness are ignored; vertex color A is remapped as AO."
                     : usesFoliage
@@ -756,7 +763,6 @@ namespace Burt.RenderPipeline.Editor
                 DrawProperty(roughnessScale);
                 DrawProperty(reflectanceScale);
                 DrawProperty(transmissionNdotL);
-                DrawProperty(foliageBackLight);
 
                 if (!IsGrassShader(material))
                 {
@@ -784,6 +790,13 @@ namespace Burt.RenderPipeline.Editor
                     DrawProperty(tintHeightContrast);
                     DrawProperty(vertexAORemap);
                     DrawProperty(treeHeight);
+                    BurtShaderGUIUtility.DrawSubHeader("Wind");
+                    DrawProperty(maxBendAngle);
+                    DrawProperty(swayIntensity);
+                    DrawProperty(flutterTipFrequency);
+                    DrawProperty(flutterTipIntensity);
+                    DrawProperty(bendMaskPow);
+                    DrawProperty(toTrunkMaskPow);
                 }
             }
             else
@@ -826,7 +839,7 @@ namespace Burt.RenderPipeline.Editor
                 DrawProperty(reflectance);
             }
 
-            EditorGUILayout.HelpBox("Foliage uses Mask B as thickness and Mask A as roughness. Deferred GBuffer keeps transmission color, weight, thickness, wrap, NdotL, and specular scale for the lighting pass.", MessageType.None);
+            EditorGUILayout.HelpBox("Foliage uses Mask B as thickness and Mask A as roughness. Deferred GBuffer keeps transmission color, weight, thickness, NdotL, screen-space shadow intensity, and specular scale for the lighting pass. Back Light is legacy material data only.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -904,6 +917,7 @@ namespace Burt.RenderPipeline.Editor
             }
             else
             {
+                DrawTexture(SubsurfaceThicknessMapLabel, subsurfaceThicknessMap);
                 DrawProperty(subsurfaceThickness);
             }
 
@@ -1556,7 +1570,7 @@ namespace Burt.RenderPipeline.Editor
 
             int stencilRef = ResolveGBufferStencilModel(material);
             int writeMask = GBufferStencilShadingModelMask;
-            if (!IsFoliageShader(material) && material.HasProperty("_ResponsiveAA") && material.GetFloat("_ResponsiveAA") >= 0.5f)
+            if (material.HasProperty("_ResponsiveAA") && material.GetFloat("_ResponsiveAA") >= 0.5f)
             {
                 stencilRef |= GBufferStencilResponsiveAABit;
                 writeMask |= GBufferStencilResponsiveAABit;

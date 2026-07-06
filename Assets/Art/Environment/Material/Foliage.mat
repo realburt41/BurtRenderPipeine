@@ -13,6 +13,7 @@ Material:
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
   - BURT_ALPHA_CLIP
+  - BURT_FOLIAGE_USE_BAKED_NORMALS
   m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
@@ -105,7 +106,7 @@ Material:
     - _FoliageThickness: 0.5
     - _FoliageTintMode: 1
     - _FoliageTransmissionWeight: 0.55
-    - _FoliageUseBakedNormals: 0
+    - _FoliageUseBakedNormals: 1
     - _GlossMapScale: 1
     - _Glossiness: 0.5
     - _GlossyReflections: 1

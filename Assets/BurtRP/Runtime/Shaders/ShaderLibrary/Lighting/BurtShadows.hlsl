@@ -1280,12 +1280,14 @@ float BurtSampleMainLightShadowWithoutPerObject(float3 positionWS)
 float BurtSampleMainLightTransmissionShadow(float3 positionWS, float3 normalWS, int objectIndex, float transmissionThickness)
 {
     int sliceIndex = BurtDecodePerObjectShadowSliceIndex(objectIndex);
-    if (sliceIndex < 0)
+    if (sliceIndex < 0 || transmissionThickness < 0.0f)
     {
         return 1.0f;
     }
 
-    float3 transmissionPositionWS = positionWS + BurtSafeNormalize(_BurtMainLightDirection.xyz) * (max(transmissionThickness, 0.0f) * 2.0f + 1.5f);
+    float sliceWorldTexelSize = max(_BurtPerObjectShadowSliceParams[sliceIndex].w, 0.0f);
+    float transmissionOffset = max(transmissionThickness, sliceWorldTexelSize * 2.0f);
+    float3 transmissionPositionWS = positionWS + BurtSafeNormalize(_BurtMainLightDirection.xyz) * transmissionOffset;
     float mainVisibility = BurtSampleMainLightShadowWithoutPerObject(transmissionPositionWS);
     float perObjectVisibility = BurtSamplePerObjectShadowExcludingSlice(positionWS, normalWS, sliceIndex);
     return min(mainVisibility, perObjectVisibility);

@@ -5,7 +5,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         Tags { "RenderPipeline" = "BurtRenderPipeline" }
 
         HLSLINCLUDE
-        #pragma target 3.5
+        #pragma target 4.5
         #define BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT 1
         #include "UnityCG.cginc"
         #include "ShaderLibrary/Core/BurtPreExposure.hlsl"
@@ -1310,13 +1310,6 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             Cull Off
             ZWrite Off
             ZTest Always
-            Stencil
-            {
-                Ref 64
-                ReadMask 224
-                Comp Equal
-                Pass Keep
-            }
 
             HLSLPROGRAM
             #pragma vertex Vert

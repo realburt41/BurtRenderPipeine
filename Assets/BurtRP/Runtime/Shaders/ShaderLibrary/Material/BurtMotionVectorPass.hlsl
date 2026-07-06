@@ -57,7 +57,7 @@ struct MotionVectorAttributes
     float4 positionOS : POSITION;
     float3 normalOS : NORMAL;
     float2 uv0 : TEXCOORD0;
-    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
         float4 color : COLOR;
     #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -108,14 +108,25 @@ MotionVectorVaryings VertMotionVector(MotionVectorAttributes input)
         float previousTimeSeconds = max(_Time.y - unity_DeltaTime.x, 0.0f);
         float4 currentWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.color, unity_ObjectToWorld, _Time.y);
         float4 previousObjectWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.color, unity_MatrixPreviousM, previousTimeSeconds);
+    #elif defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        float previousTimeSeconds = max(_Time.y - unity_DeltaTime.x, 0.0f);
+        float4 currentWorld = BurtGetFoliageAnimatedWorldPosition(positionOS, input.color, unity_ObjectToWorld, _Time.y);
+        float4 previousObjectWorld = BurtGetFoliageAnimatedWorldPosition(positionOS, input.color, unity_MatrixPreviousM, previousTimeSeconds);
     #else
         float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
         float4 previousObjectWorld = mul(unity_MatrixPreviousM, positionOS);
     #endif
 
+    float materialVertexAnimation = 0.0;
+    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+        materialVertexAnimation = step(BURT_EPSILON, max(_MaxBendAngle, _SwayIntensity));
+    #elif (defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        materialVertexAnimation = step(BURT_EPSILON, max(max(_MaxBendAngle, _SwayIntensity), _FlutterTipIntensity));
+    #endif
+
     float forceNoMotion = step(unity_MotionVectorsParams.y, 0.5);
     float cameraMotion = step(unity_MotionVectorsParams.w, 0.5);
-    float allowObjectMotion = (1.0 - forceNoMotion) * (1.0 - cameraMotion);
+    float allowObjectMotion = max((1.0 - forceNoMotion) * (1.0 - cameraMotion), materialVertexAnimation);
     float3 objectDelta = previousObjectWorld.xyz - currentWorld.xyz;
     float objectMoved = step(1e-8, dot(objectDelta, objectDelta)) * allowObjectMotion;
     float4 previousWorld = lerp(currentWorld, previousObjectWorld, objectMoved);
@@ -166,8 +177,8 @@ float4 FragMotionVector(MotionVectorVaryings input) : SV_Target
 
     float2 velocity = currentUv - previousUv;
     float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
-    float keepVelocity = step(0.02, max(velocityPixels.x, velocityPixels.y));
-    clip(keepVelocity - 0.5);
+    velocity *= step(float2(0.02, 0.02), velocityPixels);
+    clip(max(abs(velocity.x), abs(velocity.y)) - 1e-8);
     return float4(velocity, 1.0, 1.0);
 }
 

@@ -11,7 +11,7 @@ namespace Burt.RenderPipeline
         private const float Epsilon = 0.0001f;
 
         [Title("BurtRP Screen Space Shadow")]
-        [InfoBox("Deferred screen-space main-light shadow. This first Burt port traces CameraDepth along the projected main-light direction and is consumed by foliage screen-space shadow intensity.")]
+        [InfoBox("Deferred screen-space main-light shadow. This first Burt port traces CameraDepth along the projected main-light direction; foliage can blend it by material screen-space shadow intensity.")]
         public BoolParameter enabled = new BoolParameter(false);
         public ClampedFloatParameter intensity = new ClampedFloatParameter(1f, 0f, 2f);
         public ClampedIntParameter sampleCount = new ClampedIntParameter(32, 1, 64);

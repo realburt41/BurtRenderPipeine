@@ -24,6 +24,7 @@ RWTexture2D<float> _BurtTAAParallaxRejectionOutputTexture;
 
 float4x4 _BurtTAAInverseCurrentNonJitteredViewProjection;
 float4x4 _BurtTAAPreviousNonJitteredViewProjection;
+float4x4 _BurtTAAClipToPreviousClip;
 float4 _BurtTAAJitter;
 float4 _BurtTAATexelSize;
 float4 _BurtTAAStencilTexelSize;
@@ -178,17 +179,14 @@ float2 BurtTaaComputeStaticVelocity(float2 uv, float rawDepth, out float availab
     currentFrameJitter.y = -currentFrameJitter.y;
 #endif
     clip.xy -= currentFrameJitter;
-    float4 world = mul(_BurtTAAInverseCurrentNonJitteredViewProjection, clip);
-    world.xyz /= max(abs(world.w), 1e-6);
-    float4 previousClip = mul(_BurtTAAPreviousNonJitteredViewProjection, float4(world.xyz, 1.0));
+    float4 previousClip = mul(_BurtTAAClipToPreviousClip, clip);
     float2 currentUv = BurtTaaClipToUv(clip);
     float2 previousUv = BurtTaaClipToUv(previousClip);
     available = BurtTaaValidSurfaceWeight(rawDepth) * step(1e-5, previousClip.w);
     available *= step(0.0, previousUv.x) * step(previousUv.x, 1.0) * step(0.0, previousUv.y) * step(previousUv.y, 1.0);
     float2 velocity = currentUv - previousUv;
     float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
-    float keepVelocity = step(0.02, max(velocityPixels.x, velocityPixels.y));
-    return velocity * keepVelocity;
+    return velocity * step(float2(0.02, 0.02), velocityPixels);
 }
 
 void BurtTaaSelectClosestDepthTap(int2 pixel, int2 pixelOffset, float centerDepth, float centerDeviceZError, inout float closestDepth, inout int2 closestOffset)
@@ -293,34 +291,56 @@ float BurtTaaSampleHistoryDepthBilinear(float2 uv)
     return depth * rcp(max(weightSum, 1e-4));
 }
 
+float3 BurtTaaSampleHistoryLinear(float2 uv)
+{
+    int2 textureSize = BurtTaaTextureSize();
+    float2 samplePosition = saturate(uv) * (float2)textureSize - 0.5;
+    int2 basePixel = int2(floor(samplePosition));
+    float2 blend = saturate(samplePosition - basePixel);
+    float3 history = 0.0;
+
+    [unroll]
+    for (int y = 0; y < 2; y++)
+    {
+        float wy = y == 0 ? (1.0 - blend.y) : blend.y;
+        [unroll]
+        for (int x = 0; x < 2; x++)
+        {
+            float wx = x == 0 ? (1.0 - blend.x) : blend.x;
+            history += BurtTaaLoadHistoryRaw(basePixel + int2(x, y)) * (wx * wy);
+        }
+    }
+
+    return BurtTaaSanitizeRawColor(history);
+}
+
 float3 BurtTaaSampleHistoryCatmullRom(float2 uv)
 {
     int2 textureSize = BurtTaaTextureSize();
     float2 samplePosition = saturate(uv) * (float2)textureSize;
     float2 texPos1 = floor(samplePosition - 0.5) + 0.5;
     float2 f = samplePosition - texPos1;
-    float4 wx = float4(
-        f.x * (-0.5 + f.x * (1.0 - 0.5 * f.x)),
-        1.0 + f.x * f.x * (-2.5 + 1.5 * f.x),
-        f.x * (0.5 + f.x * (2.0 - 1.5 * f.x)),
-        f.x * f.x * (-0.5 + 0.5 * f.x));
-    float4 wy = float4(
-        f.y * (-0.5 + f.y * (1.0 - 0.5 * f.y)),
-        1.0 + f.y * f.y * (-2.5 + 1.5 * f.y),
-        f.y * (0.5 + f.y * (2.0 - 1.5 * f.y)),
-        f.y * f.y * (-0.5 + 0.5 * f.y));
-    int2 basePixel = int2(floor(samplePosition - 0.5));
+    float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    float2 w3 = f * f * (-0.5 + 0.5 * f);
+    float2 w12 = w1 + w2;
+    float2 offset12 = w2 / max(w12, float2(1e-5, 1e-5));
+    float2 texel = _BurtTAATexelSize.xy;
+    float2 texPos0 = (texPos1 - 1.0) * texel;
+    float2 texPos3 = (texPos1 + 2.0) * texel;
+    float2 texPos12 = (texPos1 + offset12) * texel;
     float3 result = 0.0;
 
-    [unroll]
-    for (int y = 0; y < 4; y++)
-    {
-        [unroll]
-        for (int x = 0; x < 4; x++)
-        {
-            result += BurtTaaLoadHistoryRaw(basePixel + int2(x - 1, y - 1)) * wx[x] * wy[y];
-        }
-    }
+    result += BurtTaaSampleHistoryLinear(float2(texPos0.x, texPos0.y)) * w0.x * w0.y;
+    result += BurtTaaSampleHistoryLinear(float2(texPos12.x, texPos0.y)) * w12.x * w0.y;
+    result += BurtTaaSampleHistoryLinear(float2(texPos3.x, texPos0.y)) * w3.x * w0.y;
+    result += BurtTaaSampleHistoryLinear(float2(texPos0.x, texPos12.y)) * w0.x * w12.y;
+    result += BurtTaaSampleHistoryLinear(float2(texPos12.x, texPos12.y)) * w12.x * w12.y;
+    result += BurtTaaSampleHistoryLinear(float2(texPos3.x, texPos12.y)) * w3.x * w12.y;
+    result += BurtTaaSampleHistoryLinear(float2(texPos0.x, texPos3.y)) * w0.x * w3.y;
+    result += BurtTaaSampleHistoryLinear(float2(texPos12.x, texPos3.y)) * w12.x * w3.y;
+    result += BurtTaaSampleHistoryLinear(float2(texPos3.x, texPos3.y)) * w3.x * w3.y;
 
     return BurtTaaSanitizeRawColor(result);
 }
@@ -379,8 +399,8 @@ void DilateVelocityAACS(uint3 id : SV_DispatchThreadID)
     float2 closestUv = (float2(closestPixel) + 0.5) * _BurtTAATexelSize.xy;
     float4 objectVelocity = _BurtTAARawVelocityTexture.Load(int3(closestPixel, 0));
     float stencilObjectMotion = (BurtTaaLoadStencilMask(closestUv) & 8u) != 0u ? 1.0 : 0.0;
-    float rawObjectMotion = step(0.75, objectVelocity.w);
-    float objectVelocityValid = max(stencilObjectMotion, rawObjectMotion) * objectVelocity.z * rawObjectMotion;
+    float rawObjectMotion = step(0.75, objectVelocity.w) * objectVelocity.z;
+    float objectVelocityValid = max(stencilObjectMotion, rawObjectMotion) * rawObjectMotion;
     finalVelocity = lerp(finalVelocity, objectVelocity.xy, objectVelocityValid);
     float available = max(staticAvailable, objectVelocityValid);
     float2 historyUv = uv - finalVelocity;
@@ -483,15 +503,13 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
     float3 historyWorking = BurtTaaToWorkingPerceptualSpace(rawHistory);
     float historyValidity = _BurtTAAParallaxRejectionTexture.Load(int3(pixel, 0));
     float currentDepth = BurtTaaValidSurfaceWeight(velocityData.w) > 0.5 ? velocityData.w : BurtTaaLoadCurrentDepth(pixel);
-    float historyDepth = BurtTaaSampleHistoryDepthBilinear(historyUv);
-    float depthContinuity = BurtTaaDepthDisocclusionWeight(currentDepth, historyDepth);
-    float4 taaMetadata = _BurtTAAMetadataTexture.Load(int3(pixel, 0));
-    float geometryBreak = saturate(max(taaMetadata.a, 1.0 - depthContinuity));
-    float finalRejection = saturate(min(historyValidity, depthContinuity) * finalHistoryAvailability);
+    float finalRejection = saturate(historyValidity * finalHistoryAvailability);
     uint stencil = BurtTaaLoadStencilMask(uv);
-    float motionPixels = length(velocityData.xy * _BurtTAATexelSize.zw);
-    float stencilResponsive = ((stencil & 16u) != 0u ? 1.0 : 0.0) * BurtTaaValidSurfaceWeight(currentDepth) * smoothstep(0.35, 2.50, motionPixels);
-    float responsiveStrength = saturate(max(stencilResponsive, taaMetadata.g));
+    float4 taaMetadata = _BurtTAAMetadataTexture.Load(int3(pixel, 0));
+    float surfaceWeight = BurtTaaValidSurfaceWeight(currentDepth);
+    float stencilResponsive = ((stencil & 16u) != 0u ? 1.0 : 0.0) * surfaceWeight;
+    float metadataResponsive = saturate(taaMetadata.g) * surfaceWeight;
+    float responsiveStrength = saturate(max(stencilResponsive, metadataResponsive));
     float responsiveMask = responsiveStrength * finalHistoryAvailability;
 
     float3 moment1 = neighborhoodSum * (1.0 / 9.0);
@@ -512,12 +530,10 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
     float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 1e-4)));
     float xrenderBaseBlend = max(0.05, lumaContrast);
     float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
-    float motionResponsive = saturate(max(responsiveStrength, smoothstep(0.10, 1.50, motionPixels)));
-    float softGeometryBlend = lerp(0.06, 0.22, saturate(max(responsiveStrength, motionPixels / 12.0)));
-    float hardGeometryBreak = smoothstep(0.70, 0.96, max(1.0 - historyValidity, 1.0 - depthContinuity)) * finalHistoryAvailability * motionResponsive;
-    currentBlend = max(currentBlend, responsiveMask * 0.25);
-    currentBlend = max(currentBlend, geometryBreak * softGeometryBlend * finalHistoryAvailability);
-    currentBlend = lerp(currentBlend, 1.0, hardGeometryBreak);
+    float motionPixels = length(velocityData.xy * _BurtTAATexelSize.zw);
+    float responsiveMotion = smoothstep(0.35, 2.5, motionPixels) * stencilResponsive;
+    float responsiveCurrentBlend = lerp(0.25, 0.65, responsiveMotion);
+    currentBlend = lerp(currentBlend, max(currentBlend, responsiveCurrentBlend), responsiveMask);
     currentBlend = saturate(currentBlend);
 
     float3 resolvedWorking = lerp(clippedHistoryWorking, currentFilteredWorking, currentBlend);

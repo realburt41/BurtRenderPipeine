@@ -1233,7 +1233,7 @@ BurtEncodedGBuffer BurtEncodeGBuffer(BurtGBufferData data)
 }
 
 // Decodes the five MRT payloads back into semantic GBuffer data.
-BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
+BurtGBufferData BurtDecodeGBufferInternal(BurtEncodedGBuffer encoded, float overrideShadingModelID, bool useOverrideShadingModel)
 {
     BurtGBufferData data;
 
@@ -1242,6 +1242,7 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
 
     data.normalWS = BurtDecodeNormalWSFromGBuffer(encoded.gbuffer1.rg);
     data.materialChannel = BurtDecodeMetallicAndShadingModelFromGBuffer(encoded.gbuffer1.b, data.shadingModelID);
+    data.shadingModelID = useOverrideShadingModel ? BurtResolveSurfaceShadingModel(overrideShadingModelID) : data.shadingModelID;
 #if BURT_ACTIVE_CLEAR_COAT_SHADING_MODEL
     data.clearCoatNormalWS = BurtDecodeNormalWSFromGBuffer(encoded.gbuffer3.rg);
 #elif BURT_ENABLE_CLEAR_COAT_SHADING
@@ -1414,6 +1415,16 @@ BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
 #endif
 
     return data;
+}
+
+BurtGBufferData BurtDecodeGBuffer(BurtEncodedGBuffer encoded)
+{
+    return BurtDecodeGBufferInternal(encoded, BURT_SHADING_MODEL_DEFAULT_LIT, false);
+}
+
+BurtGBufferData BurtDecodeGBufferWithShadingModel(BurtEncodedGBuffer encoded, float shadingModelID)
+{
+    return BurtDecodeGBufferInternal(encoded, shadingModelID, true);
 }
 
 // Prepares PBR material data from decoded GBuffer data.

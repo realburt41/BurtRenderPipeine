@@ -12,7 +12,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment Frag
 
@@ -65,7 +65,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                 }
 
                 BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(encodedGBuffer);
+                BurtGBufferData gbufferData = BurtDecodeDeferredGBuffer(encodedGBuffer, screenUV);
                 int debugMode = BurtResolveGBufferDebugMode();
 
                 if (debugMode == 1)
@@ -146,16 +146,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 14)
                 {
-                    float isHair = BurtIsHairShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
-                    float isClearCoat = BurtIsClearCoatShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
-                    float isSubsurface = BurtIsSubsurfaceShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
-                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
-                    float isFur = BurtIsFurShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
-                    return float4(
-                        0.6f * isHair + 0.1f * isSubsurface + 0.18f * isFoliage + 0.95f * isFur,
-                        0.1f * isHair + 0.45f * isClearCoat + 0.55f * isSubsurface + 0.85f * isFoliage + 0.45f * isFur,
-                        0.5f * isHair + 0.7f * isClearCoat + 0.15f * isSubsurface + 0.18f * isFoliage + 0.1f * isFur,
-                        1.0f);
+                    return BurtDeferredDebugStencilShadingModelColor(gbufferData.shadingModelID);
                 }
 
                 if (debugMode == 15)
@@ -267,6 +258,16 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                 {
                     float isFoliage = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
                     return BurtDebugScalar(BurtGetFoliageScreenSpaceShadowIntensity(gbufferData) * (1.0f / 3.0f) * isFoliage);
+                }
+
+                if (debugMode == 34)
+                {
+                    return BurtDebugScalar((float)BurtLoadDeferredStencil(screenUV) / 255.0f);
+                }
+
+                if (debugMode == 35)
+                {
+                    return BurtDeferredDebugStencilShadingModelColor(BurtSampleDeferredShadingModelID(screenUV));
                 }
 
                 return float4(max(gbufferData.baseColor, float3(0.0f, 0.0f, 0.0f)), 1.0f);

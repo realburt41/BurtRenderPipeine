@@ -690,7 +690,7 @@ MonoBehaviour:
     m_Value: 2
   depthThresholdEye:
     m_OverrideState: 1
-    m_Value: 0.02
+    m_Value: 0.001
   directionDilationThreshold:
     m_OverrideState: 1
     m_Value: 0.5
@@ -761,7 +761,7 @@ MonoBehaviour:
   active: 1
   enabled:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 1
   intensity:
     m_OverrideState: 1
     m_Value: 1
@@ -841,12 +841,6 @@ MonoBehaviour:
   depthEdgeResponsiveStrength:
     m_OverrideState: 0
     m_Value: 1.1
-  historyClampTightness:
-    m_OverrideState: 0
-    m_Value: 1.15
-  depthWeightedFilterFloor:
-    m_OverrideState: 0
-    m_Value: 0.12
   debugFreezeJitter:
     m_OverrideState: 0
     m_Value: 0

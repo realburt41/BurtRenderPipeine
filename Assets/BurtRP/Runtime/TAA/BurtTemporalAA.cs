@@ -77,6 +77,7 @@ namespace Burt.RenderPipeline
         public Matrix4x4 PreviousNonJitteredViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 InverseCurrentViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 InverseCurrentNonJitteredViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
+        public Matrix4x4 ClipToPreviousClipMatrix { get; private set; } = Matrix4x4.identity;
         public float CurrentPreExposure { get; private set; } = 1f;
         public float HistoryExposureCorrection { get; private set; } = 1f;
         public BurtTemporalAASettings Settings { get; private set; } = BurtTemporalAASettings.Default;
@@ -99,6 +100,7 @@ namespace Burt.RenderPipeline
                 PreviousNonJitteredViewProjectionMatrix = viewProjection,
                 InverseCurrentViewProjectionMatrix = viewProjection.inverse,
                 InverseCurrentNonJitteredViewProjectionMatrix = viewProjection.inverse,
+                ClipToPreviousClipMatrix = Matrix4x4.identity,
                 CurrentPreExposure = 1f,
                 HistoryExposureCorrection = 1f,
                 Settings = BurtTemporalAASettings.Default,
@@ -116,6 +118,7 @@ namespace Burt.RenderPipeline
             Matrix4x4 jitteredProjectionMatrix,
             Matrix4x4 previousViewProjectionMatrix,
             Matrix4x4 previousNonJitteredViewProjectionMatrix,
+            Matrix4x4 clipToPreviousClipMatrix,
             float currentPreExposure,
             float historyExposureCorrection,
             bool historyValid)
@@ -140,6 +143,7 @@ namespace Burt.RenderPipeline
                 PreviousNonJitteredViewProjectionMatrix = previousNonJitteredViewProjectionMatrix,
                 InverseCurrentViewProjectionMatrix = currentViewProjection.inverse,
                 InverseCurrentNonJitteredViewProjectionMatrix = currentNonJitteredViewProjection.inverse,
+                ClipToPreviousClipMatrix = clipToPreviousClipMatrix,
                 CurrentPreExposure = Mathf.Max(currentPreExposure, 0.0001f),
                 HistoryExposureCorrection = Mathf.Max(historyExposureCorrection, 0f),
                 Settings = settings,
@@ -232,6 +236,7 @@ namespace Burt.RenderPipeline
             public Matrix4x4 PreviousViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredProjectionMatrix = Matrix4x4.identity;
+            public Matrix4x4 PreviousViewMatrix = Matrix4x4.identity;
             public RenderTexture ColorHistory;
             public RenderTexture DepthHistory;
             public RenderTextureDescriptor ColorDescriptor;
@@ -409,6 +414,13 @@ namespace Burt.RenderPipeline
 
             var previousViewProjection = state.HasPreviousCameraState ? state.PreviousViewProjectionMatrix : GL.GetGPUProjectionMatrix(projectionMatrix, true) * viewMatrix;
             var previousNonJitteredViewProjection = state.HasPreviousCameraState ? state.PreviousNonJitteredViewProjectionMatrix : previousViewProjection;
+            var previousViewMatrix = state.HasPreviousCameraState ? state.PreviousViewMatrix : viewMatrix;
+            var previousNonJitteredProjectionMatrix = state.HasPreviousCameraState ? state.PreviousNonJitteredProjectionMatrix : projectionMatrix;
+            var clipToPreviousClip = CalculateClipToPreviousClip(
+                viewMatrix,
+                projectionMatrix,
+                previousViewMatrix,
+                previousNonJitteredProjectionMatrix);
 
             return BurtTemporalAARequestState.Create(
                 settings,
@@ -420,6 +432,7 @@ namespace Burt.RenderPipeline
                 jitteredProjection,
                 previousViewProjection,
                 previousNonJitteredViewProjection,
+                clipToPreviousClip,
                 currentPreExposure,
                 historyExposureCorrection,
                 state.HasValidHistory && descriptorsMatch);
@@ -455,8 +468,32 @@ namespace Burt.RenderPipeline
             state.PreviousViewProjectionMatrix = temporalAA.CurrentViewProjectionMatrix;
             state.PreviousNonJitteredViewProjectionMatrix = temporalAA.CurrentNonJitteredViewProjectionMatrix;
             state.PreviousNonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
+            state.PreviousViewMatrix = temporalAA.ViewMatrix;
             state.HistoryLayoutVersion = HistoryLayoutVersion;
             state.HasPreviousCameraState = true;
+        }
+
+        private static Matrix4x4 CalculateClipToPreviousClip(
+            Matrix4x4 currentViewMatrix,
+            Matrix4x4 currentNonJitteredProjectionMatrix,
+            Matrix4x4 previousViewMatrix,
+            Matrix4x4 previousNonJitteredProjectionMatrix)
+        {
+            var currentGpuNonJitteredProjection = GL.GetGPUProjectionMatrix(currentNonJitteredProjectionMatrix, true);
+            var previousGpuNonJitteredProjection = GL.GetGPUProjectionMatrix(previousNonJitteredProjectionMatrix, true);
+            var currentInverseProjection = currentGpuNonJitteredProjection.inverse;
+            var currentInverseView = currentViewMatrix.inverse;
+            var previousView = previousViewMatrix;
+            var previousInverseView = previousViewMatrix.inverse;
+
+            currentInverseView.m03 -= previousInverseView.m03;
+            currentInverseView.m13 -= previousInverseView.m13;
+            currentInverseView.m23 -= previousInverseView.m23;
+            previousView.m03 = 0f;
+            previousView.m13 = 0f;
+            previousView.m23 = 0f;
+
+            return previousGpuNonJitteredProjection * (previousView * (currentInverseView * currentInverseProjection));
         }
 
         public static bool ShouldUseTemporalAA(BurtRenderRequest request, BurtRenderPipelineAsset asset)

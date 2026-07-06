@@ -12,7 +12,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment Frag
 
@@ -492,7 +492,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
                 float stable = 1.0f - mip0Divergence;
                 float mipWeight = saturate(diagnosticMip / max(maxMip, 1.0f));
 
-                BurtGBufferData gbufferData = BurtDecodeGBuffer(BurtSampleEncodedGBuffer(screenUV));
+                BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
                 float roughnessFade = saturate((_BurtSSRHiZTraceParams0.w - gbufferData.perceptualRoughness) / max(_BurtSSRHiZTraceParams0.w, 0.0001f));
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, cameraRawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
