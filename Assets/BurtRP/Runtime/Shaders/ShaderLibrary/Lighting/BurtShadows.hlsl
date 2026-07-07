@@ -62,15 +62,14 @@ int _BurtPerObjectShadowObjectIndex;
 
 // x: PCSS enabled, y: light size in texels, z: blocker search radius in texels, w: max filter radius in texels.
 float4 _BurtMainLightShadowPCSSParams;
-static const int BURT_MAIN_LIGHT_SHADOW_PCSS_SAMPLE_COUNT = 13;
-static const float BURT_MAIN_LIGHT_SHADOW_CENTER_SAMPLE_WEIGHT = 2.0f;
-static const float BURT_MAIN_LIGHT_SHADOW_MIN_PCSS_FILTER_RADIUS_TEXELS = 0.35f;
-static const float BURT_MAIN_LIGHT_SHADOW_TRANSITION_TEXEL_FLOOR = 8.0f;
-
+#define BURT_MAIN_LIGHT_SHADOW_PCSS_SAMPLE_COUNT (13)
+#define BURT_MAIN_LIGHT_SHADOW_CENTER_SAMPLE_WEIGHT (2.0f)
+#define BURT_MAIN_LIGHT_SHADOW_MIN_PCSS_FILTER_RADIUS_TEXELS (0.35f)
+#define BURT_MAIN_LIGHT_SHADOW_TRANSITION_TEXEL_FLOOR (8.0f)
 struct BurtMainLightShadowInput
 {
-    float4 shadowCoord;
-    float strength;
+    float4 ShadowCoord;
+    float Strength;
 };
 
 int BurtGetMainLightShadowCascadeCount()
@@ -898,8 +897,7 @@ float3 BurtGetPerObjectShadowSliceDebugColor(int sliceIndex)
     return float3(0.25f, 0.25f, 0.25f);
 }
 
-static const float BURT_PER_OBJECT_SHADOW_TRANSMISSION_DEBUG_MAX_THICKNESS = 10.0f;
-
+#define BURT_PER_OBJECT_SHADOW_TRANSMISSION_DEBUG_MAX_THICKNESS (10.0f)
 void BurtFillPerObjectShadowProjectionDebugData(
     float3 positionWS,
     float3 normalWS,

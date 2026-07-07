@@ -24,20 +24,20 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -58,7 +58,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float2 screenUV = input.screenUV;
+                float2 screenUV = input.ScreenUV;
                 if (_BurtGBufferDebugYFlip > 0.5f)
                 {
                     screenUV.y = 1.0f - screenUV.y;
@@ -70,32 +70,61 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 1)
                 {
-                    return float4(saturate(encodedGBuffer.gbuffer0.rgb), 1.0f);
+                    return float4(saturate(encodedGBuffer.GBuffer0.rgb), 1.0f);
                 }
 
                 if (debugMode == 2)
                 {
-                    return float4(saturate(encodedGBuffer.gbuffer1.rgb), 1.0f);
+                    return float4(saturate(encodedGBuffer.GBuffer1.rgb), 1.0f);
                 }
 
                 if (debugMode == 3)
                 {
-                    return float4(saturate(encodedGBuffer.gbuffer2.rgb), 1.0f);
+                    return float4(saturate(encodedGBuffer.GBuffer2.rgb), 1.0f);
                 }
 
                 if (debugMode == 19)
                 {
-                    return float4(saturate(encodedGBuffer.gbuffer3.rgb), 1.0f);
+                    return float4(saturate(encodedGBuffer.GBuffer3.rgb), 1.0f);
                 }
 
                 if (debugMode == 23)
                 {
-                    return float4(saturate(encodedGBuffer.gbuffer4.rgb), 1.0f);
+                    return float4(saturate(encodedGBuffer.GBuffer4.rgb), 1.0f);
+                }
+
+                if (debugMode == 36)
+                {
+                    return float4(saturate(encodedGBuffer.GBuffer5.rgb), 1.0f);
+                }
+
+                if (debugMode == 37)
+                {
+                    float isGrass = BurtIsFoliageShadingModel(gbufferData.ShadingModelID) ? BurtGetFoliageIsGrass(gbufferData) : 0.0f;
+                    return BurtDebugScalar(isGrass);
+                }
+
+                if (debugMode == 38)
+                {
+                    float isGrass = BurtIsFoliageShadingModel(gbufferData.ShadingModelID) ? BurtGetFoliageIsGrass(gbufferData) : 0.0f;
+                    return BurtDebugScalar(BurtGetFoliageTransmissionWeight(gbufferData) * 0.1f * isGrass);
+                }
+
+                if (debugMode == 39)
+                {
+                    float isGrass = BurtIsFoliageShadingModel(gbufferData.ShadingModelID) ? BurtGetFoliageIsGrass(gbufferData) : 0.0f;
+                    return BurtDebugScalar(BurtGetFoliageSpecularScale(gbufferData) * isGrass);
+                }
+
+                if (debugMode == 40)
+                {
+                    float isGrass = BurtIsFoliageShadingModel(gbufferData.ShadingModelID) ? BurtGetFoliageIsGrass(gbufferData) : 0.0f;
+                    return BurtDebugScalar(BurtGetFoliageScreenSpaceShadowIntensity(gbufferData) * (1.0f / 3.0f) * isGrass);
                 }
 
                 if (debugMode == 4)
                 {
-                    return float4(max(gbufferData.baseColor, float3(0.0f, 0.0f, 0.0f)), 1.0f);
+                    return float4(max(gbufferData.BaseColor, float3(0.0f, 0.0f, 0.0f)), 1.0f);
                 }
 
                 if (debugMode == 5)
@@ -110,22 +139,22 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 7)
                 {
-                    return BurtDebugScalar(gbufferData.smoothness);
+                    return BurtDebugScalar(gbufferData.Smoothness);
                 }
 
                 if (debugMode == 8)
                 {
-                    return BurtDebugScalar(gbufferData.occlusion);
+                    return BurtDebugScalar(gbufferData.Occlusion);
                 }
 
                 if (debugMode == 9)
                 {
-                    return float4(saturate(gbufferData.emission), 1.0f);
+                    return float4(saturate(gbufferData.Emission), 1.0f);
                 }
 
                 if (debugMode == 10)
                 {
-                    return BurtDebugScalar(gbufferData.reflectance);
+                    return BurtDebugScalar(gbufferData.Reflectance);
                 }
 
                 if (debugMode == 11)
@@ -135,23 +164,23 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 12)
                 {
-                    return BurtDebugScalar(gbufferData.perceptualRoughness);
+                    return BurtDebugScalar(gbufferData.PerceptualRoughness);
                 }
 
                 if (debugMode == 13)
                 {
                     BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
-                    return float4(saturate(materialData.diffuseColor), 1.0f);
+                    return float4(saturate(materialData.DiffuseColor), 1.0f);
                 }
 
                 if (debugMode == 14)
                 {
-                    return BurtDeferredDebugStencilShadingModelColor(gbufferData.shadingModelID);
+                    return BurtDeferredDebugStencilShadingModelColor(gbufferData.ShadingModelID);
                 }
 
                 if (debugMode == 15)
                 {
-                    if (!BurtIsHairShadingModel(gbufferData.shadingModelID))
+                    if (!BurtIsHairShadingModel(gbufferData.ShadingModelID))
                     {
                         return float4(0.0f, 0.0f, 0.0f, 1.0f);
                     }
@@ -161,13 +190,13 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 16)
                 {
-                    float isHair = BurtIsHairShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float isHair = BurtIsHairShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
                     return BurtDebugScalar(BurtGetHairScatter(gbufferData) * isHair);
                 }
 
                 if (debugMode == 17)
                 {
-                    float isHair = BurtIsHairShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float isHair = BurtIsHairShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
                     return BurtDebugScalar(BurtGetHairLongitudinalShiftScale(gbufferData) * isHair);
                 }
 
@@ -178,7 +207,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 20)
                 {
-                    if (!BurtIsClearCoatShadingModel(gbufferData.shadingModelID))
+                    if (!BurtIsClearCoatShadingModel(gbufferData.ShadingModelID))
                     {
                         return float4(0.0f, 0.0f, 0.0f, 1.0f);
                     }
@@ -198,12 +227,12 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 24)
                 {
-                    return BurtDebugScalar(gbufferData.anisotropy * 0.5f + 0.5f);
+                    return BurtDebugScalar(gbufferData.Anisotropy * 0.5f + 0.5f);
                 }
 
                 if (debugMode == 25)
                 {
-                    return BurtDebugNormal(gbufferData.tangentWS);
+                    return BurtDebugNormal(gbufferData.TangentWS);
                 }
 
                 if (debugMode == 26)
@@ -220,7 +249,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 28)
                 {
-                    if (!BurtIsFoliageShadingModel(gbufferData.shadingModelID))
+                    if (!BurtIsFoliageShadingModel(gbufferData.ShadingModelID))
                     {
                         return float4(0.0f, 0.0f, 0.0f, 1.0f);
                     }
@@ -230,33 +259,33 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 29)
                 {
-                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
                     float foliageWeight = BurtGetFoliageTransmissionWeight(gbufferData);
-                    float visibleFoliageWeight = gbufferData.foliageIsGrass > 0.5f ? foliageWeight * 0.1f : foliageWeight;
+                    float visibleFoliageWeight = gbufferData.FoliageIsGrass > 0.5f ? foliageWeight * 0.1f : foliageWeight;
                     return BurtDebugScalar(visibleFoliageWeight * isFoliage);
                 }
 
                 if (debugMode == 30)
                 {
-                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
                     return BurtDebugScalar(BurtGetFoliageThickness(gbufferData) * isFoliage);
                 }
 
                 if (debugMode == 31)
                 {
-                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
                     return BurtDebugScalar(BurtGetFoliageTransmissionNdotL(gbufferData) * isFoliage);
                 }
 
                 if (debugMode == 32)
                 {
-                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
                     return BurtDebugScalar(BurtGetFoliageSpecularScale(gbufferData) * isFoliage);
                 }
 
                 if (debugMode == 33)
                 {
-                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.shadingModelID) ? 1.0f : 0.0f;
+                    float isFoliage = BurtIsFoliageShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
                     return BurtDebugScalar(BurtGetFoliageScreenSpaceShadowIntensity(gbufferData) * (1.0f / 3.0f) * isFoliage);
                 }
 
@@ -270,7 +299,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
                     return BurtDeferredDebugStencilShadingModelColor(BurtSampleDeferredShadingModelID(screenUV));
                 }
 
-                return float4(max(gbufferData.baseColor, float3(0.0f, 0.0f, 0.0f)), 1.0f);
+                return float4(max(gbufferData.BaseColor, float3(0.0f, 0.0f, 0.0f)), 1.0f);
             }
 
             ENDHLSL

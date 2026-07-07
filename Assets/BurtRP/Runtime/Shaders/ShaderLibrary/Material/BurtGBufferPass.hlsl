@@ -18,53 +18,54 @@ int _BurtPerObjectShadowObjectIndex;
 
 struct GBufferAttributes
 {
-    float4 positionOS : POSITION;
-    float3 normalOS : NORMAL;
-    float4 tangentOS : TANGENT;
-    float2 uv0 : TEXCOORD0;
+    float4 PositionOS : POSITION;
+    float3 NormalOS : NORMAL;
+    float4 TangentOS : TANGENT;
+    float2 UV0 : TEXCOORD0;
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-    float4 color : COLOR;
+    float4 Color : COLOR;
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float2 uv1 : TEXCOORD1;
+    float2 UV1 : TEXCOORD1;
 #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct GBufferVaryings
 {
-    float4 positionCS : SV_POSITION;
-    float3 normalWS : TEXCOORD0;
+    float4 PositionCS : SV_POSITION;
+    float3 NormalWS : TEXCOORD0;
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float2 baseMapUV : TEXCOORD1;
+    float2 BaseMapUV : TEXCOORD1;
 #endif
-    float4 tangentWS : TEXCOORD2;
+    float4 TangentWS : TEXCOORD2;
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float2 maskMapUV : TEXCOORD3;
+    float2 MaskMapUV : TEXCOORD3;
 #endif
-    float2 emissionMapUV : TEXCOORD4;
+    float2 EmissionMapUV : TEXCOORD4;
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float2 uv0 : TEXCOORD5;
-    float2 uv1 : TEXCOORD6;
-    float3 positionOS : TEXCOORD7;
-    float3 positionWS : TEXCOORD8;
+    float2 UV0 : TEXCOORD5;
+    float2 UV1 : TEXCOORD6;
+    float3 PositionOS : TEXCOORD7;
+    float3 PositionWS : TEXCOORD8;
 #else
-    float3 positionWS : TEXCOORD5;
+    float3 PositionWS : TEXCOORD5;
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        float4 vertexColor : TEXCOORD6;
-        float3 positionOS : TEXCOORD7;
+        float4 VertexColor : TEXCOORD6;
+        float3 PositionOS : TEXCOORD7;
     #endif
 #endif
 };
 
 struct GBufferFragmentOutput
 {
-    float4 gbuffer0 : SV_Target0;
-    float4 gbuffer1 : SV_Target1;
-    float4 gbuffer2 : SV_Target2;
-    float4 gbuffer3 : SV_Target3;
-    float4 gbuffer4 : SV_Target4;
-    float4 objectIndex : SV_Target5;
+    float4 GBuffer0 : SV_Target0;
+    float4 GBuffer1 : SV_Target1;
+    float4 GBuffer2 : SV_Target2;
+    float4 GBuffer3 : SV_Target3;
+    float4 GBuffer4 : SV_Target4;
+    float4 GBuffer5 : SV_Target5;
+    float4 ObjectIndex : SV_Target6;
 };
 
 float4 BurtEncodePerObjectShadowObjectIndexTarget()
@@ -75,146 +76,164 @@ float4 BurtEncodePerObjectShadowObjectIndexTarget()
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
 struct SubsurfaceForwardFragmentOutput
 {
-    float4 gbuffer0 : SV_Target0;
-    float4 gbuffer2 : SV_Target1;
+    float4 GBuffer0 : SV_Target0;
+    float4 GBuffer2 : SV_Target1;
 };
 
-static const float BURT_SUBSURFACE_PROFILE_TYPE_BURLEY = 64.0f;
-static const float BURT_SUBSURFACE_PROFILE_TYPE_SEPARABLE = 128.0f;
-
-float BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(BurtSurfaceData surfaceData)
+float BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(BurtSurfaceData SurfaceData)
 {
-    if (BurtIsSubsurface3SPreIntegratedMode(surfaceData.subsurfaceScatteringMode))
+    if (BurtIsSubsurface3SPreIntegratedMode(SurfaceData.SubsurfaceScatteringMode))
     {
         return 0.0f;
     }
 
-    float profileID = BurtClampSubsurfaceProfileIndex(surfaceData.subsurfaceProfileIndex);
-    float profileType = BurtIsSubsurface4SSeparableMode(surfaceData.subsurfaceScatteringMode)
-        ? BURT_SUBSURFACE_PROFILE_TYPE_SEPARABLE
-        : BURT_SUBSURFACE_PROFILE_TYPE_BURLEY;
-    return (profileType + profileID) / 255.0f;
+    float ProfileID = BurtClampSubsurfaceProfileIndex(SurfaceData.SubsurfaceProfileIndex);
+    float ProfileType = BurtIsSubsurface4SSeparableMode(SurfaceData.SubsurfaceScatteringMode)
+        ? BURT_SSS_PROFILE_TYPE_SEPARABLE_FLOAT
+        : BURT_SSS_PROFILE_TYPE_BURLEY_FLOAT;
+    return (ProfileType + ProfileID) / 255.0f;
 }
 #endif
 
-GBufferVaryings VertGBuffer(GBufferAttributes input)
+GBufferVaryings VertGBuffer(GBufferAttributes Input)
 {
-    UNITY_SETUP_INSTANCE_ID(input);
-    float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+    UNITY_SETUP_INSTANCE_ID(Input);
+    float4 PositionOS = BurtApplyMultipassObjectShellOffset(Input.PositionOS, Input.NormalOS);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+        PositionOS = BurtApplyTrunkVertexAnimationObjectSpace(PositionOS, Input.Color, _Time.y);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        positionOS = BurtApplyFoliageVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+        #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        PositionOS = BurtApplyGrassVertexAnimationObjectSpace(PositionOS, Input.NormalOS, Input.Color, _Time.y);
+        #else
+        PositionOS = BurtApplyFoliageVertexAnimationObjectSpace(PositionOS, Input.Color, _Time.y);
+        #endif
     #endif
 
-    GBufferVaryings output;
-    output.positionCS = UnityObjectToClipPos(positionOS);
-    output.normalWS = BurtSafeNormalize(UnityObjectToWorldNormal(input.normalOS));
-    output.tangentWS = BurtObjectToWorldTangent(input.tangentOS);
+    GBufferVaryings Output;
+    Output.PositionCS = UnityObjectToClipPos(PositionOS);
+    Output.NormalWS = BurtSafeNormalize(UnityObjectToWorldNormal(Input.NormalOS));
+    Output.TangentWS = BurtObjectToWorldTangent(Input.TangentOS);
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
-    output.maskMapUV = BurtTransformMaskMapUV(input.uv0, _MaskMap_ST);
-    output.positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
+    Output.BaseMapUV = BurtTransformBaseMapUV(Input.UV0, _BaseMap_ST);
+    Output.MaskMapUV = BurtTransformMaskMapUV(Input.UV0, _MaskMap_ST);
+    Output.PositionWS = mul(unity_ObjectToWorld, PositionOS).xyz;
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        output.vertexColor = input.color;
-        output.positionOS = positionOS.xyz;
+        Output.VertexColor = Input.Color;
+        Output.PositionOS = PositionOS.xyz;
     #endif
 #endif
-    output.emissionMapUV = BurtTransformEmissionMapUV(input.uv0, _EmissionMap_ST);
+    Output.EmissionMapUV = BurtTransformEmissionMapUV(Input.UV0, _EmissionMap_ST);
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    output.uv0 = input.uv0;
-    output.uv1 = input.uv1;
-    output.positionOS = positionOS.xyz;
-    output.positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
+    Output.UV0 = Input.UV0;
+    Output.UV1 = Input.UV1;
+    Output.PositionOS = PositionOS.xyz;
+    Output.PositionWS = mul(unity_ObjectToWorld, PositionOS).xyz;
 #endif
-    return output;
+    return Output;
 }
 
-GBufferFragmentOutput BurtPackGBufferOutput(BurtEncodedGBuffer encodedGBuffer)
+GBufferFragmentOutput BurtPackGBufferOutput(BurtEncodedGBuffer EncodedGBuffer)
 {
-    GBufferFragmentOutput output;
-    output.gbuffer0 = encodedGBuffer.gbuffer0;
-    output.gbuffer1 = encodedGBuffer.gbuffer1;
-    output.gbuffer2 = encodedGBuffer.gbuffer2;
-    output.gbuffer3 = encodedGBuffer.gbuffer3;
-    output.gbuffer4 = encodedGBuffer.gbuffer4;
-    output.objectIndex = BurtEncodePerObjectShadowObjectIndexTarget();
-    return output;
+    GBufferFragmentOutput Output;
+    Output.GBuffer0 = EncodedGBuffer.GBuffer0;
+    Output.GBuffer1 = EncodedGBuffer.GBuffer1;
+    Output.GBuffer2 = EncodedGBuffer.GBuffer2;
+    Output.GBuffer3 = EncodedGBuffer.GBuffer3;
+    Output.GBuffer4 = EncodedGBuffer.GBuffer4;
+    Output.GBuffer5 = EncodedGBuffer.GBuffer5;
+    Output.ObjectIndex = BurtEncodePerObjectShadowObjectIndexTarget();
+    return Output;
 }
 
-BurtGBufferData BurtCreateMaterialGBufferData(GBufferVaryings input, float facing, BurtSurfaceData surfaceData, float3 emissionColor)
+BurtGBufferData BurtCreateMaterialGBufferData(GBufferVaryings Input, float Facing, BurtSurfaceData SurfaceData, float3 EmissionColor)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float2 hairNormalMapUV = input.uv0 * float2(_IDXTilling, 1.0f);
-    float3 baseNormalWS = BurtGetMaterialPassNormalWS(hairNormalMapUV, input.normalWS, input.tangentWS, facing);
-    float3 geometryNormalWS = BurtGetMaterialPassGeometryNormalWS(input.normalWS, facing);
-    float3 shadingDirectionWS = BurtGetMaterialPassShadingDirectionWS(input.uv0, input.normalWS, input.tangentWS, facing);
-    return BurtCreateMaterialPassGBufferData(surfaceData, hairNormalMapUV, geometryNormalWS, baseNormalWS, input.tangentWS, shadingDirectionWS, facing, emissionColor);
+    float2 HairNormalMapUV = Input.UV0 * float2(_IDXTilling, 1.0f);
+    float3 BaseNormalWS = BurtGetMaterialPassNormalWS(HairNormalMapUV, Input.NormalWS, Input.TangentWS, Facing);
+    float3 GeometryNormalWS = BurtGetMaterialPassGeometryNormalWS(Input.NormalWS, Facing);
+    float3 ShadingDirectionWS = BurtGetMaterialPassShadingDirectionWS(Input.UV0, Input.NormalWS, Input.TangentWS, Facing);
+    return BurtCreateMaterialPassGBufferData(SurfaceData, HairNormalMapUV, GeometryNormalWS, BaseNormalWS, Input.TangentWS, ShadingDirectionWS, Facing, EmissionColor);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
+    float3 BaseNormalWS = BurtEyeSampleNormalWS(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, Facing, SurfaceData.EyeIrisMask);
+    return BurtCreateEyeGBufferData(SurfaceData, BaseNormalWS, Input.TangentWS, SurfaceData.EyeIrisNormalWS, SurfaceData.EyeCausticNormalWS, EmissionColor);
 #else
-    float3 baseNormalWS = BurtGetMaterialPassNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, facing);
+    float3 BaseNormalWS = BurtGetMaterialPassNormalWS(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, Facing);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        baseNormalWS = BurtApplyFoliageMaterialNormalWS(baseNormalWS, input.positionWS, input.vertexColor);
+        BaseNormalWS = BurtApplyFoliageMaterialNormalWS(BaseNormalWS, Input.PositionWS, Input.VertexColor);
     #endif
-    float3 shadingDirectionWS = BurtGetMaterialPassShadingDirectionWS(baseNormalWS, input.tangentWS);
-    return BurtCreateMaterialPassGBufferData(surfaceData, input.baseMapUV, input.normalWS, baseNormalWS, input.tangentWS, shadingDirectionWS, facing, emissionColor);
+    float3 ShadingDirectionWS = BurtGetMaterialPassShadingDirectionWS(BaseNormalWS, Input.TangentWS);
+    return BurtCreateMaterialPassGBufferData(SurfaceData, Input.BaseMapUV, Input.NormalWS, BaseNormalWS, Input.TangentWS, ShadingDirectionWS, Facing, EmissionColor);
 #endif
 }
 
-GBufferFragmentOutput FragGBuffer(GBufferVaryings input, fixed facing : VFACE)
+BurtGBufferData BurtCreateMaterialPassGBufferDataFromInput(GBufferVaryings Input, float Facing)
 {
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
+    float3 ViewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - Input.PositionWS);
+    BurtEyeMaterialData EyeData = BurtEvaluateEyeMaterialData(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, ViewDirectionWS, Facing);
+    BurtApplyMaterialPassAlphaClip(EyeData.BaseColor.a, _AlphaClip, _Cutoff, Input.PositionCS);
+    BurtSurfaceData SurfaceData = BurtCreateEyeSurfaceData(EyeData);
+    return BurtCreateEyeGBufferData(SurfaceData, EyeData.NormalWS, Input.TangentWS, EyeData.IrisNormalWS, EyeData.CausticNormalWS, EyeData.EmissionColor);
+#else
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
-    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS, maskMap);
+    float4 MaskMap = BurtEvaluateMaterialPassMaskMap(Input.UV0, Input.UV1);
+    float4 BaseColor = BurtEvaluateMaterialPassBaseColor(Input.UV0, Input.UV1, Input.PositionOS, MaskMap);
 #else
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.baseMapUV, input.positionWS, input.positionOS, input.vertexColor);
+        float4 BaseColor = BurtEvaluateMaterialPassBaseColor(Input.BaseMapUV, Input.PositionWS, Input.PositionOS, Input.VertexColor);
     #else
-        float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
+        float4 BaseColor = BurtSampleBaseMap(Input.BaseMapUV) * _BaseColor;
     #endif
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
+    BurtApplyMaterialPassAlphaClip(BaseColor.a, _AlphaClip, _Cutoff, Input.PositionCS);
 #else
-    float alpha = BurtEvaluateMaterialPassOpacity(baseColor.a, input.baseMapUV, input.positionWS);
-    BurtApplyMaterialPassAlphaClip(alpha, _AlphaClip, _Cutoff, input.positionCS);
-    baseColor.a = alpha;
+    float Alpha = BurtEvaluateMaterialPassOpacity(BaseColor.a, Input.BaseMapUV, Input.PositionWS);
+    BurtApplyMaterialPassAlphaClip(Alpha, _AlphaClip, _Cutoff, Input.PositionCS);
+    BaseColor.a = Alpha;
 #endif
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
+    float3 ViewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - Input.PositionWS);
+    BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.UV0, Input.UV1, Input.PositionOS, Input.NormalWS, Input.TangentWS, ViewDirectionWS);
 #else
-    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
-    float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-    float3 baseNormalWS = BurtGetMaterialPassNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, facing);
+    float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
+    float3 ViewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - Input.PositionWS);
+    float3 BaseNormalWS = BurtGetMaterialPassNormalWS(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, Facing);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, baseNormalWS, viewDirectionWS, input.positionWS, input.positionOS, input.vertexColor);
+        BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, BaseNormalWS, ViewDirectionWS, Input.PositionWS, Input.PositionOS, Input.VertexColor);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, baseNormalWS, viewDirectionWS, input.positionWS, input.positionOS, input.vertexColor);
+        BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, BaseNormalWS, ViewDirectionWS, Input.PositionWS, Input.PositionOS, Input.VertexColor);
     #else
-        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, baseNormalWS, viewDirectionWS, input.positionWS);
+        BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, BaseNormalWS, ViewDirectionWS, Input.PositionWS);
     #endif
 #endif
-    float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
-    BurtGBufferData gbufferData = BurtCreateMaterialGBufferData(input, facing, surfaceData, emissionColor);
+    float3 EmissionColor = BurtEvaluateEmission(Input.EmissionMapUV, _EmissionColor.rgb);
 
-    return BurtPackGBufferOutput(BurtEncodeGBuffer(gbufferData));
+    return BurtCreateMaterialGBufferData(Input, Facing, SurfaceData, EmissionColor);
+#endif
+}
+
+GBufferFragmentOutput FragGBuffer(GBufferVaryings Input, fixed Facing : VFACE)
+{
+    BurtGBufferData GBufferData = BurtCreateMaterialPassGBufferDataFromInput(Input, Facing);
+    return BurtPackGBufferOutput(BurtEncodeGBuffer(GBufferData));
 }
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
-SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings input, fixed facing : VFACE)
+SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings Input, fixed Facing : VFACE)
 {
-    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
-    BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
+    float4 BaseColor = BurtSampleBaseMap(Input.BaseMapUV) * _BaseColor;
+    BurtApplyMaterialPassAlphaClip(BaseColor.a, _AlphaClip, _Cutoff, Input.PositionCS);
 
-    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
-    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV);
-    float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
+    float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
+    BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV);
+    float3 EmissionColor = BurtEvaluateEmission(Input.EmissionMapUV, _EmissionColor.rgb);
 
-    SubsurfaceForwardFragmentOutput output;
-    output.gbuffer0 = float4(saturate(surfaceData.baseColor.rgb), BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(surfaceData));
-    output.gbuffer2 = float4(max(emissionColor, float3(0.0f, 0.0f, 0.0f)), saturate(surfaceData.reflectance));
-    return output;
+    SubsurfaceForwardFragmentOutput Output;
+    Output.GBuffer0 = float4(saturate(SurfaceData.BaseColor.rgb), BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(SurfaceData));
+    Output.GBuffer2 = float4(max(EmissionColor, float3(0.0f, 0.0f, 0.0f)), saturate(SurfaceData.Reflectance));
+    return Output;
 }
 #endif
 

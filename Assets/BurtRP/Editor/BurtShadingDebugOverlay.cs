@@ -130,9 +130,9 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
                     return "GBuffer Foliage SS Shadow";
                 case BurtShadingDebugMode.GBufferStencilRaw:
-                    return "GBuffer Stencil Raw";
+                    return "GBuffer Stencil Raw (0..255)";
                 case BurtShadingDebugMode.GBufferStencilShadingModel:
-                    return "GBuffer Stencil Shading Model";
+                    return "GBuffer Shading Model (Stencil/Packed)";
                 case BurtShadingDebugMode.FoliageTransmission:
                     return "Foliage Transmission";
                 case BurtShadingDebugMode.FoliageDirectTransmission:
@@ -143,6 +143,24 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Foliage Transmission Shadow";
                 case BurtShadingDebugMode.FoliageSpecularBRDF:
                     return "Foliage Specular BRDF";
+                case BurtShadingDebugMode.GBufferGrassIsGrass:
+                    return "GBuffer Grass Mask";
+                case BurtShadingDebugMode.GBufferGrassSSSIntensity:
+                    return "GBuffer Grass SSS Intensity";
+                case BurtShadingDebugMode.GBufferGrassSpecularMultiply:
+                    return "GBuffer Grass Specular Multiply";
+                case BurtShadingDebugMode.GBufferGrassScreenSpaceShadowIntensity:
+                    return "GBuffer Grass SS Shadow";
+                case BurtShadingDebugMode.GrassTransmission:
+                    return "Grass Transmission";
+                case BurtShadingDebugMode.GrassDirectTransmission:
+                    return "Grass Direct Transmission";
+                case BurtShadingDebugMode.GrassTransmissionBRDF:
+                    return "Grass Transmission BRDF";
+                case BurtShadingDebugMode.GrassTransmissionShadow:
+                    return "Grass Transmission Shadow";
+                case BurtShadingDebugMode.GrassSpecularBRDF:
+                    return "Grass Specular BRDF";
                 case BurtShadingDebugMode.GBufferAnisotropy:
                     return "GBuffer Anisotropy";
                 case BurtShadingDebugMode.GBufferTangentWS:
@@ -525,6 +543,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "TAA Object Motion Mask";
                 case BurtShadingDebugMode.TemporalAAUpscaleState:
                     return "TAA Upscale State";
+                case BurtShadingDebugMode.TemporalAAStencilMask:
+                    return "TAA Stencil Mask";
                 case BurtShadingDebugMode.TemporalAARejectionReasons:
                     return "TAA Rejection Reasons";
                 case BurtShadingDebugMode.TemporalAAFeedbackWeight:
@@ -631,6 +651,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.GBufferFoliageTransmissionNdotL,
             BurtShadingDebugMode.GBufferFoliageSpecularScale,
             BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity,
+            BurtShadingDebugMode.GBufferGrassIsGrass,
+            BurtShadingDebugMode.GBufferGrassSSSIntensity,
+            BurtShadingDebugMode.GBufferGrassSpecularMultiply,
+            BurtShadingDebugMode.GBufferGrassScreenSpaceShadowIntensity,
             BurtShadingDebugMode.GBufferStencilRaw,
             BurtShadingDebugMode.GBufferStencilShadingModel,
             BurtShadingDebugMode.GBufferAnisotropy,
@@ -670,6 +694,15 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.FoliageTransmissionBRDF,
             BurtShadingDebugMode.FoliageTransmissionShadow,
             BurtShadingDebugMode.FoliageSpecularBRDF
+        });
+
+        public static readonly BurtShadingDebugGroup Grass = new BurtShadingDebugGroup("Grass", "Grass", new[]
+        {
+            BurtShadingDebugMode.GrassTransmission,
+            BurtShadingDebugMode.GrassDirectTransmission,
+            BurtShadingDebugMode.GrassTransmissionBRDF,
+            BurtShadingDebugMode.GrassTransmissionShadow,
+            BurtShadingDebugMode.GrassSpecularBRDF
         });
 
         public static readonly BurtShadingDebugGroup Subsurface = new BurtShadingDebugGroup("Subsurface", "SSS", new[]
@@ -857,7 +890,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.TemporalAAResponsiveMask,
             BurtShadingDebugMode.TemporalAAMetadata,
             BurtShadingDebugMode.TemporalAAObjectMotionMask,
-            BurtShadingDebugMode.TemporalAAUpscaleState
+            BurtShadingDebugMode.TemporalAAUpscaleState,
+            BurtShadingDebugMode.TemporalAAStencilMask
         });
 
         public static readonly BurtShadingDebugGroup ScreenSpaceAmbientOcclusion = new BurtShadingDebugGroup("Screen Space Ambient Occlusion", "SSAO", new[] // SSAO 后处理调试。
@@ -1052,7 +1086,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.TemporalAAResponsiveMask,
             BurtShadingDebugMode.TemporalAAMetadata,
             BurtShadingDebugMode.TemporalAAObjectMotionMask,
-            BurtShadingDebugMode.TemporalAAUpscaleState
+            BurtShadingDebugMode.TemporalAAUpscaleState,
+            BurtShadingDebugMode.TemporalAAStencilMask
         });
     }
 
@@ -1080,6 +1115,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 BurtShadingDebugBRDFDropdown.Id,
                 BurtShadingDebugHairDropdown.Id,
                 BurtShadingDebugFoliageDropdown.Id,
+                BurtShadingDebugGrassDropdown.Id,
                 BurtShadingDebugSubsurfaceDropdown.Id,
                 BurtShadingDebugIBLDropdown.Id)
         {
@@ -1236,6 +1272,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public BurtShadingDebugFoliageDropdown()
             : base(BurtShadingDebugGroups.Foliage)
+        {
+        }
+    }
+
+    [EditorToolbarElement(Id, typeof(SceneView))]
+    internal sealed class BurtShadingDebugGrassDropdown : BurtShadingDebugGroupDropdown
+    {
+        public const string Id = "BurtRP/Shading Debug/Grass";
+
+        public BurtShadingDebugGrassDropdown()
+            : base(BurtShadingDebugGroups.Grass)
         {
         }
     }
@@ -1490,6 +1537,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 contentHeight += VolumetricFogReadoutHeight;
             }
 
+            if (IsGBufferGroup())
+            {
+                contentHeight += 46f;
+            }
+
             return new Vector2(320f, contentHeight); // 固定宽度，避免不同分类宽度跳变太大。
         }
 
@@ -1537,7 +1589,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 EditorGUILayout.Space(4f);
             }
 
-            EditorGUILayout.HelpBox("参考 XRender Shader Debug 的分类 Toolbar；Material、Lighting、Post Process 分别在独立 Overlay 中按细分栏位展开。", MessageType.Info); // 说明分类来源和全局 Debug 行为。
+            EditorGUILayout.HelpBox(GetHelpText(), MessageType.Info); // 说明分类来源和全局 Debug 行为。
         }
 
         private void DrawMode(BurtShadingDebugMode mode) // 绘制一个可选 Debug 模式。
@@ -1557,6 +1609,47 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         private bool IsAutoExposureGroup()
         {
             return ReferenceEquals(group, BurtShadingDebugGroups.AutoExposure);
+        }
+
+        private bool IsGBufferGroup()
+        {
+            return ReferenceEquals(group, BurtShadingDebugGroups.GBuffer);
+        }
+
+        private string GetHelpText()
+        {
+            if (IsGBufferGroup())
+            {
+                return "Burt GBuffer stores dense packed shading ids: DefaultLit="
+                    + BurtShadingModelIds.BurtPackedDefaultLit
+                    + ", Hair=" + BurtShadingModelIds.BurtPackedHair
+                    + ", ClearCoat=" + BurtShadingModelIds.BurtPackedClearCoat
+                    + ", Subsurface=" + BurtShadingModelIds.BurtPackedSubsurface
+                    + ", Fabric=" + BurtShadingModelIds.BurtPackedFabric
+                    + ", Foliage=" + BurtShadingModelIds.BurtPackedFoliage
+                    + ", Fur=" + BurtShadingModelIds.BurtPackedFur
+                    + ", Eye=" + BurtShadingModelIds.BurtPackedEye
+                    + ". Deferred stencil uses XRender high-bit buckets: DefaultLit=" + FormatHex(BurtShadingModelIds.DeferredStencilDefaultLitRef)
+                    + ", Subsurface=" + FormatHex(BurtShadingModelIds.DeferredStencilSubsurfaceRef)
+                    + ", Hair/Transmission=" + FormatHex(BurtShadingModelIds.DeferredStencilHairRef)
+                    + ", Coat=" + FormatHex(BurtShadingModelIds.DeferredStencilClearCoatRef)
+                    + ", Fabric=" + FormatHex(BurtShadingModelIds.DeferredStencilFabricRef)
+                    + ", Foliage=" + FormatHex(BurtShadingModelIds.DeferredStencilFoliageRef)
+                    + ", Fur=" + FormatHex(BurtShadingModelIds.DeferredStencilFurRef)
+                    + ". XRender semantic ids are separate, for example DefaultLit=" + FormatHex(BurtShadingModelIds.XRenderSemanticDefaultLit)
+                    + ", Foliage=" + FormatHex(BurtShadingModelIds.XRenderSemanticFoliage)
+                    + ", Fur=" + FormatHex(BurtShadingModelIds.XRenderSemanticFur)
+                    + ", Eye=" + FormatHex(BurtShadingModelIds.XRenderSemanticEye)
+                    + ", Hair=" + FormatHex(BurtShadingModelIds.XRenderSemanticHair)
+                    + ".";
+            }
+
+            return "参考 XRender Shader Debug 的分类 Toolbar；Material、Lighting、Post Process 分别在独立 Overlay 中按细分栏位展开。";
+        }
+
+        private static string FormatHex(int value)
+        {
+            return "0x" + value.ToString("X2");
         }
 
         private bool IsAtmosphereGroup()
@@ -1707,7 +1800,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 return;
             }
 
-            if (!BurtAutoExposureDebugUtility.TryGetSnapshot(camera, out var snapshot))
+            if (!AutoExposureDebugUtility.TryGetSnapshot(camera, out var snapshot))
             {
                 EditorGUILayout.HelpBox("Auto Exposure: no per-camera state yet. Select an automatic exposure mode and render one frame.", MessageType.Info);
                 return;
@@ -1730,7 +1823,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             }
         }
 
-        private static string FormatAutoExposureReadout(Camera camera, BurtAutoExposureDebugSnapshot snapshot)
+        private static string FormatAutoExposureReadout(Camera camera, AutoExposureDebugSnapshot snapshot)
         {
             return
                 "Burt Auto Exposure Readout\n" +
@@ -1765,7 +1858,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             return age >= 0 ? age.ToString() : "n/a";
         }
 
-        private static string FormatReadbackSize(BurtAutoExposureDebugSnapshot snapshot)
+        private static string FormatReadbackSize(AutoExposureDebugSnapshot snapshot)
         {
             return snapshot.ReadbackWidth > 0 && snapshot.ReadbackHeight > 0
                 ? snapshot.ReadbackWidth + "x" + snapshot.ReadbackHeight
@@ -1882,6 +1975,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return BurtGBufferDebugViewMode.FoliageSpecularScale;
                 case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
                     return BurtGBufferDebugViewMode.FoliageScreenSpaceShadowIntensity;
+                case BurtShadingDebugMode.GBufferGrassIsGrass:
+                    return BurtGBufferDebugViewMode.GrassIsGrass;
+                case BurtShadingDebugMode.GBufferGrassSSSIntensity:
+                    return BurtGBufferDebugViewMode.GrassSSSIntensity;
+                case BurtShadingDebugMode.GBufferGrassSpecularMultiply:
+                    return BurtGBufferDebugViewMode.GrassSpecularMultiply;
+                case BurtShadingDebugMode.GBufferGrassScreenSpaceShadowIntensity:
+                    return BurtGBufferDebugViewMode.GrassScreenSpaceShadowIntensity;
                 case BurtShadingDebugMode.GBufferStencilRaw:
                     return BurtGBufferDebugViewMode.StencilRaw;
                 case BurtShadingDebugMode.GBufferStencilShadingModel:

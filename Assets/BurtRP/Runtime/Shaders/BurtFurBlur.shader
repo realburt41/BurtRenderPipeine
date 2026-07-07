@@ -24,40 +24,39 @@ Shader "Hidden/BurtRP/FurBlur"
     float4 _BurtFurBlurJitter;
     int _BurtFurBlurDebugMode;
 
-    static const float BURT_TWO_PI = 6.28318530717958647692;
-    static const int BURT_FUR_BLUR_SAMPLE_COUNT = 3;
-    static const float BURT_METER_TO_CENTIMETER = 100.0;
-    static const float BURT_FUR_VALID_THETA_EPSILON = 1e-8;
-    static const float BURT_FUR_TEMPORAL_DIRECTION_MIN_DOT = 0.4;
-
+    #define BURT_TWO_PI (6.28318530717958647692)
+    #define BURT_FUR_BLUR_SAMPLE_COUNT (3)
+    #define BURT_METER_TO_CENTIMETER (100.0)
+    #define BURT_FUR_VALID_THETA_EPSILON (1e-8)
+    #define BURT_FUR_TEMPORAL_DIRECTION_MIN_DOT (0.4)
     struct Attributes
     {
-        uint vertexID : SV_VertexID;
+        uint VertexID : SV_VertexID;
     };
 
     struct Varyings
     {
-        float4 positionCS : SV_POSITION;
-        float2 uv : TEXCOORD0;
+        float4 PositionCS : SV_POSITION;
+        float2 UV : TEXCOORD0;
     };
 
     #if SHADER_TARGET >= 45
     struct TiledAttributes
     {
-        uint vertexID : SV_VertexID;
-        uint instanceID : SV_InstanceID;
+        uint VertexID : SV_VertexID;
+        uint InstanceID : SV_InstanceID;
     };
     #endif
 
     Varyings Vert(Attributes input)
     {
         Varyings output;
-        float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
-        output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+        float2 uv = float2((input.VertexID << 1) & 2, input.VertexID & 2);
+        output.PositionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
         #if UNITY_UV_STARTS_AT_TOP
             uv.y = 1.0 - uv.y;
         #endif
-        output.uv = uv;
+        output.UV = uv;
         return output;
     }
 
@@ -65,8 +64,8 @@ Shader "Hidden/BurtRP/FurBlur"
     Varyings VertTiled(TiledAttributes input)
     {
         Varyings output;
-        float2 corner = float2(input.vertexID == 1 || input.vertexID == 2 || input.vertexID == 4 ? 1.0 : 0.0, input.vertexID == 2 || input.vertexID == 4 || input.vertexID == 5 ? 1.0 : 0.0);
-        uint tileIndex = input.instanceID * 2;
+        float2 corner = float2(input.VertexID == 1 || input.VertexID == 2 || input.VertexID == 4 ? 1.0 : 0.0, input.VertexID == 2 || input.VertexID == 4 || input.VertexID == 5 ? 1.0 : 0.0);
+        uint tileIndex = input.InstanceID * 2;
         float2 tile = float2(_BurtFurBlurTileDataBuffer[tileIndex + 0], _BurtFurBlurTileDataBuffer[tileIndex + 1]);
         float2 pixel = min(tile * 8.0 + corner * 8.0, _BurtFurBlurScreenSize.xy);
         float2 uv = pixel * _BurtFurBlurScreenSize.zw;
@@ -74,8 +73,8 @@ Shader "Hidden/BurtRP/FurBlur"
         #if UNITY_UV_STARTS_AT_TOP
             positionUv.y = 1.0 - positionUv.y;
         #endif
-        output.positionCS = float4(positionUv * 2.0 - 1.0, 0.0, 1.0);
-        output.uv = uv;
+        output.PositionCS = float4(positionUv * 2.0 - 1.0, 0.0, 1.0);
+        output.UV = uv;
         return output;
     }
     #endif
@@ -211,13 +210,13 @@ Shader "Hidden/BurtRP/FurBlur"
 
     float4 FragSetupDepth(Varyings input) : SV_Target
     {
-        float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.uv);
+        float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.UV);
         return float4(0.0, rawDepth, 0.0, 1.0);
     }
 
     float4 FragBlur(Varyings input) : SV_Target
     {
-        float2 uv = input.uv;
+        float2 uv = input.UV;
         float4 property = BurtSampleFurProperty(uv);
         float4 centerColor = BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtCameraColorTexture, uv, 0.0);
         if (!BurtIsValidFurProperty(property))
@@ -261,19 +260,19 @@ Shader "Hidden/BurtRP/FurBlur"
 
     float4 FragComposite(Varyings input) : SV_Target
     {
-        float4 property = BurtSampleFurProperty(input.uv);
+        float4 property = BurtSampleFurProperty(input.UV);
         if (!BurtIsValidFurProperty(property))
         {
             return 0.0;
         }
 
-        float4 blurResult = BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtFurBlurTemporalTexture, input.uv, 0.0);
+        float4 blurResult = BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtFurBlurTemporalTexture, input.UV, 0.0);
         return float4(blurResult.rgb, 1.0);
     }
 
     float4 FragDilate(Varyings input) : SV_Target
     {
-        float2 uv = input.uv;
+        float2 uv = input.UV;
         float4 center = BurtSampleFurProperty(uv);
         if (BurtIsValidFurProperty(center))
         {
@@ -324,7 +323,7 @@ Shader "Hidden/BurtRP/FurBlur"
 
     float4 FragThetaTemporal(Varyings input) : SV_Target
     {
-        float2 uv = input.uv;
+        float2 uv = input.UV;
         float4 current = BurtSampleFurProperty(uv);
         if (!BurtIsValidFurProperty(current))
         {
@@ -530,7 +529,7 @@ Shader "Hidden/BurtRP/FurBlur"
 
     float4 FragTemporal(Varyings input) : SV_Target
     {
-        float2 uv = input.uv;
+        float2 uv = input.UV;
         float4 current = BURT_SAMPLE_TEXTURE2D_LOD_CLAMP(_BurtFurBlurColorTexture, uv, 0.0);
         if (current.a <= 0.0)
         {
@@ -601,7 +600,7 @@ Shader "Hidden/BurtRP/FurBlur"
 
     float4 FragDebug(Varyings input) : SV_Target
     {
-        float2 uv = input.uv;
+        float2 uv = input.UV;
         float4 property = BurtSampleFurProperty(uv);
         if (_BurtFurBlurDebugMode == 1)
         {

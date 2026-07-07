@@ -61,6 +61,37 @@ MonoBehaviour:
   autoHistogramMaxEV100:
     m_OverrideState: 0
     m_Value: 20
+--- !u!114 &-5537012278052935605
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9fdb83bd0c384c4f966012d965f8c8ab, type: 3}
+  m_Name: BurtVignetteVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  color:
+    m_OverrideState: 1
+    m_Value: {r: 0, g: 0, b: 0, a: 1}
+  intensity:
+    m_OverrideState: 1
+    m_Value: 0.666
+  edgeWidth:
+    m_OverrideState: 0
+    m_Value: 0.37
+  edgeSoftness:
+    m_OverrideState: 0
+    m_Value: 0.3
+  fisheyeFovDeg:
+    m_OverrideState: 0
+    m_Value: 0
+  followAspect:
+    m_OverrideState: 0
+    m_Value: 1
 --- !u!114 &-5432317182717837885
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -420,6 +451,7 @@ MonoBehaviour:
   - {fileID: 2718075953073365877}
   - {fileID: 3018446027813319552}
   - {fileID: 7039378954940126186}
+  - {fileID: -5537012278052935605}
 --- !u!114 &1128726436058786600
 MonoBehaviour:
   m_ObjectHideFlags: 3

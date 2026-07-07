@@ -2,30 +2,47 @@
 #ifndef BURT_SHADING_MODEL_MACROS_INCLUDED
 #define BURT_SHADING_MODEL_MACROS_INCLUDED
 
-#if !defined(BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT) && !defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE) && !defined(BURT_MATERIAL_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SHADING_MODEL_SILK) && !defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) && !defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) && !defined(BURT_MATERIAL_SHADING_MODEL_FUR)
+#define BURT_TOKEN_PASTE2_IMPL(A, B) A##B
+#define BURT_TOKEN_PASTE2(A, B) BURT_TOKEN_PASTE2_IMPL(A, B)
+#define BURT_TOKEN_PASTE3_IMPL(A, B, C) A##B##C
+#define BURT_TOKEN_PASTE3(A, B, C) BURT_TOKEN_PASTE3_IMPL(A, B, C)
+
+#if !defined(BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT) && !defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE) && !defined(BURT_MATERIAL_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SHADING_MODEL_SILK) && !defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) && !defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) && !defined(BURT_MATERIAL_SHADING_MODEL_FUR) && !defined(BURT_MATERIAL_SHADING_MODEL_EYE)
     #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
 #endif
 
 #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME Hair
 #elif defined(BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT)
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_CLEAR_COAT 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME ClearCoat
 #elif defined(BURT_MATERIAL_SHADING_MODEL_SUBSURFACE)
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME Subsurface
 #elif defined(BURT_MATERIAL_SHADING_MODEL_FABRIC)
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME Fabric
 #elif defined(BURT_MATERIAL_SHADING_MODEL_SILK)
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC 1
     #define BURT_MATERIAL_SELECTED_FABRIC_IS_SILK 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME Fabric
 #elif defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME Foliage
 #elif defined(BURT_MATERIAL_SHADING_MODEL_TRUNK)
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_DEFAULT_LIT 1
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME DefaultLit
 #elif defined(BURT_MATERIAL_SHADING_MODEL_FUR)
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_FUR 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME Fur
+#elif defined(BURT_MATERIAL_SHADING_MODEL_EYE)
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME Eye
 #else
     #define BURT_MATERIAL_SELECTED_SHADING_MODEL_DEFAULT_LIT 1
+    #define BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME DefaultLit
 #endif
 
 #if defined(BURT_FORWARD_SINGLE_SHADING_MODEL) || defined(BURT_MATERIAL_GBUFFER_SINGLE_SHADING_MODEL)
@@ -87,6 +104,15 @@
         #define BURT_ENABLE_FABRIC_SHADING 0
         #define BURT_ENABLE_FOLIAGE_SHADING 0
         #define BURT_ENABLE_FUR_SHADING 1
+    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
+        #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
+        #define BURT_ENABLE_HAIR_SHADING 0
+        #define BURT_ENABLE_CLEAR_COAT_SHADING 0
+        #define BURT_ENABLE_SUBSURFACE_SHADING 0
+        #define BURT_ENABLE_FABRIC_SHADING 0
+        #define BURT_ENABLE_FOLIAGE_SHADING 0
+        #define BURT_ENABLE_FUR_SHADING 0
+        #define BURT_ENABLE_EYE_SHADING 1
     #else
         #define BURT_ENABLE_DEFAULT_LIT_SHADING 1
         #define BURT_ENABLE_HAIR_SHADING 0
@@ -101,6 +127,7 @@
 #if defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL)
     #if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
         #define BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID BURT_SHADING_MODEL_HAIR
+        #define BURT_DEFERRED_SHADING_MODEL_NAME Hair
         #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
         #define BURT_ENABLE_HAIR_SHADING 1
         #define BURT_ENABLE_CLEAR_COAT_SHADING 0
@@ -110,6 +137,7 @@
         #define BURT_ENABLE_FUR_SHADING 0
     #elif defined(BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT)
         #define BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID BURT_SHADING_MODEL_CLEAR_COAT
+        #define BURT_DEFERRED_SHADING_MODEL_NAME ClearCoat
         #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
         #define BURT_ENABLE_HAIR_SHADING 0
         #define BURT_ENABLE_CLEAR_COAT_SHADING 1
@@ -119,6 +147,7 @@
         #define BURT_ENABLE_FUR_SHADING 0
     #elif defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
         #define BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID BURT_SHADING_MODEL_SUBSURFACE
+        #define BURT_DEFERRED_SHADING_MODEL_NAME Subsurface
         #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
         #define BURT_ENABLE_HAIR_SHADING 0
         #define BURT_ENABLE_CLEAR_COAT_SHADING 0
@@ -128,6 +157,7 @@
         #define BURT_ENABLE_FUR_SHADING 0
     #elif defined(BURT_DEFERRED_SHADING_MODEL_FABRIC)
         #define BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID BURT_SHADING_MODEL_FABRIC
+        #define BURT_DEFERRED_SHADING_MODEL_NAME Fabric
         #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
         #define BURT_ENABLE_HAIR_SHADING 0
         #define BURT_ENABLE_CLEAR_COAT_SHADING 0
@@ -137,6 +167,7 @@
         #define BURT_ENABLE_FUR_SHADING 0
     #elif defined(BURT_DEFERRED_SHADING_MODEL_FOLIAGE)
         #define BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID BURT_SHADING_MODEL_FOLIAGE
+        #define BURT_DEFERRED_SHADING_MODEL_NAME Foliage
         #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
         #define BURT_ENABLE_HAIR_SHADING 0
         #define BURT_ENABLE_CLEAR_COAT_SHADING 0
@@ -146,6 +177,7 @@
         #define BURT_ENABLE_FUR_SHADING 0
     #elif defined(BURT_DEFERRED_SHADING_MODEL_FUR)
         #define BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID BURT_SHADING_MODEL_FUR
+        #define BURT_DEFERRED_SHADING_MODEL_NAME Fur
         #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
         #define BURT_ENABLE_HAIR_SHADING 0
         #define BURT_ENABLE_CLEAR_COAT_SHADING 0
@@ -153,8 +185,20 @@
         #define BURT_ENABLE_FABRIC_SHADING 0
         #define BURT_ENABLE_FOLIAGE_SHADING 0
         #define BURT_ENABLE_FUR_SHADING 1
+    #elif defined(BURT_DEFERRED_SHADING_MODEL_EYE)
+        #define BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID BURT_SHADING_MODEL_EYE
+        #define BURT_DEFERRED_SHADING_MODEL_NAME Eye
+        #define BURT_ENABLE_DEFAULT_LIT_SHADING 0
+        #define BURT_ENABLE_HAIR_SHADING 0
+        #define BURT_ENABLE_CLEAR_COAT_SHADING 0
+        #define BURT_ENABLE_SUBSURFACE_SHADING 0
+        #define BURT_ENABLE_FABRIC_SHADING 0
+        #define BURT_ENABLE_FOLIAGE_SHADING 0
+        #define BURT_ENABLE_FUR_SHADING 0
+        #define BURT_ENABLE_EYE_SHADING 1
     #else
         #define BURT_DEFERRED_LIGHTING_SHADING_MODEL_ID BURT_SHADING_MODEL_DEFAULT_LIT
+        #define BURT_DEFERRED_SHADING_MODEL_NAME DefaultLit
         #define BURT_ENABLE_DEFAULT_LIT_SHADING 1
         #define BURT_ENABLE_HAIR_SHADING 0
         #define BURT_ENABLE_CLEAR_COAT_SHADING 0
@@ -162,7 +206,14 @@
         #define BURT_ENABLE_FABRIC_SHADING 0
         #define BURT_ENABLE_FOLIAGE_SHADING 0
         #define BURT_ENABLE_FUR_SHADING 0
+        #define BURT_ENABLE_EYE_SHADING 1
     #endif
+#endif
+
+#if defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL)
+    #define BURT_STATIC_SHADING_MODEL_NAME BURT_DEFERRED_SHADING_MODEL_NAME
+#elif defined(BURT_MATERIAL_SINGLE_SHADING_MODEL)
+    #define BURT_STATIC_SHADING_MODEL_NAME BURT_MATERIAL_SELECTED_SHADING_MODEL_NAME
 #endif
 
 #if !defined(BURT_ENABLE_DEFAULT_LIT_SHADING)
@@ -221,6 +272,14 @@
     #endif
 #endif
 
+#if !defined(BURT_ENABLE_EYE_SHADING)
+    #if defined(BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL) || defined(BURT_MATERIAL_SINGLE_SHADING_MODEL)
+        #define BURT_ENABLE_EYE_SHADING 0
+    #else
+        #define BURT_ENABLE_EYE_SHADING 1
+    #endif
+#endif
+
 #if BURT_STATIC_SHADING_MODEL
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_DEFAULT_LIT) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK) || defined(BURT_DEFERRED_SHADING_MODEL_DEFAULT_LIT)
         #define BURT_ACTIVE_DEFAULT_LIT_SHADING_MODEL 1
@@ -263,6 +322,12 @@
     #else
         #define BURT_ACTIVE_FUR_SHADING_MODEL 0
     #endif
+
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE) || defined(BURT_DEFERRED_SHADING_MODEL_EYE)
+        #define BURT_ACTIVE_EYE_SHADING_MODEL 1
+    #else
+        #define BURT_ACTIVE_EYE_SHADING_MODEL 0
+    #endif
 #else
     #define BURT_ACTIVE_DEFAULT_LIT_SHADING_MODEL 0
     #define BURT_ACTIVE_HAIR_SHADING_MODEL 0
@@ -271,9 +336,10 @@
     #define BURT_ACTIVE_FABRIC_SHADING_MODEL 0
     #define BURT_ACTIVE_FOLIAGE_SHADING_MODEL 0
     #define BURT_ACTIVE_FUR_SHADING_MODEL 0
+    #define BURT_ACTIVE_EYE_SHADING_MODEL 0
 #endif
 
-bool BurtIsActiveDefaultLitShadingModel(float shadingModelID)
+bool BurtIsActiveDefaultLitShadingModel(float ShadingModelID)
 {
 #if BURT_STATIC_SHADING_MODEL
     #if BURT_ACTIVE_DEFAULT_LIT_SHADING_MODEL
@@ -282,11 +348,11 @@ bool BurtIsActiveDefaultLitShadingModel(float shadingModelID)
         return false;
     #endif
 #else
-    return abs(BurtResolveSurfaceShadingModel(shadingModelID) - BURT_SHADING_MODEL_DEFAULT_LIT) < 0.5f;
+    return abs(BurtResolveSurfaceShadingModel(ShadingModelID) - BURT_SHADING_MODEL_DEFAULT_LIT) < 0.5f;
 #endif
 }
 
-bool BurtIsActiveHairShadingModel(float shadingModelID)
+bool BurtIsActiveHairShadingModel(float ShadingModelID)
 {
 #if BURT_STATIC_SHADING_MODEL
     #if BURT_ACTIVE_HAIR_SHADING_MODEL
@@ -295,11 +361,11 @@ bool BurtIsActiveHairShadingModel(float shadingModelID)
         return false;
     #endif
 #else
-    return BurtIsHairShadingModel(shadingModelID);
+    return BurtIsHairShadingModel(ShadingModelID);
 #endif
 }
 
-bool BurtIsActiveClearCoatShadingModel(float shadingModelID)
+bool BurtIsActiveClearCoatShadingModel(float ShadingModelID)
 {
 #if BURT_STATIC_SHADING_MODEL
     #if BURT_ACTIVE_CLEAR_COAT_SHADING_MODEL
@@ -308,11 +374,11 @@ bool BurtIsActiveClearCoatShadingModel(float shadingModelID)
         return false;
     #endif
 #else
-    return BurtIsClearCoatShadingModel(shadingModelID);
+    return BurtIsClearCoatShadingModel(ShadingModelID);
 #endif
 }
 
-bool BurtIsActiveSubsurfaceShadingModel(float shadingModelID)
+bool BurtIsActiveSubsurfaceShadingModel(float ShadingModelID)
 {
 #if BURT_STATIC_SHADING_MODEL
     #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
@@ -321,11 +387,11 @@ bool BurtIsActiveSubsurfaceShadingModel(float shadingModelID)
         return false;
     #endif
 #else
-    return BurtIsSubsurfaceShadingModel(shadingModelID);
+    return BurtIsSubsurfaceShadingModel(ShadingModelID);
 #endif
 }
 
-bool BurtIsActiveFabricShadingModel(float shadingModelID)
+bool BurtIsActiveFabricShadingModel(float ShadingModelID)
 {
 #if BURT_STATIC_SHADING_MODEL
     #if BURT_ACTIVE_FABRIC_SHADING_MODEL
@@ -334,11 +400,11 @@ bool BurtIsActiveFabricShadingModel(float shadingModelID)
         return false;
     #endif
 #else
-    return BurtIsFabricShadingModel(shadingModelID);
+    return BurtIsFabricShadingModel(ShadingModelID);
 #endif
 }
 
-bool BurtIsActiveFoliageShadingModel(float shadingModelID)
+bool BurtIsActiveFoliageShadingModel(float ShadingModelID)
 {
 #if BURT_STATIC_SHADING_MODEL
     #if BURT_ACTIVE_FOLIAGE_SHADING_MODEL
@@ -347,11 +413,11 @@ bool BurtIsActiveFoliageShadingModel(float shadingModelID)
         return false;
     #endif
 #else
-    return BurtIsFoliageShadingModel(shadingModelID);
+    return BurtIsFoliageShadingModel(ShadingModelID);
 #endif
 }
 
-bool BurtIsActiveFurShadingModel(float shadingModelID)
+bool BurtIsActiveFurShadingModel(float ShadingModelID)
 {
 #if BURT_STATIC_SHADING_MODEL
     #if BURT_ACTIVE_FUR_SHADING_MODEL
@@ -360,7 +426,22 @@ bool BurtIsActiveFurShadingModel(float shadingModelID)
         return false;
     #endif
 #else
-    return BurtIsFurShadingModel(shadingModelID);
+    return BurtIsFurShadingModel(ShadingModelID);
+#endif
+}
+
+bool BurtIsActiveEyeShadingModel(float ShadingModelID)
+{
+#if BURT_STATIC_SHADING_MODEL
+    #if defined(BURT_DEFERRED_SHADING_MODEL_DEFAULT_LIT) && BURT_ENABLE_EYE_SHADING
+        return BurtIsEyeShadingModel(ShadingModelID);
+    #elif BURT_ACTIVE_EYE_SHADING_MODEL
+        return true;
+    #else
+        return false;
+    #endif
+#else
+    return BurtIsEyeShadingModel(ShadingModelID);
 #endif
 }
 

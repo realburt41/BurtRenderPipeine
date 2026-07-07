@@ -18,33 +18,32 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
             float4 _BurtIBLFilterBakeTintIntensity; // rgb = tint, a = intensity.
             float4 _BurtIBLFilterBakeLowerHemisphere; // rgb = solid color, a = blend.
 
-            static const float BURT_IBL_PI = 3.14159265358979323846f;
-            static const float BURT_IBL_TWO_PI = 6.28318530717958647692f;
-            static const float BURT_IBL_FOUR_PI = 12.56637061435917295384f;
-            static const float BURT_IBL_GOLDEN_RATIO = 1.618033988749895f;
-            static const float BURT_IBL_MAX_HALF_FLOAT = 65504.0f;
-            static const float BURT_IBL_SH_C0 = 0.07957747154594767f;
-            static const float BURT_IBL_SH_C1 = 0.15915494309189535f;
-            static const float BURT_IBL_SH_C2 = 0.2984155182973038f;
-            static const float BURT_IBL_SH_C3 = 0.024867959858882128f;
-            static const float BURT_IBL_SH_C4 = 0.07460387957664638f;
-
+            #define BURT_IBL_PI (3.14159265358979323846f)
+            #define BURT_IBL_TWO_PI (6.28318530717958647692f)
+            #define BURT_IBL_FOUR_PI (12.56637061435917295384f)
+            #define BURT_IBL_GOLDEN_RATIO (1.618033988749895f)
+            #define BURT_IBL_MAX_HALF_FLOAT (65504.0f)
+            #define BURT_IBL_SH_C0 (0.07957747154594767f)
+            #define BURT_IBL_SH_C1 (0.15915494309189535f)
+            #define BURT_IBL_SH_C2 (0.2984155182973038f)
+            #define BURT_IBL_SH_C3 (0.024867959858882128f)
+            #define BURT_IBL_SH_C4 (0.07460387957664638f)
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 uv : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 UV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = float4((input.vertexID == 2 ? 3.0f : -1.0f), (input.vertexID == 1 ? 3.0f : -1.0f), 0.0f, 1.0f);
-                output.uv = float2((input.vertexID == 2 ? 2.0f : 0.0f), (input.vertexID == 1 ? 2.0f : 0.0f));
+                output.PositionCS = float4((input.VertexID == 2 ? 3.0f : -1.0f), (input.VertexID == 1 ? 3.0f : -1.0f), 0.0f, 1.0f);
+                output.UV = float2((input.VertexID == 2 ? 2.0f : 0.0f), (input.VertexID == 1 ? 2.0f : 0.0f));
                 return output;
             }
 
@@ -260,7 +259,7 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
 
             float4 FragSpecular(Varyings input) : SV_Target
             {
-                float3 normalWS = BurtIBLPixelCoordToXRenderDirection(input.positionCS.xy);
+                float3 normalWS = BurtIBLPixelCoordToXRenderDirection(input.PositionCS.xy);
                 float3 viewWS = normalWS;
                 float perceptualRoughness = max(_BurtIBLFilterParams.x, 0.0f);
                 float linearRoughness = max(perceptualRoughness * perceptualRoughness, 0.0001f);
@@ -320,7 +319,7 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
 
             float4 FragDiffuse(Varyings input) : SV_Target
             {
-                float3 normalWS = BurtIBLPixelCoordToXRenderDirection(input.positionCS.xy);
+                float3 normalWS = BurtIBLPixelCoordToXRenderDirection(input.PositionCS.xy);
                 uint sampleCount = (uint)clamp(round(_BurtIBLFilterParams.z), 1.0f, 512.0f);
                 float sourceMaxMip = max(_BurtIBLFilterParams.y, 0.0f);
                 float3 tangentWS;
@@ -354,7 +353,7 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
 
             float4 FragBakeSource(Varyings input) : SV_Target
             {
-                float3 directionWS = BurtIBLPixelCoordToXRenderDirection(input.positionCS.xy);
+                float3 directionWS = BurtIBLPixelCoordToXRenderDirection(input.PositionCS.xy);
                 float3 sampleDirectionWS = BurtIBLRotateBakeDirection(directionWS);
                 float bakeIntensity = max(_BurtIBLFilterBakeTintIntensity.a, 0.0f);
                 float3 color = BurtIBLSampleSource(sampleDirectionWS, 0.0f) *
@@ -373,7 +372,7 @@ Shader "Hidden/BurtRP/ImageBasedFilter"
 
             float4 FragDiffuseSH(Varyings input) : SV_Target
             {
-                uint coefficientIndex = (uint)clamp(floor(input.uv.x * _BurtIBLFilterFaceMip.z), 0.0f, 6.0f);
+                uint coefficientIndex = (uint)clamp(floor(input.UV.x * _BurtIBLFilterFaceMip.z), 0.0f, 6.0f);
                 uint sampleCount = (uint)clamp(round(_BurtIBLFilterParams.z), 1.0f, 512.0f);
                 float sourceMaxMip = max(_BurtIBLFilterParams.y, 0.0f);
                 float sourceResolution = max(_BurtIBLFilterParams.w, exp2(sourceMaxMip));

@@ -141,17 +141,17 @@ Shader "BurtRP/UnlitColor"
             struct Attributes
             {
                 // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
-                float4 positionOS : POSITION;
-                float3 normalOS : NORMAL;
+                float4 PositionOS : POSITION;
+                float3 NormalOS : NORMAL;
             };
 
             // 定义顶点输出结构，也就是顶点 shader 传给片元 shader 的数据。
             struct Varyings
             {
                 // 输出裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
-                float4 positionCS : SV_POSITION;
-                float3 positionWS : TEXCOORD0;
-                float3 normalWS : TEXCOORD1;
+                float4 PositionCS : SV_POSITION;
+                float3 PositionWS : TEXCOORD0;
+                float3 NormalWS : TEXCOORD1;
             };
 
             // 定义顶点 shader 函数，输入 Mesh 顶点数据，输出裁剪空间位置。
@@ -161,9 +161,9 @@ Shader "BurtRP/UnlitColor"
                 Varyings output;
 
                 // 把模型空间顶点位置转换到裁剪空间，GPU 后续会用它进行屏幕投影。
-                output.positionCS = UnityObjectToClipPos(input.positionOS);
-                output.positionWS = mul(unity_ObjectToWorld, input.positionOS).xyz;
-                output.normalWS = UnityObjectToWorldNormal(input.normalOS);
+                output.PositionCS = UnityObjectToClipPos(input.PositionOS);
+                output.PositionWS = mul(unity_ObjectToWorld, input.PositionOS).xyz;
+                output.NormalWS = UnityObjectToWorldNormal(input.NormalOS);
 
                 // 返回顶点 shader 输出结果。
                 return output;
@@ -176,59 +176,59 @@ Shader "BurtRP/UnlitColor"
                 if (BurtIsShadingDebugEnabled())
                 {
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
-                float3 normalWS = BurtSafeNormalize(input.normalWS);
-                float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex));
-                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.positionWS);
+                float3 normalWS = BurtSafeNormalize(input.NormalWS);
+                float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.PositionWS);
+                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.PositionWS, normalWS, _BurtPerObjectShadowObjectIndex));
+                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.PositionWS);
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
-                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
-                debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
-                debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
-                debugData.additionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
-                    ? pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular
+                debugData.ShadowAttenuation = BurtSampleMainLightShadow(input.PositionWS, normalWS, _BurtPerObjectShadowObjectIndex);
+                debugData.AdditionalDiffuseColor = pbrComponents.AdditionalDiffuse;
+                debugData.AdditionalSpecularColor = pbrComponents.AdditionalSpecular;
+                debugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+                    ? pbrComponents.AdditionalDiffuse + pbrComponents.AdditionalSpecular
                     : float3(0.0f, 0.0f, 0.0f);
-                debugData.additionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
-                    ? BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS)
+                debugData.AdditionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
+                    ? BurtEvaluateAdditionalShadowAttenuationDebug(input.PositionWS, normalWS)
                     : 1.0f;
                 if (BurtNeedsAdditionalShadowProjectionShadingDebug())
                 {
                     BurtFillAdditionalLightShadowProjectionDebugData(
-                        input.positionWS,
+                        input.PositionWS,
                         normalWS,
-                        debugData.additionalShadowFaceColor,
-                        debugData.additionalShadowUVColor,
-                        debugData.additionalShadowDepthColor,
-                        debugData.additionalShadowDepthDeltaColor);
+                        debugData.AdditionalShadowFaceColor,
+                        debugData.AdditionalShadowUVColor,
+                        debugData.AdditionalShadowDepthColor,
+                        debugData.AdditionalShadowDepthDeltaColor);
                 }
-                debugData.finalLightingColor = _BaseColor.rgb;
+                debugData.FinalLightingColor = _BaseColor.rgb;
 
                 BurtFillMainLightShadowShadingDebugData(
-                    input.positionWS,
-                    debugData.normalWS,
-                    debugData.shadowCascadeColor,
-                    debugData.shadowCascadeBlend,
-                    debugData.shadowDistanceFade,
-                    debugData.shadowPCSSRadius,
-                    debugData.shadowReceiverDepthDelta,
-                    debugData.shadowPCSSBlockerFraction);
+                    input.PositionWS,
+                    debugData.NormalWS,
+                    debugData.ShadowCascadeColor,
+                    debugData.ShadowCascadeBlend,
+                    debugData.ShadowDistanceFade,
+                    debugData.ShadowPCSSRadius,
+                    debugData.ShadowReceiverDepthDelta,
+                    debugData.ShadowPCSSBlockerFraction);
 
                 BurtFillPerObjectShadowShadingDebugData(
-                    input.positionWS,
+                    input.PositionWS,
                     normalWS,
                     _BurtPerObjectShadowObjectIndex,
-                    debugData.perObjectShadowObjectIndexColor,
-                    debugData.perObjectShadowSliceColor,
-                    debugData.perObjectShadowUVColor,
-                    debugData.perObjectShadowDepthColor,
-                    debugData.perObjectShadowCompareColor,
-                    debugData.perObjectShadowTransmissionDepthColor,
-                    debugData.perObjectShadowTransmissionThicknessColor);
+                    debugData.PerObjectShadowObjectIndexColor,
+                    debugData.PerObjectShadowSliceColor,
+                    debugData.PerObjectShadowUVColor,
+                    debugData.PerObjectShadowDepthColor,
+                    debugData.PerObjectShadowCompareColor,
+                    debugData.PerObjectShadowTransmissionDepthColor,
+                    debugData.PerObjectShadowTransmissionThicknessColor);
 
                 float3 debugColor;
                 if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
                 {
-                    return float4(debugColor, surfaceData.alpha);
+                    return float4(debugColor, surfaceData.Alpha);
                 }
                 }
 #endif
@@ -291,17 +291,17 @@ Shader "BurtRP/UnlitColor"
             struct ForwardOnlyAttributes
             {
                 // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
-                float4 positionOS : POSITION;
-                float3 normalOS : NORMAL;
+                float4 PositionOS : POSITION;
+                float3 NormalOS : NORMAL;
             };
 
             // 定义 Deferred ForwardOnly 顶点输出结构，也就是顶点 shader 传给片元 shader 的数据。
             struct ForwardOnlyVaryings
             {
                 // 输出裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
-                float4 positionCS : SV_POSITION;
-                float3 positionWS : TEXCOORD0;
-                float3 normalWS : TEXCOORD1;
+                float4 PositionCS : SV_POSITION;
+                float3 PositionWS : TEXCOORD0;
+                float3 NormalWS : TEXCOORD1;
             };
 
             // 定义 Deferred ForwardOnly 顶点 shader 函数，输入 Mesh 顶点数据，输出裁剪空间位置。
@@ -311,9 +311,9 @@ Shader "BurtRP/UnlitColor"
                 ForwardOnlyVaryings output;
 
                 // 把模型空间顶点位置转换到裁剪空间，GPU 后续会用它进行屏幕投影。
-                output.positionCS = UnityObjectToClipPos(input.positionOS);
-                output.positionWS = mul(unity_ObjectToWorld, input.positionOS).xyz;
-                output.normalWS = UnityObjectToWorldNormal(input.normalOS);
+                output.PositionCS = UnityObjectToClipPos(input.PositionOS);
+                output.PositionWS = mul(unity_ObjectToWorld, input.PositionOS).xyz;
+                output.NormalWS = UnityObjectToWorldNormal(input.NormalOS);
 
                 // 返回顶点 shader 输出结果。
                 return output;
@@ -326,59 +326,59 @@ Shader "BurtRP/UnlitColor"
                 if (BurtIsShadingDebugEnabled())
                 {
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
-                float3 normalWS = BurtSafeNormalize(input.normalWS);
-                float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex));
-                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.positionWS);
+                float3 normalWS = BurtSafeNormalize(input.NormalWS);
+                float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.PositionWS);
+                BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.PositionWS, normalWS, _BurtPerObjectShadowObjectIndex));
+                BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.PositionWS);
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
-                debugData.shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
-                debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
-                debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
-                debugData.additionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
-                    ? pbrComponents.additionalDiffuse + pbrComponents.additionalSpecular
+                debugData.ShadowAttenuation = BurtSampleMainLightShadow(input.PositionWS, normalWS, _BurtPerObjectShadowObjectIndex);
+                debugData.AdditionalDiffuseColor = pbrComponents.AdditionalDiffuse;
+                debugData.AdditionalSpecularColor = pbrComponents.AdditionalSpecular;
+                debugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+                    ? pbrComponents.AdditionalDiffuse + pbrComponents.AdditionalSpecular
                     : float3(0.0f, 0.0f, 0.0f);
-                debugData.additionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
-                    ? BurtEvaluateAdditionalShadowAttenuationDebug(input.positionWS, normalWS)
+                debugData.AdditionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
+                    ? BurtEvaluateAdditionalShadowAttenuationDebug(input.PositionWS, normalWS)
                     : 1.0f;
                 if (BurtNeedsAdditionalShadowProjectionShadingDebug())
                 {
                     BurtFillAdditionalLightShadowProjectionDebugData(
-                        input.positionWS,
+                        input.PositionWS,
                         normalWS,
-                        debugData.additionalShadowFaceColor,
-                        debugData.additionalShadowUVColor,
-                        debugData.additionalShadowDepthColor,
-                        debugData.additionalShadowDepthDeltaColor);
+                        debugData.AdditionalShadowFaceColor,
+                        debugData.AdditionalShadowUVColor,
+                        debugData.AdditionalShadowDepthColor,
+                        debugData.AdditionalShadowDepthDeltaColor);
                 }
-                debugData.finalLightingColor = _BaseColor.rgb;
+                debugData.FinalLightingColor = _BaseColor.rgb;
 
                 BurtFillMainLightShadowShadingDebugData(
-                    input.positionWS,
-                    debugData.normalWS,
-                    debugData.shadowCascadeColor,
-                    debugData.shadowCascadeBlend,
-                    debugData.shadowDistanceFade,
-                    debugData.shadowPCSSRadius,
-                    debugData.shadowReceiverDepthDelta,
-                    debugData.shadowPCSSBlockerFraction);
+                    input.PositionWS,
+                    debugData.NormalWS,
+                    debugData.ShadowCascadeColor,
+                    debugData.ShadowCascadeBlend,
+                    debugData.ShadowDistanceFade,
+                    debugData.ShadowPCSSRadius,
+                    debugData.ShadowReceiverDepthDelta,
+                    debugData.ShadowPCSSBlockerFraction);
 
                 BurtFillPerObjectShadowShadingDebugData(
-                    input.positionWS,
+                    input.PositionWS,
                     normalWS,
                     _BurtPerObjectShadowObjectIndex,
-                    debugData.perObjectShadowObjectIndexColor,
-                    debugData.perObjectShadowSliceColor,
-                    debugData.perObjectShadowUVColor,
-                    debugData.perObjectShadowDepthColor,
-                    debugData.perObjectShadowCompareColor,
-                    debugData.perObjectShadowTransmissionDepthColor,
-                    debugData.perObjectShadowTransmissionThicknessColor);
+                    debugData.PerObjectShadowObjectIndexColor,
+                    debugData.PerObjectShadowSliceColor,
+                    debugData.PerObjectShadowUVColor,
+                    debugData.PerObjectShadowDepthColor,
+                    debugData.PerObjectShadowCompareColor,
+                    debugData.PerObjectShadowTransmissionDepthColor,
+                    debugData.PerObjectShadowTransmissionThicknessColor);
 
                 float3 debugColor;
                 if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
                 {
-                    return float4(debugColor, surfaceData.alpha);
+                    return float4(debugColor, surfaceData.Alpha);
                 }
                 }
 #endif

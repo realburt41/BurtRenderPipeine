@@ -355,7 +355,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
                 return; // 跳过缺失字段，错误已由 FindProperty 输出。
             }
 
-            EditorGUILayout.PropertyField(property, label, true); // 绘制对象本身和所有子字段，确保 BurtPostProcessSettings 可以直接展开编辑。
+            EditorGUILayout.PropertyField(property, label, true); // 绘制对象本身和所有子字段，确保 PostProcessSettings 可以直接展开编辑。
         }
     }
 }

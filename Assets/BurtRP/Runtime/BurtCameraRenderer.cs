@@ -55,7 +55,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             var safeRenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // 传入空 options 时回退旧行为，避免调用方漏传导致 RT 不分配。
 
-            BurtPostProcessUtility.UpdateVolumeStack(request, asset); // 每个 request 渲染前刷新 VolumeStack，让后处理 Pass 能读取当前 Global Volume 参数。
+            PostProcessUtility.UpdateVolumeStack(request, asset); // 每个 request 渲染前刷新 VolumeStack，让后处理 Pass 能读取当前 Global Volume 参数。
 
             var temporalAA = BurtTemporalAAUtility.PrepareRequest(request, asset, safeRenderOptions);
             request.SetTemporalAA(temporalAA);

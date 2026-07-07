@@ -31,56 +31,56 @@ float4 _BurtBlueNoiseModuloMasks;
 float _BurtBlueNoiseScalarTextureValid;
 float _BurtBlueNoiseFrameIndex;
 
-static const float BURT_MULTIPASS_FUR_REFERENCE_LAYER_COUNT = 16.0f;
-static const float BURT_TWO_PI = 6.28318530717958647692f;
-static const float BURT_INV_TWO_PI = 0.15915494309189535f;
-
+#define BURT_MULTIPASS_FUR_REFERENCE_LAYER_COUNT (16.0f)
+#define BURT_TWO_PI (6.28318530717958647692f)
+#define BURT_INV_TWO_PI (0.15915494309189535f)
 struct BurtMultipassFurAttributes
 {
-    float4 positionOS : POSITION;
-    float3 normalOS : NORMAL;
-    float4 tangentOS : TANGENT;
-    float2 uv0 : TEXCOORD0;
-    float2 uv1 : TEXCOORD1;
-    float3 previousPositionOS : TEXCOORD4;
-    float3 previousNormalOS : TEXCOORD5;
-    float4 previousTangentOS : TEXCOORD6;
+    float4 PositionOS : POSITION;
+    float3 NormalOS : NORMAL;
+    float4 TangentOS : TANGENT;
+    float2 UV0 : TEXCOORD0;
+    float2 UV1 : TEXCOORD1;
+    float3 PreviousPositionOS : TEXCOORD4;
+    float3 PreviousNormalOS : TEXCOORD5;
+    float4 PreviousTangentOS : TEXCOORD6;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct BurtMultipassFurVaryings
 {
-    float4 positionCS : SV_POSITION;
-    float3 positionWS : TEXCOORD0;
-    float3 normalWS : TEXCOORD1;
-    float4 tangentWS : TEXCOORD2;
-    float2 uv0 : TEXCOORD3;
-    float2 uv1 : TEXCOORD4;
-    float layerIndex : TEXCOORD5;
-    float3 geometricNormalWS : TEXCOORD6;
-    float3 furDirectionWS : TEXCOORD7;
-    float3 furOffsetDirectionWS : TEXCOORD8;
+    float4 PositionCS : SV_POSITION;
+    float3 PositionWS : TEXCOORD0;
+    float3 NormalWS : TEXCOORD1;
+    float4 TangentWS : TEXCOORD2;
+    float2 UV0 : TEXCOORD3;
+    float2 UV1 : TEXCOORD4;
+    float LayerIndex : TEXCOORD5;
+    float3 GeometricNormalWS : TEXCOORD6;
+    float3 FurDirectionWS : TEXCOORD7;
+    float3 FurOffsetDirectionWS : TEXCOORD8;
 };
 
 struct BurtMultipassFurGBufferOutput
 {
-    float4 gbuffer0 : SV_Target0;
-    float4 gbuffer1 : SV_Target1;
-    float4 gbuffer2 : SV_Target2;
-    float4 gbuffer3 : SV_Target3;
-    float4 gbuffer4 : SV_Target4;
-    float4 objectIndex : SV_Target5;
+    float4 GBuffer0 : SV_Target0;
+    float4 GBuffer1 : SV_Target1;
+    float4 GBuffer2 : SV_Target2;
+    float4 GBuffer3 : SV_Target3;
+    float4 GBuffer4 : SV_Target4;
+    float4 GBuffer5 : SV_Target5;
+    float4 ObjectIndex : SV_Target6;
 };
 
 struct BurtMultipassFurVelocityVaryings
 {
-    float4 positionCS : SV_POSITION;
-    float4 currentClipNoJitter : TEXCOORD0;
-    float4 previousClipNoJitter : TEXCOORD1;
-    float2 uv0 : TEXCOORD2;
-    float2 uv1 : TEXCOORD3;
-    float layerIndex : TEXCOORD4;
-    float velocityValid : TEXCOORD5;
+    float4 PositionCS : SV_POSITION;
+    float4 CurrentClipNoJitter : TEXCOORD0;
+    float4 PreviousClipNoJitter : TEXCOORD1;
+    float2 UV0 : TEXCOORD2;
+    float2 UV1 : TEXCOORD3;
+    float LayerIndex : TEXCOORD4;
+    float VelocityValid : TEXCOORD5;
 };
 
 float4 BurtEncodeMultipassFurPerObjectShadowObjectIndexTarget()
@@ -128,10 +128,10 @@ float4 BurtSampleMultipassFurDirectionLength(float2 directionUV, int segmentInde
 {
     if (_UseDirectionMapSegment > 0.5f)
     {
-        return BURT_SAMPLE_TEXTURE2D_ARRAY_LOD_REPEAT(_FlowDirectionMapSegmentArray, directionUV, segmentIndex, 0.0f);
+        return SAMPLE_TEXTURE2D_ARRAY_LOD(_FlowDirectionMapSegmentArray, sampler_LinearRepeat, directionUV, segmentIndex, 0.0f);
     }
 
-    return _FlowDirectionMap.SampleLevel(sampler_LinearRepeat, directionUV, 0.0f);
+    return SAMPLE_TEXTURE2D_LOD(_FlowDirectionMap, sampler_LinearRepeat, directionUV, 0.0f);
 }
 
 void BurtCalculateMultipassFurDirectionLength(
@@ -144,8 +144,8 @@ void BurtCalculateMultipassFurDirectionLength(
 {
     float4 directionLength = BurtSampleMultipassFurDirectionLength(directionUV, segmentIndex);
     float3 directionTS = directionLength.xyz * 2.0f - 1.0f;
-    float3 bentDirectionOS = BurtMultipassFurTangentToObject(directionTS, input.tangentOS, input.normalOS);
-    furDirectionOS = lerp(input.normalOS, bentDirectionOS, intensity);
+    float3 bentDirectionOS = BurtMultipassFurTangentToObject(directionTS, input.TangentOS, input.NormalOS);
+    furDirectionOS = lerp(input.NormalOS, bentDirectionOS, intensity);
     furLength = directionLength.a;
 }
 
@@ -157,12 +157,12 @@ float4 BurtMultipassFurObjectToWorldTangent(float4 tangentOS)
 
 float3 BurtGetMultipassFurNormalWS(BurtMultipassFurVaryings input, float facing)
 {
-    return BurtSampleNormalWS(input.uv0, input.normalWS, input.tangentWS, _NormalScale, facing, _DoubleSidedNormalModeConstants);
+    return BurtSampleNormalWS(input.UV0, input.NormalWS, input.TangentWS, _NormalScale, facing, _DoubleSidedNormalModeConstants);
 }
 
 float3 BurtGetMultipassFurGeometryNormalWS(BurtMultipassFurVaryings input, float facing)
 {
-    float3 normalWS = input.geometricNormalWS;
+    float3 normalWS = input.GeometricNormalWS;
     if (facing < 0.0f)
     {
         normalWS *= _DoubleSidedNormalModeConstants.z;
@@ -173,8 +173,8 @@ float3 BurtGetMultipassFurGeometryNormalWS(BurtMultipassFurVaryings input, float
 
 float3 BurtGetMultipassFurShadingDirectionWS(BurtMultipassFurVaryings input)
 {
-    float3 furDirectionWS = BurtSafeNormalize(input.furDirectionWS);
-    return dot(furDirectionWS, furDirectionWS) > BURT_EPSILON ? furDirectionWS : BurtSafeNormalize(input.tangentWS.xyz);
+    float3 furDirectionWS = BurtSafeNormalize(input.FurDirectionWS);
+    return dot(furDirectionWS, furDirectionWS) > BURT_EPSILON ? furDirectionWS : BurtSafeNormalize(input.TangentWS.xyz);
 }
 
 float3 BurtMultipassFurGravityVector(float furAtten)
@@ -202,7 +202,7 @@ bool BurtShouldUseMultipassFurDirectionMap()
 float3 BurtCalculateMultipassFurOffsetOS(BurtMultipassFurAttributes input, float layerIndex, out float3 furDirectionForShadingOS)
 {
     float furAtten = BurtMultipassFurAttenuation(layerIndex);
-    float3 furDirectionOS = input.normalOS;
+    float3 furDirectionOS = input.NormalOS;
     float3 furDirectionOS1 = furDirectionOS;
     float3 furDirectionOS2 = furDirectionOS;
     float furLength = 0.05f;
@@ -211,7 +211,7 @@ float3 BurtCalculateMultipassFurOffsetOS(BurtMultipassFurAttributes input, float
 
     if (BurtShouldUseMultipassFurDirectionMap())
     {
-        float2 directionUV = _FlowDirectionUV2 > 0.5f ? input.uv1 : input.uv0;
+        float2 directionUV = _FlowDirectionUV2 > 0.5f ? input.UV1 : input.UV0;
         if (_UseDirectionMapSegment > 0.5f)
         {
             BurtCalculateMultipassFurDirectionLength(input, directionUV, 0, _FlowDirectionIntensitySegment1, furDirectionOS, furLength);
@@ -249,7 +249,7 @@ float3 BurtCalculateMultipassFurOffsetOS(BurtMultipassFurAttributes input, float
             BurtSafeNormalize(furDirectionOS2) * max(furLength2, BURT_EPSILON));
     }
 
-    float3 finalOffset = finalFur + input.normalOS * _FurExpand * 0.01f;
+    float3 finalOffset = finalFur + input.NormalOS * _FurExpand * 0.01f;
     furDirectionForShadingOS = dot(finalOffset, finalOffset) > BURT_EPSILON ? BurtSafeNormalize(finalOffset) : furDirectionOS;
     return layerIndex > 0.0f ? finalOffset : float3(0.0f, 0.0f, 0.0f);
 }
@@ -259,21 +259,21 @@ BurtMultipassFurVaryings VertMultipassFur(BurtMultipassFurAttributes input)
     UNITY_SETUP_INSTANCE_ID(input);
 
     float layerIndex = BurtMultipassFurLayerIndex();
-    float4 positionOS = input.positionOS;
+    float4 positionOS = input.PositionOS;
     float3 furDirectionOS;
     positionOS.xyz += BurtCalculateMultipassFurOffsetOS(input, layerIndex, furDirectionOS);
 
     BurtMultipassFurVaryings output;
-    output.positionCS = UnityObjectToClipPos(positionOS);
-    output.positionWS = mul(unity_ObjectToWorld, positionOS).xyz;
-    output.normalWS = BurtSafeNormalize(UnityObjectToWorldNormal(input.normalOS));
-    output.geometricNormalWS = output.normalWS;
-    output.tangentWS = BurtMultipassFurObjectToWorldTangent(input.tangentOS);
-    output.uv0 = input.uv0;
-    output.uv1 = input.uv1;
-    output.layerIndex = layerIndex;
-    output.furDirectionWS = BurtSafeNormalize(UnityObjectToWorldDir(furDirectionOS));
-    output.furOffsetDirectionWS = output.furDirectionWS;
+    output.PositionCS = UnityObjectToClipPos(positionOS);
+    output.PositionWS = mul(unity_ObjectToWorld, positionOS).xyz;
+    output.NormalWS = BurtSafeNormalize(UnityObjectToWorldNormal(input.NormalOS));
+    output.GeometricNormalWS = output.NormalWS;
+    output.TangentWS = BurtMultipassFurObjectToWorldTangent(input.TangentOS);
+    output.UV0 = input.UV0;
+    output.UV1 = input.UV1;
+    output.LayerIndex = layerIndex;
+    output.FurDirectionWS = BurtSafeNormalize(UnityObjectToWorldDir(furDirectionOS));
+    output.FurOffsetDirectionWS = output.FurDirectionWS;
     return output;
 }
 
@@ -292,7 +292,7 @@ BurtMultipassFurVelocityVaryings VertMultipassFurVelocity(BurtMultipassFurAttrib
     UNITY_SETUP_INSTANCE_ID(input);
 
     float layerIndex = BurtMultipassFurLayerIndex();
-    float4 positionOS = input.positionOS;
+    float4 positionOS = input.PositionOS;
     float3 furDirectionOS;
     float3 furOffsetOS = BurtCalculateMultipassFurOffsetOS(input, layerIndex, furDirectionOS);
     positionOS.xyz += furOffsetOS;
@@ -301,52 +301,52 @@ BurtMultipassFurVelocityVaryings VertMultipassFurVelocity(BurtMultipassFurAttrib
     if (_BurtFurBlurPreviousSkinnedMeshValid > 0.5f)
     {
         BurtMultipassFurAttributes previousInput = input;
-        previousInput.positionOS = float4(input.previousPositionOS, input.positionOS.w);
-        previousInput.normalOS = dot(input.previousNormalOS, input.previousNormalOS) > BURT_EPSILON ? input.previousNormalOS : input.normalOS;
-        previousInput.tangentOS = dot(input.previousTangentOS.xyz, input.previousTangentOS.xyz) > BURT_EPSILON ? input.previousTangentOS : input.tangentOS;
+        previousInput.PositionOS = float4(input.PreviousPositionOS, input.PositionOS.w);
+        previousInput.NormalOS = dot(input.PreviousNormalOS, input.PreviousNormalOS) > BURT_EPSILON ? input.PreviousNormalOS : input.NormalOS;
+        previousInput.TangentOS = dot(input.PreviousTangentOS.xyz, input.PreviousTangentOS.xyz) > BURT_EPSILON ? input.PreviousTangentOS : input.TangentOS;
 
         float3 previousFurDirectionOS;
         float3 previousFurOffsetOS = BurtCalculateMultipassFurOffsetOS(previousInput, layerIndex, previousFurDirectionOS);
-        previousPositionOS = float4(input.previousPositionOS + previousFurOffsetOS, input.positionOS.w);
+        previousPositionOS = float4(input.PreviousPositionOS + previousFurOffsetOS, input.PositionOS.w);
     }
 
     float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
     float4 previousWorld = mul(_BurtFurBlurPreviousObjectToWorld, previousPositionOS);
 
     BurtMultipassFurVelocityVaryings output;
-    output.positionCS = UnityObjectToClipPos(positionOS);
-    output.currentClipNoJitter = mul(_BurtFurBlurCurrentNonJitteredViewProjection, currentWorld);
-    output.previousClipNoJitter = mul(_BurtFurBlurPreviousNonJitteredViewProjection, previousWorld);
-    output.uv0 = input.uv0;
-    output.uv1 = input.uv1;
-    output.layerIndex = layerIndex;
-    output.velocityValid = step(0.5f, layerIndex);
+    output.PositionCS = UnityObjectToClipPos(positionOS);
+    output.CurrentClipNoJitter = mul(_BurtFurBlurCurrentNonJitteredViewProjection, currentWorld);
+    output.PreviousClipNoJitter = mul(_BurtFurBlurPreviousNonJitteredViewProjection, previousWorld);
+    output.UV0 = input.UV0;
+    output.UV1 = input.UV1;
+    output.LayerIndex = layerIndex;
+    output.VelocityValid = step(0.5f, layerIndex);
     return output;
 }
 
 float4 BurtSampleMultipassFurBase(BurtMultipassFurVaryings input)
 {
-    float2 baseUV = BurtMultipassFurPanner(input.uv0 * _BaseMapPanner.xy, _BaseMapPanner.zw);
-    return BURT_SAMPLE_TEXTURE2D_REPEAT(_BaseMap, baseUV);
+    float2 baseUV = BurtMultipassFurPanner(input.UV0 * _BaseMapPanner.xy, _BaseMapPanner.zw);
+    return SAMPLE_TEXTURE2D(_BaseMap, sampler_LinearRepeat, baseUV);
 }
 
 float4 BurtSampleMultipassFurMask(BurtMultipassFurVaryings input)
 {
-    float2 baseUV = BurtMultipassFurPanner(input.uv0 * _BaseMapPanner.xy, _BaseMapPanner.zw);
-    return BURT_SAMPLE_TEXTURE2D_REPEAT(_MaskMap, baseUV);
+    float2 baseUV = BurtMultipassFurPanner(input.UV0 * _BaseMapPanner.xy, _BaseMapPanner.zw);
+    return SAMPLE_TEXTURE2D(_MaskMap, sampler_LinearRepeat, baseUV);
 }
 
 float BurtMultipassFurFlowAlpha(BurtMultipassFurVaryings input, float furAtten)
 {
-    float2 flowUV = (_FlowTexUV2 > 0.5f ? input.uv1 : input.uv0) * _FlowTilling.xx * 0.1f;
+    float2 flowUV = (_FlowTexUV2 > 0.5f ? input.UV1 : input.UV0) * _FlowTilling.xx * 0.1f;
     flowUV += BurtMultipassFurPanner(flowUV, _FlowPanner.xy);
 
-    float flowValue = BURT_SAMPLE_TEXTURE2D_REPEAT(_FlowTex, flowUV).r;
+    float flowValue = SAMPLE_TEXTURE2D(_FlowTex, sampler_LinearRepeat, flowUV).r;
     float furAlphaOffset = pow(max(furAtten * 2.0f, 0.0f), 0.8f + _FurTickness);
     furAlphaOffset = pow(max(furAlphaOffset, 0.0f), _FurTicknessCurve);
 
     float finalAlpha = saturate(flowValue - furAlphaOffset);
-    return input.layerIndex == 0.0f ? 1.0f : finalAlpha;
+    return input.LayerIndex == 0.0f ? 1.0f : finalAlpha;
 }
 
 float BurtMultipassFurHash12(float2 p)
@@ -401,14 +401,14 @@ float BurtEvaluateMultipassFurDitheredAlpha(float4 positionCS, float2 uv0, float
 
 float BurtEvaluateMultipassFurDitheredAlpha(BurtMultipassFurVaryings input, float alpha, float baseAlpha)
 {
-    return BurtEvaluateMultipassFurDitheredAlpha(input.positionCS, input.uv0, input.layerIndex, alpha, baseAlpha);
+    return BurtEvaluateMultipassFurDitheredAlpha(input.PositionCS, input.UV0, input.LayerIndex, alpha, baseAlpha);
 }
 
 float4 BurtResolveMultipassFurBaseColor(BurtMultipassFurVaryings input, out float4 baseMap, out float4 maskMap, out float furAtten)
 {
     baseMap = BurtSampleMultipassFurBase(input);
     maskMap = BurtSampleMultipassFurMask(input);
-    furAtten = BurtMultipassFurAttenuation(input.layerIndex);
+    furAtten = BurtMultipassFurAttenuation(input.LayerIndex);
 
     float4 baseColor = baseMap * _BaseColor;
     baseColor = lerp(baseColor * lerp(float4(1.0f, 1.0f, 1.0f, 1.0f), _DarkColor, baseColor.a), baseColor, furAtten);
@@ -432,16 +432,16 @@ BurtSurfaceData BurtCreateMultipassFurSurfaceData(float4 baseColor, float4 baseM
     float anisotropy = lerp(0.0f, clamp(_Anisotropy * furAtten, -1.0f, 1.0f), furMask);
 
     BurtSurfaceData surfaceData = BurtCreateSurfaceData(baseColor, reflectance, smoothness, 0.0f);
-    surfaceData.occlusion = BurtResolveOcclusion(maskMap, _Occlusion);
-    surfaceData.anisotropy = anisotropy;
-    surfaceData.height = saturate(maskMap.b);
-    surfaceData.hairSecondaryRoughness = ClampPerceptualRoughness(saturate(_Roughness));
-    surfaceData.hairBackLight = saturate(_FurRimIntensity * 0.2f);
-    surfaceData.hairShadowFillStrength = saturate(_FurRimIntensity * 0.1f);
-    surfaceData.hairSpecularShift = 0.0f;
-    surfaceData.hairSecondarySpecularShift = 0.0f;
-    surfaceData.hairSpecularColor = float3(1.0f, 1.0f, 1.0f);
-    surfaceData.hairSecondarySpecularColor = float3(1.0f, 1.0f, 1.0f);
+    surfaceData.Occlusion = BurtResolveOcclusion(maskMap, _Occlusion);
+    surfaceData.Anisotropy = anisotropy;
+    surfaceData.Height = saturate(maskMap.b);
+    surfaceData.HairSecondaryRoughness = ClampPerceptualRoughness(saturate(_Roughness));
+    surfaceData.HairBackLight = saturate(_FurRimIntensity * 0.2f);
+    surfaceData.HairShadowFillStrength = saturate(_FurRimIntensity * 0.1f);
+    surfaceData.HairSpecularShift = 0.0f;
+    surfaceData.HairSecondarySpecularShift = 0.0f;
+    surfaceData.HairSpecularColor = float3(1.0f, 1.0f, 1.0f);
+    surfaceData.HairSecondarySpecularColor = float3(1.0f, 1.0f, 1.0f);
     return BurtApplyFurGBufferSurfaceSemantics(surfaceData);
 }
 
@@ -452,40 +452,41 @@ float3 BurtEvaluateMultipassFurEmission(BurtMultipassFurVaryings input, float4 m
         return float3(0.0f, 0.0f, 0.0f);
     }
 
-    float2 emissionUV = input.uv0;
+    float2 emissionUV = input.UV0;
     float viewSpaceMask = 1.0f;
 
     if (_EmissiveUseViewSpaceUV > 0.5f)
     {
         float3 pivotVS = mul(UNITY_MATRIX_V, mul(unity_ObjectToWorld, float4(0.0f, 0.0f, 0.0f, 1.0f))).xyz;
-        float3 positionVS = mul(UNITY_MATRIX_V, float4(input.positionWS, 1.0f)).xyz - pivotVS;
+        float3 positionVS = mul(UNITY_MATRIX_V, float4(input.PositionWS, 1.0f)).xyz - pivotVS;
         emissionUV = BurtMultipassFurPanner(positionVS.xy * _EmissiveTillingPanner.xy, _EmissiveTillingPanner.zw);
-        emissionUV += input.geometricNormalWS.xy * _ViewSpaceUVNormalIntensity;
+        emissionUV += input.GeometricNormalWS.xy * _ViewSpaceUVNormalIntensity;
         viewSpaceMask = saturate(maskMap.b);
     }
     else
     {
-        emissionUV = input.uv0;
+        emissionUV = input.UV0;
     }
 
-    return BURT_SAMPLE_TEXTURE2D_REPEAT(_EmissiveMap, emissionUV).rgb * _EmissiveColor.rgb * viewSpaceMask;
+    return SAMPLE_TEXTURE2D(_EmissiveMap, sampler_LinearRepeat, emissionUV).rgb * _EmissiveColor.rgb * viewSpaceMask;
 }
 
 float3 BurtEvaluateMultipassFurRim(BurtMultipassFurVaryings input, float3 viewDirectionWS)
 {
-    float ndotv = saturate(dot(input.geometricNormalWS, viewDirectionWS));
+    float ndotv = saturate(dot(input.GeometricNormalWS, viewDirectionWS));
     return saturate(pow(1.0f - ndotv, _FurRimPower) * _FurRimIntensity).xxx;
 }
 
 BurtMultipassFurGBufferOutput BurtPackMultipassFurGBuffer(BurtEncodedGBuffer encodedGBuffer)
 {
     BurtMultipassFurGBufferOutput output;
-    output.gbuffer0 = encodedGBuffer.gbuffer0;
-    output.gbuffer1 = encodedGBuffer.gbuffer1;
-    output.gbuffer2 = encodedGBuffer.gbuffer2;
-    output.gbuffer3 = encodedGBuffer.gbuffer3;
-    output.gbuffer4 = encodedGBuffer.gbuffer4;
-    output.objectIndex = BurtEncodeMultipassFurPerObjectShadowObjectIndexTarget();
+    output.GBuffer0 = encodedGBuffer.GBuffer0;
+    output.GBuffer1 = encodedGBuffer.GBuffer1;
+    output.GBuffer2 = encodedGBuffer.GBuffer2;
+    output.GBuffer3 = encodedGBuffer.GBuffer3;
+    output.GBuffer4 = encodedGBuffer.GBuffer4;
+    output.GBuffer5 = encodedGBuffer.GBuffer5;
+    output.ObjectIndex = BurtEncodeMultipassFurPerObjectShadowObjectIndexTarget();
     return output;
 }
 
@@ -495,7 +496,7 @@ BurtMultipassFurGBufferOutput FragMultipassFurGBuffer(BurtMultipassFurVaryings i
     float4 maskMap;
     float furAtten;
     float4 baseColor = BurtResolveMultipassFurBaseColor(input, baseMap, maskMap, furAtten);
-    BurtApplyMultipassFurClip(baseColor.a, input.positionCS);
+    BurtApplyMultipassFurClip(baseColor.a, input.PositionCS);
 
     BurtSurfaceData surfaceData = BurtCreateMultipassFurSurfaceData(baseColor, baseMap, maskMap, furAtten);
     float3 emissionColor = BurtEvaluateMultipassFurEmission(input, maskMap);
@@ -512,21 +513,21 @@ float4 FragMultipassFurForward(BurtMultipassFurVaryings input, fixed facing : VF
     float4 maskMap;
     float furAtten;
     float4 baseColor = BurtResolveMultipassFurBaseColor(input, baseMap, maskMap, furAtten);
-    BurtApplyMultipassFurClip(baseColor.a, input.positionCS);
+    BurtApplyMultipassFurClip(baseColor.a, input.PositionCS);
 
     float3 normalWS = BurtGetMultipassFurNormalWS(input, facing);
     float3 geometryNormalWS = BurtGetMultipassFurGeometryNormalWS(input, facing);
     float3 shadingDirectionWS = BurtGetMultipassFurShadingDirectionWS(input);
-    float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
+    float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.PositionWS);
     BurtSurfaceData surfaceData = BurtCreateMultipassFurSurfaceData(baseColor, baseMap, maskMap, furAtten);
-    float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
+    float shadowAttenuation = BurtSampleMainLightShadow(input.PositionWS, normalWS, _BurtPerObjectShadowObjectIndex);
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
     BurtGBufferData furGBufferData = BurtCreateFurGBufferData(surfaceData, normalWS, float4(shadingDirectionWS, 1.0f), float3(0.0f, 0.0f, 0.0f));
-    BurtPBRShadingComponents pbrComponents = BurtEvaluateFurShadingComponentsFromGBuffer(furGBufferData, mainLight, viewDirectionWS, input.positionWS);
+    BurtPBRShadingComponents pbrComponents = BurtEvaluateFurShadingComponentsFromGBuffer(furGBufferData, mainLight, viewDirectionWS, input.PositionWS);
     float3 emissionColor = BurtEvaluateMultipassFurEmission(input, maskMap);
-    float3 finalColor = pbrComponents.lighting + emissionColor + BurtEvaluateMultipassFurRim(input, viewDirectionWS);
+    float3 finalColor = pbrComponents.Lighting + emissionColor + BurtEvaluateMultipassFurRim(input, viewDirectionWS);
 
-    return float4(BurtApplyPreExposure(finalColor), surfaceData.alpha);
+    return float4(BurtApplyPreExposure(finalColor), surfaceData.Alpha);
 }
 
 float4 FragMultipassFurDepth(BurtMultipassFurVaryings input) : SV_Target
@@ -535,7 +536,7 @@ float4 FragMultipassFurDepth(BurtMultipassFurVaryings input) : SV_Target
     float4 maskMap;
     float furAtten;
     float4 baseColor = BurtResolveMultipassFurBaseColor(input, baseMap, maskMap, furAtten);
-    BurtApplyMultipassFurClip(baseColor.a, input.positionCS);
+    BurtApplyMultipassFurClip(baseColor.a, input.PositionCS);
     return 0;
 }
 
@@ -545,15 +546,15 @@ float4 FragMultipassFurBlurProperty(BurtMultipassFurVaryings input) : SV_Target
     float4 maskMap;
     float furAtten;
     float4 baseColor = BurtResolveMultipassFurBaseColor(input, baseMap, maskMap, furAtten);
-    BurtApplyMultipassFurClip(baseColor.a, input.positionCS);
+    BurtApplyMultipassFurClip(baseColor.a, input.PositionCS);
 
     float theta = 0.0f;
-    if (_FurBlurEnabled > 0.5f && input.layerIndex > 0.5f)
+    if (_FurBlurEnabled > 0.5f && input.LayerIndex > 0.5f)
     {
-        float3 positionVS = mul(UNITY_MATRIX_V, float4(input.positionWS, 1.0f)).xyz;
+        float3 positionVS = mul(UNITY_MATRIX_V, float4(input.PositionWS, 1.0f)).xyz;
         float distanceToCamera = length(positionVS);
-        float3 furBlurDirectionWS = dot(input.furOffsetDirectionWS, input.furOffsetDirectionWS) > BURT_EPSILON
-            ? input.furOffsetDirectionWS
+        float3 furBlurDirectionWS = dot(input.FurOffsetDirectionWS, input.FurOffsetDirectionWS) > BURT_EPSILON
+            ? input.FurOffsetDirectionWS
             : BurtGetMultipassFurShadingDirectionWS(input);
         float3 directionVS = mul((float3x3)UNITY_MATRIX_V, furBlurDirectionWS);
         float2 directionSS = directionVS.xy;
@@ -564,31 +565,31 @@ float4 FragMultipassFurBlurProperty(BurtMultipassFurVaryings input) : SV_Target
         }
     }
 
-    return float4(theta, input.positionCS.z, 0.0f, 1.0f);
+    return float4(theta, input.PositionCS.z, 0.0f, 1.0f);
 }
 
 float4 FragMultipassFurBlurVelocity(BurtMultipassFurVelocityVaryings input) : SV_Target
 {
-    float4 baseMap = BURT_SAMPLE_TEXTURE2D_REPEAT(_BaseMap, BurtMultipassFurPanner(input.uv0 * _BaseMapPanner.xy, _BaseMapPanner.zw));
-    float furAtten = BurtMultipassFurAttenuation(input.layerIndex);
+    float4 baseMap = SAMPLE_TEXTURE2D(_BaseMap, sampler_LinearRepeat, BurtMultipassFurPanner(input.UV0 * _BaseMapPanner.xy, _BaseMapPanner.zw));
+    float furAtten = BurtMultipassFurAttenuation(input.LayerIndex);
     float4 baseColor = baseMap * _BaseColor;
     baseColor = lerp(baseColor * lerp(float4(1.0f, 1.0f, 1.0f, 1.0f), _DarkColor, baseColor.a), baseColor, furAtten);
     float flowUVSource = _FlowTexUV2 > 0.5f ? 1.0f : 0.0f;
-    float2 flowUV = lerp(input.uv0, input.uv1, flowUVSource) * _FlowTilling.xx * 0.1f;
+    float2 flowUV = lerp(input.UV0, input.UV1, flowUVSource) * _FlowTilling.xx * 0.1f;
     flowUV += BurtMultipassFurPanner(flowUV, _FlowPanner.xy);
-    float flowValue = BURT_SAMPLE_TEXTURE2D_REPEAT(_FlowTex, flowUV).r;
+    float flowValue = SAMPLE_TEXTURE2D(_FlowTex, sampler_LinearRepeat, flowUV).r;
     float furAlphaOffset = pow(max(furAtten * 2.0f, 0.0f), 0.8f + _FurTickness);
     furAlphaOffset = pow(max(furAlphaOffset, 0.0f), _FurTicknessCurve);
-    float flowAlpha = input.layerIndex == 0.0f ? 1.0f : saturate(flowValue - furAlphaOffset);
-    baseColor.a = BurtEvaluateMultipassFurDitheredAlpha(input.positionCS, input.uv0, input.layerIndex, flowAlpha, baseColor.a);
-    BurtApplyMultipassFurClip(baseColor.a, input.positionCS);
+    float flowAlpha = input.LayerIndex == 0.0f ? 1.0f : saturate(flowValue - furAlphaOffset);
+    baseColor.a = BurtEvaluateMultipassFurDitheredAlpha(input.PositionCS, input.UV0, input.LayerIndex, flowAlpha, baseColor.a);
+    BurtApplyMultipassFurClip(baseColor.a, input.PositionCS);
 
     clip(_FurBlurEnabled - 0.5f);
-    clip(input.velocityValid - 0.5f);
+    clip(input.VelocityValid - 0.5f);
 
-    float valid = step(1e-5f, input.currentClipNoJitter.w) * step(1e-5f, input.previousClipNoJitter.w);
-    float2 currentUv = BurtMultipassFurClipToUv(input.currentClipNoJitter);
-    float2 previousUv = BurtMultipassFurClipToUv(input.previousClipNoJitter);
+    float valid = step(1e-5f, input.CurrentClipNoJitter.w) * step(1e-5f, input.PreviousClipNoJitter.w);
+    float2 currentUv = BurtMultipassFurClipToUv(input.CurrentClipNoJitter);
+    float2 previousUv = BurtMultipassFurClipToUv(input.PreviousClipNoJitter);
     valid *= step(0.0f, currentUv.x) * step(currentUv.x, 1.0f) * step(0.0f, currentUv.y) * step(currentUv.y, 1.0f);
     valid *= step(0.0f, previousUv.x) * step(previousUv.x, 1.0f) * step(0.0f, previousUv.y) * step(previousUv.y, 1.0f);
 

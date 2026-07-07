@@ -36,20 +36,20 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -69,7 +69,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             float3 BurtSSAOSampleNormalWS(float2 screenUV)
             {
-                return BurtDecodeNormalWSFromGBuffer(BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV).rg);
+                return BurtSampleDeferredSurfaceNormalWS(screenUV);
             }
 
             float BurtSSAORawDepthFromClip(float clipZ)
@@ -562,7 +562,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             float4 FragTrace(Varyings input) : SV_Target
             {
-                float ao = BurtSSAOEvaluate(input.screenUV);
+                float ao = BurtSSAOEvaluate(input.ScreenUV);
                 return float4(ao, ao, ao, 1.0f);
             }
 
@@ -609,10 +609,10 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 float valid2;
                 float valid3;
 
-                BurtSSAOSampleDepthNormalForDownsample(input.screenUV + fullTexel * float2(-0.5f, -0.5f), rawDepth0, linearDepth0, normal0, valid0);
-                BurtSSAOSampleDepthNormalForDownsample(input.screenUV + fullTexel * float2(0.5f, -0.5f), rawDepth1, linearDepth1, normal1, valid1);
-                BurtSSAOSampleDepthNormalForDownsample(input.screenUV + fullTexel * float2(-0.5f, 0.5f), rawDepth2, linearDepth2, normal2, valid2);
-                BurtSSAOSampleDepthNormalForDownsample(input.screenUV + fullTexel * float2(0.5f, 0.5f), rawDepth3, linearDepth3, normal3, valid3);
+                BurtSSAOSampleDepthNormalForDownsample(input.ScreenUV + fullTexel * float2(-0.5f, -0.5f), rawDepth0, linearDepth0, normal0, valid0);
+                BurtSSAOSampleDepthNormalForDownsample(input.ScreenUV + fullTexel * float2(0.5f, -0.5f), rawDepth1, linearDepth1, normal1, valid1);
+                BurtSSAOSampleDepthNormalForDownsample(input.ScreenUV + fullTexel * float2(-0.5f, 0.5f), rawDepth2, linearDepth2, normal2, valid2);
+                BurtSSAOSampleDepthNormalForDownsample(input.ScreenUV + fullTexel * float2(0.5f, 0.5f), rawDepth3, linearDepth3, normal3, valid3);
 
                 float validCount = valid0 + valid1 + valid2 + valid3;
                 if (validCount < 0.5f)
@@ -642,9 +642,9 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             float4 FragTraceHalf(Varyings input) : SV_Target
             {
-                float4 halfDepthNormal = tex2D(_BurtSSAOHalfDepthNormalTexture, input.screenUV);
+                float4 halfDepthNormal = tex2D(_BurtSSAOHalfDepthNormalTexture, input.ScreenUV);
                 float ao = BurtSSAOEvaluateWithDepthNormal(
-                    input.screenUV,
+                    input.ScreenUV,
                     halfDepthNormal.a,
                     BurtSSAOUnpackHalfNormalWS(halfDepthNormal.rgb),
                     _BurtSSAOHalfScreenSize.xy);
@@ -711,25 +711,25 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             float4 FragUpsampleRaw(Varyings input) : SV_Target
             {
-                float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
+                float rawDepth = BurtSampleDeferredRawDepth(input.ScreenUV);
                 if (BurtSSAOIsSkyDepth(rawDepth))
                 {
                     return float4(1.0f, 1.0f, 1.0f, 1.0f);
                 }
 
                 float centerLinearDepth = LinearEyeDepth(rawDepth);
-                float3 centerNormalWS = BurtSSAOSampleNormalWS(input.screenUV);
+                float3 centerNormalWS = BurtSSAOSampleNormalWS(input.ScreenUV);
                 float2 halfTexel = _BurtSSAOHalfScreenSize.zw;
                 float totalAO = 0.0f;
                 float totalWeight = 0.0f;
 
-                BurtSSAOAccumulateUpsampleFootprint(input.screenUV, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
-                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(halfTexel.x, 0.0f), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
-                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(-halfTexel.x, 0.0f), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
-                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(0.0f, halfTexel.y), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
-                BurtSSAOAccumulateUpsampleSample(input.screenUV + float2(0.0f, -halfTexel.y), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleFootprint(input.ScreenUV, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleSample(input.ScreenUV + float2(halfTexel.x, 0.0f), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleSample(input.ScreenUV + float2(-halfTexel.x, 0.0f), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleSample(input.ScreenUV + float2(0.0f, halfTexel.y), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
+                BurtSSAOAccumulateUpsampleSample(input.ScreenUV + float2(0.0f, -halfTexel.y), 0.35f, centerLinearDepth, centerNormalWS, totalAO, totalWeight);
 
-                float fallbackAO = tex2D(_BurtSSAOHalfAmbientOcclusionTexture, saturate(input.screenUV)).r;
+                float fallbackAO = tex2D(_BurtSSAOHalfAmbientOcclusionTexture, saturate(input.ScreenUV)).r;
                 float ao = totalWeight > 0.0001f ? totalAO / totalWeight : fallbackAO;
                 return float4(ao, ao, ao, 1.0f);
             }
@@ -856,10 +856,10 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             float4 FragBlur(Varyings input) : SV_Target
             {
-                float ao = saturate(BurtSSAOBilateralBlur(input.screenUV));
+                float ao = saturate(BurtSSAOBilateralBlur(input.ScreenUV));
                 if (_BurtSSAOBlurDirection.z > 0.5f)
                 {
-                    float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
+                    float rawDepth = BurtSampleDeferredRawDepth(input.ScreenUV);
                     if (BurtSSAOIsSkyDepth(rawDepth))
                     {
                         return float4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -873,18 +873,18 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             float4 FragDebug(Varyings input) : SV_Target
             {
-                float rawAO = tex2D(_BurtScreenSpaceAmbientOcclusionRawTexture, input.screenUV).r;
-                float finalAO = tex2D(_BurtScreenSpaceAmbientOcclusionTexture, input.screenUV).r;
+                float rawAO = tex2D(_BurtScreenSpaceAmbientOcclusionRawTexture, input.ScreenUV).r;
+                float finalAO = tex2D(_BurtScreenSpaceAmbientOcclusionTexture, input.ScreenUV).r;
                 float debugMode = round(_BurtSSAODebugMode);
                 if (debugMode == 4.0f)
                 {
-                    float historyAO = tex2D(_BurtSSAOPreviousHistoryTexture, input.screenUV).r;
+                    float historyAO = tex2D(_BurtSSAOPreviousHistoryTexture, input.ScreenUV).r;
                     return float4(saturate(historyAO).xxx, 1.0f);
                 }
 
                 if (debugMode == 5.0f)
                 {
-                    float historyAO = tex2D(_BurtSSAOPreviousHistoryTexture, input.screenUV).r;
+                    float historyAO = tex2D(_BurtSSAOPreviousHistoryTexture, input.ScreenUV).r;
                     return float4(saturate(abs(finalAO - historyAO) * 4.0f).xxx, 1.0f);
                 }
 
@@ -894,8 +894,8 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             float4 FragOverlay(Varyings input) : SV_Target
             {
-                float4 cameraColor = tex2D(_BurtSSAODebugCameraColorTexture, input.screenUV);
-                float ao = saturate(tex2D(_BurtScreenSpaceAmbientOcclusionTexture, input.screenUV).r);
+                float4 cameraColor = tex2D(_BurtSSAODebugCameraColorTexture, input.ScreenUV);
+                float ao = saturate(tex2D(_BurtScreenSpaceAmbientOcclusionTexture, input.ScreenUV).r);
                 return float4(cameraColor.rgb * ao, cameraColor.a);
             }
 
@@ -1034,19 +1034,19 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
 
             float4 FragTemporal(Varyings input) : SV_Target
             {
-                float ao = BurtSSAOTemporalResolveAO(input.screenUV);
+                float ao = BurtSSAOTemporalResolveAO(input.ScreenUV);
                 return float4(ao, ao, ao, 1.0f);
             }
 
             float4 FragCopyTemporalFinal(Varyings input) : SV_Target
             {
-                float ao = saturate(tex2D(_BurtSSAOTemporalFinalTexture, input.screenUV).r);
+                float ao = saturate(tex2D(_BurtSSAOTemporalFinalTexture, input.ScreenUV).r);
                 return float4(ao, ao, ao, 1.0f);
             }
 
             float4 FragCopyCurrentDepth(Varyings input) : SV_Target
             {
-                float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
+                float rawDepth = BurtSampleDeferredRawDepth(input.ScreenUV);
                 return float4(rawDepth, rawDepth, rawDepth, 1.0f);
             }
 
@@ -1155,16 +1155,16 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 float debugMode = round(_BurtSSAODebugMode);
                 if (debugMode == 8.0f)
                 {
-                    return FragDiagnosticCompare(input.screenUV);
+                    return FragDiagnosticCompare(input.ScreenUV);
                 }
 
-                float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
+                float rawDepth = BurtSampleDeferredRawDepth(input.ScreenUV);
                 if (_BurtSSAOTemporalParams.y < 0.5f || BurtSSAOIsSkyDepth(rawDepth))
                 {
                     return float4(0.0f, 0.0f, 0.0f, 1.0f);
                 }
 
-                float3 positionWS = BurtReconstructDeferredPositionWS(input.screenUV, rawDepth);
+                float3 positionWS = BurtReconstructDeferredPositionWS(input.ScreenUV, rawDepth);
                 float2 historyUV;
                 float projectedHistoryRawDepth;
                 if (!BurtSSAOProjectHistoryUV(positionWS, historyUV, projectedHistoryRawDepth))
@@ -1184,7 +1184,7 @@ Shader "Hidden/BurtRP/ScreenSpaceAmbientOcclusion"
                 float depthValidity = saturate(1.0f - abs(historyLinearDepth - projectedHistoryLinearDepth) / depthTolerance);
                 if (debugMode == 7.0f)
                 {
-                    float3 centerNormalWS = BurtSSAOSampleNormalWS(input.screenUV);
+                    float3 centerNormalWS = BurtSSAOSampleNormalWS(input.ScreenUV);
                     float centerLinearDepth = LinearEyeDepth(rawDepth);
                     float surfaceStability = BurtSSAOEvaluateCurrentSurfaceStability(historyUV, projectedHistoryLinearDepth, centerNormalWS, centerLinearDepth);
                     return float4(surfaceStability.xxx, 1.0f);

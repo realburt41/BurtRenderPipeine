@@ -20,7 +20,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent EmissionLabel = new GUIContent("Emission");
 
         private static readonly GUIContent BaseMapLabel = new GUIContent("Base Map", "Albedo RGB and alpha for clipping or transparent materials.");
-        private static readonly GUIContent MaskMapLabel = new GUIContent("Mask Map", "R Metallic, G Occlusion, B Reserved, A Smoothness or Roughness for Fabric/Silk.");
+        private static readonly GUIContent MaskMapLabel = new GUIContent("Mask Map", "R Metallic, G Occlusion, B 3S Curvature for Subsurface, A Smoothness or Roughness for Fabric/Silk.");
         private static readonly GUIContent NormalMapLabel = new GUIContent("Normal Map");
         private static readonly GUIContent FoliageNSRMapLabel = new GUIContent("NSR Map", "XRender foliage packed map: R/G normal, B thickness, A roughness.");
         private static readonly GUIContent ClearCoatNormalMapLabel = new GUIContent("Clear Coat Normal Map");
@@ -54,13 +54,6 @@ namespace Burt.RenderPipeline.Editor
         private static readonly string[] SubsurfaceScatteringModeNames = { "5S Burley", "4S Separable", "3S Preintegrated" };
         private static readonly string[] FoliageTintModeNames = { "Only Local", "Constant Tint", "Tint Map" };
         private const string SubsurfaceProfileGuidTag = "BurtSubsurfaceProfileGuid";
-        private const int GBufferStencilShadingModelMask = 0xE0;
-        private const int GBufferStencilResponsiveAABit = 0x10;
-        private const int GBufferStencilDefaultLitRef = 0x20;
-        private const int GBufferStencilSubsurfaceRef = 0x40;
-        private const int GBufferStencilClearCoatRef = 0x80;
-        private const int GBufferStencilFabricRef = 0xA0;
-        private const int GBufferStencilFoliageRef = 0xC0;
         private static bool showSurfaceOptions = true;
         private static bool showBaseInputs = true;
         private static bool showPbrMaskInputs = true;
@@ -149,6 +142,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty tlNormalWeight;
         private MaterialProperty ssShadowIntensity;
         private MaterialProperty ssShadowDistance;
+        private MaterialProperty tiltingStrength;
         private MaterialProperty groundFadeIntensity;
         private MaterialProperty noiseMap;
         private MaterialProperty variationIntensity01;
@@ -157,6 +151,11 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty variation02Height;
         private MaterialProperty variation01;
         private MaterialProperty variation02;
+        private MaterialProperty windHeightMask;
+        private MaterialProperty windStrength;
+        private MaterialProperty windNormalStrength;
+        private MaterialProperty forceIntensity;
+        private MaterialProperty windInteractionIntensity;
         private MaterialProperty normalMap;
         private MaterialProperty normalScale;
         private MaterialProperty emissionMap;
@@ -431,6 +430,7 @@ namespace Burt.RenderPipeline.Editor
             tlNormalWeight = Find("_TLNormalWeight");
             ssShadowIntensity = Find("_SSShadowIntensity");
             ssShadowDistance = Find("_SSShadowDistance");
+            tiltingStrength = Find("_TiltingStrength");
             groundFadeIntensity = Find("_GroundFadeIntensity");
             noiseMap = Find("_NoiseMap");
             variationIntensity01 = Find("_VariationIntensity01");
@@ -439,6 +439,11 @@ namespace Burt.RenderPipeline.Editor
             variation02Height = Find("_Variation02Height");
             variation01 = Find("_Variation01");
             variation02 = Find("_Variation02");
+            windHeightMask = Find("_WindHeightMask");
+            windStrength = Find("_WindStrength");
+            windNormalStrength = Find("_WindNormalStrength");
+            forceIntensity = Find("_ForceIntensity");
+            windInteractionIntensity = Find("_WindInteractionIntensity");
             normalMap = Find("_NormalMap");
             normalScale = Find("_NormalScale");
             emissionMap = Find("_EmissionMap");
@@ -602,7 +607,15 @@ namespace Burt.RenderPipeline.Editor
                 EditorGUILayout.Toggle(ZWriteLabel, zWrite.floatValue >= 0.5f);
                 EditorGUILayout.TextField(ZTestLabel, ((CompareFunction)Mathf.RoundToInt(zTest.floatValue)).ToString());
                 EditorGUILayout.TextField(BlendLabel, GetBlendStateName());
-                EditorGUILayout.TextField(EnabledPassesLabel, transparent ? "BurtForward" : "BurtDepthOnly, BurtGBuffer, ShadowCaster, BurtForward");
+                bool deferredOnlyMaterial = IsSubsurfaceShader(material) || IsFoliageShader(material) || IsTrunkShader(material);
+                string enabledPasses = transparent
+                    ? "BurtForward"
+                    : IsSubsurfaceShader(material)
+                        ? "BurtDepthNormals, BurtGBuffer, BurtSubsurfaceForward, ShadowCaster"
+                        : deferredOnlyMaterial
+                            ? "BurtDepthNormals, BurtGBuffer, ShadowCaster"
+                            : "BurtDepthOnly, BurtDepthNormals, BurtGBuffer, ShadowCaster, BurtForward";
+                EditorGUILayout.TextField(EnabledPassesLabel, enabledPasses);
             }
         }
 
@@ -648,7 +661,7 @@ namespace Burt.RenderPipeline.Editor
             else if (maskMap != null)
             {
                 BurtShaderGUIUtility.DrawChannelHint(IsSubsurfaceShader(material)
-                    ? "Channels: G Occlusion / 3S Curvature | A Smoothness. Thickness uses Subsurface Thickness Map R."
+                    ? "Channels: G Occlusion | B 3S Curvature | A Smoothness. Thickness uses Subsurface Thickness Map R."
                     : usesTrunk
                         ? "Channels: G Occlusion | A Roughness. R Metallic and B Thickness are ignored; vertex color A is remapped as AO."
                     : usesFoliage
@@ -707,7 +720,7 @@ namespace Burt.RenderPipeline.Editor
             DrawTexture(FuzzMaskLabel, fuzzMask);
             DrawProperty(fuzzAmount);
             DrawProperty(fuzzRoughness);
-            EditorGUILayout.HelpBox("Fabric writes stencil/model 4, stores fuzz color and weight in GBuffer3, and stores tangent, anisotropy, fuzz roughness, and the silk flag in GBuffer4.", MessageType.None);
+            EditorGUILayout.HelpBox("Fabric writes stencil/model 4, stores fuzz color and weight in GBuffer3, and stores tangent, anisotropy, fuzz roughness, and the silk flag in GBuffer5.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -831,6 +844,18 @@ namespace Burt.RenderPipeline.Editor
                 DrawProperty(variation02Height);
                 DrawProperty(variation02);
 
+                BurtShaderGUIUtility.DrawSubHeader("Grass Wind");
+                DrawProperty(tiltingStrength);
+                DrawProperty(windStrength);
+                using (new EditorGUI.DisabledScope(windStrength != null && windStrength.floatValue < 0.01f))
+                {
+                    DrawProperty(windHeightMask);
+                    DrawProperty(windNormalStrength);
+                    DrawProperty(windInteractionIntensity);
+                }
+
+                DrawProperty(forceIntensity);
+
                 BurtShaderGUIUtility.DrawSubHeader("Grass SSS");
                 DrawProperty(sssIntensity);
                 DrawProperty(fresnelIntensity);
@@ -892,7 +917,7 @@ namespace Burt.RenderPipeline.Editor
             DrawProperty(clearCoatMask);
             DrawProperty(clearCoatRoughness);
             DrawTextureWithExtra(ClearCoatNormalMapLabel, clearCoatNormalMap, clearCoatNormalScale);
-            EditorGUILayout.HelpBox("Clear Coat writes stencil/model 2, keeps base metallic in GBuffer1.b, stores coat normal / mask / roughness in GBuffer3, and stores base tangent / anisotropy in GBuffer4.", MessageType.None);
+            EditorGUILayout.HelpBox("Clear Coat writes stencil/model 2, keeps base metallic in GBuffer2.g, stores coat normal / mask / roughness in GBuffer3, and stores base tangent / anisotropy in GBuffer5.", MessageType.None);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -1362,7 +1387,7 @@ namespace Burt.RenderPipeline.Editor
 
         private static bool UsesFixedOpaqueCutoutSurface(Material material)
         {
-            return IsFoliageShader(material) || IsTrunkShader(material);
+            return IsSubsurfaceShader(material) || IsFoliageShader(material) || IsTrunkShader(material);
         }
 
         private static bool IsAlphaClippedMaterial(Material material)
@@ -1379,7 +1404,7 @@ namespace Burt.RenderPipeline.Editor
 
             if (IsSubsurfaceShader(material))
             {
-                return IsTransparentMaterial(material) ? "PBR Transparent Subsurface" : "PBR Subsurface / Deferred GBuffer";
+                return "PBR Subsurface / Deferred GBuffer";
             }
 
             if (IsSilkShader(material))
@@ -1394,12 +1419,12 @@ namespace Burt.RenderPipeline.Editor
 
             if (IsFoliageShader(material))
             {
-                return IsTransparentMaterial(material) ? "PBR Transparent Foliage" : "PBR Foliage / Deferred GBuffer";
+                return "PBR Foliage / Deferred GBuffer";
             }
 
             if (IsTrunkShader(material))
             {
-                return IsTransparentMaterial(material) ? "PBR Transparent Trunk" : "PBR Trunk / DefaultLit GBuffer";
+                return "PBR Trunk / DefaultLit GBuffer";
             }
 
             return IsTransparentMaterial(material) ? "PBR Transparent" : "PBR Lit / Deferred GBuffer";
@@ -1543,6 +1568,7 @@ namespace Burt.RenderPipeline.Editor
 
             ApplyDoubleSidedNormalState(material);
             ApplyGBufferStencilState(material);
+            ApplyMotionVectorStencilState(material);
             ApplyFoliageKeywords(material);
             BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
 
@@ -1550,7 +1576,9 @@ namespace Burt.RenderPipeline.Editor
             material.SetOverrideTag("RenderType", transparent ? "Transparent" : alphaClipped ? "TransparentCutout" : "Opaque");
             material.SetOverrideTag("Queue", transparent ? "Transparent" : alphaClipped ? "AlphaTest" : string.Empty);
             material.renderQueue = transparent ? (int)RenderQueue.Transparent : alphaClipped ? (int)RenderQueue.AlphaTest : (int)RenderQueue.Geometry;
-            material.SetShaderPassEnabled("BurtDepthOnly", !transparent);
+            bool hasDepthOnlyPass = !IsSubsurfaceShader(material) && !IsFoliageShader(material) && !IsTrunkShader(material);
+            material.SetShaderPassEnabled("BurtDepthOnly", !transparent && hasDepthOnlyPass);
+            material.SetShaderPassEnabled("BurtDepthNormals", !transparent);
             material.SetShaderPassEnabled("BurtGBuffer", !transparent);
             if (IsSubsurfaceShader(material))
             {
@@ -1558,7 +1586,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             material.SetShaderPassEnabled("ShadowCaster", !transparent);
-            material.SetShaderPassEnabled("BurtForward", true);
+            material.SetShaderPassEnabled("BurtForward", !IsSubsurfaceShader(material) && !IsFoliageShader(material) && !IsTrunkShader(material));
         }
 
         private static void ApplyGBufferStencilState(Material material)
@@ -1569,15 +1597,25 @@ namespace Burt.RenderPipeline.Editor
             }
 
             int stencilRef = ResolveGBufferStencilModel(material);
-            int writeMask = GBufferStencilShadingModelMask;
+            int writeMask = BurtShadingModelIds.DeferredStencilShadingModelMask;
             if (material.HasProperty("_ResponsiveAA") && material.GetFloat("_ResponsiveAA") >= 0.5f)
             {
-                stencilRef |= GBufferStencilResponsiveAABit;
-                writeMask |= GBufferStencilResponsiveAABit;
+                stencilRef |= BurtShadingModelIds.DeferredStencilResponsiveAABit;
+                writeMask |= BurtShadingModelIds.DeferredStencilResponsiveAABit;
             }
 
             material.SetFloat("_BurtGBufferStencilRef", stencilRef);
+            if (material.HasProperty("_BurtGBufferStencilReadMask"))
+            {
+                material.SetFloat("_BurtGBufferStencilReadMask", BurtShadingModelIds.DeferredStencilShadingModelMask);
+            }
+
             material.SetFloat("_BurtGBufferStencilWriteMask", writeMask);
+        }
+
+        private static void ApplyMotionVectorStencilState(Material material)
+        {
+            BurtShadingModelIds.ApplyMotionVectorStencilProperties(material);
         }
 
         private static void ApplyFoliageKeywords(Material material)
@@ -1607,20 +1645,22 @@ namespace Burt.RenderPipeline.Editor
         {
             if (IsClearCoatShader(material))
             {
-                return GBufferStencilClearCoatRef;
+                return BurtShadingModelIds.DeferredStencilClearCoatRef;
             }
 
             if (IsSubsurfaceShader(material))
             {
-                return GBufferStencilSubsurfaceRef;
+                return BurtShadingModelIds.DeferredStencilSubsurfaceRef;
             }
 
             if (IsFoliageShader(material))
             {
-                return GBufferStencilFoliageRef;
+                return BurtShadingModelIds.DeferredStencilFoliageRef;
             }
 
-            return IsFabricShader(material) || IsSilkShader(material) ? GBufferStencilFabricRef : GBufferStencilDefaultLitRef;
+            return IsFabricShader(material) || IsSilkShader(material)
+                ? BurtShadingModelIds.DeferredStencilFabricRef
+                : BurtShadingModelIds.DeferredStencilDefaultLitRef;
         }
 
         private static void MigrateLegacyTransparentShader(Material material)

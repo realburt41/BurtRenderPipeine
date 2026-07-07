@@ -26,27 +26,27 @@ Shader "Hidden/BurtRP/DebugHiZDepth"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
             float4 Frag(Varyings input) : SV_Target
             {
                 float selectedMip = clamp(_BurtHiZDebugMip, 0.0, max(_BurtHiZDebugMaxMip, 0.0));
-                float rawDepth = tex2Dlod(_BurtHiZDepthTexture, float4(input.screenUV, 0.0, selectedMip)).r;
+                float rawDepth = tex2Dlod(_BurtHiZDepthTexture, float4(input.ScreenUV, 0.0, selectedMip)).r;
                 float linearDepth = Linear01Depth(rawDepth);
                 float visualDepth = saturate(linearDepth * max(_BurtHiZDebugScale, 0.0001));
                 return float4(visualDepth.xxx, 1.0);

@@ -1,4 +1,4 @@
-﻿Shader "Hidden/BurtRP/ScreenSpaceReflections/Denoise"
+Shader "Hidden/BurtRP/ScreenSpaceReflections/Denoise"
 {
     SubShader
     {
@@ -25,20 +25,20 @@
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -58,7 +58,7 @@
 
             float4 FragDenoise(Varyings input) : SV_Target
             {
-                float2 screenUV = input.screenUV;
+                float2 screenUV = input.ScreenUV;
                 float4 centerSSR = tex2D(_BurtScreenSpaceReflectionColorTexture, screenUV);
                 float centerDepth = BurtSampleDeferredRawDepth(screenUV);
                 if (BurtSSRDenoiseIsSkyDepth(centerDepth))
@@ -70,7 +70,7 @@
                 BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
 
                 int debugMode = (int)_BurtSSRParams1.z;
-                if (BurtIsActiveHairShadingModel(centerGBuffer.shadingModelID) || BurtIsActiveFurShadingModel(centerGBuffer.shadingModelID))
+                if (BurtIsActiveHairShadingModel(centerGBuffer.ShadingModelID) || BurtIsActiveFurShadingModel(centerGBuffer.ShadingModelID))
                 {
                     bool traceDebugMode = (debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 31);
                     return traceDebugMode ? float4(0.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 0.0);

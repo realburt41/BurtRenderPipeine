@@ -224,6 +224,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
         public static RenderTextureDescriptor CreateGBuffer0Descriptor(Camera camera) // 定义创建 Deferred GBuffer0 RT 描述的函数。
         {
+            var graphicsFormat = SelectGBufferLinear8GraphicsFormat();
+            if (graphicsFormat != GraphicsFormat.None)
+            {
+                return CreateGBufferDescriptor(camera, graphicsFormat);
+            }
+
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32, false);
+        }
+
+        public static RenderTextureDescriptor CreateGBuffer1Descriptor(Camera camera) // 定义创建 Deferred GBuffer1 RT 描述的函数。
+        {
             var graphicsFormat = SelectGBufferBaseColorGraphicsFormat();
             if (graphicsFormat != GraphicsFormat.None)
             {
@@ -233,14 +244,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32, QualitySettings.activeColorSpace == ColorSpace.Linear);
         }
 
-        public static RenderTextureDescriptor CreateGBuffer1Descriptor(Camera camera) // 定义创建 Deferred GBuffer1 RT 描述的函数。
-        {
-            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false); // GBuffer1 保存 oct normal.rg、metallic.b、smoothness.a；直接高光对法线量化很敏感，所以用 16 位通道避免格子状高光。
-        }
-
         public static RenderTextureDescriptor CreateGBuffer2Descriptor(Camera camera) // 定义创建 Deferred GBuffer2 RT 描述的函数。
         {
-            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false); // GBuffer2 保存 emission.rgb 和 reflectance.a；固定 ARGBHalf，避免 DefaultHDR 回落到无 alpha HDR 格式。
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false); // GBuffer2 保存 packed material properties；当前保守使用 ARGBHalf，避免 packed payload 量化过早。
         }
 
         public static RenderTextureDescriptor CreateGBuffer3Descriptor(Camera camera)
@@ -255,6 +261,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
         }
 
         public static RenderTextureDescriptor CreateGBuffer4Descriptor(Camera camera)
+        {
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false);
+        }
+
+        public static RenderTextureDescriptor CreateGBuffer5Descriptor(Camera camera)
         {
             return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false);
         }
@@ -303,7 +314,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
-        private static RenderTextureDescriptor CreateGBufferDescriptor( // 定义创建 GBuffer RT 描述的共用函数，保证五张 GBuffer 尺寸和采样设置一致。
+        private static RenderTextureDescriptor CreateGBufferDescriptor( // 定义创建 GBuffer RT 描述的共用函数，保证全部 GBuffer 尺寸和采样设置一致。
             Camera camera, // 接收当前相机，用来匹配渲染尺寸和 targetTexture 尺寸。
             RenderTextureFormat format, // 接收当前 GBuffer 需要使用的颜色格式。
             bool sRGB = false)

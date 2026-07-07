@@ -33,7 +33,10 @@ Shader "BurtRP/Fabric"
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 160
+        [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
+        [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
 
     SubShader
@@ -85,18 +88,39 @@ Shader "BurtRP/Fabric"
 
         Pass
         {
+            Name "Burt Fabric Depth Normals"
+            Tags { "LightMode" = "BurtDepthNormals" }
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertGBuffer
+            #pragma fragment FragDepthNormals
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_FABRIC 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "Burt Fabric Motion Vectors"
             Tags { "LightMode" = "BurtMotionVectors" }
 
             ZWrite Off
-            ZTest Always
+            ZTest Equal
             Cull [_Cull]
 
             Stencil
             {
-                Ref 8
+                Ref [_MotionVectorsStencilRef]
                 ReadMask 8
-                WriteMask 8
+                WriteMask [_MotionVectorsStencilMask]
                 Comp Always
                 Pass Replace
             }
@@ -118,12 +142,14 @@ Shader "BurtRP/Fabric"
         {
             Name "Burt Fabric GBuffer"
             Tags { "LightMode" = "BurtGBuffer" }
-            ZWrite On
-            ZTest LEqual
+            ZWrite Off
+            ZTest Equal
+            // GBuffer0 normal/roughness comes from BurtDepthNormals; keep MRT0 untouched here.
+            ColorMask 0 0
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 224
+                ReadMask [_BurtGBufferStencilReadMask]
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace

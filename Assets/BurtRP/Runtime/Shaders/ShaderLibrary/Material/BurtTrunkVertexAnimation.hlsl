@@ -8,7 +8,11 @@
     #define BURT_TRUNK_MATERIAL_ENABLED 1
 #endif
 
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)
+#if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #define BURT_GRASS_MATERIAL_ENABLED 1
+#endif
+
+#if (defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)) && !defined(BURT_GRASS_MATERIAL_ENABLED)
     #define BURT_FOLIAGE_MATERIAL_ENABLED 1
 #endif
 
@@ -32,6 +36,125 @@ float3 BurtTrunkRotateAboutAxisOffset(float3 axis, float angle, float3 pivotWS, 
     float3 relative = positionWS - pivotWS;
     float3 rotated = relative * cosineValue + cross(axis, relative) * sineValue + axis * dot(axis, relative) * (1.0f - cosineValue);
     return pivotWS + rotated - positionWS;
+}
+
+float3 BurtGrassPivotPosOSFromVertexColor(float4 vertexColor)
+{
+    vertexColor = saturate(vertexColor);
+    return float3(-(vertexColor.b - 0.5f) * 4.0f, 0.0f, -(vertexColor.a - 0.5f) * 4.0f);
+}
+
+float3 BurtGrassPivotPosWSFromVertexColor(float4 vertexColor, float4x4 objectToWorldMatrix)
+{
+    return mul(objectToWorldMatrix, float4(BurtGrassPivotPosOSFromVertexColor(vertexColor), 1.0f)).xyz;
+}
+
+float BurtGrassHeightFromVertexColor(float4 vertexColor)
+{
+    return saturate(vertexColor.r);
+}
+
+float BurtGrassWindNoiseShape(float2 value)
+{
+    float2 windUV = abs(frac(value + 0.5f) * 2.0f - 1.0f);
+    return length(windUV * (3.0f - 2.0f * windUV) * windUV);
+}
+
+float BurtGrassWindNoiseIntensity(float3 pivotWS, float timeSeconds)
+{
+    float2 windDir = BurtTrunkWindDirectionWS().xz;
+    windDir = lerp(float2(1.0f, 0.0f), windDir, step(BURT_EPSILON, dot(windDir, windDir)));
+    windDir = normalize(windDir);
+
+    float windTime = timeSeconds * 20.0f;
+    float2 windScroll = windDir * windTime;
+    float noise1 = BurtGrassWindNoiseShape(pivotWS.xz * 0.2f - 0.7f * windScroll);
+    float2 windDir2 = normalize(windDir + float2(0.5f, 0.2f));
+    float noise2 = BurtGrassWindNoiseShape(pivotWS.xz * 2.0f - 0.27f * windDir2 * windTime);
+    return (noise1 * 1.2f + noise2) * 0.45f;
+}
+
+float3 BurtGrassCameraTiltOffsetWS(float4 positionOS, float3 positionWS, float3 pivotWS, float3 normalOS, float4x4 objectToWorldMatrix)
+{
+#if defined(BURT_GRASS_MATERIAL_ENABLED)
+    if (_TiltingStrength <= 0.01f)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
+    float3 normalWS = BurtSafeNormalize(mul((float3x3)objectToWorldMatrix, normalOS));
+    float3 objectUpWS = BurtSafeNormalize(float3(objectToWorldMatrix._m01, objectToWorldMatrix._m11, objectToWorldMatrix._m21));
+    float3 viewForwardWS = BurtSafeNormalize(float3(UNITY_MATRIX_I_V._m02, UNITY_MATRIX_I_V._m12, UNITY_MATRIX_I_V._m22));
+    float3 pivotDirWS = BurtSafeNormalize(positionWS - pivotWS);
+    float3 cameraOffsetDir = dot(pivotDirWS, normalWS) * normalWS;
+    cameraOffsetDir.y = 0.0f;
+
+    float cameraOffsetLengthSquared = dot(cameraOffsetDir, cameraOffsetDir);
+    float valid = step(1e-10f, cameraOffsetLengthSquared);
+    cameraOffsetDir *= rsqrt(cameraOffsetLengthSquared + 1e-16f);
+
+    float upDotV = saturate(dot(objectUpWS, viewForwardWS));
+    float upperMask = 1.0f - pow(1.0f - upDotV, 0.3f);
+    float scaleY = max(length(float3(objectToWorldMatrix._m01, objectToWorldMatrix._m11, objectToWorldMatrix._m21)), BURT_EPSILON);
+    return cameraOffsetDir * (_TiltingStrength * 0.2f / scaleY) * upperMask * valid;
+#else
+    return float3(0.0f, 0.0f, 0.0f);
+#endif
+}
+
+float3 BurtGrassCalculateOffsetWS(
+    float4 positionOS,
+    float3 normalOS,
+    float4 vertexColor,
+    float4x4 objectToWorldMatrix,
+    float timeSeconds,
+    out float windNoiseIntensity)
+{
+    windNoiseIntensity = 0.0f;
+#if defined(BURT_GRASS_MATERIAL_ENABLED)
+    float3 positionWS = mul(objectToWorldMatrix, positionOS).xyz;
+    float3 pivotWS = BurtGrassPivotPosWSFromVertexColor(vertexColor, objectToWorldMatrix);
+    float heightMask = pow(max(BurtGrassHeightFromVertexColor(vertexColor), 0.0f), max(_WindHeightMask, 0.001f));
+
+    float3 rotationForce = float3(0.0f, 0.0f, 0.0f);
+    if (_WindStrength > 0.001f)
+    {
+        windNoiseIntensity = BurtGrassWindNoiseIntensity(pivotWS, timeSeconds);
+        rotationForce += BurtTrunkWindDirectionWS() * windNoiseIntensity * heightMask * _WindStrength * 0.03f;
+    }
+
+    rotationForce += BurtGrassCameraTiltOffsetWS(positionOS, positionWS, pivotWS, normalOS, objectToWorldMatrix) * heightMask;
+
+    float forceMagnitude = length(rotationForce);
+    if (forceMagnitude <= BURT_EPSILON)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
+    float3 forceDirection = rotationForce / forceMagnitude;
+    float3 forceAxis = BurtSafeNormalize(cross(forceDirection, float3(0.0f, -1.0f, 0.0f)));
+    return BurtTrunkRotateAboutAxisOffset(forceAxis, forceMagnitude, pivotWS, positionWS);
+#else
+    return float3(0.0f, 0.0f, 0.0f);
+#endif
+}
+
+float4 BurtGetGrassAnimatedWorldPosition(float4 positionOS, float3 normalOS, float4 vertexColor, float4x4 objectToWorldMatrix, float timeSeconds)
+{
+    float windNoiseIntensity;
+    float4 positionWS = mul(objectToWorldMatrix, positionOS);
+    positionWS.xyz += BurtGrassCalculateOffsetWS(positionOS, normalOS, vertexColor, objectToWorldMatrix, timeSeconds, windNoiseIntensity);
+    return positionWS;
+}
+
+float4 BurtApplyGrassVertexAnimationObjectSpace(float4 positionOS, float3 normalOS, float4 vertexColor, float timeSeconds)
+{
+#if defined(BURT_GRASS_MATERIAL_ENABLED)
+    float4 animatedWorld = BurtGetGrassAnimatedWorldPosition(positionOS, normalOS, vertexColor, unity_ObjectToWorld, timeSeconds);
+    return mul(unity_WorldToObject, animatedWorld);
+#else
+    return positionOS;
+#endif
 }
 
 float4 BurtGetTrunkAnimatedWorldPosition(float4 positionOS, float4 vertexColor, float4x4 objectToWorldMatrix, float timeSeconds)
@@ -92,7 +215,7 @@ float4 BurtApplyTrunkVertexAnimationObjectSpace(float4 positionOS, float4 vertex
 
 float3 BurtFoliageCalculateWindOffsetWS(float4 positionOS, float4 vertexColor, float4x4 objectToWorldMatrix, float timeSeconds)
 {
-#if defined(BURT_FOLIAGE_MATERIAL_ENABLED) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+#if defined(BURT_FOLIAGE_MATERIAL_ENABLED)
     float3 positionWS = mul(objectToWorldMatrix, positionOS).xyz;
     float3 pivotWS = mul(objectToWorldMatrix, float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
 
@@ -152,7 +275,7 @@ float4 BurtGetFoliageAnimatedWorldPosition(float4 positionOS, float4 vertexColor
 
 float4 BurtApplyFoliageVertexAnimationObjectSpace(float4 positionOS, float4 vertexColor, float timeSeconds)
 {
-#if defined(BURT_FOLIAGE_MATERIAL_ENABLED) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+#if defined(BURT_FOLIAGE_MATERIAL_ENABLED)
     float4 animatedWorld = BurtGetFoliageAnimatedWorldPosition(positionOS, vertexColor, unity_ObjectToWorld, timeSeconds);
     return mul(unity_WorldToObject, animatedWorld);
 #else

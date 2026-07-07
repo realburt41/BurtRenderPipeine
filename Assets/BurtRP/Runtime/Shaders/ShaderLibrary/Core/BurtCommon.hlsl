@@ -37,6 +37,18 @@ SamplerComparisonState sampler_LinearClampCompare;
 #define SamplerPointClampCompare sampler_PointClampCompare
 #define SamplerLinearClampCompare sampler_LinearClampCompare
 
+#ifndef SAMPLE_TEXTURE2D
+    #define SAMPLE_TEXTURE2D(textureName, samplerName, coord2) textureName.Sample(samplerName, coord2)
+#endif
+
+#ifndef SAMPLE_TEXTURE2D_LOD
+    #define SAMPLE_TEXTURE2D_LOD(textureName, samplerName, coord2, lod) textureName.SampleLevel(samplerName, coord2, lod)
+#endif
+
+#ifndef SAMPLE_TEXTURE2D_ARRAY_LOD
+    #define SAMPLE_TEXTURE2D_ARRAY_LOD(textureName, samplerName, coord2, index, lod) textureName.SampleLevel(samplerName, float3(coord2, index), lod)
+#endif
+
 #define BURT_SAMPLE_TEXTURE2D_REPEAT(textureName, uv) textureName.Sample(sampler_LinearRepeat, uv)
 #define BURT_SAMPLE_TEXTURE2D_CLAMP(textureName, uv) textureName.Sample(sampler_LinearClamp, uv)
 #define BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(textureName, uv) textureName.Sample(sampler_PointClamp, uv)
@@ -48,8 +60,7 @@ SamplerComparisonState sampler_LinearClampCompare;
 #define BURT_SAMPLE_TEXTURECUBE_LOD_REPEAT(textureName, direction, lod) textureName.SampleLevel(sampler_LinearRepeat, direction, lod)
 #define BURT_SAMPLE_SHADOW_CLAMP(textureName, coord) textureName.SampleCmpLevelZero(sampler_LinearClampCompare, (coord).xy, (coord).z)
 
-static const float BURT_MULTIPASS_DEFAULT_SHELL_LENGTH = 0.03f;
-
+#define BURT_MULTIPASS_DEFAULT_SHELL_LENGTH (0.03f)
 float4 _FurScale;
 float _FurMaxCount;
 
@@ -84,23 +95,23 @@ float4 BurtApplyMultipassObjectShellOffset(float4 positionOS, float3 normalOS)
 }
 
 // 定义一个很小的正数，用来避免除以 0 或 rsqrt 输入 0 导致 NaN。
-static const float BURT_EPSILON = 0.000001f;
+#define BURT_EPSILON (0.000001f)
 
-// 保存 BurtRP 各类 pass 常用的位置数据。
+// Position data shared by BurtRP passes.
 struct BurtPositionInputs
 {
     // 保存世界空间位置，后续光照、阴影、雾效和调试视图都会用到。
-    float3 positionWS;
+    float3 PositionWS;
 
     // 保存裁剪空间位置，最终会写入 SV_POSITION 让 GPU 做光栅化。
-    float4 positionCS;
+    float4 PositionCS;
 };
 
 // 保存 BurtRP 光照当前使用的法线数据。
 struct BurtNormalInputs
 {
     // 保存世界空间法线，Lambert 光照、法线贴图和阴影 bias 计算都会用到。
-    float3 normalWS;
+    float3 NormalWS;
 };
 
 // 对 float3 做安全归一化，避免零向量导致非法结果。

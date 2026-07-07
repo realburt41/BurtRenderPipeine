@@ -48,11 +48,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
         private readonly BurtRenderPass drawPostImageEffectsGizmosPass = new BurtDrawPostImageEffectsGizmosPass(); // 创建后处理后的编辑器 Gizmos Pass，避免直接画到外部最终目标。
 
-        private readonly BurtRenderPass allocatePostProcessColorPass = new BurtAllocatePostProcessColorPass(); // 创建后处理颜色分配 Pass，用来申请 PostProcessColor 中间 RT。
+        private readonly BurtRenderPass allocatePostProcessColorPass = new AllocatePostProcessColorPass(); // 创建后处理颜色分配 Pass，用来申请 PostProcessColor 中间 RT。
 
-        private readonly BurtRenderPass postProcessPass = new BurtPostProcessPass(); // 创建第一版后处理 Pass，用来执行 No-op Copy 或 Tonemapping。
+        private readonly BurtRenderPass postProcessPass = new PostProcessPass(); // 创建第一版后处理 Pass，用来执行 No-op Copy 或 Tonemapping。
 
-        private readonly BurtRenderPass releasePostProcessColorPass = new BurtReleasePostProcessColorPass(); // 创建后处理颜色释放 Pass，用来在后处理完成后释放 PostProcessColor。
+        private readonly BurtRenderPass releasePostProcessColorPass = new ReleasePostProcessColorPass(); // 创建后处理颜色释放 Pass，用来在后处理完成后释放 PostProcessColor。
 
         private readonly BurtRenderPass debugCameraDepthPass = new BurtDebugCameraDepthPass(); // 创建 CameraDepth 调试 Pass，用来把深度纹理画到中间颜色目标上。
 
@@ -332,7 +332,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 return false; // 返回 false，把后处理推迟到真正 FinalBlit 之前，避免相机栈里重复执行效果。
             }
 
-            return BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 复用后处理工具逻辑，保证 ForwardGraph 和资源注册条件一致。
+            return PostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 复用后处理工具逻辑，保证 ForwardGraph 和资源注册条件一致。
         }
 
         private static bool ShouldUseDepthDebugView(BurtRenderPipelineAsset asset) // 定义判断是否启用 CameraDepth 调试视图的辅助函数。

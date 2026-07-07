@@ -54,24 +54,24 @@ float BurtMotionVectorEvaluateOpacity(float alpha, float2 baseMapUV, float3 posi
 
 struct MotionVectorAttributes
 {
-    float4 positionOS : POSITION;
-    float3 normalOS : NORMAL;
-    float2 uv0 : TEXCOORD0;
+    float4 PositionOS : POSITION;
+    float3 NormalOS : NORMAL;
+    float2 UV0 : TEXCOORD0;
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        float4 color : COLOR;
+        float4 Color : COLOR;
     #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct MotionVectorVaryings
 {
-    float4 positionCS : SV_POSITION;
-    float4 currentClip : TEXCOORD0;
-    float4 currentClipNoJitter : TEXCOORD1;
-    float4 previousClipNoJitter : TEXCOORD2;
-    float2 baseMapUV : TEXCOORD3;
-    float sourceConfidence : TEXCOORD4;
-    float3 positionWS : TEXCOORD5;
+    float4 PositionCS : SV_POSITION;
+    float4 CurrentClip : TEXCOORD0;
+    float4 CurrentClipNoJitter : TEXCOORD1;
+    float4 PreviousClipNoJitter : TEXCOORD2;
+    float2 BaseMapUV : TEXCOORD3;
+    float SourceConfidence : TEXCOORD4;
+    float3 PositionWS : TEXCOORD5;
 };
 
 float2 BurtTaaClipToUv(float4 clipPosition)
@@ -103,15 +103,20 @@ MotionVectorVaryings VertMotionVector(MotionVectorAttributes input)
 {
     UNITY_SETUP_INSTANCE_ID(input);
 
-    float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+    float4 positionOS = BurtApplyMultipassObjectShellOffset(input.PositionOS, input.NormalOS);
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         float previousTimeSeconds = max(_Time.y - unity_DeltaTime.x, 0.0f);
-        float4 currentWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.color, unity_ObjectToWorld, _Time.y);
-        float4 previousObjectWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.color, unity_MatrixPreviousM, previousTimeSeconds);
+        float4 currentWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.Color, unity_ObjectToWorld, _Time.y);
+        float4 previousObjectWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.Color, unity_MatrixPreviousM, previousTimeSeconds);
     #elif defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
         float previousTimeSeconds = max(_Time.y - unity_DeltaTime.x, 0.0f);
-        float4 currentWorld = BurtGetFoliageAnimatedWorldPosition(positionOS, input.color, unity_ObjectToWorld, _Time.y);
-        float4 previousObjectWorld = BurtGetFoliageAnimatedWorldPosition(positionOS, input.color, unity_MatrixPreviousM, previousTimeSeconds);
+        #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        float4 currentWorld = BurtGetGrassAnimatedWorldPosition(positionOS, input.NormalOS, input.Color, unity_ObjectToWorld, _Time.y);
+        float4 previousObjectWorld = BurtGetGrassAnimatedWorldPosition(positionOS, input.NormalOS, input.Color, unity_MatrixPreviousM, previousTimeSeconds);
+        #else
+        float4 currentWorld = BurtGetFoliageAnimatedWorldPosition(positionOS, input.Color, unity_ObjectToWorld, _Time.y);
+        float4 previousObjectWorld = BurtGetFoliageAnimatedWorldPosition(positionOS, input.Color, unity_MatrixPreviousM, previousTimeSeconds);
+        #endif
     #else
         float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
         float4 previousObjectWorld = mul(unity_MatrixPreviousM, positionOS);
@@ -120,8 +125,12 @@ MotionVectorVaryings VertMotionVector(MotionVectorAttributes input)
     float materialVertexAnimation = 0.0;
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         materialVertexAnimation = step(BURT_EPSILON, max(_MaxBendAngle, _SwayIntensity));
-    #elif (defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #elif defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        materialVertexAnimation = step(BURT_EPSILON, max(_WindStrength, _TiltingStrength));
+        #else
         materialVertexAnimation = step(BURT_EPSILON, max(max(_MaxBendAngle, _SwayIntensity), _FlutterTipIntensity));
+        #endif
     #endif
 
     float forceNoMotion = step(unity_MotionVectorsParams.y, 0.5);
@@ -132,38 +141,38 @@ MotionVectorVaryings VertMotionVector(MotionVectorAttributes input)
     float4 previousWorld = lerp(currentWorld, previousObjectWorld, objectMoved);
 
     MotionVectorVaryings output;
-    output.positionCS = mul(_BurtTAACurrentViewProjection, currentWorld);
+    output.PositionCS = mul(_BurtTAACurrentViewProjection, currentWorld);
 #if defined(UNITY_REVERSED_Z)
-    output.positionCS.z -= unity_MotionVectorsParams.z * output.positionCS.w;
+    output.PositionCS.z -= unity_MotionVectorsParams.z * output.PositionCS.w;
 #else
-    output.positionCS.z += unity_MotionVectorsParams.z * output.positionCS.w;
+    output.PositionCS.z += unity_MotionVectorsParams.z * output.PositionCS.w;
 #endif
 
-    output.currentClip = output.positionCS;
-    output.currentClipNoJitter = mul(_BurtTAACurrentNonJitteredViewProjection, currentWorld);
-    output.previousClipNoJitter = mul(_BurtTAAPreviousNonJitteredViewProjection, previousWorld);
-    output.baseMapUV = BurtMotionVectorTransformBaseMapUV(input.uv0);
-    output.sourceConfidence = objectMoved;
-    output.positionWS = currentWorld.xyz;
+    output.CurrentClip = output.PositionCS;
+    output.CurrentClipNoJitter = mul(_BurtTAACurrentNonJitteredViewProjection, currentWorld);
+    output.PreviousClipNoJitter = mul(_BurtTAAPreviousNonJitteredViewProjection, previousWorld);
+    output.BaseMapUV = BurtMotionVectorTransformBaseMapUV(input.UV0);
+    output.SourceConfidence = objectMoved;
+    output.PositionWS = currentWorld.xyz;
     return output;
 }
 
 float4 FragMotionVector(MotionVectorVaryings input) : SV_Target
 {
-    float4 baseColor = BurtMotionVectorSampleBaseMap(input.baseMapUV) * _BaseColor;
-    float alpha = BurtMotionVectorEvaluateOpacity(baseColor.a, input.baseMapUV, input.positionWS);
+    float4 baseColor = BurtMotionVectorSampleBaseMap(input.BaseMapUV) * _BaseColor;
+    float alpha = BurtMotionVectorEvaluateOpacity(baseColor.a, input.BaseMapUV, input.PositionWS);
     BurtMotionVectorApplyAlphaClip(alpha);
-    clip(input.sourceConfidence - 0.5);
+    clip(input.SourceConfidence - 0.5);
 
-    float currentRawDepth = BurtTaaDeviceDepth(input.currentClip);
+    float currentRawDepth = BurtTaaDeviceDepth(input.CurrentClip);
     float surfaceValid = BurtTaaValidSurfaceWeight(currentRawDepth);
-    float2 currentScreenUv = BurtTaaClipToUv(input.currentClip);
-    float2 currentUv = BurtTaaClipToUv(input.currentClipNoJitter);
-    float2 previousUv = BurtTaaClipToUv(input.previousClipNoJitter);
+    float2 currentScreenUv = BurtTaaClipToUv(input.CurrentClip);
+    float2 currentUv = BurtTaaClipToUv(input.CurrentClipNoJitter);
+    float2 previousUv = BurtTaaClipToUv(input.PreviousClipNoJitter);
 
     float currentInBounds = step(0.0, currentScreenUv.x) * step(currentScreenUv.x, 1.0) * step(0.0, currentScreenUv.y) * step(currentScreenUv.y, 1.0);
     float motionInBounds = step(0.0, currentUv.x) * step(currentUv.x, 1.0) * step(0.0, currentUv.y) * step(currentUv.y, 1.0);
-    float previousAvailable = step(1e-5, input.previousClipNoJitter.w);
+    float previousAvailable = step(1e-5, input.PreviousClipNoJitter.w);
     previousAvailable *= step(0.0, previousUv.x) * step(previousUv.x, 1.0) * step(0.0, previousUv.y) * step(previousUv.y, 1.0);
 
     float sceneRawDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(currentScreenUv)).r;

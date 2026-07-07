@@ -326,6 +326,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBuffer4Name);
         }
 
+        public BurtRenderTargetHandle ReadGBuffer5()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.GBuffer5Name);
+        }
+
+        public BurtRenderTargetHandle WriteGBuffer5()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.GBuffer5Name);
+        }
+
         public BurtRenderTargetHandle ReadGBufferObjectIndex()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.GBufferObjectIndexName);

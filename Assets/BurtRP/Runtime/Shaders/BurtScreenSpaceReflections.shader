@@ -1,4 +1,4 @@
-﻿Shader "Hidden/BurtRP/ScreenSpaceReflections"
+Shader "Hidden/BurtRP/ScreenSpaceReflections"
 {
     SubShader
     {
@@ -18,18 +18,18 @@
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
+                float4 PositionCS : SV_POSITION;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = float4(input.vertexID == 1 ? 3.0 : -1.0, input.vertexID == 2 ? 3.0 : -1.0, 0.0, 1.0);
+                output.PositionCS = float4(input.VertexID == 1 ? 3.0 : -1.0, input.VertexID == 2 ? 3.0 : -1.0, 0.0, 1.0);
                 return output;
             }
 

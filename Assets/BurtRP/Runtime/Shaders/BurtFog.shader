@@ -38,24 +38,24 @@ Shader "Hidden/BurtRP/Fog"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
-                output.positionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
+                float2 uv = float2((input.VertexID << 1) & 2, input.VertexID & 2);
+                output.PositionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0f - uv.y;
                 #endif
-                output.screenUV = uv;
+                output.ScreenUV = uv;
                 return output;
             }
 
@@ -130,15 +130,15 @@ Shader "Hidden/BurtRP/Fog"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float3 sourceColor = tex2D(_BurtCameraColorTexture, input.screenUV).rgb;
-                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.screenUV);
+                float3 sourceColor = tex2D(_BurtCameraColorTexture, input.ScreenUV).rgb;
+                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.ScreenUV);
                 bool isDebug = _BurtFogDebugMode > 0.5f;
                 if (IsSkyPixel(rawDepth))
                 {
                     return isDebug ? float4(0.0f, 0.0f, 0.0f, 1.0f) : float4(sourceColor, 1.0f);
                 }
 
-                float3 positionWS = ReconstructPositionWS(input.screenUV, rawDepth);
+                float3 positionWS = ReconstructPositionWS(input.ScreenUV, rawDepth);
                 float3 cameraToPixel = positionWS - _BurtFogCameraPositionWS;
                 float viewDistance = length(cameraToPixel);
                 if (viewDistance <= 1.0e-4f)

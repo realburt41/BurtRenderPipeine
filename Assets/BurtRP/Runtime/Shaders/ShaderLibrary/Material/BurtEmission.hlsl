@@ -16,7 +16,7 @@ float2 BurtTransformEmissionMapUV(float2 uv0, float4 emissionMapST)
 float4 BurtSampleEmissionMap(float2 emissionMapUV)
 {
     // 返回自发光贴图颜色，后续会和材质 Emission Color 相乘。
-    return BURT_SAMPLE_TEXTURE2D_REPEAT(_EmissionMap, emissionMapUV);
+    return SAMPLE_TEXTURE2D(_EmissionMap, sampler_LinearRepeat, emissionMapUV);
 }
 
 // 计算最终自发光颜色。

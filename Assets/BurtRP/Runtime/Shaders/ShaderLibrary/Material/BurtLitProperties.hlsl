@@ -174,6 +174,8 @@ CBUFFER_START(UnityPerMaterial)
 
     float _SSShadowDistance;
 
+    float _TiltingStrength;
+
     float _GroundFadeIntensity;
 
     float4 _NoiseMap_ST;
@@ -189,6 +191,16 @@ CBUFFER_START(UnityPerMaterial)
     float4 _Variation01;
 
     float4 _Variation02;
+
+    float _WindHeightMask;
+
+    float _WindStrength;
+
+    float _WindNormalStrength;
+
+    float _ForceIntensity;
+
+    float _WindInteractionIntensity;
 
     // 保存自发光颜色，Forward 用它和 Emission Map 相乘。
     float4 _EmissionColor;

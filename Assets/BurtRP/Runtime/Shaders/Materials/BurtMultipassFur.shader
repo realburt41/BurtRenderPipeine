@@ -62,6 +62,7 @@ Shader "BurtRP/Multipass Fur"
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 224
+        [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
     }
 
@@ -125,7 +126,7 @@ Shader "BurtRP/Multipass Fur"
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 224
+                ReadMask [_BurtGBufferStencilReadMask]
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace

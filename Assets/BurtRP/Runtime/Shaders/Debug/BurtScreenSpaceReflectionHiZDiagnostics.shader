@@ -26,32 +26,32 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             struct BurtSSRHiZTraceResult
             {
-                float hit;
-                float rawHit;
-                float steps;
-                float workCost;
-                float skipCandidate;
-                float skipUsed;
-                float skippedStableHit;
-                float2 uv;
+                float Hit;
+                float RawHit;
+                float Steps;
+                float WorkCost;
+                float SkipCandidate;
+                float SkipUsed;
+                float SkippedStableHit;
+                float2 UV;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -226,14 +226,14 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
             BurtSSRHiZTraceResult BurtSSRHiZCreateEmptyTraceResult()
             {
                 BurtSSRHiZTraceResult result;
-                result.hit = 0.0f;
-                result.rawHit = 0.0f;
-                result.steps = 0.0f;
-                result.workCost = 0.0f;
-                result.skipCandidate = 0.0f;
-                result.skipUsed = 0.0f;
-                result.skippedStableHit = 0.0f;
-                result.uv = 0.0f;
+                result.Hit = 0.0f;
+                result.RawHit = 0.0f;
+                result.Steps = 0.0f;
+                result.WorkCost = 0.0f;
+                result.SkipCandidate = 0.0f;
+                result.SkipUsed = 0.0f;
+                result.SkippedStableHit = 0.0f;
+                result.UV = 0.0f;
                 return result;
             }
 
@@ -382,7 +382,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
                         break;
                     }
 
-                    result.workCost += 1.0f;
+                    result.WorkCost += 1.0f;
                     bool candidateCanSkip = useCandidate && diagnosticMip >= 1.0f && previousTime > 0.0f && previousDepthDelta < -skipDepthThreshold;
                     float nextTime = BurtSSRHiZComputeCellExitTime(startUV, deltaUV, currentTime, candidateCanSkip ? diagnosticMip : 0.0f);
                     nextTime = BurtSSRHiZAdvanceTime(currentTime, nextTime, minTimeStep);
@@ -401,7 +401,7 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
                             float3 weightedPositionWS;
                             BurtSSRHiZProjectPosition(rayPositionWS, projectedUV, rayRawDepth, inverseW, weightedPositionWS);
                             float coarseDepthDelta = BurtSSRHiZDepthDelta(rayRawDepth, coarseRawDepth);
-                            result.skipCandidate = max(result.skipCandidate, coarseDepthDelta < -skipDepthThreshold ? 1.0f : 0.0f);
+                            result.SkipCandidate = max(result.SkipCandidate, coarseDepthDelta < -skipDepthThreshold ? 1.0f : 0.0f);
                             if (coarseDepthDelta < -skipDepthThreshold)
                             {
                                 float guardCost;
@@ -419,11 +419,11 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
                                     minTimeStep,
                                     guardCost,
                                     guardTime);
-                                result.workCost += guardCost;
-                                result.skippedStableHit = max(result.skippedStableHit, mip0Risk ? 1.0f : 0.0f);
+                                result.WorkCost += guardCost;
+                                result.SkippedStableHit = max(result.SkippedStableHit, mip0Risk ? 1.0f : 0.0f);
                                 if (!mip0Risk)
                                 {
-                                    result.skipUsed = 1.0f;
+                                    result.SkipUsed = 1.0f;
                                     currentTime = nextTime;
                                     previousTime = nextTime;
                                     previousDepthDelta = -thickness;
@@ -456,10 +456,10 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
                     bool rawHit = depthDelta >= 0.0f && depthDelta <= thickness * 1.5f;
                     if (rawHit)
                     {
-                        result.hit = 1.0f;
-                        result.rawHit = 1.0f;
-                        result.uv = rayUV;
-                        result.steps = (float)iterationIndex / max((float)maxSteps, 1.0f);
+                        result.Hit = 1.0f;
+                        result.RawHit = 1.0f;
+                        result.UV = rayUV;
+                        result.Steps = (float)iterationIndex / max((float)maxSteps, 1.0f);
                         return result;
                     }
 
@@ -468,13 +468,13 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
                     currentTime = nextTime;
                 }
 
-                result.steps = 1.0f;
+                result.Steps = 1.0f;
                 return result;
             }
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float2 screenUV = saturate(input.screenUV);
+                float2 screenUV = saturate(input.ScreenUV);
                 int debugMode = (int)round(_BurtSSRHiZDiagnosticsParams.x);
                 float maxMip = max(_BurtSSRHiZDiagnosticsParams.y, 1.0f);
                 float diagnosticMip = clamp(round(_BurtSSRHiZDiagnosticsParams.z), 0.0f, maxMip);
@@ -493,10 +493,10 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
                 float mipWeight = saturate(diagnosticMip / max(maxMip, 1.0f));
 
                 BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
-                float roughnessFade = saturate((_BurtSSRHiZTraceParams0.w - gbufferData.perceptualRoughness) / max(_BurtSSRHiZTraceParams0.w, 0.0001f));
+                float roughnessFade = saturate((_BurtSSRHiZTraceParams0.w - gbufferData.PerceptualRoughness) / max(_BurtSSRHiZTraceParams0.w, 0.0001f));
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, cameraRawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
-                float3 normalWS = BurtSafeNormalize(gbufferData.normalWS);
+                float3 normalWS = BurtGetDeferredSurfaceNormalWS(gbufferData);
                 float3 reflectionDirectionWS = BurtSafeNormalize(reflect(-viewDirectionWS, normalWS));
                 float thickness = max(_BurtSSRHiZTraceParams0.y, 0.0001f);
                 float originBias = min(thickness * 0.08f, 0.025f);
@@ -509,18 +509,18 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
                     candidateTrace = BurtSSRHiZTraceRay(originWS, reflectionDirectionWS, true, diagnosticMip);
                 }
 
-                float stableHit = saturate(stableTrace.hit);
-                float candidateHit = saturate(candidateTrace.hit);
+                float stableHit = saturate(stableTrace.Hit);
+                float candidateHit = saturate(candidateTrace.Hit);
                 float missedHit = saturate(stableHit * (1.0f - candidateHit));
                 float extraCandidateHit = saturate(candidateHit * (1.0f - stableHit));
-                float candidateWork = max(candidateTrace.workCost, 0.0001f);
-                float stableWork = max(stableTrace.workCost, 0.0001f);
+                float candidateWork = max(candidateTrace.WorkCost, 0.0001f);
+                float stableWork = max(stableTrace.WorkCost, 0.0001f);
                 float candidateCheaper = saturate((stableWork - candidateWork) / max(stableWork, 1.0f));
                 float candidateCostlier = saturate((candidateWork - stableWork) / max(stableWork, 1.0f));
 
                 if (debugMode == 20)
                 {
-                    return float4(BurtSSRHiZHeatColor(candidateTrace.skipCandidate), 1.0f);
+                    return float4(BurtSSRHiZHeatColor(candidateTrace.SkipCandidate), 1.0f);
                 }
 
                 if (debugMode == 21)
@@ -541,12 +541,12 @@ Shader "Hidden/BurtRP/ScreenSpaceReflectionHiZDiagnostics"
 
                 if (debugMode == 27)
                 {
-                    return float4(0.0f, candidateTrace.skipUsed, stableHit * 0.25f + mipWeight * 0.25f, 1.0f);
+                    return float4(0.0f, candidateTrace.SkipUsed, stableHit * 0.25f + mipWeight * 0.25f, 1.0f);
                 }
 
                 if (debugMode == 28)
                 {
-                    return float4(missedHit * candidateTrace.skipUsed, stableHit * (1.0f - missedHit), candidateTrace.skipCandidate * 0.5f, 1.0f);
+                    return float4(missedHit * candidateTrace.SkipUsed, stableHit * (1.0f - missedHit), candidateTrace.SkipCandidate * 0.5f, 1.0f);
                 }
 
                 if (debugMode == 29 || debugMode == 30)

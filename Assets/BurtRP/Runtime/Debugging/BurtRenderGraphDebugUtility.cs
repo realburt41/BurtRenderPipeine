@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic; // 引入泛型集合命名空间，用 IReadOnlyList、Dictionary 和 List 组织 Pass 与资源关系。
+using System.Collections.Generic; // 引入泛型集合命名空间，用 IReadOnlyList、Dictionary 和 List 组织 Pass 与资源关系。
 using System.Globalization; // 用 InvariantCulture 输出稳定的小数格式，避免不同系统区域设置影响 dump。
 using System.Text; // 引入文本构建命名空间，用 StringBuilder 组合多行 RenderGraph dump。
 using UnityEngine; // 引入 UnityEngine 命名空间，用 Camera、RenderTexture 和 RenderTextureDescriptor 输出 RT 诊断状态。
@@ -244,6 +244,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var gBufferSource = BurtGBufferDebugViewUtility.ResolveGBufferDebugViewSource(asset); // 解析 GBuffer Debug 的来源，区分资产面板和 Overlay。
 
+            var gBufferDebugYFlip = BurtFinalBlitUtility.ResolveFinalBlitYFlip(request);
+
             builder.Append("  RendererMode=").Append(asset.RendererMode); // 写入当前渲染路径，用来确认正在看 Forward 还是 Deferred。
 
             builder.Append(" EffectiveRendererMode=").Append(IsDeferredRequest(request, asset) ? "Deferred" : "Forward"); // 写入当前 request 实际走的渲染路径，Preview 会强制走 Forward。
@@ -263,6 +265,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" GBufferDebugResolvedMode=").Append(resolvedGBufferMode); // 写入最终生效的 GBuffer Debug 模式。
 
             builder.Append(" GBufferDebugSource=").Append(gBufferSource); // 写入最终模式来源，方便确认是否由 Overlay 触发。
+
+            builder.Append(" GBufferDebugYFlip=").Append(FormatFloat(gBufferDebugYFlip));
 
             builder.AppendLine(); // 结束第二行调试状态。
 
@@ -1430,7 +1434,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             AppendDescriptorLine(builder, "CameraDepth", BurtRenderTargetDescriptorUtility.CreateCameraDepthDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.CameraDepthName); // 输出 CameraDepth 中间 RT 描述。
 
-            if (BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset)) // 只有当前 request 实际会使用后处理框架时，才输出 PostProcessColor 描述。
+            if (PostProcessUtility.ShouldUsePostProcessFramework(request, asset)) // 只有当前 request 实际会使用后处理框架时，才输出 PostProcessColor 描述。
             {
                 AppendDescriptorLine(builder, "PostProcessColor", BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.PostProcessColorName); // 输出后处理 ping-pong RT 描述。
             }
@@ -1441,15 +1445,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             if (IsDeferredRequest(request, asset)) // 当前 request 真正走 Deferred 时才会申请 GBuffer。
             {
-                AppendDescriptorLine(builder, "GBuffer0", BurtRenderTargetDescriptorUtility.CreateGBuffer0Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer0Name); // 输出 GBuffer0 格式，第一版保存 baseColor/occlusion。
+                AppendDescriptorLine(builder, "GBuffer0", BurtRenderTargetDescriptorUtility.CreateGBuffer0Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer0Name); // 输出 GBuffer0 格式，保存 DepthNormals prepass 写入的 normal/roughness。
 
-                AppendDescriptorLine(builder, "GBuffer1", BurtRenderTargetDescriptorUtility.CreateGBuffer1Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name); // 输出 GBuffer1 格式，当前保存 direction/material-channel/smoothness。
+                AppendDescriptorLine(builder, "GBuffer1", BurtRenderTargetDescriptorUtility.CreateGBuffer1Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer1Name); // 输出 GBuffer1 格式，当前保存 baseColor/occlusion。
 
-                AppendDescriptorLine(builder, "GBuffer2", BurtRenderTargetDescriptorUtility.CreateGBuffer2Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name); // 输出 GBuffer2 格式，第一版保存 emission/reflectance。
+                AppendDescriptorLine(builder, "GBuffer2", BurtRenderTargetDescriptorUtility.CreateGBuffer2Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer2Name); // 输出 GBuffer2 格式，保存 shading model/material channel、metallic、smoothness 和 reflectance。
 
                 AppendDescriptorLine(builder, "GBuffer3", BurtRenderTargetDescriptorUtility.CreateGBuffer3Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer3Name);
 
                 AppendDescriptorLine(builder, "GBuffer4", BurtRenderTargetDescriptorUtility.CreateGBuffer4Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer4Name);
+
+                AppendDescriptorLine(builder, "GBuffer5", BurtRenderTargetDescriptorUtility.CreateGBuffer5Descriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer5Name);
 
                 AppendDescriptorLine(builder, "GBufferObjectIndex", BurtRenderTargetDescriptorUtility.CreateGBufferObjectIndexDescriptor(camera), resourceRegistry, BurtRenderGraphResourceRegistry.GBufferObjectIndexName);
 
@@ -1591,6 +1597,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
                 AppendSkippedRenderTargetLine(builder, "GBuffer4", resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer4Name);
 
+                AppendSkippedRenderTargetLine(builder, "GBuffer5", resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer5Name);
+
                 AppendSkippedRenderTargetLine(builder, "GBufferObjectIndex", resourceRegistry, BurtRenderGraphResourceRegistry.GBufferObjectIndexName);
 
                 AppendSkippedRenderTargetLine(builder, "DeferredLightingDepth", resourceRegistry, BurtRenderGraphResourceRegistry.DeferredLightingDepthName);
@@ -1656,45 +1664,51 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             var noOpCopy = settings != null && settings.EnableNoOpCopy; // 判断资产上的 No-op Copy 验证开关。
 
-            var shouldRunFramework = BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 解析当前 request 最终是否会插入后处理链。
+            var shouldRunFramework = PostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 解析当前 request 最终是否会插入后处理链。
 
-            var suppressedByShadingDebug = BurtPostProcessUtility.IsPostProcessSuppressedByShadingDebug();
+            var suppressedByShadingDebug = PostProcessUtility.IsPostProcessSuppressedByShadingDebug();
 
-            var tonemappingMode = BurtPostProcessUtility.ResolveTonemappingMode(asset); // 解析当前 Volume 中真正生效的 Tonemapping 模式。
+            var tonemappingMode = PostProcessUtility.ResolveTonemappingMode(asset); // 解析当前 Volume 中真正生效的 Tonemapping 模式。
 
-            var exposureSettings = BurtPostProcessUtility.ResolvePhysicalExposureSettings(request, asset);
+            var exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettings(request, asset);
             var postExposureMultiplier = exposureSettings.Multiplier; // 解析当前 Volume 中 Tonemapping 前曝光倍率。
-            var preExposureState = BurtPreExposureUtility.ResolveForFrame(request, asset);
-            var residualPostExposureMultiplier = BurtPreExposureUtility.ResolveResidualPostExposure(exposureSettings, preExposureState);
+            var preExposureState = PreExposureUtility.ResolveForFrame(request, asset);
+            var residualPostExposureMultiplier = PreExposureUtility.ResolveResidualPostExposure(exposureSettings, preExposureState);
 
-            var useColorAdjustments = BurtPostProcessUtility.ShouldUseColorAdjustments(request, asset); // 判断当前 Volume 是否启用基础颜色调整。
+            var useColorAdjustments = PostProcessUtility.ShouldUseColorAdjustments(request, asset); // 判断当前 Volume 是否启用基础颜色调整。
+            var colorGradingSettings = PostProcessUtility.ResolveColorGradingSettings(asset);
+            var useVignette = PostProcessUtility.ShouldUseVignette(request, asset);
+            var vignetteSettings = PostProcessUtility.ResolveVignetteSettings(asset);
+            var rcasSettings = PostProcessUtility.ResolveRCASSettings(asset);
+            var fxaaSettings = PostProcessUtility.ResolveFastApproximateAASettings(asset);
+            var smaaSettings = PostProcessUtility.ResolveSubpixelMorphologicalAASettings(asset);
 
-            var bloomSettings = BurtPostProcessUtility.ResolveBloomSettings(asset); // 解析当前 Volume 中真正生效的 Bloom 参数。
+            var bloomSettings = PostProcessUtility.ResolveBloomSettings(asset); // 解析当前 Volume 中真正生效的 Bloom 参数。
 
-            var bloomEnabled = BurtPostProcessUtility.ShouldUseBloom(request, asset); // 判断当前 request 是否启用 Bloom。
+            var bloomEnabled = PostProcessUtility.ShouldUseBloom(request, asset); // 判断当前 request 是否启用 Bloom。
 
-            var bloomMipCount = BurtPostProcessUtility.ResolveBloomMipCount(request, asset); // 解析当前 request 实际会使用的 Bloom mip 数。
-            var bloomDebugView = BurtPostProcessUtility.ResolveBloomDebugView(bloomSettings); // 合并 Volume Bloom Debug 和 Shading Debug 中的 Bloom 入口。
-            var bloomDebugRequested = BurtPostProcessUtility.IsBloomDebugRequested();
-            var preserveBloomAlpha = BurtPostProcessUtility.ShouldPreserveBloomAlpha(bloomSettings, bloomDebugView);
-            var bloomAlphaReason = BurtPostProcessUtility.ResolveBloomAlphaReason(bloomSettings, bloomDebugView);
-            var bloomRenderTextureFormat = BurtPostProcessUtility.ResolveBloomRenderTextureFormat(request != null ? request.Camera : null, bloomSettings, bloomDebugView);
-            var bloomRenderTextureFormatReason = BurtPostProcessUtility.ResolveBloomRenderTextureFormatReason(request != null ? request.Camera : null, bloomSettings, bloomDebugView);
-            var bloomMipSizes = BurtPostProcessUtility.FormatBloomMipSizes(request != null ? request.Camera : null, bloomMipCount);
-            var bloomMipPixels = BurtPostProcessUtility.CalculateBloomMipPixelCount(request != null ? request.Camera : null, bloomMipCount);
-            var bloomStages = BurtPostProcessUtility.FormatBloomStageDiagnostics(request != null ? request.Camera : null, bloomSettings, bloomMipCount);
-            var bloomDebugTarget = BurtPostProcessUtility.FormatBloomDebugTarget(request != null ? request.Camera : null, bloomDebugView, bloomMipCount);
-            var bloomPrefilterPostExposure = BurtPostProcessUtility.ResolveBloomPrefilterPostExposure(residualPostExposureMultiplier);
-            var bloomPrefilterKnee = BurtPostProcessUtility.ResolveBloomPrefilterKnee(bloomSettings);
-            var bloomPrefilterSourceThreshold = BurtPostProcessUtility.FormatBloomPrefilterSourceThreshold(bloomSettings, residualPostExposureMultiplier);
-            var bloomPrefilterBypassThreshold = BurtPostProcessUtility.ShouldBypassBloomPrefilterThreshold(bloomSettings);
+            var bloomMipCount = PostProcessUtility.ResolveBloomMipCount(request, asset); // 解析当前 request 实际会使用的 Bloom mip 数。
+            var bloomDebugView = PostProcessUtility.ResolveBloomDebugView(bloomSettings); // 合并 Volume Bloom Debug 和 Shading Debug 中的 Bloom 入口。
+            var bloomDebugRequested = PostProcessUtility.IsBloomDebugRequested();
+            var preserveBloomAlpha = PostProcessUtility.ShouldPreserveBloomAlpha(bloomSettings, bloomDebugView);
+            var bloomAlphaReason = PostProcessUtility.ResolveBloomAlphaReason(bloomSettings, bloomDebugView);
+            var bloomRenderTextureFormat = PostProcessUtility.ResolveBloomRenderTextureFormat(request != null ? request.Camera : null, bloomSettings, bloomDebugView);
+            var bloomRenderTextureFormatReason = PostProcessUtility.ResolveBloomRenderTextureFormatReason(request != null ? request.Camera : null, bloomSettings, bloomDebugView);
+            var bloomMipSizes = PostProcessUtility.FormatBloomMipSizes(request != null ? request.Camera : null, bloomMipCount);
+            var bloomMipPixels = PostProcessUtility.CalculateBloomMipPixelCount(request != null ? request.Camera : null, bloomMipCount);
+            var bloomStages = PostProcessUtility.FormatBloomStageDiagnostics(request != null ? request.Camera : null, bloomSettings, bloomMipCount);
+            var bloomDebugTarget = PostProcessUtility.FormatBloomDebugTarget(request != null ? request.Camera : null, bloomDebugView, bloomMipCount);
+            var bloomPrefilterPostExposure = PostProcessUtility.ResolveBloomPrefilterPostExposure(residualPostExposureMultiplier);
+            var bloomPrefilterKnee = PostProcessUtility.ResolveBloomPrefilterKnee(bloomSettings);
+            var bloomPrefilterSourceThreshold = PostProcessUtility.FormatBloomPrefilterSourceThreshold(bloomSettings, residualPostExposureMultiplier);
+            var bloomPrefilterBypassThreshold = PostProcessUtility.ShouldBypassBloomPrefilterThreshold(bloomSettings);
 
             var temporalAA = request != null ? request.TemporalAA : null;
             var temporalAAEnabled = temporalAA != null && temporalAA.Enabled;
-            var temporalAASettings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
+            var temporalAASettings = PostProcessUtility.ResolveTemporalAASettings(request, asset);
             var temporalAADisabledReason = BurtTemporalAAUtility.ResolveTemporalAADiagnosticDisabledReason(request, asset, renderOptions);
-            var temporalAASource = BurtPostProcessUtility.ResolveTemporalAASourceLabel(request);
-            var temporalAAVolumeState = BurtPostProcessUtility.ResolveTemporalAAVolumeStateLabel();
+            var temporalAASource = PostProcessUtility.ResolveTemporalAASourceLabel(request);
+            var temporalAAVolumeState = PostProcessUtility.ResolveTemporalAAVolumeStateLabel();
             var temporalHistory = BurtTemporalAAUtility.GetHistoryStatus(request != null ? request.Camera : null);
             var burtGITAAConfidence = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(request, asset, renderOptions) ? "BoundCurrentGIAlpha" : "Disabled";
             var finalBlitYFlip = BurtFinalBlitUtility.ResolveFinalBlitYFlip(request);
@@ -1729,7 +1743,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" InvPreExposure=").Append(preExposureState.InvPreExposure.ToString("0.###"));
             builder.Append(" ResidualPostExposure=").Append(residualPostExposureMultiplier.ToString("0.###"));
             builder.Append(" PreExposureEnabled=").Append(preExposureState.Enabled);
-            builder.Append(" PreExposureTAAInvalidationEV=").Append(BurtPreExposureUtility.TemporalAAInvalidationEVThreshold.ToString("0.###"));
+            builder.Append(" PreExposureTAAInvalidationEV=").Append(PreExposureUtility.TemporalAAInvalidationEVThreshold.ToString("0.###"));
 
             builder.Append(" AutoAvgLuma=").Append(exposureSettings.AutoAverageLuminance.ToString("0.###"));
             builder.Append(" AutoAvgLogLum=").Append(exposureSettings.AutoAverageLogLuminance.ToString("0.###"));
@@ -1747,6 +1761,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" AutoReadbackAgeFrames=").Append(exposureSettings.AutoReadbackAgeFrames);
 
             builder.Append(" ColorAdjustments=").Append(useColorAdjustments); // 写入是否启用颜色调整。
+            builder.Append(" ColorGrading=").Append(colorGradingSettings.Enabled);
+            builder.Append(" ColorGradingWhiteBalance=").Append(colorGradingSettings.WhiteBalanceEnabled);
+            builder.Append(" ColorGradingLUT=").Append(colorGradingSettings.HasLut);
+            builder.Append(" ColorGradingLUTContribution=").Append(FormatFloat(colorGradingSettings.LutContribution));
+            builder.Append(" ColorGradingIntensity=").Append(FormatFloat(colorGradingSettings.Intensity));
+            builder.Append(" Vignette=").Append(useVignette);
+            builder.Append(" VignetteIntensity=").Append(FormatFloat(vignetteSettings.Intensity));
+            builder.Append(" VignetteEdgeWidth=").Append(FormatFloat(vignetteSettings.EdgeWidth));
+            builder.Append(" VignetteEdgeSoftness=").Append(FormatFloat(vignetteSettings.EdgeSoftness));
+            builder.Append(" VignetteFisheyeFovDeg=").Append(FormatFloat(vignetteSettings.FisheyeFovDeg));
+            builder.Append(" VignetteFollowAspect=").Append(vignetteSettings.FollowAspect);
+            builder.Append(" VignetteColor=").Append(FormatVector4(new Vector4(vignetteSettings.Color.r, vignetteSettings.Color.g, vignetteSettings.Color.b, vignetteSettings.Color.a)));
+            builder.Append(" SMAA=").Append(smaaSettings.Enabled);
+            builder.Append(" SMAAThreshold=").Append(FormatFloat(smaaSettings.Threshold));
+            builder.Append(" SMAABlend=").Append(FormatFloat(smaaSettings.BlendStrength));
+            builder.Append(" SMAAMaxSearchSteps=").Append(smaaSettings.MaxSearchSteps);
+            builder.Append(" FXAA=").Append(fxaaSettings.Enabled);
+            builder.Append(" FXAASubpixel=").Append(FormatFloat(fxaaSettings.Subpixel));
+            builder.Append(" FXAAEdgeThreshold=").Append(FormatFloat(fxaaSettings.EdgeThreshold));
+            builder.Append(" FXAAEdgeThresholdMin=").Append(FormatFloat(fxaaSettings.EdgeThresholdMin));
+            builder.Append(" RCAS=").Append(rcasSettings.Enabled);
+            builder.Append(" RCASSharpness=").Append(FormatFloat(rcasSettings.Sharpness));
 
             builder.Append(" BloomEnabled=").Append(bloomEnabled); // 写入是否启用 Bloom。
 
@@ -1774,7 +1810,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" BloomPrefilterBypassThreshold=").Append(bloomPrefilterBypassThreshold); // 写入 threshold <= -1 时是否跳过阈值裁剪。
 
-            builder.Append(" BloomPrefilterFireflyClamp=").Append(BurtPostProcessUtility.BloomPrefilterFireflyClamp.ToString("0.###")); // 写入 prefilter 前的极亮点软夹取上限。
+            builder.Append(" BloomPrefilterFireflyClamp=").Append(PostProcessUtility.BloomPrefilterFireflyClamp.ToString("0.###")); // 写入 prefilter 前的极亮点软夹取上限。
 
             builder.Append(" BloomIntensity=").Append(bloomSettings.Intensity.ToString("0.###")); // 写入 Bloom 强度。
 
@@ -1798,7 +1834,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" BloomDebugTarget=").Append(bloomDebugTarget); // 写入当前 Bloom debug 实际采样的 mip 和尺寸。
 
-            builder.Append(" BloomDebugSuppressedByShadingDebug=").Append(bloomDebugView != BurtBloomDebugView.Disabled && suppressedByShadingDebug); // Shading debug 优先级更高时，Bloom debug 不覆盖画面。
+            builder.Append(" BloomDebugSuppressedByShadingDebug=").Append(bloomDebugView != BloomDebugView.Disabled && suppressedByShadingDebug); // Shading debug 优先级更高时，Bloom debug 不覆盖画面。
 
             builder.Append(" TAAEnabled=").Append(temporalAAEnabled);
             builder.Append(" TAAReason=").Append(temporalAADisabledReason);
@@ -1827,9 +1863,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAADebugMode=").Append(BurtTemporalAAUtility.IsTemporalAADebugMode(BurtShadingDebugSettings.Mode) ? BurtShadingDebugSettings.Mode.ToString() : "Disabled");
             builder.Append(" TAAFinalBlitYFlip=").Append(FormatFloat(finalBlitYFlip));
             builder.Append(" TAADebugYFlip=").Append(FormatFloat(temporalAADebugYFlip));
+            builder.Append(" TAADebugCopy=").Append(BurtTemporalAAUtility.IsTemporalAADebugMode(BurtShadingDebugSettings.Mode) && temporalAAEnabled ? "TwoStagePostProcessColor" : "Disabled");
             builder.Append(" TAAUVSpace=XRenderFullscreenPlatformSampleUv;HistoryDepthVelocityFeedbackSameOrientation;FinalCameraColorTemporalAACopy;FinalBlitHandlesDisplayFlip;XRenderVelocityCurrentMinusPreviousHistoryUvMinusVelocity");
             builder.Append(" TAAFilter=").Append(temporalAAEnabled ? "Current3x3ProjectionJitterFilter" : "Disabled");
-            builder.Append(" TAANote=").Append(temporalAAEnabled ? "XRenderTSRAccumulationParity;ResolveXRenderCompute;ComputeDilateDecimate;StencilMaskComputeFallback;FragmentDebugFallback;ColorDepthHistoryOnly;VelocityCurrentMinusPrevious;ValidObjectVelocityOnly;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ClipToPrevClipCameraRelative;XRenderPerAxisVelocityThreshold;ResolveKeeps3x3ProjectionJitterFilter;XRenderSingleRejectionBlendFactor;XRenderCatmullRom9TapCompute;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout30;ParallaxCoverageDepthGate;XRenderSigmaClamp15;NoResolveSharpen;UIntPrevUseCountUAV;ScalarParallaxRejection;MaterialMotionVectorsPass;ObjectVelocityPerAxisThreshold;TAAStencilMaskFromRawVelocity;TAAStencilMaskFoliageResponsiveFromGBuffer;ResponsiveMotionCurrentBlend;ObjectVelocityRawFallbackForDerivedStencil;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUDebugClosure489_491;HistoryValidReason;XRenderPointCurrentLoad;XRenderFinalAlpha" : "Disabled");
+            builder.Append(" TAANote=").Append(temporalAAEnabled ? "XRenderTSRAccumulationParity;ResolveXRenderCompute;ComputeDilateDecimate;XRenderDepthPixelRadiusDeviceZError;StencilMaskComputeFallback;FragmentDebugFallback;ColorDepthHistoryOnly;VelocityCurrentMinusPrevious;ValidObjectVelocityOnly;ProjectionJitterTranslateMatrix;RestoreJitteredMatricesBeforeDraw;StaticVelocitySubtractCurrentJitter;ClipToPrevClipCameraRelative;XRenderPerAxisVelocityThreshold;ResolveKeeps3x3ProjectionJitterFilter;XRenderSingleRejectionBlendFactor;XRenderCatmullRom9TapCompute;SubmitBeforeProjectionRestore;FinalHistoryAvailabilityNoSurfaceGate;HistoryLayout30;ParallaxCoverageDepthGate;XRenderSigmaClamp15;XRenderTemporalContrastSDBoost;NoResolveSharpen;UIntPrevUseCountUAV;ScalarParallaxRejection;MaterialMotionVectorsPass;TAAExplicitGBuffer0And2Bind;GrassFoliageVertexAnimationMV;ObjectMotionInstancing;ObjectVelocityPerAxisThreshold;RealStencilSubElement;TAAStencilMaskBit8FromRealStencil;TAAStencilMaskRawVelocityLowResFallback;TAAStencilMaskRealStencilOR;XRenderResponsiveStencilBit16Only;XRenderResponsiveBlend025;XRenderMotionVectorStencilProperties;XRenderMotionVectorZTestEqual;XRenderObjectMotionOpaqueQueue;ObjectVelocityRequiresStencilBit8;TAAUObjectMotionLowRes;TAAUResolveUpscalePass;TAAUDebugClosure489_491;TAAStencilMaskDebug495;HistoryValidReason;XRenderPointCurrentLoad;XRenderFinalAlpha;XRenderFloat2DilatedVelocity;XRenderSeparateClosestDepth;ClosestDepthScalarRT;TAADebugTwoStageCopy" : "Disabled");
 
             builder.Append(" VolumeLayerMask=").Append(asset != null ? asset.PostProcessVolumeLayerMask.value.ToString() : "<none>"); // 写入 Volume 查询层，排查 Volume 不生效时很有用。
 
@@ -1893,11 +1930,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
 
             builder.Append(" GBuffer4Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer4Name));
 
+            builder.Append(" GBuffer5Registered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBuffer5Name));
+
             builder.Append(" GBufferObjectIndexRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.GBufferObjectIndexName));
 
             builder.Append(" DeferredLightingDepthRegistered=").Append(IsRegistered(resourceRegistry, BurtRenderGraphResourceRegistry.DeferredLightingDepthName));
 
-            builder.Append(" GBufferLayoutContract=FixedSlotV1_BaseDirectionEmissionCustomLowCustomHigh_ObjectIndex_StencilSMHighBits");
+            builder.Append(" GBufferLayoutContract=FixedSlotPC_NormalBasePropertyCustomEmissionHighCustom_ObjectIndex_StencilSMHighBits");
 
             builder.Append(" ClusterLightCountRegistered=").Append(resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName));
             builder.Append(" ClusterLightListRegistered=").Append(resourceRegistry != null && resourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName));
@@ -2009,9 +2048,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" SSSDiffuseSpecularSplit=").Append(screenSpaceSubsurfaceEnabled);
                 builder.Append(" SSSDiffuseLuminanceSource=").Append(screenSpaceSubsurfaceEnabled ? "DeferredSubsurfaceAlphaLightingSpaceSpecularGuard" : "Disabled");
                 builder.Append(" SSSProfileIDSource=").Append(screenSpaceSubsurfaceEnabled ? "ScreenSpaceSubsurfaceBaseColorAlpha" : "Disabled");
-                builder.Append(" SSSStencilGated=").Append(screenSpaceSubsurfaceEnabled ? "ShaderStencilPlusMaskTexture" : "Disabled");
+                builder.Append(" SSSStencilGated=").Append(screenSpaceSubsurfaceEnabled ? (screenSpaceSubsurfaceUsesStencilTexture ? "DepthStencilTexture+ProfileMask" : "MaskTexture+GBufferFallback") : "Disabled");
                 builder.Append(" SSSStencilTexture=").Append(screenSpaceSubsurfaceUsesStencilTexture);
-                builder.Append(" SSSMaskFallback=").Append(screenSpaceSubsurfaceUsesMaskTexture ? "GBuffer1StrengthProfileMask" : "Disabled");
+                builder.Append(" SSSMaskFallback=").Append(screenSpaceSubsurfaceUsesMaskTexture ? (screenSpaceSubsurfaceUsesStencilTexture ? "DebugMaskTexture" : "GBuffer2StrengthProfileMask") : "Disabled");
                 builder.Append(" SSSHistoryVelocity=").Append(screenSpaceSubsurfaceUsesBurley ? "RawSceneVelocity" : "Disabled");
                 builder.Append(" SSSVelocityDilation=Removed");
                 builder.Append(" SSSBurleySampling=").Append(screenSpaceSubsurfaceUsesBurley ? (screenSpaceSubsurfaceDebugSampling ? "StableDebugNoDepthNoiseMin64" : (screenSpaceSubsurfaceTemporalSamplingReady && screenSpaceSubsurfaceHistory.HasHistory ? "TemporalAnimatedAdaptive48To64" : "StableNoTemporalNoDepthNoiseMin64")) : "Disabled");

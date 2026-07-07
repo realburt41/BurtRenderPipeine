@@ -50,17 +50,17 @@ Shader "Hidden/BurtRP/DebugCameraDepth"
             struct Attributes
             {
                 // 读取当前程序化顶点的编号，范围是 0、1、2。
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             // 定义顶点输出结构，也就是顶点 shader 传给片元 shader 的数据。
             struct Varyings
             {
                 // 输出裁剪空间位置，SV_POSITION 是 GPU 光栅化必须使用的语义。
-                float4 positionCS : SV_POSITION;
+                float4 PositionCS : SV_POSITION;
 
                 // 输出屏幕 UV，用来在片元 shader 中采样深度纹理。
-                float2 uv : TEXCOORD0;
+                float2 UV : TEXCOORD0;
             };
 
             // 定义顶点 shader，使用三个顶点生成覆盖屏幕的超大三角形。
@@ -70,13 +70,13 @@ Shader "Hidden/BurtRP/DebugCameraDepth"
                 Varyings output;
 
                 // 根据 vertexID 生成全屏三角形的 UV，三个点分别覆盖屏幕左下、右下外侧、左上外侧。
-                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                float2 uv = float2((input.VertexID << 1) & 2, input.VertexID & 2);
 
                 // 把 UV 从 0..2 区间转换成裁剪空间坐标，形成一个覆盖全屏的三角形。
-                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.PositionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
 
                 // 保存 UV，片元 shader 会用它采样 _BurtCameraDepthTexture。
-                output.uv = uv;
+                output.UV = uv;
 
                 // 返回顶点 shader 输出结果。
                 return output;
@@ -86,7 +86,7 @@ Shader "Hidden/BurtRP/DebugCameraDepth"
             float4 Frag(Varyings input) : SV_Target
             {
                 // 从 BurtRP 的 CameraDepth 深度纹理中采样原始硬件深度。
-                float2 depthUv = input.uv; // 复制全屏三角形插值出来的 UV，后面会按需要修改 y 值。
+                float2 depthUv = input.UV; // 复制全屏三角形插值出来的 UV，后面会按需要修改 y 值。
 
                 if (_BurtDepthDebugYFlip > 0.5f) // 如果当前相机的最终输出会在 FinalBlit 中翻转，这里提前把深度采样反向一次。
                 {

@@ -1803,11 +1803,11 @@ namespace Burt.RenderPipeline
                 SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.RGFloat);
         }
 
-        private static BurtFurBlurVolumeComponent GetFurBlurVolumeComponent()
+        private static FurBlurVolumeComponent GetFurBlurVolumeComponent()
         {
             var volumeManager = VolumeManager.instance;
             var stack = volumeManager != null ? volumeManager.stack : null;
-            return stack != null ? stack.GetComponent<BurtFurBlurVolumeComponent>() : null;
+            return stack != null ? stack.GetComponent<FurBlurVolumeComponent>() : null;
         }
 
         private static void ResolveTemporalMatrices(

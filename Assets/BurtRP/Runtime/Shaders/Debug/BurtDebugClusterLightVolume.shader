@@ -21,27 +21,27 @@ Shader "Hidden/BurtRP/DebugClusterLightVolume"
 
             struct Attributes
             {
-                float3 positionOS : POSITION;
-                float4 color : COLOR;
+                float3 PositionOS : POSITION;
+                float4 Color : COLOR;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float4 color : COLOR;
+                float4 PositionCS : SV_POSITION;
+                float4 Color : COLOR;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = UnityWorldToClipPos(input.positionOS);
-                output.color = input.color;
+                output.PositionCS = UnityWorldToClipPos(input.PositionOS);
+                output.Color = input.Color;
                 return output;
             }
 
             float4 Frag(Varyings input) : SV_Target
             {
-                return input.color;
+                return input.Color;
             }
             ENDHLSL
         }
@@ -63,27 +63,27 @@ Shader "Hidden/BurtRP/DebugClusterLightVolume"
 
             struct Attributes
             {
-                float3 positionOS : POSITION;
-                float4 color : COLOR;
+                float3 PositionOS : POSITION;
+                float4 Color : COLOR;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float4 color : COLOR;
+                float4 PositionCS : SV_POSITION;
+                float4 Color : COLOR;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = UnityWorldToClipPos(input.positionOS);
-                output.color = input.color;
+                output.PositionCS = UnityWorldToClipPos(input.PositionOS);
+                output.Color = input.Color;
                 return output;
             }
 
             float4 Frag(Varyings input) : SV_Target
             {
-                return input.color;
+                return input.Color;
             }
             ENDHLSL
         }

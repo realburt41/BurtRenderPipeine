@@ -107,8 +107,8 @@ namespace Burt.RenderPipeline
             targetMaterial.SetVector(ExposureParamsId, new Vector4(Mathf.Pow(2f, settings.ExposureCompensation), settings.TonemapSafeSunIntensity, settings.ExposureCompensation, 0f));
             targetMaterial.SetVector(AerialPerspectiveParamsId, new Vector4(settings.AerialPerspectiveIntensity, settings.AerialPerspectiveDistance, settings.AerialPerspectiveHeightFalloff, settings.AerialPerspectiveEnabled ? 1f : 0f));
             targetMaterial.SetColor(AerialPerspectiveTintId, settings.AerialPerspectiveTint);
-            var affectsSkyPixels = settings.AerialPerspectivePlacement == BurtAtmosphereAerialPerspectivePlacement.AfterSkyBeforeSSR
-                || settings.AerialPerspectivePlacement == BurtAtmosphereAerialPerspectivePlacement.BeforeTransparent;
+            var affectsSkyPixels = settings.AerialPerspectivePlacement == AtmosphereAerialPerspectivePlacement.AfterSkyBeforeSSR
+                || settings.AerialPerspectivePlacement == AtmosphereAerialPerspectivePlacement.BeforeTransparent;
             targetMaterial.SetVector(AerialPerspectiveFadeParamsId, new Vector4(settings.AerialPerspectiveNearFadeStart, settings.AerialPerspectiveNearFadeEnd, settings.AerialPerspectiveMaxOpacity, affectsSkyPixels ? 1f : 0f));
             targetMaterial.SetMatrix(InverseViewProjectionId, ResolveInverseViewProjection(camera));
             targetMaterial.SetVector(CameraPositionWSId, camera.transform.position);
@@ -117,7 +117,7 @@ namespace Burt.RenderPipeline
 
         private static Vector4 ResolveSunDirection(BurtRenderRequest request, BurtAtmosphereSettings settings)
         {
-            var direction = settings.SunSource == BurtAtmosphereSunSource.CustomDirection
+            var direction = settings.SunSource == AtmosphereSunSource.CustomDirection
                 ? settings.CustomSunDirection
                 : ResolveMainLightDirection(request);
 

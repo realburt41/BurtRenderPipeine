@@ -49,24 +49,24 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
-                output.positionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
+                float2 uv = float2((input.VertexID << 1) & 2, input.VertexID & 2);
+                output.PositionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0f - uv.y;
                 #endif
-                output.screenUV = uv;
+                output.ScreenUV = uv;
                 return output;
             }
 
@@ -241,13 +241,13 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.screenUV);
+                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.ScreenUV);
                 if (!IsSkyPixel(rawDepth))
                 {
                     discard;
                 }
 
-                float4 clip = BuildClipPosition(input.screenUV);
+                float4 clip = BuildClipPosition(input.ScreenUV);
                 float4 farWS = mul(_BurtAtmosphereInverseViewProjection, clip);
                 farWS.xyz /= max(abs(farWS.w), 1.0e-6f);
                 float3 viewDirWS = SafeNormalize(farWS.xyz - _BurtAtmosphereCameraPositionWS, float3(0.0f, 0.0f, 1.0f));
@@ -302,24 +302,24 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
-                output.positionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
+                float2 uv = float2((input.VertexID << 1) & 2, input.VertexID & 2);
+                output.PositionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0f - uv.y;
                 #endif
-                output.screenUV = uv;
+                output.ScreenUV = uv;
                 return output;
             }
 
@@ -401,8 +401,8 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float3 sourceColor = tex2D(_BurtCameraColorTexture, input.screenUV).rgb;
-                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.screenUV);
+                float3 sourceColor = tex2D(_BurtCameraColorTexture, input.ScreenUV).rgb;
+                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.ScreenUV);
                 float intensity = _BurtAtmosphereAerialPerspectiveParams.x;
                 float distanceScale = max(_BurtAtmosphereAerialPerspectiveParams.y, 1.0f);
                 float heightFalloff = _BurtAtmosphereAerialPerspectiveParams.z;
@@ -422,7 +422,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 float3 viewDirWS;
                 if (skyPixel)
                 {
-                    float4 farWS = mul(_BurtAtmosphereInverseViewProjection, BuildClipPosition(input.screenUV, rawDepth));
+                    float4 farWS = mul(_BurtAtmosphereInverseViewProjection, BuildClipPosition(input.ScreenUV, rawDepth));
                     farWS.xyz /= max(abs(farWS.w), 1.0e-6f);
                     viewDirWS = SafeNormalize(farWS.xyz - _BurtAtmosphereCameraPositionWS, float3(0.0f, 0.0f, 1.0f));
                     distanceWS = distanceScale * 4.0f;
@@ -430,7 +430,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 }
                 else
                 {
-                    float3 positionWS = ReconstructPositionWS(input.screenUV, rawDepth);
+                    float3 positionWS = ReconstructPositionWS(input.ScreenUV, rawDepth);
                     float3 cameraToPixel = positionWS - _BurtAtmosphereCameraPositionWS;
                     distanceWS = length(cameraToPixel);
                     viewDirWS = SafeNormalize(cameraToPixel, float3(0.0f, 0.0f, 1.0f));
@@ -520,20 +520,20 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 uv : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 UV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = float4((input.vertexID == 2 ? 3.0f : -1.0f), (input.vertexID == 1 ? 3.0f : -1.0f), 0.0f, 1.0f);
-                output.uv = float2((input.vertexID == 2 ? 2.0f : 0.0f), (input.vertexID == 1 ? 2.0f : 0.0f));
+                output.PositionCS = float4((input.VertexID == 2 ? 3.0f : -1.0f), (input.VertexID == 1 ? 3.0f : -1.0f), 0.0f, 1.0f);
+                output.UV = float2((input.VertexID == 2 ? 2.0f : 0.0f), (input.VertexID == 1 ? 2.0f : 0.0f));
                 return output;
             }
 
@@ -645,7 +645,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float3 viewDirWS = AtmosphereFaceUVToDirection(_BurtAtmosphereCubemapFace, input.uv);
+                float3 viewDirWS = AtmosphereFaceUVToDirection(_BurtAtmosphereCubemapFace, input.UV);
                 return float4(EvaluateAtmosphere(viewDirWS), 1.0f);
             }
             ENDHLSL

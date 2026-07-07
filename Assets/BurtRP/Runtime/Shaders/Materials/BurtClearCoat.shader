@@ -60,7 +60,10 @@ Shader "BurtRP/Clear Coat"
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 128
+        [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
+        [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
 
     // Defines the runtime SubShader used by BurtRP.
@@ -118,14 +121,14 @@ Shader "BurtRP/Clear Coat"
             Tags { "LightMode" = "BurtMotionVectors" }
 
             ZWrite Off
-            ZTest Always
+            ZTest Equal
             Cull [_Cull]
 
             Stencil
             {
-                Ref 8
+                Ref [_MotionVectorsStencilRef]
                 ReadMask 8
-                WriteMask 8
+                WriteMask [_MotionVectorsStencilMask]
                 Comp Always
                 Pass Replace
             }
@@ -188,6 +191,28 @@ Shader "BurtRP/Clear Coat"
             ENDHLSL
         }
 
+        Pass
+        {
+            Name "Burt Clear Coat Depth Normals"
+            Tags { "LightMode" = "BurtDepthNormals" }
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertGBuffer
+            #pragma fragment FragDepthNormals
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma target 4.5
+
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+
+            #define BURT_MATERIAL_SHADING_MODEL_CLEAR_COAT 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
+            ENDHLSL
+        }
+
         // 定义 Deferred 第一版使用的 GBuffer 写入 pass，只负责输出材质数据，不在这里做光照。
         Pass
         {
@@ -197,17 +222,19 @@ Shader "BurtRP/Clear Coat"
             // 主 Agent 的 Draw GBuffer Opaque 会用 ShaderTagId("BurtGBuffer") 精确匹配这个 pass。
             Tags { "LightMode" = "BurtGBuffer" }
 
-            // 当前 Deferred 计划允许没有 Depth Prepass 时由 GBuffer pass 写深度，和已有 DepthOnly 的 LEqual 行为保持一致。
-            ZWrite On
+            // DepthNormals prepass owns CameraDepth and GBuffer0 normal/roughness; GBuffer only fills the remaining MRTs.
+            ZWrite Off
 
-            // 如果前面已经跑过 Depth Prepass，LEqual 会让等深度片元通过；如果没跑过，也能正常建立 CameraDepth。
-            ZTest LEqual
+            // Require exact prepass depth so retained normals/depth and GBuffer material payload describe the same visible surface.
+            ZTest Equal
+            // Keep MRT0 from the prepass instead of recomputing normal/roughness in the GBuffer pass.
+            ColorMask 0 0
 
             // Deferred stencil layout matches XRender high bits: 128 = Clear Coat.
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 224
+                ReadMask [_BurtGBufferStencilReadMask]
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace

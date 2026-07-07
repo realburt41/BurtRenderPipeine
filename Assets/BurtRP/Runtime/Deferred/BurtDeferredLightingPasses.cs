@@ -176,6 +176,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int GBufferObjectIndexId = BurtRenderGraphResourceRegistry.GBufferObjectIndexId;
         private static readonly int CameraDepthId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int ScreenSpaceAmbientOcclusionId = BurtRenderGraphResourceRegistry.ScreenSpaceAmbientOcclusionTextureId;
@@ -220,6 +221,7 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.ReadGBufferObjectIndex();
             builder.ReadCameraDepth();
             builder.ReadDeferredLightingDepth();
@@ -283,6 +285,7 @@ namespace Burt.RenderPipeline
                     out var gbuffer2Target,
                     out var gbuffer3Target,
                     out var gbuffer4Target,
+                    out var gbuffer5Target,
                     out var deferredLightingDepthTarget,
                     out var gbufferObjectIndexTarget))
             {
@@ -303,6 +306,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
             cmd.SetGlobalTexture(GBufferObjectIndexId, gbufferObjectIndexTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthId, deferredLightingDepthTarget.Identifier);
             BindScreenSpaceAmbientOcclusion(context, cmd, material);
@@ -330,6 +334,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2Target,
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle deferredLightingDepthTarget,
             out BurtRenderTargetHandle gbufferObjectIndexTarget)
         {
@@ -340,6 +345,7 @@ namespace Burt.RenderPipeline
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5Target = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             deferredLightingDepthTarget = context != null ? context.DeferredLightingDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.DeferredLightingDepthName);
             gbufferObjectIndexTarget = context != null ? context.GBufferObjectIndexTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBufferObjectIndexName);
 
@@ -350,6 +356,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target.IsValid &&
                 gbuffer3Target.IsValid &&
                 gbuffer4Target.IsValid &&
+                gbuffer5Target.IsValid &&
                 deferredLightingDepthTarget.IsValid &&
                 gbufferObjectIndexTarget.IsValid;
         }
@@ -741,6 +748,7 @@ namespace Burt.RenderPipeline
         {
             if (deferredLightingMaterial != null)
             {
+                BurtShadingModelIds.ApplyDeferredLightingStencilProperties(deferredLightingMaterial);
                 return deferredLightingMaterial;
             }
 
@@ -760,6 +768,7 @@ namespace Burt.RenderPipeline
             {
                 hideFlags = HideFlags.HideAndDontSave
             };
+            BurtShadingModelIds.ApplyDeferredLightingStencilProperties(deferredLightingMaterial);
             return deferredLightingMaterial;
         }
 

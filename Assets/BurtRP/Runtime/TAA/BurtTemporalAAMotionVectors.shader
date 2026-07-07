@@ -10,7 +10,7 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
             Tags { "LightMode" = "BurtMotionVectors" }
             Cull Back
             ZWrite Off
-            ZTest LEqual
+            ZTest Equal
             Stencil
             {
                 Ref 8

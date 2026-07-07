@@ -127,6 +127,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
         }
     }
 
+    internal sealed class BurtAllocateGBuffer5Pass : BurtRenderPass
+    {
+        public override string Name => "Burt Allocate GBuffer5";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.WriteGBuffer5();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var camera = BurtGBufferRenderTargetPassUtility.ResolveCamera(context);
+            var target = context.GBuffer5Target;
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateGBuffer5Descriptor(camera);
+            BurtGBufferRenderTargetPassUtility.AllocateTemporaryRenderTarget(context, Name, BurtRenderGraphResourceRegistry.GBuffer5Id, target, descriptor);
+        }
+    }
+
     internal sealed class BurtAllocateGBufferObjectIndexPass : BurtRenderPass
     {
         public override string Name => "Burt Allocate GBuffer Object Index";
@@ -258,6 +281,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
         }
     }
 
+    internal sealed class BurtReleaseGBuffer5Pass : BurtRenderPass
+    {
+        public override string Name => "Burt Release GBuffer5";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.ReadGBuffer5();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var target = context.GBuffer5Target;
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            BurtGBufferRenderTargetPassUtility.ReleaseTemporaryRenderTarget(context, Name, BurtRenderGraphResourceRegistry.GBuffer5Id);
+        }
+    }
+
     internal sealed class BurtReleaseGBufferObjectIndexPass : BurtRenderPass
     {
         public override string Name => "Burt Release GBuffer Object Index";
@@ -281,7 +325,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
 
 
-    internal sealed class BurtSetGBufferRenderTargetsPass : BurtRenderPass // 定义 Deferred GBuffer MRT 绑定 Pass，负责把五张 GBuffer 和 CameraDepth 同时设为当前渲染目标。
+    internal sealed class BurtSetGBufferRenderTargetsPass : BurtRenderPass // 定义 Deferred GBuffer MRT 绑定 Pass，负责把全部 GBuffer 和 CameraDepth 同时设为当前渲染目标。
     {
         public override string Name => "Burt Set GBuffer Render Targets"; // 返回 Pass 名称，方便 RenderGraph Debug 和 Frame Debugger 识别 MRT 绑定阶段。
 
@@ -292,20 +336,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             builder.WriteGBuffer2(); // 声明后续 MRT 绑定会允许 shader 写入 GBuffer2。
             builder.WriteGBuffer3();
             builder.WriteGBuffer4();
+            builder.WriteGBuffer5();
             builder.WriteGBufferObjectIndex();
             builder.WriteCameraDepth(); // 声明后续 MRT 绑定会继续使用 BurtRP 自己的 CameraDepth。
         }
 
         public override void Execute(BurtRenderGraphContext context) // 执行 MRT 绑定命令。
         {
-            if (!BurtGBufferRenderTargetPassUtility.TryGetGBufferAndDepthTargets(context, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbufferObjectIndexTarget, out var cameraDepthTarget)) // 先确认五张 GBuffer 和深度目标都已经注册。
+            if (!BurtGBufferRenderTargetPassUtility.TryGetGBufferAndDepthTargets(context, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbuffer5Target, out var gbufferObjectIndexTarget, out var cameraDepthTarget)) // 先确认全部 GBuffer 和深度目标都已经注册。
             {
                 return; // 资源缺失时直接跳过，避免绑定默认 RenderTargetIdentifier 导致画面不可控。
             }
 
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
 
-            BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbufferObjectIndexTarget, cameraDepthTarget); // 把 GBuffer0/1/2/3/4 作为 MRT color attachments，把 CameraDepth 作为 depth attachment。
+            BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target, gbufferObjectIndexTarget, cameraDepthTarget); // 把 GBuffer0/1/2/3/4 作为 MRT color attachments，把 CameraDepth 作为 depth attachment。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, BurtGBufferRenderTargetPassUtility.ResolveCamera(context));
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
@@ -315,15 +360,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
         }
     }
 
-    internal sealed class BurtClearGBufferRenderTargetsPass : BurtRenderPass // 定义 Deferred GBuffer 清理 Pass，负责给五张 GBuffer 写入可预测的默认值。
+    internal sealed class BurtClearGBufferRenderTargetsPass : BurtRenderPass // 定义 Deferred GBuffer 清理 Pass，负责给全部 GBuffer 写入可预测的默认值。
     {
-        private static readonly Color GBuffer0ClearColor = new Color(0f, 0f, 0f, 1f); // 定义 GBuffer0 默认值：baseColor 为黑色，occlusion 默认为 1。
-        private static readonly Color GBuffer1ClearColor = new Color(0.5f, 0.5f, 0f, 0f); // 定义 GBuffer1 默认值：oct 法线中心为 0.5/0.5，DefaultLit+metallic/scatter 和 smoothness 默认为 0。
-        private static readonly Color GBuffer2ClearColor = new Color(0f, 0f, 0f, 0.5f); // 定义 GBuffer2 默认值：emission 为黑色，reflectance 使用非金属常用中间值。
+        private static readonly Color GBuffer0ClearColor = new Color(1f, 1f, 119f / 255f, 1f);
+        private static readonly Color GBuffer1ClearColor = new Color(0f, 0f, 0f, 1f);
+        private static readonly Color GBuffer2ClearColor = new Color(0f, 0f, 0f, 0.5f);
         private static readonly Color GBuffer3ClearColor = new Color(0.5f, 0.5f, 0f, 0f);
-        private static readonly Color GBuffer4ClearColor = new Color(0.5f, 0.5f, 0.5f, 0f);
+        private static readonly Color GBuffer4ClearColor = Color.black;
+        private static readonly Color GBuffer5ClearColor = new Color(0.5f, 0.5f, 0.5f, 0f);
         private static readonly Color GBufferObjectIndexClearColor = Color.black;
-
         public override string Name => "Burt Clear GBuffer Render Targets"; // 返回 Pass 名称，方便 RenderGraph Debug 和 Frame Debugger 识别清理阶段。
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 会清理并写入哪些 GBuffer 资源。
@@ -333,12 +378,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             builder.WriteGBuffer2(); // 声明清理会写入 GBuffer2。
             builder.WriteGBuffer3();
             builder.WriteGBuffer4();
+            builder.WriteGBuffer5();
             builder.WriteGBufferObjectIndex();
         }
 
         public override void Execute(BurtRenderGraphContext context) // 执行 GBuffer 清理命令。
         {
-            if (!BurtGBufferRenderTargetPassUtility.TryGetGBufferAndDepthTargets(context, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbufferObjectIndexTarget, out var cameraDepthTarget)) // 先确认五张 GBuffer 和深度目标都已经注册。
+            if (!BurtGBufferRenderTargetPassUtility.TryGetGBufferAndDepthTargets(context, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbuffer5Target, out var gbufferObjectIndexTarget, out var cameraDepthTarget)) // 先确认全部 GBuffer 和深度目标都已经注册。
             {
                 return; // 资源缺失时直接跳过，避免清理无效目标。
             }
@@ -346,13 +392,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
 
             var camera = BurtGBufferRenderTargetPassUtility.ResolveCamera(context);
-            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer0Target, cameraDepthTarget, GBuffer0ClearColor, camera); // 单独清理 GBuffer0，这样可以给 occlusion.a 写入 1。
-            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer1Target, cameraDepthTarget, GBuffer1ClearColor, camera); // 单独清理 GBuffer1，这样可以给法线编码写入中性默认值。
+            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer0Target, cameraDepthTarget, GBuffer0ClearColor, camera); // 单独清理 GBuffer0，给 normal 编码和 roughness 提供稳定默认值。
+            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer1Target, cameraDepthTarget, GBuffer1ClearColor, camera); // 单独清理 GBuffer1，给 baseColor 黑色和 occlusion=1 提供默认值。
             BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer2Target, cameraDepthTarget, GBuffer2ClearColor, camera); // 单独清理 GBuffer2，这样可以给 reflectance.a 写入稳定默认值。
             BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer3Target, cameraDepthTarget, GBuffer3ClearColor, camera);
             BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer4Target, cameraDepthTarget, GBuffer4ClearColor, camera);
+            BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer5Target, cameraDepthTarget, GBuffer5ClearColor, camera);
             BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbufferObjectIndexTarget, cameraDepthTarget, GBufferObjectIndexClearColor, camera);
-            BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbufferObjectIndexTarget, cameraDepthTarget); // 清理完成后重新绑定 MRT，方便后续 Draw GBuffer Pass 直接绘制。
+            BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target, gbufferObjectIndexTarget, cameraDepthTarget); // 清理完成后重新绑定 MRT，方便后续 Draw GBuffer Pass 直接绘制。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
@@ -362,31 +409,67 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
         }
     }
 
-    internal sealed class BurtDrawGBufferOpaquePass : BurtRenderPass // 定义 Deferred 不透明 GBuffer 绘制 Pass，负责把不透明材质数据写入五张 GBuffer。
+    internal sealed class BurtDepthNormalPrepass : BurtRenderPass
+    {
+        public override string Name => "Burt Depth Normal Prepass";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.WriteCameraDepth();
+            builder.WriteGBuffer0();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var request = context != null ? context.Request : null;
+            var camera = request != null ? request.Camera : null;
+            if (camera == null)
+            {
+                return;
+            }
+
+            var cameraDepthTarget = context.CameraDepthTarget;
+            var gbuffer0Target = context.GBuffer0Target;
+            if (!cameraDepthTarget.IsValid || !gbuffer0Target.IsValid)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetRenderTarget(gbuffer0Target.Identifier, cameraDepthTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+
+            var sortingSettings = new SortingSettings(camera);
+            sortingSettings.criteria = SortingCriteria.CommonOpaque;
+
+            var drawingSettings = BurtDrawingSettingsUtility.CreateDepthNormalsDrawingSettings(sortingSettings);
+            var filteringSettings = new FilteringSettings(RenderQueueRange.opaque);
+            context.ScriptableContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings);
+        }
+    }
+
+    internal sealed class BurtDrawGBufferOpaquePass : BurtRenderPass // 定义 Deferred 不透明 GBuffer 绘制 Pass，保留 prepass GBuffer0 并写入剩余材质 MRT。
     {
         public override string Name => "Burt Draw GBuffer Opaque"; // 返回 Pass 名称，方便 RenderGraph Debug 和 Frame Debugger 识别真正的 GBuffer 绘制阶段。
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源读写关系。
         {
-            var depthPrepassEnabled = builder.Asset == null || builder.Asset.EnableDepthPrepass; // 判断当前图前面是否会先写 CameraDepth，asset 为空时沿用默认开启规则。
-
-            if (depthPrepassEnabled) // 如果已经有 Depth Prepass，GBuffer 绘制会读取现有深度来做深度测试。
-            {
-                builder.ReadCameraDepth(); // 声明 GBuffer 绘制会读取前面写好的 CameraDepth。
-            }
-
-            builder.WriteGBuffer0(); // 声明这个 Pass 会写入 GBuffer0，后续保存 baseColor 和 occlusion。
-            builder.WriteGBuffer1(); // 声明这个 Pass 会写入 GBuffer1，后续保存 normal、metallic 和 smoothness。
-            builder.WriteGBuffer2(); // 声明这个 Pass 会写入 GBuffer2，后续保存 emission 和 reflectance。
+            builder.ReadCameraDepth(); // GBuffer 绘制使用 DepthNormals prepass 写好的深度做 ZTest Equal。
+            builder.ReadGBuffer0(); // GBuffer0 的 normal/roughness 来自 DepthNormals prepass，普通 GBuffer pass 只保留它。
+            builder.WriteGBuffer1(); // 声明这个 Pass 会写入 GBuffer1，后续保存 baseColor 和 occlusion。
+            builder.WriteGBuffer2(); // 声明这个 Pass 会写入 GBuffer2，后续保存 packed material properties 和 reflectance。
             builder.WriteGBuffer3();
             builder.WriteGBuffer4();
+            builder.WriteGBuffer5();
             builder.WriteGBufferObjectIndex();
-            builder.WriteCameraDepth(); // 声明这个 Pass 使用 CameraDepth 作为深度附件，并允许 GBuffer shader 写入深度。
         }
 
         public override void Execute(BurtRenderGraphContext context) // 执行不透明物体的 GBuffer 绘制。
         {
-            if (!BurtGBufferRenderTargetPassUtility.TryGetGBufferAndDepthTargets(context, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbufferObjectIndexTarget, out var cameraDepthTarget)) // 先确认五张 GBuffer 和深度目标都有效。
+            if (!BurtGBufferRenderTargetPassUtility.TryGetGBufferAndDepthTargets(context, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbuffer5Target, out var gbufferObjectIndexTarget, out var cameraDepthTarget)) // 先确认全部 GBuffer 和深度目标都有效。
             {
                 return; // 任意目标无效时直接跳过，避免 DrawRenderers 写入错误目标。
             }
@@ -404,7 +487,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
 
-            BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbufferObjectIndexTarget, cameraDepthTarget); // 绘制前重新绑定 GBuffer MRT，避免前一个 Pass 改过渲染目标。
+            BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target, gbufferObjectIndexTarget, cameraDepthTarget); // 绘制前重新绑定 GBuffer MRT，避免前一个 Pass 改过渲染目标。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
@@ -451,6 +534,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             out BurtRenderTargetHandle gbuffer2Target, // 输出 GBuffer2 句柄。
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle cameraDepthTarget)
         {
             return TryGetGBufferAndDepthTargets(
@@ -460,6 +544,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
                 out gbuffer2Target,
                 out gbuffer3Target,
                 out gbuffer4Target,
+                out gbuffer5Target,
                 out _,
                 out cameraDepthTarget);
         }
@@ -471,6 +556,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             out BurtRenderTargetHandle gbuffer2Target, // 输出 GBuffer2 句柄。
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle gbufferObjectIndexTarget,
             out BurtRenderTargetHandle cameraDepthTarget) // 输出 CameraDepth 句柄。
         {
@@ -479,10 +565,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name); // context 有效时读取 GBuffer2，否则返回无效句柄。
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5Target = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             gbufferObjectIndexTarget = context != null ? context.GBufferObjectIndexTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBufferObjectIndexName);
             cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName); // context 有效时读取 CameraDepth，否则返回无效句柄。
 
-            return gbuffer0Target.IsValid && gbuffer1Target.IsValid && gbuffer2Target.IsValid && gbuffer3Target.IsValid && gbuffer4Target.IsValid && gbufferObjectIndexTarget.IsValid && cameraDepthTarget.IsValid; // 只有五个 GBuffer 目标和深度目标全部有效时才允许绑定 MRT。
+            return gbuffer0Target.IsValid && gbuffer1Target.IsValid && gbuffer2Target.IsValid && gbuffer3Target.IsValid && gbuffer4Target.IsValid && gbuffer5Target.IsValid && gbufferObjectIndexTarget.IsValid && cameraDepthTarget.IsValid; // 只有五个 GBuffer 目标和深度目标全部有效时才允许绑定 MRT。
         }
 
         public static void SetGBufferRenderTargets(
@@ -492,6 +579,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             BurtRenderTargetHandle gbuffer2Target,
             BurtRenderTargetHandle gbuffer3Target,
             BurtRenderTargetHandle gbuffer4Target,
+            BurtRenderTargetHandle gbuffer5Target,
             BurtRenderTargetHandle cameraDepthTarget)
         {
             var colorTargets = new[]
@@ -500,7 +588,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
                 gbuffer1Target.Identifier,
                 gbuffer2Target.Identifier,
                 gbuffer3Target.Identifier,
-                gbuffer4Target.Identifier
+                gbuffer4Target.Identifier,
+                gbuffer5Target.Identifier
             };
             cmd.SetRenderTarget(colorTargets, cameraDepthTarget.Identifier);
         }
@@ -512,6 +601,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             BurtRenderTargetHandle gbuffer2Target,
             BurtRenderTargetHandle gbuffer3Target,
             BurtRenderTargetHandle gbuffer4Target,
+            BurtRenderTargetHandle gbuffer5Target,
             BurtRenderTargetHandle gbufferObjectIndexTarget,
             BurtRenderTargetHandle cameraDepthTarget)
         {
@@ -522,6 +612,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
                 gbuffer2Target.Identifier,
                 gbuffer3Target.Identifier,
                 gbuffer4Target.Identifier,
+                gbuffer5Target.Identifier,
                 gbufferObjectIndexTarget.Identifier
             };
             cmd.SetRenderTarget(colorTargets, cameraDepthTarget.Identifier);

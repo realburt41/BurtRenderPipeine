@@ -187,6 +187,7 @@ namespace Burt.RenderPipeline
             builder.WriteGBuffer2();
             builder.WriteGBuffer3();
             builder.WriteGBuffer4();
+            builder.WriteGBuffer5();
             builder.WriteGBufferObjectIndex();
             builder.WriteCameraDepth();
         }
@@ -200,6 +201,7 @@ namespace Burt.RenderPipeline
                     out var gbuffer2Target,
                     out var gbuffer3Target,
                     out var gbuffer4Target,
+                    out var gbuffer5Target,
                     out var gbufferObjectIndexTarget,
                     out var cameraDepthTarget))
             {
@@ -214,6 +216,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target,
                 gbuffer3Target,
                 gbuffer4Target,
+                gbuffer5Target,
                 gbufferObjectIndexTarget,
                 cameraDepthTarget);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);

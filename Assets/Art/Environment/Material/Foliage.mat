@@ -22,7 +22,9 @@ Material:
   stringTagMap:
     QUEUE: AlphaTest
     RenderType: TransparentCutout
-  disabledShaderPasses: []
+  disabledShaderPasses:
+  - BurtForward
+  - BurtDepthOnly
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -91,7 +93,9 @@ Material:
     m_Floats:
     - _AlphaClip: 1
     - _AlphaIncrease: 0.4
+    - _BendMaskPow: 1
     - _BumpScale: 1
+    - _BurtGBufferStencilReadMask: 224
     - _BurtGBufferStencilRef: 192
     - _BurtGBufferStencilWriteMask: 224
     - _Cull: 0
@@ -101,6 +105,8 @@ Material:
     - _DoubleSidedEnable: 1
     - _DoubleSidedNormalMode: 0
     - _DstBlend: 0
+    - _FlutterTipFrequency: 0.08
+    - _FlutterTipIntensity: 0.2
     - _FoliageBackLight: 0.55
     - _FoliageSubsurfaceColorSaturate: 0.6
     - _FoliageThickness: 0.5
@@ -110,8 +116,11 @@ Material:
     - _GlossMapScale: 1
     - _Glossiness: 0.5
     - _GlossyReflections: 1
+    - _MaxBendAngle: 0
     - _Metallic: 0
     - _Mode: 0
+    - _MotionVectorsStencilMask: 8
+    - _MotionVectorsStencilRef: 8
     - _NormalScale: 1
     - _OcclusionStrength: 1
     - _Parallax: 0.02
@@ -125,11 +134,13 @@ Material:
     - _SrcBlend: 1
     - _SubsurfaceColorSaturate: 0.6
     - _Surface: 0
+    - _SwayIntensity: 0.05
     - _ThicknessScale: 1
     - _TintAOHeightRatio: 0.556
     - _TintHeightContrast: 1
     - _TintScale: 0.427
     - _TintValue: 0.461
+    - _ToTrunkMaskPow: 1
     - _TransmissionNdotL: 0.5
     - _TreeHeight: 25
     - _UVSec: 0

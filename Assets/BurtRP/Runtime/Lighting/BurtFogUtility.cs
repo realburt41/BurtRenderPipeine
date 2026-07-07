@@ -87,8 +87,8 @@ namespace Burt.RenderPipeline
         public readonly float DirectionalIntensity;
         public readonly float AmbientIntensity;
         public readonly float Anisotropy;
-        public readonly BurtAtmosphereFogInteraction RequestedAerialInteraction;
-        public readonly BurtAtmosphereFogInteraction AerialInteraction;
+        public readonly AtmosphereFogInteraction RequestedAerialInteraction;
+        public readonly AtmosphereFogInteraction AerialInteraction;
         public readonly float AerialFadeStart;
         public readonly float AerialFadeEnd;
 
@@ -104,12 +104,12 @@ namespace Burt.RenderPipeline
             float directionalIntensity,
             float ambientIntensity,
             float anisotropy,
-            BurtAtmosphereFogInteraction requestedAerialInteraction,
-            BurtAtmosphereFogInteraction aerialInteraction,
+            AtmosphereFogInteraction requestedAerialInteraction,
+            AtmosphereFogInteraction aerialInteraction,
             float aerialFadeStart,
             float aerialFadeEnd)
         {
-            Enabled = enabled && aerialInteraction != BurtAtmosphereFogInteraction.AerialOnly && density > 0.000001f && maxOpacity > 0.000001f;
+            Enabled = enabled && aerialInteraction != AtmosphereFogInteraction.AerialOnly && density > 0.000001f && maxOpacity > 0.000001f;
             Height = height;
             Density = Mathf.Clamp(density, 0f, 0.5f);
             HeightFalloff = Mathf.Clamp(heightFalloff, 0.001f, 4f);
@@ -126,7 +126,7 @@ namespace Burt.RenderPipeline
             AerialFadeEnd = Mathf.Max(AerialFadeStart + 0.001f, aerialFadeEnd);
         }
 
-        public static BurtFogSettings Disabled => new BurtFogSettings(false, 0f, 0f, 0.2f, 0f, 0f, 0f, Color.white, 0f, 0f, 0f, BurtAtmosphereFogInteraction.Additive, BurtAtmosphereFogInteraction.Additive, 0f, 1f);
+        public static BurtFogSettings Disabled => new BurtFogSettings(false, 0f, 0f, 0.2f, 0f, 0f, 0f, Color.white, 0f, 0f, 0f, AtmosphereFogInteraction.Additive, AtmosphereFogInteraction.Additive, 0f, 1f);
     }
 
     internal static class BurtFogUtility
@@ -159,7 +159,7 @@ namespace Burt.RenderPipeline
         public static BurtFogSettings ResolveSettings(BurtRenderRequest request)
         {
             var stack = VolumeManager.instance != null ? VolumeManager.instance.stack : null;
-            var fog = stack != null ? stack.GetComponent<BurtFogVolumeComponent>() : null;
+            var fog = stack != null ? stack.GetComponent<FogVolumeComponent>() : null;
             if (fog == null || !fog.IsEnabled())
             {
                 return BurtFogSettings.Disabled;
@@ -169,9 +169,9 @@ namespace Burt.RenderPipeline
             var requestedInteraction = atmosphereSettings.FogInteraction;
             var interaction = requestedInteraction;
             var aerialCanRun = request == null ? atmosphereSettings.AerialPerspectiveEnabled : BurtAtmosphereUtility.ShouldUseAerialPerspective(request);
-            if (!aerialCanRun && interaction != BurtAtmosphereFogInteraction.AerialOnly)
+            if (!aerialCanRun && interaction != AtmosphereFogInteraction.AerialOnly)
             {
-                interaction = BurtAtmosphereFogInteraction.Additive;
+                interaction = AtmosphereFogInteraction.Additive;
             }
 
             var aerialFadeStart = aerialCanRun ? atmosphereSettings.AerialPerspectiveNearFadeStart : 0f;
@@ -213,7 +213,7 @@ namespace Burt.RenderPipeline
                 " Anisotropy=", Format(settings.Anisotropy),
                 " AerialInteraction=", settings.RequestedAerialInteraction,
                 " EffectiveAerialInteraction=", settings.AerialInteraction,
-                " SuppressedByAerial=", settings.RequestedAerialInteraction == BurtAtmosphereFogInteraction.AerialOnly,
+                " SuppressedByAerial=", settings.RequestedAerialInteraction == AtmosphereFogInteraction.AerialOnly,
                 " AerialFadeOut=", Format(settings.AerialFadeStart), "/", Format(settings.AerialFadeEnd),
                 " Formula=", FormulaName);
         }
@@ -235,7 +235,7 @@ namespace Burt.RenderPipeline
                 " Anisotropy=", Format(settings.Anisotropy),
                 " AerialInteraction=", settings.RequestedAerialInteraction,
                 " EffectiveAerialInteraction=", settings.AerialInteraction,
-                " SuppressedByAerial=", settings.RequestedAerialInteraction == BurtAtmosphereFogInteraction.AerialOnly,
+                " SuppressedByAerial=", settings.RequestedAerialInteraction == AtmosphereFogInteraction.AerialOnly,
                 " AerialFadeOut=", Format(settings.AerialFadeStart), "/", Format(settings.AerialFadeEnd),
                 " Formula=", FormulaName);
         }

@@ -58,35 +58,19 @@ Shader "BurtRP/Foliage"
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 192
+        [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
+        [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
+
+    HLSLINCLUDE
+    #pragma enable_d3d11_debug_symbols
+    ENDHLSL
 
     SubShader
     {
         Tags { "RenderType" = "TransparentCutout" "RenderPipeline" = "BurtRenderPipeline" }
-
-        Pass
-        {
-            Name "Burt Foliage Depth Only"
-            Tags { "LightMode" = "BurtDepthOnly" }
-            ColorMask 0
-            ZWrite On
-            ZTest LEqual
-            Cull [_Cull]
-
-            HLSLPROGRAM
-            #pragma vertex VertDepth
-            #pragma fragment FragDepth
-            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma shader_feature_local _ BURT_FOLIAGE_USE_BAKED_NORMALS
-            #pragma multi_compile_instancing
-            #pragma target 3.5
-            #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
-            #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
-            ENDHLSL
-        }
 
         Pass
         {
@@ -114,17 +98,39 @@ Shader "BurtRP/Foliage"
 
         Pass
         {
+            Name "Burt Foliage Depth Normals"
+            Tags { "LightMode" = "BurtDepthNormals" }
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertGBuffer
+            #pragma fragment FragDepthNormals
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma shader_feature_local _ BURT_FOLIAGE_USE_BAKED_NORMALS
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "Burt Foliage Motion Vectors"
             Tags { "LightMode" = "BurtMotionVectors" }
             ZWrite Off
-            ZTest Always
+            ZTest Equal
             Cull [_Cull]
 
             Stencil
             {
-                Ref 8
+                Ref [_MotionVectorsStencilRef]
                 ReadMask 8
-                WriteMask 8
+                WriteMask [_MotionVectorsStencilMask]
                 Comp Always
                 Pass Replace
             }
@@ -146,12 +152,14 @@ Shader "BurtRP/Foliage"
         {
             Name "Burt Foliage GBuffer"
             Tags { "LightMode" = "BurtGBuffer" }
-            ZWrite On
-            ZTest LEqual
+            ZWrite Off
+            ZTest Equal
+            // GBuffer0 normal/roughness comes from BurtDepthNormals; keep MRT0 untouched here.
+            ColorMask 0 0
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 224
+                ReadMask [_BurtGBufferStencilReadMask]
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
@@ -172,28 +180,6 @@ Shader "BurtRP/Foliage"
             ENDHLSL
         }
 
-        Pass
-        {
-            Name "Burt Foliage Forward"
-            Tags { "LightMode" = "BurtForward" }
-            ZWrite [_ZWrite]
-            ZTest [_ZTest]
-            Cull [_Cull]
-            Blend [_SrcBlend] [_DstBlend]
-
-            HLSLPROGRAM
-            #pragma vertex Vert
-            #pragma fragment Frag
-            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma shader_feature_local_fragment _ _EMISSION
-            #pragma shader_feature_local _ BURT_FOLIAGE_USE_BAKED_NORMALS
-            #pragma multi_compile_instancing
-            #pragma target 3.5
-            #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
-            ENDHLSL
-        }
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtLitShaderGUI"

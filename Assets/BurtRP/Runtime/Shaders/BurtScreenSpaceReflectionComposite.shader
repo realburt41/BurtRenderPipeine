@@ -1,4 +1,4 @@
-﻿Shader "Hidden/BurtRP/ScreenSpaceReflections/Composite"
+Shader "Hidden/BurtRP/ScreenSpaceReflections/Composite"
 {
     SubShader
     {
@@ -44,20 +44,20 @@
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -116,7 +116,7 @@
                 }
 
                 BurtGBufferData sampleGBuffer = BurtSampleDeferredGBufferData(sampleUV);
-                if (BurtSSRCompositeIsExcludedShadingModel(sampleGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(sampleGBuffer.ShadingModelID))
                 {
                     return 0.0;
                 }
@@ -148,7 +148,7 @@
                 }
 
                 BurtGBufferData sampleGBuffer = BurtSampleDeferredGBufferData(sampleUV);
-                if (BurtSSRCompositeIsExcludedShadingModel(sampleGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(sampleGBuffer.ShadingModelID))
                 {
                     return 0.0;
                 }
@@ -170,7 +170,7 @@
 
                 float centerLinearDepth = LinearEyeDepth(centerRawDepth);
                 BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
-                if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.ShadingModelID))
                 {
                     return 0.0;
                 }
@@ -243,7 +243,7 @@
                 }
 
                 BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
-                if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.ShadingModelID))
                 {
                     return 0.0;
                 }
@@ -347,7 +347,7 @@
                 }
 
                 BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
-                if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.ShadingModelID))
                 {
                     return centerSSR.rgb;
                 }
@@ -636,7 +636,7 @@
                 }
 
                 BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
-                if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.ShadingModelID))
                 {
                     return 0.0;
                 }
@@ -648,9 +648,9 @@
             float3 BurtSSRComputeBaseMaterialSpecularScale(BurtPBRMaterialData materialData, float reflectionRoughness, float nDotV)
             {
                 float2 dfg = GetSpecularDFGTerms(reflectionRoughness, nDotV);
-                float3 envBRDF = EvalSpecularDFG(materialData.f0, materialData.f90, dfg);
-                float3 energyCompensation = GetSpecularEnergyCompensation(materialData.f0, reflectionRoughness, nDotV);
-                float specularOcclusion = GetIndirectSpecularOcclusion(nDotV, materialData.occlusion, reflectionRoughness);
+                float3 envBRDF = EvalSpecularDFG(materialData.F0, materialData.F90, dfg);
+                float3 energyCompensation = GetSpecularEnergyCompensation(materialData.F0, reflectionRoughness, nDotV);
+                float specularOcclusion = GetIndirectSpecularOcclusion(nDotV, materialData.Occlusion, reflectionRoughness);
                 return envBRDF * energyCompensation * specularOcclusion;
             }
 
@@ -663,7 +663,7 @@
                 }
 
                 BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
-                if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(gbufferData.ShadingModelID))
                 {
                     return float3(0.0, 0.0, 0.0);
                 }
@@ -676,36 +676,36 @@
 
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
-                float3 baseNormalWS = BurtSafeNormalize(gbufferData.normalWS);
-                float baseRoughness = ClampPerceptualRoughness(gbufferData.perceptualRoughness);
+                float3 baseNormalWS = BurtGetDeferredSurfaceNormalWS(gbufferData);
+                float baseRoughness = ClampPerceptualRoughness(gbufferData.PerceptualRoughness);
                 float baseNoV = saturate(dot(baseNormalWS, viewDirectionWS));
                 BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
                 float3 baseSpecularScale = BurtSSRComputeBaseMaterialSpecularScale(materialData, baseRoughness, baseNoV);
 
                 #if BURT_ENABLE_CLEAR_COAT_SHADING
-                    float clearCoatMask = saturate(materialData.clearCoatMask);
+                    float clearCoatMask = saturate(materialData.ClearCoatMask);
                     if (clearCoatMask > 0.0001)
                     {
                         BurtPBRMaterialData clearCoatMaterialData = materialData;
-                        clearCoatMaterialData.baseColor = float3(1.0, 1.0, 1.0);
-                        clearCoatMaterialData.metallic = 0.0;
-                        clearCoatMaterialData.anisotropy = 0.0;
-                        clearCoatMaterialData.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
-                        clearCoatMaterialData.diffuseColor = float3(0.0, 0.0, 0.0);
-                        clearCoatMaterialData.f0 = float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0);
-                        clearCoatMaterialData.f90 = float3(1.0, 1.0, 1.0);
-                        clearCoatMaterialData.perceptualRoughness = ClampPerceptualRoughness(materialData.clearCoatRoughness);
-                        clearCoatMaterialData.linearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatMaterialData.perceptualRoughness);
-                        clearCoatMaterialData.a2 = LinearRoughnessToA2(clearCoatMaterialData.linearRoughness);
-                        clearCoatMaterialData.clearCoatMask = 0.0;
+                        clearCoatMaterialData.BaseColor = float3(1.0, 1.0, 1.0);
+                        clearCoatMaterialData.Metallic = 0.0;
+                        clearCoatMaterialData.Anisotropy = 0.0;
+                        clearCoatMaterialData.Reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
+                        clearCoatMaterialData.DiffuseColor = float3(0.0, 0.0, 0.0);
+                        clearCoatMaterialData.F0 = float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0);
+                        clearCoatMaterialData.F90 = float3(1.0, 1.0, 1.0);
+                        clearCoatMaterialData.PerceptualRoughness = ClampPerceptualRoughness(materialData.ClearCoatRoughness);
+                        clearCoatMaterialData.LinearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatMaterialData.PerceptualRoughness);
+                        clearCoatMaterialData.A2 = LinearRoughnessToA2(clearCoatMaterialData.LinearRoughness);
+                        clearCoatMaterialData.ClearCoatMask = 0.0;
                         float3 clearCoatNormalWS = BurtGetClearCoatNormalWS(gbufferData);
                         float clearCoatNoV = saturate(dot(clearCoatNormalWS, viewDirectionWS));
-                        float2 clearCoatDFG = GetSpecularDFGTerms(clearCoatMaterialData.perceptualRoughness, clearCoatNoV);
-                        float3 clearCoatEnvBRDF = EvalSpecularDFG(clearCoatMaterialData.f0, clearCoatMaterialData.f90, clearCoatDFG);
-                        float3 clearCoatEnergyCompensation = GetSpecularEnergyCompensation(clearCoatMaterialData.f0, clearCoatMaterialData.perceptualRoughness, clearCoatNoV);
-                        float clearCoatSpecularOcclusion = GetIndirectSpecularOcclusion(clearCoatNoV, clearCoatMaterialData.occlusion, clearCoatMaterialData.perceptualRoughness);
+                        float2 clearCoatDFG = GetSpecularDFGTerms(clearCoatMaterialData.PerceptualRoughness, clearCoatNoV);
+                        float3 clearCoatEnvBRDF = EvalSpecularDFG(clearCoatMaterialData.F0, clearCoatMaterialData.F90, clearCoatDFG);
+                        float3 clearCoatEnergyCompensation = GetSpecularEnergyCompensation(clearCoatMaterialData.F0, clearCoatMaterialData.PerceptualRoughness, clearCoatNoV);
+                        float clearCoatSpecularOcclusion = GetIndirectSpecularOcclusion(clearCoatNoV, clearCoatMaterialData.Occlusion, clearCoatMaterialData.PerceptualRoughness);
                         float3 clearCoatSpecularScale = clearCoatEnvBRDF * clearCoatEnergyCompensation * clearCoatSpecularOcclusion;
-                        float3 layerTransmission = BurtClearCoatFresnelTransmission(clearCoatEnvBRDF) * BurtSimpleClearCoatTransmittanceFromView(clearCoatNoV, materialData.metallic, materialData.baseColor);
+                        float3 layerTransmission = BurtClearCoatFresnelTransmission(clearCoatEnvBRDF) * BurtSimpleClearCoatTransmittanceFromView(clearCoatNoV, materialData.Metallic, materialData.BaseColor);
                         return lerp(baseSpecularScale, baseSpecularScale * layerTransmission + clearCoatSpecularScale, clearCoatMask);
                     }
                 #endif
@@ -780,19 +780,19 @@
 
             float3 BurtSSRCompositeEvaluateIBLSpecular(BurtPBRMaterialData materialData, BurtPBRGeometryData geometryData, float roughness)
             {
-                float3 reflectionDirectionWS = BurtGetIndirectSpecularReflectionDirectionWS(geometryData, materialData.anisotropy, roughness);
+                float3 reflectionDirectionWS = BurtGetIndirectSpecularReflectionDirectionWS(geometryData, materialData.Anisotropy, roughness);
                 float3 radiance = BurtSSRCompositeSampleIndirectSpecularRadiance(reflectionDirectionWS, roughness);
-                float2 dfg = GetSpecularDFGTerms(roughness, geometryData.nDotV);
-                float3 envBRDF = EvalSpecularDFG(materialData.f0, materialData.f90, dfg);
+                float2 dfg = GetSpecularDFGTerms(roughness, geometryData.NDotV);
+                float3 envBRDF = EvalSpecularDFG(materialData.F0, materialData.F90, dfg);
                 float3 energyCompensation;
                 float energyPreservation;
-                GetSpecularEnergyTerms(materialData.f0, materialData.f90, roughness, geometryData.nDotV, energyCompensation, energyPreservation);
-                if (materialData.fabricActive > 0.0001)
+                GetSpecularEnergyTerms(materialData.F0, materialData.F90, roughness, geometryData.NDotV, energyCompensation, energyPreservation);
+                if (materialData.FabricActive > 0.0001)
                 {
                     energyCompensation = float3(1.0, 1.0, 1.0);
                 }
 
-                float specularOcclusion = GetIndirectSpecularOcclusion(geometryData.nDotV, materialData.occlusion, roughness);
+                float specularOcclusion = GetIndirectSpecularOcclusion(geometryData.NDotV, materialData.Occlusion, roughness);
                 return radiance * envBRDF * energyCompensation * specularOcclusion;
             }
 
@@ -800,17 +800,17 @@
             BurtPBRMaterialData BurtSSRCompositeCreateClearCoatMaterialData(BurtPBRMaterialData materialData)
             {
                 BurtPBRMaterialData clearCoatMaterialData = materialData;
-                clearCoatMaterialData.baseColor = float3(1.0, 1.0, 1.0);
-                clearCoatMaterialData.metallic = 0.0;
-                clearCoatMaterialData.anisotropy = 0.0;
-                clearCoatMaterialData.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
-                clearCoatMaterialData.diffuseColor = float3(0.0, 0.0, 0.0);
-                clearCoatMaterialData.f0 = float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0);
-                clearCoatMaterialData.f90 = float3(1.0, 1.0, 1.0);
-                clearCoatMaterialData.perceptualRoughness = ClampPerceptualRoughness(materialData.clearCoatRoughness);
-                clearCoatMaterialData.linearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatMaterialData.perceptualRoughness);
-                clearCoatMaterialData.a2 = LinearRoughnessToA2(clearCoatMaterialData.linearRoughness);
-                clearCoatMaterialData.clearCoatMask = 0.0;
+                clearCoatMaterialData.BaseColor = float3(1.0, 1.0, 1.0);
+                clearCoatMaterialData.Metallic = 0.0;
+                clearCoatMaterialData.Anisotropy = 0.0;
+                clearCoatMaterialData.Reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
+                clearCoatMaterialData.DiffuseColor = float3(0.0, 0.0, 0.0);
+                clearCoatMaterialData.F0 = float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0);
+                clearCoatMaterialData.F90 = float3(1.0, 1.0, 1.0);
+                clearCoatMaterialData.PerceptualRoughness = ClampPerceptualRoughness(materialData.ClearCoatRoughness);
+                clearCoatMaterialData.LinearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatMaterialData.PerceptualRoughness);
+                clearCoatMaterialData.A2 = LinearRoughnessToA2(clearCoatMaterialData.LinearRoughness);
+                clearCoatMaterialData.ClearCoatMask = 0.0;
                 return clearCoatMaterialData;
             }
             #endif
@@ -828,22 +828,22 @@
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
                 BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
                 BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(gbufferData, viewDirectionWS);
-                float baseRoughness = ClampPerceptualRoughness(materialData.perceptualRoughness);
+                float baseRoughness = ClampPerceptualRoughness(materialData.PerceptualRoughness);
                 float3 baseSpecular = BurtSSRCompositeEvaluateIBLSpecular(materialData, geometryData, baseRoughness);
 
                 #if BURT_ENABLE_CLEAR_COAT_SHADING
-                    float clearCoatMask = saturate(materialData.clearCoatMask);
+                    float clearCoatMask = saturate(materialData.ClearCoatMask);
                     if (clearCoatMask > 0.0001)
                     {
                         BurtPBRMaterialData clearCoatMaterialData = BurtSSRCompositeCreateClearCoatMaterialData(materialData);
                         float3 clearCoatNormalWS = BurtGetClearCoatNormalWS(gbufferData);
-                        BurtPBRGeometryData clearCoatGeometryData = BurtPreparePBRGeometryData(clearCoatNormalWS, gbufferData.tangentWS, viewDirectionWS);
-                        float3 topLayerSpecular = BurtSSRCompositeEvaluateIBLSpecular(clearCoatMaterialData, clearCoatGeometryData, clearCoatMaterialData.perceptualRoughness);
-                        float2 clearCoatDFG = GetSpecularDFGTerms(clearCoatMaterialData.perceptualRoughness, clearCoatGeometryData.nDotV);
-                        float3 clearCoatEnvFresnel = EvalSpecularDFG(clearCoatMaterialData.f0, clearCoatMaterialData.f90, clearCoatDFG);
+                        BurtPBRGeometryData clearCoatGeometryData = BurtPreparePBRGeometryData(clearCoatNormalWS, gbufferData.TangentWS, viewDirectionWS);
+                        float3 topLayerSpecular = BurtSSRCompositeEvaluateIBLSpecular(clearCoatMaterialData, clearCoatGeometryData, clearCoatMaterialData.PerceptualRoughness);
+                        float2 clearCoatDFG = GetSpecularDFGTerms(clearCoatMaterialData.PerceptualRoughness, clearCoatGeometryData.NDotV);
+                        float3 clearCoatEnvFresnel = EvalSpecularDFG(clearCoatMaterialData.F0, clearCoatMaterialData.F90, clearCoatDFG);
                         float3 layerTransmission =
                             BurtClearCoatFresnelTransmission(clearCoatEnvFresnel) *
-                            BurtSimpleClearCoatTransmittanceFromView(clearCoatGeometryData.nDotV, materialData.metallic, materialData.baseColor);
+                            BurtSimpleClearCoatTransmittanceFromView(clearCoatGeometryData.NDotV, materialData.Metallic, materialData.BaseColor);
                         return max(lerp(baseSpecular, baseSpecular * layerTransmission, clearCoatMask) + topLayerSpecular * clearCoatMask, 0.0);
                     }
                 #endif
@@ -869,7 +869,7 @@
                 }
 
                 BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
-                if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.shadingModelID))
+                if (BurtSSRCompositeIsExcludedShadingModel(centerGBuffer.ShadingModelID))
                 {
                     return compositeDelta;
                 }
@@ -972,7 +972,7 @@
                 }
 
                 BurtGBufferData centerGBuffer = BurtSampleDeferredGBufferData(screenUV);
-                float centerMetallic = saturate(centerGBuffer.metallic);
+                float centerMetallic = saturate(centerGBuffer.Metallic);
                 float centerRoughness = BurtGetReflectionRoughness(centerGBuffer);
                 float lowRoughnessReceiverGate = saturate(materialWeight) * (1.0 - smoothstep(0.34, 0.78, centerRoughness));
                 float metallicReceiverGate = smoothstep(0.18, 0.72, centerMetallic) * (1.0 - smoothstep(0.42, 0.82, centerRoughness));
@@ -1111,7 +1111,7 @@
 
             float4 FragComposite(Varyings input) : SV_Target
             {
-                float2 screenUV = input.screenUV;
+                float2 screenUV = input.ScreenUV;
                 int debugMode = (int)_BurtSSRParams1.z;
 
                 bool compositeDebugMode = (debugMode >= 10 && debugMode <= 15) || (debugMode >= 32 && debugMode <= 37);

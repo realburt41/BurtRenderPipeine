@@ -132,7 +132,7 @@ namespace Burt.RenderPipeline
         public static BurtVolumetricFogSettings ResolveSettings()
         {
             var stack = VolumeManager.instance != null ? VolumeManager.instance.stack : null;
-            var fog = stack != null ? stack.GetComponent<BurtVolumetricFogVolumeComponent>() : null;
+            var fog = stack != null ? stack.GetComponent<VolumetricFogVolumeComponent>() : null;
             if (fog == null || !fog.IsEnabled())
             {
                 return BurtVolumetricFogSettings.Disabled;

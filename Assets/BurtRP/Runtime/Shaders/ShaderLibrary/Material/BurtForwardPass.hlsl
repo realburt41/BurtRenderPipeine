@@ -20,407 +20,435 @@
 
 struct Attributes
 {
-    float4 positionOS : POSITION;
-    float3 normalOS : NORMAL;
-    float4 tangentOS : TANGENT;
-    float2 uv0 : TEXCOORD0;
+    float4 PositionOS : POSITION;
+    float3 NormalOS : NORMAL;
+    float4 TangentOS : TANGENT;
+    float2 UV0 : TEXCOORD0;
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-    float4 color : COLOR;
+    float4 Color : COLOR;
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float2 uv1 : TEXCOORD1;
+    float2 UV1 : TEXCOORD1;
 #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct Varyings
 {
-    float4 positionCS : SV_POSITION;
-    float3 normalWS : TEXCOORD0;
+    float4 PositionCS : SV_POSITION;
+    float3 NormalWS : TEXCOORD0;
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float2 baseMapUV : TEXCOORD2;
+    float2 BaseMapUV : TEXCOORD2;
 #endif
-    float4 tangentWS : TEXCOORD3;
-    float3 positionWS : TEXCOORD4;
-    float2 emissionMapUV : TEXCOORD5;
+    float4 TangentWS : TEXCOORD3;
+    float3 PositionWS : TEXCOORD4;
+    float2 EmissionMapUV : TEXCOORD5;
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float2 maskMapUV : TEXCOORD6;
+    float2 MaskMapUV : TEXCOORD6;
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float2 uv0 : TEXCOORD7;
-    float2 uv1 : TEXCOORD8;
-    float3 positionOS : TEXCOORD9;
+    float2 UV0 : TEXCOORD7;
+    float2 UV1 : TEXCOORD8;
+    float3 PositionOS : TEXCOORD9;
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-    float4 vertexColor : TEXCOORD7;
-    float3 positionOS : TEXCOORD8;
+    float4 VertexColor : TEXCOORD7;
+    float3 PositionOS : TEXCOORD8;
 #endif
 };
 
-float BurtResolveForwardMaterialFoliageMicroShadow(BurtSurfaceData surfaceData)
+float BurtResolveForwardMaterialFoliageMicroShadow(BurtSurfaceData SurfaceData)
 {
 #if BURT_ENABLE_FOLIAGE_SHADING
-    return BurtIsFoliageShadingModel(surfaceData.shadingModelID) ? saturate(surfaceData.occlusion) : 1.0f;
+    return BurtIsFoliageShadingModel(SurfaceData.ShadingModelID) ? saturate(SurfaceData.Occlusion) : 1.0f;
 #else
     return 1.0f;
 #endif
 }
 
-Varyings Vert(Attributes input)
+Varyings Vert(Attributes Input)
 {
-    UNITY_SETUP_INSTANCE_ID(input);
-    float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+    UNITY_SETUP_INSTANCE_ID(Input);
+    float4 PositionOS = BurtApplyMultipassObjectShellOffset(Input.PositionOS, Input.NormalOS);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+        PositionOS = BurtApplyTrunkVertexAnimationObjectSpace(PositionOS, Input.Color, _Time.y);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        positionOS = BurtApplyFoliageVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+        #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        PositionOS = BurtApplyGrassVertexAnimationObjectSpace(PositionOS, Input.NormalOS, Input.Color, _Time.y);
+        #else
+        PositionOS = BurtApplyFoliageVertexAnimationObjectSpace(PositionOS, Input.Color, _Time.y);
+        #endif
     #endif
 
-    Varyings output;
-    output.positionCS = UnityObjectToClipPos(positionOS);
+    Varyings Output;
+    Output.PositionCS = UnityObjectToClipPos(PositionOS);
 
-    float4 positionWS = mul(unity_ObjectToWorld, positionOS);
-    output.positionWS = positionWS.xyz;
+    float4 PositionWS = mul(unity_ObjectToWorld, PositionOS);
+    Output.PositionWS = PositionWS.xyz;
 
-    output.normalWS = normalize(UnityObjectToWorldNormal(input.normalOS));
-    output.tangentWS = BurtObjectToWorldTangent(input.tangentOS);
+    Output.NormalWS = normalize(UnityObjectToWorldNormal(Input.NormalOS));
+    Output.TangentWS = BurtObjectToWorldTangent(Input.TangentOS);
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
+    Output.BaseMapUV = BurtTransformBaseMapUV(Input.UV0, _BaseMap_ST);
 #endif
-    output.emissionMapUV = BurtTransformEmissionMapUV(input.uv0, _EmissionMap_ST);
+    Output.EmissionMapUV = BurtTransformEmissionMapUV(Input.UV0, _EmissionMap_ST);
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    output.maskMapUV = BurtTransformMaskMapUV(input.uv0, _MaskMap_ST);
+    Output.MaskMapUV = BurtTransformMaskMapUV(Input.UV0, _MaskMap_ST);
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    output.uv0 = input.uv0;
-    output.uv1 = input.uv1;
-    output.positionOS = positionOS.xyz;
+    Output.UV0 = Input.UV0;
+    Output.UV1 = Input.UV1;
+    Output.PositionOS = PositionOS.xyz;
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-    output.vertexColor = input.color;
-    output.positionOS = positionOS.xyz;
+    Output.VertexColor = Input.Color;
+    Output.PositionOS = PositionOS.xyz;
 #endif
-    return output;
+    return Output;
 }
 
-float3 BurtGetForwardNormalWS(Varyings input, float facing)
+float3 BurtGetForwardNormalWS(Varyings Input, float Facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    return BurtGetMaterialPassNormalWS(input.uv0 * float2(_IDXTilling, 1.0f), input.normalWS, input.tangentWS, facing);
+    return BurtGetMaterialPassNormalWS(Input.UV0 * float2(_IDXTilling, 1.0f), Input.NormalWS, Input.TangentWS, Facing);
 #else
-    return BurtGetMaterialPassNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, facing);
+    float3 NormalWS = BurtGetMaterialPassNormalWS(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, Facing);
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        NormalWS = BurtApplyFoliageMaterialNormalWS(NormalWS, Input.PositionWS, Input.VertexColor);
+    #endif
+    return NormalWS;
 #endif
 }
 
-float3 BurtGetForwardShadingDirectionWS(Varyings input, float3 normalWS, float facing)
+float3 BurtGetForwardShadingDirectionWS(Varyings Input, float3 NormalWS, float Facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    return BurtGetMaterialPassShadingDirectionWS(input.uv0, input.normalWS, input.tangentWS, facing);
+    return BurtGetMaterialPassShadingDirectionWS(Input.UV0, Input.NormalWS, Input.TangentWS, Facing);
 #else
-    return BurtGetMaterialPassShadingDirectionWS(normalWS, input.tangentWS);
+    return BurtGetMaterialPassShadingDirectionWS(NormalWS, Input.TangentWS);
 #endif
 }
 
-float3 BurtGetForwardDebugNormalWS(float3 normalWS, float3 shadingDirectionWS)
+float3 BurtGetForwardDebugNormalWS(float3 NormalWS, float3 ShadingDirectionWS)
 {
-    return BurtGetMaterialPassDebugNormalWS(normalWS, shadingDirectionWS);
+    return BurtGetMaterialPassDebugNormalWS(NormalWS, ShadingDirectionWS);
 }
 
-BurtPBRShadingComponents BurtEvaluateForwardShadingComponents(BurtSurfaceData surfaceData, BurtLight mainLight, Varyings input, float3 normalWS, float3 shadingDirectionWS, float3 viewDirectionWS, float facing)
+BurtPBRShadingComponents BurtEvaluateForwardShadingComponents(BurtSurfaceData SurfaceData, BurtLight MainLight, Varyings Input, float3 NormalWS, float3 ShadingDirectionWS, float3 ViewDirectionWS, float Facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float3 geometryNormalWS = BurtGetMaterialPassGeometryNormalWS(input.normalWS, facing);
-    return BurtEvaluateHairShadingComponentsFromGBuffer(BurtCreateHairGBufferData(surfaceData, shadingDirectionWS, normalWS, geometryNormalWS, float3(0.0f, 0.0f, 0.0f)), mainLight, viewDirectionWS, input.positionWS);
+    float3 GeometryNormalWS = BurtGetMaterialPassGeometryNormalWS(Input.NormalWS, Facing);
+    return BurtEvaluateHairShadingComponentsFromGBuffer(BurtCreateHairGBufferData(SurfaceData, ShadingDirectionWS, NormalWS, GeometryNormalWS, float3(0.0f, 0.0f, 0.0f)), MainLight, ViewDirectionWS, Input.PositionWS);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
+    BurtGBufferData EyeGBufferData = BurtCreateEyeGBufferData(SurfaceData, NormalWS, Input.TangentWS, SurfaceData.EyeIrisNormalWS, SurfaceData.EyeCausticNormalWS, float3(0.0f, 0.0f, 0.0f));
+    return BurtEvaluateEyeShadingComponentsFromGBuffer(EyeGBufferData, MainLight, ViewDirectionWS, Input.PositionWS);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_CLEAR_COAT)
-    float3 clearCoatNormalWS = BurtSampleClearCoatNormalWS(input.baseMapUV, input.normalWS, input.tangentWS, _ClearCoatNormalScale, facing, _DoubleSidedNormalModeConstants);
-    return BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, input.tangentWS, clearCoatNormalWS, viewDirectionWS, input.positionWS);
+    float3 ClearCoatNormalWS = BurtSampleClearCoatNormalWS(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, _ClearCoatNormalScale, Facing, _DoubleSidedNormalModeConstants);
+    return BurtEvaluatePBRShadingComponents(SurfaceData, MainLight, NormalWS, Input.TangentWS, ClearCoatNormalWS, ViewDirectionWS, Input.PositionWS);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC)
-    return BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, input.tangentWS, viewDirectionWS, input.positionWS);
+    return BurtEvaluatePBRShadingComponents(SurfaceData, MainLight, NormalWS, Input.TangentWS, ViewDirectionWS, Input.PositionWS);
 #else
-    return BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, input.tangentWS, viewDirectionWS, input.positionWS);
+    return BurtEvaluatePBRShadingComponents(SurfaceData, MainLight, NormalWS, Input.TangentWS, ViewDirectionWS, Input.PositionWS);
 #endif
 }
 
 #if defined(BURT_ENABLE_SHADING_DEBUG)
-BurtGBufferData BurtCreateForwardDebugGBufferData(BurtSurfaceData surfaceData, Varyings input, float3 normalWS, float3 shadingDirectionWS, float facing)
+BurtGBufferData BurtCreateForwardDebugGBufferData(BurtSurfaceData SurfaceData, Varyings Input, float3 NormalWS, float3 ShadingDirectionWS, float Facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float3 geometryNormalWS = BurtGetMaterialPassGeometryNormalWS(input.normalWS, facing);
-    return BurtCreateMaterialPassGBufferData(surfaceData, input.uv0 * float2(_IDXTilling, 1.0f), geometryNormalWS, normalWS, input.tangentWS, shadingDirectionWS, facing, float3(0.0f, 0.0f, 0.0f));
+    float3 GeometryNormalWS = BurtGetMaterialPassGeometryNormalWS(Input.NormalWS, Facing);
+    return BurtCreateMaterialPassGBufferData(SurfaceData, Input.UV0 * float2(_IDXTilling, 1.0f), GeometryNormalWS, NormalWS, Input.TangentWS, ShadingDirectionWS, Facing, float3(0.0f, 0.0f, 0.0f));
 #else
-    return BurtCreateMaterialPassGBufferData(surfaceData, input.baseMapUV, input.normalWS, normalWS, input.tangentWS, shadingDirectionWS, facing, float3(0.0f, 0.0f, 0.0f));
+    return BurtCreateMaterialPassGBufferData(SurfaceData, Input.BaseMapUV, Input.NormalWS, NormalWS, Input.TangentWS, ShadingDirectionWS, Facing, float3(0.0f, 0.0f, 0.0f));
 #endif
 }
 
-float3 BurtEvaluateForwardAdditionalUnshadowedDebug(BurtSurfaceData surfaceData, Varyings input, float3 normalWS, float3 shadingDirectionWS, float3 viewDirectionWS, float facing)
+float3 BurtEvaluateForwardAdditionalUnshadowedDebug(BurtSurfaceData SurfaceData, Varyings Input, float3 NormalWS, float3 ShadingDirectionWS, float3 ViewDirectionWS, float Facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float3 geometryNormalWS = BurtGetMaterialPassGeometryNormalWS(input.normalWS, facing);
-    BurtGBufferData hairGBufferData = BurtCreateHairGBufferData(surfaceData, shadingDirectionWS, normalWS, geometryNormalWS, float3(0.0f, 0.0f, 0.0f));
-    BurtPBRGeometryData hairGeometryData = BurtPrepareHairGeometryData(hairGBufferData, viewDirectionWS);
-    BurtHairDirectComponents hairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(hairGBufferData, hairGeometryData, input.positionWS);
-    return hairAdditional.diffuse + hairAdditional.specular;
+    float3 GeometryNormalWS = BurtGetMaterialPassGeometryNormalWS(Input.NormalWS, Facing);
+    BurtGBufferData HairGBufferData = BurtCreateHairGBufferData(SurfaceData, ShadingDirectionWS, NormalWS, GeometryNormalWS, float3(0.0f, 0.0f, 0.0f));
+    BurtPBRGeometryData HairGeometryData = BurtPrepareHairGeometryData(HairGBufferData, ViewDirectionWS);
+    BurtHairDirectComponents HairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(HairGBufferData, HairGeometryData, Input.PositionWS);
+    return HairAdditional.Diffuse + HairAdditional.Specular;
 #else
-    BurtPBRShadingCoreData coreData = BurtPreparePBRShadingCoreData(surfaceData, normalWS, viewDirectionWS);
-    BurtDirectPBRComponents additional = BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(coreData, input.positionWS);
-    return additional.diffuse + additional.specular;
+    BurtPBRShadingCoreData CoreData = BurtPreparePBRShadingCoreData(SurfaceData, NormalWS, ViewDirectionWS);
+    BurtDirectPBRComponents Additional = BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(CoreData, Input.PositionWS);
+    return Additional.Diffuse + Additional.Specular;
 #endif
 }
 
 void BurtFillForwardShadingDebugData(
-    inout BurtShadingDebugData debugData,
-    BurtSurfaceData surfaceData,
-    BurtSurfaceData shadingSurfaceData,
-    BurtPBRShadingComponents pbrComponents,
-    BurtGBufferData debugDecodedGBufferData,
-    BurtPBRMaterialData debugGBufferMaterialData,
-    float3 normalWS,
-    float3 shadingDirectionWS,
-    float3 viewDirectionWS,
-    Varyings input,
-    float facing,
-    float3 positionWS,
-    float shadowAttenuation,
-    float3 emissionColor,
-    float3 finalColor)
+    inout BurtShadingDebugData DebugData,
+    BurtSurfaceData SurfaceData,
+    BurtSurfaceData ShadingSurfaceData,
+    BurtPBRShadingComponents PBRComponents,
+    BurtGBufferData DebugDecodedGBufferData,
+    BurtPBRMaterialData DebugGBufferMaterialData,
+    float3 NormalWS,
+    float3 ShadingDirectionWS,
+    float3 ViewDirectionWS,
+    Varyings Input,
+    float Facing,
+    float3 PositionWS,
+    float ShadowAttenuation,
+    float3 EmissionColor,
+    float3 FinalColor)
 {
-    debugData.normalWS = normalWS;
-    debugData.detailLightingColor = pbrComponents.lighting;
-    debugData.directDiffuseColor = pbrComponents.directDiffuse;
-    debugData.directSpecularColor = pbrComponents.directSpecular;
-    debugData.additionalDiffuseColor = pbrComponents.additionalDiffuse;
-    debugData.additionalSpecularColor = pbrComponents.additionalSpecular;
-    debugData.additionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
-        ? BurtEvaluateForwardAdditionalUnshadowedDebug(shadingSurfaceData, input, normalWS, shadingDirectionWS, viewDirectionWS, facing)
+    DebugData.NormalWS = NormalWS;
+    DebugData.DetailLightingColor = PBRComponents.Lighting;
+    DebugData.DirectDiffuseColor = PBRComponents.DirectDiffuse;
+    DebugData.DirectSpecularColor = PBRComponents.DirectSpecular;
+    DebugData.AdditionalDiffuseColor = PBRComponents.AdditionalDiffuse;
+    DebugData.AdditionalSpecularColor = PBRComponents.AdditionalSpecular;
+    DebugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+        ? BurtEvaluateForwardAdditionalUnshadowedDebug(ShadingSurfaceData, Input, NormalWS, ShadingDirectionWS, ViewDirectionWS, Facing)
         : float3(0.0f, 0.0f, 0.0f);
-    debugData.indirectDiffuseColor = pbrComponents.indirectDiffuse;
-    debugData.indirectSpecularColor = pbrComponents.indirectSpecular;
-    debugData.shadowAttenuation = shadowAttenuation;
-    debugData.additionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
-        ? BurtEvaluateAdditionalShadowAttenuationDebug(positionWS, normalWS)
+    DebugData.IndirectDiffuseColor = PBRComponents.IndirectDiffuse;
+    DebugData.IndirectSpecularColor = PBRComponents.IndirectSpecular;
+    DebugData.ShadowAttenuation = ShadowAttenuation;
+    DebugData.AdditionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
+        ? BurtEvaluateAdditionalShadowAttenuationDebug(PositionWS, NormalWS)
         : 1.0f;
     if (BurtNeedsAdditionalShadowProjectionShadingDebug())
     {
         BurtFillAdditionalLightShadowProjectionDebugData(
-            positionWS,
-            normalWS,
-            debugData.additionalShadowFaceColor,
-            debugData.additionalShadowUVColor,
-            debugData.additionalShadowDepthColor,
-            debugData.additionalShadowDepthDeltaColor);
+            PositionWS,
+            NormalWS,
+            DebugData.AdditionalShadowFaceColor,
+            DebugData.AdditionalShadowUVColor,
+            DebugData.AdditionalShadowDepthColor,
+            DebugData.AdditionalShadowDepthDeltaColor);
     }
 
     BurtFillMainLightShadowShadingDebugData(
-        positionWS,
-        debugData.normalWS,
-        debugData.shadowCascadeColor,
-        debugData.shadowCascadeBlend,
-        debugData.shadowDistanceFade,
-        debugData.shadowPCSSRadius,
-        debugData.shadowReceiverDepthDelta,
-        debugData.shadowPCSSBlockerFraction);
+        PositionWS,
+        DebugData.NormalWS,
+        DebugData.ShadowCascadeColor,
+        DebugData.ShadowCascadeBlend,
+        DebugData.ShadowDistanceFade,
+        DebugData.ShadowPCSSRadius,
+        DebugData.ShadowReceiverDepthDelta,
+        DebugData.ShadowPCSSBlockerFraction);
 
     BurtFillPerObjectShadowShadingDebugData(
-        positionWS,
-        normalWS,
+        PositionWS,
+        NormalWS,
         _BurtPerObjectShadowObjectIndex,
-        debugData.perObjectShadowObjectIndexColor,
-        debugData.perObjectShadowSliceColor,
-        debugData.perObjectShadowUVColor,
-        debugData.perObjectShadowDepthColor,
-        debugData.perObjectShadowCompareColor,
-        debugData.perObjectShadowTransmissionDepthColor,
-        debugData.perObjectShadowTransmissionThicknessColor);
+        DebugData.PerObjectShadowObjectIndexColor,
+        DebugData.PerObjectShadowSliceColor,
+        DebugData.PerObjectShadowUVColor,
+        DebugData.PerObjectShadowDepthColor,
+        DebugData.PerObjectShadowCompareColor,
+        DebugData.PerObjectShadowTransmissionDepthColor,
+        DebugData.PerObjectShadowTransmissionThicknessColor);
 
-    debugData.ambientOcclusion = surfaceData.occlusion;
-    debugData.emissionColor = emissionColor;
-    debugData.finalLightingColor = finalColor;
-    debugData.reflectance = surfaceData.reflectance;
-    debugData.perceptualRoughness = pbrComponents.perceptualRoughness;
-    debugData.specularAARoughness = pbrComponents.specularAARoughness;
-    debugData.specularEnergyCompensation = pbrComponents.specularEnergyCompensation;
-    debugData.indirectSpecularEnergyCompensation = pbrComponents.indirectSpecularEnergyCompensation;
-    debugData.energyPreservation = pbrComponents.energyPreservation;
-    debugData.specularOcclusion = pbrComponents.specularOcclusion;
-    debugData.diffuseColor = pbrComponents.diffuseColor;
-    debugData.directBRDFD = pbrComponents.directBRDFD;
-    debugData.directBRDFVisibility = pbrComponents.directBRDFVisibility;
-    debugData.directBRDFFresnel = pbrComponents.directBRDFFresnel;
-    debugData.directDiffuseLobe = pbrComponents.directDiffuseLobe;
-    debugData.directDiffuseBRDF = pbrComponents.directDiffuseBRDF;
-    debugData.directSpecularBRDF = pbrComponents.directSpecularBRDF;
-    debugData.specularAANormalVariance = pbrComponents.specularAANormalVariance;
-    debugData.specularAARoughnessDelta = pbrComponents.specularAARoughnessDelta;
-    debugData.indirectSpecularDFG = pbrComponents.indirectSpecularDFG;
-    debugData.indirectSpecularEnvBRDF = pbrComponents.indirectSpecularEnvBRDF;
-    debugData.subsurfaceProfileIndex = pbrComponents.subsurfaceProfileIndex;
-    debugData.subsurfaceTransmission = pbrComponents.subsurfaceTransmission;
-    debugData.subsurfaceDirectTransmission = pbrComponents.subsurfaceDirectTransmission;
-    debugData.subsurfaceTransmissionBRDF = pbrComponents.subsurfaceTransmissionBRDF;
-    debugData.subsurfaceTransmissionShadow = pbrComponents.subsurfaceTransmissionShadow;
-    debugData.subsurfaceTransmissionPhase = pbrComponents.subsurfaceTransmissionPhase;
-    debugData.subsurfaceTransmissionThickness = pbrComponents.subsurfaceTransmissionThickness;
-    debugData.subsurfaceKernelWeight = pbrComponents.subsurfaceKernelWeight;
-    debugData.subsurfaceIndirect = pbrComponents.subsurfaceIndirect;
-    debugData.foliageMask = pbrComponents.foliageMask;
-    debugData.foliageTransmission = pbrComponents.foliageTransmission;
-    debugData.foliageDirectTransmission = pbrComponents.foliageDirectTransmission;
-    debugData.foliageTransmissionBRDF = pbrComponents.foliageTransmissionBRDF;
-    debugData.foliageTransmissionShadow = pbrComponents.foliageTransmissionShadow;
-    debugData.foliageSpecularBRDF = pbrComponents.foliageSpecularBRDF;
-    debugData.hairPrimaryLobe = pbrComponents.hairPrimaryLobe;
-    debugData.hairSecondaryLobe = pbrComponents.hairSecondaryLobe;
-    debugData.hairTransmissionLobe = pbrComponents.hairTransmissionLobe;
-    debugData.hairScatter = pbrComponents.hairScatter;
-    debugData.gbufferBaseColor = debugDecodedGBufferData.baseColor;
-    debugData.gbufferNormalWS = BurtGetForwardDebugNormalWS(BurtGetDefaultLitNormalWS(debugDecodedGBufferData), BurtGetHairStrandDirectionWS(debugDecodedGBufferData));
-    debugData.gbufferMetallic = BurtGetGBufferMaterialChannel(debugDecodedGBufferData);
-    debugData.gbufferClearCoatMask = BurtGetClearCoatMask(debugDecodedGBufferData);
-    debugData.gbufferClearCoatNormalWS = BurtGetClearCoatNormalWS(debugDecodedGBufferData);
-    debugData.gbufferClearCoatRoughness = BurtGetClearCoatRoughness(debugDecodedGBufferData);
-    debugData.gbufferSubsurfaceStrength = BurtGetSubsurfaceStrength(debugDecodedGBufferData);
-    debugData.gbufferSubsurfaceThickness = BurtGetSubsurfaceThickness(debugDecodedGBufferData);
-    debugData.gbufferSubsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(debugDecodedGBufferData);
-    debugData.gbufferAnisotropy = debugDecodedGBufferData.anisotropy;
-    debugData.gbufferTangentWS = debugDecodedGBufferData.tangentWS;
-    debugData.gbufferSmoothness = debugDecodedGBufferData.smoothness;
-    debugData.gbufferOcclusion = debugDecodedGBufferData.occlusion;
-    debugData.gbufferReflectance = debugDecodedGBufferData.reflectance;
-    debugData.gbufferRoughness = debugGBufferMaterialData.perceptualRoughness;
-    debugData.gbufferDiffuseColor = debugGBufferMaterialData.diffuseColor;
+    DebugData.AmbientOcclusion = SurfaceData.Occlusion;
+    DebugData.EmissionColor = EmissionColor;
+    DebugData.FinalLightingColor = FinalColor;
+    DebugData.Reflectance = SurfaceData.Reflectance;
+    DebugData.PerceptualRoughness = PBRComponents.PerceptualRoughness;
+    DebugData.SpecularAARoughness = PBRComponents.SpecularAARoughness;
+    DebugData.SpecularEnergyCompensation = PBRComponents.SpecularEnergyCompensation;
+    DebugData.IndirectSpecularEnergyCompensation = PBRComponents.IndirectSpecularEnergyCompensation;
+    DebugData.EnergyPreservation = PBRComponents.EnergyPreservation;
+    DebugData.SpecularOcclusion = PBRComponents.SpecularOcclusion;
+    DebugData.DiffuseColor = PBRComponents.DiffuseColor;
+    DebugData.DirectBRDFD = PBRComponents.DirectBRDFD;
+    DebugData.DirectBRDFVisibility = PBRComponents.DirectBRDFVisibility;
+    DebugData.DirectBRDFFresnel = PBRComponents.DirectBRDFFresnel;
+    DebugData.DirectDiffuseLobe = PBRComponents.DirectDiffuseLobe;
+    DebugData.DirectDiffuseBRDF = PBRComponents.DirectDiffuseBRDF;
+    DebugData.DirectSpecularBRDF = PBRComponents.DirectSpecularBRDF;
+    DebugData.SpecularAANormalVariance = PBRComponents.SpecularAANormalVariance;
+    DebugData.SpecularAARoughnessDelta = PBRComponents.SpecularAARoughnessDelta;
+    DebugData.IndirectSpecularDFG = PBRComponents.IndirectSpecularDFG;
+    DebugData.IndirectSpecularEnvBRDF = PBRComponents.IndirectSpecularEnvBRDF;
+    DebugData.SubsurfaceProfileIndex = PBRComponents.SubsurfaceProfileIndex;
+    DebugData.SubsurfaceTransmission = PBRComponents.SubsurfaceTransmission;
+    DebugData.SubsurfaceDirectTransmission = PBRComponents.SubsurfaceDirectTransmission;
+    DebugData.SubsurfaceTransmissionBRDF = PBRComponents.SubsurfaceTransmissionBRDF;
+    DebugData.SubsurfaceTransmissionShadow = PBRComponents.SubsurfaceTransmissionShadow;
+    DebugData.SubsurfaceTransmissionPhase = PBRComponents.SubsurfaceTransmissionPhase;
+    DebugData.SubsurfaceTransmissionThickness = PBRComponents.SubsurfaceTransmissionThickness;
+    DebugData.SubsurfaceKernelWeight = PBRComponents.SubsurfaceKernelWeight;
+    DebugData.SubsurfaceIndirect = PBRComponents.SubsurfaceIndirect;
+    DebugData.FoliageMask = PBRComponents.FoliageMask;
+    DebugData.FoliageTransmission = PBRComponents.FoliageTransmission;
+    DebugData.FoliageDirectTransmission = PBRComponents.FoliageDirectTransmission;
+    DebugData.FoliageTransmissionBRDF = PBRComponents.FoliageTransmissionBRDF;
+    DebugData.FoliageTransmissionShadow = PBRComponents.FoliageTransmissionShadow;
+    DebugData.FoliageSpecularBRDF = PBRComponents.FoliageSpecularBRDF;
+    DebugData.HairPrimaryLobe = PBRComponents.HairPrimaryLobe;
+    DebugData.HairSecondaryLobe = PBRComponents.HairSecondaryLobe;
+    DebugData.HairTransmissionLobe = PBRComponents.HairTransmissionLobe;
+    DebugData.HairScatter = PBRComponents.HairScatter;
+    DebugData.GBufferBaseColor = DebugDecodedGBufferData.BaseColor;
+    DebugData.GBufferNormalWS = BurtGetForwardDebugNormalWS(BurtGetDefaultLitNormalWS(DebugDecodedGBufferData), BurtGetHairStrandDirectionWS(DebugDecodedGBufferData));
+    DebugData.GBufferMetallic = BurtGetGBufferMaterialChannel(DebugDecodedGBufferData);
+    DebugData.GBufferClearCoatMask = BurtGetClearCoatMask(DebugDecodedGBufferData);
+    DebugData.GBufferClearCoatNormalWS = BurtGetClearCoatNormalWS(DebugDecodedGBufferData);
+    DebugData.GBufferClearCoatRoughness = BurtGetClearCoatRoughness(DebugDecodedGBufferData);
+    DebugData.GBufferSubsurfaceStrength = BurtGetSubsurfaceStrength(DebugDecodedGBufferData);
+    DebugData.GBufferSubsurfaceThickness = BurtGetSubsurfaceThickness(DebugDecodedGBufferData);
+    DebugData.GBufferSubsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(DebugDecodedGBufferData);
+    DebugData.GBufferAnisotropy = DebugDecodedGBufferData.Anisotropy;
+    DebugData.GBufferTangentWS = DebugDecodedGBufferData.TangentWS;
+    DebugData.GBufferSmoothness = DebugDecodedGBufferData.Smoothness;
+    DebugData.GBufferOcclusion = DebugDecodedGBufferData.Occlusion;
+    DebugData.GBufferReflectance = DebugDecodedGBufferData.Reflectance;
+    DebugData.GBufferRoughness = DebugGBufferMaterialData.PerceptualRoughness;
+    DebugData.GBufferDiffuseColor = DebugGBufferMaterialData.DiffuseColor;
 }
 #endif
 
-float4 Frag(Varyings input, fixed facing : VFACE) : SV_Target
+float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
 {
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    float4 maskMap = BurtEvaluateMaterialPassMaskMap(input.uv0, input.uv1);
-    float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.uv0, input.uv1, input.positionOS, maskMap);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
+    float3 ViewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - Input.PositionWS);
+    BurtEyeMaterialData EyeData = BurtEvaluateEyeMaterialData(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, ViewDirectionWS, Facing);
+    float4 BaseColor = EyeData.BaseColor;
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    float4 MaskMap = BurtEvaluateMaterialPassMaskMap(Input.UV0, Input.UV1);
+    float4 BaseColor = BurtEvaluateMaterialPassBaseColor(Input.UV0, Input.UV1, Input.PositionOS, MaskMap);
 #else
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        float4 baseColor = BurtEvaluateMaterialPassBaseColor(input.baseMapUV, input.positionWS, input.positionOS, input.vertexColor);
+        float4 BaseColor = BurtEvaluateMaterialPassBaseColor(Input.BaseMapUV, Input.PositionWS, Input.PositionOS, Input.VertexColor);
     #else
-        float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
+        float4 BaseColor = BurtSampleBaseMap(Input.BaseMapUV) * _BaseColor;
     #endif
 #endif
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    BurtApplyMaterialPassAlphaClip(baseColor.a, _AlphaClip, _Cutoff, input.positionCS);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
+    BurtApplyMaterialPassAlphaClip(BaseColor.a, _AlphaClip, _Cutoff, Input.PositionCS);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    BurtApplyMaterialPassAlphaClip(BaseColor.a, _AlphaClip, _Cutoff, Input.PositionCS);
 #else
-    float alpha = BurtEvaluateMaterialPassOpacity(baseColor.a, input.baseMapUV, input.positionWS);
-    BurtApplyMaterialPassAlphaClip(alpha, _AlphaClip, _Cutoff, input.positionCS);
-    baseColor.a = alpha;
+    float Alpha = BurtEvaluateMaterialPassOpacity(BaseColor.a, Input.BaseMapUV, Input.PositionWS);
+    BurtApplyMaterialPassAlphaClip(Alpha, _AlphaClip, _Cutoff, Input.PositionCS);
+    BaseColor.a = Alpha;
 #endif
 
-    float3 normalWS = BurtGetForwardNormalWS(input, facing);
-    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        normalWS = BurtApplyFoliageMaterialNormalWS(normalWS, input.positionWS, input.vertexColor);
-    #endif
-    float3 shadingDirectionWS = BurtGetForwardShadingDirectionWS(input, normalWS, facing);
-    float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.positionWS);
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
-    BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.uv0, input.uv1, input.positionOS, input.normalWS, input.tangentWS, viewDirectionWS);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
+    float3 NormalWS = EyeData.NormalWS;
+    float3 ShadingDirectionWS = NormalWS;
 #else
-    float4 maskMap = BurtSampleMaskMap(input.maskMapUV);
+    float3 NormalWS = BurtGetForwardNormalWS(Input, Facing);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, normalWS, viewDirectionWS, input.positionWS, input.positionOS, input.vertexColor);
+        NormalWS = BurtApplyFoliageMaterialNormalWS(NormalWS, Input.PositionWS, Input.VertexColor);
+    #endif
+    float3 ShadingDirectionWS = BurtGetForwardShadingDirectionWS(Input, NormalWS, Facing);
+    float3 ViewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - Input.PositionWS);
+#endif
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
+    BurtSurfaceData SurfaceData = BurtCreateEyeSurfaceData(EyeData);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+    BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.UV0, Input.UV1, Input.PositionOS, Input.NormalWS, Input.TangentWS, ViewDirectionWS);
+#else
+    float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, NormalWS, ViewDirectionWS, Input.PositionWS, Input.PositionOS, Input.VertexColor);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, normalWS, viewDirectionWS, input.positionWS, input.positionOS, input.vertexColor);
+        BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, NormalWS, ViewDirectionWS, Input.PositionWS, Input.PositionOS, Input.VertexColor);
     #else
-        BurtSurfaceData surfaceData = BurtCreateMaterialShadingModelSurfaceData(baseColor, maskMap, input.baseMapUV, normalWS, viewDirectionWS, input.positionWS);
+        BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, NormalWS, ViewDirectionWS, Input.PositionWS);
     #endif
 #endif
-    float shadowAttenuation = BurtSampleMainLightShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex);
-    shadowAttenuation *= BurtResolveForwardMaterialFoliageMicroShadow(surfaceData);
-    float transmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(input.positionWS, -1.0f);
-    float transmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(input.positionWS, normalWS, _BurtPerObjectShadowObjectIndex, transmissionThickness);
-    BurtLight mainLight = BurtCreateMainLight(shadowAttenuation, transmissionShadowAttenuation, transmissionThickness);
-    BurtSurfaceData shadingSurfaceData = surfaceData;
+    float ShadowAttenuation = BurtSampleMainLightShadow(Input.PositionWS, NormalWS, _BurtPerObjectShadowObjectIndex);
+    ShadowAttenuation *= BurtResolveForwardMaterialFoliageMicroShadow(SurfaceData);
+    float TransmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(Input.PositionWS, -1.0f);
+    float TransmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(Input.PositionWS, NormalWS, _BurtPerObjectShadowObjectIndex, TransmissionThickness);
+    BurtLight MainLight = BurtCreateMainLight(ShadowAttenuation, TransmissionShadowAttenuation, TransmissionThickness);
+    BurtSurfaceData ShadingSurfaceData = SurfaceData;
 
 #if defined(BURT_ENABLE_SHADING_DEBUG)
     if (BurtIsShadingDebugEnabled() && BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING))
     {
-        shadingSurfaceData.baseColor.rgb = float3(0.18f, 0.18f, 0.18f);
+        ShadingSurfaceData.BaseColor.rgb = float3(0.18f, 0.18f, 0.18f);
     }
 #endif
 
-    BurtPBRShadingComponents pbrComponents = BurtEvaluateForwardShadingComponents(shadingSurfaceData, mainLight, input, normalWS, shadingDirectionWS, viewDirectionWS, facing);
-    float3 emissionColor = BurtEvaluateEmission(input.emissionMapUV, _EmissionColor.rgb);
-    float3 finalColor = pbrComponents.lighting + emissionColor;
+    BurtPBRShadingComponents PBRComponents = BurtEvaluateForwardShadingComponents(ShadingSurfaceData, MainLight, Input, NormalWS, ShadingDirectionWS, ViewDirectionWS, Facing);
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
+    float3 EmissionColor = EyeData.EmissionColor;
+#else
+    float3 EmissionColor = BurtEvaluateEmission(Input.EmissionMapUV, _EmissionColor.rgb);
+#endif
+    float3 FinalColor = PBRComponents.Lighting + EmissionColor;
 
 #if defined(BURT_ENABLE_SHADING_DEBUG)
     if (!BurtIsShadingDebugEnabled())
     {
-        return float4(BurtApplyPreExposure(finalColor), surfaceData.alpha);
+        return float4(BurtApplyPreExposure(FinalColor), SurfaceData.Alpha);
     }
 
-    BurtGBufferData debugGBufferSourceData = BurtCreateForwardDebugGBufferData(surfaceData, input, normalWS, shadingDirectionWS, facing);
-    BurtEncodedGBuffer debugEncodedGBuffer = BurtEncodeGBuffer(debugGBufferSourceData);
-    BurtGBufferData debugDecodedGBufferData = BurtDecodeGBuffer(debugEncodedGBuffer);
-    BurtPBRMaterialData debugGBufferMaterialData = BurtPreparePBRMaterialData(debugDecodedGBufferData);
-    BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
+    BurtGBufferData DebugGBufferSourceData = BurtCreateForwardDebugGBufferData(SurfaceData, Input, NormalWS, ShadingDirectionWS, Facing);
+    BurtEncodedGBuffer DebugEncodedGBuffer = BurtEncodeGBuffer(DebugGBufferSourceData);
+    BurtGBufferData DebugDecodedGBufferData = BurtDecodeGBuffer(DebugEncodedGBuffer);
+    BurtPBRMaterialData DebugGBufferMaterialData = BurtPreparePBRMaterialData(DebugDecodedGBufferData);
+    BurtShadingDebugData DebugData = BurtCreateDefaultShadingDebugData(NormalWS);
     BurtFillForwardShadingDebugData(
-        debugData,
-        surfaceData,
-        shadingSurfaceData,
-        pbrComponents,
-        debugDecodedGBufferData,
-        debugGBufferMaterialData,
-        normalWS,
-        shadingDirectionWS,
-        viewDirectionWS,
-        input,
-        facing,
-        input.positionWS,
-        shadowAttenuation,
-        emissionColor,
-        finalColor);
+        DebugData,
+        SurfaceData,
+        ShadingSurfaceData,
+        PBRComponents,
+        DebugDecodedGBufferData,
+        DebugGBufferMaterialData,
+        NormalWS,
+        ShadingDirectionWS,
+        ViewDirectionWS,
+        Input,
+        Facing,
+        Input.PositionWS,
+        ShadowAttenuation,
+        EmissionColor,
+        FinalColor);
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
-    BurtSurfaceData debugLightingSurfaceData = shadingSurfaceData;
-    debugLightingSurfaceData.shadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
-    BurtPBRShadingComponents debugLightingComponents = BurtEvaluateForwardShadingComponents(
-        debugLightingSurfaceData,
-        mainLight,
-        input,
-        normalWS,
-        shadingDirectionWS,
-        viewDirectionWS,
-        facing);
-    debugData.detailLightingColor = debugLightingComponents.lighting;
-    debugData.directDiffuseColor = debugLightingComponents.directDiffuse;
-    debugData.directSpecularColor = debugLightingComponents.directSpecular;
-    debugData.additionalDiffuseColor = debugLightingComponents.additionalDiffuse;
-    debugData.additionalSpecularColor = debugLightingComponents.additionalSpecular;
-    debugData.additionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
-        ? BurtEvaluateForwardAdditionalUnshadowedDebug(debugLightingSurfaceData, input, normalWS, shadingDirectionWS, viewDirectionWS, facing)
+    BurtSurfaceData DebugLightingSurfaceData = ShadingSurfaceData;
+    DebugLightingSurfaceData.ShadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
+    BurtPBRShadingComponents DebugLightingComponents = BurtEvaluateForwardShadingComponents(
+        DebugLightingSurfaceData,
+        MainLight,
+        Input,
+        NormalWS,
+        ShadingDirectionWS,
+        ViewDirectionWS,
+        Facing);
+    DebugData.DetailLightingColor = DebugLightingComponents.Lighting;
+    DebugData.DirectDiffuseColor = DebugLightingComponents.DirectDiffuse;
+    DebugData.DirectSpecularColor = DebugLightingComponents.DirectSpecular;
+    DebugData.AdditionalDiffuseColor = DebugLightingComponents.AdditionalDiffuse;
+    DebugData.AdditionalSpecularColor = DebugLightingComponents.AdditionalSpecular;
+    DebugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
+        ? BurtEvaluateForwardAdditionalUnshadowedDebug(DebugLightingSurfaceData, Input, NormalWS, ShadingDirectionWS, ViewDirectionWS, Facing)
         : float3(0.0f, 0.0f, 0.0f);
-    debugData.indirectDiffuseColor = debugLightingComponents.indirectDiffuse;
-    debugData.indirectSpecularColor = debugLightingComponents.indirectSpecular;
-    debugData.perceptualRoughness = debugLightingComponents.perceptualRoughness;
-    debugData.specularAARoughness = debugLightingComponents.specularAARoughness;
-    debugData.specularEnergyCompensation = debugLightingComponents.specularEnergyCompensation;
-    debugData.indirectSpecularEnergyCompensation = debugLightingComponents.indirectSpecularEnergyCompensation;
-    debugData.energyPreservation = debugLightingComponents.energyPreservation;
-    debugData.specularOcclusion = debugLightingComponents.specularOcclusion;
-    debugData.diffuseColor = debugLightingComponents.diffuseColor;
-    debugData.directBRDFD = debugLightingComponents.directBRDFD;
-    debugData.directBRDFVisibility = debugLightingComponents.directBRDFVisibility;
-    debugData.directBRDFFresnel = debugLightingComponents.directBRDFFresnel;
-    debugData.directDiffuseLobe = debugLightingComponents.directDiffuseLobe;
-    debugData.directDiffuseBRDF = debugLightingComponents.directDiffuseBRDF;
-    debugData.directSpecularBRDF = debugLightingComponents.directSpecularBRDF;
-    debugData.specularAANormalVariance = debugLightingComponents.specularAANormalVariance;
-    debugData.specularAARoughnessDelta = debugLightingComponents.specularAARoughnessDelta;
-    debugData.indirectSpecularDFG = debugLightingComponents.indirectSpecularDFG;
-    debugData.indirectSpecularEnvBRDF = debugLightingComponents.indirectSpecularEnvBRDF;
+    DebugData.IndirectDiffuseColor = DebugLightingComponents.IndirectDiffuse;
+    DebugData.IndirectSpecularColor = DebugLightingComponents.IndirectSpecular;
+    DebugData.PerceptualRoughness = DebugLightingComponents.PerceptualRoughness;
+    DebugData.SpecularAARoughness = DebugLightingComponents.SpecularAARoughness;
+    DebugData.SpecularEnergyCompensation = DebugLightingComponents.SpecularEnergyCompensation;
+    DebugData.IndirectSpecularEnergyCompensation = DebugLightingComponents.IndirectSpecularEnergyCompensation;
+    DebugData.EnergyPreservation = DebugLightingComponents.EnergyPreservation;
+    DebugData.SpecularOcclusion = DebugLightingComponents.SpecularOcclusion;
+    DebugData.DiffuseColor = DebugLightingComponents.DiffuseColor;
+    DebugData.DirectBRDFD = DebugLightingComponents.DirectBRDFD;
+    DebugData.DirectBRDFVisibility = DebugLightingComponents.DirectBRDFVisibility;
+    DebugData.DirectBRDFFresnel = DebugLightingComponents.DirectBRDFFresnel;
+    DebugData.DirectDiffuseLobe = DebugLightingComponents.DirectDiffuseLobe;
+    DebugData.DirectDiffuseBRDF = DebugLightingComponents.DirectDiffuseBRDF;
+    DebugData.DirectSpecularBRDF = DebugLightingComponents.DirectSpecularBRDF;
+    DebugData.SpecularAANormalVariance = DebugLightingComponents.SpecularAANormalVariance;
+    DebugData.SpecularAARoughnessDelta = DebugLightingComponents.SpecularAARoughnessDelta;
+    DebugData.IndirectSpecularDFG = DebugLightingComponents.IndirectSpecularDFG;
+    DebugData.IndirectSpecularEnvBRDF = DebugLightingComponents.IndirectSpecularEnvBRDF;
 #endif
 
-    float3 debugColor;
-    if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
+    float3 DebugColor;
+    if (BurtTryEvaluateMaterialShadingDebug(SurfaceData, DebugData, DebugColor))
     {
-        return float4(debugColor, surfaceData.alpha);
+        return float4(DebugColor, SurfaceData.Alpha);
     }
 #endif
 
-    return float4(BurtApplyPreExposure(finalColor), surfaceData.alpha);
+    return float4(BurtApplyPreExposure(FinalColor), SurfaceData.Alpha);
 }
 
 #endif // BURT_FORWARD_PASS_INCLUDED

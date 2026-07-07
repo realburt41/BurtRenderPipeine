@@ -61,13 +61,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 resources.RegisterPostProcessColorTexture(); // 注册 PostProcessColor 临时 RT，让分配、No-op Copy 和释放 Pass 使用同一个资源句柄。
             }
 
-            if (ShouldRegisterGBufferTargets(request, asset)) // 如果当前 request 走 Deferred 实验路径，就把五张 GBuffer 纳入资源表。
+            if (ShouldRegisterGBufferTargets(request, asset)) // 如果当前 request 走 Deferred 实验路径，就把全部 GBuffer 目标纳入资源表。
             {
                 resources.RegisterGBuffer0Texture(); // 注册 GBuffer0 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer1Texture(); // 注册 GBuffer1 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer2Texture(); // 注册 GBuffer2 临时 RT，让 Allocate、后续 GBuffer Pass 和 Release 使用同一个句柄。
                 resources.RegisterGBuffer3Texture(); // 注册 GBuffer3 临时 RT，用于保存 Clear Coat 独立法线等专用扩展通道。
                 resources.RegisterGBuffer4Texture(); // 注册 GBuffer4 临时 RT，用于保存底层 tangent 和 anisotropy。
+                resources.RegisterGBuffer5Texture();
                 resources.RegisterGBufferObjectIndexTexture();
                 resources.RegisterDeferredLightingDepthTexture();
                 if (ShouldRegisterTileLightBuffers(request, asset))
@@ -186,7 +187,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderRequest request, // 接收当前渲染请求，用来确认后处理任务是否有效。
             BurtRenderPipelineAsset asset) // 接收当前管线资产，用来读取后处理设置。
         {
-            return BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 复用后处理工具的判定逻辑，保证资源注册和 Pass 组装条件完全一致。
+            return PostProcessUtility.ShouldUsePostProcessFramework(request, asset); // 复用后处理工具的判定逻辑，保证资源注册和 Pass 组装条件完全一致。
         }
 
         private static bool ShouldRegisterMainLightShadowMap( // 定义判断当前 request 是否需要注册主光阴影图的辅助函数。

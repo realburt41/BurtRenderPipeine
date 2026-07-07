@@ -13,12 +13,12 @@ Texture2D _ClearCoatNormalMap;
 float4 BurtSampleNormalMap(float2 normalMapUV)
 {
     // 返回 normal map 的原始打包值，后续函数会把它解包成切线空间法线。
-    return BURT_SAMPLE_TEXTURE2D_REPEAT(_NormalMap, normalMapUV);
+    return SAMPLE_TEXTURE2D(_NormalMap, sampler_LinearRepeat, normalMapUV);
 }
 
 float4 BurtSampleClearCoatNormalMap(float2 normalMapUV)
 {
-    return BURT_SAMPLE_TEXTURE2D_REPEAT(_ClearCoatNormalMap, normalMapUV);
+    return SAMPLE_TEXTURE2D(_ClearCoatNormalMap, sampler_LinearRepeat, normalMapUV);
 }
 
 // 把 Unity normal map 的打包颜色解包成切线空间法线，并应用强度缩放。

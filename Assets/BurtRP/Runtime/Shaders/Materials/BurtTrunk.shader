@@ -40,7 +40,10 @@ Shader "BurtRP/Trunk"
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 32
+        [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
+        [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
 
     SubShader
@@ -49,39 +52,17 @@ Shader "BurtRP/Trunk"
 
         Pass
         {
-            Name "Burt Trunk Depth Only"
-            Tags { "LightMode" = "BurtDepthOnly" }
-            ColorMask 0
-            ZWrite On
-            ZTest LEqual
-            Cull [_Cull]
-
-            HLSLPROGRAM
-            #pragma vertex VertDepth
-            #pragma fragment FragDepth
-            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma multi_compile_instancing
-            #pragma target 3.5
-            #define BURT_MATERIAL_SHADING_MODEL_TRUNK 1
-            #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
-            ENDHLSL
-        }
-
-        Pass
-        {
             Name "Burt Trunk Motion Vectors"
             Tags { "LightMode" = "BurtMotionVectors" }
             ZWrite Off
-            ZTest Always
+            ZTest Equal
             Cull [_Cull]
 
             Stencil
             {
-                Ref 8
+                Ref [_MotionVectorsStencilRef]
                 ReadMask 8
-                WriteMask 8
+                WriteMask [_MotionVectorsStencilMask]
                 Comp Always
                 Pass Replace
             }
@@ -124,14 +105,37 @@ Shader "BurtRP/Trunk"
 
         Pass
         {
-            Name "Burt Trunk GBuffer"
-            Tags { "LightMode" = "BurtGBuffer" }
+            Name "Burt Trunk Depth Normals"
+            Tags { "LightMode" = "BurtDepthNormals" }
             ZWrite On
             ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertGBuffer
+            #pragma fragment FragDepthNormals
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+            #define BURT_MATERIAL_SHADING_MODEL_TRUNK 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Trunk GBuffer"
+            Tags { "LightMode" = "BurtGBuffer" }
+            ZWrite Off
+            ZTest Equal
+            // GBuffer0 normal/roughness comes from BurtDepthNormals; keep MRT0 untouched here.
+            ColorMask 0 0
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 224
+                ReadMask [_BurtGBufferStencilReadMask]
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
@@ -151,27 +155,6 @@ Shader "BurtRP/Trunk"
             ENDHLSL
         }
 
-        Pass
-        {
-            Name "Burt Trunk Forward"
-            Tags { "LightMode" = "BurtForward" }
-            ZWrite [_ZWrite]
-            ZTest [_ZTest]
-            Cull [_Cull]
-            Blend [_SrcBlend] [_DstBlend]
-
-            HLSLPROGRAM
-            #pragma vertex Vert
-            #pragma fragment Frag
-            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma shader_feature_local_fragment _ _EMISSION
-            #pragma multi_compile_instancing
-            #pragma target 3.5
-            #define BURT_MATERIAL_SHADING_MODEL_TRUNK 1
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
-            ENDHLSL
-        }
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtLitShaderGUI"

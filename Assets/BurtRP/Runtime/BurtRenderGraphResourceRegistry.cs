@@ -30,6 +30,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int DeferredStencilTexelSizeId = Shader.PropertyToID(DeferredStencilTexelSizeShaderName);
 
+        public const string DeferredStencilTextureAvailableShaderName = "_BurtDeferredStencilTextureAvailable";
+
+        public static readonly int DeferredStencilTextureAvailableId = Shader.PropertyToID(DeferredStencilTextureAvailableShaderName);
+
         public const string DeferredLightingDepthName = "DeferredLightingDepth";
 
         public const string DeferredLightingDepthTextureShaderName = "_BurtDeferredLightingDepthTexture";
@@ -42,19 +46,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int PostProcessColorTextureId = Shader.PropertyToID(PostProcessColorTextureShaderName); // 把后处理中间颜色名称转换成整数 ID，申请、绑定和释放都会复用它。
 
-        public const string GBuffer0Name = "GBuffer0"; // 定义 Deferred 第一张 GBuffer 的统一资源名，第一版用于保存 baseColor 和 occlusion。
+        public const string GBuffer0Name = "GBuffer0"; // 定义 Deferred 第一张 GBuffer 的统一资源名，用于保存 DepthNormals prepass 写入的 normal 和 perceptual roughness。
 
         public const string GBuffer0ShaderName = "_BurtGBuffer0"; // 定义 GBuffer0 暴露给 shader 的全局纹理名称，Deferred Lighting 会采样它。
 
         public static readonly int GBuffer0Id = Shader.PropertyToID(GBuffer0ShaderName); // 把 GBuffer0 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
 
-        public const string GBuffer1Name = "GBuffer1"; // 定义 Deferred 第二张 GBuffer 的统一资源名，第一版用于保存法线、金属度和光滑度。
+        public const string GBuffer1Name = "GBuffer1"; // 定义 Deferred 第二张 GBuffer 的统一资源名，用于保存 baseColor 和 occlusion。
 
         public const string GBuffer1ShaderName = "_BurtGBuffer1"; // 定义 GBuffer1 暴露给 shader 的全局纹理名称，Deferred Lighting 会采样它。
 
         public static readonly int GBuffer1Id = Shader.PropertyToID(GBuffer1ShaderName); // 把 GBuffer1 shader 名称转换成整数 ID，后续申请、绑定和释放都会复用它。
 
-        public const string GBuffer2Name = "GBuffer2"; // 定义 Deferred 第三张 GBuffer 的统一资源名，第一版用于保存 emission 和 reflectance。
+        public const string GBuffer2Name = "GBuffer2"; // 定义 Deferred 第三张 GBuffer 的统一资源名，用于保存 shading model/material channel、metallic、smoothness 和 reflectance。
 
         public const string GBuffer2ShaderName = "_BurtGBuffer2"; // 定义 GBuffer2 暴露给 shader 的全局纹理名称，Deferred Lighting 会采样它。
 
@@ -71,6 +75,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string GBuffer4ShaderName = "_BurtGBuffer4";
 
         public static readonly int GBuffer4Id = Shader.PropertyToID(GBuffer4ShaderName);
+
+        public const string GBuffer5Name = "GBuffer5";
+
+        public const string GBuffer5ShaderName = "_BurtGBuffer5";
+
+        public static readonly int GBuffer5Id = Shader.PropertyToID(GBuffer5ShaderName);
 
         public const string GBufferObjectIndexName = "GBufferObjectIndex";
 
@@ -700,6 +710,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetGBuffer4()
         {
             return GetRenderTarget(GBuffer4Name);
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer5Texture()
+        {
+            return RegisterGBuffer5(new RenderTargetIdentifier(GBuffer5Id));
+        }
+
+        public BurtRenderTargetHandle RegisterGBuffer5(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(GBuffer5Name, identifier);
+        }
+
+        public BurtRenderTargetHandle GetGBuffer5()
+        {
+            return GetRenderTarget(GBuffer5Name);
         }
 
         public BurtRenderTargetHandle RegisterGBufferObjectIndexTexture()

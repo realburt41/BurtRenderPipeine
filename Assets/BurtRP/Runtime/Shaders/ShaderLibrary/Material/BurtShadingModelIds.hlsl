@@ -1,0 +1,61 @@
+// Shared shading-model identifiers for Burt material, GBuffer, deferred, and compute code.
+#ifndef BURT_SHADING_MODEL_IDS_INCLUDED
+#define BURT_SHADING_MODEL_IDS_INCLUDED
+
+// XRender semantic ids describe material families. They are useful for parity notes and debug mapping,
+// but Burt does not store these sparse values directly in the GBuffer.
+#define BURT_XRENDER_SHADING_MODEL_ID_INVALID (0.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_DEFAULT_LIT (1.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_SUBSURFACE (2.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_TRANSMISSION (3.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_COAT (4.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_FABRIC (5.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_FOLIAGE (6.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_FUR (7.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_EYE (8.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_HAIR (9.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_SINGLE_LAYER_WATER (10.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_HEXAGON (11.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_EMISSIVE (12.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_COMPLEX (13.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_HEXA_LIGHTING (14.0f)
+#define BURT_XRENDER_SHADING_MODEL_ID_MEDIUM (15.0f)
+
+// Burt packed ids are dense values written into the GBuffer material payload. Keep them compact unless
+// BurtEncodeMetallicAndShadingModelForGBuffer/BurtDecodeMetallicAndShadingModelFromGBuffer are changed.
+#define BURT_SHADING_MODEL_DEFAULT_LIT (0.0f)
+#define BURT_SHADING_MODEL_HAIR (1.0f)
+#define BURT_SHADING_MODEL_CLEAR_COAT (2.0f)
+#define BURT_SHADING_MODEL_SUBSURFACE (3.0f)
+#define BURT_SHADING_MODEL_FABRIC (4.0f)
+#define BURT_SHADING_MODEL_FOLIAGE (5.0f)
+#define BURT_SHADING_MODEL_FUR (6.0f)
+#define BURT_SHADING_MODEL_EYE (7.0f)
+#define BURT_SHADING_MODEL_MAX_ENCODED (7.0f)
+
+#define BURT_GBUFFER_SHADING_MODEL_PACK_COUNT (8.0f)
+#define BURT_GBUFFER_SHADING_MODEL_PACK_BIAS (0.02f)
+#define BURT_GBUFFER_SHADING_MODEL_PACK_SCALE (1.0f - 2.0f * BURT_GBUFFER_SHADING_MODEL_PACK_BIAS)
+
+// Screen-space subsurface encodes profile type in the high bits and profile index in the low bits.
+#define BURT_SSS_PROFILE_TYPE_NONE (0u)
+#define BURT_SSS_PROFILE_TYPE_BURLEY (0x40u)
+#define BURT_SSS_PROFILE_TYPE_SEPARABLE (0x80u)
+#define BURT_SSS_PROFILE_TYPE_MASK (0xC0u)
+#define BURT_SSS_PROFILE_ID_MASK (0x3Fu)
+#define BURT_SSS_PROFILE_TYPE_BURLEY_FLOAT (64.0f)
+#define BURT_SSS_PROFILE_TYPE_SEPARABLE_FLOAT (128.0f)
+
+// Deferred stencil buckets follow XRender's high-bit layout for deferred-supported models.
+#define BURT_DEFERRED_STENCIL_OBJECT_MOTION_BIT (0x08u)
+#define BURT_DEFERRED_STENCIL_SHADING_MODEL_MASK (0xE0u)
+#define BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT (0x10u)
+#define BURT_DEFERRED_STENCIL_DEFAULT_LIT_REF (0x20u)
+#define BURT_DEFERRED_STENCIL_SUBSURFACE_REF (0x40u)
+#define BURT_DEFERRED_STENCIL_HAIR_REF (0x60u)
+#define BURT_DEFERRED_STENCIL_CLEAR_COAT_REF (0x80u)
+#define BURT_DEFERRED_STENCIL_FABRIC_REF (0xA0u)
+#define BURT_DEFERRED_STENCIL_FOLIAGE_REF (0xC0u)
+#define BURT_DEFERRED_STENCIL_FUR_REF (0xE0u)
+
+#endif // BURT_SHADING_MODEL_IDS_INCLUDED

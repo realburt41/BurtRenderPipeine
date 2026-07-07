@@ -14,29 +14,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
     public enum BurtGBufferDebugViewMode // 定义 Deferred GBuffer 调试视图要显示哪一种内容。
     {
         Disabled = 0, // 关闭 GBuffer 调试视图，保持正常渲染结果。
-        GBuffer0 = 1, // 直接显示 GBuffer0 原始内容，用来检查 baseColor 和 occlusion 是否写入。
-        GBuffer1 = 2, // 直接显示 GBuffer1 原始内容，用来检查 oct normal、packed shadingModel/material 和 smoothness 是否写入。
-        GBuffer2 = 3, // 直接显示 GBuffer2 原始内容，用来检查 emission 和 reflectance 是否写入。
+        GBuffer0 = 1, // 直接显示 GBuffer0 原始内容，用来检查 DepthNormals prepass 写入的 normal 和 roughness。
+        GBuffer1 = 2, // 直接显示 GBuffer1 原始内容，用来检查 baseColor 和 occlusion 是否写入。
+        GBuffer2 = 3, // 直接显示 GBuffer2 原始内容，用来检查 shading model/material channel、metallic、smoothness 和 reflectance 是否写入。
         GBuffer3 = 19,
         BaseColor = 4, // 解码后只显示材质基础色，方便和 Forward Lit 的颜色输入对齐。
         NormalWS = 5, // 解码后显示 GBuffer 向量槽；Default Lit=normalWS，Hair=strandDirectionWS。
         Metallic = 6, // 解码后显示 GBuffer 材质通道；Default Lit=metallic，Hair=scatter。
         Smoothness = 7, // 解码后显示光滑度灰度图，方便检查 smoothness 在 GBuffer 中是否反向或丢失。
         Occlusion = 8, // 解码后显示环境遮蔽灰度图，方便检查 occlusion 通道是否正确。
-        Emission = 9, // 解码后显示自发光颜色，方便检查 HDR emission 是否写入 GBuffer2。
+        Emission = 9, // 解码后显示自发光颜色，方便检查 HDR emission 是否写入 GBuffer4。
         Reflectance = 10, // 解码后显示 XRender 风格 reflectance 灰度图，方便检查非金属 F0 来源。
         RawDepth = 11, // 显示当前 CameraDepth 原始深度，方便把 GBuffer 和深度重建问题放在同一入口排查。
         Roughness = 12, // 解码后显示从 smoothness 还原的感知粗糙度，方便和 PBR BRDF 输入对齐。
         DiffuseColor = 13, // 解码后显示 GBuffer 重建出的 diffuseColor，方便检查 metallic 扣除后的漫反射颜色。
         ShadingModel = 14, // 解码后显示 shading model，黑色=Default Lit，洋红=Hair，方便验证材质是否进入 Hair 分支。
-        HairStrandDirection = 15, // Hair 专用：显示 GBuffer1.rg 解码后的 strand direction，非 Hair 像素显示黑色。
-        HairScatter = 16, // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 scatter，非 Hair 像素显示黑色。
-        HairShift = 17, // Hair 专用：显示复用 GBuffer1.b material channel 解码出的 longitudinal shift scale，非 Hair 像素显示黑色。
-        SubsurfaceStrength = 18, // Subsurface 专用：显示复用 GBuffer1.b material channel 解码出的 strength。
+        HairStrandDirection = 15, // Hair 专用：显示 GBuffer0.rgb 解码后的 strand direction，非 Hair 像素显示黑色。
+        HairScatter = 16, // Hair 专用：显示复用 GBuffer2.r material channel 解码出的 scatter，非 Hair 像素显示黑色。
+        HairShift = 17, // Hair 专用：显示复用 GBuffer2.r material channel 解码出的 longitudinal shift scale，非 Hair 像素显示黑色。
+        SubsurfaceStrength = 18, // Subsurface 专用：显示复用 GBuffer2.r material channel 解码出的 strength。
         ClearCoatNormalWS = 20,
         ClearCoatMask = 21,
         ClearCoatRoughness = 22,
         GBuffer4 = 23,
+        GBuffer5 = 36,
         Anisotropy = 24,
         TangentWS = 25,
         SubsurfaceThickness = 26,
@@ -47,6 +48,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         FoliageTransmissionNdotL = 31,
         FoliageSpecularScale = 32,
         FoliageScreenSpaceShadowIntensity = 33,
+        GrassIsGrass = 37,
+        GrassSSSIntensity = 38,
+        GrassSpecularMultiply = 39,
+        GrassScreenSpaceShadowIntensity = 40,
         StencilRaw = 34,
         StencilShadingModel = 35
     }
@@ -133,7 +138,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [SerializeField, Range(0f, 0.2f), LabelText("最小有效强度")] private float screenSpaceSubsurfaceMinStrength = 0.012f;
 
         [TitleGroup("Post Processing - 后处理")] // 使用 Odin 给后处理配置建立独立分组；这里不用斜杠，避免 Odin 把斜杠解析成父子分组路径。
-        [SerializeField, InlineProperty, HideLabel] private BurtPostProcessSettings postProcessSettings = new BurtPostProcessSettings(); // 保存 BurtRP 后处理框架设置；具体效果参数从 Global Volume 读取。
+        [SerializeField, InlineProperty, HideLabel] private PostProcessSettings postProcessSettings = new PostProcessSettings(); // 保存 BurtRP 后处理框架设置；具体效果参数从 Global Volume 读取。
 
         [TitleGroup("Post Processing - 后处理")] // 和后处理框架开关放在同一组，表示这是管线级 Volume 查询配置。
         [SerializeField] private LayerMask postProcessVolumeLayerMask = ~0; // 定义后处理 Global Volume 查询层，默认所有层都能参与 BurtRP 后处理。
@@ -200,7 +205,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         public float ScreenSpaceSubsurfaceMinStrength => ScreenSpaceSubsurfaceProfileSettings.MinStrength;
 
-        public BurtPostProcessSettings PostProcessSettings => EnsurePostProcessSettings(); // 暴露后处理设置给 RenderGraph 和 ForwardGraph 使用，并确保旧资产缺失字段时也有安全默认值。
+        public PostProcessSettings PostProcessSettings => EnsurePostProcessSettings(); // 暴露后处理设置给 RenderGraph 和 ForwardGraph 使用，并确保旧资产缺失字段时也有安全默认值。
 
         public LayerMask PostProcessVolumeLayerMask => postProcessVolumeLayerMask; // 暴露后处理 Volume 查询层给 VolumeManager.Update 使用。
 
@@ -348,11 +353,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
                 screenSpaceSubsurfaceProfiles);
         }
 
-        private BurtPostProcessSettings EnsurePostProcessSettings() // 定义后处理设置兜底函数，避免旧资产还没有序列化新字段时返回空引用。
+        private PostProcessSettings EnsurePostProcessSettings() // 定义后处理设置兜底函数，避免旧资产还没有序列化新字段时返回空引用。
         {
             if (postProcessSettings == null) // 如果 Unity 还没有给旧资产创建后处理设置对象，就在访问时补一个默认实例。
             {
-                postProcessSettings = new BurtPostProcessSettings(); // 创建默认后处理设置，默认关闭后处理框架以保持旧画面不变。
+                postProcessSettings = new PostProcessSettings(); // 创建默认后处理设置，默认关闭后处理框架以保持旧画面不变。
             }
 
             return postProcessSettings; // 返回可用的后处理设置对象，供外部只读访问。

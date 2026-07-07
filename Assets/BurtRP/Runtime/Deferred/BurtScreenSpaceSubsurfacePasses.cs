@@ -581,7 +581,8 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadScreenSpaceSubsurfaceBaseColor();
-            builder.ReadGBuffer1();
+            builder.ReadCameraDepth();
+            builder.ReadGBuffer2();
             builder.WriteScreenSpaceSubsurfaceMask();
         }
 
@@ -589,11 +590,13 @@ namespace Burt.RenderPipeline
         {
             var mask = context != null ? context.ScreenSpaceSubsurfaceMaskTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
             var baseColor = context != null ? context.ScreenSpaceSubsurfaceBaseColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBaseColorName);
-            var gbuffer1 = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name);
+            var cameraDepth = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
+            var gbuffer2 = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(context != null ? context.Request : null, context != null ? context.Asset : null) ||
                 !mask.IsValid ||
                 !baseColor.IsValid ||
-                !gbuffer1.IsValid)
+                !cameraDepth.IsValid ||
+                !gbuffer2.IsValid)
             {
                 return;
             }
@@ -605,7 +608,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(Name);
-            BurtScreenSpaceSubsurfacePassUtility.BindMaskInputs(cmd, context, baseColor, gbuffer1);
+            BurtScreenSpaceSubsurfacePassUtility.BindMaskInputs(cmd, context, baseColor, cameraDepth, gbuffer2);
             cmd.SetRenderTarget(mask.Identifier);
             BurtScreenSpaceSubsurfacePassUtility.SetViewport(cmd, context);
             cmd.ClearRenderTarget(false, true, Color.clear);
@@ -694,9 +697,11 @@ namespace Burt.RenderPipeline
             builder.ReadScreenSpaceSubsurfaceBaseColor();
             builder.ReadGBuffer0();
             builder.ReadGBuffer1();
+            builder.ReadGBuffer2();
             builder.ReadScreenSpaceSubsurfaceEmission();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(builder.Request, builder.Asset))
             {
                 builder.ReadScreenSpaceSubsurfaceMask();
@@ -721,7 +726,7 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var source, out var cameraDepth, out var baseColor, out var gbuffer0, out var gbuffer1, out var emission, out var gbuffer3, out var gbuffer4, out var mask, out var setup, out var profileIDAndType, out var temp, out var blur, out var args, out var groups))
+            if (!TryGetTargets(context, out var source, out var cameraDepth, out var baseColor, out var gbuffer0, out var gbuffer1, out var gbuffer2, out var emission, out var gbuffer3, out var gbuffer4, out var gbuffer5, out var mask, out var setup, out var profileIDAndType, out var temp, out var blur, out var args, out var groups))
             {
                 return;
             }
@@ -740,7 +745,7 @@ namespace Burt.RenderPipeline
 
             var cmd = CommandBufferPool.Get(Name);
             BurtScreenSpaceSubsurfaceHistoryUtility.GetCurrentHistoryTexture(context.Request, out var setupHistoryValid, out _);
-            BurtScreenSpaceSubsurfacePassUtility.BindComputeCommonInputs(cmd, shader, kernel, context, source, cameraDepth, baseColor, gbuffer0, gbuffer1, emission, gbuffer3, gbuffer4, useBurley && !setupHistoryValid);
+            BurtScreenSpaceSubsurfacePassUtility.BindComputeCommonInputs(cmd, shader, kernel, context, source, cameraDepth, baseColor, gbuffer0, gbuffer1, gbuffer2, emission, gbuffer3, gbuffer4, gbuffer5, useBurley && !setupHistoryValid);
             BurtScreenSpaceSubsurfacePassUtility.BindComputeMaskInputs(cmd, shader, kernel, mask);
             cmd.SetComputeTextureParam(shader, kernel, BurtScreenSpaceSubsurfacePassUtility.SetupTextureId, setup.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtScreenSpaceSubsurfacePassUtility.ProfileIDAndTypeRWTextureId, profileIDAndType.Identifier);
@@ -763,9 +768,11 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle baseColor,
             out BurtRenderTargetHandle gbuffer0,
             out BurtRenderTargetHandle gbuffer1,
+            out BurtRenderTargetHandle gbuffer2,
             out BurtRenderTargetHandle emission,
             out BurtRenderTargetHandle gbuffer3,
             out BurtRenderTargetHandle gbuffer4,
+            out BurtRenderTargetHandle gbuffer5,
             out BurtRenderTargetHandle mask,
             out BurtRenderTargetHandle setup,
             out BurtRenderTargetHandle profileIDAndType,
@@ -779,9 +786,11 @@ namespace Burt.RenderPipeline
             baseColor = context != null ? context.ScreenSpaceSubsurfaceBaseColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBaseColorName);
             gbuffer0 = context != null ? context.GBuffer0Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer0Name);
             gbuffer1 = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name);
+            gbuffer2 = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             emission = context != null ? context.ScreenSpaceSubsurfaceEmissionTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceEmissionName);
             gbuffer3 = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4 = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5 = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             mask = context != null ? context.ScreenSpaceSubsurfaceMaskTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceMaskName);
             setup = context != null ? context.ScreenSpaceSubsurfaceSetupTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
             profileIDAndType = context != null ? context.ScreenSpaceSubsurfaceProfileIDAndTypeTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceProfileIDAndTypeName);
@@ -796,9 +805,11 @@ namespace Burt.RenderPipeline
                 baseColor.IsValid &&
                 gbuffer0.IsValid &&
                 gbuffer1.IsValid &&
+                gbuffer2.IsValid &&
                 emission.IsValid &&
                 gbuffer3.IsValid &&
                 gbuffer4.IsValid &&
+                gbuffer5.IsValid &&
                 BurtScreenSpaceSubsurfacePassUtility.IsMaskTargetReady(context, mask) &&
                 setup.IsValid &&
                 profileIDAndType.IsValid &&
@@ -847,9 +858,11 @@ namespace Burt.RenderPipeline
             builder.ReadScreenSpaceSubsurfaceBaseColor();
             builder.ReadGBuffer0();
             builder.ReadGBuffer1();
+            builder.ReadGBuffer2();
             builder.ReadScreenSpaceSubsurfaceEmission();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.ReadBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName);
             builder.ReadBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName);
             builder.WriteScreenSpaceSubsurfaceBlur();
@@ -858,7 +871,7 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var source, out var setup, out var profileIDAndType, out var mask, out var velocity, out var cameraDepth, out var baseColor, out var gbuffer0, out var gbuffer1, out var emission, out var gbuffer3, out var gbuffer4, out var blur, out var historyTarget, out var args, out var groups))
+            if (!TryGetTargets(context, out var source, out var setup, out var profileIDAndType, out var mask, out var velocity, out var cameraDepth, out var baseColor, out var gbuffer0, out var gbuffer1, out var gbuffer2, out var emission, out var gbuffer3, out var gbuffer4, out var gbuffer5, out var blur, out var historyTarget, out var args, out var groups))
             {
                 return;
             }
@@ -881,7 +894,7 @@ namespace Burt.RenderPipeline
                 : Vector2.zero;
             cmd.SetRenderTarget(historyTarget.Identifier);
             cmd.ClearRenderTarget(false, true, Color.clear);
-            BurtScreenSpaceSubsurfacePassUtility.BindComputeCommonInputs(cmd, shader, kernel, context, source, cameraDepth, baseColor, gbuffer0, gbuffer1, emission, gbuffer3, gbuffer4, !historyValid);
+            BurtScreenSpaceSubsurfacePassUtility.BindComputeCommonInputs(cmd, shader, kernel, context, source, cameraDepth, baseColor, gbuffer0, gbuffer1, gbuffer2, emission, gbuffer3, gbuffer4, gbuffer5, !historyValid);
             cmd.SetComputeTextureParam(shader, kernel, BurtScreenSpaceSubsurfacePassUtility.SetupTextureId, setup.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtScreenSpaceSubsurfacePassUtility.ProfileIDAndTypeTextureId, profileIDAndType.Identifier);
             BurtScreenSpaceSubsurfacePassUtility.BindComputeMaskInputs(cmd, shader, kernel, mask);
@@ -907,9 +920,11 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle baseColor,
             out BurtRenderTargetHandle gbuffer0,
             out BurtRenderTargetHandle gbuffer1,
+            out BurtRenderTargetHandle gbuffer2,
             out BurtRenderTargetHandle emission,
             out BurtRenderTargetHandle gbuffer3,
             out BurtRenderTargetHandle gbuffer4,
+            out BurtRenderTargetHandle gbuffer5,
             out BurtRenderTargetHandle blur,
             out BurtRenderTargetHandle historyTarget,
             out BurtRenderBufferHandle args,
@@ -924,9 +939,11 @@ namespace Burt.RenderPipeline
             baseColor = context != null ? context.ScreenSpaceSubsurfaceBaseColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBaseColorName);
             gbuffer0 = context != null ? context.GBuffer0Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer0Name);
             gbuffer1 = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name);
+            gbuffer2 = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             emission = context != null ? context.ScreenSpaceSubsurfaceEmissionTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceEmissionName);
             gbuffer3 = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4 = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5 = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             blur = context != null ? context.ScreenSpaceSubsurfaceBlurTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName);
             historyTarget = context != null ? context.ScreenSpaceSubsurfaceHistoryTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryName);
             args = context != null ? context.ScreenSpaceSubsurfaceBurleyArgsBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName);
@@ -942,9 +959,11 @@ namespace Burt.RenderPipeline
                 baseColor.IsValid &&
                 gbuffer0.IsValid &&
                 gbuffer1.IsValid &&
+                gbuffer2.IsValid &&
                 emission.IsValid &&
                 gbuffer3.IsValid &&
                 gbuffer4.IsValid &&
+                gbuffer5.IsValid &&
                 blur.IsValid &&
                 historyTarget.IsValid &&
                 args.IsValid &&
@@ -990,12 +1009,13 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.WriteScreenSpaceSubsurfaceTemp();
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var setup, out var profileIDAndType, out var mask, out var blur, out var cameraDepth, out var gbuffer0, out var gbuffer1, out var gbuffer2, out var gbuffer3, out var gbuffer4, out var temp))
+            if (!TryGetTargets(context, out var setup, out var profileIDAndType, out var mask, out var blur, out var cameraDepth, out var gbuffer0, out var gbuffer1, out var gbuffer2, out var gbuffer3, out var gbuffer4, out var gbuffer5, out var temp))
             {
                 return;
             }
@@ -1007,7 +1027,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(Name);
-            BurtScreenSpaceSubsurfacePassUtility.BindCommonInputs(cmd, context, blur, cameraDepth, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4);
+            BurtScreenSpaceSubsurfacePassUtility.BindCommonInputs(cmd, context, blur, cameraDepth, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4, gbuffer5);
             BurtScreenSpaceSubsurfacePassUtility.BindSetupInputs(cmd, context, setup, profileIDAndType, mask);
             cmd.SetRenderTarget(temp.Identifier);
             BurtScreenSpaceSubsurfacePassUtility.SetViewport(cmd, context);
@@ -1028,6 +1048,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2,
             out BurtRenderTargetHandle gbuffer3,
             out BurtRenderTargetHandle gbuffer4,
+            out BurtRenderTargetHandle gbuffer5,
             out BurtRenderTargetHandle temp)
         {
             setup = context != null ? context.ScreenSpaceSubsurfaceSetupTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
@@ -1040,6 +1061,7 @@ namespace Burt.RenderPipeline
             gbuffer2 = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3 = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4 = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5 = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             temp = context != null ? context.ScreenSpaceSubsurfaceTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceTempName);
 
             return BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceSeparable(context != null ? context.Request : null, context != null ? context.Asset : null) &&
@@ -1053,6 +1075,7 @@ namespace Burt.RenderPipeline
                 gbuffer2.IsValid &&
                 gbuffer3.IsValid &&
                 gbuffer4.IsValid &&
+                gbuffer5.IsValid &&
                 temp.IsValid;
         }
 
@@ -1096,12 +1119,13 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.WriteScreenSpaceSubsurfaceBlur();
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var setup, out var profileIDAndType, out var mask, out var temp, out var original, out var baseColor, out var emission, out var cameraDepth, out var gbuffer0, out var gbuffer1, out var gbuffer2, out var gbuffer3, out var gbuffer4, out var blur))
+            if (!TryGetTargets(context, out var setup, out var profileIDAndType, out var mask, out var temp, out var original, out var baseColor, out var emission, out var cameraDepth, out var gbuffer0, out var gbuffer1, out var gbuffer2, out var gbuffer3, out var gbuffer4, out var gbuffer5, out var blur))
             {
                 return;
             }
@@ -1113,7 +1137,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(Name);
-            BurtScreenSpaceSubsurfacePassUtility.BindCommonInputs(cmd, context, temp, cameraDepth, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4);
+            BurtScreenSpaceSubsurfacePassUtility.BindCommonInputs(cmd, context, temp, cameraDepth, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4, gbuffer5);
             BurtScreenSpaceSubsurfacePassUtility.BindSetupInputs(cmd, context, setup, profileIDAndType, mask);
             cmd.SetGlobalTexture(BurtScreenSpaceSubsurfacePassUtility.OriginalTextureId, original.Identifier);
             cmd.SetGlobalTexture(BurtScreenSpaceSubsurfacePassUtility.SourceTextureId, temp.Identifier);
@@ -1142,6 +1166,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2,
             out BurtRenderTargetHandle gbuffer3,
             out BurtRenderTargetHandle gbuffer4,
+            out BurtRenderTargetHandle gbuffer5,
             out BurtRenderTargetHandle blur)
         {
             setup = context != null ? context.ScreenSpaceSubsurfaceSetupTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSetupName);
@@ -1157,6 +1182,7 @@ namespace Burt.RenderPipeline
             gbuffer2 = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3 = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4 = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5 = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             blur = context != null ? context.ScreenSpaceSubsurfaceBlurTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBlurName);
 
             return BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceSeparable(context != null ? context.Request : null, context != null ? context.Asset : null) &&
@@ -1173,6 +1199,7 @@ namespace Burt.RenderPipeline
                 gbuffer2.IsValid &&
                 gbuffer3.IsValid &&
                 gbuffer4.IsValid &&
+                gbuffer5.IsValid &&
                 blur.IsValid;
         }
 
@@ -1211,6 +1238,7 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.WriteScreenSpaceSubsurfaceCombine();
         }
 
@@ -1229,6 +1257,7 @@ namespace Burt.RenderPipeline
             var gbuffer2 = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             var gbuffer3 = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             var gbuffer4 = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            var gbuffer5 = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             if (!BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurface(context != null ? context.Request : null, context != null ? context.Asset : null) ||
                 !blur.IsValid ||
                 !original.IsValid ||
@@ -1242,7 +1271,8 @@ namespace Burt.RenderPipeline
                 !gbuffer1.IsValid ||
                 !gbuffer2.IsValid ||
                 !gbuffer3.IsValid ||
-                !gbuffer4.IsValid)
+                !gbuffer4.IsValid ||
+                !gbuffer5.IsValid)
             {
                 return;
             }
@@ -1254,7 +1284,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(Name);
-            BurtScreenSpaceSubsurfacePassUtility.BindCombineInputs(cmd, context, original, setup, profileIDAndType, blur, cameraDepth, baseColor, emission, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4);
+            BurtScreenSpaceSubsurfacePassUtility.BindCombineInputs(cmd, context, original, setup, profileIDAndType, blur, cameraDepth, baseColor, emission, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4, gbuffer5);
             cmd.SetRenderTarget(combine.Identifier);
             BurtScreenSpaceSubsurfacePassUtility.SetViewport(cmd, context);
             cmd.DrawProcedural(Matrix4x4.identity, combineMaterial, CombinePassIndex, MeshTopology.Triangles, 3, 1);
@@ -1633,6 +1663,7 @@ namespace Burt.RenderPipeline
             builder.ReadScreenSpaceSubsurfaceEmission();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.WriteCameraColor();
         }
 
@@ -1658,8 +1689,9 @@ namespace Burt.RenderPipeline
             var emission = context.ScreenSpaceSubsurfaceEmissionTarget;
             var gbuffer3 = context.GBuffer3Target;
             var gbuffer4 = context.GBuffer4Target;
+            var gbuffer5 = context.GBuffer5Target;
             var cameraColor = context.CameraColorTarget;
-            if (!setup.IsValid || !profileIDAndType.IsValid || !BurtScreenSpaceSubsurfacePassUtility.IsMaskTargetReady(context, mask) || !blur.IsValid || !temp.IsValid || !combine.IsValid || !source.IsValid || !cameraDepth.IsValid || !gbuffer0.IsValid || !baseColor.IsValid || !gbuffer1.IsValid || !gbuffer2.IsValid || !emission.IsValid || !gbuffer3.IsValid || !gbuffer4.IsValid || !cameraColor.IsValid)
+            if (!setup.IsValid || !profileIDAndType.IsValid || !BurtScreenSpaceSubsurfacePassUtility.IsMaskTargetReady(context, mask) || !blur.IsValid || !temp.IsValid || !combine.IsValid || !source.IsValid || !cameraDepth.IsValid || !gbuffer0.IsValid || !baseColor.IsValid || !gbuffer1.IsValid || !gbuffer2.IsValid || !emission.IsValid || !gbuffer3.IsValid || !gbuffer4.IsValid || !gbuffer5.IsValid || !cameraColor.IsValid)
             {
                 return;
             }
@@ -1671,7 +1703,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(Name);
-            BurtScreenSpaceSubsurfacePassUtility.BindDebugInputs(cmd, context, setup, profileIDAndType, mask, blur, temp, combine, source, cameraDepth, gbuffer0, baseColor, gbuffer1, gbuffer2, emission, gbuffer3, gbuffer4);
+            BurtScreenSpaceSubsurfacePassUtility.BindDebugInputs(cmd, context, setup, profileIDAndType, mask, blur, temp, combine, source, cameraDepth, gbuffer0, baseColor, gbuffer1, gbuffer2, emission, gbuffer3, gbuffer4, gbuffer5);
             cmd.SetRenderTarget(cameraColor.Identifier);
             BurtScreenSpaceSubsurfacePassUtility.SetViewport(cmd, context);
             cmd.DrawProcedural(Matrix4x4.identity, debugMaterial, DebugPassIndex, MeshTopology.Triangles, 3, 1);
@@ -1728,6 +1760,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int ScreenSizeId = Shader.PropertyToID("_BurtSSSScreenSize");
         private static readonly int DebugModeId = Shader.PropertyToID("_BurtSSSDebugMode");
         private static readonly int DebugHistoryTextureId = Shader.PropertyToID("_BurtSSSHistoryDebugTexture");
@@ -2401,6 +2434,7 @@ namespace Burt.RenderPipeline
         {
             if (material != null)
             {
+                ApplyStencilProperties(material, shaderName);
                 return material;
             }
 
@@ -2420,7 +2454,16 @@ namespace Burt.RenderPipeline
             {
                 hideFlags = HideFlags.HideAndDontSave
             };
+            ApplyStencilProperties(material, shaderName);
             return material;
+        }
+
+        private static void ApplyStencilProperties(Material material, string shaderName)
+        {
+            if (shaderName == ScreenSpaceSubsurfaceShaderName)
+            {
+                BurtShadingModelIds.ApplyScreenSpaceSubsurfaceStencilProperties(material);
+            }
         }
 
         public static void BindCommonInputs(
@@ -2432,7 +2475,8 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle gbuffer1,
             BurtRenderTargetHandle gbuffer2,
             BurtRenderTargetHandle gbuffer3,
-            BurtRenderTargetHandle gbuffer4)
+            BurtRenderTargetHandle gbuffer4,
+            BurtRenderTargetHandle gbuffer5)
         {
             var descriptor = CreateDescriptor(context);
             var width = Mathf.Max(1, descriptor.width);
@@ -2446,6 +2490,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepth, context != null && context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalVector(ScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
             cmd.SetGlobalVector(ProjectionParamsId, ResolveProjectionParams(context != null ? context.Request : null));
             var stableSampling = ShouldUseStableScreenSpaceSubsurfaceSampling(context);
@@ -2471,9 +2517,11 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle baseColor,
             BurtRenderTargetHandle gbuffer0,
             BurtRenderTargetHandle gbuffer1,
+            BurtRenderTargetHandle gbuffer2,
             BurtRenderTargetHandle emission,
             BurtRenderTargetHandle gbuffer3,
             BurtRenderTargetHandle gbuffer4,
+            BurtRenderTargetHandle gbuffer5,
             bool forceStableSampling = false)
         {
             var descriptor = CreateDescriptor(context);
@@ -2484,10 +2532,13 @@ namespace Burt.RenderPipeline
             cmd.SetComputeTextureParam(shader, kernel, CameraDepthTextureId, cameraDepth.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, GBuffer0Id, gbuffer0.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, gbuffer1.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, GBuffer2Id, gbuffer2.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, GBuffer3Id, gbuffer3.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, GBuffer4Id, gbuffer4.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, GBuffer5Id, gbuffer5.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BaseColorTextureId, baseColor.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, EmissionTextureId, emission.Identifier);
+            BurtDeferredStencilTextureUtility.BindCompute(cmd, shader, kernel, cameraDepth, context != null && context.Request != null ? context.Request.Camera : null);
             cmd.SetComputeVectorParam(shader, ComputeScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
 
             var profileSettings = ResolveProfileSettings(context != null ? context.Asset : null);
@@ -2562,7 +2613,8 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle gbuffer1,
             BurtRenderTargetHandle gbuffer2,
             BurtRenderTargetHandle gbuffer3,
-            BurtRenderTargetHandle gbuffer4)
+            BurtRenderTargetHandle gbuffer4,
+            BurtRenderTargetHandle gbuffer5)
         {
             var descriptor = CreateDescriptor(context);
             var width = Mathf.Max(1, descriptor.width);
@@ -2574,6 +2626,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepth, context != null && context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalVector(ScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
             BindProfilePalette(cmd, context != null ? context.Asset : null);
         }
@@ -2582,14 +2636,16 @@ namespace Burt.RenderPipeline
             CommandBuffer cmd,
             BurtRenderGraphContext context,
             BurtRenderTargetHandle baseColor,
-            BurtRenderTargetHandle gbuffer1)
+            BurtRenderTargetHandle cameraDepth,
+            BurtRenderTargetHandle gbuffer2)
         {
             var descriptor = CreateDescriptor(context);
             var width = Mathf.Max(1, descriptor.width);
             var height = Mathf.Max(1, descriptor.height);
 
             cmd.SetGlobalTexture(BaseColorTextureId, baseColor.Identifier);
-            cmd.SetGlobalTexture(GBuffer1Id, gbuffer1.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepth, context != null && context.Request != null ? context.Request.Camera : null);
+            cmd.SetGlobalTexture(GBuffer2Id, gbuffer2.Identifier);
             cmd.SetGlobalVector(ScreenSizeId, new Vector4(width, height, 1f / width, 1f / height));
             BindProfilePalette(cmd, context != null ? context.Asset : null);
         }
@@ -2632,7 +2688,8 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle gbuffer1,
             BurtRenderTargetHandle gbuffer2,
             BurtRenderTargetHandle gbuffer3,
-            BurtRenderTargetHandle gbuffer4)
+            BurtRenderTargetHandle gbuffer4,
+            BurtRenderTargetHandle gbuffer5)
         {
             var descriptor = CreateDescriptor(context);
             var width = Mathf.Max(1, descriptor.width);
@@ -2652,6 +2709,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5.Identifier);
+            BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepth, context != null && context.Request != null ? context.Request.Camera : null);
             BindProfilePalette(cmd, context != null ? context.Asset : null);
         }
 
@@ -2672,10 +2731,11 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle gbuffer2,
             BurtRenderTargetHandle emission,
             BurtRenderTargetHandle gbuffer3,
-            BurtRenderTargetHandle gbuffer4)
+            BurtRenderTargetHandle gbuffer4,
+            BurtRenderTargetHandle gbuffer5)
         {
             BindSetupInputs(cmd, context, setup, profileIDAndType, mask);
-            BindGBufferInputs(cmd, context, cameraDepth, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4);
+            BindGBufferInputs(cmd, context, cameraDepth, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4, gbuffer5);
             cmd.SetGlobalTexture(OriginalTextureId, original.Identifier);
             cmd.SetGlobalTexture(SourceTextureId, original.Identifier);
             cmd.SetGlobalTexture(SeparableInputTextureId, temp.Identifier);

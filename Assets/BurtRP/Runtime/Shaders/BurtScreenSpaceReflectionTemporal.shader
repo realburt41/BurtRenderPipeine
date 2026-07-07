@@ -1,4 +1,4 @@
-﻿Shader "Hidden/BurtRP/ScreenSpaceReflections/Temporal"
+Shader "Hidden/BurtRP/ScreenSpaceReflections/Temporal"
 {
     SubShader
     {
@@ -33,20 +33,20 @@
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -245,7 +245,7 @@
 
             float4 FragTemporal(Varyings input) : SV_Target
             {
-                float2 screenUV = input.screenUV;
+                float2 screenUV = input.ScreenUV;
                 float4 currentSSR = tex2D(_BurtScreenSpaceReflectionDenoisedColorTexture, screenUV);
                 int debugMode = (int)_BurtSSRParams1.z;
                 if ((debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 31))
@@ -267,7 +267,7 @@
 
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, currentRawDepth);
                 BurtGBufferData currentGBuffer = BurtSampleDeferredGBufferData(screenUV);
-                if (BurtSSRTemporalIsExcludedShadingModel(currentGBuffer.shadingModelID))
+                if (BurtSSRTemporalIsExcludedShadingModel(currentGBuffer.ShadingModelID))
                 {
                     return float4(0.0, 0.0, 0.0, 0.0);
                 }
@@ -365,26 +365,26 @@
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
             float4 FragCopyTemporalColor(Varyings input) : SV_Target
             {
-                return tex2D(_BurtScreenSpaceReflectionTemporalColorTexture, input.screenUV);
+                return tex2D(_BurtScreenSpaceReflectionTemporalColorTexture, input.ScreenUV);
             }
             ENDHLSL
         }
@@ -406,26 +406,26 @@
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
             float4 FragCopyDepthHistory(Varyings input) : SV_Target
             {
-                float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
+                float rawDepth = BurtSampleDeferredRawDepth(input.ScreenUV);
                 return float4(rawDepth, rawDepth, rawDepth, rawDepth);
             }
             ENDHLSL
@@ -448,20 +448,20 @@
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -472,8 +472,8 @@
 
             float4 FragCopyNormalRoughnessHistory(Varyings input) : SV_Target
             {
-                BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(input.screenUV);
-                if (BurtSSRTemporalIsExcludedShadingModel(gbufferData.shadingModelID))
+                BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(input.ScreenUV);
+                if (BurtSSRTemporalIsExcludedShadingModel(gbufferData.ShadingModelID))
                 {
                     return 0.0;
                 }
@@ -512,20 +512,20 @@
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -703,7 +703,7 @@
                     }
 
                     BurtGBufferData sampleGBuffer = BurtSampleDeferredGBufferData(sampleUV);
-                    if (BurtSSRTemporalIsExcludedShadingModel(sampleGBuffer.shadingModelID))
+                    if (BurtSSRTemporalIsExcludedShadingModel(sampleGBuffer.ShadingModelID))
                     {
                         continue;
                     }
@@ -732,8 +732,8 @@
 
             float4 FragCopyMomentHistory(Varyings input) : SV_Target
             {
-                float rawDepth = BurtSampleDeferredRawDepth(input.screenUV);
-                float4 temporalSSR = tex2D(_BurtScreenSpaceReflectionTemporalColorTexture, input.screenUV);
+                float rawDepth = BurtSampleDeferredRawDepth(input.ScreenUV);
+                float4 temporalSSR = tex2D(_BurtScreenSpaceReflectionTemporalColorTexture, input.ScreenUV);
                 float confidence = saturate(temporalSSR.a);
                 if (BurtSSRTemporalMomentIsSkyDepth(rawDepth) || confidence <= 0.0001)
                 {
@@ -741,15 +741,15 @@
                 }
 
                 float historyValid = saturate(_BurtSSRTemporalParams0.y);
-                BurtGBufferData currentGBuffer = BurtSampleDeferredGBufferData(input.screenUV);
-                if (BurtSSRTemporalIsExcludedShadingModel(currentGBuffer.shadingModelID))
+                BurtGBufferData currentGBuffer = BurtSampleDeferredGBufferData(input.ScreenUV);
+                if (BurtSSRTemporalIsExcludedShadingModel(currentGBuffer.ShadingModelID))
                 {
                     return 0.0;
                 }
 
                 float3 currentNormalWS = BurtGetReflectionNormalWS(currentGBuffer);
                 float currentRoughness = BurtGetReflectionRoughness(currentGBuffer);
-                float3 positionWS = BurtReconstructDeferredPositionWS(input.screenUV, rawDepth);
+                float3 positionWS = BurtReconstructDeferredPositionWS(input.ScreenUV, rawDepth);
                 float2 previousUV;
                 float previousLinearDepth;
                 float4 previousMomentSample = 0.0;
@@ -774,7 +774,7 @@
                 float temporalVariance = max(moment.y - moment.x * moment.x, 0.0);
                 float shortHistoryWeight = 1.0 - smoothstep(3.0, 4.0, historyLength);
                 float spatialVariance = shortHistoryWeight > 0.0 ?
-                    BurtSSRTemporalMomentSpatialVariance(input.screenUV, rawDepth, currentNormalWS, currentRoughness, luminance) :
+                    BurtSSRTemporalMomentSpatialVariance(input.ScreenUV, rawDepth, currentNormalWS, currentRoughness, luminance) :
                     0.0;
                 float shortHistoryVariance = spatialVariance * max(1.0, 4.0 / max(historyLength, 1.0));
                 float variance = lerp(temporalVariance, max(temporalVariance, shortHistoryVariance), shortHistoryWeight);

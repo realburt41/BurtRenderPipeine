@@ -35,6 +35,7 @@ Shader "BurtRP/Grass"
         _TLNormalWeight ("Terrain Light Normal Weight", Range(1, 3)) = 1
         _SSShadowIntensity ("Screen Space Shadow Intensity", Range(0, 3)) = 1
         _SSShadowDistance ("Screen Space Shadow Distance", Range(10, 200)) = 30
+        _TiltingStrength ("Camera Tilting Strength", Range(0, 3)) = 0.5
         _GroundFadeIntensity ("Ground Fade Intensity", Range(0, 1)) = 0
         _NoiseMap ("Noise Map", 2D) = "white" {}
         _VariationIntensity01 ("Variation R Intensity", Range(0, 5)) = 0
@@ -43,6 +44,11 @@ Shader "BurtRP/Grass"
         _Variation02Height ("Variation G Height", Range(0.1, 0.9)) = 0.5
         [HDR] _Variation01 ("Variation R Overlay", Color) = (1, 1, 1, 1)
         [HDR] _Variation02 ("Variation G Overlay", Color) = (1, 1, 1, 1)
+        _WindHeightMask ("Wind Height Mask", Range(0.001, 5)) = 1
+        _WindStrength ("Wind Strength", Range(0, 1.2)) = 0.35
+        _WindNormalStrength ("Wind Normal Strength", Range(0, 2)) = 1
+        _ForceIntensity ("Collision Force Intensity", Range(0, 1)) = 0.2
+        [HideInInspector] _WindInteractionIntensity ("Wind Interaction Intensity", Range(0, 1)) = 0.2
         _EmissionMap ("Emission Map", 2D) = "white" {}
         [HDR]_EmissionColor ("Emission Color", Color) = (0, 0, 0, 1)
         [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 1
@@ -59,7 +65,10 @@ Shader "BurtRP/Grass"
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 192
+        [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
+        [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
 
     SubShader
@@ -115,17 +124,39 @@ Shader "BurtRP/Grass"
 
         Pass
         {
+            Name "Burt Grass Depth Normals"
+            Tags { "LightMode" = "BurtDepthNormals" }
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertGBuffer
+            #pragma fragment FragDepthNormals
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
+            #define BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "Burt Grass Motion Vectors"
             Tags { "LightMode" = "BurtMotionVectors" }
             ZWrite Off
-            ZTest Always
+            ZTest Equal
             Cull [_Cull]
 
             Stencil
             {
-                Ref 8
+                Ref [_MotionVectorsStencilRef]
                 ReadMask 8
-                WriteMask 8
+                WriteMask [_MotionVectorsStencilMask]
                 Comp Always
                 Pass Replace
             }
@@ -148,12 +179,14 @@ Shader "BurtRP/Grass"
         {
             Name "Burt Grass GBuffer"
             Tags { "LightMode" = "BurtGBuffer" }
-            ZWrite On
-            ZTest LEqual
+            ZWrite Off
+            ZTest Equal
+            // GBuffer0 normal/roughness comes from BurtDepthNormals; keep MRT0 untouched here.
+            ColorMask 0 0
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 224
+                ReadMask [_BurtGBufferStencilReadMask]
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
@@ -174,28 +207,6 @@ Shader "BurtRP/Grass"
             ENDHLSL
         }
 
-        Pass
-        {
-            Name "Burt Grass Forward"
-            Tags { "LightMode" = "BurtForward" }
-            ZWrite [_ZWrite]
-            ZTest [_ZTest]
-            Cull [_Cull]
-            Blend [_SrcBlend] [_DstBlend]
-
-            HLSLPROGRAM
-            #pragma vertex Vert
-            #pragma fragment Frag
-            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma shader_feature_local_fragment _ _EMISSION
-            #pragma multi_compile_instancing
-            #pragma target 3.5
-            #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
-            #define BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS 1
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
-            ENDHLSL
-        }
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtLitShaderGUI"

@@ -3,22 +3,27 @@
 #pragma kernel DilateVelocityAACS
 #pragma kernel DecimateHistoryAACS
 
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelIds.hlsl"
+
 #define BURT_TAA_USE_COUNT_QUANTIZATION 255.0
 #define BURT_TAA_INV_USE_COUNT_QUANTIZATION 0.00392156862745098
+#define BURT_TAA_ANTI_FLICKER_FACTOR 0.5
 
 Texture2D<float4> _BurtPostProcessSourceTexture;
 Texture2D<float4> _BurtTAAHistoryTexture;
-Texture2D<float4> _BurtTAAVelocityTexture;
+Texture2D<float2> _BurtTAAVelocityTexture;
 Texture2D<float4> _BurtTAARawVelocityTexture;
 Texture2D<float4> _BurtTAAMetadataTexture;
 Texture2D<float> _BurtTAACurrentDepthTexture;
+Texture2D<float> _BurtTAAClosestDepthTexture;
 Texture2D<float> _BurtTAADepthHistoryTexture;
 Texture2D<float> _BurtTAAParallaxRejectionTexture;
 Texture2D<uint> _BurtTAAPrevUseCountUintTexture;
 Texture2D<float> _BurtTAAStencilMaskTexture;
 
 RWTexture2D<float4> _BurtTAAResolveTexture;
-RWTexture2D<float4> _BurtTAADilatedVelocityTexture;
+RWTexture2D<float2> _BurtTAADilatedVelocityTexture;
+RWTexture2D<float> _BurtTAAClosestDepthOutputTexture;
 RWTexture2D<uint> _BurtTAAPrevUseCountOutputTexture;
 RWTexture2D<float> _BurtTAAParallaxRejectionOutputTexture;
 
@@ -29,6 +34,7 @@ float4 _BurtTAAJitter;
 float4 _BurtTAATexelSize;
 float4 _BurtTAAStencilTexelSize;
 float4 _BurtTAAParams;
+float4 _BurtTAADepthParams;
 float4 _BurtTAACurrentSampleWeights0;
 float4 _BurtTAACurrentSampleWeights1;
 float4 _BurtTAACurrentSampleWeights2;
@@ -88,6 +94,21 @@ float3 BurtTaaFromWorkingPerceptualSpace(float3 color)
     return max(BurtTaaFromWorkingSpace(BurtTaaFromPerceptualSpace(color)), 0.0);
 }
 
+float BurtTaaTemporalContrast(float filteredCurrentLuma, float filteredHistoryLuma)
+{
+    return saturate(abs(filteredCurrentLuma - filteredHistoryLuma) / max(max(filteredCurrentLuma, filteredHistoryLuma), 0.2));
+}
+
+float BurtTaaAntiFlickerStandardDeviationBoost(float temporalContrast, float velocityPixelLength)
+{
+    const float maxFactorScale = 2.25;
+    const float minFactorScale = 0.8;
+    float maxTemporalContrast = 0.7 - lerp(0.0, 0.3, smoothstep(0.5, 1.0, BURT_TAA_ANTI_FLICKER_FACTOR));
+    float localizedAntiFlicker = lerp(BURT_TAA_ANTI_FLICKER_FACTOR * minFactorScale, BURT_TAA_ANTI_FLICKER_FACTOR * maxFactorScale, saturate(1.0 - 2.0 * velocityPixelLength));
+    float contrastWeight = smoothstep(0.05, maxTemporalContrast, temporalContrast);
+    return lerp(0.0, localizedAntiFlicker, contrastWeight);
+}
+
 int2 BurtTaaTextureSize()
 {
     return max(int2((int)_BurtTAATexelSize.z, (int)_BurtTAATexelSize.w), int2(1, 1));
@@ -113,6 +134,23 @@ float BurtTaaLoadCurrentDepth(int2 pixel)
 float BurtTaaLinearEyeDepth(float rawDepth)
 {
     return rcp(max(_ZBufferParams.z * rawDepth + _ZBufferParams.w, 1e-6));
+}
+
+float BurtTaaDeviceDepthFromLinearEye(float linearDepth)
+{
+    return (rcp(max(linearDepth, 1e-6)) - _ZBufferParams.w) / _ZBufferParams.z;
+}
+
+float BurtTaaDepthPixelRadius(float linearDepth)
+{
+    return max(linearDepth, 0.0) * max(_BurtTAADepthParams.x, 0.0);
+}
+
+float BurtTaaCalculateDeviceZError(float centerDepth)
+{
+    float centerEyeDepth = BurtTaaLinearEyeDepth(centerDepth);
+    float correctedDepth = BurtTaaDeviceDepthFromLinearEye(centerEyeDepth + BurtTaaDepthPixelRadius(centerEyeDepth) * 2.0);
+    return abs(correctedDepth - centerDepth);
 }
 
 float BurtTaaValidSurfaceWeight(float rawDepth)
@@ -385,8 +423,7 @@ void DilateVelocityAACS(uint3 id : SV_DispatchThreadID)
     float centerDepth = BurtTaaLoadCurrentDepth(pixel);
     float closestDepth = centerDepth;
     int2 closestOffset = int2(0, 0);
-    float centerEyeDepth = BurtTaaLinearEyeDepth(centerDepth);
-    float centerDeviceZError = max(abs(centerDepth) * 1e-5, max(centerEyeDepth * 1e-7, 1e-7));
+    float centerDeviceZError = BurtTaaCalculateDeviceZError(centerDepth);
 
     BurtTaaSelectClosestDepthTap(pixel, int2(1, 0), centerDepth, centerDeviceZError, closestDepth, closestOffset);
     BurtTaaSelectClosestDepthTap(pixel, int2(1, 1), centerDepth, centerDeviceZError, closestDepth, closestOffset);
@@ -398,16 +435,15 @@ void DilateVelocityAACS(uint3 id : SV_DispatchThreadID)
     int2 closestPixel = clamp(pixel + closestOffset, int2(0, 0), textureSize - 1);
     float2 closestUv = (float2(closestPixel) + 0.5) * _BurtTAATexelSize.xy;
     float4 objectVelocity = _BurtTAARawVelocityTexture.Load(int3(closestPixel, 0));
-    float stencilObjectMotion = (BurtTaaLoadStencilMask(closestUv) & 8u) != 0u ? 1.0 : 0.0;
+    float stencilObjectMotion = (BurtTaaLoadStencilMask(closestUv) & BURT_DEFERRED_STENCIL_OBJECT_MOTION_BIT) != 0u ? 1.0 : 0.0;
     float rawObjectMotion = step(0.75, objectVelocity.w) * objectVelocity.z;
-    float objectVelocityValid = max(stencilObjectMotion, rawObjectMotion) * rawObjectMotion;
+    float objectVelocityValid = stencilObjectMotion * rawObjectMotion;
     finalVelocity = lerp(finalVelocity, objectVelocity.xy, objectVelocityValid);
-    float available = max(staticAvailable, objectVelocityValid);
     float2 historyUv = uv - finalVelocity;
-    float historyInBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
 
     BurtTaaScatterPrevUseCount(historyUv);
-    _BurtTAADilatedVelocityTexture[pixel] = float4(finalVelocity, saturate(available * historyInBounds), closestDepth);
+    _BurtTAADilatedVelocityTexture[pixel] = finalVelocity;
+    _BurtTAAClosestDepthOutputTexture[pixel] = closestDepth;
 }
 
 [numthreads(8, 8, 1)]
@@ -421,10 +457,10 @@ void DecimateHistoryAACS(uint3 id : SV_DispatchThreadID)
     }
 
     float2 uv = (float2(pixel) + 0.5) * _BurtTAATexelSize.xy;
-    float4 velocityData = _BurtTAAVelocityTexture.Load(int3(pixel, 0));
-    float2 historyUv = uv - velocityData.xy;
+    float2 velocityData = _BurtTAAVelocityTexture.Load(int3(pixel, 0));
+    float2 historyUv = uv - velocityData;
     float inBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
-    float currentRawDepth = BurtTaaValidSurfaceWeight(velocityData.w) > 0.5 ? velocityData.w : BurtTaaLoadCurrentDepth(pixel);
+    float currentRawDepth = _BurtTAAClosestDepthTexture.Load(int3(pixel, 0));
     float currentLinearDepth = max(BurtTaaLinearEyeDepth(currentRawDepth), 1e-4);
     float2 samplePosition = historyUv * (float2)textureSize - 0.5;
     int2 basePixel = int2(floor(samplePosition));
@@ -487,8 +523,8 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    float4 velocityData = _BurtTAAVelocityTexture.Load(int3(pixel, 0));
-    float2 historyUv = uv - velocityData.xy;
+    float2 velocityData = _BurtTAAVelocityTexture.Load(int3(pixel, 0));
+    float2 historyUv = uv - velocityData;
     float historyValid = _BurtTAAParams.z;
     float inBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
     float finalHistoryAvailability = historyValid * inBounds;
@@ -502,38 +538,31 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
     float3 rawHistory = BurtTaaSampleHistoryCatmullRom(historyUv);
     float3 historyWorking = BurtTaaToWorkingPerceptualSpace(rawHistory);
     float historyValidity = _BurtTAAParallaxRejectionTexture.Load(int3(pixel, 0));
-    float currentDepth = BurtTaaValidSurfaceWeight(velocityData.w) > 0.5 ? velocityData.w : BurtTaaLoadCurrentDepth(pixel);
     float finalRejection = saturate(historyValidity * finalHistoryAvailability);
     uint stencil = BurtTaaLoadStencilMask(uv);
-    float4 taaMetadata = _BurtTAAMetadataTexture.Load(int3(pixel, 0));
-    float surfaceWeight = BurtTaaValidSurfaceWeight(currentDepth);
-    float stencilResponsive = ((stencil & 16u) != 0u ? 1.0 : 0.0) * surfaceWeight;
-    float metadataResponsive = saturate(taaMetadata.g) * surfaceWeight;
-    float responsiveStrength = saturate(max(stencilResponsive, metadataResponsive));
-    float responsiveMask = responsiveStrength * finalHistoryAvailability;
+    float responsiveMask = (stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0;
 
     float3 moment1 = neighborhoodSum * (1.0 / 9.0);
     float3 moment2 = neighborhoodSumSq * (1.0 / 9.0);
     float3 standardDeviation = sqrt(abs(moment2 - moment1 * moment1));
-    float3 clampMin = moment1 - standardDeviation * 1.5;
-    float3 clampMax = moment1 + standardDeviation * 1.5;
+    float temporalContrast = BurtTaaTemporalContrast(currentFilteredWorking.x, historyWorking.x);
+    float velocityPixelLength = length(velocityData * _BurtTAATexelSize.zw);
+    float standardDeviationFactor = 1.5 + BurtTaaAntiFlickerStandardDeviationBoost(temporalContrast, velocityPixelLength);
+    float3 clampMin = moment1 - standardDeviation * standardDeviationFactor;
+    float3 clampMax = moment1 + standardDeviation * standardDeviationFactor;
     float3 boxCenter = 0.5 * (clampMax + clampMin);
     float3 boxExtents = max(0.5 * (clampMax - clampMin), float3(1e-5, 1e-5, 1e-5));
     float3 historyOffset = historyWorking - boxCenter;
     float3 clampUnitVector = abs(historyOffset) / boxExtents;
     float clampUnit = max(max(clampUnitVector.x, clampUnitVector.y), clampUnitVector.z);
     float3 clippedHistoryWorking = clampUnit > 1.0 ? boxCenter + historyOffset / clampUnit : historyWorking;
-
     float minBoundLuma = clampMin.x;
     float maxBoundLuma = clampMax.x;
-    float historyLuma = clippedHistoryWorking.x;
+    float historyLuma = historyWorking.x;
     float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 1e-4)));
     float xrenderBaseBlend = max(0.05, lumaContrast);
     float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
-    float motionPixels = length(velocityData.xy * _BurtTAATexelSize.zw);
-    float responsiveMotion = smoothstep(0.35, 2.5, motionPixels) * stencilResponsive;
-    float responsiveCurrentBlend = lerp(0.25, 0.65, responsiveMotion);
-    currentBlend = lerp(currentBlend, max(currentBlend, responsiveCurrentBlend), responsiveMask);
+    currentBlend = lerp(currentBlend, 0.25, responsiveMask);
     currentBlend = saturate(currentBlend);
 
     float3 resolvedWorking = lerp(clippedHistoryWorking, currentFilteredWorking, currentBlend);

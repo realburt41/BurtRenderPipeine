@@ -14,6 +14,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         private static readonly ShaderTagId BurtForwardOnly = new ShaderTagId("BurtForwardOnly"); // 定义 Deferred 后专用的前向兜底 LightMode，只给不能写 GBuffer 的不透明 shader 使用。
 
         private static readonly ShaderTagId BurtDepthOnly = new ShaderTagId("BurtDepthOnly"); // 定义 BurtRP Depth Prepass 使用的深度专用 LightMode 名称。
+        private static readonly ShaderTagId BurtDepthNormals = new ShaderTagId("BurtDepthNormals");
 
         private static readonly ShaderTagId BurtGBuffer = new ShaderTagId("BurtGBuffer"); // 定义 Deferred GBuffer 绘制使用的 LightMode 名称，shader 侧需要提供同名 Pass。
         private static readonly ShaderTagId BurtSubsurfaceForward = new ShaderTagId("BurtSubsurfaceForward");
@@ -58,6 +59,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         {
             BurtForward, // BurtRP 自己的材质预览仍优先走正式前向 Pass。
             BurtForwardOnly, // 允许只实现 ForwardOnly 的 BurtRP 特殊材质在 Preview 中可见。
+            BurtGBuffer, // Foliage/Grass 不再提供 Forward pass，Preview 退到 GBuffer 保持可见。
+            BurtDepthNormals, // 没有 GBuffer 的深度法线材质仍可在 Preview 中兜底显示。
             SRPDefaultUnlit, // Unity/SRP 默认未标记 Pass 会落到这里，Inspector 预览大量使用它。
             ForwardBase, // Built-in 预览 shader 常见的前向 Pass 名称。
             Always, // Unity 内部预览 shader 常用 Always Pass。
@@ -219,6 +222,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var drawingSettings = new DrawingSettings(BurtDepthOnly, sortingSettings); // 只匹配 BurtDepthOnly，避免 Depth Prepass 意外执行颜色 pass。
 
             return drawingSettings; // 返回配置好的深度绘制设置，供调用方 Pass 使用。
+        }
+
+        public static DrawingSettings CreateDepthNormalsDrawingSettings(SortingSettings sortingSettings)
+        {
+            var drawingSettings = new DrawingSettings(BurtDepthNormals, sortingSettings);
+            drawingSettings.SetShaderPassName(1, BurtDepthOnly);
+
+            return drawingSettings;
         }
 
         public static DrawingSettings CreateGBufferDrawingSettings(SortingSettings sortingSettings) // 创建 Deferred GBuffer 绘制设置，只匹配 BurtRP 自己的 GBuffer Pass。
@@ -2297,7 +2308,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var tileResolution = hasMainLightShadow ? cascadeCache.TileResolution : 0;
 
             var cmd = CommandBufferPool.Get(Name);
-            BurtPreExposureUtility.UploadGlobals(cmd, BurtPreExposureUtility.ResolveForFrame(request, asset));
+            PreExposureUtility.UploadGlobals(cmd, PreExposureUtility.ResolveForFrame(request, asset));
             cmd.SetGlobalVector(MainLightDirectionId, new Vector4(mainLightDirection.x, mainLightDirection.y, mainLightDirection.z, 0f));
             cmd.SetGlobalColor(MainLightColorId, mainLightColor);
             cmd.SetGlobalColor(AmbientLightColorId, ambientLightColor);

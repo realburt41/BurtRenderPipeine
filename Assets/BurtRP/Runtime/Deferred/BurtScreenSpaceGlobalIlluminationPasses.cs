@@ -314,6 +314,7 @@ namespace Burt.RenderPipeline
         protected static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         protected static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         protected static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        protected static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         protected static readonly int BurtGIRawTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawTextureId;
         protected static readonly int BurtGITextureId = BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationTextureId;
         protected static readonly int BurtGITemporalDiagnosticsTextureId = BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsTextureId;
@@ -370,13 +371,15 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle gbuffer1Target,
             BurtRenderTargetHandle gbuffer2Target,
             BurtRenderTargetHandle gbuffer3Target,
-            BurtRenderTargetHandle gbuffer4Target)
+            BurtRenderTargetHandle gbuffer4Target,
+            BurtRenderTargetHandle gbuffer5Target)
         {
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
             cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
         }
 
         protected static void UploadCameraGlobals(CommandBuffer cmd, BurtRenderRequest request, Camera camera, RenderTextureDescriptor descriptor)
@@ -430,12 +433,13 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.WriteScreenSpaceGlobalIlluminationRaw();
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var rawTarget))
+            if (!TryGetTargets(context, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbuffer5Target, out var rawTarget))
             {
                 return;
             }
@@ -459,7 +463,7 @@ namespace Burt.RenderPipeline
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
-            BindGBufferInputs(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target);
+            BindGBufferInputs(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target);
             UploadCameraGlobals(cmd, context.Request, camera, descriptor);
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
@@ -476,6 +480,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2Target,
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle rawTarget)
         {
             cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
@@ -484,6 +489,7 @@ namespace Burt.RenderPipeline
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5Target = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             rawTarget = context != null ? context.ScreenSpaceGlobalIlluminationRawTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName);
 
             return cameraDepthTarget.IsValid &&
@@ -492,6 +498,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target.IsValid &&
                 gbuffer3Target.IsValid &&
                 gbuffer4Target.IsValid &&
+                gbuffer5Target.IsValid &&
                 rawTarget.IsValid;
         }
     }
@@ -582,6 +589,7 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.WriteBurtGIBackfaceDiffuseIndirect();
             builder.WriteBurtGIRoughSpecularIndirect();
         }
@@ -596,6 +604,7 @@ namespace Burt.RenderPipeline
                     out var gbuffer2Target,
                     out var gbuffer3Target,
                     out var gbuffer4Target,
+                    out var gbuffer5Target,
                     out var burtGITarget,
                     out var backfaceDiffuseTarget,
                     out var roughSpecularTarget))
@@ -629,7 +638,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalTexture(BurtGITextureId, burtGITarget.Identifier);
-            BindGBufferInputs(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target);
+            BindGBufferInputs(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target);
             UploadCameraGlobals(cmd, context.Request, camera, descriptor);
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, ResolveIndirectChannelsPassIndex, MeshTopology.Triangles, 3, 1);
@@ -647,6 +656,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2Target,
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle burtGITarget,
             out BurtRenderTargetHandle backfaceDiffuseTarget,
             out BurtRenderTargetHandle roughSpecularTarget)
@@ -657,6 +667,7 @@ namespace Burt.RenderPipeline
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5Target = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             burtGITarget = context != null ? context.ScreenSpaceGlobalIlluminationTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
             backfaceDiffuseTarget = context != null ? context.BurtGIBackfaceDiffuseIndirectTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName);
             roughSpecularTarget = context != null ? context.BurtGIRoughSpecularIndirectTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectName);
@@ -667,6 +678,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target.IsValid &&
                 gbuffer3Target.IsValid &&
                 gbuffer4Target.IsValid &&
+                gbuffer5Target.IsValid &&
                 burtGITarget.IsValid &&
                 backfaceDiffuseTarget.IsValid &&
                 roughSpecularTarget.IsValid;
@@ -704,7 +716,7 @@ namespace Burt.RenderPipeline
 
             builder.ReadScreenSpaceGlobalIlluminationRaw();
             builder.ReadCameraDepth();
-            builder.ReadGBuffer1();
+            builder.ReadGBuffer0();
             builder.WriteScreenSpaceGlobalIllumination();
             if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(builder.Request, builder.Asset))
             {
@@ -714,7 +726,7 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var rawTarget, out var cameraDepthTarget, out var gbuffer1Target, out var target, out var temporalDiagnosticsTarget))
+            if (!TryGetTargets(context, out var rawTarget, out var cameraDepthTarget, out var gbuffer0Target, out var target, out var temporalDiagnosticsTarget))
             {
                 return;
             }
@@ -740,7 +752,7 @@ namespace Burt.RenderPipeline
             var cmd = CommandBufferPool.Get(Name);
             cmd.SetGlobalTexture(BurtGIRawTextureId, rawTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
-            cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
             UploadCameraGlobals(cmd, context.Request, camera, descriptor);
             UploadSettings(cmd, settings);
 
@@ -839,17 +851,17 @@ namespace Burt.RenderPipeline
             BurtRenderGraphContext context,
             out BurtRenderTargetHandle rawTarget,
             out BurtRenderTargetHandle cameraDepthTarget,
-            out BurtRenderTargetHandle gbuffer1Target,
+            out BurtRenderTargetHandle gbuffer0Target,
             out BurtRenderTargetHandle target,
             out BurtRenderTargetHandle temporalDiagnosticsTarget)
         {
             rawTarget = context != null ? context.ScreenSpaceGlobalIlluminationRawTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationRawName);
             cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
-            gbuffer1Target = context != null ? context.GBuffer1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer1Name);
+            gbuffer0Target = context != null ? context.GBuffer0Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer0Name);
             target = context != null ? context.ScreenSpaceGlobalIlluminationTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
             temporalDiagnosticsTarget = context != null ? context.BurtGITemporalDiagnosticsTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITemporalDiagnosticsName);
 
-            return rawTarget.IsValid && cameraDepthTarget.IsValid && gbuffer1Target.IsValid && target.IsValid;
+            return rawTarget.IsValid && cameraDepthTarget.IsValid && gbuffer0Target.IsValid && target.IsValid;
         }
     }
 
@@ -942,7 +954,7 @@ namespace Burt.RenderPipeline
             builder.ReadScreenSpaceGlobalIlluminationRaw();
             builder.ReadScreenSpaceGlobalIllumination();
             builder.ReadCameraDepth();
-            builder.ReadGBuffer1();
+            builder.ReadGBuffer0();
             if (BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(BurtShadingDebugSettings.Mode))
             {
                 builder.ReadBurtGITemporalDiagnostics();
@@ -965,11 +977,11 @@ namespace Burt.RenderPipeline
 
             var cameraColorTarget = context.CameraColorTarget;
             var cameraDepthTarget = context.CameraDepthTarget;
-            var gbuffer1Target = context.GBuffer1Target;
+            var gbuffer0Target = context.GBuffer0Target;
             var rawTarget = context.ScreenSpaceGlobalIlluminationRawTarget;
             var burtGITarget = context.ScreenSpaceGlobalIlluminationTarget;
             var temporalDiagnosticsTarget = context.BurtGITemporalDiagnosticsTarget;
-            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid || !gbuffer1Target.IsValid || !rawTarget.IsValid || !burtGITarget.IsValid)
+            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid || !gbuffer0Target.IsValid || !rawTarget.IsValid || !burtGITarget.IsValid)
             {
                 return;
             }
@@ -1007,7 +1019,7 @@ namespace Burt.RenderPipeline
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
-            cmd.SetGlobalTexture(GBuffer1Id, gbuffer1Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
             cmd.SetGlobalTexture(BurtGIRawTextureId, rawTarget.Identifier);
             cmd.SetGlobalTexture(BurtGITextureId, burtGITarget.Identifier);
             if (temporalDiagnosticsTarget.IsValid)
@@ -1285,12 +1297,12 @@ namespace Burt.RenderPipeline
 
     internal readonly struct BurtScreenSpaceGlobalIlluminationSettings
     {
-        public static readonly BurtScreenSpaceGlobalIlluminationSettings Disabled = new BurtScreenSpaceGlobalIlluminationSettings(false, BurtScreenSpaceGlobalIlluminationQuality.Medium, BurtScreenSpaceGlobalIlluminationResolution.Half, 0.6f, 2f, 12, 8, 0.35f, 1f, 8f, 0.65f, 80f, true, 0.18f, 1.25f, 0.75f, 0.65f, 0.5f, 0.55f, 0.6f, true, 0.86f, 0.02f, 0.65f, 1f, 1.25f, 0.55f);
+        public static readonly BurtScreenSpaceGlobalIlluminationSettings Disabled = new BurtScreenSpaceGlobalIlluminationSettings(false, ScreenSpaceGlobalIlluminationQuality.Medium, ScreenSpaceGlobalIlluminationResolution.Half, 0.6f, 2f, 12, 8, 0.35f, 1f, 8f, 0.65f, 80f, true, 0.18f, 1.25f, 0.75f, 0.65f, 0.5f, 0.55f, 0.6f, true, 0.86f, 0.02f, 0.65f, 1f, 1.25f, 0.55f);
 
         public BurtScreenSpaceGlobalIlluminationSettings(
             bool enabled,
-            BurtScreenSpaceGlobalIlluminationQuality quality,
-            BurtScreenSpaceGlobalIlluminationResolution resolution,
+            ScreenSpaceGlobalIlluminationQuality quality,
+            ScreenSpaceGlobalIlluminationResolution resolution,
             float intensity,
             float radius,
             int sampleCount,
@@ -1346,8 +1358,8 @@ namespace Burt.RenderPipeline
         }
 
         public bool Enabled { get; }
-        public BurtScreenSpaceGlobalIlluminationQuality Quality { get; }
-        public BurtScreenSpaceGlobalIlluminationResolution Resolution { get; }
+        public ScreenSpaceGlobalIlluminationQuality Quality { get; }
+        public ScreenSpaceGlobalIlluminationResolution Resolution { get; }
         public float Intensity { get; }
         public float Radius { get; }
         public int SampleCount { get; }
@@ -1414,23 +1426,23 @@ namespace Burt.RenderPipeline
             return Mathf.RoundToInt(value * scale);
         }
 
-        private static BurtScreenSpaceGlobalIlluminationQuality NormalizeQuality(BurtScreenSpaceGlobalIlluminationQuality quality)
+        private static ScreenSpaceGlobalIlluminationQuality NormalizeQuality(ScreenSpaceGlobalIlluminationQuality quality)
         {
             switch (quality)
             {
-                case BurtScreenSpaceGlobalIlluminationQuality.Custom:
-                case BurtScreenSpaceGlobalIlluminationQuality.Low:
-                case BurtScreenSpaceGlobalIlluminationQuality.Medium:
-                case BurtScreenSpaceGlobalIlluminationQuality.High:
+                case ScreenSpaceGlobalIlluminationQuality.Custom:
+                case ScreenSpaceGlobalIlluminationQuality.Low:
+                case ScreenSpaceGlobalIlluminationQuality.Medium:
+                case ScreenSpaceGlobalIlluminationQuality.High:
                     return quality;
                 default:
-                    return BurtScreenSpaceGlobalIlluminationQuality.Medium;
+                    return ScreenSpaceGlobalIlluminationQuality.Medium;
             }
         }
 
-        private static BurtScreenSpaceGlobalIlluminationResolution NormalizeResolution(BurtScreenSpaceGlobalIlluminationResolution resolution)
+        private static ScreenSpaceGlobalIlluminationResolution NormalizeResolution(ScreenSpaceGlobalIlluminationResolution resolution)
         {
-            return resolution == BurtScreenSpaceGlobalIlluminationResolution.Full ? BurtScreenSpaceGlobalIlluminationResolution.Full : BurtScreenSpaceGlobalIlluminationResolution.Half;
+            return resolution == ScreenSpaceGlobalIlluminationResolution.Full ? ScreenSpaceGlobalIlluminationResolution.Full : ScreenSpaceGlobalIlluminationResolution.Half;
         }
     }
 
@@ -2325,7 +2337,7 @@ namespace Burt.RenderPipeline
             }
 
             var label = "ScreenSpaceDiffuseBounce+DiffuseSourceFiltered+SkySHFallback+V3.2CoplanarGateFix+NearFieldEdgeGuardedColorBleed+NoSilhouetteEnergyFade+LeakGuardEdgeFadeNormalCone+DiffuseOcclusionFloor+EdgeSkyConfidence+HitAwareBlur+StableHitAlpha+ReadableLeakGuardDebug+GrazingPlaneReject+PerSampleJitter";
-            if (settings.Resolution == BurtScreenSpaceGlobalIlluminationResolution.Full && !settings.TemporalAccumulation)
+            if (settings.Resolution == ScreenSpaceGlobalIlluminationResolution.Full && !settings.TemporalAccumulation)
             {
                 label += "+TAAFullResCurrent+StabilizedLeakGuard";
             }
@@ -2469,8 +2481,8 @@ namespace Burt.RenderPipeline
 
             return new BurtScreenSpaceGlobalIlluminationSettings(
                 true,
-                BurtScreenSpaceGlobalIlluminationQuality.Custom,
-                BurtScreenSpaceGlobalIlluminationResolution.Full,
+                ScreenSpaceGlobalIlluminationQuality.Custom,
+                ScreenSpaceGlobalIlluminationResolution.Full,
                 0.6f,
                 2f,
                 12,
@@ -2563,7 +2575,7 @@ namespace Burt.RenderPipeline
             }
         }
 
-        private static BurtScreenSpaceGlobalIlluminationSettings CreateScreenSpaceGlobalIlluminationSettings(BurtScreenSpaceGlobalIlluminationVolumeComponent component)
+        private static BurtScreenSpaceGlobalIlluminationSettings CreateScreenSpaceGlobalIlluminationSettings(ScreenSpaceGlobalIlluminationVolumeComponent component)
         {
             var quality = component.quality.value;
             var resolution = component.resolution.value;
@@ -2641,7 +2653,7 @@ namespace Burt.RenderPipeline
             return new BurtScreenSpaceGlobalIlluminationSettings(
                 true,
                 settings.Quality,
-                BurtScreenSpaceGlobalIlluminationResolution.Full,
+                ScreenSpaceGlobalIlluminationResolution.Full,
                 settings.Intensity,
                 settings.Radius,
                 settings.SampleCount,
@@ -2678,12 +2690,12 @@ namespace Burt.RenderPipeline
 
             return IsScreenSpaceGlobalIlluminationDebugMode(BurtShadingDebugSettings.Mode) &&
                 !IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(BurtShadingDebugSettings.Mode) &&
-                BurtPostProcessUtility.HasActiveTemporalAASource(request);
+                PostProcessUtility.HasActiveTemporalAASource(request);
         }
 
         private static void ApplyScreenSpaceGlobalIlluminationQualityPreset(
-            BurtScreenSpaceGlobalIlluminationQuality quality,
-            ref BurtScreenSpaceGlobalIlluminationResolution resolution,
+            ScreenSpaceGlobalIlluminationQuality quality,
+            ref ScreenSpaceGlobalIlluminationResolution resolution,
             ref int sampleCount,
             ref int maxSteps,
             ref float radius,
@@ -2701,8 +2713,8 @@ namespace Burt.RenderPipeline
         {
             switch (quality)
             {
-                case BurtScreenSpaceGlobalIlluminationQuality.Low:
-                    resolution = BurtScreenSpaceGlobalIlluminationResolution.Half;
+                case ScreenSpaceGlobalIlluminationQuality.Low:
+                    resolution = ScreenSpaceGlobalIlluminationResolution.Half;
                     sampleCount = 8;
                     maxSteps = 6;
                     radius = Mathf.Min(radius, 1.5f);
@@ -2718,8 +2730,8 @@ namespace Burt.RenderPipeline
                     temporalVarianceClamp = 1f;
                     temporalHitRejection = 0.65f;
                     break;
-                case BurtScreenSpaceGlobalIlluminationQuality.Medium:
-                    resolution = BurtScreenSpaceGlobalIlluminationResolution.Half;
+                case ScreenSpaceGlobalIlluminationQuality.Medium:
+                    resolution = ScreenSpaceGlobalIlluminationResolution.Half;
                     sampleCount = 12;
                     maxSteps = 8;
                     radius = Mathf.Max(radius, 2f);
@@ -2735,8 +2747,8 @@ namespace Burt.RenderPipeline
                     temporalVarianceClamp = 1.25f;
                     temporalHitRejection = 0.55f;
                     break;
-                case BurtScreenSpaceGlobalIlluminationQuality.High:
-                    resolution = BurtScreenSpaceGlobalIlluminationResolution.Full;
+                case ScreenSpaceGlobalIlluminationQuality.High:
+                    resolution = ScreenSpaceGlobalIlluminationResolution.Full;
                     sampleCount = 20;
                     maxSteps = 12;
                     radius = Mathf.Max(radius, 3f);
@@ -2757,7 +2769,7 @@ namespace Burt.RenderPipeline
 
         private static void ApplyScreenSpaceGlobalIlluminationResolution(ref RenderTextureDescriptor descriptor, BurtScreenSpaceGlobalIlluminationSettings settings)
         {
-            if (settings.Resolution != BurtScreenSpaceGlobalIlluminationResolution.Half)
+            if (settings.Resolution != ScreenSpaceGlobalIlluminationResolution.Half)
             {
                 return;
             }
@@ -2766,7 +2778,7 @@ namespace Burt.RenderPipeline
             descriptor.height = Mathf.Max(1, (descriptor.height + 1) / 2);
         }
 
-        private static BurtScreenSpaceGlobalIlluminationVolumeComponent GetScreenSpaceGlobalIlluminationVolumeComponent()
+        private static ScreenSpaceGlobalIlluminationVolumeComponent GetScreenSpaceGlobalIlluminationVolumeComponent()
         {
             var volumeManager = VolumeManager.instance;
             if (volumeManager == null)
@@ -2780,7 +2792,7 @@ namespace Burt.RenderPipeline
                 return null;
             }
 
-            return stack.GetComponent<BurtScreenSpaceGlobalIlluminationVolumeComponent>();
+            return stack.GetComponent<ScreenSpaceGlobalIlluminationVolumeComponent>();
         }
     }
 

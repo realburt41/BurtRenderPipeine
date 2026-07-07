@@ -129,6 +129,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int HiZDepthTextureId = BurtRenderGraphResourceRegistry.HiZDepthTextureId;
         private static readonly int SSRSourceColorTextureId = Shader.PropertyToID("_BurtSSRSourceColorTexture");
         private static readonly int SSRSourceTexelSizeId = Shader.PropertyToID("_BurtSSRSourceTexelSize");
@@ -160,6 +161,7 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             if (BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflectionHiZTrace(builder.Request, builder.Asset))
             {
                 builder.ReadHiZDepth();
@@ -169,7 +171,7 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var hiZDepthTarget, out var ssrColorTarget))
+            if (!TryGetTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbuffer5Target, out var hiZDepthTarget, out var ssrColorTarget))
             {
                 return;
             }
@@ -203,7 +205,7 @@ namespace Burt.RenderPipeline
 
             cmd.SetRenderTarget(ssrColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, colorDescriptor.width, colorDescriptor.height);
-            BindInputs(cmd, cameraColorTarget, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, hiZDepthTarget);
+            BindInputs(cmd, cameraColorTarget, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target, hiZDepthTarget);
             BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             UploadCameraGlobals(cmd, camera, colorDescriptor, hiZMipCount);
             UploadSettings(cmd, settings, hiZMipCount, hasUsableHiZDepth, hiZTraceForShader);
@@ -222,6 +224,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2Target,
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle hiZDepthTarget,
             out BurtRenderTargetHandle ssrColorTarget)
         {
@@ -232,6 +235,7 @@ namespace Burt.RenderPipeline
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5Target = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             hiZDepthTarget = context != null ? context.HiZDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.HiZDepthName);
             ssrColorTarget = context != null ? context.ScreenSpaceReflectionColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
 
@@ -242,6 +246,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target.IsValid &&
                 gbuffer3Target.IsValid &&
                 gbuffer4Target.IsValid &&
+                gbuffer5Target.IsValid &&
                 ssrColorTarget.IsValid;
         }
 
@@ -254,6 +259,7 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle gbuffer2Target,
             BurtRenderTargetHandle gbuffer3Target,
             BurtRenderTargetHandle gbuffer4Target,
+            BurtRenderTargetHandle gbuffer5Target,
             BurtRenderTargetHandle hiZDepthTarget)
         {
             cmd.SetGlobalTexture(CameraColorTextureId, cameraColorTarget.Identifier);
@@ -264,6 +270,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
             cmd.SetGlobalTexture(HiZDepthTextureId, hiZDepthTarget.IsValid ? hiZDepthTarget.Identifier : cameraDepthTarget.Identifier);
         }
 
@@ -349,6 +356,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int SSRColorTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorTextureId;
         private static readonly int SSRDenoisedColorTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorTextureId;
         private static readonly int SSRSourceTexelSizeId = Shader.PropertyToID("_BurtSSRSourceTexelSize");
@@ -373,12 +381,13 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.WriteScreenSpaceReflectionDenoisedColor();
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var ssrColorTarget, out var ssrDenoisedColorTarget))
+            if (!TryGetTargets(context, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbuffer5Target, out var ssrColorTarget, out var ssrDenoisedColorTarget))
             {
                 return;
             }
@@ -419,6 +428,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
             cmd.SetGlobalTexture(SSRColorTextureId, ssrColorTarget.Identifier);
             cmd.SetGlobalVector(SSRSourceTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
             cmd.SetGlobalVector(SSRParams1Id, new Vector4(0f, 0f, BurtScreenSpaceReflectionPassUtility.ResolveScreenSpaceReflectionShaderDebugMode(), 0.1f));
@@ -436,6 +446,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2Target,
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle ssrColorTarget,
             out BurtRenderTargetHandle ssrDenoisedColorTarget)
         {
@@ -445,6 +456,7 @@ namespace Burt.RenderPipeline
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5Target = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             ssrColorTarget = context != null ? context.ScreenSpaceReflectionColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionColorName);
             ssrDenoisedColorTarget = context != null ? context.ScreenSpaceReflectionDenoisedColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName);
 
@@ -454,6 +466,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target.IsValid &&
                 gbuffer3Target.IsValid &&
                 gbuffer4Target.IsValid &&
+                gbuffer5Target.IsValid &&
                 ssrColorTarget.IsValid &&
                 ssrDenoisedColorTarget.IsValid;
         }
@@ -497,6 +510,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int SSRDenoisedColorTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorTextureId;
         private static readonly int SSRTemporalColorTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorTextureId;
         private static readonly int SSRHistoryTextureId = Shader.PropertyToID("_BurtSSRHistoryTexture");
@@ -531,12 +545,13 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.WriteScreenSpaceReflectionTemporalColor();
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var ssrDenoisedColorTarget, out var ssrTemporalColorTarget))
+            if (!TryGetTargets(context, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbuffer5Target, out var ssrDenoisedColorTarget, out var ssrTemporalColorTarget))
             {
                 return;
             }
@@ -574,7 +589,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(Name);
-            BindInputs(cmd, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, ssrDenoisedColorTarget);
+            BindInputs(cmd, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target, ssrDenoisedColorTarget);
             BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             UploadTemporalGlobals(cmd, camera, history, settings, width, height, historyValid);
 
@@ -621,6 +636,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2Target,
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle ssrDenoisedColorTarget,
             out BurtRenderTargetHandle ssrTemporalColorTarget)
         {
@@ -630,6 +646,7 @@ namespace Burt.RenderPipeline
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5Target = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             ssrDenoisedColorTarget = context != null ? context.ScreenSpaceReflectionDenoisedColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionDenoisedColorName);
             ssrTemporalColorTarget = context != null ? context.ScreenSpaceReflectionTemporalColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
 
@@ -639,6 +656,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target.IsValid &&
                 gbuffer3Target.IsValid &&
                 gbuffer4Target.IsValid &&
+                gbuffer5Target.IsValid &&
                 ssrDenoisedColorTarget.IsValid &&
                 ssrTemporalColorTarget.IsValid;
         }
@@ -651,6 +669,7 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle gbuffer2Target,
             BurtRenderTargetHandle gbuffer3Target,
             BurtRenderTargetHandle gbuffer4Target,
+            BurtRenderTargetHandle gbuffer5Target,
             BurtRenderTargetHandle ssrDenoisedColorTarget)
         {
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
@@ -659,6 +678,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
             cmd.SetGlobalTexture(SSRDenoisedColorTextureId, ssrDenoisedColorTarget.Identifier);
         }
 
@@ -720,6 +740,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int SSRTemporalColorTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorTextureId;
         private static readonly int SSRCameraColorCopyTextureId = Shader.PropertyToID("_BurtSSRCameraColorCopyTexture");
         private static readonly int SSRSourceTexelSizeId = Shader.PropertyToID("_BurtSSRSourceTexelSize");
@@ -748,13 +769,14 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.ReadScreenSpaceReflectionTemporalColor();
             builder.WriteCameraColor();
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (!TryGetTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var ssrTemporalColorTarget))
+            if (!TryGetTargets(context, out var cameraColorTarget, out var cameraDepthTarget, out var gbuffer0Target, out var gbuffer1Target, out var gbuffer2Target, out var gbuffer3Target, out var gbuffer4Target, out var gbuffer5Target, out var ssrTemporalColorTarget))
             {
                 return;
             }
@@ -787,7 +809,7 @@ namespace Burt.RenderPipeline
             cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(SSRCameraColorCopyTextureId));
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            BindInputs(cmd, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, ssrTemporalColorTarget);
+            BindInputs(cmd, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target, ssrTemporalColorTarget);
             BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalTexture(SSRCameraColorCopyTextureId, new RenderTargetIdentifier(SSRCameraColorCopyTextureId));
             UploadCameraGlobals(cmd, camera, width, height);
@@ -808,6 +830,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2Target,
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle ssrTemporalColorTarget)
         {
             cameraColorTarget = context != null ? context.CameraColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraColorName);
@@ -817,6 +840,7 @@ namespace Burt.RenderPipeline
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5Target = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             ssrTemporalColorTarget = context != null ? context.ScreenSpaceReflectionTemporalColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceReflectionTemporalColorName);
 
             return cameraColorTarget.IsValid &&
@@ -826,6 +850,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target.IsValid &&
                 gbuffer3Target.IsValid &&
                 gbuffer4Target.IsValid &&
+                gbuffer5Target.IsValid &&
                 ssrTemporalColorTarget.IsValid;
         }
 
@@ -837,6 +862,7 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle gbuffer2Target,
             BurtRenderTargetHandle gbuffer3Target,
             BurtRenderTargetHandle gbuffer4Target,
+            BurtRenderTargetHandle gbuffer5Target,
             BurtRenderTargetHandle ssrTemporalColorTarget)
         {
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
@@ -845,6 +871,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
             cmd.SetGlobalTexture(SSRTemporalColorTextureId, ssrTemporalColorTarget.Identifier);
         }
 
@@ -901,6 +928,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int HiZDepthTextureId = BurtRenderGraphResourceRegistry.HiZDepthTextureId;
         private static readonly int SSRHiZDiagnosticsParamsId = Shader.PropertyToID("_BurtSSRHiZDiagnosticsParams");
         private static readonly int SSRHiZTraceParams0Id = Shader.PropertyToID("_BurtSSRHiZTraceParams0");
@@ -927,6 +955,7 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.ReadHiZDepth();
             builder.WriteCameraColor();
         }
@@ -945,8 +974,9 @@ namespace Burt.RenderPipeline
             var gbuffer2Target = context.GBuffer2Target;
             var gbuffer3Target = context.GBuffer3Target;
             var gbuffer4Target = context.GBuffer4Target;
+            var gbuffer5Target = context.GBuffer5Target;
             var hiZDepthTarget = context.HiZDepthTarget;
-            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid || !gbuffer0Target.IsValid || !gbuffer1Target.IsValid || !gbuffer2Target.IsValid || !gbuffer3Target.IsValid || !gbuffer4Target.IsValid || !hiZDepthTarget.IsValid)
+            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid || !gbuffer0Target.IsValid || !gbuffer1Target.IsValid || !gbuffer2Target.IsValid || !gbuffer3Target.IsValid || !gbuffer4Target.IsValid || !gbuffer5Target.IsValid || !hiZDepthTarget.IsValid)
             {
                 return;
             }
@@ -984,6 +1014,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
             cmd.SetGlobalTexture(HiZDepthTextureId, hiZDepthTarget.Identifier);
             BurtDeferredStencilTextureUtility.BindGlobal(cmd, cameraDepthTarget, camera);
             cmd.SetGlobalVector(SSRHiZDiagnosticsParamsId, new Vector4(debugMode, maxMip, diagnosticMip, 512f));
@@ -1142,8 +1173,8 @@ namespace Burt.RenderPipeline
     {
         public static readonly BurtScreenSpaceReflectionSettings Disabled = new BurtScreenSpaceReflectionSettings(
             false,
-            BurtScreenSpaceReflectionQuality.Custom,
-            BurtScreenSpaceReflectionResolution.Full,
+            ScreenSpaceReflectionQuality.Custom,
+            ScreenSpaceReflectionResolution.Full,
             48,
             30f,
             0.35f,
@@ -1157,8 +1188,8 @@ namespace Burt.RenderPipeline
 
         public BurtScreenSpaceReflectionSettings(
             bool enabled,
-            BurtScreenSpaceReflectionQuality quality,
-            BurtScreenSpaceReflectionResolution resolution,
+            ScreenSpaceReflectionQuality quality,
+            ScreenSpaceReflectionResolution resolution,
             int maxSteps,
             float maxDistance,
             float thickness,
@@ -1187,9 +1218,9 @@ namespace Burt.RenderPipeline
 
         public bool Enabled { get; }
 
-        public BurtScreenSpaceReflectionQuality Quality { get; }
+        public ScreenSpaceReflectionQuality Quality { get; }
 
-        public BurtScreenSpaceReflectionResolution Resolution { get; }
+        public ScreenSpaceReflectionResolution Resolution { get; }
 
         public int MaxSteps { get; }
 
@@ -1211,22 +1242,22 @@ namespace Burt.RenderPipeline
 
         public float TemporalClamp { get; }
 
-        private static BurtScreenSpaceReflectionQuality NormalizeQuality(BurtScreenSpaceReflectionQuality quality)
+        private static ScreenSpaceReflectionQuality NormalizeQuality(ScreenSpaceReflectionQuality quality)
         {
             switch (quality)
             {
-                case BurtScreenSpaceReflectionQuality.Low:
-                case BurtScreenSpaceReflectionQuality.Medium:
-                case BurtScreenSpaceReflectionQuality.High:
+                case ScreenSpaceReflectionQuality.Low:
+                case ScreenSpaceReflectionQuality.Medium:
+                case ScreenSpaceReflectionQuality.High:
                     return quality;
                 default:
-                    return BurtScreenSpaceReflectionQuality.Custom;
+                    return ScreenSpaceReflectionQuality.Custom;
             }
         }
 
-        private static BurtScreenSpaceReflectionResolution NormalizeResolution(BurtScreenSpaceReflectionResolution resolution)
+        private static ScreenSpaceReflectionResolution NormalizeResolution(ScreenSpaceReflectionResolution resolution)
         {
-            return resolution == BurtScreenSpaceReflectionResolution.Half ? BurtScreenSpaceReflectionResolution.Half : BurtScreenSpaceReflectionResolution.Full;
+            return resolution == ScreenSpaceReflectionResolution.Half ? ScreenSpaceReflectionResolution.Half : ScreenSpaceReflectionResolution.Full;
         }
     }
 
@@ -2008,8 +2039,8 @@ namespace Burt.RenderPipeline
 
             return new BurtScreenSpaceReflectionSettings(
                 true,
-                BurtScreenSpaceReflectionQuality.Custom,
-                BurtScreenSpaceReflectionResolution.Full,
+                ScreenSpaceReflectionQuality.Custom,
+                ScreenSpaceReflectionResolution.Full,
                 48,
                 30f,
                 0.35f,
@@ -2024,7 +2055,7 @@ namespace Burt.RenderPipeline
 
         private static void ApplyScreenSpaceReflectionResolution(ref RenderTextureDescriptor descriptor, BurtScreenSpaceReflectionSettings settings)
         {
-            if (settings.Resolution != BurtScreenSpaceReflectionResolution.Half)
+            if (settings.Resolution != ScreenSpaceReflectionResolution.Half)
             {
                 return;
             }
@@ -2262,7 +2293,7 @@ namespace Burt.RenderPipeline
             return CreateScreenSpaceReflectionSettings(screenSpaceReflections);
         }
 
-        private static BurtScreenSpaceReflectionSettings CreateScreenSpaceReflectionSettings(BurtScreenSpaceReflectionVolumeComponent screenSpaceReflections)
+        private static BurtScreenSpaceReflectionSettings CreateScreenSpaceReflectionSettings(ScreenSpaceReflectionVolumeComponent screenSpaceReflections)
         {
             var quality = screenSpaceReflections.quality.value;
             var maxSteps = screenSpaceReflections.maxSteps.value;
@@ -2304,8 +2335,8 @@ namespace Burt.RenderPipeline
         }
 
         private static void ApplyScreenSpaceReflectionQualityPreset(
-            BurtScreenSpaceReflectionQuality quality,
-            ref BurtScreenSpaceReflectionResolution resolution,
+            ScreenSpaceReflectionQuality quality,
+            ref ScreenSpaceReflectionResolution resolution,
             ref int maxSteps,
             ref float maxDistance,
             ref float thickness,
@@ -2317,8 +2348,8 @@ namespace Burt.RenderPipeline
         {
             switch (quality)
             {
-                case BurtScreenSpaceReflectionQuality.Low:
-                    resolution = BurtScreenSpaceReflectionResolution.Half;
+                case ScreenSpaceReflectionQuality.Low:
+                    resolution = ScreenSpaceReflectionResolution.Half;
                     maxSteps = 28;
                     maxDistance = 22f;
                     thickness = 0.45f;
@@ -2328,8 +2359,8 @@ namespace Burt.RenderPipeline
                     temporalClamp = 0.85f;
                     temporalAccumulation = true;
                     break;
-                case BurtScreenSpaceReflectionQuality.Medium:
-                    resolution = BurtScreenSpaceReflectionResolution.Half;
+                case ScreenSpaceReflectionQuality.Medium:
+                    resolution = ScreenSpaceReflectionResolution.Half;
                     maxSteps = 40;
                     maxDistance = 30f;
                     thickness = 0.35f;
@@ -2339,8 +2370,8 @@ namespace Burt.RenderPipeline
                     temporalClamp = 1f;
                     temporalAccumulation = true;
                     break;
-                case BurtScreenSpaceReflectionQuality.High:
-                    resolution = BurtScreenSpaceReflectionResolution.Full;
+                case ScreenSpaceReflectionQuality.High:
+                    resolution = ScreenSpaceReflectionResolution.Full;
                     maxSteps = 72;
                     maxDistance = 45f;
                     thickness = 0.28f;
@@ -2463,7 +2494,7 @@ namespace Burt.RenderPipeline
             return mode.ToString();
         }
 
-        private static BurtScreenSpaceReflectionVolumeComponent GetScreenSpaceReflectionVolumeComponent()
+        private static ScreenSpaceReflectionVolumeComponent GetScreenSpaceReflectionVolumeComponent()
         {
             var volumeManager = VolumeManager.instance;
             if (volumeManager == null)
@@ -2477,7 +2508,7 @@ namespace Burt.RenderPipeline
                 return null;
             }
 
-            return stack.GetComponent<BurtScreenSpaceReflectionVolumeComponent>();
+            return stack.GetComponent<ScreenSpaceReflectionVolumeComponent>();
         }
     }
 }

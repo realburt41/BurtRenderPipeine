@@ -30,21 +30,21 @@ Shader "Hidden/BurtRP/DebugTileLightList"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                float2 uv = float2((float)((input.vertexID << 1) & 2u), (float)(input.vertexID & 2u));
-                output.positionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
-                output.screenUV = uv;
+                float2 uv = float2((float)((input.VertexID << 1) & 2u), (float)(input.VertexID & 2u));
+                output.PositionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
+                output.ScreenUV = uv;
                 return output;
             }
 
@@ -132,7 +132,7 @@ Shader "Hidden/BurtRP/DebugTileLightList"
             {
                 int tileCountX = max(1, (int)round(_BurtTileLightGridParams.x));
                 int tileCountY = max(1, (int)round(_BurtTileLightGridParams.y));
-                float2 uv = saturate(input.screenUV);
+                float2 uv = saturate(input.ScreenUV);
                 int tileX = min((int)floor(uv.x * tileCountX), tileCountX - 1);
                 int tileY = min((int)floor(uv.y * tileCountY), tileCountY - 1);
                 int tileIndex = tileY * tileCountX + tileX;

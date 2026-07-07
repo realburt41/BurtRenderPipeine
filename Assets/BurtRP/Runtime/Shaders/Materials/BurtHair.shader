@@ -78,6 +78,9 @@ Shader "BurtRP/Hair"
         [HideInInspector] _DoubleSidedNormalMode ("Double Sided Normal Mode", Float) = 2
         [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (1, 1, -1, 0)
         [HideInInspector] _Cull ("Cull", Float) = 0
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 96
+        [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
     }
 
     SubShader
@@ -134,16 +137,40 @@ Shader "BurtRP/Hair"
 
         Pass
         {
-            Name "Burt Hair GBuffer"
-            Tags { "LightMode" = "BurtGBuffer" }
+            Name "Burt Hair Depth Normals"
+            Tags { "LightMode" = "BurtDepthNormals" }
             ZWrite On
             ZTest LEqual
 
+            HLSLPROGRAM
+            #pragma vertex VertGBuffer
+            #pragma fragment FragDepthNormals
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairProperties.hlsl"
+
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Hair GBuffer"
+            Tags { "LightMode" = "BurtGBuffer" }
+            ZWrite Off
+            ZTest Equal
+            // GBuffer0 normal/roughness comes from BurtDepthNormals; keep MRT0 untouched here.
+            ColorMask 0 0
+
             Stencil
             {
-                Ref 96
-                ReadMask 224
-                WriteMask 224
+                Ref [_BurtGBufferStencilRef]
+                ReadMask [_BurtGBufferStencilReadMask]
+                WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
             }

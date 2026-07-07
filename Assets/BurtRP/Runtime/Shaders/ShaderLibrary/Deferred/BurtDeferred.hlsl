@@ -5,12 +5,13 @@
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl" // 引入 BurtEncodedGBuffer / BurtGBufferData，以及 GBuffer 编解码函数。
 
-// 主 Agent 分配并绑定的五张 GBuffer，全局名来自 BurtRenderGraphResourceRegistry 的 _BurtGBuffer0/1/2/3/4 约定。
+// Main Agent allocates and binds six GBuffer textures plus the object-index target.
 Texture2D _BurtGBuffer0;
 Texture2D _BurtGBuffer1;
 Texture2D _BurtGBuffer2;
 Texture2D _BurtGBuffer3;
 Texture2D _BurtGBuffer4;
+Texture2D _BurtGBuffer5;
 Texture2D _BurtGBufferObjectIndex;
 
 #if SHADER_TARGET >= 45
@@ -21,6 +22,7 @@ Texture2D _BurtGBufferObjectIndex;
 #endif
 
 float4 _BurtDeferredStencilTexelSize;
+float _BurtDeferredStencilTextureAvailable;
 
 // 主 Agent 绑定的 CameraDepth；来源可以是 DepthPrepass，也可以是 GBuffer pass 写入的共享深度。
 UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -120,24 +122,26 @@ float3 BurtReconstructDeferredNonJitteredPositionWS(float2 screenUV, float rawDe
     return BurtReconstructDeferredPositionWSWithMatrix(screenUV, rawDepth, _BurtDeferredInverseNonJitteredViewProjectionMatrix);
 }
 
-// 采样 BurtRP 当前五张 GBuffer RT，并打包成 BurtGBuffer.hlsl 定义的 BurtEncodedGBuffer。
+// Sample the current BurtRP GBuffer RTs and pack them as BurtEncodedGBuffer.
 BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
 {
-    // 创建编码 GBuffer 输出，字段顺序必须和材质 shader 的 SV_Target0/1/2/3 保持一致。
+    // 创建编码 GBuffer 输出，字段顺序必须和材质 shader 的 SV_Target0..5 保持一致。
     BurtEncodedGBuffer encodedGBuffer;
 
-    // GBuffer0：baseColor.rgb + occlusion.a。
-    encodedGBuffer.gbuffer0 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer0, screenUV);
+    // GBuffer0: prepass normal.rgb + perceptual roughness.a.
+    encodedGBuffer.GBuffer0 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer0, screenUV);
 
-    // GBuffer1：oct normal.rg + packed shadingModel/material.b + smoothness.a。
-    encodedGBuffer.gbuffer1 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV);
+    // GBuffer1: baseColor.rgb + occlusion.a.
+    encodedGBuffer.GBuffer1 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV);
 
-    // GBuffer2：emission.rgb + reflectance.a。
-    encodedGBuffer.gbuffer2 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer2, screenUV);
+    // GBuffer2: packed(shadingModelID, material channel), metallic, smoothness, reflectance.
+    encodedGBuffer.GBuffer2 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer2, screenUV);
 
-    encodedGBuffer.gbuffer3 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer3, screenUV);
+    encodedGBuffer.GBuffer3 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer3, screenUV);
 
-    encodedGBuffer.gbuffer4 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer4, screenUV);
+    encodedGBuffer.GBuffer4 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer4, screenUV);
+
+    encodedGBuffer.GBuffer5 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer5, screenUV);
 
     // 返回采样结果，让调用方继续 Decode 或做原始 GBuffer Debug。
     return encodedGBuffer;
@@ -145,7 +149,7 @@ BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
 
 float BurtSampleDeferredPackedGBufferShadingModelID(float2 screenUV)
 {
-    float packedShadingModelAndMaterial = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV).b;
+    float packedShadingModelAndMaterial = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer2, screenUV).r;
     float shadingModelID;
     BurtDecodeMetallicAndShadingModelFromGBuffer(packedShadingModelAndMaterial, shadingModelID);
     return shadingModelID;
@@ -153,33 +157,44 @@ float BurtSampleDeferredPackedGBufferShadingModelID(float2 screenUV)
 
 uint BurtLoadDeferredStencil(float2 screenUV)
 {
+    #if BURT_DEFERRED_STENCIL_TEXTURE_AVAILABLE
+        if (_BurtDeferredStencilTextureAvailable <= 0.5f)
+        {
+            return 0u;
+        }
+
+        int2 size = max(int2(_BurtDeferredStencilTexelSize.zw), int2(1, 1));
+        int2 pixel = clamp(int2(screenUV * size), int2(0, 0), size - 1);
+        return _BurtDeferredStencilTexture.Load(int3(pixel, 0)).g;
+    #else
     return 0u;
+    #endif
 }
 
 float BurtDecodeDeferredStencilShadingModelID(uint stencilValue)
 {
-    uint shadingModelStencil = stencilValue & 0xE0u;
-    if (shadingModelStencil == 0x60u)
+    uint shadingModelStencil = stencilValue & BURT_DEFERRED_STENCIL_SHADING_MODEL_MASK;
+    if (shadingModelStencil == BURT_DEFERRED_STENCIL_HAIR_REF)
     {
         return BURT_SHADING_MODEL_HAIR;
     }
-    if (shadingModelStencil == 0x80u)
+    if (shadingModelStencil == BURT_DEFERRED_STENCIL_CLEAR_COAT_REF)
     {
         return BURT_SHADING_MODEL_CLEAR_COAT;
     }
-    if (shadingModelStencil == 0x40u)
+    if (shadingModelStencil == BURT_DEFERRED_STENCIL_SUBSURFACE_REF)
     {
         return BURT_SHADING_MODEL_SUBSURFACE;
     }
-    if (shadingModelStencil == 0xA0u)
+    if (shadingModelStencil == BURT_DEFERRED_STENCIL_FABRIC_REF)
     {
         return BURT_SHADING_MODEL_FABRIC;
     }
-    if (shadingModelStencil == 0xC0u)
+    if (shadingModelStencil == BURT_DEFERRED_STENCIL_FOLIAGE_REF)
     {
         return BURT_SHADING_MODEL_FOLIAGE;
     }
-    if (shadingModelStencil == 0xE0u)
+    if (shadingModelStencil == BURT_DEFERRED_STENCIL_FUR_REF)
     {
         return BURT_SHADING_MODEL_FUR;
     }
@@ -189,12 +204,43 @@ float BurtDecodeDeferredStencilShadingModelID(uint stencilValue)
 
 float BurtSampleDeferredStencilShadingModelID(float2 screenUV)
 {
-    return BurtSampleDeferredPackedGBufferShadingModelID(screenUV);
+    uint stencilValue = BurtLoadDeferredStencil(screenUV);
+    return (stencilValue & BURT_DEFERRED_STENCIL_SHADING_MODEL_MASK) != 0u
+        ? BurtDecodeDeferredStencilShadingModelID(stencilValue)
+        : BurtSampleDeferredPackedGBufferShadingModelID(screenUV);
 }
 
 float BurtSampleDeferredShadingModelID(float2 screenUV)
 {
     return BurtSampleDeferredStencilShadingModelID(screenUV);
+}
+
+float3 BurtSampleDeferredGBufferNormalWS(float2 screenUV)
+{
+    return BurtDecodeNormalWS888FromGBuffer(BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer0, screenUV).rgb);
+}
+
+float3 BurtSampleDeferredSurfaceNormalWS(float2 screenUV)
+{
+    float3 normalWS = BurtSampleDeferredGBufferNormalWS(screenUV);
+#if BURT_ENABLE_SUBSURFACE_SHADING
+    float shadingModelID = BurtSampleDeferredShadingModelID(screenUV);
+    if (BurtIsActiveSubsurfaceShadingModel(shadingModelID))
+    {
+        float distortion;
+        float scatteringMode;
+        BurtDecodeSubsurfaceDistortionModeFromGBuffer(
+            BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer5, screenUV).b,
+            distortion,
+            scatteringMode);
+        if (BurtIsSubsurface3SPreIntegratedMode(scatteringMode))
+        {
+            return BurtDecodeNormalWSFromGBuffer(BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer3, screenUV).rg);
+        }
+    }
+#endif
+
+    return normalWS;
 }
 
 float4 BurtDeferredDebugStencilShadingModelColor(float shadingModelID)
@@ -205,11 +251,12 @@ float4 BurtDeferredDebugStencilShadingModelColor(float shadingModelID)
     float isFabric = BurtIsFabricShadingModel(shadingModelID) ? 1.0f : 0.0f;
     float isFoliage = BurtIsFoliageShadingModel(shadingModelID) ? 1.0f : 0.0f;
     float isFur = BurtIsFurShadingModel(shadingModelID) ? 1.0f : 0.0f;
-    float isDefaultLit = 1.0f - saturate(isHair + isClearCoat + isSubsurface + isFabric + isFoliage + isFur);
+    float isEye = BurtIsEyeShadingModel(shadingModelID) ? 1.0f : 0.0f;
+    float isDefaultLit = 1.0f - saturate(isHair + isClearCoat + isSubsurface + isFabric + isFoliage + isFur + isEye);
     return float4(
-        0.18f * isDefaultLit + 0.6f * isHair + 0.1f * isSubsurface + 0.95f * isFabric + 0.18f * isFoliage + 0.95f * isFur,
-        0.18f * isDefaultLit + 0.1f * isHair + 0.45f * isClearCoat + 0.55f * isSubsurface + 0.35f * isFabric + 0.85f * isFoliage + 0.45f * isFur,
-        0.18f * isDefaultLit + 0.5f * isHair + 0.7f * isClearCoat + 0.15f * isSubsurface + 0.9f * isFabric + 0.18f * isFoliage + 0.1f * isFur,
+        0.18f * isDefaultLit + 0.6f * isHair + 0.1f * isSubsurface + 0.95f * isFabric + 0.18f * isFoliage + 0.95f * isFur + 0.15f * isEye,
+        0.18f * isDefaultLit + 0.1f * isHair + 0.45f * isClearCoat + 0.55f * isSubsurface + 0.35f * isFabric + 0.85f * isFoliage + 0.45f * isFur + 0.65f * isEye,
+        0.18f * isDefaultLit + 0.5f * isHair + 0.7f * isClearCoat + 0.15f * isSubsurface + 0.9f * isFabric + 0.18f * isFoliage + 0.1f * isFur + 1.0f * isEye,
         1.0f);
 }
 

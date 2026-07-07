@@ -25,22 +25,22 @@ Shader "Hidden/BurtRP/DebugPerObjectShadowAtlas"
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 uv : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 UV : TEXCOORD0;
             };
 
             Varyings Vert(uint vertexID : SV_VertexID)
             {
                 Varyings output;
                 float2 uv = float2((vertexID << 1) & 2, vertexID & 2);
-                output.positionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
-                output.uv = uv;
+                output.PositionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
+                output.UV = uv;
                 return output;
             }
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float2 shadowUv = input.uv;
+                float2 shadowUv = input.UV;
                 if (_BurtPerObjectShadowDebugYFlip > 0.5f)
                 {
                     shadowUv.y = 1.0f - shadowUv.y;

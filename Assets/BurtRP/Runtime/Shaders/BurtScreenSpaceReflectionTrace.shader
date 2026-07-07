@@ -1,4 +1,4 @@
-﻿Shader "Hidden/BurtRP/ScreenSpaceReflections/Trace"
+Shader "Hidden/BurtRP/ScreenSpaceReflections/Trace"
 {
     SubShader
     {
@@ -30,82 +30,82 @@
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             struct BurtSSRHit
             {
-                float hit;
-                float rawHit;
-                float2 uv;
-                float steps;
-                float depthDelta;
-                float distance;
-                float worldError;
-                float surfaceSupport;
-                float hiZSkipCandidate;
-                float hiZMipLevel;
-                float hiZDivergence;
-                float hiZSkipUsed;
-                float hiZProbeBlocked;
-                float workCost;
+                float Hit;
+                float RawHit;
+                float2 UV;
+                float Steps;
+                float DepthDelta;
+                float Distance;
+                float WorldError;
+                float SurfaceSupport;
+                float HiZSkipCandidate;
+                float HiZMipLevel;
+                float HiZDivergence;
+                float HiZSkipUsed;
+                float HiZProbeBlocked;
+                float WorkCost;
             };
 
             struct BurtSSRTraceQuality
             {
-                float edgeFade;
-                float hitNormalWeight;
-                float screenParallelWeight;
-                float grazingWeight;
-                float distanceFade;
-                float depthError;
-                float depthQuality;
-                float worldQuality;
-                float surfaceSupportWeight;
-                float resolveQuality;
-                float validHit;
-                float visibilityWeight;
+                float EdgeFade;
+                float HitNormalWeight;
+                float ScreenParallelWeight;
+                float GrazingWeight;
+                float DistanceFade;
+                float DepthError;
+                float DepthQuality;
+                float WorldQuality;
+                float SurfaceSupportWeight;
+                float ResolveQuality;
+                float ValidHit;
+                float VisibilityWeight;
             };
 
             struct BurtSSRLayerSample
             {
-                BurtSSRHit hit;
-                BurtSSRTraceQuality quality;
-                float3 color;
-                float visibility;
+                BurtSSRHit Hit;
+                BurtSSRTraceQuality Quality;
+                float3 Color;
+                float Visibility;
             };
 
             BurtSSRHit BurtSSRCreateEmptyHit()
             {
                 BurtSSRHit result;
-                result.hit = 0.0;
-                result.rawHit = 0.0;
-                result.uv = 0.0;
-                result.steps = 0.0;
-                result.depthDelta = 0.0;
-                result.distance = 0.0;
-                result.worldError = 0.0;
-                result.surfaceSupport = 0.0;
-                result.hiZSkipCandidate = 0.0;
-                result.hiZMipLevel = 0.0;
-                result.hiZDivergence = 0.0;
-                result.hiZSkipUsed = 0.0;
-                result.hiZProbeBlocked = 0.0;
-                result.workCost = 0.0;
+                result.Hit = 0.0;
+                result.RawHit = 0.0;
+                result.UV = 0.0;
+                result.Steps = 0.0;
+                result.DepthDelta = 0.0;
+                result.Distance = 0.0;
+                result.WorldError = 0.0;
+                result.SurfaceSupport = 0.0;
+                result.HiZSkipCandidate = 0.0;
+                result.HiZMipLevel = 0.0;
+                result.HiZDivergence = 0.0;
+                result.HiZSkipUsed = 0.0;
+                result.HiZProbeBlocked = 0.0;
+                result.WorkCost = 0.0;
                 return result;
             }
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -1168,7 +1168,7 @@
                         break;
                     }
 
-                    result.workCost += 1.0;
+                    result.WorkCost += 1.0;
                     float mipLevel = (float)currentMip;
                     float nextTime = BurtSSRComputeCellExitTime(startUV, deltaUV, currentTime, mipLevel);
                     nextTime = BurtSSRAdvanceTime(currentTime, nextTime, minTimeStep);
@@ -1195,9 +1195,9 @@
                                 debugHiZMip,
                                 rawSkipCandidate,
                                 mip0Divergence);
-                            result.hiZSkipCandidate = max(result.hiZSkipCandidate, rawSkipCandidate);
-                            result.hiZDivergence = max(result.hiZDivergence, mip0Divergence);
-                            result.hiZMipLevel = max(result.hiZMipLevel, rawSkipCandidate * debugHiZMip / max(min(_BurtSSRParams1.y, 3.0), 1.0));
+                            result.HiZSkipCandidate = max(result.HiZSkipCandidate, rawSkipCandidate);
+                            result.HiZDivergence = max(result.HiZDivergence, mip0Divergence);
+                            result.HiZMipLevel = max(result.HiZMipLevel, rawSkipCandidate * debugHiZMip / max(min(_BurtSSRParams1.y, 3.0), 1.0));
                         }
                     }
                     if (useHiZTrace && currentMip > 0)
@@ -1206,7 +1206,7 @@
                         bool canAttemptHiZSkip = previousTime > 0.0 && hasPreviousDepthDelta && previousDepthDelta < -skipMissThreshold;
                         if (canAttemptHiZSkip)
                         {
-                            result.workCost += 5.0;
+                            result.WorkCost += 5.0;
                         }
 
                         bool hiZCellLooksSkippable = canAttemptHiZSkip &&
@@ -1251,12 +1251,12 @@
                                 proofCrossedSurface);
                         }
 
-                        result.workCost += segmentProbeWork;
-                        result.hiZProbeBlocked = max(result.hiZProbeBlocked, segmentHasMip0RawHit ? 1.0 : 0.0);
+                        result.WorkCost += segmentProbeWork;
+                        result.HiZProbeBlocked = max(result.HiZProbeBlocked, segmentHasMip0RawHit ? 1.0 : 0.0);
                         bool canSkipHiZCell = hiZCellLooksSkippable && !segmentHasMip0RawHit;
                         if (canSkipHiZCell)
                         {
-                            result.hiZSkipUsed = 1.0;
+                            result.HiZSkipUsed = 1.0;
                             previousTime = nextTime;
                             previousDepthDelta = -max(_BurtSSRParams0.y, 0.0001);
                             hasPreviousDepthDelta = true;
@@ -1298,12 +1298,12 @@
 
                             if (shouldResolveProofHit)
                             {
-                                if (result.rawHit <= 0.0)
+                                if (result.RawHit <= 0.0)
                                 {
-                                    result.rawHit = 1.0;
-                                    result.uv = resolvedRawUV;
-                                    result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
-                                    result.depthDelta = resolvedDepthDelta;
+                                    result.RawHit = 1.0;
+                                    result.UV = resolvedRawUV;
+                                    result.Steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                                    result.DepthDelta = resolvedDepthDelta;
                                 }
 
                                 float2 baseCandidateUV = BurtSSRPushHitUVInsideSilhouette(resolvedRawUV, deltaUV);
@@ -1313,14 +1313,14 @@
                                 float candidateSurfaceSupport;
                                 if (BurtSSRFindBestResolvedHitCandidate(baseCandidateUV, deltaUV, originWS, reflectionDirectionWS, minTraceDistance, clippedDistance, candidateUV, candidateDistance, candidateWorldError, candidateSurfaceSupport))
                                 {
-                                    result.hit = 1.0;
-                                    result.rawHit = 1.0;
-                                    result.uv = candidateUV;
-                                    result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
-                                    result.depthDelta = resolvedDepthDelta;
-                                    result.distance = candidateDistance;
-                                    result.worldError = candidateWorldError;
-                                    result.surfaceSupport = candidateSurfaceSupport;
+                                    result.Hit = 1.0;
+                                    result.RawHit = 1.0;
+                                    result.UV = candidateUV;
+                                    result.Steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                                    result.DepthDelta = resolvedDepthDelta;
+                                    result.Distance = candidateDistance;
+                                    result.WorldError = candidateWorldError;
+                                    result.SurfaceSupport = candidateSurfaceSupport;
                                     break;
                                 }
                             }
@@ -1349,7 +1349,7 @@
                     float thickness = BurtSSRAdaptiveThickness(rayLinearDepth, travelDistance);
                     float frontTolerance = max(rayLinearDepth * 0.001, 0.02);
                     float sceneRawDepth;
-                    result.workCost += 5.0;
+                    result.WorkCost += 5.0;
                     if (!BurtSSRTrySampleRayMarchDepth(rayUV, deltaUV, rayLinearDepth, thickness, frontTolerance, sceneRawDepth))
                     {
                         previousTime = rayTime;
@@ -1393,12 +1393,12 @@
                             continue;
                         }
 
-                        if (result.rawHit <= 0.0)
+                        if (result.RawHit <= 0.0)
                         {
-                            result.rawHit = 1.0;
-                            result.uv = refined ? refinedUV : rayUV;
-                            result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
-                            result.depthDelta = refined ? refinedDepthDelta : depthDelta;
+                            result.RawHit = 1.0;
+                            result.UV = refined ? refinedUV : rayUV;
+                            result.Steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                            result.DepthDelta = refined ? refinedDepthDelta : depthDelta;
                         }
 
                         float2 baseCandidateUV = BurtSSRPushHitUVInsideSilhouette(refined ? refinedUV : rayUV, deltaUV);
@@ -1416,25 +1416,25 @@
                             continue;
                         }
 
-                        result.hit = 1.0;
-                        result.rawHit = 1.0;
-                        result.uv = candidateUV;
-                        result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
-                        result.depthDelta = refined ? refinedDepthDelta : depthDelta;
-                        result.distance = candidateDistance;
-                        result.worldError = candidateWorldError;
-                        result.surfaceSupport = candidateSurfaceSupport;
+                        result.Hit = 1.0;
+                        result.RawHit = 1.0;
+                        result.UV = candidateUV;
+                        result.Steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                        result.DepthDelta = refined ? refinedDepthDelta : depthDelta;
+                        result.Distance = candidateDistance;
+                        result.WorldError = candidateWorldError;
+                        result.SurfaceSupport = candidateSurfaceSupport;
                         break;
                     }
 
                     if (nearSurface)
                     {
-                        if (result.rawHit <= 0.0)
+                        if (result.RawHit <= 0.0)
                         {
-                            result.rawHit = 1.0;
-                            result.uv = rayUV;
-                            result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
-                            result.depthDelta = depthDelta;
+                            result.RawHit = 1.0;
+                            result.UV = rayUV;
+                            result.Steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                            result.DepthDelta = depthDelta;
                         }
 
                         float candidateDistance;
@@ -1452,14 +1452,14 @@
                             continue;
                         }
 
-                        result.hit = 1.0;
-                        result.rawHit = 1.0;
-                        result.uv = candidateUV;
-                        result.steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
-                        result.depthDelta = depthDelta;
-                        result.distance = candidateDistance;
-                        result.worldError = candidateWorldError;
-                        result.surfaceSupport = candidateSurfaceSupport;
+                        result.Hit = 1.0;
+                        result.RawHit = 1.0;
+                        result.UV = candidateUV;
+                        result.Steps = (float)iterationIndex / max((float)iterationLimit, 1.0);
+                        result.DepthDelta = depthDelta;
+                        result.Distance = candidateDistance;
+                        result.WorldError = candidateWorldError;
+                        result.SurfaceSupport = candidateSurfaceSupport;
                         break;
                     }
 
@@ -1503,42 +1503,42 @@
             BurtSSRTraceQuality BurtSSREvaluateTraceQuality(BurtSSRHit hit, float3 reflectionDirectionWS, float nDotV, float thickness)
             {
                 BurtSSRTraceQuality quality;
-                quality.edgeFade = hit.hit > 0.0 ? BurtSSREdgeFade(hit.uv) : 0.0;
-                quality.hitNormalWeight = hit.hit > 0.0 ? BurtSSRHitNormalWeight(hit.uv, reflectionDirectionWS) : 0.0;
+                quality.EdgeFade = hit.Hit > 0.0 ? BurtSSREdgeFade(hit.UV) : 0.0;
+                quality.HitNormalWeight = hit.Hit > 0.0 ? BurtSSRHitNormalWeight(hit.UV, reflectionDirectionWS) : 0.0;
                 float3 reflectionDirectionVS = BurtSafeNormalize(mul(_BurtSSRViewMatrix, float4(reflectionDirectionWS, 0.0)).xyz);
-                quality.screenParallelWeight = lerp(0.35, 1.0, smoothstep(0.005, 0.08, abs(reflectionDirectionVS.z)));
-                quality.grazingWeight = smoothstep(0.01, 0.06, nDotV);
-                quality.distanceFade = hit.hit > 0.0 ? saturate(1.0 - hit.distance / max(_BurtSSRParams0.x, 0.01)) : 0.0;
-                quality.distanceFade *= quality.distanceFade;
-                quality.depthError = hit.hit > 0.0 ? abs(hit.depthDelta) / max(thickness * 1.25, 0.0001) : 999.0;
-                quality.depthQuality = hit.hit > 0.0 ? 1.0 - smoothstep(0.85, 1.35, quality.depthError) : 0.0;
-                quality.worldQuality = hit.hit > 0.0 ? 1.0 - smoothstep(0.8, 1.6, hit.worldError) : 0.0;
-                quality.surfaceSupportWeight = hit.hit > 0.0 ? BurtSSRHitContinuityWeight(hit.surfaceSupport, quality.depthError, hit.worldError) : 0.0;
-                quality.resolveQuality = quality.depthQuality * quality.worldQuality;
-                quality.validHit = saturate(hit.hit * quality.hitNormalWeight * quality.screenParallelWeight * quality.grazingWeight * quality.distanceFade * quality.resolveQuality * quality.surfaceSupportWeight);
-                quality.visibilityWeight = saturate(quality.validHit * quality.edgeFade);
+                quality.ScreenParallelWeight = lerp(0.35, 1.0, smoothstep(0.005, 0.08, abs(reflectionDirectionVS.z)));
+                quality.GrazingWeight = smoothstep(0.01, 0.06, nDotV);
+                quality.DistanceFade = hit.Hit > 0.0 ? saturate(1.0 - hit.Distance / max(_BurtSSRParams0.x, 0.01)) : 0.0;
+                quality.DistanceFade *= quality.DistanceFade;
+                quality.DepthError = hit.Hit > 0.0 ? abs(hit.DepthDelta) / max(thickness * 1.25, 0.0001) : 999.0;
+                quality.DepthQuality = hit.Hit > 0.0 ? 1.0 - smoothstep(0.85, 1.35, quality.DepthError) : 0.0;
+                quality.WorldQuality = hit.Hit > 0.0 ? 1.0 - smoothstep(0.8, 1.6, hit.WorldError) : 0.0;
+                quality.SurfaceSupportWeight = hit.Hit > 0.0 ? BurtSSRHitContinuityWeight(hit.SurfaceSupport, quality.DepthError, hit.WorldError) : 0.0;
+                quality.ResolveQuality = quality.DepthQuality * quality.WorldQuality;
+                quality.ValidHit = saturate(hit.Hit * quality.HitNormalWeight * quality.ScreenParallelWeight * quality.GrazingWeight * quality.DistanceFade * quality.ResolveQuality * quality.SurfaceSupportWeight);
+                quality.VisibilityWeight = saturate(quality.ValidHit * quality.EdgeFade);
                 return quality;
             }
 
             float BurtSSRComputeTraceVisibility(BurtSSRHit hit, float3 reflectionDirectionWS, float nDotV, float thickness)
             {
                 BurtSSRTraceQuality quality = BurtSSREvaluateTraceQuality(hit, reflectionDirectionWS, nDotV, thickness);
-                return quality.visibilityWeight;
+                return quality.VisibilityWeight;
             }
 
             float BurtSSRComputeHiZValidationWeight(BurtSSRHit hit, BurtSSRTraceQuality quality)
             {
-                if (hit.hit <= 0.0 || hit.hiZSkipUsed <= 0.0)
+                if (hit.Hit <= 0.0 || hit.HiZSkipUsed <= 0.0)
                 {
                     return 0.0;
                 }
 
-                float lowSupportRisk = 1.0 - smoothstep(0.2, 0.75, hit.surfaceSupport);
-                float depthRisk = smoothstep(0.55, 1.15, quality.depthError);
-                float worldRisk = smoothstep(0.55, 1.25, hit.worldError);
-                float lowVisibilityRisk = 1.0 - smoothstep(0.05, 0.22, quality.visibilityWeight);
+                float lowSupportRisk = 1.0 - smoothstep(0.2, 0.75, hit.SurfaceSupport);
+                float depthRisk = smoothstep(0.55, 1.15, quality.DepthError);
+                float worldRisk = smoothstep(0.55, 1.25, hit.WorldError);
+                float lowVisibilityRisk = 1.0 - smoothstep(0.05, 0.22, quality.VisibilityWeight);
                 float continuityRisk = max(max(depthRisk, worldRisk), lowSupportRisk * 0.8);
-                return saturate(hit.hiZSkipUsed * max(continuityRisk, lowVisibilityRisk * 0.6));
+                return saturate(hit.HiZSkipUsed * max(continuityRisk, lowVisibilityRisk * 0.6));
             }
 
             BurtSSRHit BurtSSRValidateHiZHit(
@@ -1564,8 +1564,8 @@
 
                 // Avoid a second full ray march inside the trace fragment; suspicious HiZ hits are damped instead.
                 float suppression = validationWeight;
-                outputQuality.validHit *= lerp(1.0, 0.45, suppression);
-                outputQuality.visibilityWeight = saturate(outputQuality.validHit * outputQuality.edgeFade);
+                outputQuality.ValidHit *= lerp(1.0, 0.45, suppression);
+                outputQuality.VisibilityWeight = saturate(outputQuality.ValidHit * outputQuality.EdgeFade);
                 return hit;
             }
 
@@ -1583,23 +1583,23 @@
                 float3 reflectionDirectionWS = BurtGetIndirectSpecularReflectionDirectionWS(geometryData, 0.0, perceptualRoughness);
                 float originBias = min(thickness * 0.08, 0.025);
                 float3 originWS = positionWS + normalWS * originBias + reflectionDirectionWS * originBias;
-                layer.hit = BurtSSRCreateEmptyHit();
+                layer.Hit = BurtSSRCreateEmptyHit();
                 if (roughnessIntensity > 0.0001)
                 {
-                    layer.hit = BurtSSRMarch(originWS, reflectionDirectionWS);
+                    layer.Hit = BurtSSRMarch(originWS, reflectionDirectionWS);
                 }
-                layer.quality = BurtSSREvaluateTraceQuality(layer.hit, reflectionDirectionWS, nDotV, thickness);
+                layer.Quality = BurtSSREvaluateTraceQuality(layer.Hit, reflectionDirectionWS, nDotV, thickness);
                 BurtSSRTraceQuality validatedQuality;
-                layer.hit = BurtSSRValidateHiZHit(originWS, reflectionDirectionWS, nDotV, thickness, layer.hit, layer.quality, validatedQuality);
-                layer.quality = validatedQuality;
-                layer.color = tex2D(_BurtSSRSourceColorTexture, layer.hit.uv).rgb * layer.hit.hit;
-                layer.visibility = layer.quality.visibilityWeight;
+                layer.Hit = BurtSSRValidateHiZHit(originWS, reflectionDirectionWS, nDotV, thickness, layer.Hit, layer.Quality, validatedQuality);
+                layer.Quality = validatedQuality;
+                layer.Color = tex2D(_BurtSSRSourceColorTexture, layer.Hit.UV).rgb * layer.Hit.Hit;
+                layer.Visibility = layer.Quality.VisibilityWeight;
                 return layer;
             }
 
             float4 FragSSR(Varyings input) : SV_Target
             {
-                float2 screenUV = input.screenUV;
+                float2 screenUV = input.ScreenUV;
                 int debugMode = (int)_BurtSSRParams1.z;
                 float rawDepth = BurtSampleDeferredRawDepth(screenUV);
 
@@ -1609,7 +1609,7 @@
                 }
 
                 BurtGBufferData gbufferData = BurtSampleDeferredGBufferData(screenUV);
-                if (BurtIsActiveHairShadingModel(gbufferData.shadingModelID) || BurtIsActiveFurShadingModel(gbufferData.shadingModelID))
+                if (BurtIsActiveHairShadingModel(gbufferData.ShadingModelID) || BurtIsActiveFurShadingModel(gbufferData.ShadingModelID))
                 {
                     bool traceDebugMode = (debugMode > 0 && debugMode <= 8) || (debugMode >= 16 && debugMode <= 31);
                     return traceDebugMode ? float4(0.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 0.0);
@@ -1630,7 +1630,7 @@
                     }
 
                     BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
-                    float3 fresnel = F_Schlick(materialData.f0, materialData.f90, nDotV);
+                    float3 fresnel = F_Schlick(materialData.F0, materialData.F90, nDotV);
                     float materialWeight = saturate(max(max(fresnel.r, fresnel.g), fresnel.b) * roughnessIntensity);
                     if (materialWeight <= 0.002)
                     {
@@ -1640,35 +1640,35 @@
 
                 float thickness = max(_BurtSSRParams0.y, 0.0001);
                 BurtSSRLayerSample baseLayer = BurtSSRTraceLayer(positionWS, viewDirectionWS, normalWS, reflectionRoughness, thickness, nDotV, roughnessIntensity);
-                BurtSSRHit hit = baseLayer.hit;
-                BurtSSRTraceQuality traceQuality = baseLayer.quality;
-                float edgeFade = traceQuality.edgeFade;
-                float hitNormalWeight = traceQuality.hitNormalWeight;
-                float screenParallelWeight = traceQuality.screenParallelWeight;
-                float grazingWeight = traceQuality.grazingWeight;
-                float distanceFade = traceQuality.distanceFade;
-                float depthError = traceQuality.depthError;
-                float depthQuality = traceQuality.depthQuality;
-                float worldQuality = traceQuality.worldQuality;
-                float resolveQuality = traceQuality.resolveQuality;
-                float validHit = traceQuality.validHit;
-                float visibilityWeight = traceQuality.visibilityWeight;
-                float3 reflectionColor = baseLayer.color;
+                BurtSSRHit hit = baseLayer.Hit;
+                BurtSSRTraceQuality traceQuality = baseLayer.Quality;
+                float edgeFade = traceQuality.EdgeFade;
+                float hitNormalWeight = traceQuality.HitNormalWeight;
+                float screenParallelWeight = traceQuality.ScreenParallelWeight;
+                float grazingWeight = traceQuality.GrazingWeight;
+                float distanceFade = traceQuality.DistanceFade;
+                float depthError = traceQuality.DepthError;
+                float depthQuality = traceQuality.DepthQuality;
+                float worldQuality = traceQuality.WorldQuality;
+                float resolveQuality = traceQuality.ResolveQuality;
+                float validHit = traceQuality.ValidHit;
+                float visibilityWeight = traceQuality.VisibilityWeight;
+                float3 reflectionColor = baseLayer.Color;
 
                 if (debugMode == 1)
                 {
-                    float rawHitMask = saturate(max(hit.rawHit, hit.hit));
+                    float rawHitMask = saturate(max(hit.RawHit, hit.Hit));
                     return float4(rawHitMask, rawHitMask, rawHitMask, 1.0);
                 }
 
                 if (debugMode == 2)
                 {
-                    return float4(hit.uv * validHit, 0.0, 1.0);
+                    return float4(hit.UV * validHit, 0.0, 1.0);
                 }
 
                 if (debugMode == 3)
                 {
-                    float visibleSteps = hit.steps * saturate(max(hit.rawHit, hit.hit));
+                    float visibleSteps = hit.Steps * saturate(max(hit.RawHit, hit.Hit));
                     return float4(visibleSteps, visibleSteps, visibleSteps, 1.0);
                 }
 
@@ -1684,23 +1684,23 @@
 
                 if (debugMode == 6)
                 {
-                    if (hit.hit <= 0.0)
+                    if (hit.Hit <= 0.0)
                     {
                         return float4(0.0, 0.0, 0.0, 1.0);
                     }
 
-                    float deltaDebug = saturate(abs(hit.depthDelta) / max(thickness * 1.25, 0.0001));
+                    float deltaDebug = saturate(abs(hit.DepthDelta) / max(thickness * 1.25, 0.0001));
                     return float4(deltaDebug, 1.0 - deltaDebug, 0.0, 1.0);
                 }
 
                 if (debugMode == 7)
                 {
-                    if (hit.hit <= 0.0)
+                    if (hit.Hit <= 0.0)
                     {
                         return float4(0.0, 0.0, 0.0, 1.0);
                     }
 
-                    float worldErrorDebug = saturate(hit.worldError);
+                    float worldErrorDebug = saturate(hit.WorldError);
                     return float4(worldErrorDebug, 1.0 - worldErrorDebug, 0.0, 1.0);
                 }
 
@@ -1721,7 +1721,7 @@
 
                 if (debugMode == 19)
                 {
-                    return float4(hit.surfaceSupport, hit.surfaceSupport, hit.surfaceSupport, 1.0);
+                    return float4(hit.SurfaceSupport, hit.SurfaceSupport, hit.SurfaceSupport, 1.0);
                 }
 
                 if (debugMode >= 20 && debugMode <= 30)
@@ -1737,49 +1737,49 @@
                         return float4(0.0, 0.0, 0.0, 1.0);
                     }
 
-                    float skipUsed = saturate(hit.hiZSkipUsed);
-                    float skipCandidate = saturate(hit.hiZSkipCandidate);
-                    float divergence = saturate(hit.hiZDivergence);
-                    float probeBlocked = saturate(hit.hiZProbeBlocked);
+                    float skipUsed = saturate(hit.HiZSkipUsed);
+                    float skipCandidate = saturate(hit.HiZSkipCandidate);
+                    float divergence = saturate(hit.HiZDivergence);
+                    float probeBlocked = saturate(hit.HiZProbeBlocked);
                     return float4(max(divergence, probeBlocked), skipUsed * (1.0 - divergence), skipCandidate, 1.0);
                 }
 
                 #if BURT_ENABLE_CLEAR_COAT_SHADING
                     BurtPBRMaterialData clearCoatMaterialData = BurtPreparePBRMaterialData(gbufferData);
-                    float clearCoatMask = saturate(clearCoatMaterialData.clearCoatMask);
+                    float clearCoatMask = saturate(clearCoatMaterialData.ClearCoatMask);
                     if (clearCoatMask > 0.0001)
                     {
                         float3 clearCoatNormalWS = BurtGetClearCoatNormalWS(gbufferData);
-                        float clearCoatRoughness = ClampPerceptualRoughness(clearCoatMaterialData.clearCoatRoughness);
+                        float clearCoatRoughness = ClampPerceptualRoughness(clearCoatMaterialData.ClearCoatRoughness);
                         float clearCoatNoV = saturate(dot(clearCoatNormalWS, viewDirectionWS));
                         float clearCoatRoughnessIntensity = saturate((_BurtSSRParams0.w - clearCoatRoughness) / max(_BurtSSRParams0.w, 0.0001)) * saturate(_BurtSSRParams0.z);
                         BurtSSRLayerSample topLayer = BurtSSRTraceLayer(positionWS, viewDirectionWS, clearCoatNormalWS, clearCoatRoughness, thickness, clearCoatNoV, clearCoatRoughnessIntensity);
 
                         BurtPBRMaterialData topMaterialData = clearCoatMaterialData;
-                        topMaterialData.baseColor = float3(1.0, 1.0, 1.0);
-                        topMaterialData.metallic = 0.0;
-                        topMaterialData.anisotropy = 0.0;
-                        topMaterialData.reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
-                        topMaterialData.diffuseColor = float3(0.0, 0.0, 0.0);
-                        topMaterialData.f0 = float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0);
-                        topMaterialData.f90 = float3(1.0, 1.0, 1.0);
-                        topMaterialData.perceptualRoughness = clearCoatRoughness;
-                        topMaterialData.linearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatRoughness);
-                        topMaterialData.a2 = LinearRoughnessToA2(topMaterialData.linearRoughness);
-                        topMaterialData.clearCoatMask = 0.0;
+                        topMaterialData.BaseColor = float3(1.0, 1.0, 1.0);
+                        topMaterialData.Metallic = 0.0;
+                        topMaterialData.Anisotropy = 0.0;
+                        topMaterialData.Reflectance = BURT_INPUT_DEFAULT_REFLECTANCE;
+                        topMaterialData.DiffuseColor = float3(0.0, 0.0, 0.0);
+                        topMaterialData.F0 = float3(BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0, BURT_CLEAR_COAT_F0);
+                        topMaterialData.F90 = float3(1.0, 1.0, 1.0);
+                        topMaterialData.PerceptualRoughness = clearCoatRoughness;
+                        topMaterialData.LinearRoughness = PerceptualRoughnessToLinearRoughness(clearCoatRoughness);
+                        topMaterialData.A2 = LinearRoughnessToA2(topMaterialData.LinearRoughness);
+                        topMaterialData.ClearCoatMask = 0.0;
 
                         float2 topDFG = GetSpecularDFGTerms(clearCoatRoughness, clearCoatNoV);
-                        float3 topEnvBRDF = EvalSpecularDFG(topMaterialData.f0, topMaterialData.f90, topDFG);
-                        float3 layerTransmission = BurtClearCoatFresnelTransmission(topEnvBRDF) * BurtSimpleClearCoatTransmittanceFromView(clearCoatNoV, clearCoatMaterialData.metallic, clearCoatMaterialData.baseColor);
+                        float3 topEnvBRDF = EvalSpecularDFG(topMaterialData.F0, topMaterialData.F90, topDFG);
+                        float3 layerTransmission = BurtClearCoatFresnelTransmission(topEnvBRDF) * BurtSimpleClearCoatTransmittanceFromView(clearCoatNoV, clearCoatMaterialData.Metallic, clearCoatMaterialData.BaseColor);
                         float transmissionWeight = saturate(max(max(layerTransmission.r, layerTransmission.g), layerTransmission.b));
-                        float baseLayerConfidence = smoothstep(0.01, 0.12, baseLayer.visibility);
-                        float topLayerConfidence = smoothstep(0.01, 0.12, topLayer.visibility);
-                        float3 safeBaseLayerColor = lerp(topLayer.color, baseLayer.color, baseLayerConfidence);
-                        float3 safeTopLayerColor = lerp(safeBaseLayerColor, topLayer.color, topLayerConfidence);
+                        float baseLayerConfidence = smoothstep(0.01, 0.12, baseLayer.Visibility);
+                        float topLayerConfidence = smoothstep(0.01, 0.12, topLayer.Visibility);
+                        float3 safeBaseLayerColor = lerp(topLayer.Color, baseLayer.Color, baseLayerConfidence);
+                        float3 safeTopLayerColor = lerp(safeBaseLayerColor, topLayer.Color, topLayerConfidence);
                         float3 dualLayerColor = safeBaseLayerColor * layerTransmission + safeTopLayerColor * clearCoatMask;
-                        float dualLayerVisibility = saturate(max(baseLayer.visibility * transmissionWeight, topLayer.visibility * clearCoatMask));
-                        reflectionColor = lerp(baseLayer.color, dualLayerColor, clearCoatMask);
-                        visibilityWeight = lerp(baseLayer.visibility, dualLayerVisibility, clearCoatMask);
+                        float dualLayerVisibility = saturate(max(baseLayer.Visibility * transmissionWeight, topLayer.Visibility * clearCoatMask));
+                        reflectionColor = lerp(baseLayer.Color, dualLayerColor, clearCoatMask);
+                        visibilityWeight = lerp(baseLayer.Visibility, dualLayerVisibility, clearCoatMask);
                     }
                 #endif
 

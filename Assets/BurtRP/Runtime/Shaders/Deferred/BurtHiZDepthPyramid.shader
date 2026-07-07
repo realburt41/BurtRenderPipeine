@@ -21,26 +21,26 @@ Shader "Hidden/BurtRP/HiZDepthPyramid"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
             float FragCopyDepth(Varyings input) : SV_Target
             {
-                return SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.screenUV);
+                return SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.ScreenUV);
             }
             ENDHLSL
         }
@@ -65,20 +65,20 @@ Shader "Hidden/BurtRP/HiZDepthPyramid"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -100,7 +100,7 @@ Shader "Hidden/BurtRP/HiZDepthPyramid"
 
             float FragReduceClosest(Varyings input) : SV_Target
             {
-                float2 sourceBasePixel = input.positionCS.xy * 2.0 - 0.5;
+                float2 sourceBasePixel = input.PositionCS.xy * 2.0 - 0.5;
                 float4 sourceDepth;
                 sourceDepth.x = SampleSourcePixel(sourceBasePixel);
                 sourceDepth.y = SampleSourcePixel(sourceBasePixel + float2(1.0, 0.0));

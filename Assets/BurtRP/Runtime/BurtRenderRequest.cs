@@ -151,7 +151,7 @@ namespace Burt.RenderPipeline
 
             BurtEditorGizmoUtility.EmitWorldGeometryForSceneView(camera); // SceneView 剔除前注入编辑器世界几何，恢复 SRP Gizmos/辅助绘制数据。
             BurtTemporalAAUtility.RecoverCameraProjectionForCulling(camera); // 剔除前把 TAA/异常留下的 custom projection 交还给 Unity，避免 GameView 只剩天空盒。
-            BurtPostProcessUtility.UpdateVolumeStack(camera, asset); // Cull 前刷新 VolumeStack，让 Global Volume 里的阴影距离参与 shadow caster 剔除。
+            PostProcessUtility.UpdateVolumeStack(camera, asset); // Cull 前刷新 VolumeStack，让 Global Volume 里的阴影距离参与 shadow caster 剔除。
 
             // 尝试从相机获取剔除参数。
             if (!camera.TryGetCullingParameters(out var cullingParameters))

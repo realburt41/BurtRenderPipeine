@@ -1,3 +1,4 @@
+using Burt.RenderPipeline;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -7,8 +8,6 @@ namespace Burt.RenderPipeline.Editor
     public sealed class BurtMultipassFurShaderGUI : ShaderGUI
     {
         private const string DirectionMapKeyword = "BURT_MULTIPASS_FUR_USE_DIRECTION_MAP";
-        private const int GBufferStencilFurRef = 0xE0;
-        private const int GBufferStencilShadingModelMask = 0xE0;
 
         private static readonly GUIContent SurfaceOptionsLabel = new GUIContent("Multipass Fur Surface Options");
         private static readonly GUIContent BaseInputsLabel = new GUIContent("Base Inputs");
@@ -141,8 +140,13 @@ namespace Burt.RenderPipeline.Editor
                 return;
             }
 
-            material.SetFloat("_BurtGBufferStencilRef", GBufferStencilFurRef);
-            material.SetFloat("_BurtGBufferStencilWriteMask", GBufferStencilShadingModelMask);
+            material.SetFloat("_BurtGBufferStencilRef", BurtShadingModelIds.DeferredStencilFurRef);
+            if (material.HasProperty("_BurtGBufferStencilReadMask"))
+            {
+                material.SetFloat("_BurtGBufferStencilReadMask", BurtShadingModelIds.DeferredStencilShadingModelMask);
+            }
+
+            material.SetFloat("_BurtGBufferStencilWriteMask", BurtShadingModelIds.DeferredStencilShadingModelMask);
         }
 
         private void CacheProperties()

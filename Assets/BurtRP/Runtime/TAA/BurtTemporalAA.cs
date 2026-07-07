@@ -232,6 +232,8 @@ namespace Burt.RenderPipeline
             public Vector2 PreviousRenderScale = Vector2.one;
             public Vector4 PreviousTemporalAAPostProcessSignature0;
             public Vector4 PreviousTemporalAAPostProcessSignature1;
+            public Vector4 PreviousTemporalAAPostProcessSignature2;
+            public Vector4 PreviousTemporalAAPostProcessSignature3;
             public float PreviousPreExposure = 1f;
             public Matrix4x4 PreviousViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredViewProjectionMatrix = Matrix4x4.identity;
@@ -323,7 +325,7 @@ namespace Burt.RenderPipeline
             return settings;
         }
 
-        private static BurtTemporalAAVolumeComponent GetTemporalAAVolumeComponent()
+        private static TemporalAAVolumeComponent GetTemporalAAVolumeComponent()
         {
             var volumeManager = VolumeManager.instance;
             if (volumeManager == null || volumeManager.stack == null)
@@ -331,7 +333,7 @@ namespace Burt.RenderPipeline
                 return null;
             }
 
-            return volumeManager.stack.GetComponent<BurtTemporalAAVolumeComponent>();
+            return volumeManager.stack.GetComponent<TemporalAAVolumeComponent>();
         }
 
         public static BurtTemporalAARequestState PrepareRequest(BurtRenderRequest request, BurtRenderPipelineAsset asset)
@@ -352,7 +354,7 @@ namespace Burt.RenderPipeline
                 return BurtTemporalAARequestState.CreateDisabled(viewMatrix, projectionMatrix);
             }
 
-            var settings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
+            var settings = PostProcessUtility.ResolveTemporalAASettings(request, asset);
             settings = ApplyTemporalAAViewJitterScale(settings, camera);
             settings = ApplyTemporalAADebugOverrides(settings, out var jitterFrameOverride);
             var cameraId = camera.GetInstanceID();
@@ -360,8 +362,8 @@ namespace Burt.RenderPipeline
             state.Camera = camera;
             PruneDisposedCameraStates();
             var rendererMode = asset != null ? asset.RendererMode : BurtRendererMode.Forward;
-            ResolveTemporalAAPostProcessSignature(out var postProcessSignature0, out var postProcessSignature1);
-            var currentPreExposure = BurtPreExposureUtility.ResolveForFrame(request, asset).PreExposure;
+            ResolveTemporalAAPostProcessSignature(out var postProcessSignature0, out var postProcessSignature1, out var postProcessSignature2, out var postProcessSignature3);
+            var currentPreExposure = PreExposureUtility.ResolveForFrame(request, asset).PreExposure;
             var previousPreExposure = state.HasPreviousCameraState ? state.PreviousPreExposure : currentPreExposure;
             var historyExposureCorrection = currentPreExposure / Mathf.Max(previousPreExposure, 0.0001f);
             var colorDescriptor = CreateColorHistoryDescriptor(camera);
@@ -383,6 +385,8 @@ namespace Burt.RenderPipeline
                 renderScale,
                 postProcessSignature0,
                 postProcessSignature1,
+                postProcessSignature2,
+                postProcessSignature3,
                 projectionMatrix,
                 descriptorsMatch);
             if (!layoutMatches && string.IsNullOrEmpty(invalidationReason))
@@ -463,7 +467,7 @@ namespace Burt.RenderPipeline
             state.PreviousTargetWidth = targetWidth;
             state.PreviousTargetHeight = targetHeight;
             state.PreviousRenderScale = CalculateRenderScale(camera, colorDescriptor);
-            ResolveTemporalAAPostProcessSignature(out state.PreviousTemporalAAPostProcessSignature0, out state.PreviousTemporalAAPostProcessSignature1);
+            ResolveTemporalAAPostProcessSignature(out state.PreviousTemporalAAPostProcessSignature0, out state.PreviousTemporalAAPostProcessSignature1, out state.PreviousTemporalAAPostProcessSignature2, out state.PreviousTemporalAAPostProcessSignature3);
             state.PreviousPreExposure = temporalAA.CurrentPreExposure;
             state.PreviousViewProjectionMatrix = temporalAA.CurrentViewProjectionMatrix;
             state.PreviousNonJitteredViewProjectionMatrix = temporalAA.CurrentNonJitteredViewProjectionMatrix;
@@ -523,15 +527,15 @@ namespace Burt.RenderPipeline
                 return "AuxiliaryCamera";
             }
 
-            if (BurtPostProcessUtility.IsPostProcessSuppressedByShadingDebug())
+            if (PostProcessUtility.IsPostProcessSuppressedByShadingDebug())
             {
                 return "PostProcessSuppressedByShadingDebug";
             }
 
-            var settings = BurtPostProcessUtility.ResolveTemporalAASettings(request, asset);
+            var settings = PostProcessUtility.ResolveTemporalAASettings(request, asset);
             if (!settings.Enabled)
             {
-                return BurtPostProcessUtility.ResolveTemporalAAConfigurationDisabledReason(request, asset) ?? "DisabledByVolumeOrAsset";
+                return PostProcessUtility.ResolveTemporalAAConfigurationDisabledReason(request, asset) ?? "DisabledByVolumeOrAsset";
             }
 
             if (renderOptions != null && renderOptions.UseSharedRenderTargets && renderOptions.RequestCountInStack > 1)
@@ -544,7 +548,7 @@ namespace Burt.RenderPipeline
                 return "PostProcessNotFinalBlitRequest";
             }
 
-            if (!BurtPostProcessUtility.ShouldUsePostProcessFramework(request, asset))
+            if (!PostProcessUtility.ShouldUsePostProcessFramework(request, asset))
             {
                 return "PostProcessFrameworkUnavailable";
             }
@@ -560,7 +564,8 @@ namespace Burt.RenderPipeline
                 || mode == BurtShadingDebugMode.TemporalAAPrevUseCount
                 || mode == BurtShadingDebugMode.TemporalAAMetadata
                 || mode == BurtShadingDebugMode.TemporalAAObjectMotionMask
-                || mode == BurtShadingDebugMode.TemporalAAUpscaleState;
+                || mode == BurtShadingDebugMode.TemporalAAUpscaleState
+                || mode == BurtShadingDebugMode.TemporalAAStencilMask;
         }
 
         public static BurtTemporalAAHistoryTextures EnsureHistoryTextures(Camera camera, out bool historyValid)
@@ -792,6 +797,8 @@ namespace Burt.RenderPipeline
             Vector2 renderScale,
             Vector4 postProcessSignature0,
             Vector4 postProcessSignature1,
+            Vector4 postProcessSignature2,
+            Vector4 postProcessSignature3,
             Matrix4x4 projectionMatrix,
             bool descriptorsMatch)
         {
@@ -826,7 +833,9 @@ namespace Burt.RenderPipeline
             }
 
             if (VectorChanged(postProcessSignature0, state.PreviousTemporalAAPostProcessSignature0, TemporalAAPostProcessSignatureEpsilon)
-                || VectorChanged(postProcessSignature1, state.PreviousTemporalAAPostProcessSignature1, TemporalAAPostProcessSignatureEpsilon))
+                || VectorChanged(postProcessSignature1, state.PreviousTemporalAAPostProcessSignature1, TemporalAAPostProcessSignatureEpsilon)
+                || VectorChanged(postProcessSignature2, state.PreviousTemporalAAPostProcessSignature2, TemporalAAPostProcessSignatureEpsilon)
+                || VectorChanged(postProcessSignature3, state.PreviousTemporalAAPostProcessSignature3, TemporalAAPostProcessSignatureEpsilon))
             {
                 return "PostProcessColorChanged";
             }
@@ -953,7 +962,7 @@ namespace Burt.RenderPipeline
                 || FloatChanged(current.w, previous.w, epsilon);
         }
 
-        private static void ResolveTemporalAAPostProcessSignature(out Vector4 signature0, out Vector4 signature1)
+        private static void ResolveTemporalAAPostProcessSignature(out Vector4 signature0, out Vector4 signature1, out Vector4 signature2, out Vector4 signature3)
         {
             var volumeManager = VolumeManager.instance;
             var stack = volumeManager != null ? volumeManager.stack : null;
@@ -961,21 +970,25 @@ namespace Burt.RenderPipeline
             {
                 signature0 = Vector4.zero;
                 signature1 = Vector4.zero;
+                signature2 = Vector4.zero;
+                signature3 = Vector4.zero;
                 return;
             }
 
-            var tonemapping = stack.GetComponent<BurtTonemappingVolumeComponent>();
-            var exposure = stack.GetComponent<BurtExposureVolumeComponent>();
-            var colorAdjustments = stack.GetComponent<BurtColorAdjustmentsVolumeComponent>();
-            var temporalAA = stack.GetComponent<BurtTemporalAAVolumeComponent>();
+            var tonemapping = stack.GetComponent<TonemappingVolumeComponent>();
+            var exposure = stack.GetComponent<ExposureVolumeComponent>();
+            var colorAdjustments = stack.GetComponent<ColorAdjustmentsVolumeComponent>();
+            var vignette = stack.GetComponent<VignetteVolumeComponent>();
+            var temporalAA = stack.GetComponent<TemporalAAVolumeComponent>();
             var tonemappingEnabled = tonemapping != null && tonemapping.IsEnabled();
             var exposureEnabled = exposure != null && exposure.IsEnabled();
             var colorAdjustmentsEnabled = colorAdjustments != null && colorAdjustments.IsEnabled();
+            var vignetteEnabled = vignette != null && vignette.IsEnabled();
             var temporalAAUpscaleFactor = temporalAA != null && temporalAA.IsEnabled() ? temporalAA.upscaleFactor.value : BurtTemporalAASettings.Default.UpscaleFactor;
             var exposureMultiplier = exposureEnabled &&
-                exposure.mode.value != BurtExposureMode.Automatic &&
-                exposure.mode.value != BurtExposureMode.AutomaticHistogram
-                ? new BurtPhysicalExposureSettings(
+                exposure.mode.value != ExposureMode.Automatic &&
+                exposure.mode.value != ExposureMode.AutomaticHistogram
+                ? new PhysicalExposureSettings(
                     exposure.mode.value,
                     exposure.manualEV100.value,
                     exposure.iso.value,
@@ -984,10 +997,16 @@ namespace Burt.RenderPipeline
                     exposure.calibration.value,
                     exposure.compensation.value).Multiplier
                 : 1f;
-            var saturation = colorAdjustmentsEnabled ? colorAdjustments.saturation.value : BurtColorAdjustmentsSettings.DefaultSaturation;
-            var contrast = colorAdjustmentsEnabled ? colorAdjustments.contrast.value : BurtColorAdjustmentsSettings.DefaultContrast;
-            var gamma = colorAdjustmentsEnabled ? colorAdjustments.gamma.value : BurtColorAdjustmentsSettings.DefaultGamma;
-            var colorFilter = colorAdjustmentsEnabled ? colorAdjustments.colorFilter.value : BurtColorAdjustmentsSettings.DefaultColorFilter;
+            var saturation = colorAdjustmentsEnabled ? colorAdjustments.saturation.value : ColorAdjustmentsSettings.DefaultSaturation;
+            var contrast = colorAdjustmentsEnabled ? colorAdjustments.contrast.value : ColorAdjustmentsSettings.DefaultContrast;
+            var gamma = colorAdjustmentsEnabled ? colorAdjustments.gamma.value : ColorAdjustmentsSettings.DefaultGamma;
+            var colorFilter = colorAdjustmentsEnabled ? colorAdjustments.colorFilter.value : ColorAdjustmentsSettings.DefaultColorFilter;
+            var vignetteColor = vignetteEnabled ? vignette.color.value : VignetteSettings.DefaultColor;
+            var vignetteIntensity = vignetteEnabled ? vignette.intensity.value : VignetteSettings.DefaultIntensity;
+            var vignetteEdgeWidth = vignetteEnabled ? vignette.edgeWidth.value : VignetteSettings.DefaultEdgeWidth;
+            var vignetteEdgeSoftness = vignetteEnabled ? vignette.edgeSoftness.value : VignetteSettings.DefaultEdgeSoftness;
+            var vignetteFisheyeFovDeg = vignetteEnabled ? vignette.fisheyeFovDeg.value : VignetteSettings.DefaultFisheyeFovDeg;
+            var vignetteFollowAspect = vignetteEnabled && vignette.followAspect.value ? 1f : 0f;
             signature0 = new Vector4(
                 exposureMultiplier,
                 saturation,
@@ -998,6 +1017,16 @@ namespace Burt.RenderPipeline
                 colorFilter.g,
                 colorFilter.b,
                 (tonemappingEnabled ? (int)tonemapping.mode.value + 1 : 0f) + Mathf.Clamp(temporalAAUpscaleFactor, 1f, 2f) * 0.01f);
+            signature2 = new Vector4(
+                vignetteColor.r,
+                vignetteColor.g,
+                vignetteColor.b,
+                vignetteColor.a * vignetteIntensity);
+            signature3 = new Vector4(
+                vignetteEdgeWidth,
+                vignetteEdgeSoftness,
+                vignetteFisheyeFovDeg,
+                vignetteFollowAspect);
         }
 
         private static bool ProjectionChanged(Matrix4x4 current, Matrix4x4 previous)

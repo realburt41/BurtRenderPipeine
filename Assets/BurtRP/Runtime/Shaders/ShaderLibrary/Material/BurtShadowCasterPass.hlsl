@@ -34,22 +34,22 @@ float _BurtMainLightShadowNormalBias;
 
 struct ShadowAttributes
 {
-    float4 positionOS : POSITION;
-    float3 normalOS : NORMAL;
+    float4 PositionOS : POSITION;
+    float3 NormalOS : NORMAL;
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        float4 color : COLOR;
+        float4 Color : COLOR;
     #endif
     #if BURT_SHADOW_CASTER_USES_BASE_MAP_UV
-    float2 uv0 : TEXCOORD0;
+    float2 UV0 : TEXCOORD0;
     #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct ShadowVaryings
 {
-    float4 positionCS : SV_POSITION;
+    float4 PositionCS : SV_POSITION;
     #if BURT_SHADOW_CASTER_USES_BASE_MAP_UV
-    float2 baseMapUV : TEXCOORD0;
+    float2 BaseMapUV : TEXCOORD0;
     #endif
 };
 
@@ -95,33 +95,37 @@ float3 ApplyBurtShadowCasterNormalBias(float4 positionOS, float3 normalOS)
 ShadowVaryings VertShadow(ShadowAttributes input)
 {
     UNITY_SETUP_INSTANCE_ID(input);
-    float4 positionOS = BurtApplyMultipassObjectShellOffset(input.positionOS, input.normalOS);
+    float4 positionOS = BurtApplyMultipassObjectShellOffset(input.PositionOS, input.NormalOS);
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+        positionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.Color, _Time.y);
     #elif defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        positionOS = BurtApplyFoliageVertexAnimationObjectSpace(positionOS, input.color, _Time.y);
+        #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+        positionOS = BurtApplyGrassVertexAnimationObjectSpace(positionOS, input.NormalOS, input.Color, _Time.y);
+        #else
+        positionOS = BurtApplyFoliageVertexAnimationObjectSpace(positionOS, input.Color, _Time.y);
+        #endif
     #endif
     #if (defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)) && defined(BURT_FOLIAGE_USE_BAKED_NORMALS)
         positionOS.xyz *= 0.98f;
     #endif
 
     ShadowVaryings output;
-    float3 biasedPositionWS = ApplyBurtShadowCasterNormalBias(positionOS, input.normalOS);
-    output.positionCS = mul(UNITY_MATRIX_VP, float4(biasedPositionWS, 1.0f));
+    float3 biasedPositionWS = ApplyBurtShadowCasterNormalBias(positionOS, input.NormalOS);
+    output.PositionCS = mul(UNITY_MATRIX_VP, float4(biasedPositionWS, 1.0f));
 
 #if !defined(_CASTING_PUNCTUAL_LIGHT_SHADOW)
     #if UNITY_REVERSED_Z
-        output.positionCS.z = min(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
+        output.PositionCS.z = min(output.PositionCS.z, UNITY_NEAR_CLIP_VALUE);
     #else
-        output.positionCS.z = max(output.positionCS.z, UNITY_NEAR_CLIP_VALUE);
+        output.PositionCS.z = max(output.PositionCS.z, UNITY_NEAR_CLIP_VALUE);
     #endif
 #endif
 
     #if BURT_SHADOW_CASTER_USES_BASE_MAP_UV
     #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
-        output.baseMapUV = input.uv0;
+        output.BaseMapUV = input.UV0;
     #else
-        output.baseMapUV = BurtTransformBaseMapUV(input.uv0, _BaseMap_ST);
+        output.BaseMapUV = BurtTransformBaseMapUV(input.UV0, _BaseMap_ST);
     #endif
     #endif
 
@@ -131,11 +135,15 @@ ShadowVaryings VertShadow(ShadowAttributes input)
 float4 FragShadow(ShadowVaryings input) : SV_Target
 {
 #if BURT_SHADOW_CASTER_ALPHA_CLIP
-    float4 baseColor = BurtSampleBaseMap(input.baseMapUV) * _BaseColor;
+    float4 baseColor = BurtSampleBaseMap(input.BaseMapUV) * _BaseColor;
     #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
         BurtApplyAlphaClip(saturate(baseColor.a - saturate(_ShadowCutOff)), _AlphaClip, 0.0f);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE)
-        float alpha = BURT_SAMPLE_TEXTURE2D_REPEAT(_AlphaMap, input.baseMapUV).r;
+        #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+            float alpha = SAMPLE_TEXTURE2D_BIAS(_AlphaMap, sampler_LinearRepeat, input.BaseMapUV, -1.0f).r;
+        #else
+            float alpha = SAMPLE_TEXTURE2D(_AlphaMap, sampler_LinearRepeat, input.BaseMapUV).r;
+        #endif
         BurtApplyAlphaClip(alpha, _AlphaClip, _Cutoff);
     #else
         BurtApplyAlphaClip(baseColor.a, _AlphaClip, _Cutoff);

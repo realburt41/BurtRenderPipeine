@@ -11,7 +11,7 @@ Shader "BurtRP/Subsurface"
         _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
 
         // 定义 PBR Mask Map：R=金属度，G=环境遮蔽，B=预留，A=光滑度。
-        _MaskMap ("Mask Map (R Metallic, G Occlusion, A Smoothness)", 2D) = "white" {}
+        _MaskMap ("Mask Map (R Metallic, G Occlusion, B 3S Curvature, A Smoothness)", 2D) = "white" {}
 
         // 定义切线空间法线贴图，Forward 光照会用它改变每个片元的世界空间法线。
         [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
@@ -44,7 +44,7 @@ Shader "BurtRP/Subsurface"
         // Enables cutout rendering when set to 1 so every Lit pass discards pixels below the same alpha threshold.
         [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 0
 
-        // Stores the alpha cutoff threshold used by Forward, DepthOnly, and ShadowCaster to keep color, depth, and shadows consistent.
+        // Stores the alpha cutoff threshold used by DepthNormals, GBuffer, and ShadowCaster to keep color, depth, and shadows consistent.
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
 
         [HideInInspector] _Surface ("Surface Type", Float) = 0
@@ -58,7 +58,10 @@ Shader "BurtRP/Subsurface"
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 64
+        [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
+        [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
 
     // Defines the runtime SubShader used by BurtRP.
@@ -67,63 +70,20 @@ Shader "BurtRP/Subsurface"
         // Marks this shader as a BurtRP opaque shader so materials are easy to identify.
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
 
-        // Defines the depth-only pass used by Burt Depth Prepass.
-        Pass
-        {
-            // Names this pass for Frame Debugger readability.
-            Name "Burt Lit Depth Only"
-
-            // Matches BurtDepthPrepass because BurtRP looks for this LightMode.
-            Tags { "LightMode" = "BurtDepthOnly" }
-
-            // Disables color writes so this pass only affects CameraDepth.
-            ColorMask 0
-
-            // Enables depth writes so opaque lit objects can populate CameraDepth.
-            ZWrite On
-
-            // Uses less-equal depth testing, matching the forward color pass.
-            ZTest LEqual
-
-            // Applies the ShaderGUI resolved culling mode so depth follows double-sided Lit materials.
-            Cull [_Cull]
-
-            // Starts the HLSL program for this pass.
-            HLSLPROGRAM
-
-            // Declares the depth vertex shader entry point.
-            #pragma vertex VertDepth
-
-            // Declares the depth fragment shader entry point.
-            #pragma fragment FragDepth
-            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-
-            // Includes Unity helper functions such as UnityObjectToClipPos.
-            #include "UnityCG.cginc"
-
-            // 引入 BurtRP Lit 统一材质 CBUFFER，让 DepthOnly、ShadowCaster、Forward 的 SRP Batcher 布局完全一致。
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
-
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
-
-            // Ends the HLSL program for this pass.
-            ENDHLSL
-        }
-
         Pass
         {
             Name "Burt Subsurface Motion Vectors"
             Tags { "LightMode" = "BurtMotionVectors" }
 
             ZWrite Off
-            ZTest Always
+            ZTest Equal
             Cull [_Cull]
 
             Stencil
             {
-                Ref 8
+                Ref [_MotionVectorsStencilRef]
                 ReadMask 8
-                WriteMask 8
+                WriteMask [_MotionVectorsStencilMask]
                 Comp Always
                 Pass Replace
             }
@@ -186,6 +146,28 @@ Shader "BurtRP/Subsurface"
             ENDHLSL
         }
 
+        Pass
+        {
+            Name "Burt Subsurface Depth Normals"
+            Tags { "LightMode" = "BurtDepthNormals" }
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertGBuffer
+            #pragma fragment FragDepthNormals
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma target 4.5
+
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+
+            #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
+            ENDHLSL
+        }
+
         // 定义 Deferred 第一版使用的 GBuffer 写入 pass，只负责输出材质数据，不在这里做光照。
         Pass
         {
@@ -195,17 +177,19 @@ Shader "BurtRP/Subsurface"
             // 主 Agent 的 Draw GBuffer Opaque 会用 ShaderTagId("BurtGBuffer") 精确匹配这个 pass。
             Tags { "LightMode" = "BurtGBuffer" }
 
-            // 当前 Deferred 计划允许没有 Depth Prepass 时由 GBuffer pass 写深度，和已有 DepthOnly 的 LEqual 行为保持一致。
-            ZWrite On
+            // DepthNormals prepass owns CameraDepth and GBuffer0 normal/roughness; GBuffer only fills the remaining MRTs.
+            ZWrite Off
 
-            // 如果前面已经跑过 Depth Prepass，LEqual 会让等深度片元通过；如果没跑过，也能正常建立 CameraDepth。
-            ZTest LEqual
+            // Require exact prepass depth so retained normals/depth and GBuffer material payload describe the same visible surface.
+            ZTest Equal
+            // Keep MRT0 from the prepass instead of recomputing normal/roughness in the GBuffer pass.
+            ColorMask 0 0
 
             // Deferred stencil layout matches XRender high bits: 64 = Subsurface.
             Stencil
             {
                 Ref [_BurtGBufferStencilRef]
-                ReadMask 224
+                ReadMask [_BurtGBufferStencilReadMask]
                 WriteMask [_BurtGBufferStencilWriteMask]
                 Comp Always
                 Pass Replace
@@ -261,52 +245,6 @@ Shader "BurtRP/Subsurface"
             ENDHLSL
         }
 
-        // Defines the forward color pass used by Burt Draw Opaque and Burt Draw Transparent.
-        Pass
-        {
-            // Names this pass for Frame Debugger readability.
-            Name "Burt Lit Forward"
-
-            // Matches BurtForward because BurtRP's main draw passes now only render this LightMode.
-            Tags { "LightMode" = "BurtForward" }
-
-            // Enables depth writes for opaque forward rendering.
-            ZWrite [_ZWrite]
-
-            // Uses less-equal depth testing so pixels that match the prepass depth still draw.
-            ZTest [_ZTest]
-
-            // Applies the ShaderGUI resolved culling mode for Lit forward rendering.
-            Cull [_Cull]
-
-            // Lets the ShaderGUI switch the same Lit pass between opaque and alpha blended rendering.
-            Blend [_SrcBlend] [_DstBlend]
-
-            // Starts the HLSL program for this pass.
-            HLSLPROGRAM
-
-            // Declares the forward vertex shader entry point.
-            #pragma vertex Vert
-
-            // Declares the forward fragment shader entry point.
-            #pragma fragment Frag
-            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma shader_feature_local_fragment _ _EMISSION
-
-            // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
-            #pragma target 3.5
-
-            // Selects the shared Forward shading model before BurtLighting.hlsl is included.
-            #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
-
-            // Includes the material CBUFFER first so the shared pass can read the same SRP Batcher layout.
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
-
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
-
-            // Ends the HLSL program for this pass.
-            ENDHLSL
-        }
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtLitShaderGUI"

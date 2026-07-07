@@ -43,11 +43,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         GBufferReflectance = 135, // GBuffer 调试：显示 GBuffer 解码后的 XRender Reflectance。
         GBufferRoughness = 136, // GBuffer 调试：显示从 GBuffer Smoothness 还原出的 XRender Base.Roughness。
         GBufferDiffuseColor = 137, // GBuffer 调试：显示从 GBuffer 还原 PBRMaterialData 后的 DiffuseColor。
-        GBufferHairStrandDirection = 138, // GBuffer 调试：只显示 Hair 像素复用 GBuffer1.rg 存储的 strand direction。
-        GBufferHairScatter = 139, // GBuffer 调试：只显示 Hair 像素复用 GBuffer1.b material channel 存储的 scatter。
-        GBufferHairShift = 140, // GBuffer 调试：只显示 Hair 像素复用 GBuffer1.b material channel 存储的 longitudinal shift scale。
+        GBufferHairStrandDirection = 138, // GBuffer 调试：只显示 Hair 像素复用 GBuffer0.rgb 存储的 strand direction。
+        GBufferHairScatter = 139, // GBuffer 调试：只显示 Hair 像素复用 GBuffer2.r material channel 存储的 scatter。
+        GBufferHairShift = 140, // GBuffer 调试：只显示 Hair 像素复用 GBuffer2.r material channel 存储的 longitudinal shift scale。
         GBufferClearCoatMask = 141, // GBuffer debug: Clear Coat mask stored in GBuffer3.b.
-        GBufferSubsurfaceStrength = 142, // GBuffer 调试：只显示 Subsurface 像素复用 GBuffer1.b material channel 存储的 strength。
+        GBufferSubsurfaceStrength = 142, // GBuffer 调试：只显示 Subsurface 像素复用 GBuffer2.r material channel 存储的 strength。
         GBufferClearCoatNormalWS = 143,
         GBufferClearCoatRoughness = 144, // GBuffer debug: Clear Coat top-layer roughness stored in GBuffer3.a.
         GBufferAnisotropy = 145, // GBuffer debug: signed anisotropy stored in GBuffer4.b.
@@ -71,6 +71,15 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         FoliageTransmissionBRDF = 163,
         FoliageTransmissionShadow = 164,
         FoliageSpecularBRDF = 165,
+        GBufferGrassIsGrass = 166,
+        GBufferGrassSSSIntensity = 167,
+        GBufferGrassSpecularMultiply = 168,
+        GBufferGrassScreenSpaceShadowIntensity = 169,
+        GrassTransmission = 170,
+        GrassDirectTransmission = 171,
+        GrassTransmissionBRDF = 172,
+        GrassTransmissionShadow = 173,
+        GrassSpecularBRDF = 174,
         DetailLighting = 200, // 光照调试：参考 XRender Detail Lighting，用 0.18 中灰 BaseColor 重新计算光照，方便只看明暗细节。
         IndirectLighting = 201, // 光照调试：只显示 PBR 间接光，方便检查 SH 漫反射和 Reflection Probe 镜面反射。
         DirectDiffuse = 202, // 光照调试：只显示直接漫反射，方便检查 NdotL、阴影和 1/PI。
@@ -183,6 +192,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         TemporalAAMetadata = 489, // TAA debug: metadata RGB, red = trusted object motion, green = responsive, blue = untrusted motion.
         TemporalAAObjectMotionMask = 490, // TAA debug: object motion ownership, red = trusted, green = untrusted, blue = velocity valid.
         TemporalAAUpscaleState = 491, // TAA debug: TAAU state, red = active, green/blue = width/height upscale factor.
+        TemporalAAStencilMask = 495, // TAA debug: stencil-derived TAA mask, red = object motion, green = responsive, blue = other stencil bits.
         ScreenSpaceReflectionHiZWorkCompare = 366, // SSR debug: green means candidate has lower estimated work including proof probes, red means higher.
         ScreenSpaceReflectionHiZStepSaved = 368, // SSR debug: production guarded HiZ saved normalized ray steps versus stable mip0, green means saved and red means regression.
         BloomFinalBloom = 369, // Bloom debug: final bloom texture after the upsample/combine chain.
@@ -385,6 +395,15 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.FoliageTransmissionBRDF:
                 case BurtShadingDebugMode.FoliageTransmissionShadow:
                 case BurtShadingDebugMode.FoliageSpecularBRDF:
+                case BurtShadingDebugMode.GBufferGrassIsGrass:
+                case BurtShadingDebugMode.GBufferGrassSSSIntensity:
+                case BurtShadingDebugMode.GBufferGrassSpecularMultiply:
+                case BurtShadingDebugMode.GBufferGrassScreenSpaceShadowIntensity:
+                case BurtShadingDebugMode.GrassTransmission:
+                case BurtShadingDebugMode.GrassDirectTransmission:
+                case BurtShadingDebugMode.GrassTransmissionBRDF:
+                case BurtShadingDebugMode.GrassTransmissionShadow:
+                case BurtShadingDebugMode.GrassSpecularBRDF:
                 case BurtShadingDebugMode.SpecularAARoughness:
                 case BurtShadingDebugMode.DirectBRDFD:
                 case BurtShadingDebugMode.DirectBRDFVisibility:
@@ -518,6 +537,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.TemporalAAMetadata:
                 case BurtShadingDebugMode.TemporalAAObjectMotionMask:
                 case BurtShadingDebugMode.TemporalAAUpscaleState:
+                case BurtShadingDebugMode.TemporalAAStencilMask:
                     return true;
                 default:
                     return false;

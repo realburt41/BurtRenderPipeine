@@ -25,20 +25,20 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
 
             struct Attributes
             {
-                uint vertexID : SV_VertexID;
+                uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float2 screenUV : TEXCOORD0;
+                float4 PositionCS : SV_POSITION;
+                float2 ScreenUV : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = BurtGetFullScreenTriangleVertexPosition(input.vertexID);
-                output.screenUV = BurtGetFullScreenTriangleTexCoord(input.vertexID);
+                output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
                 return output;
             }
 
@@ -64,14 +64,14 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
             uint BurtSSShadowClassifyMaterial(BurtGBufferData data)
             {
             #if BURT_ENABLE_FOLIAGE_SHADING
-                if (BurtIsActiveFoliageShadingModel(data.shadingModelID))
+                if (BurtIsActiveFoliageShadingModel(data.ShadingModelID))
                 {
                     return BurtGetFoliageIsGrass(data) > 0.5f ? BURT_SS_SHADOW_PIXEL_GRASS : BURT_SS_SHADOW_PIXEL_FOLIAGE;
                 }
             #endif
 
             #if BURT_ENABLE_FABRIC_SHADING
-                if (BurtIsActiveFabricShadingModel(data.shadingModelID))
+                if (BurtIsActiveFabricShadingModel(data.ShadingModelID))
                 {
                     return BURT_SS_SHADOW_PIXEL_DETAIL;
                 }
@@ -196,7 +196,7 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
                 float centerLinearDepth = LinearEyeDepth(rawDepth);
                 BurtGBufferData receiverData = BurtSSShadowSampleGBufferData(screenUV);
                 uint receiverMaterialClass = BurtSSShadowClassifyMaterial(receiverData);
-                float3 normalWS = receiverData.normalWS;
+                float3 normalWS = BurtGetDeferredSurfaceNormalWS(receiverData);
                 float3 lightDirectionWS = BurtSafeNormalize(_BurtMainLightDirection.xyz);
                 float receiverWeight = saturate(dot(normalWS, lightDirectionWS) * 4.0f);
                 if (receiverWeight <= 0.0001f)
@@ -255,18 +255,18 @@ Shader "Hidden/BurtRP/ScreenSpaceShadow"
 
             float4 FragTrace(Varyings input) : SV_Target
             {
-                float shadow = BurtSSShadowTrace(input.screenUV);
+                float shadow = BurtSSShadowTrace(input.ScreenUV);
                 return float4(shadow, shadow, shadow, 1.0f);
             }
 
             float4 FragDebug(Varyings input) : SV_Target
             {
-                float shadow = tex2D(_BurtScreenSpaceShadowTexture, input.screenUV).r;
+                float shadow = tex2D(_BurtScreenSpaceShadowTexture, input.ScreenUV).r;
                 if (_BurtSSShadowDebugMode == 1)
                 {
-                    BurtGBufferData gbufferData = BurtSSShadowSampleGBufferData(input.screenUV);
+                    BurtGBufferData gbufferData = BurtSSShadowSampleGBufferData(input.ScreenUV);
                 #if BURT_ENABLE_FOLIAGE_SHADING
-                    if (BurtIsActiveFoliageShadingModel(gbufferData.shadingModelID))
+                    if (BurtIsActiveFoliageShadingModel(gbufferData.ShadingModelID))
                     {
                         shadow = lerp(1.0f, shadow, max(BurtGetFoliageScreenSpaceShadowIntensity(gbufferData), 0.0f));
                     }

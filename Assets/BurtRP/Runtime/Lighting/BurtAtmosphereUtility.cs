@@ -21,7 +21,7 @@ namespace Burt.RenderPipeline
         public readonly float SunDiskIntensity;
         public readonly float SunHaloSize;
         public readonly float SunHaloIntensity;
-        public readonly BurtAtmosphereSunSource SunSource;
+        public readonly AtmosphereSunSource SunSource;
         public readonly Vector3 CustomSunDirection;
         public readonly Color HorizonColor;
         public readonly Color HorizonSunsetColor;
@@ -41,8 +41,8 @@ namespace Burt.RenderPipeline
         public readonly float AerialPerspectiveNearFadeStart;
         public readonly float AerialPerspectiveNearFadeEnd;
         public readonly float AerialPerspectiveMaxOpacity;
-        public readonly BurtAtmosphereAerialPerspectivePlacement AerialPerspectivePlacement;
-        public readonly BurtAtmosphereFogInteraction FogInteraction;
+        public readonly AtmosphereAerialPerspectivePlacement AerialPerspectivePlacement;
+        public readonly AtmosphereFogInteraction FogInteraction;
         public readonly string SkyFormula;
         public readonly string AerialFormula;
 
@@ -123,7 +123,7 @@ namespace Burt.RenderPipeline
         public readonly float SunDiskIntensity;
         public readonly float SunHaloSize;
         public readonly float SunHaloIntensity;
-        public readonly BurtAtmosphereSunSource SunSource;
+        public readonly AtmosphereSunSource SunSource;
         public readonly Vector3 CustomSunDirection;
         public readonly Color HorizonColor;
         public readonly Color HorizonSunsetColor;
@@ -143,8 +143,8 @@ namespace Burt.RenderPipeline
         public readonly float AerialPerspectiveNearFadeStart;
         public readonly float AerialPerspectiveNearFadeEnd;
         public readonly float AerialPerspectiveMaxOpacity;
-        public readonly BurtAtmosphereAerialPerspectivePlacement AerialPerspectivePlacement;
-        public readonly BurtAtmosphereFogInteraction FogInteraction;
+        public readonly AtmosphereAerialPerspectivePlacement AerialPerspectivePlacement;
+        public readonly AtmosphereFogInteraction FogInteraction;
 
         public BurtAtmosphereSettings(
             bool enabled,
@@ -162,7 +162,7 @@ namespace Burt.RenderPipeline
             float sunDiskIntensity,
             float sunHaloSize,
             float sunHaloIntensity,
-            BurtAtmosphereSunSource sunSource,
+            AtmosphereSunSource sunSource,
             Vector3 customSunDirection,
             Color horizonColor,
             Color horizonSunsetColor,
@@ -182,8 +182,8 @@ namespace Burt.RenderPipeline
             float aerialPerspectiveNearFadeStart,
             float aerialPerspectiveNearFadeEnd,
             float aerialPerspectiveMaxOpacity,
-            BurtAtmosphereAerialPerspectivePlacement aerialPerspectivePlacement,
-            BurtAtmosphereFogInteraction fogInteraction)
+            AtmosphereAerialPerspectivePlacement aerialPerspectivePlacement,
+            AtmosphereFogInteraction fogInteraction)
         {
             Enabled = enabled;
             RayleighIntensity = Mathf.Max(0f, rayleighIntensity);
@@ -224,7 +224,7 @@ namespace Burt.RenderPipeline
             FogInteraction = fogInteraction;
         }
 
-        public static BurtAtmosphereSettings Disabled => new BurtAtmosphereSettings(false, 0f, 0f, 0f, 6371f, 80f, 8f, 1.2f, Color.black, Color.white, 0f, 1f, 1.2f, 1f, 1f, BurtAtmosphereSunSource.MainLight, Vector3.up, new Color(0.48f, 0.66f, 0.92f, 1f), new Color(0.95f, 0.82f, 0.58f, 1f), 1f, 0.65f, 0.35f, 0.22f, -0.02f, -0.20f, 0f, 4f, false, 0f, 250f, 0f, new Color(0.70f, 0.82f, 1.0f, 1f), 0f, 50f, 0.65f, BurtAtmosphereAerialPerspectivePlacement.AfterOpaqueBeforeSky, BurtAtmosphereFogInteraction.Additive);
+        public static BurtAtmosphereSettings Disabled => new BurtAtmosphereSettings(false, 0f, 0f, 0f, 6371f, 80f, 8f, 1.2f, Color.black, Color.white, 0f, 1f, 1.2f, 1f, 1f, AtmosphereSunSource.MainLight, Vector3.up, new Color(0.48f, 0.66f, 0.92f, 1f), new Color(0.95f, 0.82f, 0.58f, 1f), 1f, 0.65f, 0.35f, 0.22f, -0.02f, -0.20f, 0f, 4f, false, 0f, 250f, 0f, new Color(0.70f, 0.82f, 1.0f, 1f), 0f, 50f, 0.65f, AtmosphereAerialPerspectivePlacement.AfterOpaqueBeforeSky, AtmosphereFogInteraction.Additive);
     }
 
     internal static class BurtAtmosphereUtility
@@ -266,28 +266,28 @@ namespace Burt.RenderPipeline
             }
 
             var settings = ResolveSettings();
-            return settings.AerialPerspectiveEnabled && settings.FogInteraction != BurtAtmosphereFogInteraction.FogOnly;
+            return settings.AerialPerspectiveEnabled && settings.FogInteraction != AtmosphereFogInteraction.FogOnly;
         }
 
         public static bool ShouldApplyAerialPerspectiveAfterOpaqueBeforeSky(BurtRenderRequest request)
         {
-            return ShouldUseAerialPerspective(request) && ResolveSettings().AerialPerspectivePlacement == BurtAtmosphereAerialPerspectivePlacement.AfterOpaqueBeforeSky;
+            return ShouldUseAerialPerspective(request) && ResolveSettings().AerialPerspectivePlacement == AtmosphereAerialPerspectivePlacement.AfterOpaqueBeforeSky;
         }
 
         public static bool ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(BurtRenderRequest request)
         {
-            return ShouldUseAerialPerspective(request) && ResolveSettings().AerialPerspectivePlacement == BurtAtmosphereAerialPerspectivePlacement.AfterSkyBeforeSSR;
+            return ShouldUseAerialPerspective(request) && ResolveSettings().AerialPerspectivePlacement == AtmosphereAerialPerspectivePlacement.AfterSkyBeforeSSR;
         }
 
         public static bool ShouldApplyAerialPerspectiveBeforeTransparent(BurtRenderRequest request)
         {
-            return ShouldUseAerialPerspective(request) && ResolveSettings().AerialPerspectivePlacement == BurtAtmosphereAerialPerspectivePlacement.BeforeTransparent;
+            return ShouldUseAerialPerspective(request) && ResolveSettings().AerialPerspectivePlacement == AtmosphereAerialPerspectivePlacement.BeforeTransparent;
         }
 
         public static BurtAtmosphereSettings ResolveSettings()
         {
             var stack = VolumeManager.instance != null ? VolumeManager.instance.stack : null;
-            var atmosphere = stack != null ? stack.GetComponent<BurtAtmosphereVolumeComponent>() : null;
+            var atmosphere = stack != null ? stack.GetComponent<AtmosphereVolumeComponent>() : null;
             if (atmosphere == null || !atmosphere.IsEnabled())
             {
                 return BurtAtmosphereSettings.Disabled;
@@ -397,7 +397,7 @@ namespace Burt.RenderPipeline
                 "Requested=", requested,
                 " UsesSourceCopy=", requested,
                 " SourceCopy=TemporaryCameraColor",
-                " AffectsSkyPixels=", settings.AerialPerspectivePlacement != BurtAtmosphereAerialPerspectivePlacement.AfterOpaqueBeforeSky,
+                " AffectsSkyPixels=", settings.AerialPerspectivePlacement != AtmosphereAerialPerspectivePlacement.AfterOpaqueBeforeSky,
                 " Placement=", settings.AerialPerspectivePlacement,
                 " FogInteraction=", settings.FogInteraction,
                 " Formula=", AerialFormulaName,

@@ -1,3 +1,4 @@
+using Burt.RenderPipeline;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -128,7 +129,24 @@ namespace Burt.RenderPipeline.Editor
             }
 
             ApplyHairMaterialOptions(material);
+            ApplyGBufferStencilState(material);
             BurtShaderGUIUtility.UpdateEmissionFlag(material);
+        }
+
+        private static void ApplyGBufferStencilState(Material material)
+        {
+            if (material == null || !material.HasProperty("_BurtGBufferStencilRef") || !material.HasProperty("_BurtGBufferStencilWriteMask"))
+            {
+                return;
+            }
+
+            material.SetFloat("_BurtGBufferStencilRef", BurtShadingModelIds.DeferredStencilHairRef);
+            if (material.HasProperty("_BurtGBufferStencilReadMask"))
+            {
+                material.SetFloat("_BurtGBufferStencilReadMask", BurtShadingModelIds.DeferredStencilShadingModelMask);
+            }
+
+            material.SetFloat("_BurtGBufferStencilWriteMask", BurtShadingModelIds.DeferredStencilShadingModelMask);
         }
 
         private void CacheProperties()

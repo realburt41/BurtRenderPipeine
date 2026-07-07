@@ -48,6 +48,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int ScreenSpaceShadowTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceShadowTextureId;
         private static readonly int ViewProjectionMatrixId = Shader.PropertyToID("_BurtSSShadowViewProjectionMatrix");
         private static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseViewProjectionMatrix");
@@ -80,6 +81,7 @@ namespace Burt.RenderPipeline
             builder.ReadGBuffer2();
             builder.ReadGBuffer3();
             builder.ReadGBuffer4();
+            builder.ReadGBuffer5();
             builder.ReadLightingGlobals();
             builder.WriteScreenSpaceShadow();
         }
@@ -94,6 +96,7 @@ namespace Burt.RenderPipeline
                     out var gbuffer2Target,
                     out var gbuffer3Target,
                     out var gbuffer4Target,
+                    out var gbuffer5Target,
                     out var shadowTarget))
             {
                 return;
@@ -129,6 +132,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
             cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
             cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+            cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
             UploadCameraGlobals(cmd, camera, fullDescriptor, traceDescriptor);
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, TracePassIndex, MeshTopology.Triangles, 3, 1);
@@ -145,6 +149,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle gbuffer2Target,
             out BurtRenderTargetHandle gbuffer3Target,
             out BurtRenderTargetHandle gbuffer4Target,
+            out BurtRenderTargetHandle gbuffer5Target,
             out BurtRenderTargetHandle shadowTarget)
         {
             cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
@@ -153,6 +158,7 @@ namespace Burt.RenderPipeline
             gbuffer2Target = context != null ? context.GBuffer2Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer2Name);
             gbuffer3Target = context != null ? context.GBuffer3Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer3Name);
             gbuffer4Target = context != null ? context.GBuffer4Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer4Name);
+            gbuffer5Target = context != null ? context.GBuffer5Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GBuffer5Name);
             shadowTarget = context != null ? context.ScreenSpaceShadowTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceShadowName);
             return cameraDepthTarget.IsValid &&
                 gbuffer0Target.IsValid &&
@@ -160,6 +166,7 @@ namespace Burt.RenderPipeline
                 gbuffer2Target.IsValid &&
                 gbuffer3Target.IsValid &&
                 gbuffer4Target.IsValid &&
+                gbuffer5Target.IsValid &&
                 shadowTarget.IsValid;
         }
 
@@ -243,6 +250,7 @@ namespace Burt.RenderPipeline
         private static readonly int GBuffer2Id = BurtRenderGraphResourceRegistry.GBuffer2Id;
         private static readonly int GBuffer3Id = BurtRenderGraphResourceRegistry.GBuffer3Id;
         private static readonly int GBuffer4Id = BurtRenderGraphResourceRegistry.GBuffer4Id;
+        private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int ScreenSpaceShadowTextureId = BurtRenderGraphResourceRegistry.ScreenSpaceShadowTextureId;
         private static readonly int DebugModeId = Shader.PropertyToID("_BurtSSShadowDebugMode");
 
@@ -269,6 +277,7 @@ namespace Burt.RenderPipeline
                 builder.ReadGBuffer2();
                 builder.ReadGBuffer3();
                 builder.ReadGBuffer4();
+                builder.ReadGBuffer5();
             }
 
             builder.WriteCameraColor();
@@ -294,12 +303,14 @@ namespace Burt.RenderPipeline
             var gbuffer2Target = context.GBuffer2Target;
             var gbuffer3Target = context.GBuffer3Target;
             var gbuffer4Target = context.GBuffer4Target;
+            var gbuffer5Target = context.GBuffer5Target;
             if (requiresGBuffer &&
                 (!gbuffer0Target.IsValid ||
                     !gbuffer1Target.IsValid ||
                     !gbuffer2Target.IsValid ||
                     !gbuffer3Target.IsValid ||
-                    !gbuffer4Target.IsValid))
+                    !gbuffer4Target.IsValid ||
+                    !gbuffer5Target.IsValid))
             {
                 return;
             }
@@ -323,6 +334,7 @@ namespace Burt.RenderPipeline
                 cmd.SetGlobalTexture(GBuffer2Id, gbuffer2Target.Identifier);
                 cmd.SetGlobalTexture(GBuffer3Id, gbuffer3Target.Identifier);
                 cmd.SetGlobalTexture(GBuffer4Id, gbuffer4Target.Identifier);
+                cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
             }
 
             cmd.DrawProcedural(Matrix4x4.identity, material, DebugPassIndex, MeshTopology.Triangles, 3, 1);
@@ -552,7 +564,7 @@ namespace Burt.RenderPipeline
                 component.quarterResolution.value);
         }
 
-        private static BurtScreenSpaceShadowVolumeComponent GetScreenSpaceShadowVolumeComponent()
+        private static ScreenSpaceShadowVolumeComponent GetScreenSpaceShadowVolumeComponent()
         {
             var volumeManager = VolumeManager.instance;
             if (volumeManager == null)
@@ -566,7 +578,7 @@ namespace Burt.RenderPipeline
                 return null;
             }
 
-            return stack.GetComponent<BurtScreenSpaceShadowVolumeComponent>();
+            return stack.GetComponent<ScreenSpaceShadowVolumeComponent>();
         }
     }
 
