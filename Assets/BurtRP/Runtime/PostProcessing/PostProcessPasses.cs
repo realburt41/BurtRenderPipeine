@@ -55,6 +55,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
     {
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy"; // 定义后处理 shader 的查找名称，必须和 shader 文件里的 Shader 名称一致。
         private const string TemporalAAComputeShaderResourcePath = "BurtTemporalAA";
+        private const string SMAAAreaTextureResourcePath = "SMAA/AreaTex";
+        private const string SMAASearchTextureResourcePath = "SMAA/SearchTex";
         private const int MaxBloomMipCount = 8; // 第一版 Bloom 最多申请 8 级临时 RT，避免动态 RenderGraph 资源注册过重。
 
         private const int MaxBloomGaussianSamples = PostProcessUtility.BloomGaussianMaxSamples; // Match XRender PC GaussianBlur sample cap.
@@ -91,7 +93,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             Vignette = 19,
             RCAS = 20,
             FXAA = 21,
-            SMAA = 22
+            SMAAEdgeDetection = 22,
+            SMAABlendWeights = 23,
+            SMAANeighborhoodBlending = 24
         }
 
         private static int ShaderPass(PostProcessShaderPass pass)
@@ -277,11 +281,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int RCASParamsId = Shader.PropertyToID("_BurtRCASParams");
         private static readonly int FXAAParamsId = Shader.PropertyToID("_BurtFXAAParams");
         private static readonly int SMAAParamsId = Shader.PropertyToID("_BurtSMAAParams");
+        private static readonly int SMAAEdgeTextureId = Shader.PropertyToID("_BurtSMAAEdgeTexture");
+        private static readonly int SMAABlendTextureId = Shader.PropertyToID("_BurtSMAABlendTexture");
+        private static readonly int SMAAAreaTextureId = Shader.PropertyToID("_BurtSMAAAreaTexture");
+        private static readonly int SMAASearchTextureId = Shader.PropertyToID("_BurtSMAASearchTexture");
         private Material postProcessMaterial;
         private static ComputeShader temporalAAComputeShader;
+        private static Texture2D smaaAreaTexture;
+        private static Texture2D smaaSearchTexture;
         private bool hasLoggedMissingShader; // 记录缺失 shader 警告是否已经输出，避免 Console 每帧刷屏。
         private static bool hasLoggedMissingTemporalAAComputeShader;
         private static bool hasLoggedMissingTemporalAAComputeKernel;
+        private static bool hasLoggedMissingSMAATextures;
+        private static bool hasLoggedMissingSMAAPasses;
 
         public override string Name => "Post Process"; // 返回 Pass 名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
 
@@ -533,11 +545,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             if (allowFinalPostEffects && smaaSettings.Enabled)
             {
-                SetSMAAGlobals(cmd, smaaSettings);
-                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, currentSource, nextTargetIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier, PostProcessShaderPass.SMAA);
-                currentIsCameraColor = nextTargetIsCameraColor;
-                currentSource = currentIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier;
-                nextTargetIsCameraColor = !nextTargetIsCameraColor;
+                var smaaTargetIsCameraColor = nextTargetIsCameraColor;
+                var smaaTarget = smaaTargetIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier;
+                if (ExecuteSMAA(cmd, context.Request.Camera, material, currentSource, smaaTarget, smaaSettings))
+                {
+                    currentIsCameraColor = smaaTargetIsCameraColor;
+                    currentSource = currentIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier;
+                    nextTargetIsCameraColor = !nextTargetIsCameraColor;
+                }
             }
 
             if (allowFinalPostEffects && fxaaSettings.Enabled)
@@ -620,6 +635,115 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(SourceTextureId, source);
             SetPostProcessTexelSize(cmd, camera);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(pass), MeshTopology.Triangles, 3, 1);
+        }
+
+        private static bool ExecuteSMAA(CommandBuffer cmd, Camera camera, Material material, RenderTargetIdentifier source, RenderTargetIdentifier target, SubpixelMorphologicalAASettings settings)
+        {
+            if (!HasSMAAPasses(material))
+            {
+                return false;
+            }
+
+            if (!EnsureSMAATextures())
+            {
+                return false;
+            }
+
+            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.colorFormat = RenderTextureFormat.ARGB32;
+            descriptor.sRGB = false;
+            descriptor.enableRandomWrite = false;
+
+            cmd.GetTemporaryRT(SMAAEdgeTextureId, descriptor, FilterMode.Bilinear);
+            cmd.GetTemporaryRT(SMAABlendTextureId, descriptor, FilterMode.Bilinear);
+
+            var edgeTarget = new RenderTargetIdentifier(SMAAEdgeTextureId);
+            var blendTarget = new RenderTargetIdentifier(SMAABlendTextureId);
+
+            SetSMAAGlobals(cmd, settings);
+            cmd.SetGlobalTexture(SMAAAreaTextureId, smaaAreaTexture);
+            cmd.SetGlobalTexture(SMAASearchTextureId, smaaSearchTexture);
+            SetPostProcessTexelSize(cmd, camera);
+
+            cmd.SetRenderTarget(edgeTarget);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+            cmd.SetGlobalTexture(SourceTextureId, source);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.SMAAEdgeDetection), MeshTopology.Triangles, 3, 1);
+
+            cmd.SetRenderTarget(blendTarget);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+            cmd.SetGlobalTexture(SMAAEdgeTextureId, edgeTarget);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.SMAABlendWeights), MeshTopology.Triangles, 3, 1);
+
+            cmd.SetRenderTarget(target);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.SetGlobalTexture(SourceTextureId, source);
+            cmd.SetGlobalTexture(SMAABlendTextureId, blendTarget);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.SMAANeighborhoodBlending), MeshTopology.Triangles, 3, 1);
+
+            cmd.ReleaseTemporaryRT(SMAABlendTextureId);
+            cmd.ReleaseTemporaryRT(SMAAEdgeTextureId);
+            return true;
+        }
+
+        private static bool HasSMAAPasses(Material material)
+        {
+            if (material == null)
+            {
+                return false;
+            }
+
+            var requiredPassCount = ShaderPass(PostProcessShaderPass.SMAANeighborhoodBlending) + 1;
+            if (material.passCount >= requiredPassCount)
+            {
+                hasLoggedMissingSMAAPasses = false;
+                return true;
+            }
+
+            if (!hasLoggedMissingSMAAPasses)
+            {
+                Debug.LogWarning(
+                    "BurtRP SMAA is enabled, but shader " + PostProcessShaderName +
+                    " has only " + material.passCount +
+                    " passes. Expected at least " + requiredPassCount +
+                    ". SMAA will be skipped until the shader is reimported without errors.");
+                hasLoggedMissingSMAAPasses = true;
+            }
+
+            return false;
+        }
+
+        private static bool EnsureSMAATextures()
+        {
+            if (smaaAreaTexture == null)
+            {
+                smaaAreaTexture = Resources.Load<Texture2D>(SMAAAreaTextureResourcePath);
+            }
+
+            if (smaaSearchTexture == null)
+            {
+                smaaSearchTexture = Resources.Load<Texture2D>(SMAASearchTextureResourcePath);
+            }
+
+            if (smaaAreaTexture != null && smaaSearchTexture != null)
+            {
+                hasLoggedMissingSMAATextures = false;
+                return true;
+            }
+
+            if (!hasLoggedMissingSMAATextures)
+            {
+                Debug.LogWarning("BurtRP SMAA is enabled, but SMAA lookup textures could not be loaded from Resources/SMAA.");
+                hasLoggedMissingSMAATextures = true;
+            }
+
+            return false;
         }
 
         private static void SetPostProcessTexelSize(CommandBuffer cmd, Camera camera)

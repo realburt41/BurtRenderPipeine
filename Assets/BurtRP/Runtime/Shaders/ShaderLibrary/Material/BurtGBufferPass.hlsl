@@ -208,7 +208,11 @@ BurtGBufferData BurtCreateMaterialPassGBufferDataFromInput(GBufferVaryings Input
         BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, BaseNormalWS, ViewDirectionWS, Input.PositionWS);
     #endif
 #endif
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    float3 EmissionColor = float3(0.0f, 0.0f, 0.0f);
+    #else
     float3 EmissionColor = BurtEvaluateEmission(Input.EmissionMapUV, _EmissionColor.rgb);
+    #endif
 
     return BurtCreateMaterialGBufferData(Input, Facing, SurfaceData, EmissionColor);
 #endif

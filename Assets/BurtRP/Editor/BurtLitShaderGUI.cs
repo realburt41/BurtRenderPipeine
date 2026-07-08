@@ -15,6 +15,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent FabricLabel = new GUIContent("Fabric");
         private static readonly GUIContent SilkLabel = new GUIContent("Silk");
         private static readonly GUIContent FoliageLabel = new GUIContent("Foliage");
+        private static readonly GUIContent GrassLabel = new GUIContent("Grass");
         private static readonly GUIContent TrunkLabel = new GUIContent("Trunk");
         private static readonly GUIContent NormalLabel = new GUIContent("Normal");
         private static readonly GUIContent EmissionLabel = new GUIContent("Emission");
@@ -62,6 +63,7 @@ namespace Burt.RenderPipeline.Editor
         private static bool showFabricInputs = true;
         private static bool showSilkInputs = true;
         private static bool showFoliageInputs = true;
+        private static bool showGrassInputs = true;
         private static bool showTrunkInputs = true;
         private static bool showNormalInputs = true;
         private static bool showEmissionInputs = true;
@@ -192,7 +194,7 @@ namespace Burt.RenderPipeline.Editor
             DrawSilkInputs(material);
             DrawFoliageInputs(material);
             DrawTrunkInputs(material);
-            DrawEmissionInputs();
+            DrawEmissionInputs(material);
         }
 
         public override void ValidateMaterial(Material material)
@@ -210,7 +212,7 @@ namespace Burt.RenderPipeline.Editor
             MigrateFabricRoughness(material);
             SyncFoliageTintModeProperties(material);
             SyncTrunkXRenderCompatibilityProperties(material);
-            BurtShaderGUIUtility.UpdateEmissionFlag(material);
+            ApplyEmissionState(material);
             ClampSubsurfaceScatteringMode(material);
             ApplySurfaceOptions(material);
         }
@@ -626,7 +628,11 @@ namespace Burt.RenderPipeline.Editor
                 return;
             }
 
-            if (IsFoliageShader(material) && !IsGrassShader(material))
+            if (IsGrassShader(material))
+            {
+                DrawProperty(baseColor);
+            }
+            else if (IsFoliageShader(material))
             {
                 DrawTexture(BaseMapLabel, baseMap);
             }
@@ -648,6 +654,7 @@ namespace Burt.RenderPipeline.Editor
             bool usesTrunk = IsTrunkShader(material);
             bool usesRoughness = IsFabricShader(material) || IsSilkShader(material) || usesTrunk;
             bool usesFoliage = IsFoliageShader(material);
+            bool usesGrass = IsGrassShader(material);
             bool usesTreeFoliage = usesFoliage && !IsGrassShader(material);
             if (!usesTreeFoliage)
             {
@@ -664,6 +671,8 @@ namespace Burt.RenderPipeline.Editor
                     ? "Channels: G Occlusion | B 3S Curvature | A Smoothness. Thickness uses Subsurface Thickness Map R."
                     : usesTrunk
                         ? "Channels: G Occlusion | A Roughness. R Metallic and B Thickness are ignored; vertex color A is remapped as AO."
+                    : usesGrass
+                        ? "Channels: G Occlusion. Grass roughness, SSS, specular, and screen-space shadow use Grass parameters."
                     : usesFoliage
                         ? "Channels: G Occlusion | B Thickness | A Roughness. R Metallic is ignored by Foliage."
                     : usesRoughness
@@ -698,7 +707,9 @@ namespace Burt.RenderPipeline.Editor
 
             if (!usesTreeFoliage && maskMap != null)
             {
-                EditorGUILayout.HelpBox("Mask channels are multiplied by scalar values below, matching BurtRP GBuffer and Forward sampling.", MessageType.None);
+                EditorGUILayout.HelpBox(usesGrass
+                    ? "Grass only reads Mask G as optional occlusion; roughness, SSS, specular, and screen-space shadow come from Grass parameters."
+                    : "Mask channels are multiplied by scalar values below, matching BurtRP GBuffer and Forward sampling.", MessageType.None);
             }
 
             BurtShaderGUIUtility.EndSection();
@@ -748,6 +759,12 @@ namespace Burt.RenderPipeline.Editor
                 return;
             }
 
+            if (IsGrassShader(material))
+            {
+                DrawGrassInputs();
+                return;
+            }
+
             if (!BurtShaderGUIUtility.BeginSection(FoliageLabel, ref showFoliageInputs))
             {
                 return;
@@ -765,10 +782,7 @@ namespace Burt.RenderPipeline.Editor
                 BurtShaderGUIUtility.DrawSubHeader("XRender Foliage");
                 DrawTexture(AlphaMapLabel, alphaMap);
                 DrawProperty(alphaIncrease);
-                if (!IsGrassShader(material))
-                {
-                    DrawFoliageUseBakedNormalsProperty(material);
-                }
+                DrawFoliageUseBakedNormalsProperty(material);
 
                 DrawProperty(subsurfaceColor);
                 DrawProperty(subsurfaceColorSaturate);
@@ -777,40 +791,37 @@ namespace Burt.RenderPipeline.Editor
                 DrawProperty(reflectanceScale);
                 DrawProperty(transmissionNdotL);
 
-                if (!IsGrassShader(material))
+                BurtShaderGUIUtility.DrawSubHeader("Foliage Tint");
+                DrawFoliageTintMode(material);
+                int tintMode = GetFoliageTintModeValue(material);
+                if (tintMode > 0)
                 {
-                    BurtShaderGUIUtility.DrawSubHeader("Foliage Tint");
-                    DrawFoliageTintMode(material);
-                    int tintMode = GetFoliageTintModeValue(material);
-                    if (tintMode > 0)
+                    DrawTexture(TintPaletteLabel, tintPalette);
+                    DrawTexture(LocalTintPaletteLabel, localTintPalette);
+                    if (tintMode == 1)
                     {
-                        DrawTexture(TintPaletteLabel, tintPalette);
-                        DrawTexture(LocalTintPaletteLabel, localTintPalette);
-                        if (tintMode == 1)
-                        {
-                            DrawProperty(tintValue);
-                        }
+                        DrawProperty(tintValue);
                     }
-
-                    DrawProperty(tintScale);
-                    if (tintMode == 0)
-                    {
-                        DrawProperty(localTintColor);
-                    }
-
-                    DrawProperty(tintAOHeightRatio);
-                    DrawProperty(tintAORemap);
-                    DrawProperty(tintHeightContrast);
-                    DrawProperty(vertexAORemap);
-                    DrawProperty(treeHeight);
-                    BurtShaderGUIUtility.DrawSubHeader("Wind");
-                    DrawProperty(maxBendAngle);
-                    DrawProperty(swayIntensity);
-                    DrawProperty(flutterTipFrequency);
-                    DrawProperty(flutterTipIntensity);
-                    DrawProperty(bendMaskPow);
-                    DrawProperty(toTrunkMaskPow);
                 }
+
+                DrawProperty(tintScale);
+                if (tintMode == 0)
+                {
+                    DrawProperty(localTintColor);
+                }
+
+                DrawProperty(tintAOHeightRatio);
+                DrawProperty(tintAORemap);
+                DrawProperty(tintHeightContrast);
+                DrawProperty(vertexAORemap);
+                DrawProperty(treeHeight);
+                BurtShaderGUIUtility.DrawSubHeader("Wind");
+                DrawProperty(maxBendAngle);
+                DrawProperty(swayIntensity);
+                DrawProperty(flutterTipFrequency);
+                DrawProperty(flutterTipIntensity);
+                DrawProperty(bendMaskPow);
+                DrawProperty(toTrunkMaskPow);
             }
             else
             {
@@ -822,49 +833,57 @@ namespace Burt.RenderPipeline.Editor
                 DrawProperty(foliageSubsurfaceColorSaturate);
             }
 
-            if (IsGrassShader(material))
+            EditorGUILayout.HelpBox("Foliage uses Mask B as thickness and Mask A as roughness. Deferred GBuffer keeps transmission color, weight, thickness, NdotL, screen-space shadow intensity, and specular scale for the lighting pass. Back Light is legacy material data only.", MessageType.None);
+            BurtShaderGUIUtility.EndSection();
+        }
+
+        private void DrawGrassInputs()
+        {
+            if (!BurtShaderGUIUtility.BeginSection(GrassLabel, ref showGrassInputs))
             {
-                BurtShaderGUIUtility.DrawSubHeader("Grass Surface");
-                DrawProperty(baseColorTip);
-                DrawProperty(tipMaskPow);
-                DrawProperty(roughness);
-                DrawProperty(heightAO);
-                DrawProperty(heightAOFallOff);
-                DrawProperty(tlNormalWeight);
-                DrawProperty(ssShadowIntensity);
-                DrawProperty(ssShadowDistance);
-                DrawProperty(groundFadeIntensity);
-
-                BurtShaderGUIUtility.DrawSubHeader("Grass Variation");
-                DrawTexture(NoiseMapLabel, noiseMap);
-                DrawProperty(variationIntensity01);
-                DrawProperty(variation01Height);
-                DrawProperty(variation01);
-                DrawProperty(variationIntensity02);
-                DrawProperty(variation02Height);
-                DrawProperty(variation02);
-
-                BurtShaderGUIUtility.DrawSubHeader("Grass Wind");
-                DrawProperty(tiltingStrength);
-                DrawProperty(windStrength);
-                using (new EditorGUI.DisabledScope(windStrength != null && windStrength.floatValue < 0.01f))
-                {
-                    DrawProperty(windHeightMask);
-                    DrawProperty(windNormalStrength);
-                    DrawProperty(windInteractionIntensity);
-                }
-
-                DrawProperty(forceIntensity);
-
-                BurtShaderGUIUtility.DrawSubHeader("Grass SSS");
-                DrawProperty(sssIntensity);
-                DrawProperty(fresnelIntensity);
-                DrawProperty(fresnelExp);
-                DrawProperty(grassSpecular);
-                DrawProperty(reflectance);
+                return;
             }
 
-            EditorGUILayout.HelpBox("Foliage uses Mask B as thickness and Mask A as roughness. Deferred GBuffer keeps transmission color, weight, thickness, NdotL, screen-space shadow intensity, and specular scale for the lighting pass. Back Light is legacy material data only.", MessageType.None);
+            BurtShaderGUIUtility.DrawSubHeader("Grass Surface");
+            DrawTexture(AlphaMapLabel, alphaMap);
+            DrawProperty(alphaIncrease);
+            DrawProperty(baseColorTip);
+            DrawProperty(tipMaskPow);
+            DrawProperty(roughness);
+            DrawProperty(heightAO);
+            DrawProperty(heightAOFallOff);
+            DrawProperty(tlNormalWeight);
+            DrawProperty(ssShadowIntensity);
+            DrawProperty(ssShadowDistance);
+            DrawProperty(groundFadeIntensity);
+
+            BurtShaderGUIUtility.DrawSubHeader("Grass Variation");
+            DrawTexture(NoiseMapLabel, noiseMap);
+            DrawProperty(variationIntensity01);
+            DrawProperty(variation01Height);
+            DrawProperty(variation01);
+            DrawProperty(variationIntensity02);
+            DrawProperty(variation02Height);
+            DrawProperty(variation02);
+
+            BurtShaderGUIUtility.DrawSubHeader("Grass Wind");
+            DrawProperty(tiltingStrength);
+            DrawProperty(windStrength);
+            using (new EditorGUI.DisabledScope(windStrength != null && windStrength.floatValue < 0.01f))
+            {
+                DrawProperty(windHeightMask);
+                DrawProperty(windNormalStrength);
+                DrawProperty(windInteractionIntensity);
+            }
+
+            DrawProperty(forceIntensity);
+
+            BurtShaderGUIUtility.DrawSubHeader("Grass SSS");
+            DrawProperty(sssIntensity);
+            DrawProperty(fresnelIntensity);
+            DrawProperty(fresnelExp);
+            DrawProperty(grassSpecular);
+            DrawProperty(reflectance);
             BurtShaderGUIUtility.EndSection();
         }
 
@@ -1142,6 +1161,11 @@ namespace Burt.RenderPipeline.Editor
 
         private void DrawNormalInputs(Material material)
         {
+            if (IsGrassShader(material))
+            {
+                return;
+            }
+
             if (!BurtShaderGUIUtility.BeginSection(NormalLabel, ref showNormalInputs))
             {
                 return;
@@ -1157,8 +1181,13 @@ namespace Burt.RenderPipeline.Editor
             BurtShaderGUIUtility.EndSection();
         }
 
-        private void DrawEmissionInputs()
+        private void DrawEmissionInputs(Material material)
         {
+            if (IsGrassShader(material))
+            {
+                return;
+            }
+
             if (!BurtShaderGUIUtility.BeginSection(EmissionLabel, ref showEmissionInputs))
             {
                 return;
@@ -1170,7 +1199,7 @@ namespace Burt.RenderPipeline.Editor
             {
                 foreach (Object target in materialEditor.targets)
                 {
-                    BurtShaderGUIUtility.UpdateEmissionFlag(target as Material);
+                    ApplyEmissionState(target as Material);
                 }
             }
 
@@ -1419,6 +1448,11 @@ namespace Burt.RenderPipeline.Editor
 
             if (IsFoliageShader(material))
             {
+                if (IsGrassShader(material))
+                {
+                    return "PBR Grass / Deferred GBuffer";
+                }
+
                 return "PBR Foliage / Deferred GBuffer";
             }
 
@@ -1627,6 +1661,23 @@ namespace Burt.RenderPipeline.Editor
 
             bool useBakedNormals = material.HasProperty("_FoliageUseBakedNormals") && material.GetFloat("_FoliageUseBakedNormals") >= 0.5f;
             SetKeyword(material, "BURT_FOLIAGE_USE_BAKED_NORMALS", useBakedNormals);
+        }
+
+        private static void ApplyEmissionState(Material material)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            if (IsGrassShader(material))
+            {
+                material.DisableKeyword(BurtShaderGUIUtility.EmissionKeyword);
+                material.globalIlluminationFlags |= MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+                return;
+            }
+
+            BurtShaderGUIUtility.UpdateEmissionFlag(material);
         }
 
         private static void SetKeyword(Material material, string keyword, bool enabled)

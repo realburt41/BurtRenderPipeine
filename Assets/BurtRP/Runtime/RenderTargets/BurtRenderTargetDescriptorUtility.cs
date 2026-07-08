@@ -246,7 +246,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
         public static RenderTextureDescriptor CreateGBuffer2Descriptor(Camera camera) // 定义创建 Deferred GBuffer2 RT 描述的函数。
         {
-            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGBHalf, false); // GBuffer2 保存 packed material properties；当前保守使用 ARGBHalf，避免 packed payload 量化过早。
+            var graphicsFormat = SelectGBufferLinear8GraphicsFormat();
+            if (graphicsFormat != GraphicsFormat.None)
+            {
+                return CreateGBufferDescriptor(camera, graphicsFormat);
+            }
+
+            return CreateGBufferDescriptor(camera, RenderTextureFormat.ARGB32, false);
         }
 
         public static RenderTextureDescriptor CreateGBuffer3Descriptor(Camera camera)

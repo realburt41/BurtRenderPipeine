@@ -395,22 +395,47 @@ BurtSurfaceData BurtApplyFoliageXRenderSurfaceSemantics(
         UseSpecularColor);
 }
 
+BurtSurfaceData BurtApplyGrassMaterialExtras(BurtSurfaceData SurfaceData, float3 PositionWS, float4 VertexColor)
+{
+#if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    float HeightMask = BurtGrassHeightFromVertexColor(VertexColor);
+    float CameraDistance = distance(_WorldSpaceCameraPos.xyz, PositionWS);
+    float NearRange = BurtMaterialSafePow(1.0f - saturate(CameraDistance / max(_HeightAOFallOff, BURT_EPSILON)), 0.7f);
+    float HeightOcclusion = saturate(HeightMask - saturate(_HeightAO) + 1.0f);
+    SurfaceData.Occlusion = min(SurfaceData.Occlusion, lerp(1.0f, HeightOcclusion, NearRange));
+#endif
+    return SurfaceData;
+}
+
 BurtSurfaceData BurtApplyFoliageMaterialExtras(BurtSurfaceData SurfaceData, float3 PositionWS, float3 PositionOS, float4 VertexColor)
 {
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
-        float HeightMask = BurtGrassHeightFromVertexColor(VertexColor);
-        float CameraDistance = distance(_WorldSpaceCameraPos.xyz, PositionWS);
-        float NearRange = BurtMaterialSafePow(1.0f - saturate(CameraDistance / max(_HeightAOFallOff, BURT_EPSILON)), 0.7f);
-        float HeightOcclusion = saturate(HeightMask - saturate(_HeightAO) + 1.0f);
-        SurfaceData.Occlusion = min(SurfaceData.Occlusion, lerp(1.0f, HeightOcclusion, NearRange));
-    #else
-        float CameraDistance = distance(_WorldSpaceCameraPos.xyz, PositionWS);
-        float FoliageScreenSpaceShadow = saturate(CameraDistance * 0.025f);
-        SurfaceData.Occlusion = BurtMaterialRangeRemap(_VertexAORemap.x, _VertexAORemap.y, saturate(VertexColor.a));
-        SurfaceData.FoliageScreenSpaceShadowIntensity = FoliageScreenSpaceShadow * FoliageScreenSpaceShadow;
-    #endif
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    float CameraDistance = distance(_WorldSpaceCameraPos.xyz, PositionWS);
+    float FoliageScreenSpaceShadow = saturate(CameraDistance * 0.025f);
+    SurfaceData.Occlusion = BurtMaterialRangeRemap(_VertexAORemap.x, _VertexAORemap.y, saturate(VertexColor.a));
+    SurfaceData.FoliageScreenSpaceShadowIntensity = FoliageScreenSpaceShadow * FoliageScreenSpaceShadow;
 #endif
+    return SurfaceData;
+}
+
+BurtSurfaceData BurtCreateGrassXRenderSurfaceData(float4 BaseColor, float4 MaskMap)
+{
+    float4 GrassMaskMap = float4(0.0f, MaskMap.g, 0.5f, 1.0f);
+    BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, saturate(1.0f - _Roughness), 0.0f, GrassMaskMap, _OcclusionStrength);
+    SurfaceData.Metallic = 0.0f;
+    SurfaceData.Anisotropy = 0.0f;
+    SurfaceData.Smoothness = saturate(1.0f - _Roughness);
+    SurfaceData.Reflectance = saturate(_Reflectance);
+    SurfaceData.FoliageTransmissionColor = max(BaseColor.rgb, float3(0.0f, 0.0f, 0.0f));
+    SurfaceData.FoliageTransmissionWeight = 0.0f;
+    SurfaceData.FoliageThickness = 0.0f;
+    SurfaceData.FoliageBackLight = 0.0f;
+    SurfaceData.FoliageTransmissionNdotL = 0.0f;
+    SurfaceData.FoliageSpecularScale = saturate(_Specular);
+    SurfaceData.FoliageUseSpecularColor = 0.0f;
+    SurfaceData.FoliageScreenSpaceShadowIntensity = 0.0f;
+    SurfaceData.FoliageIsGrass = 1.0f;
+    SurfaceData.ShadingModelID = BURT_SHADING_MODEL_FOLIAGE;
     return SurfaceData;
 }
 
@@ -435,17 +460,24 @@ BurtSurfaceData BurtApplyGrassXRenderSurfaceSemantics(
     float FresnelTerm = NoVWeight * VoLWeight;
     FresnelTerm *= saturate(CameraDistance * 0.04f);
 
-    float GraSSSSSIntensity = (_FresnelIntensity * FresnelTerm + _SSSIntensity) * FadeDis;
+    float GrassSSSIntensity = (_FresnelIntensity * FresnelTerm + _SSSIntensity) * FadeDis;
     float HeightMask = BurtGrassHeightFromVertexColor(VertexColor);
     float DisMask = saturate(1.0f - CameraDistance / max(_SSShadowDistance, BURT_EPSILON));
     float DisFalloff = 1.0f - (1.0f - DisMask) * (1.0f - DisMask);
-    SurfaceData.FoliageTransmissionWeight = max(GraSSSSSIntensity, 0.0f);
+    SurfaceData.Metallic = 0.0f;
+    SurfaceData.Anisotropy = 0.0f;
+    SurfaceData.FoliageTransmissionColor = max(SurfaceData.BaseColor.rgb, float3(0.0f, 0.0f, 0.0f));
+    SurfaceData.FoliageTransmissionWeight = max(GrassSSSIntensity, 0.0f);
+    SurfaceData.FoliageThickness = 0.0f;
+    SurfaceData.FoliageBackLight = 0.0f;
+    SurfaceData.FoliageTransmissionNdotL = 0.0f;
     SurfaceData.FoliageSpecularScale = saturate(lerp(0.5f, _Specular, FadeDis));
     SurfaceData.FoliageUseSpecularColor = 0.0f;
     SurfaceData.FoliageScreenSpaceShadowIntensity = max((1.0f - HeightMask) * _SSShadowIntensity * DisFalloff, 0.0f);
     SurfaceData.FoliageIsGrass = 1.0f;
     SurfaceData.Reflectance = saturate(lerp(0.5f, _Reflectance, FadeDis));
     SurfaceData.Smoothness = saturate(1.0f - _Roughness);
+    SurfaceData.ShadingModelID = BURT_SHADING_MODEL_FOLIAGE;
 #endif
     return SurfaceData;
 }
@@ -534,8 +566,12 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 BaseColor, floa
     float Subsurface3SCurvature = saturate(MaskMap.b * _Subsurface3SCurvatureScale + _Subsurface3SCurvatureBias);
     return BurtApplySubsurfaceSurfaceSemantics(SurfaceData, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, Subsurface3SCurvature, _SubsurfaceProfileIndex, _SubsurfaceScatteringMode);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    return BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
+    #else
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, _Smoothness, 0.0f, MaskMap, _OcclusionStrength);
     return BurtApplyFoliageXRenderSurfaceSemantics(SurfaceData, BaseColor, MaskMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
+    #endif
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, saturate(_Specular), 1.0f, 0.0f, float4(0.0f, MaskMap.g, 0.5f, 1.0f), 1.0f);
     return BurtApplyTrunkXRenderSurfaceSemantics(SurfaceData, MaskMap, float4(1.0f, 1.0f, 1.0f, 1.0f));
@@ -576,9 +612,13 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 BaseColor, floa
     BurtSurfaceData SurfaceData = BurtCreateFabricSurfaceData(BaseColor, _Reflectance, _Roughness, _Metallic, MaskMap, _OcclusionStrength);
     return BurtApplyFabricPassSurfaceSemantics(SurfaceData, MaskMap, UV0);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    return BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
+    #else
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, _Smoothness, 0.0f, MaskMap, _OcclusionStrength);
     float4 FoliageMap = BurtResolveFoliageSurfaceMap(UV0, MaskMap);
     return BurtApplyFoliageXRenderSurfaceSemantics(SurfaceData, BaseColor, FoliageMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
+    #endif
 #else
     return BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap);
 #endif
@@ -593,9 +633,13 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 BaseColor, floa
     float NdotV = saturate(dot(BurtSafeNormalize(NormalWS), BurtSafeNormalize(ViewDirectionWS)));
     return BurtApplyFabricPassSurfaceSemantics(SurfaceData, MaskMap, UV0, NdotV);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    return BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
+    #else
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, _Smoothness, 0.0f, MaskMap, _OcclusionStrength);
     float4 FoliageMap = BurtResolveFoliageSurfaceMap(UV0, MaskMap);
     return BurtApplyFoliageXRenderSurfaceSemantics(SurfaceData, BaseColor, FoliageMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
+    #endif
 #else
     return BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap);
 #endif
@@ -638,9 +682,13 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
     return BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, UV0, GeometryNormalWS, ViewDirectionWS);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    return BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
+    #else
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, _Smoothness, 0.0f, MaskMap, _OcclusionStrength);
     float4 FoliageMap = BurtResolveFoliageSurfaceMap(UV0, MaskMap);
     return BurtApplyFoliageXRenderSurfaceSemantics(SurfaceData, BaseColor, FoliageMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
+    #endif
 #else
     return BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap);
 #endif
@@ -657,11 +705,17 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
     float4 VertexColor)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    BurtSurfaceData SurfaceData = BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
+    SurfaceData = BurtApplyGrassMaterialExtras(SurfaceData, PositionWS, VertexColor);
+    return BurtApplyGrassXRenderSurfaceSemantics(SurfaceData, NormalWS, ViewDirectionWS, PositionWS, VertexColor);
+    #else
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, _Smoothness, 0.0f, MaskMap, _OcclusionStrength);
     float4 FoliageMap = BurtResolveFoliageSurfaceMap(UV0, MaskMap);
     SurfaceData = BurtApplyFoliageXRenderSurfaceSemantics(SurfaceData, BaseColor, FoliageMap, _ThicknessScale, _RoughnessScale, _ReflectanceScale, _SubsurfaceColor.rgb, _SubsurfaceColorSaturate, _TransmissionNdotL, _FoliageBackLight, _ReflectanceScale, 1.0f);
     SurfaceData = BurtApplyFoliageMaterialExtras(SurfaceData, PositionWS, PositionOS, VertexColor);
-    return BurtApplyGrassXRenderSurfaceSemantics(SurfaceData, NormalWS, ViewDirectionWS, PositionWS, VertexColor);
+    return SurfaceData;
+    #endif
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, saturate(_Specular), 1.0f, 0.0f, float4(0.0f, MaskMap.g, 0.5f, 1.0f), 1.0f);
     return BurtApplyTrunkXRenderSurfaceSemantics(SurfaceData, MaskMap, VertexColor);

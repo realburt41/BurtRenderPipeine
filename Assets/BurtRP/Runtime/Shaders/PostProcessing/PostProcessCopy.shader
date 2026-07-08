@@ -2923,9 +2923,6 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 Varyings output;
                 float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
                 output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
-                #if UNITY_UV_STARTS_AT_TOP
-                    uv.y = 1.0 - uv.y;
-                #endif
                 output.uv = uv;
                 return output;
             }
@@ -3034,141 +3031,55 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
-            #pragma vertex Vert
-            #pragma fragment Frag
-            #include "UnityCG.cginc"
-
-            sampler2D _BurtPostProcessSourceTexture;
-            float4 _BurtPostProcessTexelSize;
-            float4 _BurtFXAAParams;
-
-            struct Attributes { uint vertexID : SV_VertexID; };
-            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
-
-            Varyings Vert(Attributes input)
-            {
-                Varyings output;
-                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
-                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
-                output.uv = uv;
-                return output;
-            }
-
-            float BurtFXAALuma(float3 color)
-            {
-                return dot(color, float3(0.299, 0.587, 0.114));
-            }
-
-            float4 Frag(Varyings input) : SV_Target
-            {
-                float2 texel = _BurtPostProcessTexelSize.xy;
-                float2 uv = input.uv;
-                float4 center = tex2D(_BurtPostProcessSourceTexture, uv);
-                float3 rgbM = center.rgb;
-                float3 rgbNW = tex2D(_BurtPostProcessSourceTexture, uv + texel * float2(-1.0, -1.0)).rgb;
-                float3 rgbNE = tex2D(_BurtPostProcessSourceTexture, uv + texel * float2(1.0, -1.0)).rgb;
-                float3 rgbSW = tex2D(_BurtPostProcessSourceTexture, uv + texel * float2(-1.0, 1.0)).rgb;
-                float3 rgbSE = tex2D(_BurtPostProcessSourceTexture, uv + texel * float2(1.0, 1.0)).rgb;
-                float lumaM = BurtFXAALuma(rgbM);
-                float lumaNW = BurtFXAALuma(rgbNW);
-                float lumaNE = BurtFXAALuma(rgbNE);
-                float lumaSW = BurtFXAALuma(rgbSW);
-                float lumaSE = BurtFXAALuma(rgbSE);
-                float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
-                float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
-                float range = lumaMax - lumaMin;
-                float edgeThreshold = max(_BurtFXAAParams.z, lumaMax * _BurtFXAAParams.y);
-                if (range < edgeThreshold)
-                {
-                    return center;
-                }
-
-                float2 direction;
-                direction.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
-                direction.y = ((lumaNW + lumaSW) - (lumaNE + lumaSE));
-                float directionReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * 0.25 * 0.03125, 0.0078125);
-                float reciprocalDirectionMin = rcp(min(abs(direction.x), abs(direction.y)) + directionReduce);
-                direction = clamp(direction * reciprocalDirectionMin, -8.0, 8.0) * texel;
-
-                float3 rgbA = 0.5 * (
-                    tex2D(_BurtPostProcessSourceTexture, uv + direction * (1.0 / 3.0 - 0.5)).rgb +
-                    tex2D(_BurtPostProcessSourceTexture, uv + direction * (2.0 / 3.0 - 0.5)).rgb);
-                float3 rgbB = rgbA * 0.5 + 0.25 * (
-                    tex2D(_BurtPostProcessSourceTexture, uv + direction * -0.5).rgb +
-                    tex2D(_BurtPostProcessSourceTexture, uv + direction * 0.5).rgb);
-                float lumaB = BurtFXAALuma(rgbB);
-                float3 resolved = (lumaB < lumaMin || lumaB > lumaMax) ? rgbA : lerp(rgbA, rgbB, saturate(_BurtFXAAParams.x));
-                return float4(resolved, center.a);
-            }
+            #pragma target 4.5
+            #pragma vertex VertFXAA
+            #pragma fragment FragFXAA
+            #include "Assets/BurtRP/Runtime/Shaders/PostProcessing/FXAABridge.hlsl"
             ENDHLSL
         }
 
         Pass
         {
-            Name "SMAA"
+            Name "SMAA Edge Detection"
             Cull Off
             ZWrite Off
             ZTest Always
 
             HLSLPROGRAM
-            #pragma target 3.5
-            #pragma vertex Vert
-            #pragma fragment Frag
-            #include "UnityCG.cginc"
+            #pragma target 4.5
+            #pragma vertex VertSMAAEdge
+            #pragma fragment FragSMAAEdge
+            #include "Assets/BurtRP/Runtime/Shaders/PostProcessing/SMAABridge.hlsl"
+            ENDHLSL
+        }
 
-            sampler2D _BurtPostProcessSourceTexture;
-            float4 _BurtPostProcessTexelSize;
-            float4 _BurtSMAAParams;
+        Pass
+        {
+            Name "SMAA Blend Weights"
+            Cull Off
+            ZWrite Off
+            ZTest Always
 
-            struct Attributes { uint vertexID : SV_VertexID; };
-            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex VertSMAABlend
+            #pragma fragment FragSMAABlend
+            #include "Assets/BurtRP/Runtime/Shaders/PostProcessing/SMAABridge.hlsl"
+            ENDHLSL
+        }
 
-            Varyings Vert(Attributes input)
-            {
-                Varyings output;
-                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
-                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
-                output.uv = uv;
-                return output;
-            }
+        Pass
+        {
+            Name "SMAA Neighborhood Blending"
+            Cull Off
+            ZWrite Off
+            ZTest Always
 
-            float BurtSMAALuma(float3 color)
-            {
-                return dot(color, float3(0.2126, 0.7152, 0.0722));
-            }
-
-            float4 Frag(Varyings input) : SV_Target
-            {
-                float2 texel = _BurtPostProcessTexelSize.xy;
-                float2 uv = input.uv;
-                float4 center = tex2D(_BurtPostProcessSourceTexture, uv);
-                float3 left = tex2D(_BurtPostProcessSourceTexture, uv - float2(texel.x, 0.0)).rgb;
-                float3 right = tex2D(_BurtPostProcessSourceTexture, uv + float2(texel.x, 0.0)).rgb;
-                float3 down = tex2D(_BurtPostProcessSourceTexture, uv - float2(0.0, texel.y)).rgb;
-                float3 up = tex2D(_BurtPostProcessSourceTexture, uv + float2(0.0, texel.y)).rgb;
-                float lumaCenter = BurtSMAALuma(center.rgb);
-                float horizontalContrast = abs(lumaCenter - BurtSMAALuma(left)) + abs(lumaCenter - BurtSMAALuma(right));
-                float verticalContrast = abs(lumaCenter - BurtSMAALuma(down)) + abs(lumaCenter - BurtSMAALuma(up));
-                float contrast = max(horizontalContrast, verticalContrast);
-                float threshold = max(_BurtSMAAParams.x, 0.0001);
-                if (contrast < threshold)
-                {
-                    return center;
-                }
-
-                float searchScale = saturate((_BurtSMAAParams.z - 1.0) / 15.0);
-                float3 wideHorizontal = 0.5 * (
-                    tex2D(_BurtPostProcessSourceTexture, uv - float2(texel.x, 0.0) * lerp(1.0, 2.0, searchScale)).rgb +
-                    tex2D(_BurtPostProcessSourceTexture, uv + float2(texel.x, 0.0) * lerp(1.0, 2.0, searchScale)).rgb);
-                float3 wideVertical = 0.5 * (
-                    tex2D(_BurtPostProcessSourceTexture, uv - float2(0.0, texel.y) * lerp(1.0, 2.0, searchScale)).rgb +
-                    tex2D(_BurtPostProcessSourceTexture, uv + float2(0.0, texel.y) * lerp(1.0, 2.0, searchScale)).rgb);
-                float3 blendColor = horizontalContrast > verticalContrast ? wideHorizontal : wideVertical;
-                float edgeWeight = saturate((contrast - threshold) / max(contrast, 0.0001));
-                center.rgb = lerp(center.rgb, blendColor, edgeWeight * saturate(_BurtSMAAParams.y));
-                return center;
-            }
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex VertSMAANeighbor
+            #pragma fragment FragSMAANeighbor
+            #include "Assets/BurtRP/Runtime/Shaders/PostProcessing/SMAABridge.hlsl"
             ENDHLSL
         }
 

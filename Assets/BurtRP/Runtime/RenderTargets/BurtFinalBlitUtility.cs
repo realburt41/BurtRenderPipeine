@@ -17,14 +17,6 @@ namespace Burt.RenderPipeline
                 return 0f;
             }
 
-            // SceneView, Preview, and user cameras that render into a RenderTexture are
-            // already in RT orientation. Treating them like a backbuffer display blit
-            // flips the final image vertically.
-            if (camera.targetTexture != null)
-            {
-                return 0f;
-            }
-
             if (camera.cameraType == CameraType.SceneView)
             {
                 return 1f;
@@ -33,6 +25,14 @@ namespace Burt.RenderPipeline
             if (camera.cameraType == CameraType.Preview)
             {
                 return 1f;
+            }
+
+            // User cameras that render into a RenderTexture stay in RT orientation.
+            // SceneView/Preview can also expose editor-owned target textures, so those
+            // editor camera types must be handled before this generic RT branch.
+            if (camera.targetTexture != null)
+            {
+                return 0f;
             }
 
             if (camera.cameraType == CameraType.Game)

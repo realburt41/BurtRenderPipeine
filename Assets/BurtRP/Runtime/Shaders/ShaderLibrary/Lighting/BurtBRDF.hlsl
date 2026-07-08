@@ -1399,15 +1399,32 @@ void BurtApplySubsurfaceDirectPBR(
     }
 
     float3 n = geometryData.NormalWS;
-    float3 v = geometryData.ViewDirectionWS;
     float3 l = BurtSafeNormalize(lightDirectionWS);
     float rawNoL = dot(n, l);
+    float Curvature = saturate(materialData.Subsurface3SCurvature);
+    if (BurtIsSubsurface3SPreIntegratedMode(materialData.SubsurfaceScatteringMode))
+    {
+        float3 PreintegratedLutScatter = BurtSampleSubsurfacePreIntegratedLut(rawNoL, Curvature, materialData.SubsurfaceProfileIndex);
+        float PreintegratedLutWeight = saturate(_BurtSubsurfacePreIntegratedLutEnabled);
+        float3 PreintegratedDiffuseBRDF = materialData.DiffuseColor * PreintegratedLutScatter * BURT_INV_PI;
+        float3 PreintegratedDiffuse = PreintegratedDiffuseBRDF * lightColor * shadowAttenuation;
+        float TargetDiffuseLobe = BurtEvaluateSubsurfaceProfileIntensity(PreintegratedLutScatter) * BURT_INV_PI;
+        float3 ResolvedDiffuse = lerp(components.Diffuse, PreintegratedDiffuse, PreintegratedLutWeight);
+        float3 ResolvedDiffuseBRDF = lerp(components.BrdfTerms.DiffuseBRDF, PreintegratedDiffuseBRDF, PreintegratedLutWeight);
+        float ResolvedDiffuseLobe = lerp(components.BrdfTerms.DiffuseLobe, TargetDiffuseLobe, PreintegratedLutWeight);
+
+        components.Diffuse = lerp(components.Diffuse, ResolvedDiffuse, subsurfaceStrength);
+        components.BrdfTerms.DiffuseLobe = lerp(components.BrdfTerms.DiffuseLobe, ResolvedDiffuseLobe, subsurfaceStrength);
+        components.BrdfTerms.DiffuseBRDF = lerp(components.BrdfTerms.DiffuseBRDF, ResolvedDiffuseBRDF, subsurfaceStrength);
+        return;
+    }
+
+    float3 v = geometryData.ViewDirectionWS;
     float wrappedNoL = saturate((rawNoL + materialData.SubsurfaceDistortion) / (1.0f + materialData.SubsurfaceDistortion));
     float3 h = BurtSafeNormalize(l + v);
     float vDotH = saturate(dot(v, h));
     float wrappedDiffuseLobe = SlabLobe_Diffuse(materialData, geometryData.NDotV, wrappedNoL, vDotH);
 
-    float curvature = saturate(materialData.Subsurface3SCurvature);
     float3 profileTransmissionBRDF;
     float3 profileTransmissionThroughput;
     float profileTransmissionLobe;
@@ -1434,23 +1451,6 @@ void BurtApplySubsurfaceDirectPBR(
     components.TransmissionPhase = lerp(components.TransmissionPhase, profileTransmissionPhase, subsurfaceStrength);
     components.TransmissionShadow = lerp(components.TransmissionShadow, transmissionShadow, subsurfaceStrength);
     components.TransmissionThickness = lerp(components.TransmissionThickness, profileTransmissionThickness, subsurfaceStrength);
-    if (BurtIsSubsurface3SPreIntegratedMode(materialData.SubsurfaceScatteringMode))
-    {
-        float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(rawNoL, curvature, materialData.SubsurfaceProfileIndex);
-        float lutWeight = saturate(_BurtSubsurfacePreIntegratedLutEnabled);
-        float3 preintegratedDiffuseBRDF = materialData.DiffuseColor * lutScatter * BURT_INV_PI;
-        float3 preintegratedDiffuse = preintegratedDiffuseBRDF * lightColor * shadowAttenuation;
-        float targetDiffuseLobe = BurtEvaluateSubsurfaceProfileIntensity(lutScatter) * BURT_INV_PI;
-        float3 resolvedDiffuse = lerp(components.Diffuse, preintegratedDiffuse, lutWeight);
-        float3 resolvedDiffuseBRDF = lerp(components.BrdfTerms.DiffuseBRDF, preintegratedDiffuseBRDF, lutWeight);
-        float resolvedDiffuseLobe = lerp(components.BrdfTerms.DiffuseLobe, targetDiffuseLobe, lutWeight);
-
-        components.Diffuse = lerp(components.Diffuse, resolvedDiffuse, subsurfaceStrength);
-        components.BrdfTerms.DiffuseLobe = lerp(components.BrdfTerms.DiffuseLobe, resolvedDiffuseLobe, subsurfaceStrength);
-        components.BrdfTerms.DiffuseBRDF = lerp(components.BrdfTerms.DiffuseBRDF, resolvedDiffuseBRDF, subsurfaceStrength);
-        return;
-    }
-
 #if defined(BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT)
     float3 diffuseTint = float3(1.0f, 1.0f, 1.0f);
 #else
@@ -1465,11 +1465,11 @@ void BurtApplySubsurfaceDirectPBR(
     float3 dualEnergyCompensation;
     float dualEnergyPreservation;
     GetSpecularEnergyTerms(materialData.F0, materialData.F90, averageRoughness, components.BrdfTerms.NDotV, dualEnergyCompensation, dualEnergyPreservation);
-    float3 lutScatter = BurtSampleSubsurfacePreIntegratedLut(rawNoL, curvature, materialData.SubsurfaceProfileIndex);
-    float lutWeight = saturate(_BurtSubsurfacePreIntegratedLutEnabled);
-    float scatterIntensity = BurtEvaluateSubsurfaceProfileIntensity(lutScatter);
-    float3 wrappedDiffuseBRDF = materialData.DiffuseColor * diffuseTint * lerp(wrappedDiffuseLobe, scatterIntensity * BURT_INV_PI, lutWeight) * dualEnergyPreservation;
-    float3 wrappedDiffuse = wrappedDiffuseBRDF * lightColor * lerp(wrappedNoL * shadowAttenuation, shadowAttenuation, lutWeight);
+    float3 LutScatter = BurtSampleSubsurfacePreIntegratedLut(rawNoL, Curvature, materialData.SubsurfaceProfileIndex);
+    float LutWeight = saturate(_BurtSubsurfacePreIntegratedLutEnabled);
+    float ScatterIntensity = BurtEvaluateSubsurfaceProfileIntensity(LutScatter);
+    float3 wrappedDiffuseBRDF = materialData.DiffuseColor * diffuseTint * lerp(wrappedDiffuseLobe, ScatterIntensity * BURT_INV_PI, LutWeight) * dualEnergyPreservation;
+    float3 wrappedDiffuse = wrappedDiffuseBRDF * lightColor * lerp(wrappedNoL * shadowAttenuation, shadowAttenuation, LutWeight);
 
     profileTransmissionBRDF *= dualEnergyPreservation;
     profileTransmission *= dualEnergyPreservation;

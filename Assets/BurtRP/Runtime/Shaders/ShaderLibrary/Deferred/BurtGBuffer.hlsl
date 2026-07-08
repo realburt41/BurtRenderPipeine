@@ -6,7 +6,7 @@
 // Authoritative BurtRP deferred GBuffer layout contract, aligned to the XRender PC-style fixed slots.
 // GBuffer0: normal payload. rgb = RGB888-packed normalWS, a = perceptual roughness. Backed by R8G8B8A8_UNorm.
 // GBuffer1: base payload. rgb = baseColor, a = occlusion. Backed by R8G8B8A8_SRGB/UNorm.
-// GBuffer2: property payload. r = packed(shadingModelID, material channel), g = metallic, b = smoothness, a = reflectance.
+// GBuffer2: property payload. r = packed(shadingModelID, material channel), g = metallic, b = smoothness, a = reflectance. Backed by R8G8B8A8_UNorm.
 // GBuffer3: low-precision per-model custom payload. Every channel must be 0..1 and safe for R8G8B8A8_UNorm.
 //   Default/ClearCoat: clearCoatNormal.xy, clearCoatMask, clearCoatRoughness.
 //   Hair/Fur: primarySpecularColor.rgb, pack(secondaryRoughness, shadowFillStrength).
@@ -1453,7 +1453,7 @@ float4 BurtClampGBuffer3LowPrecisionPayload(float4 Payload)
     return saturate(Payload);
 }
 
-// Encodes semantic GBuffer Data into the five MRT payloads.
+// Encodes semantic GBuffer Data into the six MRT payloads.
 BurtEncodedGBuffer BurtEncodeGBuffer(BurtGBufferData Data)
 {
     BurtEncodedGBuffer Encoded;

@@ -6,7 +6,7 @@ Shader "BurtRP/Grass"
         [HDR] _BaseColor ("Base Color", Color) = (0.72, 0.9, 0.48, 1)
         [HDR] _BaseColorTip ("Tip Overlay Color", Color) = (0.5, 0.5, 0.5, 1)
         _TipMaskPow ("Tip Mask Power", Range(0.1, 10)) = 3
-        _MaskMap ("Mask Map (R Unused, G Occlusion, B Thickness, A Roughness)", 2D) = "white" {}
+        _MaskMap ("Mask Map (G Occlusion, Other Channels Ignored)", 2D) = "white" {}
         _AlphaMap ("Alpha Map", 2D) = "white" {}
         _AlphaIncrease ("Alpha Distance Increase", Range(0, 8)) = 4
         [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
@@ -15,17 +15,6 @@ Shader "BurtRP/Grass"
         _Smoothness ("Smoothness", Range(0, 1)) = 0.35
         _Roughness ("Grass Roughness", Range(0, 1)) = 0.81
         _OcclusionStrength ("Occlusion Strength", Range(0, 1)) = 1
-        [HDR] _FoliageTransmissionColor ("Transmission Color", Color) = (0.45, 0.9, 0.28, 1)
-        _FoliageTransmissionWeight ("SSS Intensity", Range(0, 1)) = 0.28
-        _FoliageThickness ("Thickness", Range(0, 1)) = 0.35
-        _FoliageBackLight ("Back Light Wrap", Range(0, 1)) = 0.7
-        _FoliageSubsurfaceColorSaturate ("Transmission Saturation", Range(0, 2)) = 0.35
-        [HDR] _SubsurfaceColor ("SSS Tint", Color) = (1, 1, 1, 1)
-        _SubsurfaceColorSaturate ("SSS Saturation", Range(0, 2)) = 0.35
-        _RoughnessScale ("Roughness Scale", Range(0, 2)) = 1
-        _ReflectanceScale ("Foliage Specular Scale", Range(0, 1)) = 0.5
-        _ThicknessScale ("Thickness Scale", Range(0, 1)) = 1
-        _TransmissionNdotL ("Transmission NdotL", Range(0, 1)) = 0.5
         _SSSIntensity ("Base SSS Intensity", Range(0, 1)) = 0.18
         _FresnelIntensity ("Fresnel SSS Intensity", Range(0, 5)) = 1
         _FresnelExp ("Fresnel Exp", Range(0, 0.5)) = 0.35
@@ -49,8 +38,6 @@ Shader "BurtRP/Grass"
         _WindNormalStrength ("Wind Normal Strength", Range(0, 2)) = 1
         _ForceIntensity ("Collision Force Intensity", Range(0, 1)) = 0.2
         [HideInInspector] _WindInteractionIntensity ("Wind Interaction Intensity", Range(0, 1)) = 0.2
-        _EmissionMap ("Emission Map", 2D) = "white" {}
-        [HDR]_EmissionColor ("Emission Color", Color) = (0, 0, 0, 1)
         [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 1
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
 
@@ -134,7 +121,6 @@ Shader "BurtRP/Grass"
             #pragma vertex VertGBuffer
             #pragma fragment FragDepthNormals
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
             #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
@@ -197,7 +183,6 @@ Shader "BurtRP/Grass"
             #pragma vertex VertGBuffer
             #pragma fragment FragGBuffer
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
             #pragma target 4.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
