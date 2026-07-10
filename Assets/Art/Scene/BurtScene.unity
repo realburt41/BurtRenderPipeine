@@ -140,7 +140,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!135 &111655243
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -870,7 +870,7 @@ PrefabInstance:
     - target: {fileID: -3801706451896346929, guid: 90a6df37d194067498e876e6899e80be,
         type: 3}
       propertyPath: m_RenderingLayerMask
-      value: 4194304
+      value: 4194305
       objectReference: {fileID: 0}
     - target: {fileID: -3801706451896346929, guid: 90a6df37d194067498e876e6899e80be,
         type: 3}
@@ -1023,7 +1023,7 @@ MonoBehaviour:
   syncRenderOrderToCameraDepth: 1
   clearMode: 0
   clearColor: {r: 0.3679245, g: 0.3679245, b: 0.3679245, a: 1}
-  antialiasingMode: 0
+  antialiasingMode: 1
   syncClearSettingsToUnityCamera: 1
 --- !u!114 &785301927
 MonoBehaviour:
@@ -1940,7 +1940,7 @@ PrefabInstance:
     - target: {fileID: 4915011884796750827, guid: a4d884658cca4ba49b43f233195e69d5,
         type: 3}
       propertyPath: m_RenderingLayerMask
-      value: 4194304
+      value: 4194305
       objectReference: {fileID: 0}
     - target: {fileID: 4915011884796750827, guid: a4d884658cca4ba49b43f233195e69d5,
         type: 3}
@@ -2186,7 +2186,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2104118997}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a9ac4034810f48d6b5d82a4795bc1d64, type: 3}
   m_Name: 

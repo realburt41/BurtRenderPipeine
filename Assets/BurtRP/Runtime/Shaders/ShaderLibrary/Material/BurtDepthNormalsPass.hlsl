@@ -3,6 +3,7 @@
 #ifndef BURT_DEPTH_NORMALS_PASS_INCLUDED
 #define BURT_DEPTH_NORMALS_PASS_INCLUDED
 
+#define BURT_MATERIAL_DEPTH_NORMALS_PASS 1
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
 
 struct DepthNormalsFragmentOutput

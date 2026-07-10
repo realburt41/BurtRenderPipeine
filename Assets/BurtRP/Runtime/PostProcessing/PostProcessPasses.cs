@@ -95,7 +95,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             FXAA = 21,
             SMAAEdgeDetection = 22,
             SMAABlendWeights = 23,
-            SMAANeighborhoodBlending = 24
+            SMAANeighborhoodBlending = 24,
+            LensFlare = 25,
+            DiaphragmDepthOfField = 26,
+            PlainCopy = 27
         }
 
         private static int ShaderPass(PostProcessShaderPass pass)
@@ -285,15 +288,44 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int SMAABlendTextureId = Shader.PropertyToID("_BurtSMAABlendTexture");
         private static readonly int SMAAAreaTextureId = Shader.PropertyToID("_BurtSMAAAreaTexture");
         private static readonly int SMAASearchTextureId = Shader.PropertyToID("_BurtSMAASearchTexture");
-        private Material postProcessMaterial;
+        private static readonly int LensFlareBokeh0TextureId = Shader.PropertyToID("_BurtLensFlareBokeh0Tex");
+        private static readonly int LensFlareBokeh1TextureId = Shader.PropertyToID("_BurtLensFlareBokeh1Tex");
+        private static readonly int LensFlareBokeh2TextureId = Shader.PropertyToID("_BurtLensFlareBokeh2Tex");
+        private static readonly int LensFlareBokeh3TextureId = Shader.PropertyToID("_BurtLensFlareBokeh3Tex");
+        private static readonly int LensFlareBokeh4TextureId = Shader.PropertyToID("_BurtLensFlareBokeh4Tex");
+        private static readonly int LensFlareLineTextureId = Shader.PropertyToID("_BurtLensFlareLineTex");
+        private static readonly int LensFlareHiZDepthTextureId = BurtRenderGraphResourceRegistry.HiZDepthTextureId;
+        private static readonly int LensFlareViewProjectionId = Shader.PropertyToID("_BurtLensFlareViewProjection");
+        private static readonly int LensFlareBokeh0ScaleAndPositionId = Shader.PropertyToID("_BurtLensFlareBokeh0ScaleAndPosition");
+        private static readonly int LensFlareBokeh1ScaleAndPositionId = Shader.PropertyToID("_BurtLensFlareBokeh1ScaleAndPosition");
+        private static readonly int LensFlareBokeh2ScaleAndPositionId = Shader.PropertyToID("_BurtLensFlareBokeh2ScaleAndPosition");
+        private static readonly int LensFlareBokeh3ScaleAndPositionId = Shader.PropertyToID("_BurtLensFlareBokeh3ScaleAndPosition");
+        private static readonly int LensFlareBokeh4ScaleAndPositionId = Shader.PropertyToID("_BurtLensFlareBokeh4ScaleAndPosition");
+        private static readonly int LensFlareBokeh0ColorId = Shader.PropertyToID("_BurtLensFlareBokeh0Color");
+        private static readonly int LensFlareBokeh1ColorId = Shader.PropertyToID("_BurtLensFlareBokeh1Color");
+        private static readonly int LensFlareBokeh2ColorId = Shader.PropertyToID("_BurtLensFlareBokeh2Color");
+        private static readonly int LensFlareBokeh3ColorId = Shader.PropertyToID("_BurtLensFlareBokeh3Color");
+        private static readonly int LensFlareBokeh4ColorId = Shader.PropertyToID("_BurtLensFlareBokeh4Color");
+        private static readonly int LensFlareLineParamsId = Shader.PropertyToID("_BurtLensFlareLineParams");
+        private static readonly int LensFlareTotalParamsId = Shader.PropertyToID("_BurtLensFlareTotalParams");
+        private static readonly int LensFlareTintColorId = Shader.PropertyToID("_BurtLensFlareTintColor");
+        private static readonly int LensFlareTextureFlags0Id = Shader.PropertyToID("_BurtLensFlareTextureFlags0");
+        private static readonly int LensFlareTextureFlags1Id = Shader.PropertyToID("_BurtLensFlareTextureFlags1");
+        private static readonly int LensFlareDepthParamsId = Shader.PropertyToID("_BurtLensFlareDepthParams");
+        private static readonly int DiaphragmDepthOfFieldParams0Id = Shader.PropertyToID("_BurtDiaphragmDOFParams0");
+        private static readonly int DiaphragmDepthOfFieldParams1Id = Shader.PropertyToID("_BurtDiaphragmDOFParams1");
+        private static readonly int DiaphragmDepthOfFieldParams2Id = Shader.PropertyToID("_BurtDiaphragmDOFParams2");
+        private static Material postProcessMaterial;
         private static ComputeShader temporalAAComputeShader;
         private static Texture2D smaaAreaTexture;
         private static Texture2D smaaSearchTexture;
-        private bool hasLoggedMissingShader; // 记录缺失 shader 警告是否已经输出，避免 Console 每帧刷屏。
+        private static bool hasLoggedMissingShader; // 记录缺失 shader 警告是否已经输出，避免 Console 每帧刷屏。
         private static bool hasLoggedMissingTemporalAAComputeShader;
         private static bool hasLoggedMissingTemporalAAComputeKernel;
         private static bool hasLoggedMissingSMAATextures;
         private static bool hasLoggedMissingSMAAPasses;
+        private static bool hasLoggedMissingLensFlarePass;
+        private static bool hasLoggedMissingDiaphragmDepthOfFieldPass;
 
         public override string Name => "Post Process"; // 返回 Pass 名称，方便 RenderGraph Debug 和 Frame Debugger 识别。
 
@@ -321,17 +353,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             }
 
             builder.ReadCameraColor(); // 声明先读取场景渲染完成后的 CameraColor。
-            builder.ReadCameraDepth(); // TAA resolve reads depth when enabled; non-TAA paths ignore it.
-            var temporalAA = builder.Request != null ? builder.Request.TemporalAA : null;
-            if (temporalAA != null &&
-                temporalAA.Enabled &&
-                builder.ResourceRegistry != null &&
-                builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.GBuffer0Name) &&
-                builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.GBuffer2Name))
-            {
-                builder.ReadGBuffer0();
-                builder.ReadGBuffer2();
-            }
 
             builder.WritePostProcessColor(); // 声明第一段拷贝会写入 PostProcessColor。
 
@@ -345,6 +366,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset)) // 执行阶段再次检查开关，保证关闭后不会提交绘制命令。
             {
                 return; // 未启用时直接跳过。
+            }
+
+            if (PostProcessUtility.IsTemporalAADebugRequested())
+            {
+                return;
             }
 
             var renderContext = context.ScriptableContext; // 从上下文中取出 Unity SRP 渲染上下文。
@@ -390,65 +416,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var useColorGrading = PostProcessUtility.ShouldUseColorGrading(context.Request, context.Asset);
             var useVignette = PostProcessUtility.ShouldUseVignette(context.Request, context.Asset);
             var vignetteSettings = PostProcessUtility.ResolveVignetteSettings(context.Asset);
-            var rcasSettings = PostProcessUtility.ResolveRCASSettings(context.Asset);
-            var fxaaSettings = PostProcessUtility.ResolveFastApproximateAASettings(context.Asset);
-            var smaaSettings = PostProcessUtility.ResolveSubpixelMorphologicalAASettings(context.Asset);
-            var temporalAA = context.Request.TemporalAA ?? BurtTemporalAARequestState.Disabled;
-            var temporalAADebugRequested = PostProcessUtility.IsTemporalAADebugRequested();
-            var useTemporalAA = temporalAA.Enabled;
-            var useTemporalAADebug = useTemporalAA && temporalAADebugRequested;
             var autoExposureDebugMode = PostProcessUtility.ResolveAutoExposureDebugMode(BurtShadingDebugSettings.Mode);
 
             var bloomSettings = PostProcessUtility.ResolveBloomSettings(context.Asset); // 从 Global Volume 读取 Bloom 参数，未启用时回退到关闭状态。
 
-            var bloomMipCount = PostProcessUtility.CalculateBloomMipCount(context.Request.Camera, bloomSettings); // 按当前相机尺寸和 Volume 上限计算实际 mip 数。
+            var bloomMipCount = PostProcessUtility.ResolveBloomMipCount(context.Request, context.Asset); // 按当前相机尺寸和 Volume 上限计算实际 mip 数。
             var bloomDebugView = PostProcessUtility.ResolveBloomDebugView(bloomSettings); // Shading Debug 的 Bloom Prefilter 会覆盖 Volume 内的 Bloom debug 下拉。
 
             var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取 CommandBuffer，并用 Pass 名称命名。
             PreExposureUtility.UploadGlobals(cmd, preExposureState);
-            if (useTemporalAA &&
-                PreExposureUtility.ShouldInvalidateTemporalAAHistory(context.Request.Camera, preExposureState, out var preExposureInvalidationReason))
-            {
-                BurtTemporalAAUtility.InvalidateHistory(context.Request.Camera, preExposureInvalidationReason);
-            }
-
-            if (temporalAADebugRequested && !useTemporalAA)
-            {
-                ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
-                renderContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
-                PostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, preExposureState, useColorAdjustments, useVignette, vignetteSettings, bloomSettings, 0);
-                return;
-            }
-
-
-            if (useTemporalAA)
-            {
-                useTemporalAA = ExecuteTemporalAA(context, cmd, context.Request.Camera, cameraColorTarget, context.CameraDepthTarget, postProcessColorTarget, material, temporalAA, useTemporalAADebug);
-                useTemporalAADebug = useTemporalAA && temporalAADebugRequested;
-                if (!useTemporalAA && temporalAADebugRequested)
-                {
-                    ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
-                    renderContext.ExecuteCommandBuffer(cmd);
-                    CommandBufferPool.Release(cmd);
-                    PostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, preExposureState, useColorAdjustments, useVignette, vignetteSettings, bloomSettings, 0);
-                    return;
-                }
-            }
-
-            if (useTemporalAADebug)
-            {
-                renderContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
-                PostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, preExposureState, useColorAdjustments, useVignette, vignetteSettings, bloomSettings, 0);
-                return;
-            }
-
-            if (bloomMipCount > 0) // 如果 Bloom 启用，就在同一个 Pass 内部管理临时 mip 链。
-            {
-                ExecuteBloom(cmd, context.Request.Camera, cameraColorTarget, material, bloomSettings, bloomDebugView, bloomMipCount, residualPostExposureMultiplier); // 先对 HDR CameraColor 做 prefilter/downsample/upsample。
-            }
-
             if (AutoExposureUtility.ShouldCapture(exposureSettings, context.Request.Camera))
             {
                 AutoExposureUtility.CaptureAverageLogLuminance(
@@ -543,35 +519,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 cmd.SetGlobalFloat(UseVignetteId, 0f);
             }
 
-            if (allowFinalPostEffects && smaaSettings.Enabled)
-            {
-                var smaaTargetIsCameraColor = nextTargetIsCameraColor;
-                var smaaTarget = smaaTargetIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier;
-                if (ExecuteSMAA(cmd, context.Request.Camera, material, currentSource, smaaTarget, smaaSettings))
-                {
-                    currentIsCameraColor = smaaTargetIsCameraColor;
-                    currentSource = currentIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier;
-                    nextTargetIsCameraColor = !nextTargetIsCameraColor;
-                }
-            }
-
-            if (allowFinalPostEffects && fxaaSettings.Enabled)
-            {
-                SetFXAAGlobals(cmd, fxaaSettings);
-                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, currentSource, nextTargetIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier, PostProcessShaderPass.FXAA);
-                currentIsCameraColor = nextTargetIsCameraColor;
-                currentSource = currentIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier;
-                nextTargetIsCameraColor = !nextTargetIsCameraColor;
-            }
-
-            if (allowFinalPostEffects && rcasSettings.Enabled)
-            {
-                SetRCASGlobals(cmd, rcasSettings);
-                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, currentSource, nextTargetIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier, PostProcessShaderPass.RCAS);
-                currentIsCameraColor = nextTargetIsCameraColor;
-                currentSource = currentIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier;
-            }
-
             if (!currentIsCameraColor)
             {
                 DrawFinalPostProcessPass(cmd, context.Request.Camera, material, currentSource, cameraColorTarget.Identifier, PostProcessShaderPass.CopyAndComposite);
@@ -586,6 +533,437 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             PostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, preExposureState, useColorAdjustments, useVignette, vignetteSettings, bloomSettings, bloomMipCount); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
         }
 
+        internal static bool ShouldUseTemporalAAPass(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return PostProcessUtility.IsTemporalAADebugRequested() || PostProcessUtility.ShouldUseTemporalAA(request, asset);
+        }
+
+        internal static bool ShouldUseDiaphragmDepthOfFieldPass(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return !PostProcessUtility.IsTemporalAADebugRequested() && PostProcessUtility.ShouldUseDiaphragmDepthOfField(request, asset);
+        }
+
+        internal static bool ShouldUseLensFlarePass(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return !PostProcessUtility.IsTemporalAADebugRequested() && PostProcessUtility.ShouldUseLensFlare(request, asset);
+        }
+
+        internal static bool ShouldUseBloomPass(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return !PostProcessUtility.IsTemporalAADebugRequested() && PostProcessUtility.ResolveBloomMipCount(request, asset) > 0;
+        }
+
+        internal static bool ShouldUseSubpixelMorphologicalAAPass(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldUseFinalAAPass(request, asset) && PostProcessUtility.ShouldUseSubpixelMorphologicalAA(request, asset);
+        }
+
+        internal static bool ShouldUseFastApproximateAAPass(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldUseFinalAAPass(request, asset) && PostProcessUtility.ShouldUseFastApproximateAA(request, asset);
+        }
+
+        internal static bool ShouldUseRCASPass(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldUseFinalAAPass(request, asset) && PostProcessUtility.ShouldUseRCAS(request, asset);
+        }
+
+        private static bool ShouldUseFinalAAPass(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return !PostProcessUtility.IsTemporalAADebugRequested() &&
+                !PostProcessUtility.IsBloomDebugRequested() &&
+                PostProcessUtility.ResolveAutoExposureDebugMode(BurtShadingDebugSettings.Mode) <= 0;
+        }
+
+        internal sealed class TemporalAAPass : BurtRenderPass
+        {
+            public override string Name => "Temporal AA";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
+                    !ShouldUseTemporalAAPass(builder.Request, builder.Asset))
+                {
+                    return;
+                }
+
+                builder.ReadCameraColor();
+                builder.ReadCameraDepth();
+                builder.WritePostProcessColor();
+                builder.ReadPostProcessColor();
+                builder.WriteCameraColor();
+
+                var temporalAA = builder.Request != null ? builder.Request.TemporalAA : null;
+                if (temporalAA != null &&
+                    temporalAA.Enabled &&
+                    builder.ResourceRegistry != null &&
+                    builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.GBuffer0Name) &&
+                    builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.GBuffer2Name))
+                {
+                    builder.ReadGBuffer0();
+                    builder.ReadGBuffer2();
+                }
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset) ||
+                    !ShouldUseTemporalAAPass(context.Request, context.Asset))
+                {
+                    return;
+                }
+
+                var cameraColorTarget = context.CameraColorTarget;
+                var postProcessColorTarget = context.PostProcessColorTarget;
+                var cameraDepthTarget = context.CameraDepthTarget;
+                if (!cameraColorTarget.IsValid)
+                {
+                    InvalidateTemporalAAIfEnabled(context, "ResolveMissingCameraColor");
+                    return;
+                }
+
+                if (!postProcessColorTarget.IsValid)
+                {
+                    InvalidateTemporalAAIfEnabled(context, "ResolveMissingPostProcessColor");
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                if (material == null)
+                {
+                    InvalidateTemporalAAIfEnabled(context, "PostProcessShaderMissing");
+                    return;
+                }
+
+                var temporalAA = context.Request.TemporalAA ?? BurtTemporalAARequestState.Disabled;
+                var temporalAADebugRequested = PostProcessUtility.IsTemporalAADebugRequested();
+                var useTemporalAA = temporalAA.Enabled;
+                if (!useTemporalAA && !temporalAADebugRequested)
+                {
+                    return;
+                }
+
+                var exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
+                var preExposureState = PreExposureUtility.ResolveForFrame(exposureSettings);
+                var cmd = CommandBufferPool.Get(Name);
+                PreExposureUtility.UploadGlobals(cmd, preExposureState);
+                if (useTemporalAA &&
+                    PreExposureUtility.ShouldInvalidateTemporalAAHistory(context.Request.Camera, preExposureState, out var preExposureInvalidationReason))
+                {
+                    BurtTemporalAAUtility.InvalidateHistory(context.Request.Camera, preExposureInvalidationReason);
+                }
+
+                if (temporalAADebugRequested && !useTemporalAA)
+                {
+                    ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
+                    context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                    CommandBufferPool.Release(cmd);
+                    return;
+                }
+
+                var useTemporalAADebug = useTemporalAA && temporalAADebugRequested;
+                useTemporalAA = ExecuteTemporalAA(context, cmd, context.Request.Camera, cameraColorTarget, cameraDepthTarget, postProcessColorTarget, material, temporalAA, useTemporalAADebug);
+                if (!useTemporalAA && temporalAADebugRequested)
+                {
+                    ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
+                }
+
+                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
+        internal sealed class DiaphragmDepthOfFieldPass : BurtRenderPass
+        {
+            public override string Name => "Diaphragm Depth Of Field";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
+                    !ShouldUseDiaphragmDepthOfFieldPass(builder.Request, builder.Asset))
+                {
+                    return;
+                }
+
+                builder.ReadCameraColor();
+                builder.ReadCameraDepth();
+                builder.WritePostProcessColor();
+                builder.ReadPostProcessColor();
+                builder.WriteCameraColor();
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset) ||
+                    !ShouldUseDiaphragmDepthOfFieldPass(context.Request, context.Asset))
+                {
+                    return;
+                }
+
+                var settings = PostProcessUtility.ResolveDiaphragmDepthOfFieldSettings(context.Request, context.Asset);
+                if (!settings.Enabled)
+                {
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                if (material == null)
+                {
+                    return;
+                }
+
+                var cmd = CommandBufferPool.Get(Name);
+                ExecuteDiaphragmDepthOfField(cmd, context.Request.Camera, context.CameraColorTarget, context.CameraDepthTarget, context.PostProcessColorTarget, material, settings);
+                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
+        internal sealed class LensFlarePass : BurtRenderPass
+        {
+            public override string Name => "Lens Flare";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
+                    !ShouldUseLensFlarePass(builder.Request, builder.Asset))
+                {
+                    return;
+                }
+
+                builder.ReadCameraColor();
+                builder.ReadCameraDepth();
+                builder.WriteCameraColor();
+                if (builder.ResourceRegistry != null &&
+                    builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.HiZDepthName))
+                {
+                    builder.ReadHiZDepth();
+                }
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset) ||
+                    !ShouldUseLensFlarePass(context.Request, context.Asset))
+                {
+                    return;
+                }
+
+                var settings = PostProcessUtility.ResolveLensFlareSettings(context.Asset);
+                if (!settings.Enabled)
+                {
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                if (material == null)
+                {
+                    return;
+                }
+
+                var cmd = CommandBufferPool.Get(Name);
+                ExecuteLensFlare(cmd, context.Request.Camera, context.CameraColorTarget, context.CameraDepthTarget, context.HiZDepthTarget, material, settings);
+                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
+        internal sealed class BloomPass : BurtRenderPass
+        {
+            public override string Name => "Bloom";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
+                    !ShouldUseBloomPass(builder.Request, builder.Asset))
+                {
+                    return;
+                }
+
+                builder.ReadCameraColor();
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset) ||
+                    !ShouldUseBloomPass(context.Request, context.Asset))
+                {
+                    return;
+                }
+
+                var cameraColorTarget = context.CameraColorTarget;
+                if (!cameraColorTarget.IsValid)
+                {
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                if (material == null)
+                {
+                    return;
+                }
+
+                var bloomSettings = PostProcessUtility.ResolveBloomSettings(context.Asset);
+                var bloomMipCount = PostProcessUtility.ResolveBloomMipCount(context.Request, context.Asset);
+                if (bloomMipCount <= 0)
+                {
+                    return;
+                }
+
+                var exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
+                var preExposureState = PreExposureUtility.ResolveForFrame(exposureSettings);
+                var bloomDebugView = PostProcessUtility.ResolveBloomDebugView(bloomSettings);
+                var cmd = CommandBufferPool.Get(Name);
+                PreExposureUtility.UploadGlobals(cmd, preExposureState);
+                ExecuteBloom(cmd, context.Request.Camera, cameraColorTarget, material, bloomSettings, bloomDebugView, bloomMipCount, preExposureState.ResidualPostExposure);
+                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
+        internal sealed class SubpixelMorphologicalAAPass : BurtRenderPass
+        {
+            public override string Name => "SMAA";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
+                    !ShouldUseSubpixelMorphologicalAAPass(builder.Request, builder.Asset))
+                {
+                    return;
+                }
+
+                builder.ReadCameraColor();
+                builder.WritePostProcessColor();
+                builder.ReadPostProcessColor();
+                builder.WriteCameraColor();
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset) ||
+                    !ShouldUseSubpixelMorphologicalAAPass(context.Request, context.Asset))
+                {
+                    return;
+                }
+
+                var settings = PostProcessUtility.ResolveSubpixelMorphologicalAASettings(context.Asset);
+                if (!settings.Enabled || !context.CameraColorTarget.IsValid || !context.PostProcessColorTarget.IsValid)
+                {
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                if (material == null)
+                {
+                    return;
+                }
+
+                var cmd = CommandBufferPool.Get(Name);
+                if (ExecuteSMAA(cmd, context.Request.Camera, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, settings))
+                {
+                    DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
+                }
+
+                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
+        internal sealed class FastApproximateAAPass : BurtRenderPass
+        {
+            public override string Name => "FXAA";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
+                    !ShouldUseFastApproximateAAPass(builder.Request, builder.Asset))
+                {
+                    return;
+                }
+
+                builder.ReadCameraColor();
+                builder.WritePostProcessColor();
+                builder.ReadPostProcessColor();
+                builder.WriteCameraColor();
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset) ||
+                    !ShouldUseFastApproximateAAPass(context.Request, context.Asset))
+                {
+                    return;
+                }
+
+                var settings = PostProcessUtility.ResolveFastApproximateAASettings(context.Asset);
+                if (!settings.Enabled || !context.CameraColorTarget.IsValid || !context.PostProcessColorTarget.IsValid)
+                {
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                if (material == null)
+                {
+                    return;
+                }
+
+                var cmd = CommandBufferPool.Get(Name);
+                SetFXAAGlobals(cmd, settings);
+                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, PostProcessShaderPass.FXAA);
+                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
+                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
+        internal sealed class RCASPass : BurtRenderPass
+        {
+            public override string Name => "RCAS";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
+                    !ShouldUseRCASPass(builder.Request, builder.Asset))
+                {
+                    return;
+                }
+
+                builder.ReadCameraColor();
+                builder.WritePostProcessColor();
+                builder.ReadPostProcessColor();
+                builder.WriteCameraColor();
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset) ||
+                    !ShouldUseRCASPass(context.Request, context.Asset))
+                {
+                    return;
+                }
+
+                var settings = PostProcessUtility.ResolveRCASSettings(context.Asset);
+                if (!settings.Enabled || !context.CameraColorTarget.IsValid || !context.PostProcessColorTarget.IsValid)
+                {
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                if (material == null)
+                {
+                    return;
+                }
+
+                var cmd = CommandBufferPool.Get(Name);
+                SetRCASGlobals(cmd, settings);
+                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, PostProcessShaderPass.RCAS);
+                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
+                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
         private static void SetVignetteGlobals(CommandBuffer cmd, VignetteSettings settings)
         {
             var edgeSoftness = Mathf.Max(settings.EdgeSoftness, 0.01f);
@@ -594,6 +972,175 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalColor(VignetteColorId, settings.Color);
             cmd.SetGlobalVector(VignetteParamsId, new Vector4(settings.Intensity, edgeWidth, 1f / edgeSoftness, settings.FisheyeFovDeg));
             cmd.SetGlobalVector(VignetteOptionsId, new Vector4(settings.FollowAspect ? 1f : 0f, 0f, 0f, 0f));
+        }
+
+        private static bool ExecuteDiaphragmDepthOfField(
+            CommandBuffer cmd,
+            Camera camera,
+            BurtRenderTargetHandle cameraColorTarget,
+            BurtRenderTargetHandle cameraDepthTarget,
+            BurtRenderTargetHandle postProcessColorTarget,
+            Material material,
+            DiaphragmDepthOfFieldSettings settings)
+        {
+            if (cmd == null || camera == null || material == null || !settings.Enabled)
+            {
+                return false;
+            }
+
+            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid || !postProcessColorTarget.IsValid)
+            {
+                return false;
+            }
+
+            if (!HasPostProcessShaderPass(material, PostProcessShaderPass.DiaphragmDepthOfField, "Diaphragm Depth Of Field", ref hasLoggedMissingDiaphragmDepthOfFieldPass))
+            {
+                return false;
+            }
+
+            cmd.SetRenderTarget(postProcessColorTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
+            SetPostProcessTexelSize(cmd, camera);
+            SetDiaphragmDepthOfFieldGlobals(cmd, settings);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.DiaphragmDepthOfField), MeshTopology.Triangles, 3, 1);
+
+            DrawFinalPostProcessPass(cmd, camera, material, postProcessColorTarget.Identifier, cameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
+            return true;
+        }
+
+        private static void SetDiaphragmDepthOfFieldGlobals(CommandBuffer cmd, DiaphragmDepthOfFieldSettings settings)
+        {
+            cmd.SetGlobalVector(
+                DiaphragmDepthOfFieldParams0Id,
+                new Vector4(
+                    settings.FocusDistanceMeters,
+                    settings.InfinityBackgroundCocRadius,
+                    settings.MinForegroundCocRadius,
+                    settings.MaxBackgroundCocRadius));
+            cmd.SetGlobalVector(
+                DiaphragmDepthOfFieldParams1Id,
+                new Vector4(
+                    settings.DepthBlurExponent,
+                    settings.MaxDepthBlurRadius,
+                    settings.MaxRadiusPixels,
+                    0f));
+            cmd.SetGlobalVector(
+                DiaphragmDepthOfFieldParams2Id,
+                new Vector4(
+                    settings.SqueezeFactor,
+                    settings.SmoothGather ? 1f : 0f,
+                    settings.VisualizeDOF ? 1f : 0f,
+                    0f));
+        }
+
+        private static bool ExecuteLensFlare(
+            CommandBuffer cmd,
+            Camera camera,
+            BurtRenderTargetHandle cameraColorTarget,
+            BurtRenderTargetHandle cameraDepthTarget,
+            BurtRenderTargetHandle hiZDepthTarget,
+            Material material,
+            LensFlareSettings settings)
+        {
+            if (cmd == null || camera == null || material == null || !settings.Enabled)
+            {
+                return false;
+            }
+
+            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid)
+            {
+                return false;
+            }
+
+            if (!HasPostProcessShaderPass(material, PostProcessShaderPass.LensFlare, "Lens Flare", ref hasLoggedMissingLensFlarePass))
+            {
+                return false;
+            }
+
+            SetLensFlareGlobals(cmd, camera, cameraDepthTarget, hiZDepthTarget, settings);
+            cmd.SetRenderTarget(cameraColorTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.LensFlare), MeshTopology.Triangles, 3, 1);
+            return true;
+        }
+
+        private static void SetLensFlareGlobals(CommandBuffer cmd, Camera camera, BurtRenderTargetHandle cameraDepthTarget, BurtRenderTargetHandle hiZDepthTarget, LensFlareSettings settings)
+        {
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
+            cmd.SetGlobalTexture(LensFlareHiZDepthTextureId, hiZDepthTarget.IsValid ? hiZDepthTarget.Identifier : cameraDepthTarget.Identifier);
+            cmd.SetGlobalTexture(LensFlareBokeh0TextureId, ResolveTextureOrBlack(settings.Bokeh0Texture));
+            cmd.SetGlobalTexture(LensFlareBokeh1TextureId, ResolveTextureOrBlack(settings.Bokeh1Texture));
+            cmd.SetGlobalTexture(LensFlareBokeh2TextureId, ResolveTextureOrBlack(settings.Bokeh2Texture));
+            cmd.SetGlobalTexture(LensFlareBokeh3TextureId, ResolveTextureOrBlack(settings.Bokeh3Texture));
+            cmd.SetGlobalTexture(LensFlareBokeh4TextureId, ResolveTextureOrBlack(settings.Bokeh4Texture));
+            cmd.SetGlobalTexture(LensFlareLineTextureId, ResolveTextureOrBlack(settings.LineTexture));
+            cmd.SetGlobalMatrix(LensFlareViewProjectionId, ResolveLensFlareViewProjection(camera));
+            cmd.SetGlobalVector(LensFlareBokeh0ScaleAndPositionId, settings.Bokeh0ScaleAndPosition);
+            cmd.SetGlobalVector(LensFlareBokeh1ScaleAndPositionId, settings.Bokeh1ScaleAndPosition);
+            cmd.SetGlobalVector(LensFlareBokeh2ScaleAndPositionId, settings.Bokeh2ScaleAndPosition);
+            cmd.SetGlobalVector(LensFlareBokeh3ScaleAndPositionId, settings.Bokeh3ScaleAndPosition);
+            cmd.SetGlobalVector(LensFlareBokeh4ScaleAndPositionId, settings.Bokeh4ScaleAndPosition);
+            cmd.SetGlobalVector(LensFlareBokeh0ColorId, settings.Bokeh0Color);
+            cmd.SetGlobalVector(LensFlareBokeh1ColorId, settings.Bokeh1Color);
+            cmd.SetGlobalVector(LensFlareBokeh2ColorId, settings.Bokeh2Color);
+            cmd.SetGlobalVector(LensFlareBokeh3ColorId, settings.Bokeh3Color);
+            cmd.SetGlobalVector(LensFlareBokeh4ColorId, settings.Bokeh4Color);
+            cmd.SetGlobalVector(LensFlareLineParamsId, settings.LineParams);
+            cmd.SetGlobalVector(LensFlareTotalParamsId, settings.TotalParams);
+            cmd.SetGlobalVector(LensFlareTintColorId, settings.TotalTintColor);
+            cmd.SetGlobalVector(LensFlareTextureFlags0Id, settings.TextureFlags0);
+            cmd.SetGlobalVector(LensFlareTextureFlags1Id, settings.TextureFlags1);
+            cmd.SetGlobalVector(LensFlareDepthParamsId, new Vector4(hiZDepthTarget.IsValid ? 1f : 0f, 1f, 0f, 0f));
+        }
+
+        private static Matrix4x4 ResolveLensFlareViewProjection(Camera camera)
+        {
+            if (camera == null)
+            {
+                return Matrix4x4.identity;
+            }
+
+            var projectionMatrix = camera.nonJitteredProjectionMatrix;
+            if (projectionMatrix == Matrix4x4.zero)
+            {
+                projectionMatrix = camera.projectionMatrix;
+            }
+
+            return GL.GetGPUProjectionMatrix(projectionMatrix, true) * camera.worldToCameraMatrix;
+        }
+
+        private static Texture ResolveTextureOrBlack(Texture2D texture)
+        {
+            return texture != null ? texture : Texture2D.blackTexture;
+        }
+
+        private static bool HasPostProcessShaderPass(Material material, PostProcessShaderPass pass, string featureName, ref bool hasLoggedMissingPass)
+        {
+            if (material == null)
+            {
+                return false;
+            }
+
+            var requiredPassCount = ShaderPass(pass) + 1;
+            if (material.passCount >= requiredPassCount)
+            {
+                hasLoggedMissingPass = false;
+                return true;
+            }
+
+            if (!hasLoggedMissingPass)
+            {
+                Debug.LogWarning(
+                    "BurtRP " + featureName + " is enabled, but shader " + PostProcessShaderName +
+                    " has only " + material.passCount +
+                    " passes. Expected at least " + requiredPassCount +
+                    ". The effect will be skipped until the shader is reimported without errors.");
+                hasLoggedMissingPass = true;
+            }
+
+            return false;
         }
 
         private static void SetColorGradingGlobals(CommandBuffer cmd, ColorGradingSettings settings, bool useColorGrading)
@@ -1805,7 +2352,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             return PostProcessUtility.GetBloomMipHeight(camera, mipIndex); // 和 Bloom 诊断共用同一套尺寸计算。
         }
 
-        private Material GetPostProcessMaterial() // 定义获取后处理材质的内部辅助函数。
+        private static Material GetPostProcessMaterial() // 定义获取后处理材质的内部辅助函数。
         {
             if (postProcessMaterial != null) // 如果材质之前已经创建过，就直接复用。
             {

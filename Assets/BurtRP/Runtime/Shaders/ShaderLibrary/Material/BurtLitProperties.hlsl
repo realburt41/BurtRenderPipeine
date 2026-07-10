@@ -6,6 +6,8 @@
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 
+#define BURT_FORWARD_ENABLE_REFRACTION 0
+
 CBUFFER_START(UnityPerMaterial)
 
     // 保存材质基础颜色，Forward 用它参与 albedo，DepthOnly 和 ShadowCaster 用它参与 alpha clip。
@@ -22,6 +24,14 @@ CBUFFER_START(UnityPerMaterial)
 
     // 保存 alpha clip 阈值，BaseMap alpha 低于这个值时会被丢弃。
     float _Cutoff;
+
+    float _Surface;
+
+    float _Refraction;
+
+    float _IOR;
+
+    float _RefractionStage;
 
     // 保存法线贴图强度，Forward 用它缩放 normal map 扰动。
     float _NormalScale;
@@ -201,6 +211,40 @@ CBUFFER_START(UnityPerMaterial)
     float _ForceIntensity;
 
     float _WindInteractionIntensity;
+
+    float _Occlusion;
+
+    float _PreserveSpecular;
+
+    float4 _EmissiveColor;
+
+    float4 _EmissiveMap_ST;
+
+    float _AtlasMode;
+
+    float4 _RoomCount;
+
+    float4 _FakeRoom_ST;
+
+    float4 _AtlasMap_ST;
+
+    float4 _FrostMap_ST;
+
+    float _CubemapLightMultiplier;
+
+    float _ColorTemp;
+
+    float _Exposure;
+
+    float _InteriorIntensity;
+
+    float _Depth;
+
+    float _ScaleXAxis;
+
+    float _MarchSteps;
+
+    float _DitherSteps;
 
     // 保存自发光颜色，Forward 用它和 Emission Map 相乘。
     float4 _EmissionColor;

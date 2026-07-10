@@ -1,0 +1,84 @@
+#pragma kernel UploadRGBAHalf
+#pragma kernel UploadRGBA8
+#pragma kernel UploadR8
+#pragma kernel ClearRGBA
+#pragma kernel ClearR8
+
+ByteAddressBuffer _BurtGIProbeUploadSource;
+RWTexture3D<float4> _BurtGIProbeUploadRgbaTexture;
+RWTexture3D<float> _BurtGIProbeUploadR8Texture;
+
+float3 _BurtGIProbeUploadOrigin;
+float3 _BurtGIProbeUploadPoolDimensions;
+
+uint BurtGIProbeUploadSourceIndex(uint3 localCoord)
+{
+    return localCoord.x + localCoord.y * 512u + localCoord.z * (512u * 4u);
+}
+
+bool BurtGIProbeUploadIsInPool(uint3 localCoord, out uint3 poolCoord)
+{
+    poolCoord = localCoord + (uint3)round(_BurtGIProbeUploadOrigin);
+    return all(poolCoord < (uint3)round(_BurtGIProbeUploadPoolDimensions));
+}
+
+float4 BurtGIProbeUploadDecodeRGBA8(uint byteOffset)
+{
+    uint packed = _BurtGIProbeUploadSource.Load(byteOffset);
+    return float4(
+        (packed & 0xffu) / 255.0,
+        ((packed >> 8u) & 0xffu) / 255.0,
+        ((packed >> 16u) & 0xffu) / 255.0,
+        ((packed >> 24u) & 0xffu) / 255.0);
+}
+
+[numthreads(8, 4, 4)]
+void UploadRGBAHalf(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 poolCoord;
+    if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
+
+    uint byteOffset = BurtGIProbeUploadSourceIndex(dispatchThreadId) * 8u;
+    uint packed01 = _BurtGIProbeUploadSource.Load(byteOffset);
+    uint packed23 = _BurtGIProbeUploadSource.Load(byteOffset + 4u);
+    _BurtGIProbeUploadRgbaTexture[poolCoord] = float4(
+        f16tof32(packed01 & 0xffffu),
+        f16tof32(packed01 >> 16u),
+        f16tof32(packed23 & 0xffffu),
+        f16tof32(packed23 >> 16u));
+}
+
+[numthreads(8, 4, 4)]
+void UploadRGBA8(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 poolCoord;
+    if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
+    _BurtGIProbeUploadRgbaTexture[poolCoord] = BurtGIProbeUploadDecodeRGBA8(BurtGIProbeUploadSourceIndex(dispatchThreadId) * 4u);
+}
+
+[numthreads(8, 4, 4)]
+void UploadR8(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 poolCoord;
+    if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
+    uint byteOffset = BurtGIProbeUploadSourceIndex(dispatchThreadId);
+    uint alignedByteOffset = byteOffset & ~3u;
+    uint byteShift = (byteOffset & 3u) * 8u;
+    _BurtGIProbeUploadR8Texture[poolCoord] = ((_BurtGIProbeUploadSource.Load(alignedByteOffset) >> byteShift) & 0xffu) / 255.0;
+}
+
+[numthreads(8, 4, 4)]
+void ClearRGBA(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 poolCoord;
+    if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
+    _BurtGIProbeUploadRgbaTexture[poolCoord] = 0.0;
+}
+
+[numthreads(8, 4, 4)]
+void ClearR8(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 poolCoord;
+    if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
+    _BurtGIProbeUploadR8Texture[poolCoord] = 0.0;
+}

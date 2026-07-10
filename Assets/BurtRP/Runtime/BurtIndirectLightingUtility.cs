@@ -199,6 +199,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 runtimeSkyReflectionTint,
                 skyReflection.ForceOverride,
                 runtimeSkyReflectionRotation);
+            BurtLocalSkyProbeUtility.Upload(cmd, camera);
+            BurtGIVirtualProbeCellStreamer.UpdateForCamera(camera);
+            BurtGIProbeVolumeUtility.Upload(cmd, camera);
         }
 
         public static void AppendDebugState(StringBuilder builder) // 保留旧入口，旧调用没有相机上下文时只输出全局自定义/默认反射。
@@ -1065,6 +1068,39 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
         private static Vector4 CreateUnitySHC(SphericalHarmonicsL2 sh) // 创建 UnityCG.cginc 中 unity_SHC 的打包结果。
         {
             return new Vector4(sh[0, 8], sh[1, 8], sh[2, 8], 1f); // rgb 保存三个颜色通道的第 8 个二阶系数，w 暂未使用但保持为 1。
+        }
+    }
+
+    internal static class BurtLocalSkyProbeUtility
+    {
+        private static readonly int ColorTextureId = Shader.PropertyToID("_BurtGILocalSkyProbeColorTexture");
+        private static readonly int DepthTextureId = Shader.PropertyToID("_BurtGILocalSkyProbeDepthTexture");
+        private static readonly int Params0Id = Shader.PropertyToID("_BurtGILocalSkyProbeParams0");
+        private static readonly int Params1Id = Shader.PropertyToID("_BurtGILocalSkyProbeParams1");
+
+        public static void Upload(CommandBuffer cmd, Camera camera)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            if (!BurtLocalSkyProbe.TryGetBestForCamera(camera, out var probe))
+            {
+                cmd.SetGlobalVector(Params0Id, Vector4.zero);
+                cmd.SetGlobalVector(Params1Id, Vector4.zero);
+                return;
+            }
+
+            var origin = probe.transform.position;
+            cmd.SetGlobalTexture(ColorTextureId, probe.colorCubemap);
+            cmd.SetGlobalTexture(DepthTextureId, probe.depthCubemap);
+            cmd.SetGlobalVector(Params0Id, new Vector4(origin.x, origin.y, origin.z, 1f));
+            cmd.SetGlobalVector(Params1Id, new Vector4(
+                Mathf.Max(0.01f, probe.probeOffsetDistanceMax),
+                Mathf.Max(0f, probe.intensity),
+                0f,
+                0f));
         }
     }
 }

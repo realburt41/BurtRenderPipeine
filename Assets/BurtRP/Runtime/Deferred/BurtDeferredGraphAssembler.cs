@@ -24,17 +24,234 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateBurtGIBackfaceDiffuseIndirectPass = new BurtAllocateBurtGIBackfaceDiffuseIndirectPass();
         private readonly BurtRenderPass allocateBurtGIRoughSpecularIndirectPass = new BurtAllocateBurtGIRoughSpecularIndirectPass();
         private readonly BurtRenderPass allocateBurtGITemporalDiagnosticsPass = new BurtAllocateBurtGITemporalDiagnosticsPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelCountBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelDataBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactThreadCountXBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeNumBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeDataBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastUsedFrameBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastTracedFrameBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeWorldOffsetBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeWorldOffsetBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceDataBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceDataBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceAllocatorBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceAllocatorBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapPriorityHistogramBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPriorityHistogramBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxUpdateBucketBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxUpdateBucketBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbesToUpdateTraceCostBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbePDFBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceProbePDFBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapClearProbePDFsIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileAllocatorBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterProbesIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceProbesIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileDataBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileDataBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapSortedProbeTraceTileDataBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridValueBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridValueBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridTileBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridTileBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridCountBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridCountBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridVisibilityCellQueryBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridVisibilityCellQueryBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateCellValueBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateCellValueBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTileBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTileBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesGroupCountXBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugCellBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridDebugCellBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugDrawArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridDebugDrawArgsBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass();
+        private readonly BurtRenderPass allocateBurtGITranslucencyVolume0Pass = new BurtAllocateBurtGITranslucencyVolume0Pass();
+        private readonly BurtRenderPass allocateBurtGITranslucencyVolume1Pass = new BurtAllocateBurtGITranslucencyVolume1Pass();
+        private readonly BurtRenderPass allocateBurtGITranslucencyVolumeFilter0Pass = new BurtAllocateBurtGITranslucencyVolumeFilter0Pass();
+        private readonly BurtRenderPass allocateBurtGITranslucencyVolumeFilter1Pass = new BurtAllocateBurtGITranslucencyVolumeFilter1Pass();
+        private readonly BurtRenderPass allocateBurtGISceneVoxelRadiancePass = new BurtAllocateBurtGISceneVoxelRadiancePass();
+        private readonly BurtRenderPass allocateBurtGISceneVoxelGeometryPass = new BurtAllocateBurtGISceneVoxelGeometryPass();
+        private readonly BurtRenderPass allocateBurtGISceneVoxelOccupancyMipPass = new BurtAllocateBurtGISceneVoxelOccupancyMipPass();
+        private readonly BurtRenderPass allocateBurtGISceneVoxelLightingPass = new BurtAllocateBurtGISceneVoxelLightingPass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeRadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeRadiancePass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeIrradiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeIrradiancePass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeConfidencePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeConfidencePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeHitDistancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeHitDistancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeBentNormalPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeBentNormalPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceHitPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTraceHitPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeFilteredRadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeFilteredRadiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeFilteredIrradiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeFilteredIrradiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeFilteredConfidencePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeFilteredConfidencePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeFixupRadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeFixupRadiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeFixupIrradiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeFixupIrradiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeFixupConfidencePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeFixupConfidencePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeMipRadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeMipRadiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeMipIrradiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeMipIrradiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeMipConfidencePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeMipConfidencePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeMip2RadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeMip2RadiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeMip2IrradiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeMip2IrradiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeMip2ConfidencePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeMip2ConfidencePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeMip3RadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeMip3RadiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeMip3IrradiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeMip3IrradiancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeMip3ConfidencePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeMip3ConfidencePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeRadianceSHAmbientPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeRadianceSHAmbientPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeRadianceSHDirectionalPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeRadianceSHDirectionalPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeIrradianceOctPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeIrradianceOctPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeRadianceOctPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeRadianceOctPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeImportancePDFPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeImportancePDFPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeImportanceRayInfoPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeImportanceRayInfoPass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationTracePass = new BurtScreenSpaceGlobalIlluminationTracePass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationBlurPass = new BurtScreenSpaceGlobalIlluminationBlurPass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationResolveIndirectChannelsPass = new BurtScreenSpaceGlobalIlluminationResolveIndirectChannelsPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationTranslucencyVolumeGeneratePass = new BurtScreenSpaceGlobalIlluminationTranslucencyVolumeGeneratePass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationTranslucencyVolumeSpatialFilterPass = new BurtScreenSpaceGlobalIlluminationTranslucencyVolumeSpatialFilterPass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationApplyIndirectPass = new BurtScreenSpaceGlobalIlluminationApplyIndirectPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbePlacementUniformPass = new BurtScreenSpaceGlobalIlluminationScreenProbePlacementUniformPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeAdaptivePlacementSetupPass = new BurtScreenSpaceGlobalIlluminationScreenProbeAdaptivePlacementSetupPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeIndirectArgsSetupPass = new BurtScreenSpaceGlobalIlluminationScreenProbeIndirectArgsSetupPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeTraceCompactSetupPass = new BurtScreenSpaceGlobalIlluminationScreenProbeTraceCompactSetupPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeBentNormalPass = new BurtScreenSpaceGlobalIlluminationScreenProbeBentNormalPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapPreparePass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapPreparePass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapInitPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapInitPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapMarkPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapMarkPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapTraceSelectMaxPriorityBucketPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceSelectMaxPriorityBucketPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapTraceAllocateProbeTracesPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceAllocateProbeTracesPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapTraceSetupProbeIndirectArgsPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceSetupProbeIndirectArgsPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapTraceClearProbePDFsPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceClearProbePDFsPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapTraceComputeProbeWorldOffsetsPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceComputeProbeWorldOffsetsPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapTraceGenerateProbeTraceTilesPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceGenerateProbeTraceTilesPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapTraceSetupTraceFromProbesPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceSetupTraceFromProbesPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapTraceSortTraceTilesPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceSortTraceTilesPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapTracePass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapTracePass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapFilterPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapFilterCalculateProbeIrradiancePass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterCalculateProbeIrradiancePass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapFilterPrepareProbeOcclusionPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterPrepareProbeOcclusionPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapFilterFixupBorderAndGenerateMipsPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterFixupBorderAndGenerateMipsPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapUpdateStatePass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapUpdateStatePass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapPostPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapPostPass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbePreparePass = new BurtScreenSpaceGlobalIlluminationScreenProbePreparePass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeTraceAtlasPass = new BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheHashGridLitePass = new BurtScreenSpaceGlobalIlluminationRadianceCacheHashGridLitePass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationSceneVoxelRadianceLitePass = new BurtScreenSpaceGlobalIlluminationSceneVoxelRadianceLitePass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeTemporalFilterPass = new BurtScreenSpaceGlobalIlluminationScreenProbeTemporalFilterPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeSpatialFilterPass = new BurtScreenSpaceGlobalIlluminationScreenProbeSpatialFilterPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeFixupBordersPass = new BurtScreenSpaceGlobalIlluminationScreenProbeFixupBordersPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeGenerateMipPass = new BurtScreenSpaceGlobalIlluminationScreenProbeGenerateMipPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeGenerateMip2Pass = new BurtScreenSpaceGlobalIlluminationScreenProbeGenerateMip2Pass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeGenerateMip3Pass = new BurtScreenSpaceGlobalIlluminationScreenProbeGenerateMip3Pass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeIrradianceSHPass = new BurtScreenSpaceGlobalIlluminationScreenProbeIrradianceSHPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeIrradianceOctPass = new BurtScreenSpaceGlobalIlluminationScreenProbeIrradianceOctPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeImportancePDFPass = new BurtScreenSpaceGlobalIlluminationScreenProbeImportancePDFPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass = new BurtScreenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeImportanceGenRaysPass = new BurtScreenSpaceGlobalIlluminationScreenProbeImportanceGenRaysPass();
         private readonly BurtRenderPass releaseBurtGITemporalDiagnosticsPass = new BurtReleaseBurtGITemporalDiagnosticsPass();
         private readonly BurtRenderPass releaseBurtGIBackfaceDiffuseIndirectPass = new BurtReleaseBurtGIBackfaceDiffuseIndirectPass();
         private readonly BurtRenderPass releaseBurtGIRoughSpecularIndirectPass = new BurtReleaseBurtGIRoughSpecularIndirectPass();
+        private readonly BurtRenderPass releaseBurtGITranslucencyVolume0Pass = new BurtReleaseBurtGITranslucencyVolume0Pass();
+        private readonly BurtRenderPass releaseBurtGITranslucencyVolume1Pass = new BurtReleaseBurtGITranslucencyVolume1Pass();
+        private readonly BurtRenderPass releaseBurtGITranslucencyVolumeFilter0Pass = new BurtReleaseBurtGITranslucencyVolumeFilter0Pass();
+        private readonly BurtRenderPass releaseBurtGITranslucencyVolumeFilter1Pass = new BurtReleaseBurtGITranslucencyVolumeFilter1Pass();
+        private readonly BurtRenderPass releaseBurtGISceneVoxelRadiancePass = new BurtReleaseBurtGISceneVoxelRadiancePass();
+        private readonly BurtRenderPass releaseBurtGISceneVoxelGeometryPass = new BurtReleaseBurtGISceneVoxelGeometryPass();
+        private readonly BurtRenderPass releaseBurtGISceneVoxelOccupancyMipPass = new BurtReleaseBurtGISceneVoxelOccupancyMipPass();
+        private readonly BurtRenderPass releaseBurtGISceneVoxelLightingPass = new BurtReleaseBurtGISceneVoxelLightingPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeRadianceSHDirectionalPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeRadianceSHDirectionalPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeRadianceSHAmbientPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeRadianceSHAmbientPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeIrradianceOctPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeIrradianceOctPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeRadianceOctPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeRadianceOctPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeImportancePDFPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeImportancePDFPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeImportanceRayInfoPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeImportanceRayInfoPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeMipConfidencePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeMipConfidencePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeMipIrradiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeMipIrradiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeMipRadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeMipRadiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeMip2ConfidencePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeMip2ConfidencePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeMip2IrradiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeMip2IrradiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeMip2RadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeMip2RadiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeMip3ConfidencePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeMip3ConfidencePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeMip3IrradiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeMip3IrradiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeMip3RadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeMip3RadiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeFixupConfidencePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeFixupConfidencePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeFixupIrradiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeFixupIrradiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeFixupRadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeFixupRadiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeFilteredConfidencePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeFilteredConfidencePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeFilteredIrradiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeFilteredIrradiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeFilteredRadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeFilteredRadiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceHitPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTraceHitPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeDataBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeNumBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapSortedProbeTraceTileDataBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugDrawArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridDebugDrawArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugCellBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridDebugCellBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesGroupCountXBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTileBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTileBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateCellValueBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateCellValueBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridVisibilityCellQueryBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridVisibilityCellQueryBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridCountBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridCountBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridTileBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridTileBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridValueBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridValueBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileDataBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileDataBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceProbesIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterProbesIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileAllocatorBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapClearProbePDFsIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbePDFBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceProbePDFBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbesToUpdateTraceCostBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxUpdateBucketBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxUpdateBucketBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPriorityHistogramBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPriorityHistogramBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceAllocatorBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceAllocatorBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceDataBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceDataBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeWorldOffsetBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeWorldOffsetBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastTracedFrameBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastUsedFrameBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactThreadCountXBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelDataBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelCountBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIndirectArgsBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeHitDistancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeHitDistancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeBentNormalPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeBentNormalPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeConfidencePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeConfidencePass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeIrradiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeIrradiancePass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeRadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeRadiancePass();
@@ -154,13 +371,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass releaseScreenSpaceReflectionColorPass = new BurtReleaseScreenSpaceReflectionColorPass();
         private readonly BurtRenderPass releaseScreenSpaceReflectionDenoisedColorPass = new BurtReleaseScreenSpaceReflectionDenoisedColorPass();
         private readonly BurtRenderPass releaseScreenSpaceReflectionTemporalColorPass = new BurtReleaseScreenSpaceReflectionTemporalColorPass();
+        private readonly BurtRenderPass allocateRefractionDistortionPass = new BurtAllocateRefractionDistortionPass();
+        private readonly BurtRenderPass allocateRefractionSceneColorMipChainPass = new BurtAllocateRefractionSceneColorMipChainPass();
+        private readonly BurtRenderPass buildRefractionSceneColorMipChainPass = new BurtBuildRefractionSceneColorMipChainPass();
+        private readonly BurtRenderPass drawRefractionDistortionPass = new BurtDrawRefractionDistortionPass();
+        private readonly BurtRenderPass applyRefractionDistortionPass = new BurtApplyRefractionDistortionPass();
         private readonly BurtRenderPass drawTransparentPass = new BurtDrawTransparentPass(); // 创建透明物体绘制 Pass，未来 Deferred 第一版也会继续让透明走 Forward。
         private readonly BurtRenderPass drawMultipassTransparentPass = new BurtDrawMultipassTransparentPass();
+        private readonly BurtRenderPass releaseRefractionPass = new BurtReleaseRefractionPass();
         private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // 创建不支持 Shader 调试 Pass，让非 BurtRP 材质继续显示错误材质。
         private readonly BurtRenderPass drawPreImageEffectsGizmosPass = new BurtDrawPreImageEffectsGizmosPass(); // 创建编辑器 Gizmos 绘制 Pass，恢复 SRP Scene/Game View 的 Gizmos 显示。
         private readonly BurtRenderPass drawPostImageEffectsGizmosPass = new BurtDrawPostImageEffectsGizmosPass(); // 创建后处理后的编辑器 Gizmos Pass，避免直接画到外部最终目标。
         private readonly BurtRenderPass allocatePostProcessColorPass = new AllocatePostProcessColorPass(); // 创建后处理中间 RT 分配 Pass，保持后处理尾部链路不分 Forward/Deferred。
+        private readonly BurtRenderPass temporalAAPass = new PostProcessPass.TemporalAAPass();
+        private readonly BurtRenderPass diaphragmDepthOfFieldPass = new PostProcessPass.DiaphragmDepthOfFieldPass();
+        private readonly BurtRenderPass lensFlarePass = new PostProcessPass.LensFlarePass();
+        private readonly BurtRenderPass bloomPass = new PostProcessPass.BloomPass();
         private readonly BurtRenderPass postProcessPass = new PostProcessPass(); // 创建后处理 Pass，让 Tonemapping 在 Deferred 实验模式下也能继续工作。
+        private readonly BurtRenderPass subpixelMorphologicalAAPass = new PostProcessPass.SubpixelMorphologicalAAPass();
+        private readonly BurtRenderPass fastApproximateAAPass = new PostProcessPass.FastApproximateAAPass();
+        private readonly BurtRenderPass rcasPass = new PostProcessPass.RCASPass();
         private readonly BurtRenderPass releasePostProcessColorPass = new ReleasePostProcessColorPass(); // 创建后处理中间 RT 释放 Pass，避免后处理临时资源泄漏。
         private readonly BurtRenderPass debugCameraDepthPass = new BurtDebugCameraDepthPass(); // 创建深度调试 Pass，让 Deferred 实验模式仍能显示 CameraDepth。
         private readonly BurtRenderPass debugMainLightShadowMapPass = new BurtDebugMainLightShadowMapPass(); // 创建主光阴影图调试 Pass，让 Deferred 实验模式仍能查看 shadow map。
@@ -234,6 +464,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             var useMainLightShadow = BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 复用阴影工具判断当前 request 是否需要主光阴影图。
             var useAdditionalLightShadow = BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(request);
             var usePerObjectShadow = BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(request, asset);
+            var preserveShadingDebugOutputBeforeSceneEffects = ShouldPreserveShadingDebugOutputBeforeSceneEffects();
             AddCameraAllocationPasses(graph, safeRenderOptions); // 先申请 CameraColor 和 CameraDepth，确保 GBuffer MRT 可以使用独立深度。
             AddGBufferAllocationPasses(graph, useLocalGBufferTargets); // 再申请全部 GBuffer，给后面的 MRT 绑定和清理阶段准备真实 RT。
             AddDeferredLightingDepthAllocationPass(graph, useLocalGBufferTargets);
@@ -273,38 +504,59 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             AddDeferredForwardOnlyOpaqueFallback(graph, asset); // 根据资产开关决定是否绘制不能写入 GBuffer 的前向专用不透明物体。
             AddHiZBuildPass(graph, useHiZDepth);
             AddScreenSpaceSubsurfacePasses(graph, request, asset, useLocalGBufferTargets);
-            if (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterOpaqueBeforeSky(request))
+            if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterOpaqueBeforeSky(request))
             {
                 graph.AddPass(applyAtmosphereAerialPerspectivePass);
             }
 
-            if (BurtFogUtility.ShouldUseFog(request))
+            if (!preserveShadingDebugOutputBeforeSceneEffects && BurtFogUtility.ShouldUseFog(request))
             {
                 graph.AddPass(applyFogPass);
             }
 
-            graph.AddPass(drawSkyboxPass); // 在不透明之后绘制天空盒，保持 Forward 现有顺序。
-            if (BurtAtmosphereUtility.ShouldUseAtmosphere(request))
+            if (!preserveShadingDebugOutputBeforeSceneEffects)
+            {
+                graph.AddPass(drawSkyboxPass); // 在不透明之后绘制天空盒，保持 Forward 现有顺序。
+            }
+
+            if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldUseAtmosphere(request))
             {
                 graph.AddPass(drawAtmospherePass);
             }
-            if (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(request))
+            if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(request))
             {
                 graph.AddPass(applyAtmosphereAerialPerspectivePass);
             }
             AddScreenSpaceReflectionPasses(graph, request, asset, useLocalGBufferTargets);
-            if (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveBeforeTransparent(request))
+            if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldApplyAerialPerspectiveBeforeTransparent(request))
             {
                 graph.AddPass(applyAtmosphereAerialPerspectivePass);
             }
-            if (BurtVolumetricFogUtility.ShouldUseVolumetricFog(request))
+            if (!preserveShadingDebugOutputBeforeSceneEffects && BurtVolumetricFogUtility.ShouldUseVolumetricFog(request))
             {
                 graph.AddPass(applyVolumetricFogPass);
             }
 
-            graph.AddPass(drawTransparentPass); // 透明物体继续走 Forward，未来 Deferred 第一版也会保持这个策略。
-            graph.AddPass(drawMultipassTransparentPass);
-            AddUnsupportedShaderDebug(graph, asset); // 根据资产开关决定是否绘制不支持 Shader 的错误材质。
+            if (!preserveShadingDebugOutputBeforeSceneEffects)
+            {
+                if (BurtRefractionPassUtility.ShouldUseRefraction(request, asset))
+                {
+                    graph.AddPass(allocateRefractionDistortionPass);
+                    graph.AddPass(allocateRefractionSceneColorMipChainPass);
+                    graph.AddPass(buildRefractionSceneColorMipChainPass);
+                    graph.AddPass(drawRefractionDistortionPass);
+                    graph.AddPass(applyRefractionDistortionPass);
+                }
+
+                graph.AddPass(drawTransparentPass); // 透明物体继续走 Forward，未来 Deferred 第一版也会保持这个策略。
+                graph.AddPass(drawMultipassTransparentPass);
+                if (BurtRefractionPassUtility.ShouldUseRefraction(request, asset))
+                {
+                    graph.AddPass(releaseRefractionPass);
+                }
+
+                AddUnsupportedShaderDebug(graph, asset); // 根据资产开关决定是否绘制不支持 Shader 的错误材质。
+            }
             AddPreImageEffectsGizmosPass(graph, request); // 编辑器里在后处理前恢复 PreImageEffects Gizmos。
             AddPostProcessPasses(graph, request, asset, safeRenderOptions); // 根据后处理和 FinalBlit 条件决定是否插入 Tonemapping 链路。
             AddDebugViewPasses(graph, request, asset, useMainLightShadow, usePerObjectShadow, useLocalGBufferTargets, safeRenderOptions); // 根据 Debug 开关决定是否覆盖显示深度、主光阴影或 GBuffer。
@@ -693,17 +945,149 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
             if (useBurtGIScreenProbeLite)
             {
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastUsedFrameBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastTracedFrameBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeWorldOffsetBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceDataBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceAllocatorBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapPriorityHistogramBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxUpdateBucketBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbesToUpdateTraceCostBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbePDFBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapClearProbePDFsIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileAllocatorBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterProbesIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceProbesIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileDataBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapSortedProbeTraceTileDataBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridValueBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridTileBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridCountBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridVisibilityCellQueryBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateCellValueBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTileBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesIndirectArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesGroupCountXBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugCellBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugDrawArgsBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass);
+                graph.AddPass(allocateBurtGITranslucencyVolume0Pass);
+                graph.AddPass(allocateBurtGITranslucencyVolume1Pass);
+                graph.AddPass(allocateBurtGITranslucencyVolumeFilter0Pass);
+                graph.AddPass(allocateBurtGITranslucencyVolumeFilter1Pass);
+                graph.AddPass(allocateBurtGISceneVoxelRadiancePass);
+                graph.AddPass(allocateBurtGISceneVoxelGeometryPass);
+                graph.AddPass(allocateBurtGISceneVoxelOccupancyMipPass);
+                graph.AddPass(allocateBurtGISceneVoxelLightingPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeRadiancePass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeIrradiancePass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeConfidencePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeHitDistancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeBentNormalPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceHitPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeFilteredRadiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeFilteredIrradiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeFilteredConfidencePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeFixupRadiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeFixupIrradiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeFixupConfidencePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeMipRadiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeMipIrradiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeMipConfidencePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeMip2RadiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeMip2IrradiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeMip2ConfidencePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeMip3RadiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeMip3IrradiancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeMip3ConfidencePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeRadianceSHAmbientPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeRadianceSHDirectionalPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeIrradianceOctPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeRadianceOctPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeImportancePDFPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeImportanceRayInfoPass);
             }
 
             graph.AddPass(screenSpaceGlobalIlluminationTracePass);
+            if (useBurtGIScreenProbeLite)
+            {
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbePlacementUniformPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeAdaptivePlacementSetupPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeIndirectArgsSetupPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeImportancePDFPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeImportanceGenRaysPass);
+                graph.AddPass(screenSpaceGlobalIlluminationSceneVoxelRadianceLitePass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapPreparePass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapInitPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapMarkPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapTraceSelectMaxPriorityBucketPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapTraceAllocateProbeTracesPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapTraceSetupProbeIndirectArgsPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapTraceClearProbePDFsPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapTraceComputeProbeWorldOffsetsPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapTraceGenerateProbeTraceTilesPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapTraceSetupTraceFromProbesPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapTraceSortTraceTilesPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapTracePass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapFilterPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapFilterCalculateProbeIrradiancePass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapFilterPrepareProbeOcclusionPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapFilterFixupBorderAndGenerateMipsPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapUpdateStatePass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbePreparePass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeTraceCompactSetupPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeTraceAtlasPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheHashGridLitePass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeBentNormalPass);
+                graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheClipMapPostPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeTemporalFilterPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeSpatialFilterPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeFixupBordersPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeGenerateMipPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeGenerateMip2Pass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeGenerateMip3Pass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeIrradianceSHPass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeIrradianceOctPass);
+            }
+
             graph.AddPass(screenSpaceGlobalIlluminationBlurPass);
             graph.AddPass(screenSpaceGlobalIlluminationResolveIndirectChannelsPass);
             if (useBurtGIScreenProbeLite)
             {
-                graph.AddPass(screenSpaceGlobalIlluminationScreenProbePreparePass);
+                graph.AddPass(screenSpaceGlobalIlluminationTranslucencyVolumeGeneratePass);
+                graph.AddPass(screenSpaceGlobalIlluminationTranslucencyVolumeSpatialFilterPass);
             }
 
             graph.AddPass(screenSpaceGlobalIlluminationApplyIndirectPass);
@@ -716,6 +1100,87 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
                 if (useBurtGIScreenProbeLite)
                 {
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeImportanceRayInfoPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeImportancePDFPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeRadianceOctPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeIrradianceOctPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeRadianceSHDirectionalPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeRadianceSHAmbientPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip3ConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip3IrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip3RadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip2ConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip2IrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip2RadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMipConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMipIrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMipRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFixupConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFixupIrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFixupRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFilteredConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFilteredIrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFilteredRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceHitPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugDrawArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugCellBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesGroupCountXBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTileBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateCellValueBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridVisibilityCellQueryBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridCountBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridTileBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheHashGridValueBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapSortedProbeTraceTileDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceProbesIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterProbesIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapClearProbePDFsIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbePDFBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbesToUpdateTraceCostBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxUpdateBucketBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPriorityHistogramBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeWorldOffsetBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastTracedFrameBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastUsedFrameBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeHitDistancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeBentNormalPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeConfidencePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeIrradiancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeRadiancePass);
@@ -740,6 +1205,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return;
             }
 
+            graph.AddPass(releaseBurtGITranslucencyVolumeFilter1Pass);
+            graph.AddPass(releaseBurtGITranslucencyVolumeFilter0Pass);
+            graph.AddPass(releaseBurtGITranslucencyVolume1Pass);
+            graph.AddPass(releaseBurtGITranslucencyVolume0Pass);
+            graph.AddPass(releaseBurtGISceneVoxelRadiancePass);
+            graph.AddPass(releaseBurtGISceneVoxelGeometryPass);
+            graph.AddPass(releaseBurtGISceneVoxelOccupancyMipPass);
+            graph.AddPass(releaseBurtGISceneVoxelLightingPass);
             graph.AddPass(releaseBurtGIRoughSpecularIndirectPass);
             graph.AddPass(releaseBurtGIBackfaceDiffuseIndirectPass);
             graph.AddPass(releaseScreenSpaceGlobalIlluminationPass);
@@ -990,7 +1463,42 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(allocatePostProcessColorPass); // 添加后处理中间颜色 RT 分配 Pass。
+            if (PostProcessPass.ShouldUseTemporalAAPass(request, asset))
+            {
+                graph.AddPass(temporalAAPass);
+            }
+
+            if (PostProcessPass.ShouldUseDiaphragmDepthOfFieldPass(request, asset))
+            {
+                graph.AddPass(diaphragmDepthOfFieldPass);
+            }
+
+            if (PostProcessPass.ShouldUseLensFlarePass(request, asset))
+            {
+                graph.AddPass(lensFlarePass);
+            }
+
+            if (PostProcessPass.ShouldUseBloomPass(request, asset))
+            {
+                graph.AddPass(bloomPass);
+            }
+
             graph.AddPass(postProcessPass); // 添加后处理 Pass，执行 No-op Copy 或 Tonemapping。
+            if (PostProcessPass.ShouldUseSubpixelMorphologicalAAPass(request, asset))
+            {
+                graph.AddPass(subpixelMorphologicalAAPass);
+            }
+
+            if (PostProcessPass.ShouldUseFastApproximateAAPass(request, asset))
+            {
+                graph.AddPass(fastApproximateAAPass);
+            }
+
+            if (PostProcessPass.ShouldUseRCASPass(request, asset))
+            {
+                graph.AddPass(rcasPass);
+            }
+
             graph.AddPass(releasePostProcessColorPass); // 添加后处理中间颜色 RT 释放 Pass。
         }
 
@@ -1058,6 +1566,66 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
                 if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(request, asset))
                 {
+                    graph.AddPass(releaseBurtGITranslucencyVolumeFilter1Pass);
+                    graph.AddPass(releaseBurtGITranslucencyVolumeFilter0Pass);
+                    graph.AddPass(releaseBurtGITranslucencyVolume1Pass);
+                    graph.AddPass(releaseBurtGITranslucencyVolume0Pass);
+                    graph.AddPass(releaseBurtGISceneVoxelRadiancePass);
+                    graph.AddPass(releaseBurtGISceneVoxelGeometryPass);
+                    graph.AddPass(releaseBurtGISceneVoxelOccupancyMipPass);
+                    graph.AddPass(releaseBurtGISceneVoxelLightingPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip3ConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip3IrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip3RadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip2ConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip2IrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMip2RadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMipConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMipIrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeMipRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFixupConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFixupIrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFixupRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFilteredConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFilteredIrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeFilteredRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceHitPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbePDFBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbesToUpdateTraceCostBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxUpdateBucketBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPriorityHistogramBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeWorldOffsetBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastTracedFrameBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastUsedFrameBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeHitDistancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeBentNormalPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeConfidencePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeIrradiancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeRadiancePass);
@@ -1487,6 +2055,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             return asset.EnableUnsupportedShaderDebug; // 使用资产上的不支持 Shader 调试开关。
+        }
+
+        private static bool ShouldPreserveShadingDebugOutputBeforeSceneEffects()
+        {
+            return BurtShadingDebugSettings.IsDebugging &&
+                !BurtShadingDebugSettings.IsSceneEffectDebugMode(BurtShadingDebugSettings.Mode) &&
+                !PostProcessUtility.IsBloomDebugRequested() &&
+                !PostProcessUtility.IsTemporalAADebugRequested() &&
+                !PostProcessUtility.IsAutoExposureDebugRequested();
         }
 
         private static bool ShouldUsePostProcessFramework( // 判断是否启用后处理链路。

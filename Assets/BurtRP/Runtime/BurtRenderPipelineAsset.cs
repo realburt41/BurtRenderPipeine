@@ -1,5 +1,6 @@
 using Sirenix.OdinInspector; // 引入 Odin Inspector 命名空间，用来给新配置提供更清晰的分组显示。
 using System.Collections.Generic;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Color、SerializeField、CreateAssetMenu 等 Unity 类型。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来继承 RenderPipelineAsset。
 
@@ -92,6 +93,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         [Header("PBR / Shading")] // 把 PBR 共享查找表集中显示，方便确认 BRDF 使用的全局资源。
         [SerializeField] private Texture2D preintegratedFGLut; // 保存预积分 FG LUT，默认指向 Assets/Textures/PreintegratedFG.exr。
+        [TitleGroup("XGI - Hardware Ray Tracing")]
+        [SerializeField] private bool enableXGIHardwareRayTracing;
+        [TitleGroup("XGI - Hardware Ray Tracing")]
+        [ShowIf(nameof(enableXGIHardwareRayTracing))]
+        [SerializeField] private RayTracingShader xgiRadianceCacheHardwareRayTracingShader;
 
         [TitleGroup("Deferred - 屏幕空间次表面 5S")]
         [ShowIf(nameof(IsDeferredRendererMode))]
@@ -174,6 +180,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public float HiZDebugScale => Mathf.Max(0.0001f, hiZDebugScale);
 
         public Texture2D PreintegratedFGLut => preintegratedFGLut; // 暴露预积分 FG LUT，RenderPipeline 会把它绑定成全局 shader 纹理。
+        public bool EnableXGIHardwareRayTracing => enableXGIHardwareRayTracing && SystemInfo.supportsRayTracing && xgiRadianceCacheHardwareRayTracingShader != null;
+        public RayTracingShader XGIRadianceCacheHardwareRayTracingShader => xgiRadianceCacheHardwareRayTracingShader;
 
         public bool EnableScreenSpaceSubsurface => enableScreenSpaceSubsurface;
 

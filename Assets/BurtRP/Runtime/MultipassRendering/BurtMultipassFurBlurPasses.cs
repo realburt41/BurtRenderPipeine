@@ -1581,7 +1581,7 @@ namespace Burt.RenderPipeline
             }
 
             return new BurtFurBlurSettings(
-                component.enabled.value,
+                component.IsEnabled(),
                 component.tiledBlur.value,
                 component.radiusCm.value,
                 component.depthThresholdEye.value,

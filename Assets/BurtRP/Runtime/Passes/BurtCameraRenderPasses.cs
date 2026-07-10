@@ -87,6 +87,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             LightweightForward // 把旧 LWRP shader 视为不支持，因为 BurtRP 不执行 LWRP 专用 pass。
         }; // 结束不支持 LightMode 列表。
 
+        private static readonly ShaderTagId BurtRefractionDistortion = new ShaderTagId("BurtRefractionDistortion");
+
         public static DrawingSettings CreateForwardDrawingSettings(SortingSettings sortingSettings) // 创建 BurtRP 常规前向颜色绘制使用的 DrawingSettings。
         {
             var drawingSettings = new DrawingSettings(BurtForward, sortingSettings); // 只匹配 BurtForward，让主渲染路径严格由 BurtRP 自己的 shader pass 驱动。
@@ -94,6 +96,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             drawingSettings.perObjectData = ForwardPerObjectData; // 让 Unity 在 DrawRenderers 时真正上传 SH、Reflection Probe 等 per-object 间接光数据。
 
             return drawingSettings; // 返回配置好的前向绘制设置，供调用方 Pass 使用。
+        }
+
+        public static DrawingSettings CreateRefractionDistortionDrawingSettings(SortingSettings sortingSettings)
+        {
+            var drawingSettings = new DrawingSettings(BurtRefractionDistortion, sortingSettings);
+            drawingSettings.perObjectData = PerObjectData.None;
+            return drawingSettings;
         }
 
         public static DrawingSettings CreateForwardOnlyDrawingSettings(SortingSettings sortingSettings) // 创建 Deferred 后前向兜底绘制设置，只匹配显式声明 BurtForwardOnly 的 shader。
@@ -256,6 +265,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             return 1f;
         }
 
+        public static void SetDepthOnlyShadowRenderTarget(CommandBuffer cmd, BurtRenderTargetHandle target)
+        {
+            if (cmd == null || !target.IsValid)
+            {
+                return;
+            }
+
+            cmd.SetRenderTarget(target.Identifier);
+        }
+
         public static bool HasShadowCasters(CullingResults cullingResults, int visibleLightIndex)
         {
             if (visibleLightIndex < 0 || visibleLightIndex >= cullingResults.visibleLights.Length)
@@ -270,7 +289,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
     internal static class BurtMainLightShadowMatrixUtility
     {
         public const int MaxCascadeCount = BurtShadowData.MaxMainLightShadowCascadeCount;
-
         private static readonly int MainLightWorldToShadowId = Shader.PropertyToID("_BurtMainLightWorldToShadow");
         private static readonly int MainLightWorldToShadowRow0Id = Shader.PropertyToID("_BurtMainLightWorldToShadowRow0");
         private static readonly int MainLightWorldToShadowRow1Id = Shader.PropertyToID("_BurtMainLightWorldToShadowRow1");
@@ -289,7 +307,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         private static readonly int MainLightShadowSampleBiasId = Shader.PropertyToID("_BurtMainLightShadowSampleBias");
         private static readonly int MainLightShadowSoftnessId = Shader.PropertyToID("_BurtMainLightShadowSoftness");
         private static readonly int MainLightShadowPCSSParamsId = Shader.PropertyToID("_BurtMainLightShadowPCSSParams");
-        private static readonly int MainLightShadowCasterBiasParamsId = Shader.PropertyToID("_BurtMainLightShadowCasterBiasParams");
+        private static readonly int MainLightShadowReceiverBiasParamsId = Shader.PropertyToID("_BurtMainLightShadowReceiverBiasParams");
 
         private static readonly Matrix4x4[] DisabledWorldToShadowMatrices = CreateIdentityMatrixArray();
         private static readonly Vector4[] DisabledCascadeSpheres = CreateDisabledCascadeSpheres();
@@ -430,6 +448,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         public static Matrix4x4 CreateWorldToShadowMatrixNoAtlas(Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix)
         {
+            // ComputeDirectionalShadowMatricesAndCullingPrimitives already returns the projection
+            // convention consumed by the shadow caster draw. Match Unity's SRP shadow transform:
+            // only reverse the Z row on reversed-Z platforms before forming world-to-shadow.
             if (SystemInfo.usesReversedZBuffer)
             {
                 projectionMatrix.m20 = -projectionMatrix.m20;
@@ -437,6 +458,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 projectionMatrix.m22 = -projectionMatrix.m22;
                 projectionMatrix.m23 = -projectionMatrix.m23;
             }
+
+            var worldToShadow = projectionMatrix * viewMatrix;
 
             var textureScaleAndBias = Matrix4x4.identity;
             textureScaleAndBias.m00 = 0.5f;
@@ -446,7 +469,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             textureScaleAndBias.m13 = 0.5f;
             textureScaleAndBias.m23 = 0.5f;
 
-            return textureScaleAndBias * projectionMatrix * viewMatrix;
+            return textureScaleAndBias * worldToShadow;
         }
 
         public static Matrix4x4 CreateAtlasSliceTransform(Vector4 atlasRect)
@@ -600,7 +623,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             SetFloat(cmd, material, MainLightShadowSampleBiasId, 0f);
             SetFloat(cmd, material, MainLightShadowSoftnessId, 0f);
             SetVector(cmd, material, MainLightShadowPCSSParamsId, Vector4.zero);
-            SetVector(cmd, material, MainLightShadowCasterBiasParamsId, Vector4.zero);
+            SetVector(cmd, material, MainLightShadowReceiverBiasParamsId, Vector4.zero);
             SetFloat(cmd, material, MainLightShadowStrengthId, 0f);
         }
 
@@ -630,22 +653,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             SetFloat(cmd, material, MainLightShadowSampleBiasId, Mathf.Max(0f, shadowData.MainLightShadowSampleBias));
             SetFloat(cmd, material, MainLightShadowSoftnessId, ShouldUseSoftMainLightShadowSampling(shadowData) ? 1f : 0f);
             SetVector(cmd, material, MainLightShadowPCSSParamsId, CreateMainLightShadowPCSSParams(shadowData));
-            SetVector(cmd, material, MainLightShadowCasterBiasParamsId, CreateMainLightShadowCasterBiasParams(shadowData));
+            SetVector(cmd, material, MainLightShadowReceiverBiasParamsId, CreateMainLightShadowReceiverBiasParams(shadowData));
             SetFloat(cmd, material, MainLightShadowStrengthId, shadowData.MainLightShadowStrength);
         }
 
-        private static Vector4 CreateMainLightShadowCasterBiasParams(BurtShadowData shadowData)
+        private static Vector4 CreateMainLightShadowReceiverBiasParams(BurtShadowData shadowData)
         {
-            if (shadowData == null)
+            if (shadowData == null || !shadowData.HasMainLightShadow)
             {
                 return Vector4.zero;
             }
 
-            return new Vector4(
-                Mathf.Max(0f, shadowData.MainLightShadowDepthBias),
-                Mathf.Max(0f, shadowData.MainLightShadowNormalBias),
-                0f,
-                0f);
+            // The shadow map is already rendered with caster-side polygon offset. Applying an
+            // unrelated receiver offset moves the lookup away from that depth surface and can
+            // erase contact/cast shadows. Keep main-light sampling in the original geometry space.
+            return Vector4.zero;
         }
 
         private static bool ShouldUseSoftMainLightShadowSampling(BurtShadowData shadowData)
@@ -910,10 +932,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.MainLightShadowMapId, descriptor, FilterMode.Bilinear); // 使用双线性过滤，让硬件阴影采样器能平滑比较边缘，避免点采样放大阴影条带。
 
-            cmd.SetRenderTarget(shadowMapTarget.Identifier); // 把主光阴影图绑定为当前渲染目标，为后续 ShadowCaster 绘制做准备。
+            BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, shadowMapTarget); // 把主光阴影图显式绑定为 depth attachment，为后续 ShadowCaster 绘制做准备。
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
 
-            cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth()); // Match URP/CoreUtils shadowmap clears, which use depth 1.0 for the shadow atlas.
+            cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth()); // Match Unity shadow compare semantics: empty atlas pixels must remain lit for BurtRP's current sampler state.
 
             BurtMainLightShadowMatrixUtility.BindMainLightShadowMapIfValid(cmd, shadowMapTarget); // 把主光阴影图暴露成全局纹理，后续 Lit shader 会通过它采样阴影。
 
@@ -934,6 +956,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         private static readonly int UnityLightDirectionId = Shader.PropertyToID("_LightDirection");
         private static readonly int UnityLightPositionId = Shader.PropertyToID("_LightPosition");
         private static readonly int UnityShadowBiasId = Shader.PropertyToID("_ShadowBias");
+        private static readonly int WorldSpaceCameraPosId = Shader.PropertyToID("_WorldSpaceCameraPos");
+        private static readonly int UnityWorldToCameraId = Shader.PropertyToID("unity_WorldToCamera");
+        private static readonly int UnityCameraToWorldId = Shader.PropertyToID("unity_CameraToWorld");
 
         public override string Name => "Burt Draw Main Light Shadow Caster";
 
@@ -990,21 +1015,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var cascadeSpheres = cascadeCache.CascadeSpheres;
             var cascadeAtlasRects = cascadeCache.CascadeAtlasRects;
             var cmd = CommandBufferPool.Get(Name);
-            var usePerObjectShadow = BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(request, context.Asset);
-            var mainLight = usePerObjectShadow ? ResolveMainLight(request, shadowData) : null;
-            var restoreMainLightRenderingLayerMask = false;
-            var originalMainLightRenderingLayerMask = 0;
 
             try
             {
-                if (mainLight != null)
-                {
-                    originalMainLightRenderingLayerMask = mainLight.renderingLayerMask;
-                    mainLight.renderingLayerMask = originalMainLightRenderingLayerMask & ~(int)BurtPerObjectShadow.PerObjectShadowRenderingLayerMask;
-                    restoreMainLightRenderingLayerMask = true;
-                }
-
-                cmd.SetRenderTarget(shadowMapTarget.Identifier);
+                BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, shadowMapTarget);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, atlasResolution, atlasResolution);
                 cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
                 cmd.SetGlobalVector(MainLightDirectionId, new Vector4(mainLightDirection.x, mainLightDirection.y, mainLightDirection.z, 0f));
@@ -1014,6 +1028,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 cmd.SetGlobalFloat(CastingPunctualLightShadowId, 0f);
                 SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
                 cmd.SetGlobalDepthBias(1f, 2.5f);
+                SetShadowCasterCameraGlobals(cmd, camera);
                 BurtMainLightShadowMatrixUtility.UploadMainLightShadowReceiverGlobals(cmd, null, shadowMapTarget, worldToShadowMatrices, cascadeSpheres, cascadeAtlasRects, cascadeCount, tileResolution, shadowData);
                 renderContext.ExecuteCommandBuffer(cmd);
                 cmd.Clear();
@@ -1027,7 +1042,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                         Mathf.Max(1f, (atlasRect.z - atlasRect.x) * atlasResolution),
                         Mathf.Max(1f, (atlasRect.w - atlasRect.y) * atlasResolution));
 
-                    cmd.SetRenderTarget(shadowMapTarget.Identifier);
+                    BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, shadowMapTarget);
                     cmd.SetViewport(viewport);
                     cmd.SetViewProjectionMatrices(cascadeCache.ViewMatrices[cascadeIndex], cascadeCache.ProjectionMatrices[cascadeIndex]);
                     var depthBias = ResolveMainLightShadowDepthBias(shadowData, cascadeCache.ProjectionMatrices[cascadeIndex], tileResolution);
@@ -1043,18 +1058,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                     {
                         var shadowDrawingSettings = new ShadowDrawingSettings(request.CullingResults, shadowData.MainLightIndex, BatchCullingProjectionType.Orthographic);
                         shadowDrawingSettings.splitData = cascadeCache.SplitDatas[cascadeIndex];
-                        shadowDrawingSettings.useRenderingLayerMaskTest = usePerObjectShadow;
+                        shadowDrawingSettings.useRenderingLayerMaskTest = false;
                         renderContext.DrawShadows(ref shadowDrawingSettings);
                     }
                 }
             }
             finally
             {
-                if (restoreMainLightRenderingLayerMask && mainLight != null)
-                {
-                    mainLight.renderingLayerMask = originalMainLightRenderingLayerMask;
-                }
-
                 CommandBufferPool.Release(cmd);
                 ResetMainLightShadowCasterState(context, renderContext, camera);
             }
@@ -1135,20 +1145,68 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             return direction.normalized;
         }
 
-        private static Light ResolveMainLight(BurtRenderRequest request, BurtShadowData shadowData)
+        private static float ResolveMainLightShadowNormalBias(BurtShadowData shadowData, Matrix4x4 projectionMatrix, int tileResolution)
         {
-            if (request == null || shadowData == null || shadowData.MainLightIndex < 0)
+            if (shadowData == null || tileResolution <= 0)
             {
-                return null;
+                return 0f;
             }
 
-            var visibleLights = request.CullingResults.visibleLights;
-            if (shadowData.MainLightIndex >= visibleLights.Length)
+            var normalBias = Mathf.Max(0f, shadowData.MainLightShadowNormalBias);
+            if (normalBias <= 0f)
             {
-                return null;
+                return 0f;
             }
 
-            return visibleLights[shadowData.MainLightIndex].light;
+            var projectionWidth = Mathf.Abs(projectionMatrix.m00) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m00) : 0f;
+            var projectionHeight = Mathf.Abs(projectionMatrix.m11) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m11) : 0f;
+            var worldTexelSize = Mathf.Max(projectionWidth, projectionHeight) / Mathf.Max(1, tileResolution);
+            return -normalBias * worldTexelSize * ResolveMainLightShadowSoftKernelRadius(shadowData);
+        }
+
+        private static float ResolveMainLightShadowDepthBias(BurtShadowData shadowData, Matrix4x4 projectionMatrix, int tileResolution)
+        {
+            if (shadowData == null || tileResolution <= 0)
+            {
+                return 0f;
+            }
+
+            var depthBias = Mathf.Max(0f, shadowData.MainLightShadowDepthBias);
+            if (depthBias <= 0f)
+            {
+                return 0f;
+            }
+
+            var projectionWidth = Mathf.Abs(projectionMatrix.m00) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m00) : 0f;
+            var projectionHeight = Mathf.Abs(projectionMatrix.m11) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m11) : 0f;
+            var worldTexelSize = Mathf.Max(projectionWidth, projectionHeight) / Mathf.Max(1, tileResolution);
+            return -depthBias * worldTexelSize * ResolveMainLightShadowSoftKernelRadius(shadowData);
+        }
+
+        private static float ResolveMainLightShadowSoftKernelRadius(BurtShadowData shadowData)
+        {
+            // The 13-tap PCF path samples a 5x5-equivalent footprint. Mirror URP's medium
+            // soft-shadow bias scaling so neighboring taps do not self-shadow flat receivers.
+            return shadowData != null && shadowData.IsMainLightShadowSoft ? 2.5f : 1f;
+        }
+
+        private static void SetShadowCasterCameraGlobals(CommandBuffer cmd, Camera camera)
+        {
+            if (cmd == null || camera == null)
+            {
+                return;
+            }
+
+            var cameraPosition = camera.transform.position;
+            cmd.SetGlobalVector(WorldSpaceCameraPosId, new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1f));
+            SetWorldToCameraAndCameraToWorldMatrices(cmd, camera.worldToCameraMatrix);
+        }
+
+        private static void SetWorldToCameraAndCameraToWorldMatrices(CommandBuffer cmd, Matrix4x4 viewMatrix)
+        {
+            var worldToCameraMatrix = Matrix4x4.Scale(new Vector3(1f, 1f, -1f)) * viewMatrix;
+            cmd.SetGlobalMatrix(UnityWorldToCameraId, worldToCameraMatrix);
+            cmd.SetGlobalMatrix(UnityCameraToWorldId, worldToCameraMatrix.inverse);
         }
 
         private static void SetKeyword(CommandBuffer cmd, string keyword, bool enabled)
@@ -1168,43 +1226,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
         }
 
-        private static float ResolveMainLightShadowNormalBias(BurtShadowData shadowData, Matrix4x4 projectionMatrix, int tileResolution)
-        {
-            if (shadowData == null || tileResolution <= 0)
-            {
-                return 0f;
-            }
-
-            var normalBias = Mathf.Max(0f, shadowData.MainLightShadowNormalBias);
-            if (normalBias <= 0f)
-            {
-                return 0f;
-            }
-
-            var projectionWidth = Mathf.Abs(projectionMatrix.m00) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m00) : 0f;
-            var projectionHeight = Mathf.Abs(projectionMatrix.m11) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m11) : 0f;
-            var worldTexelSize = Mathf.Max(projectionWidth, projectionHeight) / Mathf.Max(1, tileResolution);
-            return -normalBias * worldTexelSize;
-        }
-
-        private static float ResolveMainLightShadowDepthBias(BurtShadowData shadowData, Matrix4x4 projectionMatrix, int tileResolution)
-        {
-            if (shadowData == null || tileResolution <= 0)
-            {
-                return 0f;
-            }
-
-            var depthBias = Mathf.Max(0f, shadowData.MainLightShadowDepthBias);
-            if (depthBias <= 0f)
-            {
-                return 0f;
-            }
-
-            var projectionWidth = Mathf.Abs(projectionMatrix.m00) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m00) : 0f;
-            var projectionHeight = Mathf.Abs(projectionMatrix.m11) > 0.00001f ? 2f / Mathf.Abs(projectionMatrix.m11) : 0f;
-            var worldTexelSize = Mathf.Max(projectionWidth, projectionHeight) / Mathf.Max(1, tileResolution);
-            return -depthBias * worldTexelSize;
-        }
     }
 
     internal static class BurtAdditionalLightShadowUtility
@@ -1968,7 +1989,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateAdditionalLightShadowAtlasDescriptor(lightingData);
             var cmd = CommandBufferPool.Get(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.AdditionalLightShadowAtlasId, descriptor, FilterMode.Bilinear);
-            cmd.SetRenderTarget(atlasTarget.Identifier);
+            BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, atlasTarget);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
             BurtAdditionalLightShadowUtility.BindAdditionalLightShadowAtlasIfValid(cmd, atlasTarget);
@@ -2048,7 +2069,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var cmd = CommandBufferPool.Get(Name);
             try
             {
-                cmd.SetRenderTarget(atlasTarget.Identifier);
+                BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, atlasTarget);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, atlasResolution, atlasResolution);
                 cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
                 cmd.SetGlobalDepthBias(0f, 0f);
@@ -2077,7 +2098,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                     var depthBias = BurtAdditionalLightShadowUtility.ResolveAdditionalLightShadowCasterDepthBias(request, lightingData, lightIndex, tileResolution);
                     var normalBias = BurtAdditionalLightShadowUtility.ResolveAdditionalLightShadowCasterNormalBias(request, lightingData, lightIndex, tileResolution);
 
-                    cmd.SetRenderTarget(atlasTarget.Identifier);
+                    BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, atlasTarget);
                     cmd.SetViewport(viewport);
                     cmd.EnableScissorRect(viewport);
                     cmd.SetViewProjectionMatrices(lightingData.AdditionalLightShadowSliceViewMatrices[sliceIndex], lightingData.AdditionalLightShadowSliceProjectionMatrices[sliceIndex]);
@@ -2615,6 +2636,63 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
 
             renderContext.DrawSkybox(camera); // 使用 Unity SRP 上下文绘制当前相机的天空盒。
+        }
+    }
+
+    internal sealed class BurtDrawRefractionDistortionPass : BurtRenderPass
+    {
+        private static readonly Color InvalidDistortionClearColor = new Color(0.0f, 0.0f, 0.0f, 65504.0f);
+
+        public override string Name => "Burt Draw Refraction Distortion";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.DrawRenderers;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadCameraDepth();
+            builder.WriteRefractionDistortion();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var distortionTarget = context.RefractionDistortionTarget;
+            var cameraDepthTarget = context.CameraDepthTarget;
+            if (!distortionTarget.IsValid || !cameraDepthTarget.IsValid)
+            {
+                return;
+            }
+
+            var request = context.Request;
+            var camera = request != null ? request.Camera : null;
+            if (camera == null)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetRenderTarget(distortionTarget.Identifier, cameraDepthTarget.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
+            cmd.ClearRenderTarget(false, true, InvalidDistortionClearColor);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+
+            var sortingSettings = new SortingSettings(camera);
+            sortingSettings.criteria = SortingCriteria.CommonTransparent;
+            var drawingSettings = BurtDrawingSettingsUtility.CreateRefractionDistortionDrawingSettings(sortingSettings);
+            var filteringSettings = new FilteringSettings(RenderQueueRange.transparent);
+            context.ScriptableContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings);
         }
     }
 

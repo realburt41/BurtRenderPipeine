@@ -11,6 +11,9 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtNormal.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEmission.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl"
+#if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
+    #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInteriorMappingPass.hlsl"
+#endif
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMaterialShadingModelPassCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkVertexAnimation.hlsl"
 
@@ -50,6 +53,9 @@ struct GBufferVaryings
     float3 PositionWS : TEXCOORD8;
 #else
     float3 PositionWS : TEXCOORD5;
+    #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
+        float2 UV0 : TEXCOORD6;
+    #endif
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         float4 VertexColor : TEXCOORD6;
         float3 PositionOS : TEXCOORD7;
@@ -117,6 +123,9 @@ GBufferVaryings VertGBuffer(GBufferAttributes Input)
     Output.BaseMapUV = BurtTransformBaseMapUV(Input.UV0, _BaseMap_ST);
     Output.MaskMapUV = BurtTransformMaskMapUV(Input.UV0, _MaskMap_ST);
     Output.PositionWS = mul(unity_ObjectToWorld, PositionOS).xyz;
+    #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
+        Output.UV0 = Input.UV0;
+    #endif
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         Output.VertexColor = Input.Color;
         Output.PositionOS = PositionOS.xyz;
@@ -197,7 +206,11 @@ BurtGBufferData BurtCreateMaterialPassGBufferDataFromInput(GBufferVaryings Input
     float3 ViewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - Input.PositionWS);
     BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.UV0, Input.UV1, Input.PositionOS, Input.NormalWS, Input.TangentWS, ViewDirectionWS);
 #else
-    float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
+    #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
+        float4 MaskMap = BurtSampleMaskMap(Input.BaseMapUV);
+    #else
+        float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
+    #endif
     float3 ViewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - Input.PositionWS);
     float3 BaseNormalWS = BurtGetMaterialPassNormalWS(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, Facing);
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
@@ -208,8 +221,12 @@ BurtGBufferData BurtCreateMaterialPassGBufferDataFromInput(GBufferVaryings Input
         BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, BaseNormalWS, ViewDirectionWS, Input.PositionWS);
     #endif
 #endif
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if defined(BURT_MATERIAL_DEPTH_NORMALS_PASS)
     float3 EmissionColor = float3(0.0f, 0.0f, 0.0f);
+    #elif defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    float3 EmissionColor = float3(0.0f, 0.0f, 0.0f);
+    #elif defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
+    float3 EmissionColor = BurtEvaluateInteriorMappingEmission(Input.UV0, Input.BaseMapUV, Input.PositionWS, Input.NormalWS, Input.TangentWS, Input.PositionCS);
     #else
     float3 EmissionColor = BurtEvaluateEmission(Input.EmissionMapUV, _EmissionColor.rgb);
     #endif

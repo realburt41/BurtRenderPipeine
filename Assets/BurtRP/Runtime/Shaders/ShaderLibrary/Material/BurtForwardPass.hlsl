@@ -18,6 +18,14 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMaterialShadingModelPassCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkVertexAnimation.hlsl"
 
+sampler2D _BurtOpaqueCameraColorTexture;
+UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
+float _BurtOpaqueCameraColorAvailable;
+
+#ifndef BURT_FORWARD_ENABLE_REFRACTION
+#define BURT_FORWARD_ENABLE_REFRACTION 0
+#endif
+
 struct Attributes
 {
     float4 PositionOS : POSITION;
@@ -37,6 +45,7 @@ struct Varyings
 {
     float4 PositionCS : SV_POSITION;
     float3 NormalWS : TEXCOORD0;
+    float4 ScreenPos : TEXCOORD1;
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 BaseMapUV : TEXCOORD2;
 #endif
@@ -81,6 +90,7 @@ Varyings Vert(Attributes Input)
 
     Varyings Output;
     Output.PositionCS = UnityObjectToClipPos(PositionOS);
+    Output.ScreenPos = ComputeScreenPos(Output.PositionCS);
 
     float4 PositionWS = mul(unity_ObjectToWorld, PositionOS);
     Output.PositionWS = PositionWS.xyz;
@@ -131,6 +141,111 @@ float3 BurtGetForwardDebugNormalWS(float3 NormalWS, float3 ShadingDirectionWS)
 {
     return BurtGetMaterialPassDebugNormalWS(NormalWS, ShadingDirectionWS);
 }
+
+float2 BurtGetForwardScreenUV(Varyings Input)
+{
+    return saturate(Input.ScreenPos.xy / max(Input.ScreenPos.w, BURT_EPSILON));
+}
+
+float BurtGetForwardLinearEyeDepth(float3 PositionWS)
+{
+    return max(-mul(UNITY_MATRIX_V, float4(PositionWS, 1.0f)).z, 1.0e-4f);
+}
+
+float3 BurtSampleForwardOpaqueCameraColor(float2 ScreenUV)
+{
+    return BurtRemovePreExposure(tex2D(_BurtOpaqueCameraColorTexture, ScreenUV).rgb);
+}
+
+#if BURT_FORWARD_ENABLE_REFRACTION
+float BurtGetForwardRefractionSqrtVarianceFromRoughness(float Roughness)
+{
+    return saturate(Roughness * Roughness * 0.00173056f);
+}
+
+float BurtGetForwardRoughRefractionRadiusPixels(float RoughRefraction, float Thickness, float SceneDepth)
+{
+    float roughness = saturate(RoughRefraction);
+    if (roughness <= 1.0e-4f || Thickness <= 1.0e-4f)
+    {
+        return 0.0f;
+    }
+
+    float standardDeviationCM = BurtGetForwardRefractionSqrtVarianceFromRoughness(roughness) * Thickness * 100.0f * 350.0f;
+    float tanHalfHFOV = rcp(max(abs(UNITY_MATRIX_P._m00), 1.0e-4f));
+    float pixelRadiusCM = max(100.0f * max(SceneDepth, 1.0e-4f) * tanHalfHFOV * (2.0f / max(_ScreenParams.x, 1.0f)), 1.0e-4f);
+    return clamp(standardDeviationCM / pixelRadiusCM, 0.0f, 32.0f);
+}
+
+float3 BurtSampleForwardRoughRefraction(float2 ScreenUV, float RoughRefraction, float Thickness, float SceneDepth)
+{
+    float radiusPixels = BurtGetForwardRoughRefractionRadiusPixels(RoughRefraction, Thickness, SceneDepth);
+    if (radiusPixels <= 1.0e-3f)
+    {
+        return BurtSampleForwardOpaqueCameraColor(ScreenUV);
+    }
+
+    float2 texelSize = rcp(max(_ScreenParams.xy, float2(1.0f, 1.0f)));
+    float2 radiusUV = texelSize * radiusPixels;
+
+    float3 color = BurtSampleForwardOpaqueCameraColor(ScreenUV) * 0.25f;
+    color += BurtSampleForwardOpaqueCameraColor(saturate(ScreenUV + float2(radiusUV.x, 0.0f))) * 0.125f;
+    color += BurtSampleForwardOpaqueCameraColor(saturate(ScreenUV - float2(radiusUV.x, 0.0f))) * 0.125f;
+    color += BurtSampleForwardOpaqueCameraColor(saturate(ScreenUV + float2(0.0f, radiusUV.y))) * 0.125f;
+    color += BurtSampleForwardOpaqueCameraColor(saturate(ScreenUV - float2(0.0f, radiusUV.y))) * 0.125f;
+    color += BurtSampleForwardOpaqueCameraColor(saturate(ScreenUV + radiusUV)) * 0.0625f;
+    color += BurtSampleForwardOpaqueCameraColor(saturate(ScreenUV - radiusUV)) * 0.0625f;
+    color += BurtSampleForwardOpaqueCameraColor(saturate(ScreenUV + float2(radiusUV.x, -radiusUV.y))) * 0.0625f;
+    color += BurtSampleForwardOpaqueCameraColor(saturate(ScreenUV + float2(-radiusUV.x, radiusUV.y))) * 0.0625f;
+    return color;
+}
+
+float2 BurtComputeForwardRefractionOffset(float3 NormalWS)
+{
+    float3 normalVS = normalize(mul((float3x3)UNITY_MATRIX_V, NormalWS));
+    float aspect = max(_ScreenParams.x, 1.0f) / max(_ScreenParams.y, 1.0f);
+    float2 fovFix = float2(UNITY_MATRIX_P._m00, aspect * UNITY_MATRIX_P._m00);
+    return normalVS.xy * (_IOR - 1.0f) * fovFix * 0.00023f * max(_ScreenParams.x, 1.0f) * saturate(_Refraction);
+}
+
+void BurtApplyForwardRefraction(Varyings Input, float3 NormalWS, BurtSurfaceData SurfaceData, inout float3 FinalColor, inout float OutputAlpha)
+{
+    if (_Surface < 0.5f || _Refraction <= 1.0e-4f || _BurtOpaqueCameraColorAvailable < 0.5f || SurfaceData.Alpha <= 1.0e-4f)
+    {
+        return;
+    }
+
+    float2 screenUV = BurtGetForwardScreenUV(Input);
+    float2 uvBorder = max(_ScreenParams.zw - 1.0f, float2(0.0f, 0.0f));
+    float2 clampedUV = clamp(screenUV, uvBorder, 1.0f - uvBorder);
+    float2 refractionOffset = BurtComputeForwardRefractionOffset(NormalWS);
+    float2 depthProbeUV = clamp(clampedUV + refractionOffset, uvBorder, 1.0f - uvBorder);
+
+    float surfaceDepth = BurtGetForwardLinearEyeDepth(Input.PositionWS);
+    float sceneRawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, depthProbeUV);
+    float sceneDepth = LinearEyeDepth(sceneRawDepth);
+    float thickness = max(sceneDepth - surfaceDepth, 0.0f);
+    float depthFade = saturate(thickness * 100.0f);
+    if (depthFade <= 1.0e-4f)
+    {
+        return;
+    }
+
+    float2 refractionUV = clamp(clampedUV + refractionOffset * depthFade, uvBorder, 1.0f - uvBorder);
+    float refractionSceneDepth = LinearEyeDepth(SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, refractionUV));
+    float refractionThickness = max(refractionSceneDepth - surfaceDepth, 0.0f);
+    float roughRefraction = saturate((1.0f - SurfaceData.Smoothness) - saturate(_RefractionStage));
+    float3 refractionColor = BurtSampleForwardRoughRefraction(refractionUV, roughRefraction, refractionThickness, refractionSceneDepth);
+    float3 refractionComposite = lerp(refractionColor, FinalColor, saturate(SurfaceData.Alpha));
+    float refractionBlend = saturate(_Refraction) * depthFade;
+    FinalColor = lerp(FinalColor, refractionComposite, refractionBlend);
+    OutputAlpha = lerp(OutputAlpha, 1.0f, refractionBlend);
+}
+#else
+void BurtApplyForwardRefraction(Varyings Input, float3 NormalWS, BurtSurfaceData SurfaceData, inout float3 FinalColor, inout float OutputAlpha)
+{
+}
+#endif
 
 BurtPBRShadingComponents BurtEvaluateForwardShadingComponents(BurtSurfaceData SurfaceData, BurtLight MainLight, Varyings Input, float3 NormalWS, float3 ShadingDirectionWS, float3 ViewDirectionWS, float Facing)
 {
@@ -204,7 +319,7 @@ void BurtFillForwardShadingDebugData(
         : float3(0.0f, 0.0f, 0.0f);
     DebugData.IndirectDiffuseColor = PBRComponents.IndirectDiffuse;
     DebugData.IndirectSpecularColor = PBRComponents.IndirectSpecular;
-    DebugData.ShadowAttenuation = ShadowAttenuation;
+    DebugData.ShadowAttenuation = BurtSampleMainLightShadowWithoutPerObject(PositionWS, NormalWS);
     DebugData.AdditionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
         ? BurtEvaluateAdditionalShadowAttenuationDebug(PositionWS, NormalWS)
         : 1.0f;
@@ -227,6 +342,10 @@ void BurtFillForwardShadingDebugData(
         DebugData.ShadowDistanceFade,
         DebugData.ShadowPCSSRadius,
         DebugData.ShadowReceiverDepthDelta,
+        DebugData.MainLightShadowReceiverDepth,
+        DebugData.MainLightShadowRawDepth,
+        DebugData.MainLightShadowCompare,
+        DebugData.MainLightShadowProjectionValidity,
         DebugData.ShadowPCSSBlockerFraction);
 
     BurtFillPerObjectShadowShadingDebugData(
@@ -282,14 +401,31 @@ void BurtFillForwardShadingDebugData(
     DebugData.HairTransmissionLobe = PBRComponents.HairTransmissionLobe;
     DebugData.HairScatter = PBRComponents.HairScatter;
     DebugData.GBufferBaseColor = DebugDecodedGBufferData.BaseColor;
-    DebugData.GBufferNormalWS = BurtGetForwardDebugNormalWS(BurtGetDefaultLitNormalWS(DebugDecodedGBufferData), BurtGetHairStrandDirectionWS(DebugDecodedGBufferData));
+#if BURT_ENABLE_HAIR_SHADING
+    float3 DebugHairStrandDirectionWS = BurtGetHairStrandDirectionWS(DebugDecodedGBufferData);
+#else
+    float3 DebugHairStrandDirectionWS = BurtGetDefaultLitNormalWS(DebugDecodedGBufferData);
+#endif
+    DebugData.GBufferNormalWS = BurtGetForwardDebugNormalWS(BurtGetDefaultLitNormalWS(DebugDecodedGBufferData), DebugHairStrandDirectionWS);
     DebugData.GBufferMetallic = BurtGetGBufferMaterialChannel(DebugDecodedGBufferData);
+#if BURT_ENABLE_CLEAR_COAT_SHADING
     DebugData.GBufferClearCoatMask = BurtGetClearCoatMask(DebugDecodedGBufferData);
     DebugData.GBufferClearCoatNormalWS = BurtGetClearCoatNormalWS(DebugDecodedGBufferData);
     DebugData.GBufferClearCoatRoughness = BurtGetClearCoatRoughness(DebugDecodedGBufferData);
+#else
+    DebugData.GBufferClearCoatMask = 0.0f;
+    DebugData.GBufferClearCoatNormalWS = BurtGetDefaultLitNormalWS(DebugDecodedGBufferData);
+    DebugData.GBufferClearCoatRoughness = 0.2f;
+#endif
+#if BURT_ENABLE_SUBSURFACE_SHADING
     DebugData.GBufferSubsurfaceStrength = BurtGetSubsurfaceStrength(DebugDecodedGBufferData);
     DebugData.GBufferSubsurfaceThickness = BurtGetSubsurfaceThickness(DebugDecodedGBufferData);
     DebugData.GBufferSubsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(DebugDecodedGBufferData);
+#else
+    DebugData.GBufferSubsurfaceStrength = 0.0f;
+    DebugData.GBufferSubsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
+    DebugData.GBufferSubsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
+#endif
     DebugData.GBufferAnisotropy = DebugDecodedGBufferData.Anisotropy;
     DebugData.GBufferTangentWS = DebugDecodedGBufferData.TangentWS;
     DebugData.GBufferSmoothness = DebugDecodedGBufferData.Smoothness;
@@ -372,11 +508,13 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
     float3 EmissionColor = BurtEvaluateEmission(Input.EmissionMapUV, _EmissionColor.rgb);
 #endif
     float3 FinalColor = PBRComponents.Lighting + EmissionColor;
+    float OutputAlpha = SurfaceData.Alpha;
+    BurtApplyForwardRefraction(Input, NormalWS, SurfaceData, FinalColor, OutputAlpha);
 
 #if defined(BURT_ENABLE_SHADING_DEBUG)
     if (!BurtIsShadingDebugEnabled())
     {
-        return float4(BurtApplyPreExposure(FinalColor), SurfaceData.Alpha);
+        return float4(BurtApplyPreExposure(FinalColor), OutputAlpha);
     }
 
     BurtGBufferData DebugGBufferSourceData = BurtCreateForwardDebugGBufferData(SurfaceData, Input, NormalWS, ShadingDirectionWS, Facing);
@@ -448,7 +586,7 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
     }
 #endif
 
-    return float4(BurtApplyPreExposure(FinalColor), SurfaceData.Alpha);
+    return float4(BurtApplyPreExposure(FinalColor), OutputAlpha);
 }
 
 #endif // BURT_FORWARD_PASS_INCLUDED

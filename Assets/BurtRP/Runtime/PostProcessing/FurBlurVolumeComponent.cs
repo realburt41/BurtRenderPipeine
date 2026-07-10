@@ -21,5 +21,23 @@ namespace Burt.RenderPipeline
         public BoolParameter colorTemporal = new BoolParameter(BurtFurBlurSettings.DefaultColorTemporal);
         public ClampedFloatParameter thetaFeedback = new ClampedFloatParameter(BurtFurBlurSettings.DefaultThetaFeedback, 0f, 0.98f);
         public ClampedFloatParameter temporalFeedback = new ClampedFloatParameter(BurtFurBlurSettings.DefaultTemporalFeedback, 0f, 0.98f);
+
+        public bool IsEnabled()
+        {
+            return active && HasAnyOverride() && enabled.value;
+        }
+
+        private bool HasAnyOverride()
+        {
+            return enabled.overrideState ||
+                tiledBlur.overrideState ||
+                radiusCm.overrideState ||
+                depthThresholdEye.overrideState ||
+                directionDilationThreshold.overrideState ||
+                thetaTemporal.overrideState ||
+                colorTemporal.overrideState ||
+                thetaFeedback.overrideState ||
+                temporalFeedback.overrideState;
+        }
     }
 }

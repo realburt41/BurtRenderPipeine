@@ -79,6 +79,46 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateRefractionDistortionDescriptor(Camera camera)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Sample))
+            {
+                descriptor.graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat;
+            }
+
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
+        public static RenderTextureDescriptor CreateRefractionSceneColorMipChainDescriptor(Camera camera)
+        {
+            var descriptor = CreateCameraColorDescriptor(camera);
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, FormatUsage.Sample))
+            {
+                descriptor.graphicsFormat = GraphicsFormat.B10G11R11_UFloatPack32;
+            }
+            else
+            {
+                descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            }
+
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = true;
+            descriptor.autoGenerateMips = false;
+            descriptor.mipCount = Mathf.Min(6, CalculateMipCount(descriptor.width, descriptor.height));
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
         public static RenderTextureDescriptor CreateScreenSpaceAmbientOcclusionDescriptor(Camera camera)
         {
             var descriptor = CreateCameraColorDescriptor(camera);

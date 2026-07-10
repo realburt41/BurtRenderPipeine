@@ -55,6 +55,9 @@ Shader "BurtRP/Lit"
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
+        [ToggleUI] _Refraction ("Refraction", Float) = 0
+        _IOR ("IOR", Range(-3, 3)) = 1.5
+        _RefractionStage ("Refraction Stage", Range(0, 1)) = 0
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 32
         [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
@@ -266,6 +269,44 @@ Shader "BurtRP/Lit"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
 
             // 结束 GBuffer pass 的 HLSL 程序。
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Lit Refraction Distortion"
+            Tags { "LightMode" = "BurtRefractionDistortion" }
+
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+            Blend One Zero
+
+            HLSLPROGRAM
+            #pragma vertex VertRefractionDistortion
+            #pragma fragment FragRefractionDistortion
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+
+            #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtRefractionDistortionPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "BurtGI"
+            Tags { "LightMode" = "RayTracing" }
+
+            HLSLPROGRAM
+            #pragma only_renderers d3d11 d3d12
+            #pragma raytracing BurtGI
+            #pragma shader_feature_local _ BURT_ALPHA_CLIP
+
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
             ENDHLSL
         }
 

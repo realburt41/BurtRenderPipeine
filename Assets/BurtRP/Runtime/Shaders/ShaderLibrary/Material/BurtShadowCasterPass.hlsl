@@ -113,14 +113,6 @@ ShadowVaryings VertShadow(ShadowAttributes input)
     float3 biasedPositionWS = ApplyBurtShadowCasterNormalBias(positionOS, input.NormalOS);
     output.PositionCS = mul(UNITY_MATRIX_VP, float4(biasedPositionWS, 1.0f));
 
-#if !defined(_CASTING_PUNCTUAL_LIGHT_SHADOW)
-    #if UNITY_REVERSED_Z
-        output.PositionCS.z = min(output.PositionCS.z, UNITY_NEAR_CLIP_VALUE);
-    #else
-        output.PositionCS.z = max(output.PositionCS.z, UNITY_NEAR_CLIP_VALUE);
-    #endif
-#endif
-
     #if BURT_SHADOW_CASTER_USES_BASE_MAP_UV
     #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
         output.BaseMapUV = input.UV0;

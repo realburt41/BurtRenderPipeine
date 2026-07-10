@@ -9,7 +9,7 @@ Texture2D _BurtAdditionalLightShadowAtlas;
 Texture2D _BurtPerObjectShadowAtlas;
 
 #define BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES 4
-#define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT 32
+#define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT 8
 #define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES 24
 #define BURT_ADDITIONAL_LIGHT_SHADOW_POINT_FACE_COUNT 6
 #define BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_POINT 1.0f
@@ -37,7 +37,7 @@ float _BurtMainLightShadowStrength;
 float4 _BurtMainLightShadowTexelSize;
 float _BurtMainLightShadowSampleBias;
 float _BurtMainLightShadowSoftness;
-float4 _BurtMainLightShadowCasterBiasParams;
+float4 _BurtMainLightShadowReceiverBiasParams;
 
 float4 _BurtAdditionalLightShadowData[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT];
 float4 _BurtAdditionalLightShadowLightParams[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT];
@@ -190,7 +190,9 @@ float BurtGetMainLightShadowEstimatedWorldTexelSize(int cascadeIndex)
     float worldToAtlasScaleY = length(BurtGetMainLightWorldToShadowRow1(cascadeIndex).xyz);
     float texelWorldSizeX = _BurtMainLightShadowTexelSize.x / max(worldToAtlasScaleX, 0.000001f);
     float texelWorldSizeY = _BurtMainLightShadowTexelSize.y / max(worldToAtlasScaleY, 0.000001f);
-    return max(texelWorldSizeX, texelWorldSizeY);
+    // XRender derives receiver normal bias from the unremapped [-1, 1] shadow projection.
+    // BRP stores atlas UV matrices here, so the inverse atlas-UV texel is twice that value.
+    return max(texelWorldSizeX, texelWorldSizeY) * 0.5f;
 }
 
 float BurtSmootherStep01(float value)
@@ -199,24 +201,25 @@ float BurtSmootherStep01(float value)
     return value * value * value * (value * (value * 6.0f - 15.0f) + 10.0f);
 }
 
-float3 BurtApplyMainLightShadowCasterBiasEstimate(float3 positionWS, float3 normalWS, int cascadeIndex)
+float3 BurtApplyMainLightShadowReceiverNormalBias(float3 PositionWS, float3 NormalWS, int CascadeIndex)
 {
-    float worldTexelSize = BurtGetMainLightShadowEstimatedWorldTexelSize(cascadeIndex);
-    if (worldTexelSize <= 0.0f)
+    float WorldTexelSize = BurtGetMainLightShadowEstimatedWorldTexelSize(CascadeIndex);
+    float NormalBiasFactor = max(_BurtMainLightShadowReceiverBiasParams.y, 0.0f);
+    if (WorldTexelSize <= 0.0f || NormalBiasFactor <= 0.0f)
     {
-        return positionWS;
+        return PositionWS;
     }
 
-    float3 lightDirectionWS = _BurtMainLightDirection.xyz;
-    lightDirectionWS *= rsqrt(max(dot(lightDirectionWS, lightDirectionWS), 0.000001f));
+    float3 SafeNormalWS = NormalWS;
+    SafeNormalWS *= rsqrt(max(dot(SafeNormalWS, SafeNormalWS), 0.000001f));
 
-    float3 safeNormalWS = normalWS;
-    safeNormalWS *= rsqrt(max(dot(safeNormalWS, safeNormalWS), 0.000001f));
+    // XRender's shadow receiver bias uses light.forward, while BRP lighting stores surface-to-light.
+    float3 SafeLightDirectionWS = -_BurtMainLightDirection.xyz;
+    SafeLightDirectionWS *= rsqrt(max(dot(SafeLightDirectionWS, SafeLightDirectionWS), 0.000001f));
 
-    float depthBias = -max(_BurtMainLightShadowCasterBiasParams.x, 0.0f) * worldTexelSize;
-    float normalBias = -max(_BurtMainLightShadowCasterBiasParams.y, 0.0f) * worldTexelSize;
-    float normalBiasScale = (1.0f - saturate(dot(safeNormalWS, lightDirectionWS))) * normalBias;
-    return positionWS + lightDirectionWS * depthBias + safeNormalWS * normalBiasScale;
+    float NoL = saturate(dot(SafeNormalWS, SafeLightDirectionWS));
+    float SinTheta = sqrt(max(1.0f - NoL * NoL, 0.0f));
+    return PositionWS + SafeNormalWS * SinTheta * WorldTexelSize * NormalBiasFactor;
 }
 
 float4 BurtTransformWorldToMainLightShadowCascade(float4 positionWS, int cascadeIndex)
@@ -294,17 +297,6 @@ float BurtApplyMainLightReceiverBias(float projectedDepth)
 {
     float receiverBias = max(0.0f, _BurtMainLightShadowSampleBias);
     return saturate(projectedDepth + receiverBias);
-}
-
-float BurtSampleMainLightShadowCompare(float3 projectedShadowCoord, int cascadeIndex)
-{
-    projectedShadowCoord.xy = BurtClampMainLightShadowUVToCascade(projectedShadowCoord.xy, cascadeIndex);
-    return BURT_SAMPLE_SHADOW_CLAMP(_BurtMainLightShadowMap, projectedShadowCoord);
-}
-
-float BurtSampleMainLightShadowCompare(float3 projectedShadowCoord)
-{
-    return BurtSampleMainLightShadowCompare(projectedShadowCoord, 0);
 }
 
 float BurtSampleMainLightShadowRawDepth(float2 shadowUV, int cascadeIndex)
@@ -479,6 +471,22 @@ float BurtIsMainLightShadowRawBlocker(float storedDepth, float receiverDepth)
     return blockerDistance > minBlockerDistance ? 1.0f : 0.0f;
 }
 
+float BurtCompareMainLightShadowDepth(float storedDepth, float receiverDepth)
+{
+    return 1.0f - BurtIsMainLightShadowRawBlocker(storedDepth, receiverDepth);
+}
+
+float BurtSampleMainLightShadowCompare(float3 projectedShadowCoord, int cascadeIndex)
+{
+    projectedShadowCoord.xy = BurtClampMainLightShadowUVToCascade(projectedShadowCoord.xy, cascadeIndex);
+    return BURT_SAMPLE_SHADOW_CLAMP(_BurtMainLightShadowMap, projectedShadowCoord);
+}
+
+float BurtSampleMainLightShadowCompare(float3 projectedShadowCoord)
+{
+    return BurtSampleMainLightShadowCompare(projectedShadowCoord, 0);
+}
+
 bool BurtTryEvaluateMainLightShadowPCSSBlockers(
     float3 projectedShadowCoord,
     int cascadeIndex,
@@ -530,12 +538,29 @@ bool BurtTryEvaluateMainLightShadowPCSSBlockers(
     return true;
 }
 
+float2 BurtGetMainLightShadowReceiverPlaneDepthGradient(float3 projectedShadowCoord)
+{
+    float3 shadowCoordDx = ddx(projectedShadowCoord);
+    float3 shadowCoordDy = ddy(projectedShadowCoord);
+    float determinant = shadowCoordDx.x * shadowCoordDy.y - shadowCoordDx.y * shadowCoordDy.x;
+    if (abs(determinant) <= 0.00000001f)
+    {
+        return float2(0.0f, 0.0f);
+    }
+
+    return float2(
+        (shadowCoordDx.z * shadowCoordDy.y - shadowCoordDx.y * shadowCoordDy.z) / determinant,
+        (shadowCoordDx.x * shadowCoordDy.z - shadowCoordDx.z * shadowCoordDy.x) / determinant);
+}
+
 float BurtSampleMainLightShadowPCF(float3 projectedShadowCoord, float radiusTexels, int cascadeIndex)
 {
     float2 texelSize = _BurtMainLightShadowTexelSize.xy;
     float radius = max(radiusTexels, 0.0f);
     float visibility = 0.0f;
     float weightSum = 0.0f;
+    float2 centerUV = BurtClampMainLightShadowUVToCascade(projectedShadowCoord.xy, cascadeIndex);
+    float2 receiverPlaneDepthGradient = BurtGetMainLightShadowReceiverPlaneDepthGradient(projectedShadowCoord);
     int sampleRotationIndex = BurtGetMainLightShadowSampleRotationIndex(projectedShadowCoord.xy, cascadeIndex);
 
     UNITY_UNROLL
@@ -543,17 +568,14 @@ float BurtSampleMainLightShadowPCF(float3 projectedShadowCoord, float radiusTexe
     {
         float2 offset = BurtRotateMainLightShadowDiskOffset(BurtGetMainLightShadowPoissonDiskOffset(filterIndex), sampleRotationIndex);
         float sampleWeight = BurtGetMainLightShadowPoissonDiskWeight(offset, filterIndex);
-        float sampleVisibility = BurtSampleMainLightShadowCompare(float3(projectedShadowCoord.xy + offset * radius * texelSize, projectedShadowCoord.z), cascadeIndex);
+        float2 sampleUV = BurtClampMainLightShadowUVToCascade(centerUV + offset * radius * texelSize, cascadeIndex);
+        float sampleReceiverDepth = projectedShadowCoord.z + dot(receiverPlaneDepthGradient, sampleUV - centerUV);
+        float sampleVisibility = BurtSampleMainLightShadowCompare(float3(sampleUV, sampleReceiverDepth), cascadeIndex);
         visibility += sampleVisibility * sampleWeight;
         weightSum += sampleWeight;
     }
 
     return visibility / max(weightSum, 0.0001f);
-}
-
-float BurtSampleMainLightShadowPCF(float3 projectedShadowCoord, float radiusTexels)
-{
-    return BurtSampleMainLightShadowPCF(projectedShadowCoord, radiusTexels, 0);
 }
 
 float BurtCalculateMainLightShadowPCSSRadiusTexels(float3 projectedShadowCoord, int cascadeIndex)
@@ -608,11 +630,6 @@ float BurtSampleMainLightShadowPCSS(float3 projectedShadowCoord, int cascadeInde
     float radiusTexels = BurtCalculateMainLightShadowPCSSRadiusTexels(projectedShadowCoord, cascadeIndex);
     radiusTexels = min(max(radiusTexels, BURT_MAIN_LIGHT_SHADOW_MIN_PCSS_FILTER_RADIUS_TEXELS), max(_BurtMainLightShadowPCSSParams.w, BURT_MAIN_LIGHT_SHADOW_MIN_PCSS_FILTER_RADIUS_TEXELS));
     return BurtSampleMainLightShadowPCF(projectedShadowCoord, radiusTexels, cascadeIndex);
-}
-
-float BurtSampleMainLightShadowPCSS(float3 projectedShadowCoord)
-{
-    return BurtSampleMainLightShadowPCSS(projectedShadowCoord, 0);
 }
 
 float BurtApplyShadowStrength(float rawShadow, float strength)
@@ -708,71 +725,6 @@ float BurtCalculateMainLightShadowFade(float3 positionWS, int cascadeIndex)
     return BurtSmootherStep01(fadeWeight);
 }
 
-float3 BurtGetMainLightShadowCascadeDebugColorByIndex(int cascadeIndex)
-{
-    if (cascadeIndex == 1)
-    {
-        return float3(0.15f, 0.9f, 0.25f);
-    }
-
-    if (cascadeIndex == 2)
-    {
-        return float3(0.2f, 0.45f, 1.0f);
-    }
-
-    if (cascadeIndex == 3)
-    {
-        return float3(1.0f, 0.65f, 0.1f);
-    }
-
-    return float3(1.0f, 0.15f, 0.1f);
-}
-
-float3 BurtGetMainLightShadowCascadeDebugColor(float3 positionWS)
-{
-    int cascadeIndex = BurtSelectMainLightShadowCascade(positionWS);
-    if (cascadeIndex < 0)
-    {
-        return float3(0.0f, 0.0f, 0.0f);
-    }
-
-    return BurtGetMainLightShadowCascadeDebugColorByIndex(cascadeIndex);
-}
-
-float BurtGetMainLightShadowCascadeBlendDebug(float3 positionWS)
-{
-    int cascadeIndex = BurtSelectMainLightShadowCascade(positionWS);
-    if (cascadeIndex < 0)
-    {
-        return 0.0f;
-    }
-
-    return BurtCalculateMainLightCascadeBlendWeight(positionWS, cascadeIndex);
-}
-
-float BurtGetMainLightShadowDistanceFadeDebug(float3 positionWS)
-{
-    int cascadeCount = BurtGetMainLightShadowCascadeCount();
-    if (cascadeCount <= 0)
-    {
-        return 0.0f;
-    }
-
-    int cascadeIndex = BurtSelectMainLightShadowCascade(positionWS);
-    if (cascadeIndex < 0)
-    {
-        return 1.0f;
-    }
-
-    return BurtCalculateMainLightShadowFade(positionWS, cascadeIndex);
-}
-
-float3 BurtProjectWorldToMainLightShadowCascade(float3 positionWS, int cascadeIndex)
-{
-    float4 shadowCoord = BurtTransformWorldToMainLightShadowCascade(float4(positionWS, 1.0f), cascadeIndex);
-    float safeW = abs(shadowCoord.w) > 0.00001f ? shadowCoord.w : (shadowCoord.w < 0.0f ? -0.00001f : 0.00001f);
-    return shadowCoord.xyz / safeW;
-}
 
 int BurtGetPerObjectShadowSliceCount()
 {
@@ -848,7 +800,7 @@ float2 BurtGetPerObjectShadowSliceTexelSize(int sliceIndex)
 float3 BurtApplyPerObjectShadowReceiverBias(float3 positionWS, float3 normalWS, int sliceIndex)
 {
     float3 safeNormalWS = BurtSafeNormalize(normalWS);
-    float3 lightDirectionWS = BurtSafeNormalize(_BurtMainLightDirection.xyz);
+    float3 lightDirectionWS = BurtSafeNormalize(-_BurtMainLightDirection.xyz);
     float4 sliceParams = _BurtPerObjectShadowSliceParams[sliceIndex];
     float normalBias = max(sliceParams.z, 0.0f);
     if (normalBias <= 0.0f)
@@ -884,116 +836,6 @@ float BurtSamplePerObjectShadowRawDepth(float2 shadowUV, int sliceIndex)
     return _BurtPerObjectShadowAtlas.Load(int3(pixelCoord, 0)).r;
 }
 
-float3 BurtGetPerObjectShadowSliceDebugColor(int sliceIndex)
-{
-    if (sliceIndex == 0) return float3(1.0f, 0.0f, 0.0f);
-    if (sliceIndex == 1) return float3(0.0f, 1.0f, 0.0f);
-    if (sliceIndex == 2) return float3(0.0f, 0.0f, 1.0f);
-    if (sliceIndex == 3) return float3(1.0f, 1.0f, 0.0f);
-    if (sliceIndex == 4) return float3(1.0f, 0.0f, 1.0f);
-    if (sliceIndex == 5) return float3(0.0f, 1.0f, 1.0f);
-    if (sliceIndex == 6) return float3(1.0f, 0.5f, 0.0f);
-    if (sliceIndex == 7) return float3(0.5f, 0.0f, 1.0f);
-    return float3(0.25f, 0.25f, 0.25f);
-}
-
-#define BURT_PER_OBJECT_SHADOW_TRANSMISSION_DEBUG_MAX_THICKNESS (10.0f)
-void BurtFillPerObjectShadowProjectionDebugData(
-    float3 positionWS,
-    float3 normalWS,
-    int objectIndex,
-    out float3 objectIndexColor,
-    out float3 sliceColor,
-    out float3 uvColor,
-    out float3 depthColor,
-    out float3 compareColor)
-{
-    objectIndexColor = float3(0.0f, 0.0f, 0.0f);
-    sliceColor = float3(0.0f, 0.0f, 0.0f);
-    uvColor = float3(0.0f, 0.0f, 0.0f);
-    depthColor = float3(0.0f, 0.0f, 0.0f);
-    compareColor = float3(0.0f, 0.0f, 0.0f);
-
-    int sliceCount = BurtGetPerObjectShadowSliceCount();
-    objectIndex = max(objectIndex, 0);
-    float objectIndexDebug = saturate((float)objectIndex / max((float)sliceCount, 1.0f));
-    objectIndexColor = float3(objectIndexDebug, objectIndexDebug, objectIndexDebug);
-
-    int sliceIndex = BurtDecodePerObjectShadowSliceIndex(objectIndex);
-    if (sliceIndex < 0)
-    {
-        return;
-    }
-
-    float3 biasedPositionWS = BurtApplyPerObjectShadowReceiverBias(positionWS, normalWS, sliceIndex);
-    float4 shadowCoord = BurtTransformWorldToPerObjectShadowSlice(float4(biasedPositionWS, 1.0f), sliceIndex);
-    float safeW = abs(shadowCoord.w) > 0.00001f ? shadowCoord.w : (shadowCoord.w < 0.0f ? -0.00001f : 0.00001f);
-    float3 projectedShadowCoord = shadowCoord.xyz / safeW;
-    bool insideAtlas = BurtIsInsidePerObjectShadowAtlas(projectedShadowCoord, sliceIndex);
-
-    float4 sliceParams = _BurtPerObjectShadowSliceParams[sliceIndex];
-    float receiverDepth = saturate(projectedShadowCoord.z + max(sliceParams.y, 0.0f));
-    float rawDepth = BurtSamplePerObjectShadowRawDepth(projectedShadowCoord.xy, sliceIndex);
-    float compareVisibility = insideAtlas ? BurtSamplePerObjectShadowCompare(float3(projectedShadowCoord.xy, receiverDepth), sliceIndex) : 1.0f;
-    float insideWeight = insideAtlas ? 1.0f : 0.25f;
-
-    sliceColor = BurtGetPerObjectShadowSliceDebugColor(sliceIndex) * insideWeight;
-    uvColor = float3(saturate(BurtClampPerObjectShadowUVToRect(projectedShadowCoord.xy, sliceIndex)), insideAtlas ? 1.0f : 0.0f);
-    depthColor = float3(saturate(receiverDepth), saturate(rawDepth), saturate(compareVisibility));
-    compareColor = float3(compareVisibility, compareVisibility, compareVisibility);
-}
-
-void BurtFillPerObjectShadowTransmissionDebugData(
-    float3 positionWS,
-    int objectIndex,
-    out float3 transmissionDepthColor,
-    out float3 transmissionThicknessColor)
-{
-    transmissionDepthColor = float3(0.0f, 0.0f, 0.0f);
-    transmissionThicknessColor = float3(0.0f, 0.0f, 0.0f);
-
-    int sliceCount = BurtGetPerObjectShadowSliceCount();
-    int safeObjectIndex = max(objectIndex, 0);
-    float objectIndexDebug = saturate((float)safeObjectIndex / max((float)sliceCount, 1.0f));
-    if (safeObjectIndex <= 0)
-    {
-        return;
-    }
-
-    int sliceIndex = BurtDecodePerObjectShadowSliceIndex(safeObjectIndex);
-    if (sliceIndex < 0)
-    {
-        transmissionThicknessColor = float3(objectIndexDebug, 0.0f, 0.25f);
-        return;
-    }
-
-    float4 depthParams = _BurtPerObjectShadowSliceDepthParams[sliceIndex];
-    if (depthParams.w <= 0.5f || depthParams.x <= 0.0001f)
-    {
-        transmissionThicknessColor = float3(objectIndexDebug, 0.0f, 0.5f);
-        return;
-    }
-
-    float4 shadowCoord = BurtTransformWorldToPerObjectShadowSlice(float4(positionWS, 1.0f), sliceIndex);
-    float safeW = abs(shadowCoord.w) > 0.00001f ? shadowCoord.w : (shadowCoord.w < 0.0f ? -0.00001f : 0.00001f);
-    float3 projectedShadowCoord = shadowCoord.xyz / safeW;
-    float surfaceDepth = saturate(projectedShadowCoord.z);
-    if (!BurtIsInsidePerObjectShadowAtlas(projectedShadowCoord, sliceIndex))
-    {
-        transmissionDepthColor = float3(surfaceDepth, 0.0f, 0.0f);
-        transmissionThicknessColor = float3(objectIndexDebug, 0.0f, 0.75f);
-        return;
-    }
-
-    float rawDepth = BurtSamplePerObjectShadowRawDepth(projectedShadowCoord.xy, sliceIndex);
-    float depthDelta = max(saturate(rawDepth) - surfaceDepth, 0.0f);
-    float thickness = clamp(saturate(depthDelta) * max(depthParams.x, 0.001f), 0.0f, BURT_PER_OBJECT_SHADOW_TRANSMISSION_DEBUG_MAX_THICKNESS);
-    transmissionDepthColor = float3(surfaceDepth, saturate(rawDepth), saturate(depthDelta * 16.0f));
-    transmissionThicknessColor = float3(
-        objectIndexDebug,
-        saturate(thickness / BURT_PER_OBJECT_SHADOW_TRANSMISSION_DEBUG_MAX_THICKNESS),
-        1.0f);
-}
 
 float BurtSamplePerObjectShadowPCF(float3 projectedShadowCoord, int sliceIndex)
 {
@@ -1135,160 +977,55 @@ float BurtSamplePerObjectShadow(float3 positionWS)
     return BurtSamplePerObjectShadow(positionWS, _BurtMainLightDirection.xyz);
 }
 
-float BurtGetMainLightShadowPCSSRadiusDebug(float3 positionWS)
+
+float BurtSampleMainLightShadowRawVisibility(float3 PositionWS, float3 NormalWS, int CascadeIndex)
 {
-    if (_BurtMainLightShadowPCSSParams.x <= 0.5f)
-    {
-        return 0.0f;
-    }
-
-    int cascadeIndex = BurtSelectMainLightShadowCascade(positionWS);
-    if (cascadeIndex < 0)
-    {
-        return 0.0f;
-    }
-
-    float3 projectedShadowCoord = BurtProjectWorldToMainLightShadowCascade(positionWS, cascadeIndex);
-    if (!BurtIsInsideMainLightShadowMap(projectedShadowCoord, cascadeIndex))
-    {
-        return 0.0f;
-    }
-
-    projectedShadowCoord.z = BurtApplyMainLightReceiverBias(projectedShadowCoord.z);
-    float radius = BurtCalculateMainLightShadowPCSSRadiusTexels(projectedShadowCoord, cascadeIndex);
-    float normalizedRadius = saturate(radius / max(_BurtMainLightShadowPCSSParams.w, 1.5f));
-
-    // For debug readability, suppress the wide low-level halo on lit receivers and emphasize
-    // where the current PCSS filter is actually contributing to visible shadowing.
-    float shadowedWeight = saturate((1.0f - BurtSampleMainLightShadowPCSS(projectedShadowCoord, cascadeIndex)) * 1.25f);
-    return normalizedRadius * shadowedWeight;
+    float3 ReceiverPositionWS = BurtApplyMainLightShadowReceiverNormalBias(PositionWS, NormalWS, CascadeIndex);
+    return BurtSampleMainLightShadowRawVisibility(BurtTransformWorldToMainLightShadowCascade(float4(ReceiverPositionWS, 1.0f), CascadeIndex), CascadeIndex);
 }
 
-float BurtGetMainLightShadowPCSSBlockerFractionDebug(float3 positionWS)
+float BurtSampleMainLightShadowWithoutPerObject(float3 PositionWS, float3 NormalWS)
 {
-    if (_BurtMainLightShadowPCSSParams.x <= 0.5f)
+    float MainVisibility = 1.0f;
+    int CascadeIndex = _BurtMainLightShadowStrength > 0.0001f ? BurtSelectMainLightShadowCascade(PositionWS) : -1;
+    if (CascadeIndex >= 0)
     {
-        return 0.0f;
+        float RawShadow = BurtSampleMainLightShadowRawVisibility(PositionWS, NormalWS, CascadeIndex);
+
+        float BlendWeight = BurtCalculateMainLightCascadeBlendWeight(PositionWS, CascadeIndex);
+        if (BlendWeight > 0.0f)
+        {
+            int NextCascadeIndex = min(CascadeIndex + 1, BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES - 1);
+            float NextRawShadow = BurtSampleMainLightShadowRawVisibility(PositionWS, NormalWS, NextCascadeIndex);
+            RawShadow = lerp(RawShadow, NextRawShadow, BlendWeight);
+        }
+
+        RawShadow = lerp(RawShadow, 1.0f, BurtCalculateMainLightShadowFade(PositionWS, CascadeIndex));
+        MainVisibility = BurtApplyShadowStrength(RawShadow, _BurtMainLightShadowStrength);
     }
 
-    int cascadeIndex = BurtSelectMainLightShadowCascade(positionWS);
-    if (cascadeIndex < 0)
-    {
-        return 0.0f;
-    }
-
-    float3 projectedShadowCoord = BurtProjectWorldToMainLightShadowCascade(positionWS, cascadeIndex);
-    if (!BurtIsInsideMainLightShadowMap(projectedShadowCoord, cascadeIndex))
-    {
-        return 0.0f;
-    }
-
-    projectedShadowCoord.z = BurtApplyMainLightReceiverBias(projectedShadowCoord.z);
-
-    float blockerFraction = 0.0f;
-    float averageBlockerDistance = 0.0f;
-    float averageBlockerDepth = 0.0f;
-    BurtTryEvaluateMainLightShadowPCSSBlockers(projectedShadowCoord, cascadeIndex, blockerFraction, averageBlockerDistance, averageBlockerDepth);
-
-    // Raw blocker fraction is too sparse to read on narrow silhouettes when only a few Poisson
-    // taps land on the occluder. Use the center sample as a floor for debug visibility, then
-    // gate by actual shadow visibility so lit receivers do not show false self-blockers.
-    float centerRawDepth = BurtSampleMainLightShadowRawDepthBilinear(projectedShadowCoord.xy, cascadeIndex);
-    float centerIsBlocker = BurtIsMainLightShadowRawBlocker(centerRawDepth, projectedShadowCoord.z);
-    float displayFraction = saturate(max(blockerFraction, centerIsBlocker * 0.35f) * 1.75f);
-    float blockedWeight = saturate(1.0f - BurtSampleMainLightShadowPCSS(projectedShadowCoord, cascadeIndex));
-    return displayFraction * blockedWeight;
-}
-
-float BurtGetMainLightShadowReceiverDepthDeltaDebug(float3 positionWS, float3 normalWS)
-{
-    int cascadeIndex = BurtSelectMainLightShadowCascade(positionWS);
-    if (cascadeIndex < 0)
-    {
-        return 0.0f;
-    }
-
-    float3 projectedShadowCoord = BurtProjectWorldToMainLightShadowCascade(positionWS, cascadeIndex);
-    if (!BurtIsInsideMainLightShadowMap(projectedShadowCoord, cascadeIndex))
-    {
-        return 0.0f;
-    }
-
-    // The shadow map stores caster positions after BurtRP's depth/normal bias. Re-project an
-    // estimated biased receiver so this debug reflects acne-vs-bias pressure instead of just
-    // visualizing the caster bias offset as a full-white self-shadowing surface.
-    float3 biasedPositionWS = BurtApplyMainLightShadowCasterBiasEstimate(positionWS, normalWS, cascadeIndex);
-    float3 biasedProjectedShadowCoord = BurtProjectWorldToMainLightShadowCascade(biasedPositionWS, cascadeIndex);
-    float receiverDepth = biasedProjectedShadowCoord.z;
-    float storedDepthCenter = 0.0f;
-    float storedDepthSurface = 0.0f;
-    float storedDepthAverage = 0.0f;
-    float storedDepthSpan = 0.0f;
-    float storedDepthSurfaceCurvature = 0.0f;
-    BurtSampleMainLightShadowDebugNeighborhood(biasedProjectedShadowCoord.xy, cascadeIndex, storedDepthCenter, storedDepthSurface, storedDepthAverage, storedDepthSpan, storedDepthSurfaceCurvature);
-
-    // Convert both receiver/stored depth into the same light-distance convention before
-    // taking the difference; otherwise reversed-Z platforms turn this debug into a shadow mask.
-    float receiverDistance = BurtConvertMainLightShadowDepthToLightDistance(receiverDepth);
-    float storedDistanceCenter = BurtConvertMainLightShadowDepthToLightDistance(storedDepthCenter);
-    float storedDistanceSurface = BurtConvertMainLightShadowDepthToLightDistance(storedDepthSurface);
-    float storedDistanceAverage = BurtConvertMainLightShadowDepthToLightDistance(storedDepthAverage);
-    float storedDistanceSpan = storedDepthSpan;
-    float storedDistanceCurvature = storedDepthSurfaceCurvature;
-    float signedDistanceDelta = receiverDistance - storedDistanceSurface;
-    float neighborhoodDisagreement = abs(storedDistanceSurface - storedDistanceAverage);
-    float localPlaneResidual = abs(storedDistanceCenter - storedDistanceSurface);
-
-    // This view is for receiver-vs-shadow-surface alignment, not for visualizing full cast-shadow
-    // separation. Once the pixel is genuinely blocked by another surface, blend back toward mid-gray
-    // so acne/bias pressure on lit receivers remains readable.
-    float visibility = BurtSampleMainLightShadowRawVisibility(BurtTransformWorldToMainLightShadowCascade(float4(positionWS, 1.0f), cascadeIndex), cascadeIndex);
-    float litWeight = saturate((visibility - 0.05f) / 0.95f);
-
-    // Keep the scale wide enough that small flat-surface bias differences stay around mid-gray.
-    float displayScale = max(max(max(max(storedDistanceSpan * 2.5f, neighborhoodDisagreement * 3.0f), max(localPlaneResidual, storedDistanceCurvature) * 6.0f), _BurtMainLightShadowSampleBias * 24.0f), 0.002f);
-    float deltaDebug = saturate(0.5f + signedDistanceDelta / displayScale);
-    return lerp(0.5f, deltaDebug, litWeight);
+    return MainVisibility;
 }
 
 float BurtSampleMainLightShadowWithoutPerObject(float3 positionWS)
 {
-    float mainVisibility = 1.0f;
-    int cascadeIndex = _BurtMainLightShadowStrength > 0.0001f ? BurtSelectMainLightShadowCascade(positionWS) : -1;
-    if (cascadeIndex >= 0)
-    {
-        float4 positionWS4 = float4(positionWS, 1.0f);
-        float rawShadow = BurtSampleMainLightShadowRawVisibility(BurtTransformWorldToMainLightShadowCascade(positionWS4, cascadeIndex), cascadeIndex);
-
-        float blendWeight = BurtCalculateMainLightCascadeBlendWeight(positionWS, cascadeIndex);
-        if (blendWeight > 0.0f)
-        {
-            int nextCascadeIndex = min(cascadeIndex + 1, BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES - 1);
-            float nextRawShadow = BurtSampleMainLightShadowRawVisibility(BurtTransformWorldToMainLightShadowCascade(positionWS4, nextCascadeIndex), nextCascadeIndex);
-            rawShadow = lerp(rawShadow, nextRawShadow, blendWeight);
-        }
-
-        rawShadow = lerp(rawShadow, 1.0f, BurtCalculateMainLightShadowFade(positionWS, cascadeIndex));
-        mainVisibility = BurtApplyShadowStrength(rawShadow, _BurtMainLightShadowStrength);
-    }
-
-    return mainVisibility;
+    return BurtSampleMainLightShadowWithoutPerObject(positionWS, _BurtMainLightDirection.xyz);
 }
 
 float BurtSampleMainLightTransmissionShadow(float3 positionWS, float3 normalWS, int objectIndex, float transmissionThickness)
 {
-    int sliceIndex = BurtDecodePerObjectShadowSliceIndex(objectIndex);
-    if (sliceIndex < 0 || transmissionThickness < 0.0f)
+    int SliceIndex = BurtDecodePerObjectShadowSliceIndex(objectIndex);
+    if (SliceIndex < 0 || transmissionThickness < 0.0f)
     {
         return 1.0f;
     }
 
-    float sliceWorldTexelSize = max(_BurtPerObjectShadowSliceParams[sliceIndex].w, 0.0f);
-    float transmissionOffset = max(transmissionThickness, sliceWorldTexelSize * 2.0f);
-    float3 transmissionPositionWS = positionWS + BurtSafeNormalize(_BurtMainLightDirection.xyz) * transmissionOffset;
-    float mainVisibility = BurtSampleMainLightShadowWithoutPerObject(transmissionPositionWS);
-    float perObjectVisibility = BurtSamplePerObjectShadowExcludingSlice(positionWS, normalWS, sliceIndex);
-    return min(mainVisibility, perObjectVisibility);
+    float SliceWorldTexelSize = max(_BurtPerObjectShadowSliceParams[SliceIndex].w, 0.0f);
+    float TransmissionOffset = max(transmissionThickness, SliceWorldTexelSize * 2.0f);
+    float3 TransmissionPositionWS = positionWS + BurtSafeNormalize(_BurtMainLightDirection.xyz) * TransmissionOffset;
+    float MainVisibility = BurtSampleMainLightShadowWithoutPerObject(TransmissionPositionWS, normalWS);
+    float PerObjectVisibility = BurtSamplePerObjectShadowExcludingSlice(positionWS, normalWS, SliceIndex);
+    return min(MainVisibility, PerObjectVisibility);
 }
 
 float BurtSampleMainLightTransmissionShadow(float3 positionWS, float3 normalWS, int objectIndex)
@@ -1304,7 +1041,7 @@ float BurtSampleMainLightTransmissionShadow(float3 positionWS, float3 normalWS)
 
 float BurtSampleMainLightShadow(float3 positionWS, float3 normalWS, int objectIndex)
 {
-    return min(BurtSampleMainLightShadowWithoutPerObject(positionWS), BurtSamplePerObjectShadow(positionWS, normalWS, objectIndex));
+    return min(BurtSampleMainLightShadowWithoutPerObject(positionWS, normalWS), BurtSamplePerObjectShadow(positionWS, normalWS, objectIndex));
 }
 
 float BurtSampleMainLightShadow(float3 positionWS, float3 normalWS)
@@ -1595,74 +1332,8 @@ float BurtSampleAdditionalLightShadow(int lightIndex, float3 positionWS, float3 
     return BurtApplyShadowStrength(rawShadow, shadowData.y);
 }
 
-float3 BurtGetAdditionalLightShadowFaceDebugColor(int sliceOffset)
-{
-    if (sliceOffset == 0) return float3(1.0f, 0.0f, 0.0f);
-    if (sliceOffset == 1) return float3(0.0f, 1.0f, 0.0f);
-    if (sliceOffset == 2) return float3(0.0f, 0.0f, 1.0f);
-    if (sliceOffset == 3) return float3(1.0f, 1.0f, 0.0f);
-    if (sliceOffset == 4) return float3(1.0f, 0.0f, 1.0f);
-    if (sliceOffset == 5) return float3(0.0f, 1.0f, 1.0f);
-    return float3(0.25f, 0.25f, 0.25f);
-}
-
-bool BurtGetAdditionalLightShadowProjectionDebug(
-    int lightIndex,
-    float3 positionWS,
-    float3 lightPositionWS,
-    float3 lightDirectionWS,
-    float3 normalWS,
-    out float3 faceColor,
-    out float3 uvColor,
-    out float3 depthColor,
-    out float3 depthDeltaColor)
-{
-    faceColor = float3(0.0f, 0.0f, 0.0f);
-    uvColor = float3(0.0f, 0.0f, 0.0f);
-    depthColor = float3(0.0f, 0.0f, 0.0f);
-    depthDeltaColor = float3(0.0f, 0.0f, 0.0f);
-
-    float4 shadowData;
-    int sliceIndex;
-    int sliceOffset;
-    bool isPointShadow;
-    if (!BurtResolveAdditionalLightShadowSlice(lightIndex, positionWS, lightPositionWS, lightDirectionWS, shadowData, sliceIndex, sliceOffset, isPointShadow))
-    {
-        return false;
-    }
-
-    float3 shadowPositionWS = BurtResolveAdditionalLightShadowSamplePositionWS(lightIndex, positionWS, normalWS, shadowData);
-    if (isPointShadow)
-    {
-        float4 lightParams = _BurtAdditionalLightShadowLightParams[lightIndex];
-        if (!BurtResolveAdditionalLightShadowSliceFromData(lightIndex, shadowPositionWS, lightPositionWS, lightDirectionWS, shadowData, lightParams, sliceIndex, sliceOffset, isPointShadow))
-        {
-            return false;
-        }
-    }
-
-    float4 shadowCoord;
-    if (!BurtTryProjectAdditionalLightShadowSlice(shadowPositionWS, sliceIndex, shadowCoord))
-    {
-        return false;
-    }
-
-    float3 projectedShadowCoord = shadowCoord.xyz / shadowCoord.w;
-    bool insideAtlas = BurtIsInsideAdditionalLightShadowAtlas(projectedShadowCoord, sliceIndex, isPointShadow);
-    float2 clampedUV = BurtClampAdditionalLightShadowUVToRect(projectedShadowCoord.xy, sliceIndex, isPointShadow);
-    float rawDepth = BurtSampleAdditionalLightShadowRawDepth(projectedShadowCoord.xy, sliceIndex, isPointShadow);
-    float receiverDepth = BurtApplyAdditionalLightReceiverBias(projectedShadowCoord.z);
-    float compareVisibility = insideAtlas ? BurtSampleAdditionalLightShadowCompare(shadowCoord, sliceIndex, isPointShadow) : 1.0f;
-
-    faceColor = isPointShadow ? BurtGetAdditionalLightShadowFaceDebugColor(sliceOffset) : float3(1.0f, 1.0f, 1.0f);
-    uvColor = float3(saturate(clampedUV), insideAtlas ? 1.0f : 0.0f);
-    float receiverDistance = BurtConvertAdditionalLightShadowDepthToLightDistance(receiverDepth);
-    float storedDistance = BurtConvertAdditionalLightShadowDepthToLightDistance(rawDepth);
-    depthColor = float3(saturate(receiverDepth), saturate(rawDepth), saturate(compareVisibility));
-    depthDeltaColor = float3(saturate((receiverDistance - storedDistance) * 25.0f + 0.5f), saturate(receiverDepth), saturate(rawDepth));
-    return true;
-}
 
 #define BURT_ADDITIONAL_LIGHT_SHADOWS_INCLUDED 1
 
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadowsDebug.hlsl"
 #endif // BURT_SHADOWS_INCLUDED

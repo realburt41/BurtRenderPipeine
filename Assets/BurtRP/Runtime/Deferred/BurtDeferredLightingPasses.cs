@@ -195,6 +195,13 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGIApplyIndirectBackfaceDiffuseTextureId = Shader.PropertyToID("_BurtGIBackfaceDiffuseIndirectTexture");
         private static readonly int BurtGIApplyIndirectRoughSpecularTextureId = Shader.PropertyToID("_BurtGIRoughSpecularIndirectTexture");
         private static readonly int BurtGIApplyIndirectParamsId = Shader.PropertyToID("_BurtGIApplyIndirectParams");
+        private static readonly int BurtGIShortRangeAOParamsId = Shader.PropertyToID("_BurtGIShortRangeAOParams");
+        private static readonly int BurtGITranslucencyVolumeParamsId = Shader.PropertyToID("_BurtGITranslucencyVolumeParams");
+        private static readonly int BurtGITranslucencyVolume0TextureId = BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume0TextureId;
+        private static readonly int BurtGITranslucencyVolume1TextureId = BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume1TextureId;
+        private static readonly int BurtGITranslucencyVolumeGridSizeId = Shader.PropertyToID("_BurtGITranslucencyVolumeGridSize");
+        private static readonly int BurtGITranslucencyVolumeGridZParamsId = Shader.PropertyToID("_BurtGITranslucencyVolumeGridZParams");
+        private static readonly int BurtGITranslucencyVolumeParams0Id = Shader.PropertyToID("_BurtGITranslucencyVolumeParams0");
 
         private readonly string passName;
         private readonly int shaderPassIndex;
@@ -241,6 +248,19 @@ namespace Burt.RenderPipeline
                 builder.ReadScreenSpaceGlobalIllumination();
                 builder.ReadBurtGIBackfaceDiffuseIndirect();
                 builder.ReadBurtGIRoughSpecularIndirect();
+                if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeFilter0Name) &&
+                    builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeFilter1Name))
+                {
+                    builder.ReadBurtGITranslucencyVolumeFilter0();
+                    builder.ReadBurtGITranslucencyVolumeFilter1();
+                }
+                else if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume0Name) &&
+                    builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume1Name))
+                {
+                    builder.ReadBurtGITranslucencyVolume0();
+                    builder.ReadBurtGITranslucencyVolume1();
+                }
+
                 builder.ReadGlobalResource(BurtRenderGraphResourceRegistry.BurtGIApplyIndirectGlobalsName);
             }
 
@@ -413,6 +433,8 @@ namespace Burt.RenderPipeline
         {
             var enabled = false;
             var intensity = 0f;
+            var shortRangeAOParams = Vector4.zero;
+            var translucencyVolumeParams = Vector4.zero;
             var target = context != null
                 ? context.ScreenSpaceGlobalIlluminationTarget
                 : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
@@ -422,6 +444,23 @@ namespace Burt.RenderPipeline
             var roughSpecularTarget = context != null
                 ? context.BurtGIRoughSpecularIndirectTarget
                 : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectName);
+            var translucencyVolume0Target = context != null
+                ? context.BurtGITranslucencyVolume0Target
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume0Name);
+            var translucencyVolume1Target = context != null
+                ? context.BurtGITranslucencyVolume1Target
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume1Name);
+            var translucencyVolumeFilter0Target = context != null
+                ? context.BurtGITranslucencyVolumeFilter0Target
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeFilter0Name);
+            var translucencyVolumeFilter1Target = context != null
+                ? context.BurtGITranslucencyVolumeFilter1Target
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeFilter1Name);
+            if (translucencyVolumeFilter0Target.IsValid && translucencyVolumeFilter1Target.IsValid)
+            {
+                translucencyVolume0Target = translucencyVolumeFilter0Target;
+                translucencyVolume1Target = translucencyVolumeFilter1Target;
+            }
 
             if (context != null &&
                 target.IsValid &&
@@ -432,6 +471,12 @@ namespace Burt.RenderPipeline
                 var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(context.Request, context.Asset);
                 enabled = settings.Enabled;
                 intensity = settings.Intensity;
+                shortRangeAOParams = new Vector4(
+                    settings.ShortRangeAO ? 1f : 0f,
+                    settings.ShortRangeAOWeight,
+                    settings.ShortRangeAOSlopeCompareToleranceScale,
+                    2f);
+                translucencyVolumeParams = new Vector4(1f, 0.65f, 0.55f, 1f);
             }
 
             if (enabled)
@@ -445,12 +490,41 @@ namespace Burt.RenderPipeline
 
             cmd.SetGlobalTexture(BurtGIApplyIndirectBackfaceDiffuseTextureId, enabled ? backfaceDiffuseTarget.Identifier : Texture2D.blackTexture);
             cmd.SetGlobalTexture(BurtGIApplyIndirectRoughSpecularTextureId, enabled ? roughSpecularTarget.Identifier : Texture2D.blackTexture);
+            var volumeEnabled = enabled && translucencyVolume0Target.IsValid && translucencyVolume1Target.IsValid;
+            var fallbackVolumeTexture = BurtGITranslucencyVolumeFallbackUtility.BlackVolumeTexture;
+            cmd.SetGlobalTexture(BurtGITranslucencyVolume0TextureId, volumeEnabled ? translucencyVolume0Target.Identifier : fallbackVolumeTexture);
+            cmd.SetGlobalTexture(BurtGITranslucencyVolume1TextureId, volumeEnabled ? translucencyVolume1Target.Identifier : fallbackVolumeTexture);
             var applyParams = new Vector4(enabled ? 1f : 0f, intensity, enabled ? 1f : 0f, enabled ? 1f : 0f);
             cmd.SetGlobalVector(BurtGIApplyIndirectParamsId, applyParams);
+            cmd.SetGlobalVector(BurtGIShortRangeAOParamsId, enabled ? shortRangeAOParams : Vector4.zero);
+            cmd.SetGlobalVector(BurtGITranslucencyVolumeParamsId, volumeEnabled ? translucencyVolumeParams : Vector4.zero);
+            UploadTranslucencyVolumeGlobals(context, cmd, volumeEnabled);
             if (material != null)
             {
                 material.SetVector(BurtGIApplyIndirectParamsId, applyParams);
+                material.SetVector(BurtGIShortRangeAOParamsId, enabled ? shortRangeAOParams : Vector4.zero);
+                material.SetVector(BurtGITranslucencyVolumeParamsId, volumeEnabled ? translucencyVolumeParams : Vector4.zero);
             }
+        }
+
+        private static void UploadTranslucencyVolumeGlobals(BurtRenderGraphContext context, CommandBuffer cmd, bool enabled)
+        {
+            if (!enabled)
+            {
+                cmd.SetGlobalVector(BurtGITranslucencyVolumeGridSizeId, Vector4.zero);
+                cmd.SetGlobalVector(BurtGITranslucencyVolumeGridZParamsId, Vector4.zero);
+                cmd.SetGlobalVector(BurtGITranslucencyVolumeParams0Id, Vector4.zero);
+                return;
+            }
+
+            var camera = context != null && context.Request != null ? context.Request.Camera : null;
+            var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context != null ? context.Request : null, context != null ? context.Asset : null);
+            var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationTranslucencyVolumeDescriptor(camera, settings);
+            var nearPlane = camera != null ? Mathf.Max(camera.nearClipPlane, 0.01f) : 0.1f;
+            var farPlane = camera != null ? Mathf.Max(camera.farClipPlane, nearPlane + 1f) : 1000f;
+            cmd.SetGlobalVector(BurtGITranslucencyVolumeGridSizeId, new Vector4(descriptor.width, descriptor.height, descriptor.volumeDepth, 0.65f));
+            cmd.SetGlobalVector(BurtGITranslucencyVolumeGridZParamsId, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveTranslucencyVolumeGridZParams());
+            cmd.SetGlobalVector(BurtGITranslucencyVolumeParams0Id, new Vector4(nearPlane, farPlane, 0.75f, 0.65f));
         }
 
         private static void BindAdditionalLightBuffer(BurtRenderGraphContext context, CommandBuffer cmd, Material material)

@@ -65,7 +65,7 @@ Shader "BurtRP/Foliage"
     }
 
     HLSLINCLUDE
-    #pragma enable_d3d11_debug_symbols
+    // #pragma enable_d3d11_debug_symbols
     ENDHLSL
 
     SubShader
@@ -177,6 +177,20 @@ Shader "BurtRP/Foliage"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "BurtGI"
+            Tags { "LightMode" = "RayTracing" }
+
+            HLSLPROGRAM
+            #pragma only_renderers d3d11 d3d12
+            #pragma raytracing BurtGI
+            #pragma shader_feature_local _ BURT_ALPHA_CLIP
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
             ENDHLSL
         }
 

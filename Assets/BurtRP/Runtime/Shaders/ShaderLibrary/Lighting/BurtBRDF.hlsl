@@ -1,8 +1,7 @@
-// BurtRP �?PBR BRDF 工具库，当前实现单主光也能复用，后续多光源会继续调用这里的函数
-#ifndef BURT_BRDF_INCLUDED // 开�?include guard，防止同一�?shader 编译单元里重复定�?BRDF 函数
-#define BURT_BRDF_INCLUDED // 标记 BurtBRDF.hlsl 已经被包含过，后续重�?include 会被跳过�?
+#ifndef BURT_BRDF_INCLUDED
+#define BURT_BRDF_INCLUDED
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl" // 引入安全归一化和基础数学保护
-#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl" // 引入 BurtSurfaceData，用来读�?baseColor、metallic、smoothness 等材质参数
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelMacros.hlsl"
 
 // 定义圆周率，PBR 漫反射和 GGX 分布项都会使用它
@@ -44,7 +43,6 @@ float _BurtSubsurfaceProfileParamLutEnabled;
 float4 _BurtSubsurfaceProfileParamLutSize;
 #endif
 
-// 定义预积�?FG LUT 的尺寸；当前资源�?XRender 默认 128x128 生成
 #define BURT_PREINTEGRATED_FG_LUT_SIZE (128.0f)
 #define BURT_PREINTEGRATED_FG_LUT_INV_SIZE (1.0f / BURT_PREINTEGRATED_FG_LUT_SIZE)
 #if BURT_ENABLE_SUBSURFACE_SHADING
@@ -240,17 +238,13 @@ float BurtHenyeyGreensteinPhase(float anisotropy, float cosTheta)
 
 #endif
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::rcp_safe；用安全倒数保护 BRDF 分母，避�?0 产生 NaN
 float rcp_safe(float value)
 {
-    // XRender 原实现使�?1e-7，这里沿�?BurtRP 通用 epsilon 统一数值保护下限
 return rcp(max(value, BURT_EPSILON));
 }
 
-// 出处：XRender/Shaders/Library/Math.hlsl::Pow5；Schlick Fresnel �?DFG 近似都会用到五次项
 float Pow5(float value)
 {
-    // 先算平方，减少重复乘法，也避免直�?pow 带来的平台差异
 float value2 = value * value;
 
     // value^5 = value^2 * value^2 * value
@@ -270,41 +264,32 @@ float PerceivedLuminance(float3 color)
 return dot(color, float3(0.3f, 0.59f, 0.11f));
 }
 
-// 出处：XRender/Shaders/Library/CommonMaterial.hlsl::DiffuseColorFromBaseColor；金属材质不保留普�?diffuse
 float3 DiffuseColorFromBaseColor(float3 baseColor, float metallic)
 {
-    // metallic 越高，baseColor 越多转移�?specular F0，diffuse 越少
 return baseColor * (1.0f - metallic);
 }
 
-// 出处：XRender/Shaders/Library/CommonMaterial.hlsl::DielectricReflectanceToF0；Frostbite reflectance �?F0 的映射
 float3 DielectricReflectanceToF0(float3 baseColor, float reflectance, float metallic)
 {
     // XRender 公式：MATERIAL_MAX_DIELECTRIC_F0 * Reflectance^2 * (1 - Metallic) + BaseColor * Metallic
 float dielectricF0 = BURT_MATERIAL_MAX_DIELECTRIC_F0 * saturate(reflectance) * saturate(reflectance);
 
-    // 非金�?F0 �?reflectance 映射得到，金�?F0 来自 baseColor
 return dielectricF0 * (1.0f - saturate(metallic)) + baseColor * saturate(metallic);
 }
 
-// 出处：XRender/Shaders/Library/CommonMaterial.hlsl::PerceptualSmoothnessToPerceptualRoughness；BurtRP 面板仍暴�?Smoothness
 float PerceptualSmoothnessToPerceptualRoughness(float perceptualSmoothness)
 {
-    // smoothness 越高 roughness 越低，Deferred 后续也应按同一规则�?GBuffer 还原
 return 1.0f - saturate(perceptualSmoothness);
 }
 
 // 出处：XRender/Shaders/Library/CommonMaterial.hlsl::ClampPerceptualRoughness；避免完全镜面造成数值尖峰
 float ClampPerceptualRoughness(float perceptualRoughness)
 {
-    // BurtRP 当前最小粗糙度略高�?XRender PC 默认值，用来控制�?TAA 阶段的高光稳定性
 return clamp(perceptualRoughness, BURT_MIN_PERCEPTUAL_ROUGHNESS, 1.0f);
 }
 
-// BurtRP 表面数据适配函数：把面板 smoothness 转成 XRender 语义�?Base.Roughness
 float GetSurfacePerceptualRoughness(BurtSurfaceData surfaceData)
 {
-    // 先做 smoothness -> roughness，再�?XRender �?ClampPerceptualRoughness 语义做下限保护
 return ClampPerceptualRoughness(PerceptualSmoothnessToPerceptualRoughness(surfaceData.Smoothness));
 }
 
@@ -314,10 +299,8 @@ float GeometricNormalVariance(float3 geometricNormalWS, float screenSpaceVarianc
     // 先安全归一化法线，避免长度误差放大 ddx/ddy 的方差
 float3 safeNormalWS = BurtSafeNormalize(geometricNormalWS);
 
-    // 计算当前像素在屏�?x 方向的法线变化，导数越大表示高光越容易闪烁或漏采样
 float3 deltaX = ddx(safeNormalWS);
 
-    // 计算当前像素在屏�?y 方向的法线变化，�?x 方向一起描述一个像素覆盖范围内的法线分布
 float3 deltaY = ddy(safeNormalWS);
 
     // 把两个方向的变化量转成方差，并乘以屏幕空间权重
@@ -330,14 +313,12 @@ float NormalFiltering(float perceptualRoughness, float variance, float threshold
     // Ref: Geometry into Shading, equation (3)；阈值限制过滤过强导致高光被过度拓宽
 float squaredPerceptualRoughness = saturate(perceptualRoughness * perceptualRoughness + min(2.0f * variance, threshold * threshold));
 
-    // 开平方回到感知粗糙度空间，材质滑块和后�?DFG 仍然使用同一层语义
 return sqrt(squaredPerceptualRoughness);
 }
 
 // 出处：XRender/Shaders/Library/CommonMaterial.hlsl::GeometricNormalFiltering；对几何法线应用 Specular AA
 float GeometricNormalFiltering(float perceptualRoughness, float3 geometricNormalWS, float screenSpaceVariance, float threshold)
 {
-    // 先估算法线方差，再交�?NormalFiltering 转成过滤后的感知粗糙度
 float variance = GeometricNormalVariance(geometricNormalWS, screenSpaceVariance);
 
     // 只允许过滤增加粗糙度，不允许把材质本身变得更光滑
@@ -347,7 +328,6 @@ return max(perceptualRoughness, NormalFiltering(perceptualRoughness, variance, t
 // 保存 Specular AA 中间项，方便 Debug View 同时观察法线方差和粗糙度拓宽幅度
 struct BurtSpecularAATerms
 {
-    // 保存材质原始感知粗糙度，也就是未经过屏幕空间法线过滤�?Base.Roughness
 float MaterialPerceptualRoughness;
 
     // 保存 GeometricNormalVariance 的结果，数值越大表示像素内法线变化越强
@@ -374,7 +354,6 @@ BurtSpecularAATerms BurtEvaluateSpecularAATerms(float materialPerceptualRoughnes
 // BurtRP 直接高光适配函数：材质粗糙度 + XRender 几何法线过滤
 float GetDirectSpecularPerceptualRoughness(BurtSurfaceData surfaceData, float3 normalWS)
 {
-    // 先取得材质本身的感知粗糙度，也就�?1 - smoothness 后的结果
 float materialRoughness = GetSurfacePerceptualRoughness(surfaceData);
 
     // 再把屏幕空间法线变化折算进去，避免极光滑材质的高光小到被像素漏采样
@@ -384,11 +363,9 @@ return BurtEvaluateSpecularAATerms(materialRoughness, normalWS).FilteredPerceptu
 // 出处：XRender/Shaders/Library/CommonMaterial.hlsl::PerceptualRoughnessToLinearRoughness；感知粗糙度转线性粗糙度
 float PerceptualRoughnessToLinearRoughness(float perceptualRoughness)
 {
-    // 线�?roughness 使用感知 roughness 的平方，让材质滑块在视觉上更均匀
 return max(perceptualRoughness * perceptualRoughness, BURT_EPSILON);
 }
 
-// 出处：XRender/Shaders/Library/CommonMaterial.hlsl::LinearRoughnessToA2；线性粗糙度�?GGX D 项使用的 A2
 float LinearRoughnessToA2(float linearRoughness)
 {
     // A2 太小会让高光尖峰过高，所以用 BURT_EPSILON 做最低保护
@@ -398,28 +375,22 @@ return max(linearRoughness * linearRoughness, BURT_EPSILON);
 // 出处：XRender/Shaders/Library/CommonMaterial.hlsl::ApproximateF90；默认掠射角反射端点
 float3 ApproximateF90(float3 f0)
 {
-    // XRender 当前 DefaultLit 路径返回 1；参数保留在签名里，方便后续接入自定�?F90 或薄膜材质
 return float3(1.0f, 1.0f, 1.0f);
 }
 
-// 保存 PBR 材质侧可�?Forward SurfaceData 或未�?Deferred GBuffer 还原的数据，避免光照函数直接依赖材质面板结构
 struct BurtPBRMaterialData
 {
-    // 保存材质基础�?RGB，Deferred 后续可以�?GBuffer 还原
 float3 BaseColor;
 
-    // 保存金属度，既参�?diffuseColor，也参与 reflectance �?F0 的重建
 float Metallic;
 
     float Anisotropy;
 
-    // 保存 XRender 风格 reflectance；不直接暴露 F0，后续统一�?reflectance 还原
 float Reflectance;
 
     // 保存环境遮蔽，用于间接漫反射和间接高光遮蔽
 float Occlusion;
 
-    // 保存面板 smoothness，Debug View �?GBuffer 检查仍然需要看原始语义
 float Smoothness;
 
     // 保存 XRender Base.Roughness，也就是 BurtRP smoothness 转换后的感知粗糙度
@@ -431,10 +402,8 @@ float LinearRoughness;
     // 保存 GGX D 项使用的 a^2，减少直接光中重复计算
 float A2;
 
-    // 保存金属度扣除后�?diffuseColor，对�?XRender GenericData.DiffuseColor
 float3 DiffuseColor;
 
-    // 保存�?baseColor、reflectance、metallic 重建�?F0，对�?XRender GenericData.F0
 float3 F0;
 
     // 保存默认掠射角端点，对应 XRender GenericData.F90
@@ -620,7 +589,6 @@ float BurtGetSubsurfaceMaterialWeight(BurtPBRMaterialData materialData)
     return saturate(materialData.SubsurfaceActive);
 }
 
-// 保存 PBR 几何侧数据；Forward 由插值输入生成，Deferred 后续�?GBuffer normal 和重�?view direction 生成
 struct BurtPBRGeometryData
 {
     // 保存安全归一化后的世界空间法线
@@ -633,14 +601,12 @@ float3 NormalWS;
     // 保存安全归一化后的世界空间视线方向，约定从表面指向相机
 float3 ViewDirectionWS;
 
-    // 保存 NdotV，Energy Term、DFG �?Specular Occlusion 都会复用
 float NDotV;
 
     // 保存环境反射方向，Reflection Probe / Sky Specular 会复用
 float3 ReflectionDirectionWS;
 };
 
-// 从世界空间法线和视线方向准备 PBR 几何数据，方�?Forward �?Deferred 使用同一套几何约定
 float3 BurtCreateFallbackTangentWS(float3 normalWS)
 {
     float3 axis = abs(normalWS.y) < 0.95f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
@@ -677,10 +643,8 @@ BurtPBRGeometryData BurtPreparePBRGeometryData(float3 normalWS, float3 viewDirec
     return BurtPreparePBRGeometryData(safeNormalWS, float4(BurtCreateFallbackTangentWS(safeNormalWS), 1.0f), viewDirectionWS);
 }
 
-// BurtRP 直接高光适配函数：使用已经准备好的材�?几何数据计算 Specular AA 后的感知粗糙度
 float GetDirectSpecularPerceptualRoughness(BurtPBRMaterialData materialData, BurtPBRGeometryData geometryData)
 {
-    // XRender 几何法线过滤只影响直接高光，不回写材�?Base.Roughness
 return BurtEvaluateSpecularAATerms(materialData.PerceptualRoughness, geometryData.NormalWS).FilteredPerceptualRoughness;
 }
 
@@ -691,10 +655,8 @@ BurtSpecularAATerms BurtEvaluateSpecularAATerms(BurtPBRMaterialData materialData
 return BurtEvaluateSpecularAATerms(materialData.PerceptualRoughness, geometryData.NormalWS);
 }
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::Fd_Lambert；标�?Lambert 漫反�?lobe
 float Fd_Lambert()
 {
-    // XRender 返回 INV_PI；BurtRP 使用同一常量，确�?direct/indirect diffuse 的能量尺度一致
 return BURT_INV_PI;
 }
 
@@ -703,7 +665,6 @@ float Fd_Lambert_Fabric(float perceptualRoughness)
     return BURT_INV_PI * lerp(1.0f, 0.5f, saturate(perceptualRoughness));
 }
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::Fd_Diffuse_Burley；Disney/Burley 粗糙漫反�?lobe
 float Fd_Diffuse_Burley(float roughness, float noV, float noL, float voH)
 {
     // XRender 公式：FD90 = 0.5 + 2 * VoH^2 * Roughness
@@ -712,10 +673,8 @@ float fd90 = 0.5f + 2.0f * voH * voH * roughness;
     // 视线侧散射项，掠射角会增强粗糙漫反射
 float fdV = 1.0f + (fd90 - 1.0f) * Pow5(1.0f - saturate(noV));
 
-    // 光照侧散射项，和视线侧一起构�?Burley diffuse
 float fdL = 1.0f + (fd90 - 1.0f) * Pow5(1.0f - saturate(noL));
 
-    // 返回�?1/PI �?diffuse lobe
 return BURT_INV_PI * fdV * fdL;
 }
 
@@ -723,29 +682,23 @@ return BURT_INV_PI * fdV * fdL;
 #define BURT_USE_DISNEY_DIFFUSE 0
 #endif
 
-// 出处：XRender/Shaders/SlabLobes/SL_Diffuse.hlsl::SlabLobe_Diffuse；当前默�?Lambert，保�?Burley 分支给后续材�?质量级别切换
 float SlabLobe_Diffuse(BurtPBRMaterialData materialData, float noV, float noL, float voH)
 {
 #if BURT_USE_DISNEY_DIFFUSE
     // Burley 使用材质 Base.Roughness，不使用 Specular AA 后的直接高光 roughness
 return Fd_Diffuse_Burley(materialData.PerceptualRoughness, noV, noL, voH);
 #else
-    // 默认沿用当前 Lambert 结果，避免本轮整理改变已�?diffuse 观感
 return Fd_Lambert();
 #endif
 }
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::F_Schlick；标�?Schlick Fresnel，u 对应 VoH/LoH
 float3 F_Schlick(float3 f0, float3 f90, float u)
 {
-    // 返回�?F0 �?F90 的角度相关反射率，掠射角会更接近 F90
 return f0 + (f90 - f0) * Pow5(1.0f - saturate(u));
 }
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::F_Schlick；默�?F90 �?1 的重载
 float3 F_Schlick(float3 f0, float u)
 {
-    // 旧接口等价于常见�?f0 -> 1 �?Schlick 近似
 return F_Schlick(f0, float3(1.0f, 1.0f, 1.0f), u);
 }
 
@@ -755,10 +708,8 @@ float3 F_Schlick_UE(float3 specularColor, float voH)
     return saturate(50.0f * specularColor.g) * fc + (1.0f - fc) * specularColor;
 }
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::F_Schlick_UE；BurtRP 直接高光使用这个名字便于�?XRender 溯源
 float3 F_Schlick_UE(float3 f0, float3 f90, float voH)
 {
-    // XRender 的三参数版本等价�?F90 * Fc + (1 - Fc) * F0
 return F_Schlick(f0, f90, voH);
 }
 
@@ -850,7 +801,6 @@ float3 BurtEvaluateFoliageSlabSubsurfaceColor(float3 foliageTransmissionColor)
     return BurtIsotropicMediumSlabTransmittance(extinction, BURT_VOLUME_DEFAULT_THICKNESS_M, 1.0f);
 }
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::D_GGX；Unreal/Frostbite/Filament 使用�?GGX/Trowbridge-Reitz D 项
 float D_GGX(float a2, float noH)
 {
     // XRender 原式：d = (NoH * A2 - NoH) * NoH + 1
@@ -873,7 +823,6 @@ float V_Neubelt(float noV, float noL)
     return rcp_safe(4.0f * (saturate(noL) + saturate(noV) - saturate(noL) * saturate(noV)));
 }
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::Vis_SmithJointApprox；返�?G / (4 * NoV * NoL)
 float D_GGX_Anisotropic(float ax, float ay, float noH, float xoH, float yoH)
 {
     float a2 = max(ax * ay, BURT_EPSILON);
@@ -937,20 +886,15 @@ float Vis_SmithJointApprox(float linearRoughness, float noV, float noL)
     // 计算视线侧遮蔽对光照方向的影响
 float visibilityV = noL * (noV * (1.0f - linearRoughness) + linearRoughness);
 
-    // 计算光照侧遮蔽对视线方向的影响，和上面一项组�?joint visibility
 float visibilityL = noV * (noL * (1.0f - linearRoughness) + linearRoughness);
 
-    // �?0.5 后再除以两项之和；rcp_safe 负责保护极小分母
 return 0.5f * rcp_safe(visibilityV + visibilityL);
 }
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::PrefilteredDFG_Approx；Lazarov 2013 的环�?BRDF 拟合
 float2 PrefilteredDFG_Approx(float roughness, float noV)
 {
-    // c0 是经验拟合系数，XRender �?PrefilteredDFG_Approx 也使用这组值�?    const
 float4 c0 = float4(-1.0f, -0.0275f, -0.572f, 0.022f);
 
-    // c1 是经验拟合系数，用来�?roughness 映射�?DFG �?AB 两项�?    const
 float4 c1 = float4(1.0f, 0.0425f, 1.04f, -0.04f);
 
     // 根据 roughness 插值得到中间拟合参数
@@ -959,14 +903,11 @@ float4 r = roughness * c0 + c1;
     // a004 负责拟合视角相关的能量变化，NoV 越小掠射角效果越强
 float a004 = min(r.x * r.x, exp2(-9.28f * noV)) * r.x + r.y;
 
-    // AB 分别对应 F0 �?F90 的权重，后面会组合成环境 BRDF
 return float2(-1.04f, 1.04f) * a004 + r.zw;
 }
 
-// 出处：XRender/Shaders/Library/CommonTransform.hlsl::Remap01CoordToHalfTexelCoord；把 0..1 坐标移到�?texel 中心
 float2 Remap01CoordToHalfTexelCoord(float2 coord, float2 invSize)
 {
-    // 保证 128x128 LUT 的首尾采样落�?texel 中心，避免采到边缘外推值
 return coord * (1.0f - invSize) + 0.5f * invSize;
 }
 
@@ -991,27 +932,21 @@ float3 SanitizePreIntegratedFG(float3 fg, float3 fallbackFG)
     return lerp(fallbackFG, fg, finite * inRange * hasEnergy);
 }
 
-// BurtRP LUT 适配函数：读取预积分 FG；没有绑�?LUT 时回退到解�?DFG，保证材质仍可渲染
 float3 GetPreIntegratedFGOrApprox(float perceptualRoughness, float clampedNdotV)
 {
-    // 解析近似只提�?DFG.xy，因此用 DFG.x + DFG.y 近似能量补偿项，作为�?LUT 的安�?fallback
 float2 approxDFG = PrefilteredDFG_Approx(perceptualRoughness, clampedNdotV);
     float approxEnergy = clamp(approxDFG.x + approxDFG.y, 0.001f, 1.0f);
     float3 approxFG = float3(approxDFG, approxEnergy);
 
-    // �?C# 确认 LUT 已绑定时使用贴图结果，否则完全使用解析近似
 float3 lutFG = SanitizePreIntegratedFG(GetPreIntegratedFG(clampedNdotV, perceptualRoughness), approxFG);
     return lerp(approxFG, lutFG, saturate(_BurtPreIntegratedFGEnabled));
 }
 
-// BurtRP 适配函数：返回环�?BRDF 使用�?DFG.xy；优先使�?PreintegratedFG.exr，回退到解析近似
 float2 GetSpecularDFGTerms(float perceptualRoughness, float clampedNdotV)
 {
-    // LUT �?xy 对应 XRender 注释里的 ibl brdf 两项，后续会分别�?F0 �?F90
 return GetPreIntegratedFGOrApprox(perceptualRoughness, clampedNdotV).xy;
 }
 
-// 出处：XRender/Shaders/Library/BRDF.hlsl::EvalSpecularDFG；把 DFG �?AB 两项应用�?F0/F90 上
 float3 EvalSpecularDFG(float3 f0, float3 f90, float2 dfg)
 {
     // XRender 公式：F0 * DFG.x + F90 * DFG.y
@@ -1021,42 +956,32 @@ return f0 * dfg.x + f90 * dfg.y;
 // 出处：XRender/Shaders/Library/CommonMaterial.hlsl::ComputeEnergyCompensation；用 LUT.z 的单次散射能量补多次散射
 float3 ComputeEnergyCompensation(float3 f0, float z)
 {
-    // XRender 公式�? + F0 * (1 / Z - 1)，Z 越低说明单次散射漏能越多，需要越多补偿
 return 1.0f + f0 * (rcp_safe(max(z, 0.001f)) - 1.0f);
 }
 
 // 出处：XRender/Shaders/Library/CommonMaterial.hlsl::ComputeEnergyPreservation；UE5 ShadingEnergyConservationTemplate 用预积分能量估算反射层占用的能量
 float ComputeEnergyPreservation(float3 f0, float3 f90, float3 energy, float3 w)
 {
-    // Energy.z �?F0 单次散射能量，Energy.y �?F90-F0 权重；w 是多次散射能量补偿
 float3 reflectedEnergy = w * (energy.z * f0 + energy.y * (f90 - f0));
 
-    // XRender 用感知亮度把 RGB 反射能量压成单通道，作为底�?diffuse 可保留的比例
 return 1.0f - PerceivedLuminance(reflectedEnergy);
 }
 
-// 出处：XRender/Shaders/Library/CommonMaterial.hlsl::CalculateEnergyTerm；BurtRP 暂时常开 EnergyCompensation �?EnergyPreservation
 void CalculateEnergyTerm(float3 f0, float3 f90, float3 energy, out float3 energyCompensation, out float energyPreservation)
 {
-    // LUT.z 作为除数时需要极小值保护，避免贴图未绑定或异常 texel 产生过大补偿�?    energy.z = clamp(energy.z, 0.001f, 1.0f);
 
-    // 先补高光多次散射能量，后�?preservation 要用补偿后的反射能量估算底层透过率
 energyCompensation = ComputeEnergyCompensation(f0, energy.z);
 
-    // preservation 是给底层 diffuse �?one-minus-reflectance，最终限制到 0..1 防止调试 LUT 过冲
 energyPreservation = saturate(ComputeEnergyPreservation(f0, f90, energy, energyCompensation));
 }
 
-// BurtRP 适配函数：从预积�?FG 取出 XRender Energy.xyz，并一次性算出补偿和保能项，方便 Forward/Deferred 共用
 void GetSpecularEnergyTerms(float3 f0, float3 f90, float perceptualRoughness, float clampedNdotV, out float3 energyCompensation, out float energyPreservation)
 {
-    // PreIntegratedFG.rgb 对应 XRender �?Energy.xyz；没�?LUT 时由解析近似提供保守 fallback
 float3 energy = GetPreIntegratedFGOrApprox(perceptualRoughness, clampedNdotV);
 
     CalculateEnergyTerm(f0, f90, energy, energyCompensation, energyPreservation);
 }
 
-// BurtRP 适配函数：从预积�?FG 中取 Energy.z，再调用 XRender 原名 ComputeEnergyCompensation
 float3 GetSpecularEnergyCompensation(float3 f0, float perceptualRoughness, float clampedNdotV)
 {
     // 复用统一 energy terms，避免补偿和保能调试读取到两套不同的 LUT 数据
@@ -1068,28 +993,21 @@ float3 energyCompensation;
 return energyCompensation;
 }
 
-// BurtRP 适配函数：返�?XRender EnergyPreservation，也就是 SlabOperator_Layering 给底�?diffuse �?one-minus-reflectance
 float GetSpecularEnergyPreservation(float3 f0, float3 f90, float perceptualRoughness, float clampedNdotV)
 {
-    // 复用统一 energy terms，确�?Debug View 看到�?preservation 和真�?diffuse 缩放一致
 float3 energyCompensation;
     float energyPreservation;
     GetSpecularEnergyTerms(f0, f90, perceptualRoughness, clampedNdotV, energyCompensation, energyPreservation);
 
-    // 返回单通道底层透过率，1 表示不压�?diffuse�? 表示 specular 顶层占满能量
 return energyPreservation;
 }
 
-// 保存 PBR 能量项，集中管理 XRender EnergyCompensation_GGX �?EnergyPreservation，方�?Deferred 一次性准备
 struct BurtPBREnergyTerms
 {
-    // 保存直接高光能量补偿；使�?Specular AA 后的 roughness，保持直接高光和已调准结果一致
 float3 DirectSpecularEnergyCompensation;
 
-    // 保存间接高光能量补偿；使用材�?Base.Roughness，对�?XRender Sky/EnvProbe Specular
 float3 IndirectSpecularEnergyCompensation;
 
-    // 保存底层 diffuse 保能比例；使用材�?Base.Roughness，对�?XRender GenericData.EnergyPreservation
 float EnergyPreservation;
 };
 
@@ -1098,7 +1016,6 @@ BurtPBREnergyTerms BurtPreparePBREnergyTerms(BurtPBRMaterialData materialData, B
 {
     BurtPBREnergyTerms energyTerms;
 
-    // 直接高光补偿继续使用 AA �?roughness，避免把之前校准好的 direct specular 峰值改掉
 float unusedDirectEnergyPreservation;
     GetSpecularEnergyTerms(materialData.F0, materialData.F90, directSpecularPerceptualRoughness, geometryData.NDotV, energyTerms.DirectSpecularEnergyCompensation, unusedDirectEnergyPreservation);
 
@@ -1111,7 +1028,6 @@ float unusedDirectEnergyPreservation;
         energyTerms.EnergyPreservation = 1.0f;
     }
 
-    // 返回集中准备好的能量项，后续光照函数只消费结构体，不再重复采�?FG LUT
 return energyTerms;
 }
 
@@ -1126,18 +1042,14 @@ float exponent = exp2(-16.0f * saturate(linearRoughness) - 1.0f);
 // 出处：XRender/Shaders/Library/CommonMaterial.hlsl::GetSpecularOcclusion；UE ReflectionEnvironmentShared.ush 风格的间接高光遮蔽
 float GetSpecularOcclusion(float noV, float ao, float linearRoughness)
 {
-    // XRender 当前 GenericData.Setup �?SpecularAO 分支里使用这�?UE 近似，roughness 越大 AO 影响越平滑
 return saturate(pow(max(saturate(noV) + saturate(ao), BURT_EPSILON), abs(linearRoughness)) - 1.0f + saturate(ao));
 }
 
-// BurtRP 适配函数：间接高光遮蔽输入使用感知粗糙度，内部转 XRender �?LinearRoughness
 float GetIndirectSpecularOcclusion(float noV, float ao, float perceptualRoughness)
 {
-    // 对齐 XRender GenericData.Setup.hlsl 当前启用�?UE Approximate，而不�?HDRP/Frostbite 版本
 return GetSpecularOcclusion(noV, ao, PerceptualRoughnessToLinearRoughness(perceptualRoughness));
 }
 
-// 保存直接�?BRDF 的中间项，方�?Debug View 拆开查看 D / V / F / diffuse lobe
 float3 BurtGTAOMultiBounce(float visibility, float3 albedo)
 {
     float ao = saturate(visibility);
@@ -1153,22 +1065,17 @@ struct BurtDirectBRDFTerms
     // 保存 NdotL，控制直接光受光角度
 float NDotL;
 
-    // 保存 NdotV，控�?Fresnel、Smith 可见性和能量项
 float NDotV;
 
-    // 保存 NdotH，控�?GGX D 项峰值位置
 float NDotH;
 
-    // 保存 VdotH，作�?Schlick Fresnel 输入
 float VDotH;
 
-    // 保存直接高光实际使用的感知粗糙度，也就是包含 Specular AA �?roughness
 float PerceptualRoughness;
 
     // 保存直接高光使用的线性粗糙度
 float LinearRoughness;
 
-    // 保存直接高光使用�?a^2
 float A2;
 
     // 保存 GGX NDF D 项
@@ -1180,13 +1087,11 @@ float Visibility;
     // 保存 Schlick Fresnel 项
 float3 Fresnel;
 
-    // 保存 diffuse lobe，默�?Lambert，可�?Burley
 float DiffuseLobe;
 
     // 保存未乘灯光颜色、NdotL 和阴影的 diffuse BRDF
 float3 DiffuseBRDF;
 
-    // 保存未乘灯光颜色、NdotL 和阴影的 specular BRDF，已经包�?energy compensation
 float3 SpecularBRDF;
 };
 
@@ -1219,7 +1124,6 @@ float3 h = BurtSafeNormalize(l + v);
     terms.LinearRoughness = PerceptualRoughnessToLinearRoughness(terms.PerceptualRoughness);
     terms.A2 = LinearRoughnessToA2(terms.LinearRoughness);
 
-    // XRender 的直接高�?lobe 拆项：D / V / F
 float xoH = dot(geometryData.TangentWS, h);
     float yoH = dot(geometryData.BitangentWS, h);
     float xoV = dot(geometryData.TangentWS, v);
@@ -1240,7 +1144,6 @@ float xoH = dot(geometryData.TangentWS, h);
     terms.SpecularBRDF = terms.D * terms.Visibility * terms.Fresnel * energyTerms.DirectSpecularEnergyCompensation;
     return terms;
 }
-// 保存直接 PBR 光照拆分结果，方便正常渲染和 Debug View 共用同一�?BRDF 计算�?
 struct BurtDirectPBRComponents
 {
     // 保存直接漫反射最终贡献，已经包含灯光颜色、NdotL 和阴影衰减
@@ -1251,7 +1154,6 @@ float3 Specular;
 
 float3 Transmission;
 
-    // 保存 XRender EnergyPreservation，表�?specular 顶层之后底层 diffuse 还能保留的能量比例
 float EnergyPreservation;
 
 float3 TransmissionBRDF;
@@ -1261,7 +1163,6 @@ float TransmissionPhase;
 float TransmissionShadow;
 float TransmissionThickness;
 
-    // 保存直接 BRDF 中间项，Debug View 可以拆开查看 D / V / F �?diffuse/specular BRDF�?
     BurtDirectBRDFTerms BrdfTerms;
 };
 
@@ -1809,18 +1710,14 @@ BurtDirectPBRComponents BurtEvaluateDirectPBRComponents(
 
     BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(normalWS, viewDirectionWS);
 
-    // 直接高光�?roughness 单独包含 Specular AA，不回写材质 Base.Roughness
     float directSpecularPerceptualRoughness = GetDirectSpecularPerceptualRoughness(materialData, geometryData);
 
-    // 一次性准备直�?间接高光补偿�?EnergyPreservation，避免多个光照函数重复查 FG LUT�?
     BurtPBREnergyTerms energyTerms = BurtPreparePBREnergyTerms(materialData, geometryData, directSpecularPerceptualRoughness);
     return BurtEvaluateDirectPBRComponents(materialData, geometryData, energyTerms, directSpecularPerceptualRoughness, lightColor, lightDirectionWS, shadowAttenuation);
 
-    // 复用准备数据版本，保�?Forward 和未�?Deferred 的直接光入口一致
     return BurtEvaluateDirectPBRComponents(materialData, geometryData, energyTerms, directSpecularPerceptualRoughness, lightColor, lightDirectionWS, shadowAttenuation);
 }
 
-// 计算单个方向光对当前表面�?PBR 直接光贡献
 float3 BurtEvaluateDirectPBR(
     BurtSurfaceData surfaceData,
     float3 lightColor,
@@ -1829,11 +1726,10 @@ float3 BurtEvaluateDirectPBR(
     float3 viewDirectionWS,
     float shadowAttenuation)
 {
-    // 复用拆分版本，确保正常渲染和 Debug View 看到的是同一�?BRDF 结果�?
     BurtDirectPBRComponents components = BurtEvaluateDirectPBRComponents(surfaceData, lightColor, lightDirectionWS, normalWS, viewDirectionWS, shadowAttenuation);
 
     // 把直接漫反射和直接高光相加，得到旧接口需要的总直接光
     return components.Diffuse + components.Specular;
 }
 
-#endif // BURT_BRDF_INCLUDED // 结束 BurtBRDF.hlsl �?include guard�?
+#endif

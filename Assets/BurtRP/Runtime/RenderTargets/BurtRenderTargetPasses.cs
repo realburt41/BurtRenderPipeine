@@ -34,10 +34,661 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.CameraColorTextureId, descriptor, FilterMode.Bilinear); // 申请一个临时颜色 RT，并绑定到 CameraColor 的全局 ID。
 
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraColorTextureId, cameraColorTarget.Identifier); // 把 CameraColor 暴露成全局纹理，FinalBlit 和后续全屏 Pass 都可以采样它。
+            cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.OpaqueCameraColorAvailableId, 0.0f);
+            cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.RefractionAvailableId, 0.0f);
 
             renderContext.ExecuteCommandBuffer(cmd); // 把申请 RT 的命令提交给 ScriptableRenderContext。
 
             CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+        }
+    }
+
+    internal sealed class BurtAllocateOpaqueCameraColorPass : BurtRenderPass
+    {
+        public override string Name => "Burt Allocate Opaque Camera Color";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.WriteOpaqueCameraColor();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var opaqueCameraColorTarget = context.OpaqueCameraColorTarget;
+            if (!opaqueCameraColorTarget.IsValid)
+            {
+                return;
+            }
+
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(context.Request != null ? context.Request.Camera : null);
+            descriptor.depthBufferBits = 0;
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.OpaqueCameraColorTextureId, descriptor, FilterMode.Bilinear);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.OpaqueCameraColorTextureId, opaqueCameraColorTarget.Identifier);
+            cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.OpaqueCameraColorAvailableId, 0.0f);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal sealed class BurtCopyOpaqueCameraColorPass : BurtRenderPass
+    {
+        public override string Name => "Burt Copy Opaque Camera Color";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.ReadCameraColor();
+            builder.WriteOpaqueCameraColor();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var cameraColorTarget = context.CameraColorTarget;
+            var opaqueCameraColorTarget = context.OpaqueCameraColorTarget;
+            if (!cameraColorTarget.IsValid || !opaqueCameraColorTarget.IsValid)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.Blit(cameraColorTarget.Identifier, opaqueCameraColorTarget.Identifier);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.OpaqueCameraColorTextureId, opaqueCameraColorTarget.Identifier);
+            cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.OpaqueCameraColorAvailableId, 1.0f);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal sealed class BurtAllocateRefractionDistortionPass : BurtRenderPass
+    {
+        public override string Name => "Burt Allocate Refraction Distortion";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.WriteRefractionDistortion();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var target = context.RefractionDistortionTarget;
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateRefractionDistortionDescriptor(context.Request != null ? context.Request.Camera : null);
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.RefractionDistortionTextureId, descriptor, FilterMode.Point);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.RefractionDistortionTextureId, target.Identifier);
+            cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.RefractionAvailableId, 0.0f);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal sealed class BurtAllocateRefractionSceneColorMipChainPass : BurtRenderPass
+    {
+        public override string Name => "Burt Allocate Refraction Scene Color Mip Chain";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.WriteRefractionSceneColorMipChain();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var target = context.RefractionSceneColorMipChainTarget;
+            if (!target.IsValid)
+            {
+                return;
+            }
+
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateRefractionSceneColorMipChainDescriptor(context.Request != null ? context.Request.Camera : null);
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainId, descriptor, FilterMode.Trilinear);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainId, target.Identifier);
+            BurtRefractionPassUtility.SetSceneColorMipGlobals(cmd, descriptor);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal sealed class BurtBuildRefractionSceneColorMipChainPass : BurtRenderPass
+    {
+        public override string Name => "Burt Build Refraction Scene Color Mip Chain";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadCameraColor();
+            builder.WriteRefractionSceneColorMipChain();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var cameraColor = context.CameraColorTarget;
+            var mipChain = context.RefractionSceneColorMipChainTarget;
+            if (!cameraColor.IsValid || !mipChain.IsValid)
+            {
+                return;
+            }
+
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateRefractionSceneColorMipChainDescriptor(context.Request != null ? context.Request.Camera : null);
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.Blit(cameraColor.Identifier, mipChain.Identifier);
+            cmd.GenerateMips(mipChain.Identifier);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainId, mipChain.Identifier);
+            BurtRefractionPassUtility.SetSceneColorMipGlobals(cmd, descriptor);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal sealed class BurtApplyRefractionDistortionPass : BurtRenderPass
+    {
+        private const string RefractionShaderName = "Hidden/BurtRP/Refraction";
+        private Material material;
+        private bool hasLoggedMissingShader;
+
+        public override string Name => "Burt Apply Refraction Distortion";
+
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.FullScreen;
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadRefractionDistortion();
+            builder.ReadRefractionSceneColorMipChain();
+            builder.ReadCameraDepth();
+            builder.WriteCameraColor();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var cameraColor = context.CameraColorTarget;
+            var cameraDepth = context.CameraDepthTarget;
+            var distortion = context.RefractionDistortionTarget;
+            var mipChain = context.RefractionSceneColorMipChainTarget;
+            if (!cameraColor.IsValid || !cameraDepth.IsValid || !distortion.IsValid || !mipChain.IsValid)
+            {
+                return;
+            }
+
+            var drawMaterial = GetMaterial();
+            if (drawMaterial == null)
+            {
+                return;
+            }
+
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateRefractionSceneColorMipChainDescriptor(context.Request != null ? context.Request.Camera : null);
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.SetRenderTarget(cameraColor.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepth.Identifier);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.RefractionDistortionTextureId, distortion.Identifier);
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainId, mipChain.Identifier);
+            cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.RefractionAvailableId, 1.0f);
+            BurtRefractionPassUtility.SetSceneColorMipGlobals(cmd, descriptor);
+            cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, 0, MeshTopology.Triangles, 3, 1);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+
+        private Material GetMaterial()
+        {
+            if (material != null)
+            {
+                return material;
+            }
+
+            var shader = Shader.Find(RefractionShaderName);
+            if (shader == null)
+            {
+                if (!hasLoggedMissingShader)
+                {
+                    Debug.LogWarning("BurtRP could not find shader: " + RefractionShaderName);
+                    hasLoggedMissingShader = true;
+                }
+
+                return null;
+            }
+
+            material = new Material(shader);
+            material.hideFlags = HideFlags.HideAndDontSave;
+            return material;
+        }
+    }
+
+    internal sealed class BurtReleaseRefractionPass : BurtRenderPass
+    {
+        public override string Name => "Burt Release Refraction";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(builder.Request, builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadRefractionDistortion();
+            builder.ReadRefractionSceneColorMipChain();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (!BurtRefractionPassUtility.ShouldUseRefraction(context.Request, context.Asset))
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.RefractionDistortionTextureId);
+            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainId);
+            cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.RefractionAvailableId, 0.0f);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
+    internal static class BurtRefractionPassUtility
+    {
+        private const string LitShaderName = "BurtRP/Lit";
+        private const string RefractionDistortionPassName = "BurtRefractionDistortion";
+        private const float RefractionThreshold = 1.0e-4f;
+        private static readonly int SurfaceId = Shader.PropertyToID("_Surface");
+        private static readonly int RefractionId = Shader.PropertyToID("_Refraction");
+        private static readonly int RefractionSceneColorMipCountId = Shader.PropertyToID("_BurtRefractionSceneColorMipCount");
+        private static readonly int RefractionSceneColorMaxMipId = Shader.PropertyToID("_BurtRefractionSceneColorMaxMip");
+        private static readonly ShaderTagId LightModeTag = new ShaderTagId("LightMode");
+        private static readonly ShaderTagId RefractionDistortionLightMode = new ShaderTagId(RefractionDistortionPassName);
+        private static int materialGateFrame = -1;
+        private static int materialGateCameraId;
+        private static int materialGateAssetId;
+        private static int materialGateCullingMask;
+        private static MaterialGateResult materialGateResult = MaterialGateResult.Disabled("Uninitialized");
+
+        public static bool ShouldUseRefraction(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (!ShouldUseRefractionBase(request))
+            {
+                return false;
+            }
+
+            return ResolveMaterialGate(request, asset).HasCandidate;
+        }
+
+        public static string ResolveRefractionCandidateGateLabel(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (!ShouldUseRefractionBase(request))
+            {
+                return "Disabled";
+            }
+
+            return ResolveMaterialGate(request, asset).DebugLabel;
+        }
+
+        public static string ResolveRefractionPathLabel(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return ShouldUseRefraction(request, asset) ? "DistortionSceneColorMipApplyMerge" : "Disabled";
+        }
+
+        public static string ResolveRefractionResourceLabel(BurtRenderRequest request)
+        {
+            var camera = request != null ? request.Camera : null;
+            var distortion = BurtRenderTargetDescriptorUtility.CreateRefractionDistortionDescriptor(camera);
+            var sceneColor = BurtRenderTargetDescriptorUtility.CreateRefractionSceneColorMipChainDescriptor(camera);
+            return "Distortion=" + FormatDescriptor(distortion) + ",SceneColorMipChain=" + FormatDescriptor(sceneColor);
+        }
+
+        public static void SetSceneColorMipGlobals(CommandBuffer cmd, RenderTextureDescriptor descriptor)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            var mipCount = Mathf.Max(1, descriptor.mipCount);
+            cmd.SetGlobalFloat(RefractionSceneColorMipCountId, mipCount);
+            cmd.SetGlobalFloat(RefractionSceneColorMaxMipId, Mathf.Max(0.0f, mipCount - 1.0f));
+        }
+
+        private static bool ShouldUseRefractionBase(BurtRenderRequest request)
+        {
+            if (request == null || !request.IsValid || request.Camera == null)
+            {
+                return false;
+            }
+
+            return request.Type != BurtRenderRequestType.Preview &&
+                request.Type != BurtRenderRequestType.Reflection;
+        }
+
+        private static MaterialGateResult ResolveMaterialGate(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            var camera = request != null ? request.Camera : null;
+            var frame = Time.frameCount;
+            var cameraId = camera != null ? camera.GetInstanceID() : 0;
+            var assetId = asset != null ? asset.GetInstanceID() : 0;
+            var cullingMask = camera != null ? camera.cullingMask : 0;
+            if (materialGateFrame == frame &&
+                materialGateCameraId == cameraId &&
+                materialGateAssetId == assetId &&
+                materialGateCullingMask == cullingMask)
+            {
+                return materialGateResult;
+            }
+
+            materialGateFrame = frame;
+            materialGateCameraId = cameraId;
+            materialGateAssetId = assetId;
+            materialGateCullingMask = cullingMask;
+            materialGateResult = ScanVisibleRefractionMaterials(camera);
+            return materialGateResult;
+        }
+
+        private static MaterialGateResult ScanVisibleRefractionMaterials(Camera camera)
+        {
+            if (camera == null)
+            {
+                return MaterialGateResult.Disabled("NoCamera");
+            }
+
+            Renderer[] renderers;
+            Plane[] frustumPlanes;
+            try
+            {
+                renderers = FindActiveRenderers();
+                frustumPlanes = GeometryUtility.CalculateFrustumPlanes(camera);
+            }
+            catch
+            {
+                return MaterialGateResult.Active("ScanFailed");
+            }
+
+            var result = new MaterialGateResult();
+            result.RendererCount = renderers != null ? renderers.Length : 0;
+            if (renderers == null)
+            {
+                return result;
+            }
+
+            try
+            {
+                for (var rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+                {
+                    var renderer = renderers[rendererIndex];
+                    if (!IsActiveRenderer(renderer) || !IsRendererInCameraLayer(renderer, camera))
+                    {
+                        continue;
+                    }
+
+                    result.LayerMatchedRendererCount++;
+                    if (!IsRendererInFrustum(renderer, frustumPlanes))
+                    {
+                        continue;
+                    }
+
+                    result.FrustumMatchedRendererCount++;
+                    if (RendererHasRefractionMaterial(renderer, ref result))
+                    {
+                        result.HasCandidate = true;
+                    }
+                }
+            }
+            catch
+            {
+                result.HasCandidate = true;
+                result.Reason = "ScanFailed";
+                return result;
+            }
+
+            return result;
+        }
+
+        private static Renderer[] FindActiveRenderers()
+        {
+#if UNITY_2022_2_OR_NEWER
+            return UnityEngine.Object.FindObjectsByType<Renderer>(FindObjectsSortMode.None);
+#else
+            return UnityEngine.Object.FindObjectsOfType<Renderer>();
+#endif
+        }
+
+        private static bool IsActiveRenderer(Renderer renderer)
+        {
+            return renderer != null &&
+                renderer.enabled &&
+                renderer.gameObject != null &&
+                renderer.gameObject.activeInHierarchy;
+        }
+
+        private static bool IsRendererInCameraLayer(Renderer renderer, Camera camera)
+        {
+            return renderer != null &&
+                camera != null &&
+                renderer.gameObject != null &&
+                (camera.cullingMask & (1 << renderer.gameObject.layer)) != 0;
+        }
+
+        private static bool IsRendererInFrustum(Renderer renderer, Plane[] frustumPlanes)
+        {
+            if (renderer == null)
+            {
+                return false;
+            }
+
+            return frustumPlanes == null || frustumPlanes.Length == 0 || GeometryUtility.TestPlanesAABB(frustumPlanes, renderer.bounds);
+        }
+
+        private static bool RendererHasRefractionMaterial(Renderer renderer, ref MaterialGateResult result)
+        {
+            var materials = renderer != null ? renderer.sharedMaterials : null;
+            if (materials == null)
+            {
+                return false;
+            }
+
+            var hasCandidate = false;
+            for (var materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                var material = materials[materialIndex];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                result.MaterialSlotCount++;
+                if (!IsRefractionMaterialCandidate(material))
+                {
+                    continue;
+                }
+
+                hasCandidate = true;
+                result.HasCandidate = true;
+                result.CandidateMaterialSlotCount++;
+                if (string.IsNullOrEmpty(result.FirstCandidateMaterialName))
+                {
+                    result.FirstCandidateMaterialName = material.name;
+                    result.FirstCandidateShaderName = material.shader != null ? material.shader.name : "<none>";
+                    result.FirstCandidateRefraction = material.HasProperty(RefractionId) ? material.GetFloat(RefractionId) : 0.0f;
+                }
+            }
+
+            return hasCandidate;
+        }
+
+        private static bool IsRefractionMaterialCandidate(Material material)
+        {
+            if (material == null || material.shader == null)
+            {
+                return false;
+            }
+
+            if (material.shader.name != LitShaderName)
+            {
+                return false;
+            }
+
+            if (!material.HasProperty(RefractionId) || material.GetFloat(RefractionId) <= RefractionThreshold)
+            {
+                return false;
+            }
+
+            if (!IsTransparentMaterial(material))
+            {
+                return false;
+            }
+
+            if (!ShaderHasLightMode(material.shader, RefractionDistortionLightMode))
+            {
+                return false;
+            }
+
+            return material.GetShaderPassEnabled(RefractionDistortionPassName);
+        }
+
+        private static bool IsTransparentMaterial(Material material)
+        {
+            if (material == null)
+            {
+                return false;
+            }
+
+            if (material.HasProperty(SurfaceId))
+            {
+                return material.GetFloat(SurfaceId) >= 0.5f;
+            }
+
+            var renderQueue = material.renderQueue;
+            if (renderQueue >= 0)
+            {
+                return renderQueue >= (int)RenderQueue.Transparent;
+            }
+
+            var queueTag = material.GetTag("Queue", true, "Geometry");
+            return queueTag.StartsWith("Transparent") || queueTag.StartsWith("Overlay");
+        }
+
+        private static bool ShaderHasLightMode(Shader shader, ShaderTagId expectedLightMode)
+        {
+            if (shader == null)
+            {
+                return false;
+            }
+
+            for (var passIndex = 0; passIndex < shader.passCount; passIndex++)
+            {
+                var lightMode = shader.FindPassTagValue(passIndex, LightModeTag);
+                if (lightMode.Equals(expectedLightMode))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string FormatDescriptor(RenderTextureDescriptor descriptor)
+        {
+            return descriptor.width + "x" + descriptor.height +
+                ",format=" + (descriptor.graphicsFormat != UnityEngine.Experimental.Rendering.GraphicsFormat.None ? descriptor.graphicsFormat.ToString() : descriptor.colorFormat.ToString()) +
+                ",mips=" + descriptor.mipCount +
+                ",useMipMap=" + descriptor.useMipMap;
+        }
+
+        private struct MaterialGateResult
+        {
+            public bool HasCandidate;
+            public string Reason;
+            public int RendererCount;
+            public int LayerMatchedRendererCount;
+            public int FrustumMatchedRendererCount;
+            public int MaterialSlotCount;
+            public int CandidateMaterialSlotCount;
+            public string FirstCandidateMaterialName;
+            public string FirstCandidateShaderName;
+            public float FirstCandidateRefraction;
+
+            public string DebugLabel
+            {
+                get
+                {
+                    var state = HasCandidate ? "Active" : "Skipped";
+                    var reason = string.IsNullOrEmpty(Reason) ? (HasCandidate ? "CandidateMaterial" : "NoCandidateMaterial") : Reason;
+                    var label = state +
+                        "(" + reason +
+                        ",renderers=" + RendererCount +
+                        ",layer=" + LayerMatchedRendererCount +
+                        ",frustum=" + FrustumMatchedRendererCount +
+                        ",slots=" + MaterialSlotCount +
+                        ",candidates=" + CandidateMaterialSlotCount;
+                    if (!string.IsNullOrEmpty(FirstCandidateMaterialName))
+                    {
+                        label += ",first=" + FirstCandidateMaterialName +
+                            ",shader=" + FirstCandidateShaderName +
+                            ",refraction=" + FirstCandidateRefraction.ToString("0.###");
+                    }
+
+                    return label + ")";
+                }
+            }
+
+            public static MaterialGateResult Active(string reason)
+            {
+                return new MaterialGateResult
+                {
+                    HasCandidate = true,
+                    Reason = reason
+                };
+            }
+
+            public static MaterialGateResult Disabled(string reason)
+            {
+                return new MaterialGateResult
+                {
+                    HasCandidate = false,
+                    Reason = reason
+                };
+            }
         }
     }
 
@@ -349,6 +1000,31 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             renderContext.ExecuteCommandBuffer(cmd); // 把释放 RT 的命令提交给 ScriptableRenderContext。
 
             CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+        }
+    }
+
+    internal sealed class BurtReleaseOpaqueCameraColorPass : BurtRenderPass
+    {
+        public override string Name => "Burt Release Opaque Camera Color";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            builder.ReadOpaqueCameraColor();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            var opaqueCameraColorTarget = context.OpaqueCameraColorTarget;
+            if (!opaqueCameraColorTarget.IsValid)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.OpaqueCameraColorTextureId);
+            cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.OpaqueCameraColorAvailableId, 0.0f);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
         }
     }
 

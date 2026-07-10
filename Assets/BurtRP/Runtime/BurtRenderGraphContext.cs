@@ -25,6 +25,45 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle OpaqueCameraColorTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.OpaqueCameraColorName);
+                }
+
+                return ResourceRegistry.GetOpaqueCameraColor();
+            }
+        }
+
+        public BurtRenderTargetHandle RefractionDistortionTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.RefractionDistortionName);
+                }
+
+                return ResourceRegistry.GetRefractionDistortion();
+            }
+        }
+
+        public BurtRenderTargetHandle RefractionSceneColorMipChainTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainName);
+                }
+
+                return ResourceRegistry.GetRefractionSceneColorMipChain();
+            }
+        }
+
         public BurtRenderTargetHandle FinalCameraTarget // 定义读取最终相机输出目标的快捷属性，方便 FinalBlit 不直接操作资源名。
         {
             get // 定义属性 getter，每次访问时从资源注册表读取最新的 FinalCameraTarget。
@@ -337,6 +376,149 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle BurtGITranslucencyVolume0Target
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume0Name);
+                }
+
+                return ResourceRegistry.GetBurtGITranslucencyVolume0();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGITranslucencyVolume1Target
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume1Name);
+                }
+
+                return ResourceRegistry.GetBurtGITranslucencyVolume1();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGITranslucencyVolumeFilter0Target
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeFilter0Name);
+                }
+
+                return ResourceRegistry.GetBurtGITranslucencyVolumeFilter0();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGITranslucencyVolumeFilter1Target
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeFilter1Name);
+                }
+
+                return ResourceRegistry.GetBurtGITranslucencyVolumeFilter1();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGISceneVoxelRadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGISceneVoxelRadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGISceneVoxelRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGISceneVoxelGeometryTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGISceneVoxelGeometryName);
+                }
+
+                return ResourceRegistry.GetBurtGISceneVoxelGeometry();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGISceneVoxelOccupancyMipTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGISceneVoxelOccupancyMipName);
+                }
+
+                return ResourceRegistry.GetBurtGISceneVoxelOccupancyMip();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGISceneVoxelLightingTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGISceneVoxelLightingName);
+                }
+
+                return ResourceRegistry.GetBurtGISceneVoxelLighting();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeScreenDepthTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeScreenDepthName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeScreenDepth();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeWorldNormalTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeWorldNormalName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeWorldNormal();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeWorldPositionTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeWorldPositionName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeWorldPosition();
+            }
+        }
+
         public BurtRenderTargetHandle BurtGIScreenProbeRadianceTarget
         {
             get
@@ -347,6 +529,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetBurtGIScreenProbeRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeAdaptiveProbeHeaderTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeHeaderName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeAdaptiveProbeHeader();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeAdaptiveProbeIndicesTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeIndicesName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeAdaptiveProbeIndices();
             }
         }
 
@@ -373,6 +581,448 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetBurtGIScreenProbeConfidence();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeHitDistanceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeHitDistanceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeHitDistance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeBentNormalTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeBentNormalName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeBentNormal();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeTraceRadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceRadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeTraceRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeTraceHitTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceHitName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeTraceHit();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeTemporalRadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTemporalRadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeTemporalRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeTemporalIrradianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTemporalIrradianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeTemporalIrradiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeTemporalConfidenceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTemporalConfidenceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeTemporalConfidence();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeFilteredRadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeFilteredRadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeFilteredRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeFilteredIrradianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeFilteredIrradianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeFilteredIrradiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeFilteredConfidenceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeFilteredConfidenceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeFilteredConfidence();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeFixupRadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeFixupRadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeFixupRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeFixupIrradianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeFixupIrradianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeFixupIrradiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeFixupConfidenceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeFixupConfidenceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeFixupConfidence();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeMipRadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeMipRadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeMipRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeMipIrradianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeMipIrradianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeMipIrradiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeMipConfidenceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeMipConfidenceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeMipConfidence();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeMip2RadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeMip2RadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeMip2Radiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeMip2IrradianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeMip2IrradianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeMip2Irradiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeMip2ConfidenceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeMip2ConfidenceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeMip2Confidence();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeMip3RadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeMip3RadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeMip3Radiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeMip3IrradianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeMip3IrradianceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeMip3Irradiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeMip3ConfidenceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeMip3ConfidenceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeMip3Confidence();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeRadianceSHAmbientTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceSHAmbientName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeRadianceSHAmbient();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeRadianceSHDirectionalTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceSHDirectionalName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeRadianceSHDirectional();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeIrradianceOctTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIrradianceOctName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeIrradianceOct();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeRadianceOctTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceOctName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeRadianceOct();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeImportancePDFTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeImportancePDFName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeImportancePDF();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeImportanceLightPDFTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeImportanceLightPDFName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeImportanceLightPDF();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeImportanceRayInfoTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeImportanceRayInfoName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeImportanceRayInfo();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIRadianceCacheClipMapIndirectionTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapIndirectionName);
+                }
+
+                return ResourceRegistry.GetBurtGIRadianceCacheClipMapIndirection();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIRadianceCacheClipMapDepthProbeAtlasTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapDepthProbeAtlasName);
+                }
+
+                return ResourceRegistry.GetBurtGIRadianceCacheClipMapDepthProbeAtlas();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIRadianceCacheClipMapRadianceProbeAtlasTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceProbeAtlasName);
+                }
+
+                return ResourceRegistry.GetBurtGIRadianceCacheClipMapRadianceProbeAtlas();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIRadianceCacheClipMapFinalRadianceAtlasTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFinalRadianceAtlasName);
+                }
+
+                return ResourceRegistry.GetBurtGIRadianceCacheClipMapFinalRadianceAtlas();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIRadianceCacheClipMapProbeOcclusionAtlasTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeOcclusionAtlasName);
+                }
+
+                return ResourceRegistry.GetBurtGIRadianceCacheClipMapProbeOcclusionAtlas();
             }
         }
 
@@ -641,6 +1291,70 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
         public BurtRenderBufferHandle FurBlurArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
 
         public BurtRenderBufferHandle FurBlurTileDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.FurBlurTileDataBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeTraceCompactTexelCountBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelCountBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeTraceCompactTexelDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelDataBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeTraceCompactIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeTraceCompactThreadCountXBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactThreadCountXBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeAdaptiveProbeNumBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeNumBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeAdaptiveProbeDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeDataBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeAllocatorBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeFreeListBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeWorldOffsetBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeTraceDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceDataBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceAllocatorBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapPriorityHistogramBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPriorityHistogramBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxUpdateBucketBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapRadianceProbePDFBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceProbePDFBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeTraceTileDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileDataBufferName);
+
+        public BurtRenderBufferHandle BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferName);
 
         public BurtRequestRenderOptions RenderOptions { get; } // 保存当前 request 的栈级执行选项，Pass 可以通过它判断 RT 生命周期策略。
 

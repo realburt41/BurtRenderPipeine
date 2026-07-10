@@ -19,7 +19,8 @@ Material:
   m_CustomRenderQueue: 2000
   stringTagMap:
     RenderType: Opaque
-  disabledShaderPasses: []
+  disabledShaderPasses:
+  - BurtRefractionDistortion
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -44,15 +45,24 @@ Material:
     m_Floats:
     - _AlphaClip: 0
     - _Anisotropy: 0
+    - _BurtGBufferStencilReadMask: 224
+    - _BurtGBufferStencilRef: 32
+    - _BurtGBufferStencilWriteMask: 224
     - _Cull: 2
     - _Cutoff: 0.564
     - _DoubleSidedEnable: 0
     - _DoubleSidedNormalMode: 0
     - _DstBlend: 0
+    - _IOR: 1.5
     - _Metallic: 0
+    - _MotionVectorsStencilMask: 8
+    - _MotionVectorsStencilRef: 8
     - _NormalScale: 0
     - _OcclusionStrength: 1
     - _Reflectance: 0.5
+    - _Refraction: 0
+    - _RefractionStage: 0
+    - _ResponsiveAA: 0
     - _Smoothness: 0
     - _SrcBlend: 1
     - _Surface: 0

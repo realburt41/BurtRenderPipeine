@@ -17,6 +17,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent FoliageLabel = new GUIContent("Foliage");
         private static readonly GUIContent GrassLabel = new GUIContent("Grass");
         private static readonly GUIContent TrunkLabel = new GUIContent("Trunk");
+        private static readonly GUIContent InteriorMappingLabel = new GUIContent("Interior Mapping");
         private static readonly GUIContent NormalLabel = new GUIContent("Normal");
         private static readonly GUIContent EmissionLabel = new GUIContent("Emission");
 
@@ -32,6 +33,12 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent LocalTintPaletteLabel = new GUIContent("Local Tint Palette");
         private static readonly GUIContent NoiseMapLabel = new GUIContent("Noise Map");
         private static readonly GUIContent EmissionMapLabel = new GUIContent("Emission Map");
+        private static readonly GUIContent EmissiveMapLabel = new GUIContent("Emissive Map");
+        private static readonly GUIContent AtlasMapLabel = new GUIContent("Atlas Room");
+        private static readonly GUIContent FakeRoomLabel = new GUIContent("Fake Inner");
+        private static readonly GUIContent InteriorFrontDepthLabel = new GUIContent("Front Depth");
+        private static readonly GUIContent InteriorBackDepthLabel = new GUIContent("Back Depth");
+        private static readonly GUIContent InteriorColorLabel = new GUIContent("Object Color");
         private static readonly GUIContent ShadingModelLabel = new GUIContent("Shading Model");
         private static readonly GUIContent SubsurfaceScatteringModeLabel = new GUIContent("SSS Algorithm", "Choose 5S Burley, 4S Separable screen-space skin scattering, or 3S Preintegrated skin shading.");
         private static readonly GUIContent SubsurfaceProfileLabel = new GUIContent("Subsurface Profile", "Drag a BurtSubsurfaceProfile asset here. The material stores the resolved profile slot for the shader.");
@@ -50,6 +57,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent BlendLabel = new GUIContent("Blend");
         private static readonly GUIContent EnabledPassesLabel = new GUIContent("Enabled Passes");
         private static readonly GUIContent ResponsiveAALabel = new GUIContent("Responsive AA", "Marks this material in stencil bit 16 so Temporal AA lowers history feedback on thin or fast-changing surfaces.");
+        private static readonly GUIContent RefractionLabel = new GUIContent("Refraction", "Transparent Lit only. Samples the opaque camera color before transparent rendering for rough refraction.");
         private static readonly string[] SurfaceTypeNames = { "Opaque", "Transparent" };
         private static readonly string[] DoubleSidedNormalModeNames = { "None", "Flip", "Mirror" };
         private static readonly string[] SubsurfaceScatteringModeNames = { "5S Burley", "4S Separable", "3S Preintegrated" };
@@ -65,6 +73,7 @@ namespace Burt.RenderPipeline.Editor
         private static bool showFoliageInputs = true;
         private static bool showGrassInputs = true;
         private static bool showTrunkInputs = true;
+        private static bool showInteriorMappingInputs = true;
         private static bool showNormalInputs = true;
         private static bool showEmissionInputs = true;
 
@@ -79,6 +88,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty smoothness;
         private MaterialProperty roughness;
         private MaterialProperty occlusionStrength;
+        private MaterialProperty occlusion;
         private MaterialProperty reflectance;
         private MaterialProperty clearCoatMask;
         private MaterialProperty clearCoatRoughness;
@@ -158,6 +168,26 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty windNormalStrength;
         private MaterialProperty forceIntensity;
         private MaterialProperty windInteractionIntensity;
+        private MaterialProperty preserveSpecular;
+        private MaterialProperty ior;
+        private MaterialProperty emissiveMap;
+        private MaterialProperty emissiveColor;
+        private MaterialProperty atlasMode;
+        private MaterialProperty atlasMap;
+        private MaterialProperty roomCount;
+        private MaterialProperty fakeRoom;
+        private MaterialProperty fakeRoomST;
+        private MaterialProperty cubemapLightMultiplier;
+        private MaterialProperty colorTemp;
+        private MaterialProperty exposure;
+        private MaterialProperty interiorIntensity;
+        private MaterialProperty depth;
+        private MaterialProperty scaleXAxis;
+        private MaterialProperty interiorFrontDepth;
+        private MaterialProperty interiorBackDepth;
+        private MaterialProperty interiorColor;
+        private MaterialProperty marchSteps;
+        private MaterialProperty ditherSteps;
         private MaterialProperty normalMap;
         private MaterialProperty normalScale;
         private MaterialProperty emissionMap;
@@ -173,6 +203,8 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty zWrite;
         private MaterialProperty zTest;
         private MaterialProperty responsiveAA;
+        private MaterialProperty refraction;
+        private MaterialProperty refractionStage;
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
@@ -194,6 +226,7 @@ namespace Burt.RenderPipeline.Editor
             DrawSilkInputs(material);
             DrawFoliageInputs(material);
             DrawTrunkInputs(material);
+            DrawInteriorMappingInputs(material);
             DrawEmissionInputs(material);
         }
 
@@ -212,6 +245,7 @@ namespace Burt.RenderPipeline.Editor
             MigrateFabricRoughness(material);
             SyncFoliageTintModeProperties(material);
             SyncTrunkXRenderCompatibilityProperties(material);
+            ApplyInteriorMappingKeywords(material);
             ApplyEmissionState(material);
             ClampSubsurfaceScatteringMode(material);
             ApplySurfaceOptions(material);
@@ -367,6 +401,7 @@ namespace Burt.RenderPipeline.Editor
             smoothness = Find("_Smoothness");
             roughness = Find("_Roughness");
             occlusionStrength = Find("_OcclusionStrength");
+            occlusion = Find("_Occlusion");
             reflectance = Find("_Reflectance");
             clearCoatMask = Find("_ClearCoatMask");
             clearCoatRoughness = Find("_ClearCoatRoughness");
@@ -446,6 +481,26 @@ namespace Burt.RenderPipeline.Editor
             windNormalStrength = Find("_WindNormalStrength");
             forceIntensity = Find("_ForceIntensity");
             windInteractionIntensity = Find("_WindInteractionIntensity");
+            preserveSpecular = Find("_PreserveSpecular");
+            ior = Find("_IOR");
+            emissiveMap = Find("_EmissiveMap");
+            emissiveColor = Find("_EmissiveColor");
+            atlasMode = Find("_AtlasMode");
+            atlasMap = Find("_AtlasMap");
+            roomCount = Find("_RoomCount");
+            fakeRoom = Find("_FakeRoom");
+            fakeRoomST = Find("_FakeRoom_ST");
+            cubemapLightMultiplier = Find("_CubemapLightMultiplier");
+            colorTemp = Find("_ColorTemp");
+            exposure = Find("_Exposure");
+            interiorIntensity = Find("_InteriorIntensity");
+            depth = Find("_Depth");
+            scaleXAxis = Find("_ScaleXAxis");
+            interiorFrontDepth = Find("_InteriorFrontDepth");
+            interiorBackDepth = Find("_InteriorBackDepth");
+            interiorColor = Find("_InteriorColor");
+            marchSteps = Find("_MarchSteps");
+            ditherSteps = Find("_DitherSteps");
             normalMap = Find("_NormalMap");
             normalScale = Find("_NormalScale");
             emissionMap = Find("_EmissionMap");
@@ -461,6 +516,8 @@ namespace Burt.RenderPipeline.Editor
             zWrite = Find("_ZWrite");
             zTest = Find("_ZTest");
             responsiveAA = Find("_ResponsiveAA");
+            refraction = Find("_Refraction");
+            refractionStage = Find("_RefractionStage");
         }
 
         private MaterialProperty Find(string propertyName)
@@ -519,6 +576,7 @@ namespace Burt.RenderPipeline.Editor
             DrawDoubleSidedOptions(material);
             DrawAlphaClipProperty();
             DrawResponsiveAAProperty();
+            DrawRefractionOptions(transparent);
 
             if (cutoff != null)
             {
@@ -609,7 +667,7 @@ namespace Burt.RenderPipeline.Editor
                 EditorGUILayout.Toggle(ZWriteLabel, zWrite.floatValue >= 0.5f);
                 EditorGUILayout.TextField(ZTestLabel, ((CompareFunction)Mathf.RoundToInt(zTest.floatValue)).ToString());
                 EditorGUILayout.TextField(BlendLabel, GetBlendStateName());
-                bool deferredOnlyMaterial = IsSubsurfaceShader(material) || IsFoliageShader(material) || IsTrunkShader(material);
+                bool deferredOnlyMaterial = IsSubsurfaceShader(material) || IsFoliageShader(material) || IsTrunkShader(material) || IsInteriorMappingShader(material);
                 string enabledPasses = transparent
                     ? "BurtForward"
                     : IsSubsurfaceShader(material)
@@ -644,6 +702,24 @@ namespace Burt.RenderPipeline.Editor
             BurtShaderGUIUtility.EndSection();
         }
 
+        private void DrawRefractionOptions(bool transparent)
+        {
+            if (!transparent || refraction == null)
+            {
+                return;
+            }
+
+            BurtShaderGUIUtility.DrawSeparator();
+            BurtShaderGUIUtility.DrawSubHeader(RefractionLabel.text);
+            DrawProperty(refraction);
+            bool refractionEnabled = refraction.hasMixedValue || refraction.floatValue >= 0.5f;
+            using (new EditorGUI.DisabledScope(!refractionEnabled))
+            {
+                DrawProperty(ior);
+                DrawProperty(refractionStage);
+            }
+        }
+
         private void DrawPbrInputs(Material material)
         {
             if (!BurtShaderGUIUtility.BeginSection(PbrMaskLabel, ref showPbrMaskInputs))
@@ -652,7 +728,8 @@ namespace Burt.RenderPipeline.Editor
             }
 
             bool usesTrunk = IsTrunkShader(material);
-            bool usesRoughness = IsFabricShader(material) || IsSilkShader(material) || usesTrunk;
+            bool usesInteriorMapping = IsInteriorMappingShader(material);
+            bool usesRoughness = IsFabricShader(material) || IsSilkShader(material) || usesTrunk || usesInteriorMapping;
             bool usesFoliage = IsFoliageShader(material);
             bool usesGrass = IsGrassShader(material);
             bool usesTreeFoliage = usesFoliage && !IsGrassShader(material);
@@ -675,6 +752,8 @@ namespace Burt.RenderPipeline.Editor
                         ? "Channels: G Occlusion. Grass roughness, SSS, specular, and screen-space shadow use Grass parameters."
                     : usesFoliage
                         ? "Channels: G Occlusion | B Thickness | A Roughness. R Metallic is ignored by Foliage."
+                    : usesInteriorMapping
+                        ? "Channels: R Metallic | G Occlusion | B Reserved | A Roughness. InteriorMapping output metallic is fixed to 1.0 to match XRender."
                     : usesRoughness
                         ? "Channels: R Metallic | G Occlusion | B Reserved | A Roughness"
                         : "Channels: R Metallic | G Occlusion | B Reserved | A Smoothness");
@@ -684,7 +763,10 @@ namespace Burt.RenderPipeline.Editor
             {
                 BurtShaderGUIUtility.DrawSubHeader("Lit");
                 DrawProperty(metallic);
-                DrawProperty(anisotropy);
+                if (!usesInteriorMapping)
+                {
+                    DrawProperty(anisotropy);
+                }
             }
 
             if (!usesTreeFoliage)
@@ -697,7 +779,7 @@ namespace Burt.RenderPipeline.Editor
 
                 if (!usesTrunk)
                 {
-                    DrawProperty(occlusionStrength);
+                    DrawProperty(usesInteriorMapping ? occlusion : occlusionStrength);
                 }
             }
             if (!IsSubsurfaceShader(material) && !usesFoliage && !usesTrunk)
@@ -917,6 +999,63 @@ namespace Burt.RenderPipeline.Editor
             {
                 DrawProperty(terrainBlendBlendHeight);
             }
+
+            BurtShaderGUIUtility.EndSection();
+        }
+
+        private void DrawInteriorMappingInputs(Material material)
+        {
+            if (!IsInteriorMappingShader(material))
+            {
+                return;
+            }
+
+            if (!BurtShaderGUIUtility.BeginSection(InteriorMappingLabel, ref showInteriorMappingInputs))
+            {
+                return;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            DrawProperty(atlasMode);
+            if (EditorGUI.EndChangeCheck())
+            {
+                foreach (Object target in materialEditor.targets)
+                {
+                    ApplyInteriorMappingKeywords(target as Material);
+                }
+            }
+
+            bool useAtlasMode = IsInteriorMappingAtlasMode(material);
+            if (useAtlasMode)
+            {
+                BurtShaderGUIUtility.DrawSubHeader("Atlas");
+                DrawTexture(AtlasMapLabel, atlasMap);
+                DrawProperty(roomCount);
+            }
+            else
+            {
+                BurtShaderGUIUtility.DrawSubHeader("Cubemap");
+                DrawTextureNoScaleOffset(FakeRoomLabel, fakeRoom);
+                DrawProperty(fakeRoomST);
+                DrawProperty(cubemapLightMultiplier);
+                DrawProperty(colorTemp);
+                DrawProperty(exposure);
+                DrawProperty(interiorIntensity);
+                DrawProperty(depth);
+                DrawProperty(scaleXAxis);
+
+                BurtShaderGUIUtility.DrawSubHeader("Interior Object");
+                DrawTextureNoScaleOffset(InteriorFrontDepthLabel, interiorFrontDepth);
+                DrawTextureNoScaleOffset(InteriorBackDepthLabel, interiorBackDepth);
+                DrawTextureNoScaleOffset(InteriorColorLabel, interiorColor);
+                DrawProperty(marchSteps);
+                DrawProperty(ditherSteps);
+            }
+
+            BurtShaderGUIUtility.DrawSubHeader("XRender Compatibility");
+            DrawTextureNoScaleOffset(EmissiveMapLabel, emissiveMap, emissiveColor);
+            DrawProperty(preserveSpecular);
+            DrawProperty(ior);
 
             BurtShaderGUIUtility.EndSection();
         }
@@ -1183,7 +1322,12 @@ namespace Burt.RenderPipeline.Editor
 
         private void DrawEmissionInputs(Material material)
         {
-            if (IsGrassShader(material))
+            if (IsGrassShader(material) || IsInteriorMappingShader(material))
+            {
+                return;
+            }
+
+            if (emissionMap == null && emissionColor == null)
             {
                 return;
             }
@@ -1219,6 +1363,28 @@ namespace Burt.RenderPipeline.Editor
         private void DrawTexture(GUIContent label, MaterialProperty texture)
         {
             BurtShaderGUIUtility.DrawTexture(materialEditor, label, texture);
+        }
+
+        private void DrawTextureNoScaleOffset(GUIContent label, MaterialProperty texture)
+        {
+            if (texture == null)
+            {
+                return;
+            }
+
+            materialEditor.TexturePropertySingleLine(label, texture);
+        }
+
+        private void DrawTextureNoScaleOffset(GUIContent label, MaterialProperty texture, MaterialProperty color)
+        {
+            if (texture != null && color != null)
+            {
+                materialEditor.TexturePropertySingleLine(label, texture, color);
+                return;
+            }
+
+            DrawTextureNoScaleOffset(label, texture);
+            DrawProperty(color);
         }
 
         private void DrawFoliageTintMode(Material material)
@@ -1416,7 +1582,7 @@ namespace Burt.RenderPipeline.Editor
 
         private static bool UsesFixedOpaqueCutoutSurface(Material material)
         {
-            return IsSubsurfaceShader(material) || IsFoliageShader(material) || IsTrunkShader(material);
+            return IsSubsurfaceShader(material) || IsFoliageShader(material) || IsTrunkShader(material) || IsInteriorMappingShader(material);
         }
 
         private static bool IsAlphaClippedMaterial(Material material)
@@ -1459,6 +1625,11 @@ namespace Burt.RenderPipeline.Editor
             if (IsTrunkShader(material))
             {
                 return "PBR Trunk / DefaultLit GBuffer";
+            }
+
+            if (IsInteriorMappingShader(material))
+            {
+                return "PBR Interior Mapping / Deferred GBuffer";
             }
 
             return IsTransparentMaterial(material) ? "PBR Transparent" : "PBR Lit / Deferred GBuffer";
@@ -1516,6 +1687,29 @@ namespace Burt.RenderPipeline.Editor
             return material != null &&
                 material.shader != null &&
                 material.shader.name.IndexOf("Trunk", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsInteriorMappingShader(Material material)
+        {
+            return material != null &&
+                material.shader != null &&
+                (material.shader.name.IndexOf("InteriorMapping", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    material.shader.name.IndexOf("Interior Mapping", System.StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private static bool IsInteriorMappingAtlasMode(Material material)
+        {
+            return material != null && material.HasProperty("_AtlasMode") && material.GetFloat("_AtlasMode") >= 0.5f;
+        }
+
+        private static void ApplyInteriorMappingKeywords(Material material)
+        {
+            if (material == null || !IsInteriorMappingShader(material))
+            {
+                return;
+            }
+
+            SetKeyword(material, "BURT_INTERIOR_ATLAS_MODE", IsInteriorMappingAtlasMode(material));
         }
 
         private static BurtRenderPipelineAsset GetActiveBurtAsset()
@@ -1600,17 +1794,33 @@ namespace Burt.RenderPipeline.Editor
                 material.SetFloat("_ZTest", (float)CompareFunction.LessEqual);
             }
 
+            if (material.HasProperty("_Refraction"))
+            {
+                material.SetFloat("_Refraction", transparent ? Mathf.Clamp01(material.GetFloat("_Refraction")) : 0.0f);
+            }
+
+            if (material.HasProperty("_IOR"))
+            {
+                material.SetFloat("_IOR", Mathf.Clamp(material.GetFloat("_IOR"), -3.0f, 3.0f));
+            }
+
+            if (material.HasProperty("_RefractionStage"))
+            {
+                material.SetFloat("_RefractionStage", Mathf.Clamp01(material.GetFloat("_RefractionStage")));
+            }
+
             ApplyDoubleSidedNormalState(material);
             ApplyGBufferStencilState(material);
             ApplyMotionVectorStencilState(material);
             ApplyFoliageKeywords(material);
+            ApplyInteriorMappingKeywords(material);
             BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
 
             bool alphaClipped = IsAlphaClippedMaterial(material);
             material.SetOverrideTag("RenderType", transparent ? "Transparent" : alphaClipped ? "TransparentCutout" : "Opaque");
             material.SetOverrideTag("Queue", transparent ? "Transparent" : alphaClipped ? "AlphaTest" : string.Empty);
             material.renderQueue = transparent ? (int)RenderQueue.Transparent : alphaClipped ? (int)RenderQueue.AlphaTest : (int)RenderQueue.Geometry;
-            bool hasDepthOnlyPass = !IsSubsurfaceShader(material) && !IsFoliageShader(material) && !IsTrunkShader(material);
+            bool hasDepthOnlyPass = !IsSubsurfaceShader(material) && !IsFoliageShader(material) && !IsTrunkShader(material) && !IsInteriorMappingShader(material);
             material.SetShaderPassEnabled("BurtDepthOnly", !transparent && hasDepthOnlyPass);
             material.SetShaderPassEnabled("BurtDepthNormals", !transparent);
             material.SetShaderPassEnabled("BurtGBuffer", !transparent);
@@ -1620,7 +1830,13 @@ namespace Burt.RenderPipeline.Editor
             }
 
             material.SetShaderPassEnabled("ShadowCaster", !transparent);
-            material.SetShaderPassEnabled("BurtForward", !IsSubsurfaceShader(material) && !IsFoliageShader(material) && !IsTrunkShader(material));
+            material.SetShaderPassEnabled("BurtForward", !IsSubsurfaceShader(material) && !IsFoliageShader(material) && !IsTrunkShader(material) && !IsInteriorMappingShader(material));
+            bool refractionDistortion = transparent &&
+                material.shader != null &&
+                material.shader.name == "BurtRP/Lit" &&
+                material.HasProperty("_Refraction") &&
+                material.GetFloat("_Refraction") > 1.0e-4f;
+            material.SetShaderPassEnabled("BurtRefractionDistortion", refractionDistortion);
         }
 
         private static void ApplyGBufferStencilState(Material material)

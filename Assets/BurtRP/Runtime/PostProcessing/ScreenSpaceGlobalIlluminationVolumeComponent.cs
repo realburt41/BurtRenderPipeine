@@ -21,6 +21,13 @@ namespace Burt.RenderPipeline
         Half = 1
     }
 
+    [UnityEngine.Scripting.APIUpdating.MovedFromAttribute(true, "Burt.RenderPipeline", null, "BurtScreenSpaceGlobalIlluminationFinalGather")]
+    public enum ScreenSpaceGlobalIlluminationFinalGather
+    {
+        ScreenProbe = 0,
+        IrradianceField = 1
+    }
+
     [Serializable]
     [UnityEngine.Scripting.APIUpdating.MovedFromAttribute(true, "Burt.RenderPipeline", null, "BurtScreenSpaceGlobalIlluminationQualityParameter")]
     public sealed class ScreenSpaceGlobalIlluminationQualityParameter : VolumeParameter<ScreenSpaceGlobalIlluminationQuality>, IEquatable<ScreenSpaceGlobalIlluminationQualityParameter>
@@ -92,6 +99,41 @@ namespace Burt.RenderPipeline
     }
 
     [Serializable]
+    [UnityEngine.Scripting.APIUpdating.MovedFromAttribute(true, "Burt.RenderPipeline", null, "BurtScreenSpaceGlobalIlluminationFinalGatherParameter")]
+    public sealed class ScreenSpaceGlobalIlluminationFinalGatherParameter : VolumeParameter<ScreenSpaceGlobalIlluminationFinalGather>, IEquatable<ScreenSpaceGlobalIlluminationFinalGatherParameter>
+    {
+        public ScreenSpaceGlobalIlluminationFinalGatherParameter(ScreenSpaceGlobalIlluminationFinalGather value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+
+        public static bool operator ==(ScreenSpaceGlobalIlluminationFinalGatherParameter lhs, ScreenSpaceGlobalIlluminationFinalGather rhs)
+        {
+            return lhs != null && lhs.value == rhs;
+        }
+
+        public static bool operator !=(ScreenSpaceGlobalIlluminationFinalGatherParameter lhs, ScreenSpaceGlobalIlluminationFinalGather rhs)
+        {
+            return !(lhs == rhs);
+        }
+
+        public override int GetHashCode()
+        {
+            return ((int)value * 31) + (overrideState ? 1 : 0);
+        }
+
+        public bool Equals(ScreenSpaceGlobalIlluminationFinalGatherParameter other)
+        {
+            return other != null && value == other.value && overrideState == other.overrideState;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return Equals(obj as ScreenSpaceGlobalIlluminationFinalGatherParameter);
+        }
+    }
+
+    [Serializable]
     [VolumeComponentMenu("Rendering/Screen Space Global Illumination")]
     [UnityEngine.Scripting.APIUpdating.MovedFromAttribute(true, "Burt.RenderPipeline", null, "BurtScreenSpaceGlobalIlluminationVolumeComponent")]
     public sealed class ScreenSpaceGlobalIlluminationVolumeComponent : VolumeComponent
@@ -135,13 +177,27 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter temporalHitRejection = new ClampedFloatParameter(0.55f, 0f, 1f);
 
         [Title("ScreenProbe Lite")]
-        [InfoBox("Experimental placeholder for the XGI-style ScreenProbe path. It is disabled by default and is not blended into BurtGI yet.")]
+        [InfoBox("XGI-style ScreenProbe path. It gathers a low-resolution probe grid, traces a compact octahedral atlas, and blends the resulting irradiance into BurtGI when Apply Strength is above zero.")]
         public BoolParameter screenProbeLite = new BoolParameter(false);
         public ClampedIntParameter screenProbeSpacingPixels = new ClampedIntParameter(16, 4, 64);
         public ClampedFloatParameter screenProbeTraceDistance = new ClampedFloatParameter(12f, 0.5f, 80f);
         public ClampedIntParameter screenProbeSampleCount = new ClampedIntParameter(8, 1, 32);
         public ClampedFloatParameter screenProbeTemporalFeedback = new ClampedFloatParameter(0.9f, 0f, 0.98f);
         public ClampedFloatParameter screenProbeApplyStrength = new ClampedFloatParameter(0f, 0f, 1f);
+        public ClampedIntParameter screenProbeSpatialFilterPasses = new ClampedIntParameter(3, 0, 4);
+        public ClampedIntParameter screenProbeSpatialFilterHalfKernelSize = new ClampedIntParameter(1, 0, 2);
+        public BoolParameter screenProbeFixupBorders = new BoolParameter(true);
+
+        [Title("XGI Final Gather")]
+        [InfoBox("ScreenProbe gathers the filtered probe atlas. IrradianceField directly interpolates the Radiance Cache ClipMap onto the full-resolution GBuffer, matching XRender's alternate final-gather path.")]
+        public ScreenSpaceGlobalIlluminationFinalGatherParameter finalGather = new ScreenSpaceGlobalIlluminationFinalGatherParameter(ScreenSpaceGlobalIlluminationFinalGather.ScreenProbe);
+        public ClampedFloatParameter irradianceFieldStrength = new ClampedFloatParameter(1f, 0f, 2f);
+
+        [Title("Short Range AO")]
+        [InfoBox("XGI-style near-field occlusion for indirect lighting, evaluated from the ScreenProbe trace-atlas bent-normal texture and its temporal history.")]
+        public BoolParameter shortRangeAO = new BoolParameter(false);
+        public ClampedFloatParameter shortRangeAOWeight = new ClampedFloatParameter(1f, 0f, 2f);
+        public ClampedFloatParameter shortRangeAOSlopeCompareToleranceScale = new ClampedFloatParameter(0.5f, 0f, 2f);
 
         public bool IsEnabled()
         {

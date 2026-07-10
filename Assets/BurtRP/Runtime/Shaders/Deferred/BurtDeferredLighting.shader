@@ -36,7 +36,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 // 保存屏幕 UV，用来采样 GBuffer 和 CameraDepth。
                 float2 ScreenUV : TEXCOORD0;
             };
-            #pragma enable_d3d11_debug_symbols
+            // #pragma enable_d3d11_debug_symbols
         ENDHLSL
 
         // Default Lit pass: XRender-style high stencil bits, 32 = DefaultLit.

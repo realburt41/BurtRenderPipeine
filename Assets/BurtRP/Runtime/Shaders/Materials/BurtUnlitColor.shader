@@ -59,7 +59,7 @@ Shader "BurtRP/UnlitColor"
             Name "Burt Unlit Shadow Caster"
 
             // 使用 Unity 标准 ShadowCaster LightMode，因为 ScriptableRenderContext.DrawShadows 会查找这个标签。
-            Tags { "LightMode" = "BurtDisabledShadowCaster" }
+            Tags { "LightMode" = "ShadowCaster" }
 
             // 关闭颜色写入，因为 shadow map 只需要深度信息。
             ColorMask 0
@@ -182,7 +182,7 @@ Shader "BurtRP/UnlitColor"
                 BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.PositionWS);
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
-                debugData.ShadowAttenuation = BurtSampleMainLightShadow(input.PositionWS, normalWS, _BurtPerObjectShadowObjectIndex);
+                debugData.ShadowAttenuation = BurtSampleMainLightShadowWithoutPerObject(input.PositionWS, normalWS);
                 debugData.AdditionalDiffuseColor = pbrComponents.AdditionalDiffuse;
                 debugData.AdditionalSpecularColor = pbrComponents.AdditionalSpecular;
                 debugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
@@ -211,6 +211,10 @@ Shader "BurtRP/UnlitColor"
                     debugData.ShadowDistanceFade,
                     debugData.ShadowPCSSRadius,
                     debugData.ShadowReceiverDepthDelta,
+                    debugData.MainLightShadowReceiverDepth,
+                    debugData.MainLightShadowRawDepth,
+                    debugData.MainLightShadowCompare,
+                    debugData.MainLightShadowProjectionValidity,
                     debugData.ShadowPCSSBlockerFraction);
 
                 BurtFillPerObjectShadowShadingDebugData(
@@ -332,7 +336,7 @@ Shader "BurtRP/UnlitColor"
                 BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.PositionWS);
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
-                debugData.ShadowAttenuation = BurtSampleMainLightShadow(input.PositionWS, normalWS, _BurtPerObjectShadowObjectIndex);
+                debugData.ShadowAttenuation = BurtSampleMainLightShadowWithoutPerObject(input.PositionWS, normalWS);
                 debugData.AdditionalDiffuseColor = pbrComponents.AdditionalDiffuse;
                 debugData.AdditionalSpecularColor = pbrComponents.AdditionalSpecular;
                 debugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
@@ -361,6 +365,10 @@ Shader "BurtRP/UnlitColor"
                     debugData.ShadowDistanceFade,
                     debugData.ShadowPCSSRadius,
                     debugData.ShadowReceiverDepthDelta,
+                    debugData.MainLightShadowReceiverDepth,
+                    debugData.MainLightShadowRawDepth,
+                    debugData.MainLightShadowCompare,
+                    debugData.MainLightShadowProjectionValidity,
                     debugData.ShadowPCSSBlockerFraction);
 
                 BurtFillPerObjectShadowShadingDebugData(
@@ -397,5 +405,3 @@ Shader "BurtRP/UnlitColor"
     // 禁用 fallback，避免 BurtRP shader 出错时悄悄回退到其他管线 shader。
     Fallback Off
 }
-
-

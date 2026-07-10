@@ -741,7 +741,7 @@ namespace Burt.RenderPipeline
             var descriptor = BurtPerObjectShadowUtility.CreateAtlasDescriptor(preparedData);
             var cmd = CommandBufferPool.Get(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.PerObjectShadowAtlasId, descriptor, FilterMode.Bilinear);
-            cmd.SetRenderTarget(atlasTarget.Identifier);
+            BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, atlasTarget);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
             BurtPerObjectShadowUtility.BindPerObjectShadowAtlasIfValid(cmd, atlasTarget);
@@ -793,7 +793,7 @@ namespace Burt.RenderPipeline
             try
             {
                 cmd.SetGlobalInt(BurtPerObjectShadowUtility.PerObjectShadowObjectIndexId, 0);
-                cmd.SetRenderTarget(atlasTarget.Identifier);
+                BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, atlasTarget);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, preparedData.AtlasWidth, preparedData.AtlasHeight);
                 cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
                 BurtPerObjectShadowUtility.UploadPerObjectShadowReceiverGlobals(cmd, null, atlasTarget, preparedData);
@@ -803,7 +803,7 @@ namespace Burt.RenderPipeline
                 for (var sliceIndex = 0; sliceIndex < preparedData.SliceCount; sliceIndex++)
                 {
                     var slice = preparedData.Slices[sliceIndex];
-                    cmd.SetRenderTarget(atlasTarget.Identifier);
+                    BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, atlasTarget);
                     cmd.SetViewport(slice.Viewport);
                     cmd.EnableScissorRect(slice.Viewport);
                     cmd.SetViewProjectionMatrices(slice.ViewMatrix, slice.ProjectionMatrix);

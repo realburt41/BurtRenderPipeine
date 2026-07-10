@@ -105,6 +105,10 @@ float _BurtShadingDebugEnabled; // 保存 C# 侧上传的调试开关，0 表示
 #define BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_UV (229.0f)
 #define BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH (230.0f)
 #define BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH_DELTA (231.0f)
+#define BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_RECEIVER_DEPTH (234.0f)
+#define BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_RAW_DEPTH (235.0f)
+#define BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_COMPARE (236.0f)
+#define BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_PROJECTION_VALIDITY (237.0f)
 #define BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_OBJECT_INDEX (476.0f)
 #define BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_SLICE (477.0f)
 #define BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_UV (478.0f)
@@ -177,6 +181,14 @@ struct BurtShadingDebugData
 
     // 保存 receiver depth 和 shadow map stored depth 的可视化差值。
     float ShadowReceiverDepthDelta;
+
+    float MainLightShadowReceiverDepth;
+
+    float MainLightShadowRawDepth;
+
+    float MainLightShadowCompare;
+
+    float3 MainLightShadowProjectionValidity;
 
     // 保存 PCSS blocker search 命中的 blocker 样本占比。
     float ShadowPCSSBlockerFraction;
@@ -356,6 +368,14 @@ bool BurtNeedsAdditionalShadowProjectionShadingDebug()
         || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH_DELTA);
 }
 
+bool BurtNeedsMainLightShadowProjectionShadingDebug()
+{
+    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_RECEIVER_DEPTH)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_RAW_DEPTH)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_COMPARE)
+        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_PROJECTION_VALIDITY);
+}
+
 bool BurtNeedsPerObjectShadowProjectionShadingDebug()
 {
     return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_OBJECT_INDEX)
@@ -477,6 +497,10 @@ void BurtFillMainLightShadowShadingDebugData(
     out float shadowDistanceFade,
     out float shadowPCSSRadius,
     out float shadowReceiverDepthDelta,
+    out float mainLightShadowReceiverDepth,
+    out float mainLightShadowRawDepth,
+    out float mainLightShadowCompare,
+    out float3 mainLightShadowProjectionValidity,
     out float shadowPCSSBlockerFraction)
 {
     shadowCascadeColor = float3(0.0f, 0.0f, 0.0f);
@@ -484,6 +508,10 @@ void BurtFillMainLightShadowShadingDebugData(
     shadowDistanceFade = 0.0f;
     shadowPCSSRadius = 0.0f;
     shadowReceiverDepthDelta = 0.0f;
+    mainLightShadowReceiverDepth = 0.0f;
+    mainLightShadowRawDepth = 0.0f;
+    mainLightShadowCompare = 1.0f;
+    mainLightShadowProjectionValidity = float3(0.0f, 0.0f, 0.0f);
     shadowPCSSBlockerFraction = 0.0f;
 
     if (!BurtIsShadingDebugEnabled())
@@ -496,6 +524,7 @@ void BurtFillMainLightShadowShadingDebugData(
         || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_DISTANCE_FADE)
         || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_PCSS_RADIUS)
         || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_RECEIVER_DEPTH_DELTA)
+        || BurtNeedsMainLightShadowProjectionShadingDebug()
         || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_SHADOW_PCSS_BLOCKER_FRACTION);
     if (!needsShadowDebug)
     {
@@ -505,9 +534,11 @@ void BurtFillMainLightShadowShadingDebugData(
     shadowCascadeColor = BurtGetMainLightShadowCascadeDebugColor(positionWS);
     shadowCascadeBlend = BurtGetMainLightShadowCascadeBlendDebug(positionWS);
     shadowDistanceFade = BurtGetMainLightShadowDistanceFadeDebug(positionWS);
-    shadowPCSSRadius = BurtGetMainLightShadowPCSSRadiusDebug(positionWS);
+    shadowPCSSRadius = BurtGetMainLightShadowPCSSRadiusDebug(positionWS, normalWS);
     shadowReceiverDepthDelta = BurtGetMainLightShadowReceiverDepthDeltaDebug(positionWS, normalWS);
-    shadowPCSSBlockerFraction = BurtGetMainLightShadowPCSSBlockerFractionDebug(positionWS);
+    BurtTryGetMainLightShadowProjectionDebug(positionWS, normalWS, mainLightShadowReceiverDepth, mainLightShadowRawDepth, mainLightShadowCompare);
+    mainLightShadowProjectionValidity = BurtGetMainLightShadowProjectionValidityDebug(positionWS, normalWS);
+    shadowPCSSBlockerFraction = BurtGetMainLightShadowPCSSBlockerFractionDebug(positionWS, normalWS);
 }
 
 void BurtFillPerObjectShadowShadingDebugData(
@@ -1043,6 +1074,30 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
     {
         debugColor = float3(data.ShadowAttenuation, data.ShadowAttenuation, data.ShadowAttenuation); // 白色表示无阴影，黑色表示完全被遮挡。
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_RECEIVER_DEPTH))
+    {
+        debugColor = float3(data.MainLightShadowReceiverDepth, data.MainLightShadowReceiverDepth, data.MainLightShadowReceiverDepth);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_RAW_DEPTH))
+    {
+        debugColor = float3(data.MainLightShadowRawDepth, data.MainLightShadowRawDepth, data.MainLightShadowRawDepth);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_COMPARE))
+    {
+        debugColor = float3(data.MainLightShadowCompare, data.MainLightShadowCompare, data.MainLightShadowCompare);
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_PROJECTION_VALIDITY))
+    {
+        debugColor = data.MainLightShadowProjectionValidity;
+        return true;
     }
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_ATTENUATION)) // AdditionalShadowAttenuation 模式显示追加光阴影衰减。

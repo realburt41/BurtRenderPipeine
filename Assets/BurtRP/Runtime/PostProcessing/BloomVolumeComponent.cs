@@ -14,6 +14,7 @@ namespace Burt.RenderPipeline
 
         [Title("BurtRP Bloom")]
         [InfoBox("Requests a temporary mip chain inside Burt post-processing and composites Bloom back before tonemapping.")]
+        public BoolParameter enabled = new BoolParameter(true);
         public ClampedFloatParameter threshold = new ClampedFloatParameter(BloomSettings.DefaultThreshold, -1f, 10f);
         public ClampedFloatParameter softKnee = new ClampedFloatParameter(BloomSettings.DefaultSoftKnee, 0f, 1f);
         public ClampedFloatParameter intensity = new ClampedFloatParameter(0f, 0f, 10f);
@@ -41,7 +42,7 @@ namespace Burt.RenderPipeline
 
         public bool IsEnabled()
         {
-            return active && BloomSettings.IsQualityEnabled(quality.value) && intensity.value > IntensityEpsilon;
+            return active && enabled.value && BloomSettings.IsQualityEnabled(quality.value) && intensity.value > IntensityEpsilon;
         }
     }
 }

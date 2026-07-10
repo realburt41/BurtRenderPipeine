@@ -14,6 +14,7 @@ namespace Burt.RenderPipeline
 
         [Title("BurtRP Color Adjustments")]
         [InfoBox("Runs inside the Burt post-process pass after tonemapping.")]
+        public BoolParameter enabled = new BoolParameter(true);
         public ClampedFloatParameter saturation = new ClampedFloatParameter(ColorAdjustmentsSettings.DefaultSaturation, 0f, 2f);
         public ClampedFloatParameter contrast = new ClampedFloatParameter(ColorAdjustmentsSettings.DefaultContrast, 0f, 2f);
         public ClampedFloatParameter gamma = new ClampedFloatParameter(ColorAdjustmentsSettings.DefaultGamma, 0.01f, 5f);
@@ -21,7 +22,7 @@ namespace Burt.RenderPipeline
 
         public bool IsEnabled()
         {
-            return active && (HasAnyOverride() || HasAnyNonNeutralValue());
+            return active && enabled.value && (HasAnyOverride() || HasAnyNonNeutralValue());
         }
 
         private bool HasAnyOverride()

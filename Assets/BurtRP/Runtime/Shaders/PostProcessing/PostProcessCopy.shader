@@ -3083,6 +3083,71 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             ENDHLSL
         }
 
+        Pass
+        {
+            Name "Lens Flare"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+            Blend One One
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex VertLensFlare
+            #pragma fragment FragLensFlare
+            #include "Assets/BurtRP/Runtime/Shaders/PostProcessing/LensFlareBridge.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Diaphragm Depth Of Field"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex VertDiaphragmDOF
+            #pragma fragment FragDiaphragmDOF
+            #include "Assets/BurtRP/Runtime/Shaders/PostProcessing/DiaphragmDOFBridge.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Plain Copy"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+
+            sampler2D _BurtPostProcessSourceTexture;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.uv = uv;
+                return output;
+            }
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                return tex2D(_BurtPostProcessSourceTexture, input.uv);
+            }
+            ENDHLSL
+        }
+
 
     }
 

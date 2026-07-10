@@ -23,6 +23,9 @@ MonoBehaviour:
   hiZDebugMip: 0
   hiZDebugScale: 50
   preintegratedFGLut: {fileID: 2800000, guid: 7bc59e552e7f6e74f893b90c1f15fc48, type: 3}
+  enableXGIHardwareRayTracing: 0
+  xgiRadianceCacheHardwareRayTracingShader: {fileID: 4807578003741378534, guid: 1bc4a883d46e4b9ca368051e54a4707f,
+    type: 3}
   enableScreenSpaceSubsurface: 1
   screenSpaceSubsurfaceProfile: {fileID: 11400000, guid: 7bd911dcc7284b5888779f12015db556,
     type: 2}

@@ -467,7 +467,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return temporalAADebugRequested || bloomDebugRequested || autoExposureDebugRequested; // Post-backed debug should fail visibly instead of being silently skipped.
             }
 
-            return temporalAADebugRequested || bloomDebugRequested || autoExposureDebugRequested || HasActiveExposureVolume() || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume() || HasActiveColorGradingVolume() || HasActiveVignetteVolume() || HasActiveRCASVolume() || HasActiveFastApproximateAAVolume() || HasActiveSubpixelMorphologicalAAVolume() || HasActiveBloomVolume() || HasActiveTemporalAASource(request); // Only real post effects allocate and run the framework; pure No-op is skipped.
+            return temporalAADebugRequested || bloomDebugRequested || autoExposureDebugRequested || HasActiveExposureVolume() || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume() || HasActiveColorGradingVolume() || HasActiveVignetteVolume() || HasActiveLensFlareVolume() || HasActiveDiaphragmDepthOfFieldVolume() || HasActiveRCASVolume() || HasActiveFastApproximateAAVolume() || HasActiveSubpixelMorphologicalAAVolume() || HasActiveBloomVolume() || HasActiveTemporalAASource(request); // Only real post effects allocate and run the framework; pure No-op is skipped.
         }
 
         public static bool ShouldUseBloom( // 定义判断当前 request 是否需要 Bloom 的统一入口。
@@ -545,6 +545,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             BurtRenderPipelineAsset asset)
         {
             return IsPostProcessEffectAllowed(request, asset) && HasActiveVignetteVolume();
+        }
+
+        public static bool ShouldUseLensFlare(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return IsPostProcessEffectAllowed(request, asset) && HasActiveLensFlareVolume();
+        }
+
+        public static bool ShouldUseDiaphragmDepthOfField(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return IsPostProcessEffectAllowed(request, asset) && HasActiveDiaphragmDepthOfFieldVolume();
         }
 
         public static bool ShouldUseColorGrading(BurtRenderRequest request, BurtRenderPipelineAsset asset)
@@ -809,6 +823,38 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 vignette.edgeSoftness.value,
                 vignette.fisheyeFovDeg.value,
                 vignette.followAspect.value);
+        }
+
+        public static LensFlareSettings ResolveLensFlareSettings(BurtRenderPipelineAsset asset)
+        {
+            if (!IsPostProcessEnabled(asset))
+            {
+                return LensFlareSettings.Default;
+            }
+
+            var lensFlare = GetLensFlareVolumeComponent();
+            if (lensFlare == null || !lensFlare.IsEnabled())
+            {
+                return LensFlareSettings.Default;
+            }
+
+            return new LensFlareSettings(
+                true,
+                lensFlare.data.value,
+                lensFlare.intensity.value,
+                lensFlare.scale.value,
+                lensFlare.tint.value);
+        }
+
+        public static DiaphragmDepthOfFieldSettings ResolveDiaphragmDepthOfFieldSettings(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (!IsPostProcessEnabled(asset))
+            {
+                return DiaphragmDepthOfFieldSettings.Default;
+            }
+
+            var depthOfField = GetDiaphragmDepthOfFieldVolumeComponent();
+            return DiaphragmDepthOfFieldSettings.Create(depthOfField, request != null ? request.Camera : null);
         }
 
         public static ColorGradingSettings ResolveColorGradingSettings(BurtRenderPipelineAsset asset)
@@ -1204,7 +1250,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             bool useVignette,
             VignetteSettings vignetteSettings,
             BloomSettings bloomSettings, // 接收本次执行使用的 Bloom 参数。
-            int bloomMipCount) // 接收本次实际使用的 Bloom mip 数。
+            int bloomMipCount, // 接收本次实际使用的 Bloom mip 数。
+            bool useLensFlare = false,
+            LensFlareSettings lensFlareSettings = default,
+            bool useDiaphragmDepthOfField = false,
+            DiaphragmDepthOfFieldSettings diaphragmDepthOfFieldSettings = default)
         {
             if (context == null) // 如果上下文为空，说明调用方状态异常。
             {
@@ -1296,6 +1346,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 .Append(vignetteSettings.Color.g.ToString("0.###")).Append(',')
                 .Append(vignetteSettings.Color.b.ToString("0.###")).Append(',')
                 .Append(vignetteSettings.Color.a.ToString("0.###")).Append(')')
+                .Append(" LensFlare=").Append(useLensFlare)
+                .Append(" LensFlareIntensity=").Append(lensFlareSettings.TotalParams.x.ToString("0.###"))
+                .Append(" LensFlareScale=").Append(lensFlareSettings.TotalParams.y.ToString("0.###"))
+                .Append(" LensFlareData=").Append(lensFlareSettings.TextureFlags1.z > 0.5f)
+                .Append(" DiaphragmDOF=").Append(useDiaphragmDepthOfField)
+                .Append(" DiaphragmDOFFocusM=").Append(diaphragmDepthOfFieldSettings.FocusDistanceMeters.ToString("0.###"))
+                .Append(" DiaphragmDOFMaxRadiusPx=").Append(diaphragmDepthOfFieldSettings.MaxRadiusPixels.ToString("0.###"))
+                .Append(" DiaphragmDOFSqueeze=").Append(diaphragmDepthOfFieldSettings.SqueezeFactor.ToString("0.###"))
+                .Append(" DiaphragmDOFVisualize=").Append(diaphragmDepthOfFieldSettings.VisualizeDOF)
                 .Append(" SMAA=").Append(smaaSettings.Enabled)
                 .Append(" SMAAThreshold=").Append(smaaSettings.Threshold.ToString("0.###"))
                 .Append(" SMAABlend=").Append(smaaSettings.BlendStrength.ToString("0.###"))
@@ -1405,6 +1464,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             var vignette = GetVignetteVolumeComponent();
 
             return vignette != null && vignette.IsEnabled();
+        }
+
+        private static bool HasActiveLensFlareVolume()
+        {
+            var lensFlare = GetLensFlareVolumeComponent();
+
+            return lensFlare != null && lensFlare.IsEnabled();
+        }
+
+        private static bool HasActiveDiaphragmDepthOfFieldVolume()
+        {
+            var depthOfField = GetDiaphragmDepthOfFieldVolumeComponent();
+
+            return depthOfField != null && depthOfField.IsEnabled();
         }
 
         private static bool HasActiveColorGradingVolume()
@@ -1584,6 +1657,44 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             return stack.GetComponent<VignetteVolumeComponent>();
+        }
+
+        private static LensFlareVolumeComponent GetLensFlareVolumeComponent()
+        {
+            var volumeManager = VolumeManager.instance;
+
+            if (volumeManager == null)
+            {
+                return null;
+            }
+
+            var stack = volumeManager.stack;
+
+            if (stack == null)
+            {
+                return null;
+            }
+
+            return stack.GetComponent<LensFlareVolumeComponent>();
+        }
+
+        private static DiaphragmDepthOfFieldVolumeComponent GetDiaphragmDepthOfFieldVolumeComponent()
+        {
+            var volumeManager = VolumeManager.instance;
+
+            if (volumeManager == null)
+            {
+                return null;
+            }
+
+            var stack = volumeManager.stack;
+
+            if (stack == null)
+            {
+                return null;
+            }
+
+            return stack.GetComponent<DiaphragmDepthOfFieldVolumeComponent>();
         }
 
         private static ColorGradingVolumeComponent GetColorGradingVolumeComponent()

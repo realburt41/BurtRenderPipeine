@@ -237,6 +237,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Camera Depth"; // 已有全屏深度调试。
                 case BurtShadingDebugMode.MainLightShadow:
                     return "Main Light Shadow"; // 已有主光阴影图调试。
+                case BurtShadingDebugMode.MainLightShadowReceiverDepth:
+                    return "Main Light Shadow Receiver Depth";
+                case BurtShadingDebugMode.MainLightShadowRawDepth:
+                    return "Main Light Shadow Raw Depth";
+                case BurtShadingDebugMode.MainLightShadowCompare:
+                    return "Main Light Shadow Compare";
+                case BurtShadingDebugMode.MainLightShadowProjectionValidity:
+                    return "Main Light Shadow Projection & Compare";
                 case BurtShadingDebugMode.PerObjectShadowAtlas:
                     return "Per Object Shadow Atlas";
                 case BurtShadingDebugMode.PerObjectShadowObjectIndex:
@@ -297,6 +305,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "BurtGI Diagnostic Compare";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
                     return "BurtGI Confidence";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHashGridDebug:
+                    return "BurtGI HashGrid Debug";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
                     return "SSS Setup";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
@@ -771,6 +781,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ShadowPCSSRadius, // 当前像素的 PCSS 半影半径。
             BurtShadingDebugMode.ShadowReceiverDepthDelta, // receiver / shadow map 深度差，用来调 bias。
             BurtShadingDebugMode.ShadowPCSSBlockerFraction, // PCSS blocker search 命中的 blocker 占比。
+            BurtShadingDebugMode.MainLightShadowReceiverDepth,
+            BurtShadingDebugMode.MainLightShadowRawDepth,
+            BurtShadingDebugMode.MainLightShadowCompare,
+            BurtShadingDebugMode.MainLightShadowProjectionValidity,
             BurtShadingDebugMode.MainLightShadow, // 主光 shadow map 全屏 Debug。
             BurtShadingDebugMode.PerObjectShadowObjectIndex,
             BurtShadingDebugMode.PerObjectShadowSlice,
@@ -925,7 +939,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDifference,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHashGridDebug
         });
 
         public static readonly BurtShadingDebugGroup ScreenSpaceSubsurface = new BurtShadingDebugGroup("Screen Space Subsurface", "SSS", new[]

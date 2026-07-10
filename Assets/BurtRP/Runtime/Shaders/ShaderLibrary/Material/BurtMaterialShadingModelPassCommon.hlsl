@@ -575,6 +575,8 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 BaseColor, floa
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, saturate(_Specular), 1.0f, 0.0f, float4(0.0f, MaskMap.g, 0.5f, 1.0f), 1.0f);
     return BurtApplyTrunkXRenderSurfaceSemantics(SurfaceData, MaskMap, float4(1.0f, 1.0f, 1.0f, 1.0f));
+#elif defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
+    return BurtCreateInteriorMappingSurfaceData(BaseColor, MaskMap);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_EYE)
     float EyeReflectance = saturate(_ScleraSpecular);
     float EyeSmoothness = saturate(1.0f - _ScleraRoughness);
@@ -809,8 +811,10 @@ float3 BurtGetMaterialPassDebugNormalWS(float3 NormalWS, float3 ShadingDirection
 #endif
 }
 
-#define BURT_CREATE_MATERIAL_PASS_GBUFFER_DATA(ShadingModelName, SurfaceData, NormalMapUV, GeometryNormalWS, BaseNormalWS, TangentWS, ShadingDirectionWS, Facing, EmissionColor) \
-    BURT_TOKEN_PASTE2(BurtCreateMaterialPassGBufferData_, ShadingModelName)(SurfaceData, NormalMapUV, GeometryNormalWS, BaseNormalWS, TangentWS, ShadingDirectionWS, Facing, EmissionColor)
+#if defined(BURT_GBUFFER_INCLUDED)
+
+    #define BURT_CREATE_MATERIAL_PASS_GBUFFER_DATA(ShadingModelName, SurfaceData, NormalMapUV, GeometryNormalWS, BaseNormalWS, TangentWS, ShadingDirectionWS, Facing, EmissionColor) \
+        BURT_TOKEN_PASTE2(BurtCreateMaterialPassGBufferData_, ShadingModelName)(SurfaceData, NormalMapUV, GeometryNormalWS, BaseNormalWS, TangentWS, ShadingDirectionWS, Facing, EmissionColor)
 
 BurtGBufferData BurtCreateMaterialPassGBufferData_DefaultLit(
     BurtSurfaceData SurfaceData,
@@ -825,6 +829,7 @@ BurtGBufferData BurtCreateMaterialPassGBufferData_DefaultLit(
     return BurtCreateGBufferData(SurfaceData, BaseNormalWS, TangentWS, EmissionColor);
 }
 
+#if BURT_ENABLE_HAIR_SHADING
 BurtGBufferData BurtCreateMaterialPassGBufferData_Hair(
     BurtSurfaceData SurfaceData,
     float2 NormalMapUV,
@@ -837,8 +842,9 @@ BurtGBufferData BurtCreateMaterialPassGBufferData_Hair(
 {
     return BurtCreateHairGBufferData(SurfaceData, ShadingDirectionWS, BaseNormalWS, GeometryNormalWS, EmissionColor);
 }
+#endif
 
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_CLEAR_COAT)
+#if BURT_ENABLE_CLEAR_COAT_SHADING
 BurtGBufferData BurtCreateMaterialPassGBufferData_ClearCoat(
     BurtSurfaceData SurfaceData,
     float2 NormalMapUV,
@@ -854,6 +860,7 @@ BurtGBufferData BurtCreateMaterialPassGBufferData_ClearCoat(
 }
 #endif
 
+#if BURT_ENABLE_SUBSURFACE_SHADING
 BurtGBufferData BurtCreateMaterialPassGBufferData_Subsurface(
     BurtSurfaceData SurfaceData,
     float2 NormalMapUV,
@@ -866,7 +873,9 @@ BurtGBufferData BurtCreateMaterialPassGBufferData_Subsurface(
 {
     return BurtCreateSubsurfaceGBufferData(SurfaceData, BaseNormalWS, GeometryNormalWS, TangentWS, EmissionColor);
 }
+#endif
 
+#if BURT_ENABLE_FOLIAGE_SHADING
 BurtGBufferData BurtCreateMaterialPassGBufferData_Foliage(
     BurtSurfaceData SurfaceData,
     float2 NormalMapUV,
@@ -879,7 +888,9 @@ BurtGBufferData BurtCreateMaterialPassGBufferData_Foliage(
 {
     return BurtCreateFoliageGBufferData(SurfaceData, BaseNormalWS, TangentWS, EmissionColor);
 }
+#endif
 
+#if BURT_ENABLE_FABRIC_SHADING
 BurtGBufferData BurtCreateMaterialPassGBufferData_Fabric(
     BurtSurfaceData SurfaceData,
     float2 NormalMapUV,
@@ -892,7 +903,9 @@ BurtGBufferData BurtCreateMaterialPassGBufferData_Fabric(
 {
     return BurtCreateFabricGBufferData(SurfaceData, BaseNormalWS, TangentWS, EmissionColor);
 }
+#endif
 
+#if BURT_ENABLE_FUR_SHADING
 BurtGBufferData BurtCreateMaterialPassGBufferData_Fur(
     BurtSurfaceData SurfaceData,
     float2 NormalMapUV,
@@ -905,7 +918,9 @@ BurtGBufferData BurtCreateMaterialPassGBufferData_Fur(
 {
     return BurtCreateFurGBufferData(SurfaceData, BaseNormalWS, TangentWS, EmissionColor);
 }
+#endif
 
+#if BURT_ENABLE_EYE_SHADING
 BurtGBufferData BurtCreateMaterialPassGBufferData_Eye(
     BurtSurfaceData SurfaceData,
     float2 NormalMapUV,
@@ -918,6 +933,7 @@ BurtGBufferData BurtCreateMaterialPassGBufferData_Eye(
 {
     return BurtCreateEyeGBufferData(SurfaceData, BaseNormalWS, TangentWS, SurfaceData.EyeIrisNormalWS, SurfaceData.EyeCausticNormalWS, EmissionColor);
 }
+#endif
 
 BurtGBufferData BurtCreateMaterialPassGBufferData(
     BurtSurfaceData SurfaceData,
@@ -940,5 +956,7 @@ BurtGBufferData BurtCreateMaterialPassGBufferData(
         Facing,
         EmissionColor);
 }
+
+#endif // BURT_GBUFFER_INCLUDED
 
 #endif // BURT_MATERIAL_SHADING_MODEL_PASS_COMMON_INCLUDED

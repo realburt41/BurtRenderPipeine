@@ -19,7 +19,8 @@ Material:
   m_CustomRenderQueue: 2000
   stringTagMap:
     RenderType: Opaque
-  disabledShaderPasses: []
+  disabledShaderPasses:
+  - BurtRefractionDistortion
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -52,12 +53,15 @@ Material:
     - _DoubleSidedEnable: 0
     - _DoubleSidedNormalMode: 0
     - _DstBlend: 0
+    - _IOR: 1.5
     - _Metallic: 1
     - _MotionVectorsStencilMask: 8
     - _MotionVectorsStencilRef: 8
     - _NormalScale: 0
     - _OcclusionStrength: 1
     - _Reflectance: 0.5
+    - _Refraction: 0
+    - _RefractionStage: 0
     - _ResponsiveAA: 0
     - _Smoothness: 1
     - _SrcBlend: 1
@@ -65,7 +69,7 @@ Material:
     - _ZTest: 4
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.9150943, g: 0.75667745, b: 0.21150759, a: 1}
+    - _BaseColor: {r: 0.9150943, g: 0.75667745, b: 0.21150756, a: 0.3764706}
     - _DoubleSidedNormalModeConstants: {r: 1, g: 1, b: 1, a: 0}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}

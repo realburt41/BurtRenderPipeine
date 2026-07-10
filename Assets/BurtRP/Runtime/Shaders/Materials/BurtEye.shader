@@ -207,6 +207,20 @@ Shader "BurtRP/Eye"
 
         Pass
         {
+            Name "BurtGI"
+            Tags { "LightMode" = "RayTracing" }
+
+            HLSLPROGRAM
+            #pragma only_renderers d3d11 d3d12
+            #pragma raytracing BurtGI
+            #pragma shader_feature_local _ BURT_ALPHA_CLIP
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEyeProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "Burt Eye Forward"
             Tags { "LightMode" = "BurtForward" }
             ZWrite [_ZWrite]

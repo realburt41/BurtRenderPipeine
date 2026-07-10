@@ -1,0 +1,2763 @@
+#pragma kernel ScreenProbeTraceCompactCS
+#pragma kernel ScreenProbeAdaptivePlacementLiteCS
+#pragma kernel ScreenProbeIndirectArgsSetupCS
+#pragma kernel ScreenProbeTraceGenArgsCS
+#pragma kernel ScreenProbeTraceAtlasClearCS
+#pragma kernel ScreenProbeTraceAtlasFromCompactCS
+#pragma kernel ScreenProbeBentNormalCS
+#pragma kernel ScreenProbeIrradianceSH3CS
+#pragma kernel ScreenProbeIrradianceOctLiteCS
+#pragma kernel ScreenProbeRadianceOctLiteCS
+#pragma kernel ScreenProbeIrradianceOctGenerateMipCS
+#pragma kernel ScreenProbeImportancePDFLiteCS
+#pragma kernel ScreenProbeImportanceLightPDFLiteCS
+#pragma kernel ScreenProbeImportanceGenRaysLiteCS
+
+#define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
+#define BURT_GI_SCREEN_PROBE_TRACE_ATLAS_CLEAR_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_BENT_NORMAL_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_SH3_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT (BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE)
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_SH_COEFFICIENT_COUNT 9
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION 6u
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_BORDER_SIZE 1u
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER 8u
+#define BURT_GI_HASH_GRID_TILE_MIP0_OFFSET 0u
+#define BURT_GI_HASH_GRID_TILE_MIP1_OFFSET 64u
+#define BURT_GI_HASH_GRID_TILE_MIP2_OFFSET 80u
+#define BURT_GI_HASH_GRID_TILE_MIP3_OFFSET 84u
+#define BURT_GI_HASH_GRID_FILTER_CONFIDENCE 0.75
+#define BURT_GI_HASH_GRID_TILE_DECAY_MAX 500u
+#define BURT_GI_CLIPMAP_COUNT 5
+#define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT 5u
+
+Texture2D<float> _BurtGIScreenProbeScreenDepthTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldNormalTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
+Texture2D<float4> _BurtGIScreenProbeRadianceTexture;
+Texture2D<float4> _BurtGIScreenProbeIrradianceTexture;
+Texture2D<float4> _BurtGIScreenProbeConfidenceTexture;
+Texture2D<float4> _BurtGIScreenProbeFixupIrradianceTexture;
+Texture2D<float4> _BurtGIScreenProbeFixupConfidenceTexture;
+Texture2D<float4> _BurtGIScreenProbeMipIrradianceTexture;
+Texture2D<float4> _BurtGIScreenProbeMipConfidenceTexture;
+Texture2D<float4> _BurtGIScreenProbeMip2IrradianceTexture;
+Texture2D<float4> _BurtGIScreenProbeMip2ConfidenceTexture;
+Texture2D<float4> _BurtGIScreenProbeMip3IrradianceTexture;
+Texture2D<float4> _BurtGIScreenProbeMip3ConfidenceTexture;
+Texture2D<float4> _BurtGIScreenProbeHitDistanceTexture;
+Texture2D<float4> _BurtGIScreenProbeHistoryRadianceTexture;
+Texture2D<float> _BurtGIScreenProbeHistoryScreenDepthTexture;
+Texture2D<float4> _BurtGIScreenProbeHistoryWorldPositionTexture;
+Texture2D<float4> _BurtGIScreenProbeHistoryBentNormalTexture;
+Texture2D<float> _BurtGIScreenProbeHistoryTraceHitTexture;
+Texture2D<float4> _BurtGIScreenProbeIrradianceOctParentMipTexture;
+Texture2D<float> _BurtHiZDepthTexture;
+Texture3D<float4> _BurtGISceneVoxelGeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelLightingReadTexture;
+SamplerState sampler_BurtGISceneVoxelOccupancyMipReadTexture;
+TextureCube<float4> _BurtSkyReflectionTexture;
+SamplerState sampler_BurtSkyReflectionTexture;
+TextureCube<float4> _BurtGILocalSkyProbeColorTexture;
+TextureCube<float4> _BurtGILocalSkyProbeDepthTexture;
+SamplerState sampler_BurtGILocalSkyProbeColorTexture;
+SamplerState sampler_BurtGILocalSkyProbeDepthTexture;
+
+RWTexture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
+RWTexture2D<float> _BurtGIScreenProbeTraceHitTexture;
+RWTexture2D<uint> _BurtGIScreenProbeAdaptiveProbeHeaderTexture;
+RWTexture2D<uint> _BurtGIScreenProbeAdaptiveProbeIndicesTexture;
+RWTexture2D<float4> _BurtGIScreenProbeBentNormalTexture;
+RWTexture2D<float4> _BurtGIScreenProbeRadianceSHAmbientTexture;
+RWTexture2D<float4> _BurtGIScreenProbeRadianceSHDirectionalTexture;
+RWTexture2D<float4> _BurtGIScreenProbeIrradianceOctTexture;
+RWTexture2D<float4> _BurtGIScreenProbeRadianceOctTexture;
+RWTexture2D<float4> _BurtGIScreenProbeIrradianceOctMipTexture;
+RWTexture2D<float> _BurtGIScreenProbeImportancePDFTexture;
+RWTexture2D<float> _BurtGIScreenProbeImportanceLightPDFTexture;
+RWTexture2D<uint> _BurtGIScreenProbeImportanceRayInfoTexture;
+
+groupshared float BurtGIScreenProbeImportanceLightSharedPDF[BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT];
+groupshared float BurtGIScreenProbeImportanceRaySharedPDF[BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT];
+groupshared uint BurtGIScreenProbeImportanceRaySharedInfo[BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT];
+groupshared uint2 BurtGIScreenProbeImportanceRaySharedSort[2 * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT];
+groupshared uint BurtGIScreenProbeImportanceRaySharedSubdivideCount;
+
+RWStructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelCountBuffer;
+RWStructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelDataBuffer;
+RWStructuredBuffer<uint3> _BurtGIScreenProbeIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIScreenProbeTraceCompactIndirectArgsBuffer;
+RWStructuredBuffer<uint> _BurtGIScreenProbeTraceCompactThreadCountXBuffer;
+RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
+RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+StructuredBuffer<uint4> _BurtGIRadianceCacheHashGridValueBuffer;
+StructuredBuffer<uint4> _BurtGIRadianceCacheHashGridTileBuffer;
+
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGIScreenProbeTraceParams;
+float4 _BurtGIScreenProbeBentNormalParams;
+float4 _BurtGIScreenProbeScreenTraceParams;
+float4 _BurtGIScreenProbeImportanceLightPDFParams;
+float4 _BurtGIScreenProbeImportanceGenRaysParams;
+float4 _BurtGIScreenProbeAdaptiveParams;
+float4 _BurtGIScreenProbeAdaptivePlacementParams;
+float4 _BurtGIScreenProbeIndirectArgsParams;
+float4 _BurtGIScreenProbeTraceCompactParams;
+float4 _BurtGIScreenProbeIrradianceOctMipParams;
+float4 _BurtGIRadianceCacheHashGridParams0;
+float4 _BurtGIRadianceCacheHashGridParams1;
+float4 _BurtGIRadianceCacheClipMapClipmapCenterExtent[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtDeferredCameraWorldPosition;
+float4x4 _BurtGIScreenProbeViewProjectionMatrix;
+float4 _BurtSkyReflectionHDR;
+float4 _BurtSkyReflectionTint;
+float4 _BurtSkyReflectionRotation;
+float4 _BurtSkyLowerHemisphereDiffuseColor;
+float4 _BurtGILocalSkyProbeParams0;
+float4 _BurtGILocalSkyProbeParams1;
+float _BurtSkyReflectionIntensity;
+float _BurtSkyReflectionEnabled;
+float _BurtSkyReflectionMaxMip;
+float _BurtSkyLowerHemisphereEnabled;
+uint _BurtGIScreenProbeTraceCompactGroupSize;
+uint _BurtGIRadianceCacheClipMapFrameIndex;
+
+groupshared float4 BurtGIScreenProbeIrradianceOctSharedSH[BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_SH_COEFFICIENT_COUNT];
+groupshared float BurtGIScreenProbeIrradianceOctSharedHit[BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT];
+groupshared float BurtGIScreenProbeIrradianceOctSharedSampleCount[BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT];
+
+uint BurtGIDivRoundUp(uint value, uint divisor)
+{
+    return divisor == 0u ? 0u : (value + divisor - 1u) / divisor;
+}
+
+void BurtGIWriteDispatchArgs(uint index, uint workItemCount, uint threadGroupSize)
+{
+    _BurtGIScreenProbeIndirectArgsBuffer[index] = uint3(
+        BurtGIDivRoundUp(max(1u, workItemCount), max(1u, threadGroupSize)),
+        1u,
+        1u);
+}
+
+bool BurtGIScreenProbeTraceCompactIsSkyDepth(float rawDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return rawDepth <= 0.00001f;
+#else
+    return rawDepth >= 0.99999f;
+#endif
+}
+
+float3 BurtGIScreenProbeDecodeNormalWS(float4 encodedNormal)
+{
+    return normalize(encodedNormal.xyz * 2.0 - 1.0);
+}
+
+float BurtGIScreenProbeRawDepthFromClip(float clipZ)
+{
+#if defined(UNITY_REVERSED_Z)
+    return saturate(clipZ);
+#else
+    return saturate((clipZ - UNITY_NEAR_CLIP_VALUE) / max(1.0 - UNITY_NEAR_CLIP_VALUE, 0.00001));
+#endif
+}
+
+float2 BurtGIScreenProbeClipToScreenUV(float2 clipXY)
+{
+    float2 uv = clipXY * 0.5 + 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+    uv.y = 1.0 - uv.y;
+#endif
+    return uv;
+}
+
+bool BurtGIScreenProbeProjectPositionWS(float3 positionWS, out float2 screenUV, out float rawDepth)
+{
+    float4 clipPosition = mul(_BurtGIScreenProbeViewProjectionMatrix, float4(positionWS, 1.0));
+    if (clipPosition.w <= 0.00001)
+    {
+        screenUV = 0.0;
+        rawDepth = 0.0;
+        return false;
+    }
+
+    float3 ndc = clipPosition.xyz / clipPosition.w;
+    screenUV = BurtGIScreenProbeClipToScreenUV(ndc.xy);
+    rawDepth = BurtGIScreenProbeRawDepthFromClip(ndc.z);
+    return !any(screenUV < 0.0) && !any(screenUV > 1.0) && !BurtGIScreenProbeTraceCompactIsSkyDepth(rawDepth);
+}
+
+float3 BurtGIScreenProbeSceneVoxelWorldToUVW(float3 worldPosition)
+{
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    float extent = max(centerExtent.w, 0.001);
+    return (worldPosition - centerExtent.xyz) / (extent * 2.0) + 0.5;
+}
+
+bool BurtGIScreenProbeTrySampleSceneVoxelOccupancy(float3 samplePosition, float sampleRadius, out float occupancy)
+{
+    occupancy = 0.0;
+
+    uint width;
+    uint height;
+    uint depth;
+    _BurtGISceneVoxelOccupancyMipReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float3 uvw = BurtGIScreenProbeSceneVoxelWorldToUVW(samplePosition);
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return false;
+    }
+
+    float voxelSizeWS = max(_BurtGISceneVoxelCenterExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
+    float mipLevel = clamp(
+        floor(log2(max(sampleRadius, voxelSizeWS) / voxelSizeWS)),
+        0.0,
+        (float)(BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT - 1u));
+    float4 occupancyMip = _BurtGISceneVoxelOccupancyMipReadTexture.SampleLevel(
+        sampler_BurtGISceneVoxelOccupancyMipReadTexture,
+        uvw,
+        mipLevel);
+    occupancy = saturate(max(occupancyMip.x, occupancyMip.y));
+    return occupancy > 0.001;
+}
+
+bool BurtGIScreenProbeTrySampleSceneVoxelGeometry(
+    float3 samplePosition,
+    float3 traceDirection,
+    out float3 normalWS,
+    out float occupancy,
+    out float normalFacingWeight)
+{
+    normalWS = 0.0;
+    occupancy = 0.0;
+    normalFacingWeight = 0.0;
+
+    uint width;
+    uint height;
+    uint depth;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float3 uvw = BurtGIScreenProbeSceneVoxelWorldToUVW(samplePosition);
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return false;
+    }
+
+    uint3 coord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
+    float4 geometry = _BurtGISceneVoxelGeometryReadTexture.Load(int4((int3)coord, 0));
+    occupancy = saturate(geometry.a);
+    if (occupancy <= 0.001)
+    {
+        return false;
+    }
+
+    normalWS = normalize(geometry.xyz * 2.0 - 1.0);
+    normalFacingWeight = saturate(dot(normalWS, -normalize(traceDirection)) * 0.85 + 0.15);
+    return normalFacingWeight > 0.001;
+}
+
+bool BurtGIScreenProbeTrySampleSceneVoxelLighting(
+    float3 samplePosition,
+    float sampleRadius,
+    out float3 radiance,
+    out float confidence)
+{
+    radiance = 0.0;
+    confidence = 0.0;
+
+    uint width;
+    uint height;
+    uint depth;
+    _BurtGISceneVoxelLightingReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float3 uvw = BurtGIScreenProbeSceneVoxelWorldToUVW(samplePosition);
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return false;
+    }
+
+    uint3 coord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
+    float4 lighting = _BurtGISceneVoxelLightingReadTexture.Load(int4((int3)coord, 0));
+    confidence = saturate(lighting.a);
+    radiance = max(lighting.rgb, 0.0);
+    if (confidence <= 0.001 || dot(radiance, radiance) <= 0.0)
+    {
+        return false;
+    }
+
+    float voxelSizeWS = max(_BurtGISceneVoxelCenterExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
+    float footprintWeight = saturate(voxelSizeWS / max(sampleRadius, voxelSizeWS));
+    confidence *= lerp(0.5, 1.0, footprintWeight);
+    return true;
+}
+
+float3 BurtGIScreenProbeTraceSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+
+bool BurtGIScreenProbeTrySampleSkyRadiance(float3 directionWS, float roughness, out float3 skyRadiance)
+{
+    skyRadiance = 0.0;
+    if (_BurtSkyReflectionEnabled <= 0.5)
+    {
+        return false;
+    }
+
+    float3 safeDirectionWS = BurtGIScreenProbeTraceSafeNormalize(directionWS, float3(0.0, 1.0, 0.0));
+    float2 rotation = _BurtSkyReflectionRotation.xy;
+    float2 rotatedXZ = float2(
+        safeDirectionWS.x * rotation.x - safeDirectionWS.z * rotation.y,
+        safeDirectionWS.x * rotation.y + safeDirectionWS.z * rotation.x);
+    float3 sampleDirectionWS = BurtGIScreenProbeTraceSafeNormalize(
+        float3(rotatedXZ.x, safeDirectionWS.y, rotatedXZ.y),
+        safeDirectionWS);
+    float mipLevel = saturate(roughness) * max(_BurtSkyReflectionMaxMip, 0.0);
+    float4 encodedSky = _BurtSkyReflectionTexture.SampleLevel(sampler_BurtSkyReflectionTexture, sampleDirectionWS, mipLevel);
+    float hdrMultiplier = _BurtSkyReflectionHDR.x * pow(max(abs(encodedSky.a), 0.0001), _BurtSkyReflectionHDR.y);
+    skyRadiance = max(encodedSky.rgb * hdrMultiplier, 0.0) *
+        max(_BurtSkyReflectionTint.rgb, 0.0) *
+        max(_BurtSkyReflectionIntensity, 0.0);
+
+    if (_BurtSkyLowerHemisphereEnabled > 0.5 && safeDirectionWS.y < 0.0)
+    {
+        skyRadiance = lerp(skyRadiance, max(_BurtSkyLowerHemisphereDiffuseColor.rgb, 0.0), saturate(_BurtSkyLowerHemisphereDiffuseColor.a));
+    }
+
+    return dot(skyRadiance, skyRadiance) > 0.000001;
+}
+
+bool BurtGIScreenProbeTrySampleLocalSkyProbe(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maxTraceDistance,
+    out float3 localSkyRadiance,
+    out float localSkyHitDistance)
+{
+    localSkyRadiance = 0.0;
+    localSkyHitDistance = maxTraceDistance;
+    if (_BurtGILocalSkyProbeParams0.w <= 0.5 ||
+        _BurtGILocalSkyProbeParams1.x <= 0.01 ||
+        _BurtGILocalSkyProbeParams1.y <= 0.0)
+    {
+        return false;
+    }
+
+    float3 localSkyOriginWS = _BurtGILocalSkyProbeParams0.xyz;
+    float3 probeOffsetVector = rayOriginWS - localSkyOriginWS;
+    float probeOffsetDistance = length(probeOffsetVector);
+    float probeOffsetDistanceMax = _BurtGILocalSkyProbeParams1.x;
+    if (probeOffsetDistance >= probeOffsetDistanceMax)
+    {
+        return false;
+    }
+
+    float3 safeRayDirectionWS = BurtGIScreenProbeTraceSafeNormalize(rayDirectionWS, float3(0.0, 1.0, 0.0));
+    float traceStep = max(probeOffsetDistanceMax * 2.0 / 50.0, 0.01);
+    float maxTraceSteps = min(50.0, ceil(maxTraceDistance / traceStep));
+    float3 sampleVector = 0.0;
+    float sampledDepth = 0.0;
+
+    [loop]
+    for (int traceStepIndex = 50; traceStepIndex > 0; --traceStepIndex)
+    {
+        if ((float)traceStepIndex > maxTraceSteps)
+        {
+            continue;
+        }
+
+        float3 rayVector = traceStep * (float)traceStepIndex * safeRayDirectionWS;
+        float3 candidateVector = BurtGIScreenProbeTraceSafeNormalize(probeOffsetVector + rayVector, safeRayDirectionWS);
+        float candidateDepth = _BurtGILocalSkyProbeDepthTexture.SampleLevel(
+            sampler_BurtGILocalSkyProbeDepthTexture,
+            candidateVector,
+            0.0).r;
+        if (candidateDepth <= 0.001)
+        {
+            continue;
+        }
+
+        float3 rayEndWS = rayOriginWS + rayVector;
+        float3 hitPositionWS = localSkyOriginWS + candidateVector * candidateDepth;
+        if (distance(rayEndWS, hitPositionWS) >= traceStep)
+        {
+            continue;
+        }
+
+        sampleVector = candidateVector;
+        sampledDepth = candidateDepth;
+        localSkyHitDistance = distance(rayOriginWS, hitPositionWS);
+        break;
+    }
+
+    if (sampledDepth <= 0.001 || localSkyHitDistance >= maxTraceDistance)
+    {
+        return false;
+    }
+
+    float3 localSkyColor = _BurtGILocalSkyProbeColorTexture.SampleLevel(
+        sampler_BurtGILocalSkyProbeColorTexture,
+        sampleVector,
+        0.0).rgb;
+    localSkyRadiance = max(localSkyColor, 0.0) * _BurtGILocalSkyProbeParams1.y;
+    return true;
+}
+
+float3 BurtGIScreenProbeConeLaneDirection(float3 rayDirectionWS, uint laneIndex, float laneAngle)
+{
+    float3 direction = BurtGIScreenProbeTraceSafeNormalize(rayDirectionWS, float3(0.0, 1.0, 0.0));
+    if (laneIndex == 0u || laneAngle <= 0.0001)
+    {
+        return direction;
+    }
+
+    float3 upSeed = abs(direction.y) > 0.92 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
+    float3 tangent = BurtGIScreenProbeTraceSafeNormalize(cross(upSeed, direction), float3(1.0, 0.0, 0.0));
+    float3 bitangent = BurtGIScreenProbeTraceSafeNormalize(cross(direction, tangent), float3(0.0, 0.0, 1.0));
+    float laneSign = laneIndex == 1u ? 1.0 : -1.0;
+    float laneTwist = laneIndex == 1u ? 0.35 : -0.35;
+    float3 coneOffset = tangent * laneSign + bitangent * laneTwist;
+    return BurtGIScreenProbeTraceSafeNormalize(direction + coneOffset * laneAngle, direction);
+}
+
+bool BurtGIScreenProbeTrySampleSceneVoxelConeTraceLane(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maxTraceDistance,
+    float minTraceDistanceBias,
+    float coneHalfAngle,
+    out float3 tracedRadiance,
+    out float tracedConfidence,
+    out float tracedHitDistance)
+{
+    tracedRadiance = 0.0;
+    tracedConfidence = 0.0;
+    tracedHitDistance = maxTraceDistance;
+
+    uint width;
+    uint height;
+    uint depth;
+    _BurtGISceneVoxelLightingReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float voxelSizeWS = max(_BurtGISceneVoxelCenterExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.05);
+    float minTraceDistance = max(max(voxelSizeWS * 0.75, 0.1), minTraceDistanceBias);
+    float traceDistance = minTraceDistance;
+    float traceLimit = max(maxTraceDistance, minTraceDistance + voxelSizeWS);
+    float3 direction = BurtGIScreenProbeTraceSafeNormalize(rayDirectionWS, float3(0.0, 1.0, 0.0));
+    float transparency = 1.0;
+    float accumulatedWeight = 0.0;
+
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < 24u && traceDistance <= traceLimit; ++stepIndex)
+    {
+        float stepFraction = saturate((traceDistance - minTraceDistance) / max(traceLimit - minTraceDistance, 0.001));
+        float sampleRadius = max(voxelSizeWS, traceDistance * max(coneHalfAngle, 0.08));
+        float3 samplePosition = rayOriginWS + direction * traceDistance;
+
+        float coarseOccupancy;
+        if (!BurtGIScreenProbeTrySampleSceneVoxelOccupancy(samplePosition, sampleRadius, coarseOccupancy))
+        {
+            traceDistance += max(voxelSizeWS, sampleRadius);
+            continue;
+        }
+
+        float3 sampleRadiance;
+        float sampleConfidence;
+        float3 sampleNormal;
+        float sampleOccupancy;
+        float normalFacingWeight;
+        if (BurtGIScreenProbeTrySampleSceneVoxelLighting(samplePosition, sampleRadius, sampleRadiance, sampleConfidence) &&
+            BurtGIScreenProbeTrySampleSceneVoxelGeometry(samplePosition, direction, sampleNormal, sampleOccupancy, normalFacingWeight))
+        {
+            float distanceWeight = 1.0 - stepFraction * 0.4;
+            float hitConfidence = saturate(sampleConfidence * max(coarseOccupancy, sampleOccupancy) * normalFacingWeight * distanceWeight);
+            float contributionWeight = hitConfidence * transparency;
+            tracedRadiance += sampleRadiance * contributionWeight;
+            accumulatedWeight += contributionWeight;
+            transparency *= 1.0 - hitConfidence * 0.85;
+            if (hitConfidence > tracedConfidence)
+            {
+                tracedConfidence = hitConfidence;
+                tracedHitDistance = traceDistance;
+            }
+
+            if (transparency < 0.18 || tracedConfidence > 0.78)
+            {
+                break;
+            }
+        }
+
+        traceDistance += max(voxelSizeWS, sampleRadius * lerp(0.9, 1.5, stepFraction));
+    }
+
+    if (accumulatedWeight > 0.0001)
+    {
+        tracedRadiance /= accumulatedWeight;
+        tracedConfidence = saturate(max(tracedConfidence, accumulatedWeight * (1.0 - transparency)));
+    }
+
+    return tracedConfidence > 0.001;
+}
+
+bool BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maxTraceDistance,
+    float minTraceDistanceBias,
+    float coneHalfAngle,
+    out float3 tracedRadiance,
+    out float tracedConfidence,
+    out float tracedHitDistance)
+{
+    tracedRadiance = 0.0;
+    tracedConfidence = 0.0;
+    tracedHitDistance = maxTraceDistance;
+
+    float3 radianceSum = 0.0;
+    float confidenceSum = 0.0;
+    float weightSum = 0.0;
+
+    [unroll]
+    for (uint laneIndex = 0u; laneIndex < 3u; ++laneIndex)
+    {
+        float laneWeight = laneIndex == 0u ? 1.0 : 0.55;
+        float3 laneDirection = BurtGIScreenProbeConeLaneDirection(rayDirectionWS, laneIndex, coneHalfAngle * 0.85);
+        float3 laneRadiance;
+        float laneConfidence;
+        float laneHitDistance;
+        if (!BurtGIScreenProbeTrySampleSceneVoxelConeTraceLane(
+                rayOriginWS,
+                laneDirection,
+                maxTraceDistance,
+                minTraceDistanceBias,
+                coneHalfAngle,
+                laneRadiance,
+                laneConfidence,
+                laneHitDistance))
+        {
+            continue;
+        }
+
+        float distanceWeight = 1.0 - saturate(laneHitDistance / max(maxTraceDistance, 0.001)) * 0.28;
+        float sampleWeight = laneWeight * laneConfidence * distanceWeight;
+        radianceSum += laneRadiance * sampleWeight;
+        confidenceSum += laneConfidence * sampleWeight;
+        weightSum += sampleWeight;
+        if (laneConfidence > tracedConfidence)
+        {
+            tracedHitDistance = laneHitDistance;
+        }
+
+        tracedConfidence = max(tracedConfidence, laneConfidence * laneWeight);
+    }
+
+    if (weightSum <= 0.0001)
+    {
+        return false;
+    }
+
+    tracedRadiance = radianceSum / weightSum;
+    tracedConfidence = saturate(max(tracedConfidence, confidenceSum / weightSum));
+    return tracedConfidence > 0.001;
+}
+
+float BurtGIScreenProbeEvaluateHiZScreenTraceVisibility(float3 originWS, float3 rayDirectionWS, float temporalStepOffset)
+{
+    float screenTraceStrength = saturate(_BurtGIScreenProbeScreenTraceParams.x);
+    if (screenTraceStrength <= 0.0001)
+    {
+        return 1.0;
+    }
+
+    float2 hiZSize = max(_BurtGIScreenProbeScreenTraceParams.zw, 1.0);
+    uint2 hiZSizeUInt = uint2(max(1u, (uint)hiZSize.x), max(1u, (uint)hiZSize.y));
+    float maxTraceDistance = max(_BurtGIScreenProbeScreenTraceParams.y, 0.01);
+    uint maxHiZMip = max(0u, min(12u, (uint)floor(log2(max(hiZSize.x, hiZSize.y)))));
+    float visibility = 1.0;
+
+    [unroll]
+    for (uint stepIndex = 0u; stepIndex < 6u; ++stepIndex)
+    {
+        float stepT = saturate(((float)stepIndex + 0.5 + temporalStepOffset * 0.75) / 6.0);
+        float3 samplePositionWS = originWS + rayDirectionWS * (maxTraceDistance * stepT);
+        float2 sampleUV;
+        float sampleRawDepth;
+        if (!BurtGIScreenProbeProjectPositionWS(samplePositionWS, sampleUV, sampleRawDepth))
+        {
+            continue;
+        }
+
+        float footprintPixels = max(1.0, maxTraceDistance * (0.45 + stepT * 2.25));
+        uint mipLevel = min(maxHiZMip, (uint)floor(log2(footprintPixels)));
+        uint2 mipSize = uint2(
+            max(hiZSizeUInt.x >> mipLevel, 1u),
+            max(hiZSizeUInt.y >> mipLevel, 1u));
+        uint2 samplePixel = min((uint2)(sampleUV * (float2)mipSize), mipSize - 1u);
+        float sceneRawDepth = _BurtHiZDepthTexture.Load(int3(samplePixel, mipLevel));
+        if (BurtGIScreenProbeTraceCompactIsSkyDepth(sceneRawDepth))
+        {
+            continue;
+        }
+
+#if defined(UNITY_REVERSED_Z)
+        float depthDelta = sceneRawDepth - sampleRawDepth;
+#else
+        float depthDelta = sampleRawDepth - sceneRawDepth;
+#endif
+        float thickness = lerp(0.0005, 0.0125, saturate(stepT)) * (1.0 + (float)mipLevel * 0.35);
+        float hit = smoothstep(thickness, thickness * 4.0, depthDelta);
+        float mipConfidence = 1.0 - saturate((float)mipLevel / max((float)maxHiZMip, 1.0)) * 0.25;
+        visibility = min(visibility, 1.0 - hit * mipConfidence);
+    }
+
+    return lerp(1.0, visibility, screenTraceStrength);
+}
+
+bool BurtGIScreenProbeHasValidPlacement(uint2 screenProbeCoord);
+
+bool BurtGIScreenProbeTryHiZScreenTraceRadiance(
+    float3 originWS,
+    float3 rayDirectionWS,
+    uint2 sourceProbeCoord,
+    uint2 traceTexelCoord,
+    uint2 screenProbeGridSize,
+    float maxTraceDistanceWS,
+    float directionalEnergy,
+    out float3 screenTraceRadiance,
+    out float screenTraceConfidence,
+    out float screenTraceDistance)
+{
+    screenTraceRadiance = 0.0;
+    screenTraceConfidence = 0.0;
+    screenTraceDistance = maxTraceDistanceWS;
+
+    float screenTraceStrength = saturate(_BurtGIScreenProbeScreenTraceParams.x);
+    if (screenTraceStrength <= 0.0001)
+    {
+        return false;
+    }
+
+    float2 hiZSize = max(_BurtGIScreenProbeScreenTraceParams.zw, 1.0);
+    uint2 hiZSizeUInt = uint2(max(1u, (uint)hiZSize.x), max(1u, (uint)hiZSize.y));
+    uint maxHiZMip = max(0u, min(12u, (uint)floor(log2(max(hiZSize.x, hiZSize.y)))));
+    float maxTraceDistance = max(maxTraceDistanceWS, 0.01);
+    uint temporalHash = _BurtGIRadianceCacheClipMapFrameIndex +
+        sourceProbeCoord.x * 17u +
+        sourceProbeCoord.y * 131u +
+        traceTexelCoord.x * 37u +
+        traceTexelCoord.y * 73u;
+    float temporalStepOffset = (float)(temporalHash & 7u) * 0.125;
+    float bestHit = 0.0;
+
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < 10u; ++stepIndex)
+    {
+        float stepT = saturate(((float)stepIndex + 0.35 + temporalStepOffset) / 10.0);
+        float sampleDistance = maxTraceDistance * stepT;
+        float3 samplePositionWS = originWS + rayDirectionWS * sampleDistance;
+        float2 sampleUV;
+        float sampleRawDepth;
+        if (!BurtGIScreenProbeProjectPositionWS(samplePositionWS, sampleUV, sampleRawDepth))
+        {
+            continue;
+        }
+
+        float footprintPixels = max(1.0, sampleDistance * (0.65 + stepT * 1.85));
+        uint mipLevel = min(maxHiZMip, (uint)floor(log2(footprintPixels)));
+        uint2 mipSize = uint2(
+            max(hiZSizeUInt.x >> mipLevel, 1u),
+            max(hiZSizeUInt.y >> mipLevel, 1u));
+        uint2 samplePixel = min((uint2)(sampleUV * (float2)mipSize), mipSize - 1u);
+        float sceneRawDepth = _BurtHiZDepthTexture.Load(int3(samplePixel, mipLevel));
+        if (BurtGIScreenProbeTraceCompactIsSkyDepth(sceneRawDepth))
+        {
+            continue;
+        }
+
+#if defined(UNITY_REVERSED_Z)
+        float depthDelta = sceneRawDepth - sampleRawDepth;
+#else
+        float depthDelta = sampleRawDepth - sceneRawDepth;
+#endif
+        float thickness = lerp(0.0006, 0.018, saturate(stepT)) * (1.0 + (float)mipLevel * 0.45);
+        float hit = smoothstep(thickness, thickness * 3.0, depthDelta);
+        if (hit <= bestHit)
+        {
+            continue;
+        }
+
+        uint2 hitProbeCoord = min((uint2)(sampleUV * (float2)screenProbeGridSize), screenProbeGridSize - 1u);
+        if (all(hitProbeCoord == sourceProbeCoord) || !BurtGIScreenProbeHasValidPlacement(hitProbeCoord))
+        {
+            continue;
+        }
+
+        float4 hitNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(hitProbeCoord, 0));
+        float3 hitNormalWS = BurtGIScreenProbeDecodeNormalWS(hitNormal);
+        float facingWeight = saturate(dot(hitNormalWS, -rayDirectionWS) * 0.5 + 0.5);
+        float4 hitRadiance = _BurtGIScreenProbeRadianceTexture.Load(int3(hitProbeCoord, 0));
+        float4 hitIrradiance = _BurtGIScreenProbeIrradianceTexture.Load(int3(hitProbeCoord, 0));
+        float4 hitConfidence = _BurtGIScreenProbeConfidenceTexture.Load(int3(hitProbeCoord, 0));
+        float hitEnergy = saturate(max(hitRadiance.a, hitConfidence.g));
+        float hitProbeConfidence = saturate(min(hitIrradiance.a, hitConfidence.r));
+        float mipConfidence = 1.0 - saturate((float)mipLevel / max((float)maxHiZMip, 1.0)) * 0.3;
+        float candidateConfidence = saturate(hit * facingWeight * hitEnergy * hitProbeConfidence * mipConfidence * (1.0 - stepT * 0.25));
+        if (candidateConfidence > screenTraceConfidence)
+        {
+            bestHit = hit;
+            screenTraceRadiance = max(hitRadiance.rgb, hitIrradiance.rgb * 0.65) * directionalEnergy;
+            screenTraceConfidence = candidateConfidence * screenTraceStrength;
+            screenTraceDistance = sampleDistance;
+        }
+    }
+
+    return screenTraceConfidence > 0.001;
+}
+
+uint BurtGIEncodeScreenProbeTraceTexel(uint screenProbeIndex, uint2 traceTexelCoord)
+{
+    return (screenProbeIndex & 0xfffffu) | ((traceTexelCoord.x & 0x1fu) << 20) | ((traceTexelCoord.y & 0x1fu) << 25);
+}
+
+void BurtGIDecodeScreenProbeTraceTexel(uint traceTexelData, out uint screenProbeIndex, out uint2 traceTexelCoord)
+{
+    screenProbeIndex = traceTexelData & 0xfffffu;
+    traceTexelCoord.x = (traceTexelData >> 20) & 0x1fu;
+    traceTexelCoord.y = (traceTexelData >> 25) & 0x1fu;
+}
+
+uint BurtGIPackScreenProbeImportanceRayInfo(uint2 texelCoord, uint level)
+{
+    return (texelCoord.x & 0x3fu) | ((texelCoord.y & 0x3fu) << 6) | ((level & 0xfu) << 12);
+}
+
+void BurtGIUnpackScreenProbeImportanceRayInfo(uint rayInfo, out uint2 texelCoord, out uint level)
+{
+    texelCoord.x = rayInfo & 0x3fu;
+    texelCoord.y = (rayInfo >> 6) & 0x3fu;
+    level = (rayInfo >> 12) & 0xfu;
+}
+
+uint2 BurtGIPackScreenProbeImportanceRaySortInfo(uint2 texelCoord, uint level, float pdf)
+{
+    return uint2((texelCoord.x & 0xffu) | ((texelCoord.y & 0xffu) << 8) | ((level & 0xffu) << 16), asuint(pdf));
+}
+
+void BurtGIUnpackScreenProbeImportanceRaySortInfo(uint2 sortInfo, out uint2 texelCoord, out uint level, out float pdf)
+{
+    texelCoord.x = sortInfo.x & 0xffu;
+    texelCoord.y = (sortInfo.x >> 8) & 0xffu;
+    level = (sortInfo.x >> 16) & 0xffu;
+    pdf = asfloat(sortInfo.y);
+}
+
+uint BurtGIPackScreenProbeAdaptiveProbeData(uint2 adaptiveFineProbeCoord, uint adaptiveLevel)
+{
+    return (adaptiveFineProbeCoord.x & 0x3fffu) | ((adaptiveFineProbeCoord.y & 0x3fffu) << 14) | ((adaptiveLevel & 0xfu) << 28);
+}
+
+void BurtGIUnpackScreenProbeAdaptiveProbeData(uint packedProbeData, out uint2 adaptiveFineProbeCoord, out uint adaptiveLevel)
+{
+    adaptiveFineProbeCoord.x = packedProbeData & 0x3fffu;
+    adaptiveFineProbeCoord.y = (packedProbeData >> 14) & 0x3fffu;
+    adaptiveLevel = (packedProbeData >> 28) & 0xfu;
+}
+
+uint2 BurtGIAdaptiveFineProbeCoordToBaseCoord(uint2 adaptiveFineProbeCoord, uint adaptiveLevel, uint2 screenProbeGridSize)
+{
+    uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
+    return min(adaptiveFineProbeCoord / max(1u, adaptiveSubGridSize), screenProbeGridSize - 1u);
+}
+
+uint BurtGIGetScreenProbeUniformCount(uint screenProbeWidth, uint screenProbeHeight)
+{
+    return max(1u, screenProbeWidth * screenProbeHeight);
+}
+
+uint BurtGIGetScreenProbeAdaptiveCount(uint maxAdaptiveProbeCount)
+{
+    return min(_BurtGIScreenProbeAdaptiveProbeNumBuffer[0], maxAdaptiveProbeCount);
+}
+
+bool BurtGIResolveScreenProbeSourceAndAtlasCoord(
+    uint screenProbeIndex,
+    uint screenProbeWidth,
+    uint screenProbeHeight,
+    uint maxAdaptiveProbeCount,
+    out uint2 sourceScreenProbeCoord,
+    out uint2 atlasScreenProbeCoord)
+{
+    uint uniformProbeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
+    atlasScreenProbeCoord = uint2(screenProbeIndex % screenProbeWidth, screenProbeIndex / screenProbeWidth);
+    if (screenProbeIndex < uniformProbeCount)
+    {
+        sourceScreenProbeCoord = atlasScreenProbeCoord;
+        return sourceScreenProbeCoord.y < screenProbeHeight;
+    }
+
+    uint adaptiveProbeIndex = screenProbeIndex - uniformProbeCount;
+    if (adaptiveProbeIndex >= BurtGIGetScreenProbeAdaptiveCount(maxAdaptiveProbeCount))
+    {
+        sourceScreenProbeCoord = uint2(0u, 0u);
+        return false;
+    }
+
+    uint adaptiveLevel;
+    uint2 adaptiveFineProbeCoord;
+    BurtGIUnpackScreenProbeAdaptiveProbeData(
+        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex],
+        adaptiveFineProbeCoord,
+        adaptiveLevel);
+    sourceScreenProbeCoord = BurtGIAdaptiveFineProbeCoordToBaseCoord(
+        adaptiveFineProbeCoord,
+        adaptiveLevel,
+        uint2(screenProbeWidth, screenProbeHeight));
+    return sourceScreenProbeCoord.x < screenProbeWidth && sourceScreenProbeCoord.y < screenProbeHeight;
+}
+
+float3 BurtGIOctahedralDirectionFromUV(float2 octUV)
+{
+    float2 f = octUV * 2.0 - 1.0;
+    float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    if (n.z < 0.0)
+    {
+        float2 signNotZero = float2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+        n.xy = (1.0 - abs(n.yx)) * signNotZero;
+    }
+
+    return normalize(n);
+}
+
+float3 BurtGIEquiAreaSphericalMapping(float2 uv)
+{
+    uv = 2.0 * uv - 1.0;
+    float d = 1.0 - (abs(uv.x) + abs(uv.y));
+    float r = 1.0 - abs(d);
+    float phi = r == 0.0 ? 0.0 : 0.7853981633974483 * ((abs(uv.y) - abs(uv.x)) / r + 1.0);
+    float f = r * sqrt(max(2.0 - r * r, 0.0));
+    return normalize(float3(
+        f * sign(uv.y) * abs(sin(phi)),
+        sign(d) * (1.0 - r * r),
+        f * sign(uv.x) * abs(cos(phi))));
+}
+
+uint2 BurtGIOctahedralMapWrapBorder(uint2 texelCoord, uint resolution, uint borderSize)
+{
+    if (texelCoord.x < borderSize)
+    {
+        texelCoord.x = borderSize - 1u + borderSize - texelCoord.x;
+        texelCoord.y = resolution - 1u - texelCoord.y;
+    }
+
+    if (texelCoord.x >= resolution - borderSize)
+    {
+        texelCoord.x = (resolution - borderSize) - (texelCoord.x - (resolution - borderSize - 1u));
+        texelCoord.y = resolution - 1u - texelCoord.y;
+    }
+
+    if (texelCoord.y < borderSize)
+    {
+        texelCoord.y = borderSize - 1u + borderSize - texelCoord.y;
+        texelCoord.x = resolution - 1u - texelCoord.x;
+    }
+
+    if (texelCoord.y >= resolution - borderSize)
+    {
+        texelCoord.y = (resolution - borderSize) - (texelCoord.y - (resolution - borderSize - 1u));
+        texelCoord.x = resolution - 1u - texelCoord.x;
+    }
+
+    return texelCoord - borderSize;
+}
+
+float4 BurtGISHBasis3V0(float3 direction)
+{
+    return float4(
+        0.28209479,
+        -0.48860251 * direction.y,
+        0.48860251 * direction.z,
+        -0.48860251 * direction.x);
+}
+
+float4 BurtGISHBasis3V1(float3 direction)
+{
+    return float4(
+        1.09254843 * direction.x * direction.y,
+        -1.09254843 * direction.y * direction.z,
+        0.31539157 * (3.0 * direction.z * direction.z - 1.0),
+        -1.09254843 * direction.x * direction.z);
+}
+
+float BurtGISHBasis3V2(float3 direction)
+{
+    return 0.54627422 * (direction.x * direction.x - direction.y * direction.y);
+}
+
+float3 BurtGIEvaluateDiffuseTransferSH3(
+    float3 direction,
+    float3 sh0,
+    float3 sh1,
+    float3 sh2,
+    float3 sh3,
+    float3 sh4,
+    float3 sh5,
+    float3 sh6,
+    float3 sh7,
+    float3 sh8)
+{
+    float4 basis0 = BurtGISHBasis3V0(direction) * float4(1.0, 0.66666667, 0.66666667, 0.66666667);
+    float4 basis1 = BurtGISHBasis3V1(direction) * 0.25;
+    float basis2 = BurtGISHBasis3V2(direction) * 0.25;
+    float3 irradiance = 0.0;
+    irradiance.r = dot(float4(sh0.r, sh1.r, sh2.r, sh3.r), basis0) + dot(float4(sh4.r, sh5.r, sh6.r, sh7.r), basis1) + sh8.r * basis2;
+    irradiance.g = dot(float4(sh0.g, sh1.g, sh2.g, sh3.g), basis0) + dot(float4(sh4.g, sh5.g, sh6.g, sh7.g), basis1) + sh8.g * basis2;
+    irradiance.b = dot(float4(sh0.b, sh1.b, sh2.b, sh3.b), basis0) + dot(float4(sh4.b, sh5.b, sh6.b, sh7.b), basis1) + sh8.b * basis2;
+    return max(irradiance * 12.5663706, 0.0);
+}
+
+bool BurtGIScreenProbeHasValidPlacement(uint2 screenProbeCoord)
+{
+    float rawDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(screenProbeCoord, 0));
+    return encodedNormal.a > 0.5f &&
+        encodedPosition.a > 0.5f &&
+        !BurtGIScreenProbeTraceCompactIsSkyDepth(rawDepth);
+}
+
+bool BurtGIResolveScreenProbeTraceSourcePlacement(
+    uint screenProbeIndex,
+    uint screenProbeWidth,
+    uint screenProbeHeight,
+    uint maxAdaptiveProbeCount,
+    uint2 sourceScreenProbeCoord,
+    out float3 sourcePositionWS,
+    out float3 sourceNormalWS)
+{
+    sourcePositionWS = 0.0;
+    sourceNormalWS = float3(0.0, 1.0, 0.0);
+
+    uint uniformProbeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
+    if (screenProbeIndex < uniformProbeCount)
+    {
+        if (!BurtGIScreenProbeHasValidPlacement(sourceScreenProbeCoord))
+        {
+            return false;
+        }
+
+        float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(sourceScreenProbeCoord, 0));
+        float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(sourceScreenProbeCoord, 0));
+        sourcePositionWS = encodedPosition.xyz;
+        sourceNormalWS = BurtGIScreenProbeDecodeNormalWS(encodedNormal);
+        return true;
+    }
+
+    uint adaptiveProbeIndex = screenProbeIndex - uniformProbeCount;
+    if (adaptiveProbeIndex >= BurtGIGetScreenProbeAdaptiveCount(maxAdaptiveProbeCount))
+    {
+        return false;
+    }
+
+    uint adaptiveLevel;
+    uint2 adaptiveFineProbeCoord;
+    BurtGIUnpackScreenProbeAdaptiveProbeData(
+        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex],
+        adaptiveFineProbeCoord,
+        adaptiveLevel);
+
+    uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
+    uint2 baseProbeCoord = min(
+        adaptiveFineProbeCoord / max(1u, adaptiveSubGridSize),
+        uint2(screenProbeWidth - 1u, screenProbeHeight - 1u));
+    uint2 adaptiveCellCoord = adaptiveFineProbeCoord - baseProbeCoord * adaptiveSubGridSize;
+    float2 adaptiveCellUV = (float2(adaptiveCellCoord) + 0.5f) / (float)max(1u, adaptiveSubGridSize);
+    float2 bilinearUV = saturate(adaptiveCellUV);
+    float4 bilinearWeights = float4(
+        (1.0 - bilinearUV.x) * (1.0 - bilinearUV.y),
+        bilinearUV.x * (1.0 - bilinearUV.y),
+        (1.0 - bilinearUV.x) * bilinearUV.y,
+        bilinearUV.x * bilinearUV.y);
+
+    uint2 rightProbeCoord = uint2(min(baseProbeCoord.x + 1u, screenProbeWidth - 1u), baseProbeCoord.y);
+    uint2 downProbeCoord = uint2(baseProbeCoord.x, min(baseProbeCoord.y + 1u, screenProbeHeight - 1u));
+    uint2 rightDownProbeCoord = uint2(rightProbeCoord.x, downProbeCoord.y);
+    float rawDepth00 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(baseProbeCoord, 0));
+    float rawDepth10 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(rightProbeCoord, 0));
+    float rawDepth01 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(downProbeCoord, 0));
+    float rawDepth11 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(rightDownProbeCoord, 0));
+    float4 encodedNormal00 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(baseProbeCoord, 0));
+    float4 encodedNormal10 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(rightProbeCoord, 0));
+    float4 encodedNormal01 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(downProbeCoord, 0));
+    float4 encodedNormal11 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(rightDownProbeCoord, 0));
+    float4 encodedPosition00 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(baseProbeCoord, 0));
+    float4 encodedPosition10 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightProbeCoord, 0));
+    float4 encodedPosition01 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(downProbeCoord, 0));
+    float4 encodedPosition11 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightDownProbeCoord, 0));
+    bool valid00 = encodedNormal00.a > 0.5f && encodedPosition00.a > 0.5f && !BurtGIScreenProbeTraceCompactIsSkyDepth(rawDepth00);
+    bool valid10 = encodedNormal10.a > 0.5f && encodedPosition10.a > 0.5f && !BurtGIScreenProbeTraceCompactIsSkyDepth(rawDepth10);
+    bool valid01 = encodedNormal01.a > 0.5f && encodedPosition01.a > 0.5f && !BurtGIScreenProbeTraceCompactIsSkyDepth(rawDepth01);
+    bool valid11 = encodedNormal11.a > 0.5f && encodedPosition11.a > 0.5f && !BurtGIScreenProbeTraceCompactIsSkyDepth(rawDepth11);
+    float4 validWeights = bilinearWeights * float4(valid00 ? 1.0 : 0.0, valid10 ? 1.0 : 0.0, valid01 ? 1.0 : 0.0, valid11 ? 1.0 : 0.0);
+    float validWeightSum = dot(validWeights, float4(1.0, 1.0, 1.0, 1.0));
+    if (validWeightSum <= 0.0001f)
+    {
+        return false;
+    }
+
+    float invValidWeightSum = rcp(validWeightSum);
+    float3 normal00 = valid00 ? BurtGIScreenProbeDecodeNormalWS(encodedNormal00) : sourceNormalWS;
+    float3 normal10 = valid10 ? BurtGIScreenProbeDecodeNormalWS(encodedNormal10) : normal00;
+    float3 normal01 = valid01 ? BurtGIScreenProbeDecodeNormalWS(encodedNormal01) : normal00;
+    float3 normal11 = valid11 ? BurtGIScreenProbeDecodeNormalWS(encodedNormal11) : normal00;
+    sourcePositionWS =
+        (encodedPosition00.xyz * validWeights.x +
+            encodedPosition10.xyz * validWeights.y +
+            encodedPosition01.xyz * validWeights.z +
+            encodedPosition11.xyz * validWeights.w) * invValidWeightSum;
+    sourceNormalWS = BurtGIScreenProbeTraceSafeNormalize(
+        normal00 * validWeights.x +
+        normal10 * validWeights.y +
+        normal01 * validWeights.z +
+        normal11 * validWeights.w,
+        normal00);
+    return true;
+}
+
+float BurtGIScreenProbeTransferPDFNeighborhoodWeight(
+    uint2 sampleProbeCoord,
+    float3 sourcePositionWS,
+    float3 sourceNormalWS,
+    out float3 sampleNormalWS)
+{
+    sampleNormalWS = sourceNormalWS;
+    if (!BurtGIScreenProbeHasValidPlacement(sampleProbeCoord))
+    {
+        return 0.0;
+    }
+
+    float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(sampleProbeCoord, 0));
+    float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(sampleProbeCoord, 0));
+    sampleNormalWS = BurtGIScreenProbeDecodeNormalWS(encodedNormal);
+    float3 samplePositionWS = encodedPosition.xyz;
+    float sampleDistance = max(distance(sourcePositionWS, samplePositionWS), 0.05);
+    float planeDistance = abs(dot(sourcePositionWS - samplePositionWS, sampleNormalWS));
+    float relativePlaneDistance = planeDistance / sampleDistance;
+    float planeWeight = exp2(-32.0 * relativePlaneDistance * relativePlaneDistance);
+    float normalWeight = saturate(dot(sourceNormalWS, sampleNormalWS) * 0.5 + 0.5);
+    return planeWeight * normalWeight;
+}
+
+float BurtGIScreenProbeLoadImportancePDF(uint2 screenProbeCoord, uint2 traceTexelCoord, uint traceResolution)
+{
+    uint2 pdfTexelCoord = traceTexelCoord;
+    if (traceResolution != BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER)
+    {
+        float2 normalizedTraceTexel = (float2(traceTexelCoord) + 0.5) / max(1.0, (float)traceResolution);
+        pdfTexelCoord = min(
+            (uint2)(normalizedTraceTexel * (float)BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER),
+            BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER - 1u);
+    }
+
+    uint2 pdfAtlasCoord = screenProbeCoord * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER + pdfTexelCoord;
+    return saturate(_BurtGIScreenProbeImportancePDFTexture.Load(int3(pdfAtlasCoord, 0)));
+}
+
+float3 BurtGIScreenProbeTraceGridStepDirection(float3 rayDirection, float3 sourceNormal)
+{
+    float2 gridDirection = rayDirection.xy;
+    if (dot(gridDirection, gridDirection) < 0.0001f)
+    {
+        gridDirection = sourceNormal.xy;
+    }
+
+    if (dot(gridDirection, gridDirection) < 0.0001f)
+    {
+        gridDirection = float2(1.0f, 0.0f);
+    }
+
+    gridDirection /= max(0.0001f, max(abs(gridDirection.x), abs(gridDirection.y)));
+    return float3(gridDirection, rayDirection.z);
+}
+
+void BurtGIScreenProbeEvaluateSceneTraceCandidate(
+    uint2 sourceProbeCoord,
+    uint2 sampleProbeCoord,
+    float3 sourcePositionWS,
+    float3 sourceNormalWS,
+    float3 rayDirection,
+    float directionalEnergy,
+    uint sourceTraceLevel,
+    float coneRadiusScale,
+    inout float bestSceneTraceHit,
+    inout float bestSceneTraceConfidence,
+    inout float bestSceneTraceDistance,
+    inout float3 bestSceneTraceRadiance)
+{
+    if (all(sampleProbeCoord == sourceProbeCoord) ||
+        !BurtGIScreenProbeHasValidPlacement(sampleProbeCoord))
+    {
+        return;
+    }
+
+    float4 samplePosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(sampleProbeCoord, 0));
+    float4 sampleNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(sampleProbeCoord, 0));
+    float3 toSample = samplePosition.xyz - sourcePositionWS;
+    float sampleDistance = length(toSample);
+    if (sampleDistance <= 0.0001f)
+    {
+        return;
+    }
+
+    float rayDistance = dot(toSample, rayDirection);
+    float forwardWeight = saturate((rayDistance / max(sampleDistance, 0.0001f) - 0.05f) * 1.0526316f);
+    if (forwardWeight <= 0.0f)
+    {
+        return;
+    }
+
+    float3 closestRayPosition = sourcePositionWS + rayDirection * max(rayDistance, 0.0f);
+    float rayLineDistance = length(samplePosition.xyz - closestRayPosition);
+    float rayConeRadius = max(0.08f, 0.075f * rayDistance * coneRadiusScale + 0.25f * (float)sourceTraceLevel);
+    float rayLineWeight = saturate(1.0f - rayLineDistance / rayConeRadius);
+    float3 sampleNormalWS = BurtGIScreenProbeDecodeNormalWS(sampleNormal);
+    float facingWeight = saturate(dot(sampleNormalWS, -rayDirection) * 0.5f + 0.5f);
+    float normalContinuityWeight = saturate(1.0f - dot(sampleNormalWS, sourceNormalWS) * 0.35f);
+    float4 sampleRadiance = _BurtGIScreenProbeRadianceTexture.Load(int3(sampleProbeCoord, 0));
+    float4 sampleIrradiance = _BurtGIScreenProbeIrradianceTexture.Load(int3(sampleProbeCoord, 0));
+    float4 sampleConfidence = _BurtGIScreenProbeConfidenceTexture.Load(int3(sampleProbeCoord, 0));
+    float sampleHitRatio = saturate(max(sampleRadiance.a, sampleConfidence.g));
+    float sampleConfidenceValue = saturate(min(sampleIrradiance.a, sampleConfidence.r));
+    float distanceWeight = rcp(1.0f + sampleDistance * 0.15f);
+    float candidateTraceHit = saturate(forwardWeight * rayLineWeight * facingWeight * normalContinuityWeight * sampleHitRatio * sampleConfidenceValue * distanceWeight);
+    if (candidateTraceHit > bestSceneTraceHit)
+    {
+        bestSceneTraceHit = candidateTraceHit;
+        bestSceneTraceConfidence = sampleConfidenceValue;
+        bestSceneTraceDistance = sampleDistance;
+        bestSceneTraceRadiance = max(sampleRadiance.rgb, sampleIrradiance.rgb * 0.65f) * directionalEnergy;
+    }
+}
+
+uint BurtGIRadianceCacheHashGridCellCount()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheHashGridParams1.y);
+}
+
+uint BurtGIRadianceCacheHashGridTileCount()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheHashGridParams1.x);
+}
+
+uint BurtGIRadianceCacheHashGridCellsPerTile()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheHashGridParams1.z);
+}
+
+uint BurtGIRadianceCacheHashGridBucketCount()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheHashGridParams0.z);
+}
+
+uint BurtGIRadianceCacheHashGridTilesPerBucket()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheHashGridParams0.w);
+}
+
+uint BurtGIRadianceCacheHashGridHash(uint3 value)
+{
+    uint h = value.x * 0x8da6b343u;
+    h ^= value.y * 0xd8163841u;
+    h ^= value.z * 0xcb1ab31fu;
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    h *= 0x846ca68bu;
+    h ^= h >> 16;
+    return h;
+}
+
+float BurtGIScreenProbeInterleavedGradientNoise(uint2 coord, uint temporalIndex)
+{
+    uint hash = BurtGIRadianceCacheHashGridHash(uint3(coord.x, coord.y, temporalIndex));
+    return (float)(hash & 0x00ffffffu) * (1.0 / 16777216.0);
+}
+
+float2 BurtGIScreenProbeBlueNoiseVec2(uint2 coord, uint temporalIndex)
+{
+    return float2(
+        BurtGIScreenProbeInterleavedGradientNoise(coord, temporalIndex),
+        BurtGIScreenProbeInterleavedGradientNoise(coord ^ uint2(0x9e37u, 0x7f4au), temporalIndex + 17u));
+}
+
+uint BurtGIRadianceCacheHashGridTileHash(float3 worldPosition, float3 rayDirection)
+{
+    float cellSize = max(0.001, _BurtGIRadianceCacheHashGridParams0.x);
+    float tileCellRatio = max(1.0, _BurtGIRadianceCacheHashGridParams0.y);
+    float tileSize = cellSize * tileCellRatio;
+    int3 signedTileCoord = (int3)floor(worldPosition / tileSize);
+    int3 signedDirectionCoord = (int3)floor(0.5 + (0.5 * rayDirection + 0.5) * 4.0);
+    uint3 tileKey = uint3((uint)signedTileCoord.x, (uint)signedTileCoord.y, (uint)signedTileCoord.z);
+    uint3 directionKey = uint3((uint)signedDirectionCoord.x, (uint)signedDirectionCoord.y, (uint)signedDirectionCoord.z);
+    uint hash = BurtGIRadianceCacheHashGridHash(tileKey ^ (directionKey * 0x9e3779b9u));
+    return hash == 0xffffffffu ? 0xfffffffeu : max(1u, hash);
+}
+
+uint2 BurtGIRadianceCacheHashGridLocalCellCoordMip0(float3 worldPosition, float3 rayDirection)
+{
+    float cellSize = max(0.001, _BurtGIRadianceCacheHashGridParams0.x);
+    uint tileCellRatio = max(1u, (uint)_BurtGIRadianceCacheHashGridParams0.y);
+    float tileSize = cellSize * (float)tileCellRatio;
+    int3 signedTileCoord = (int3)floor(worldPosition / tileSize);
+    int3 signedCellCoord = (int3)floor(worldPosition / cellSize) - signedTileCoord * (int)tileCellRatio;
+    uint3 maxCellCoord = uint3(tileCellRatio - 1u, tileCellRatio - 1u, tileCellRatio - 1u);
+    uint3 cellCoord = min(uint3((uint)signedCellCoord.x, (uint)signedCellCoord.y, (uint)signedCellCoord.z), maxCellCoord);
+    float3 absDirection = abs(rayDirection);
+    float maxDirection = max(max(absDirection.x, absDirection.y), absDirection.z);
+    uint2 cellOffsetMip0 = absDirection.x == maxDirection
+        ? uint2(cellCoord.y, cellCoord.z)
+        : (absDirection.y == maxDirection ? uint2(cellCoord.x, cellCoord.z) : uint2(cellCoord.x, cellCoord.y));
+    return min(cellOffsetMip0, uint2(tileCellRatio - 1u, tileCellRatio - 1u));
+}
+
+uint BurtGIRadianceCacheHashGridMipLocalCellIndex(uint2 cellCoordMip0, uint mipLevel)
+{
+    if (mipLevel == 0u)
+    {
+        return BURT_GI_HASH_GRID_TILE_MIP0_OFFSET + cellCoordMip0.x + cellCoordMip0.y * 8u;
+    }
+
+    if (mipLevel == 1u)
+    {
+        uint2 mipCoord = min(cellCoordMip0 >> 1u, uint2(3u, 3u));
+        return BURT_GI_HASH_GRID_TILE_MIP1_OFFSET + mipCoord.x + mipCoord.y * 4u;
+    }
+
+    if (mipLevel == 2u)
+    {
+        uint2 mipCoord = min(cellCoordMip0 >> 2u, uint2(1u, 1u));
+        return BURT_GI_HASH_GRID_TILE_MIP2_OFFSET + mipCoord.x + mipCoord.y * 2u;
+    }
+
+    return BURT_GI_HASH_GRID_TILE_MIP3_OFFSET;
+}
+
+uint BurtGIRadianceCacheHashGridLocalCell(float3 worldPosition, float3 rayDirection)
+{
+    return BurtGIRadianceCacheHashGridMipLocalCellIndex(
+        BurtGIRadianceCacheHashGridLocalCellCoordMip0(worldPosition, rayDirection),
+        0u);
+}
+
+bool BurtGIRadianceCacheHashGridFindTile(uint tileHash, out uint tileIndex)
+{
+    uint bucketIndex = BurtGIRadianceCacheHashGridHash(uint3(tileHash, tileHash >> 7, tileHash >> 17)) % BurtGIRadianceCacheHashGridBucketCount();
+    uint tilesPerBucket = BurtGIRadianceCacheHashGridTilesPerBucket();
+    tileIndex = 0xffffffffu;
+
+    [loop]
+    for (uint bucketOffset = 0u; bucketOffset < tilesPerBucket; ++bucketOffset)
+    {
+        uint candidateTileIndex = bucketIndex * tilesPerBucket + bucketOffset;
+        if (candidateTileIndex >= BurtGIRadianceCacheHashGridTileCount())
+        {
+            break;
+        }
+
+        uint4 tileValue = _BurtGIRadianceCacheHashGridTileBuffer[candidateTileIndex];
+        if (tileValue.x == 0xffffffffu)
+        {
+            break;
+        }
+
+        if (tileValue.x == tileHash)
+        {
+            tileIndex = candidateTileIndex;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+uint BurtGIRadianceCacheHashGridCellIndexFromTile(uint tileIndex, uint localCellIndex)
+{
+    return min(tileIndex * BurtGIRadianceCacheHashGridCellsPerTile() + localCellIndex, BurtGIRadianceCacheHashGridCellCount() - 1u);
+}
+
+float4 BurtGIRadianceCacheHashGridUnpackRadiance(uint4 packedValue)
+{
+    uint2 packedRadiance = packedValue.xy;
+    float3 radiance = float3(
+        (float)(packedRadiance.x & 0xffffu),
+        (float)((packedRadiance.x >> 16) & 0xffffu),
+        (float)(packedRadiance.y & 0xffffu)) / 65535.0 * 8.0;
+    float sampleWeight = (float)((packedRadiance.y >> 16) & 0xffffu) / 65535.0;
+    return float4(radiance, sampleWeight);
+}
+
+uint BurtGIRadianceCacheHashGridFrameDelta(uint frameIndex, uint lastUpdateFrame)
+{
+    if (lastUpdateFrame == 0xffffffffu)
+    {
+        return BURT_GI_HASH_GRID_TILE_DECAY_MAX;
+    }
+
+    return frameIndex >= lastUpdateFrame
+        ? frameIndex - lastUpdateFrame
+        : (0xffffffffu - lastUpdateFrame) + frameIndex + 1u;
+}
+
+float BurtGIRadianceCacheHashGridAgeConfidenceScale(uint4 packedValue)
+{
+    uint frameDelta = BurtGIRadianceCacheHashGridFrameDelta(_BurtGIRadianceCacheClipMapFrameIndex, packedValue.z);
+    return 1.0 - saturate((float)frameDelta / (float)BURT_GI_HASH_GRID_TILE_DECAY_MAX);
+}
+
+float4 BurtGIRadianceCacheHashGridFilteredRadiance(uint tileIndex, uint2 localCellCoordMip0, out uint selectedMipLevel)
+{
+    selectedMipLevel = 0u;
+    uint mip0Index = BurtGIRadianceCacheHashGridCellIndexFromTile(
+        tileIndex,
+        BurtGIRadianceCacheHashGridMipLocalCellIndex(localCellCoordMip0, 0u));
+    uint4 mip0PackedValue = _BurtGIRadianceCacheHashGridValueBuffer[mip0Index];
+    float4 filteredRadiance = BurtGIRadianceCacheHashGridUnpackRadiance(mip0PackedValue);
+    filteredRadiance.a *= BurtGIRadianceCacheHashGridAgeConfidenceScale(mip0PackedValue);
+    bool hasFilteredRadiance = filteredRadiance.a > 0.0001 && dot(filteredRadiance.rgb, filteredRadiance.rgb) > 0.0;
+
+    [unroll]
+    for (uint mipLevel = 1u; mipLevel < 4u; ++mipLevel)
+    {
+        uint mipIndex = BurtGIRadianceCacheHashGridCellIndexFromTile(
+            tileIndex,
+            BurtGIRadianceCacheHashGridMipLocalCellIndex(localCellCoordMip0, mipLevel));
+        uint4 mipPackedValue = _BurtGIRadianceCacheHashGridValueBuffer[mipIndex];
+        float4 mipRadiance = BurtGIRadianceCacheHashGridUnpackRadiance(mipPackedValue);
+        mipRadiance.a *= BurtGIRadianceCacheHashGridAgeConfidenceScale(mipPackedValue);
+        bool hasMipRadiance = mipRadiance.a > 0.0001 && dot(mipRadiance.rgb, mipRadiance.rgb) > 0.0;
+        bool preferMip = hasMipRadiance &&
+            (!hasFilteredRadiance ||
+                (filteredRadiance.a < BURT_GI_HASH_GRID_FILTER_CONFIDENCE && mipRadiance.a >= filteredRadiance.a));
+        if (preferMip)
+        {
+            filteredRadiance = mipRadiance;
+            hasFilteredRadiance = true;
+            selectedMipLevel = mipLevel;
+        }
+    }
+
+    return filteredRadiance;
+}
+
+bool BurtGIRadianceCacheHashGridTraceLite(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maxTraceDistance,
+    out float3 cachedRadiance,
+    out float cachedConfidence)
+{
+    cachedRadiance = 0.0;
+    cachedConfidence = 0.0;
+
+    float traceDistance = max(maxTraceDistance, 1.0);
+    uint maxSteps = 16u;
+
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < maxSteps; ++stepIndex)
+    {
+        float stepT = ((float)stepIndex + 0.5) / (float)maxSteps;
+        float sampleDistance = stepT * traceDistance;
+        float3 samplePositionWS = rayOriginWS + rayDirectionWS * sampleDistance;
+        uint tileHash = BurtGIRadianceCacheHashGridTileHash(samplePositionWS, rayDirectionWS);
+        uint tileIndex;
+        if (!BurtGIRadianceCacheHashGridFindTile(tileHash, tileIndex))
+        {
+            continue;
+        }
+
+        uint selectedMipLevel;
+        float4 cellRadiance = BurtGIRadianceCacheHashGridFilteredRadiance(
+            tileIndex,
+            BurtGIRadianceCacheHashGridLocalCellCoordMip0(samplePositionWS, rayDirectionWS),
+            selectedMipLevel);
+        if (cellRadiance.a > 0.0001 && dot(cellRadiance.rgb, cellRadiance.rgb) > 0.0)
+        {
+            cachedRadiance = cellRadiance.rgb;
+            float mipConfidenceScale = 1.0 - min(0.3, (float)selectedMipLevel * 0.1);
+            cachedConfidence = saturate(cellRadiance.a * mipConfidenceScale * (1.0 - stepT * 0.35));
+            return true;
+        }
+    }
+
+    return false;
+}
+
+[numthreads(8, 8, 1)]
+void ScreenProbeAdaptivePlacementLiteCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.y);
+    uint tileCapacity = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.z);
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    uint adaptiveSubGridSize = max(1u, (uint)_BurtGIScreenProbeAdaptivePlacementParams.z);
+    uint adaptiveLevel = min(15u, max(1u, (uint)_BurtGIScreenProbeAdaptivePlacementParams.w));
+    uint2 adaptiveFineGridSize = uint2(screenProbeWidth, screenProbeHeight) * adaptiveSubGridSize;
+    uint2 adaptiveFineProbeCoord = dispatchThreadId.xy;
+    if (adaptiveFineProbeCoord.x >= adaptiveFineGridSize.x || adaptiveFineProbeCoord.y >= adaptiveFineGridSize.y)
+    {
+        return;
+    }
+
+    uint previousSubGridSize = adaptiveSubGridSize >> 1u;
+    if (previousSubGridSize > 1u &&
+        (adaptiveFineProbeCoord.x % previousSubGridSize) == 0u &&
+        (adaptiveFineProbeCoord.y % previousSubGridSize) == 0u)
+    {
+        return;
+    }
+
+    uint2 screenProbeCoord = min(adaptiveFineProbeCoord / adaptiveSubGridSize, uint2(screenProbeWidth - 1u, screenProbeHeight - 1u));
+    uint2 adaptiveCellCoord = adaptiveFineProbeCoord - screenProbeCoord * adaptiveSubGridSize;
+    if (adaptiveCellCoord.x == 0u && adaptiveCellCoord.y == 0u)
+    {
+        return;
+    }
+
+    if (screenProbeCoord.x >= screenProbeWidth || screenProbeCoord.y >= screenProbeHeight)
+    {
+        return;
+    }
+
+    float rawDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(screenProbeCoord, 0));
+    bool validPlacement = encodedNormal.a > 0.5f &&
+        encodedPosition.a > 0.5f &&
+        !BurtGIScreenProbeTraceCompactIsSkyDepth(rawDepth);
+    if (!validPlacement)
+    {
+        return;
+    }
+
+    uint2 rightProbeCoord = uint2(min(screenProbeCoord.x + 1u, screenProbeWidth - 1u), screenProbeCoord.y);
+    uint2 downProbeCoord = uint2(screenProbeCoord.x, min(screenProbeCoord.y + 1u, screenProbeHeight - 1u));
+    uint2 rightDownProbeCoord = uint2(rightProbeCoord.x, downProbeCoord.y);
+    float rightDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(rightProbeCoord, 0));
+    float downDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(downProbeCoord, 0));
+    float rightDownDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(rightDownProbeCoord, 0));
+    float4 rightNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(rightProbeCoord, 0));
+    float4 downNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(downProbeCoord, 0));
+    float4 rightDownNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(rightDownProbeCoord, 0));
+    float4 rightPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightProbeCoord, 0));
+    float4 downPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(downProbeCoord, 0));
+    float4 rightDownPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightDownProbeCoord, 0));
+    float3 normalWS = BurtGIScreenProbeDecodeNormalWS(encodedNormal);
+    bool rightValid = rightNormal.a > 0.5f &&
+        rightPosition.a > 0.5f &&
+        !BurtGIScreenProbeTraceCompactIsSkyDepth(rightDepth);
+    bool downValid = downNormal.a > 0.5f &&
+        downPosition.a > 0.5f &&
+        !BurtGIScreenProbeTraceCompactIsSkyDepth(downDepth);
+    bool rightDownValid = rightDownNormal.a > 0.5f &&
+        rightDownPosition.a > 0.5f &&
+        !BurtGIScreenProbeTraceCompactIsSkyDepth(rightDownDepth);
+    float3 rightNormalWS = rightValid ? BurtGIScreenProbeDecodeNormalWS(rightNormal) : normalWS;
+    float3 downNormalWS = downValid ? BurtGIScreenProbeDecodeNormalWS(downNormal) : normalWS;
+    float3 rightDownNormalWS = rightDownValid ? BurtGIScreenProbeDecodeNormalWS(rightDownNormal) : normalWS;
+    float2 adaptiveCellUV = (float2(adaptiveCellCoord) + 0.5f) / (float)adaptiveSubGridSize;
+    float2 bilinearUV = saturate(adaptiveCellUV);
+    float4 bilinearWeights = float4(
+        (1.0 - bilinearUV.x) * (1.0 - bilinearUV.y),
+        bilinearUV.x * (1.0 - bilinearUV.y),
+        (1.0 - bilinearUV.x) * bilinearUV.y,
+        bilinearUV.x * bilinearUV.y);
+    float4 validWeights = bilinearWeights * float4(1.0, rightValid ? 1.0 : 0.0, downValid ? 1.0 : 0.0, rightDownValid ? 1.0 : 0.0);
+    float validWeightSum = dot(validWeights, float4(1.0, 1.0, 1.0, 1.0));
+    float invValidWeightSum = rcp(max(validWeightSum, 0.0001));
+    float3 interpolatedNormalWS = normalize(
+        normalWS * validWeights.x +
+        rightNormalWS * validWeights.y +
+        downNormalWS * validWeights.z +
+        rightDownNormalWS * validWeights.w);
+    float3 interpolatedPositionWS =
+        (encodedPosition.xyz * validWeights.x +
+            rightPosition.xyz * validWeights.y +
+            downPosition.xyz * validWeights.z +
+            rightDownPosition.xyz * validWeights.w) * invValidWeightSum;
+    float interpolatedDepth =
+        (rawDepth * validWeights.x +
+            rightDepth * validWeights.y +
+            downDepth * validWeights.z +
+            rightDownDepth * validWeights.w) * invValidWeightSum;
+    float normalEdge = max(
+        max(1.0 - saturate(dot(interpolatedNormalWS, rightNormalWS)), 1.0 - saturate(dot(interpolatedNormalWS, downNormalWS))),
+        max(1.0 - saturate(dot(interpolatedNormalWS, normalWS)), 1.0 - saturate(dot(interpolatedNormalWS, rightDownNormalWS))));
+    float depthEdge = max(
+        max(abs(rawDepth - interpolatedDepth), rightValid ? abs(rightDepth - interpolatedDepth) : 0.0),
+        max(downValid ? abs(downDepth - interpolatedDepth) : 0.0, rightDownValid ? abs(rightDownDepth - interpolatedDepth) : 0.0)) * 32.0;
+    float positionEdge = max(
+        max(distance(encodedPosition.xyz, interpolatedPositionWS), rightValid ? distance(rightPosition.xyz, interpolatedPositionWS) : 0.0),
+        max(downValid ? distance(downPosition.xyz, interpolatedPositionWS) : 0.0, rightDownValid ? distance(rightDownPosition.xyz, interpolatedPositionWS) : 0.0)) * 0.05;
+    float invalidCornerEdge = saturate(1.0 - validWeightSum) * 0.75;
+    float adaptiveEdgeScore = max(max(depthEdge, max(normalEdge, positionEdge)), invalidCornerEdge);
+    float centerBias = 1.0f - saturate(distance(adaptiveCellUV, float2(0.5f, 0.5f)) * 1.41421356f);
+    float layerWeight = rcp(1.0f + (float)adaptiveLevel * 0.18f);
+    float candidateScore = adaptiveEdgeScore * lerp(0.75f, 1.15f, centerBias) * layerWeight;
+    float normalReject00 = 1.0 - step(0.92, dot(normalWS, interpolatedNormalWS));
+    float normalReject10 = rightValid ? 1.0 - step(0.92, dot(rightNormalWS, interpolatedNormalWS)) : 1.0;
+    float normalReject01 = downValid ? 1.0 - step(0.92, dot(downNormalWS, interpolatedNormalWS)) : 1.0;
+    float normalReject11 = rightDownValid ? 1.0 - step(0.92, dot(rightDownNormalWS, interpolatedNormalWS)) : 1.0;
+    float depthReject00 = step(0.08, abs(rawDepth - interpolatedDepth) * 32.0);
+    float depthReject10 = rightValid ? step(0.08, abs(rightDepth - interpolatedDepth) * 32.0) : 1.0;
+    float depthReject01 = downValid ? step(0.08, abs(downDepth - interpolatedDepth) * 32.0) : 1.0;
+    float depthReject11 = rightDownValid ? step(0.08, abs(rightDownDepth - interpolatedDepth) * 32.0) : 1.0;
+    float positionReject00 = step(0.08, distance(encodedPosition.xyz, interpolatedPositionWS) * 0.05);
+    float positionReject10 = rightValid ? step(0.08, distance(rightPosition.xyz, interpolatedPositionWS) * 0.05) : 1.0;
+    float positionReject01 = downValid ? step(0.08, distance(downPosition.xyz, interpolatedPositionWS) * 0.05) : 1.0;
+    float positionReject11 = rightDownValid ? step(0.08, distance(rightDownPosition.xyz, interpolatedPositionWS) * 0.05) : 1.0;
+    float4 acceptedWeights = validWeights * (1.0 - saturate(float4(
+        max(max(normalReject00, depthReject00), positionReject00),
+        max(max(normalReject10, depthReject10), positionReject10),
+        max(max(normalReject01, depthReject01), positionReject01),
+        max(max(normalReject11, depthReject11), positionReject11))));
+    float acceptedWeightSum = dot(acceptedWeights, float4(1.0, 1.0, 1.0, 1.0));
+
+    bool highEdgeCandidate = candidateScore > 0.08f;
+    bool interpolationRejectCandidate = acceptedWeightSum < 0.999f;
+    bool sparseCoverageCandidate = adaptiveLevel == 1u &&
+        (((screenProbeCoord.x ^ screenProbeCoord.y ^ adaptiveCellCoord.x ^ adaptiveCellCoord.y) & 3u) == 0u);
+    if (!highEdgeCandidate && !interpolationRejectCandidate && !sparseCoverageCandidate)
+    {
+        return;
+    }
+
+    uint adaptiveProbeIndex;
+    InterlockedAdd(_BurtGIScreenProbeAdaptiveProbeNumBuffer[0], 1u, adaptiveProbeIndex);
+    if (adaptiveProbeIndex >= maxAdaptiveProbeCount || adaptiveProbeIndex > 65515u)
+    {
+        return;
+    }
+
+    _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex] = BurtGIPackScreenProbeAdaptiveProbeData(adaptiveFineProbeCoord, adaptiveLevel);
+
+    uint adaptiveSlot;
+    InterlockedAdd(_BurtGIScreenProbeAdaptiveProbeHeaderTexture[screenProbeCoord], 1u, adaptiveSlot);
+    if (adaptiveSlot >= tileCapacity)
+    {
+        return;
+    }
+
+    _BurtGIScreenProbeAdaptiveProbeIndicesTexture[uint2(screenProbeCoord.x * tileCapacity + adaptiveSlot, screenProbeCoord.y)] = adaptiveProbeIndex;
+}
+
+[numthreads(1, 1, 1)]
+void ScreenProbeIndirectArgsSetupCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    uint probeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight) + BurtGIGetScreenProbeAdaptiveCount(maxAdaptiveProbeCount);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeIndirectArgsParams.x));
+    uint gatherResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeIndirectArgsParams.y));
+    uint gatherResolutionWithBorder = max(1u, min(64u, (uint)_BurtGIScreenProbeIndirectArgsParams.z));
+    uint lightSampleResolutionXY = max(1u, min(8u, (uint)_BurtGIScreenProbeIndirectArgsParams.w));
+    uint threadGroupSize = max(1u, _BurtGIScreenProbeTraceCompactGroupSize);
+
+    BurtGIWriteDispatchArgs(0u, probeCount, 1u);
+    BurtGIWriteDispatchArgs(1u, probeCount, threadGroupSize);
+    BurtGIWriteDispatchArgs(2u, probeCount * traceResolution * traceResolution, threadGroupSize);
+    BurtGIWriteDispatchArgs(3u, probeCount * gatherResolution * gatherResolution, threadGroupSize);
+    BurtGIWriteDispatchArgs(4u, probeCount * gatherResolutionWithBorder * gatherResolutionWithBorder, threadGroupSize);
+    BurtGIWriteDispatchArgs(5u, probeCount * lightSampleResolutionXY * lightSampleResolutionXY, threadGroupSize);
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE, 1, 1)]
+void ScreenProbeTraceCompactCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint traceTexelsPerProbe = traceResolution * traceResolution;
+    uint probeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight) + BurtGIGetScreenProbeAdaptiveCount(maxAdaptiveProbeCount);
+    uint totalTraceTexelCount = min(
+        max(1u, (uint)_BurtGIScreenProbeTraceCompactParams.x),
+        probeCount * traceTexelsPerProbe);
+    uint linearTraceTexelIndex = dispatchThreadId.x;
+    if (linearTraceTexelIndex >= totalTraceTexelCount)
+    {
+        return;
+    }
+
+    uint screenProbeIndex = linearTraceTexelIndex / traceTexelsPerProbe;
+    if (screenProbeIndex >= 0x100000u)
+    {
+        return;
+    }
+
+    uint localTraceTexelIndex = linearTraceTexelIndex - screenProbeIndex * traceTexelsPerProbe;
+    uint2 traceTexelCoord = uint2(localTraceTexelIndex % traceResolution, localTraceTexelIndex / traceResolution);
+    uint2 screenProbeCoord;
+    uint2 atlasScreenProbeCoord;
+    if (!BurtGIResolveScreenProbeSourceAndAtlasCoord(screenProbeIndex, screenProbeWidth, screenProbeHeight, maxAdaptiveProbeCount, screenProbeCoord, atlasScreenProbeCoord))
+    {
+        return;
+    }
+
+    float rawDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(screenProbeCoord, 0));
+    bool validPlacement = encodedNormal.a > 0.5f &&
+        encodedPosition.a > 0.5f &&
+        !BurtGIScreenProbeTraceCompactIsSkyDepth(rawDepth);
+    if (!validPlacement)
+    {
+        return;
+    }
+
+    float maxTraceDistance = max(_BurtGIScreenProbeTraceParams.w, 0.5);
+    float compactTracingEndDistance = max(_BurtGIScreenProbeTraceCompactParams.y, maxTraceDistance);
+    float cameraDistance = distance(encodedPosition.xyz, _BurtDeferredCameraWorldPosition.xyz);
+    if (cameraDistance > compactTracingEndDistance)
+    {
+        return;
+    }
+
+    float4 probeHitDistance = _BurtGIScreenProbeHitDistanceTexture.Load(int3(screenProbeCoord, 0));
+    float encodedHitDistance = saturate(probeHitDistance.r);
+    float averageHitDistance = max(probeHitDistance.g, 0.0);
+    float probeHitRatio = saturate(probeHitDistance.b);
+    float probeHitConfidence = saturate(probeHitDistance.a);
+    bool hasReliableProbeHit = probeHitRatio > 0.82 &&
+        probeHitConfidence > 0.55 &&
+        averageHitDistance > 0.0 &&
+        averageHitDistance < maxTraceDistance * 0.92;
+    if (hasReliableProbeHit)
+    {
+        uint traceDither = (traceTexelCoord.x * 13u) ^ (traceTexelCoord.y * 29u) ^ (screenProbeIndex * 7u);
+        uint keepMask = encodedHitDistance < 0.45 ? 3u : 1u;
+        if ((traceDither & keepMask) != 0u)
+        {
+            return;
+        }
+    }
+
+    float previousTraceHit = 0.0;
+    if (_BurtGIScreenProbeTraceCompactParams.z > 0.5f)
+    {
+        uint2 atlasSize = max(
+            uint2(1u, 1u),
+            uint2((uint)_BurtGIScreenProbeTraceParams.y, (uint)_BurtGIScreenProbeTraceParams.z));
+        uint2 historyTraceAtlasCoord = atlasScreenProbeCoord * traceResolution + traceTexelCoord;
+        float4 historyWorldPosition = _BurtGIScreenProbeHistoryWorldPositionTexture.Load(int3(screenProbeCoord, 0));
+        float historyPositionDelta = distance(historyWorldPosition.xyz, encodedPosition.xyz);
+        float historyPositionTolerance = max(0.15f, maxTraceDistance * 0.015f);
+        bool hasStableHistoryProbe = historyWorldPosition.a > 0.5f && historyPositionDelta < historyPositionTolerance;
+        if (hasStableHistoryProbe && all(historyTraceAtlasCoord < atlasSize))
+        {
+            previousTraceHit = saturate(_BurtGIScreenProbeHistoryTraceHitTexture.Load(int3(historyTraceAtlasCoord, 0)));
+        }
+    }
+
+    bool hasReliablePreviousTraceHit = previousTraceHit > 0.78f &&
+        averageHitDistance > 0.0f &&
+        averageHitDistance < maxTraceDistance * 0.98f;
+    if (hasReliablePreviousTraceHit)
+    {
+        uint previousTraceDither = (traceTexelCoord.x * 17u) ^ (traceTexelCoord.y * 31u) ^ (screenProbeIndex * 11u);
+        uint previousTraceKeepMask = previousTraceHit > 0.92f ? 3u : 1u;
+        if ((previousTraceDither & previousTraceKeepMask) != 0u)
+        {
+            return;
+        }
+    }
+
+    uint writeIndex;
+    InterlockedAdd(_BurtGIScreenProbeTraceCompactTexelCountBuffer[0], 1u, writeIndex);
+    if (writeIndex < totalTraceTexelCount)
+    {
+        _BurtGIScreenProbeTraceCompactTexelDataBuffer[writeIndex] =
+            BurtGIEncodeScreenProbeTraceTexel(screenProbeIndex, traceTexelCoord);
+    }
+}
+
+[numthreads(1, 1, 1)]
+void ScreenProbeTraceGenArgsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint threadCount = _BurtGIScreenProbeTraceCompactTexelCountBuffer[0];
+    uint groupSize = max(1u, _BurtGIScreenProbeTraceCompactGroupSize);
+    if (threadCount == 0u)
+    {
+        _BurtGIScreenProbeTraceCompactIndirectArgsBuffer[0] = uint3(0u, 1u, 1u);
+        _BurtGIScreenProbeTraceCompactThreadCountXBuffer[0] = 0u;
+        return;
+    }
+
+    uint groupCountX = BurtGIDivRoundUp(threadCount, groupSize);
+    _BurtGIScreenProbeTraceCompactIndirectArgsBuffer[0] = uint3(groupCountX, 1u, 1u);
+    _BurtGIScreenProbeTraceCompactThreadCountXBuffer[0] = groupCountX * groupSize;
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_TRACE_ATLAS_CLEAR_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TRACE_ATLAS_CLEAR_THREADGROUP_SIZE, 1)]
+void ScreenProbeTraceAtlasClearCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 atlasSize = max(
+        uint2(1u, 1u),
+        uint2((uint)_BurtGIScreenProbeTraceParams.y, (uint)_BurtGIScreenProbeTraceParams.z));
+    uint2 atlasCoord = dispatchThreadId.xy;
+    if (any(atlasCoord >= atlasSize))
+    {
+        return;
+    }
+
+    _BurtGIScreenProbeTraceRadianceTexture[atlasCoord] = float4(0.0, 0.0, 0.0, 0.0);
+    _BurtGIScreenProbeTraceHitTexture[atlasCoord] = 0.0;
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE, 1, 1)]
+void ScreenProbeTraceAtlasFromCompactCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint dispatchThreadIndex = dispatchThreadId.y * _BurtGIScreenProbeTraceCompactThreadCountXBuffer[0] + dispatchThreadId.x;
+    if (dispatchThreadIndex >= _BurtGIScreenProbeTraceCompactTexelCountBuffer[0])
+    {
+        return;
+    }
+
+    uint screenProbeIndex;
+    uint2 traceTexelCoord;
+    BurtGIDecodeScreenProbeTraceTexel(
+        _BurtGIScreenProbeTraceCompactTexelDataBuffer[dispatchThreadIndex],
+        screenProbeIndex,
+        traceTexelCoord);
+
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 atlasSize = max(
+        uint2(1u, 1u),
+        uint2((uint)_BurtGIScreenProbeTraceParams.y, (uint)_BurtGIScreenProbeTraceParams.z));
+    uint2 screenProbeCoord;
+    uint2 atlasScreenProbeCoord;
+    if (!BurtGIResolveScreenProbeSourceAndAtlasCoord(screenProbeIndex, screenProbeWidth, screenProbeHeight, maxAdaptiveProbeCount, screenProbeCoord, atlasScreenProbeCoord) ||
+        traceTexelCoord.x >= traceResolution ||
+        traceTexelCoord.y >= traceResolution)
+    {
+        return;
+    }
+
+    uint uniformProbeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
+    bool isAdaptiveProbe = screenProbeIndex >= uniformProbeCount;
+    uint2 atlasCoord = atlasScreenProbeCoord * traceResolution + traceTexelCoord;
+    if (any(atlasCoord >= atlasSize))
+    {
+        return;
+    }
+
+    uint2 sourceTraceTexelCoord = traceTexelCoord;
+    uint sourceTraceLevel = 0u;
+    if (!isAdaptiveProbe)
+    {
+        uint rayInfo = _BurtGIScreenProbeImportanceRayInfoTexture[atlasCoord];
+        BurtGIUnpackScreenProbeImportanceRayInfo(rayInfo, sourceTraceTexelCoord, sourceTraceLevel);
+    }
+    uint maxImportanceTraceResolution = min(64u, max(traceResolution, traceResolution << 1u));
+    uint sourceMipSize = max(1u, maxImportanceTraceResolution >> min(sourceTraceLevel, 5u));
+    if (sourceTraceTexelCoord.x >= sourceMipSize || sourceTraceTexelCoord.y >= sourceMipSize)
+    {
+        sourceTraceTexelCoord = traceTexelCoord;
+        sourceTraceLevel = 0u;
+        sourceMipSize = traceResolution;
+    }
+
+    float2 octUV = (float2((float)sourceTraceTexelCoord.x, (float)sourceTraceTexelCoord.y) + 0.5) / (float)sourceMipSize;
+    float3 rayDirection = BurtGIEquiAreaSphericalMapping(octUV);
+    uint2 importanceTraceTexelCoord = min((uint2)((float2(sourceTraceTexelCoord) + 0.5) * ((float)traceResolution / (float)sourceMipSize)), traceResolution - 1u);
+    uint2 importancePDFProbeCoord = isAdaptiveProbe ? atlasScreenProbeCoord : screenProbeCoord;
+    float importancePDF = BurtGIScreenProbeLoadImportancePDF(importancePDFProbeCoord, importanceTraceTexelCoord, traceResolution);
+    float rayLevelWeight = rcp(1.0f + (float)sourceTraceLevel);
+    float importanceEnergyWeight = lerp(0.85f, 1.15f, importancePDF) * lerp(1.0f, 0.85f, saturate((float)sourceTraceLevel * 0.25f));
+    float importanceConfidenceWeight = lerp(0.8f, 1.1f, importancePDF) * lerp(1.0f, rayLevelWeight, 0.25f);
+    float4 probeRadiance = _BurtGIScreenProbeRadianceTexture.Load(int3(screenProbeCoord, 0));
+    float4 probeIrradiance = _BurtGIScreenProbeIrradianceTexture.Load(int3(screenProbeCoord, 0));
+    float4 probeConfidence = _BurtGIScreenProbeConfidenceTexture.Load(int3(screenProbeCoord, 0));
+    float4 probeHitDistance = _BurtGIScreenProbeHitDistanceTexture.Load(int3(screenProbeCoord, 0));
+    float confidence = saturate(min(probeIrradiance.a, probeConfidence.r) * importanceConfidenceWeight);
+    float hitRatio = saturate(max(probeRadiance.a, probeConfidence.g) * lerp(0.9f, 1.05f, importancePDF));
+    float directionalEnergy = lerp(0.72, 1.18, saturate(rayDirection.z * 0.5 + 0.5)) * importanceEnergyWeight;
+    float edgeDamping = lerp(1.0, 0.55, saturate(probeConfidence.b));
+    float3 traceRadiance = max(probeRadiance.rgb, probeIrradiance.rgb * 0.65) * directionalEnergy * edgeDamping;
+    float sceneTraceHit = 0.0f;
+    float3 sourcePositionWS;
+    float3 sourceNormalWS;
+    bool hasSourcePlacement = BurtGIResolveScreenProbeTraceSourcePlacement(
+        screenProbeIndex,
+        screenProbeWidth,
+        screenProbeHeight,
+        maxAdaptiveProbeCount,
+        screenProbeCoord,
+        sourcePositionWS,
+        sourceNormalWS);
+
+    if (hasSourcePlacement)
+    {
+        float3 screenTraceRadiance = 0.0;
+        float screenTraceConfidence = 0.0;
+        float screenTraceDistance = max(1.0f, _BurtGIScreenProbeTraceParams.w);
+        if (BurtGIScreenProbeTryHiZScreenTraceRadiance(
+                sourcePositionWS + sourceNormalWS * 0.05 + rayDirection * 0.05,
+                normalize(rayDirection),
+                screenProbeCoord,
+                traceTexelCoord,
+                uint2(screenProbeWidth, screenProbeHeight),
+                max(1.0f, _BurtGIScreenProbeTraceParams.w),
+                directionalEnergy,
+                screenTraceRadiance,
+                screenTraceConfidence,
+                screenTraceDistance))
+        {
+            float screenTraceDistanceWeight = 1.0f - saturate(screenTraceDistance / max(1.0f, _BurtGIScreenProbeTraceParams.w)) * 0.2f;
+            float screenTraceWeight = saturate(screenTraceConfidence * screenTraceDistanceWeight);
+            traceRadiance = lerp(traceRadiance, screenTraceRadiance, screenTraceWeight);
+            hitRatio = max(hitRatio, screenTraceWeight);
+            confidence = max(confidence, screenTraceConfidence);
+            sceneTraceHit = max(sceneTraceHit, screenTraceWeight);
+        }
+
+        float3 hashGridRadiance = 0.0;
+        float hashGridConfidence = 0.0;
+        if (BurtGIRadianceCacheHashGridTraceLite(
+                sourcePositionWS + sourceNormalWS * 0.05 + rayDirection * 0.05,
+                normalize(rayDirection),
+                max(1.0f, _BurtGIScreenProbeTraceParams.w),
+                hashGridRadiance,
+                hashGridConfidence))
+        {
+            traceRadiance = lerp(traceRadiance, hashGridRadiance * directionalEnergy, hashGridConfidence);
+            hitRatio = max(hitRatio, hashGridConfidence);
+            confidence = max(confidence, hashGridConfidence);
+            sceneTraceHit = max(sceneTraceHit, hashGridConfidence);
+        }
+
+        float3 sceneVoxelRadiance = 0.0;
+        float sceneVoxelConfidence = 0.0;
+        float sceneVoxelHitDistance = max(1.0f, _BurtGIScreenProbeTraceParams.w);
+        float voxelTraceConeHalfAngle = lerp(0.08f, 0.28f, saturate((float)sourceTraceLevel * 0.25f + importancePDF * 0.25f));
+        float voxelTraceMinDistanceBias = max(0.0f, saturate(probeHitDistance.a) * voxelTraceConeHalfAngle * 0.5f);
+        if (BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
+                sourcePositionWS + sourceNormalWS * 0.05 + rayDirection * 0.05,
+                BurtGIScreenProbeTraceSafeNormalize(rayDirection, sourceNormalWS),
+                max(1.0f, _BurtGIScreenProbeTraceParams.w),
+                voxelTraceMinDistanceBias,
+                voxelTraceConeHalfAngle,
+                sceneVoxelRadiance,
+                sceneVoxelConfidence,
+                sceneVoxelHitDistance))
+        {
+            float voxelDistanceWeight = 1.0f - saturate(sceneVoxelHitDistance / max(1.0f, _BurtGIScreenProbeTraceParams.w)) * 0.25f;
+            float voxelTraceWeight = saturate(sceneVoxelConfidence * voxelDistanceWeight);
+            traceRadiance = lerp(traceRadiance, sceneVoxelRadiance * directionalEnergy, voxelTraceWeight);
+            hitRatio = max(hitRatio, voxelTraceWeight);
+            confidence = max(confidence, sceneVoxelConfidence);
+            sceneTraceHit = max(sceneTraceHit, voxelTraceWeight);
+        }
+
+        float3 gridStepDirection = BurtGIScreenProbeTraceGridStepDirection(rayDirection, sourceNormalWS);
+        uint maxTraceSteps = max(2u, min(12u, (uint)ceil(max(1.0f, _BurtGIScreenProbeTraceParams.w))));
+        float bestSceneTraceHit = 0.0f;
+        float bestSceneTraceConfidence = 0.0f;
+        float bestSceneTraceDistance = max(1.0f, _BurtGIScreenProbeTraceParams.w);
+        float3 bestSceneTraceRadiance = 0.0f;
+
+        [loop]
+        for (uint stepIndex = 1u; stepIndex <= maxTraceSteps; ++stepIndex)
+        {
+            float2 sampleProbeCoordF = float2(screenProbeCoord) + gridStepDirection.xy * (float)stepIndex;
+            int2 centerProbeCoordI = int2(round(sampleProbeCoordF));
+            if (centerProbeCoordI.x < -1 ||
+                centerProbeCoordI.y < -1 ||
+                centerProbeCoordI.x > (int)screenProbeWidth ||
+                centerProbeCoordI.y > (int)screenProbeHeight)
+            {
+                break;
+            }
+
+            [unroll]
+            for (int neighborY = -1; neighborY <= 1; ++neighborY)
+            {
+                [unroll]
+                for (int neighborX = -1; neighborX <= 1; ++neighborX)
+                {
+                    int2 sampleProbeCoordI = centerProbeCoordI + int2(neighborX, neighborY);
+                    if (sampleProbeCoordI.x < 0 ||
+                        sampleProbeCoordI.y < 0 ||
+                        sampleProbeCoordI.x >= (int)screenProbeWidth ||
+                        sampleProbeCoordI.y >= (int)screenProbeHeight)
+                    {
+                        continue;
+                    }
+
+                    BurtGIScreenProbeEvaluateSceneTraceCandidate(
+                        screenProbeCoord,
+                        (uint2)sampleProbeCoordI,
+                        sourcePositionWS,
+                        sourceNormalWS,
+                        rayDirection,
+                        directionalEnergy,
+                        sourceTraceLevel,
+                        1.0f,
+                        bestSceneTraceHit,
+                        bestSceneTraceConfidence,
+                        bestSceneTraceDistance,
+                        bestSceneTraceRadiance);
+                }
+            }
+
+            float2 coneTangent = normalize(float2(-gridStepDirection.y, gridStepDirection.x) + float2(0.0001f, 0.0001f));
+            float coneLaneOffset = max(1.0f, (float)stepIndex * 0.35f + (float)sourceTraceLevel * 0.5f);
+            [unroll]
+            for (int coneLane = -1; coneLane <= 1; coneLane += 2)
+            {
+                int2 coneProbeCoordI = int2(round(sampleProbeCoordF + coneTangent * (float)coneLane * coneLaneOffset));
+                if (coneProbeCoordI.x < 0 ||
+                    coneProbeCoordI.y < 0 ||
+                    coneProbeCoordI.x >= (int)screenProbeWidth ||
+                    coneProbeCoordI.y >= (int)screenProbeHeight)
+                {
+                    continue;
+                }
+
+                BurtGIScreenProbeEvaluateSceneTraceCandidate(
+                    screenProbeCoord,
+                    (uint2)coneProbeCoordI,
+                    sourcePositionWS,
+                    sourceNormalWS,
+                    rayDirection,
+                    directionalEnergy,
+                    sourceTraceLevel,
+                    1.6f,
+                    bestSceneTraceHit,
+                    bestSceneTraceConfidence,
+                    bestSceneTraceDistance,
+                    bestSceneTraceRadiance);
+            }
+
+            if (bestSceneTraceHit > 0.65f)
+            {
+                break;
+            }
+        }
+
+        if (bestSceneTraceHit > 0.001f)
+        {
+            float sceneTraceDistanceWeight = 1.0f - saturate(bestSceneTraceDistance / max(1.0f, _BurtGIScreenProbeTraceParams.w)) * 0.22f;
+            float sceneTraceWeight = saturate(bestSceneTraceHit * sceneTraceDistanceWeight);
+            sceneTraceHit = max(sceneTraceHit, sceneTraceWeight);
+            traceRadiance = lerp(traceRadiance, bestSceneTraceRadiance, sceneTraceWeight);
+            hitRatio = max(hitRatio, sceneTraceWeight);
+            confidence = max(confidence, bestSceneTraceConfidence * sceneTraceWeight);
+        }
+
+        if (sceneTraceHit < 0.65f)
+        {
+            float3 localSkyRadiance;
+            float localSkyHitDistance;
+            if (BurtGIScreenProbeTrySampleLocalSkyProbe(
+                    sourcePositionWS + sourceNormalWS * 0.05f + rayDirection * 0.05f,
+                    rayDirection,
+                    max(1.0f, _BurtGIScreenProbeTraceParams.w),
+                    localSkyRadiance,
+                    localSkyHitDistance))
+            {
+                float localSkyDistanceWeight = 1.0f - saturate(localSkyHitDistance / max(1.0f, _BurtGIScreenProbeTraceParams.w)) * 0.2f;
+                float localSkyWeight = saturate((1.0f - sceneTraceHit) * localSkyDistanceWeight);
+                traceRadiance = lerp(traceRadiance, localSkyRadiance * directionalEnergy, localSkyWeight);
+                hitRatio = max(hitRatio, localSkyWeight);
+                confidence = max(confidence, localSkyWeight * 0.75f);
+                sceneTraceHit = max(sceneTraceHit, localSkyWeight);
+            }
+        }
+
+        // Match XRender's transparent-ray fallback: sky contributes radiance but is not a geometry hit.
+        if (sceneTraceHit < 0.65f)
+        {
+            float3 skyRadiance;
+            float skyRoughness = saturate(0.18f + (float)sourceTraceLevel * 0.22f + importancePDF * 0.16f);
+            if (BurtGIScreenProbeTrySampleSkyRadiance(rayDirection, skyRoughness, skyRadiance))
+            {
+                float skyWeight = saturate((1.0f - sceneTraceHit) * (0.42f + 0.38f * importancePDF));
+                traceRadiance = lerp(traceRadiance, skyRadiance * directionalEnergy, skyWeight);
+                confidence = max(confidence, skyWeight * 0.35f);
+            }
+        }
+    }
+
+    _BurtGIScreenProbeTraceRadianceTexture[atlasCoord] = float4(max(traceRadiance, float3(0.0, 0.0, 0.0)), hitRatio);
+    _BurtGIScreenProbeTraceHitTexture[atlasCoord] = saturate(max(sceneTraceHit, confidence * hitRatio) * importanceConfidenceWeight);
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_BENT_NORMAL_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_BENT_NORMAL_THREADGROUP_SIZE, 1)]
+void ScreenProbeBentNormalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 screenProbeCoord = dispatchThreadId.xy;
+    if (screenProbeCoord.x >= screenProbeWidth || screenProbeCoord.y >= screenProbeHeight)
+    {
+        return;
+    }
+
+    float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(screenProbeCoord, 0));
+    if (!BurtGIScreenProbeHasValidPlacement(screenProbeCoord) || encodedNormal.a <= 0.5f)
+    {
+        _BurtGIScreenProbeBentNormalTexture[screenProbeCoord] = float4(0.5, 0.5, 1.0, 0.0);
+        return;
+    }
+
+    float3 normalWS = BurtGIScreenProbeDecodeNormalWS(encodedNormal);
+    float currentRawDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(screenProbeCoord, 0));
+    float3 currentWorldPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(screenProbeCoord, 0)).xyz;
+    float3 unoccludedSum = 0.0;
+    float3 bentNormal = 0.0;
+    float weightSum = 0.0;
+    uint temporalIndex = _BurtGIRadianceCacheClipMapFrameIndex & 7u;
+    uint2 temporalProbeCoord = screenProbeCoord * traceResolution;
+
+    [loop]
+    for (uint y = 0u; y < traceResolution; ++y)
+    {
+        [loop]
+        for (uint x = 0u; x < traceResolution; ++x)
+        {
+            uint2 atlasCoord = screenProbeCoord * traceResolution + uint2(x, y);
+            uint2 traceNoiseCoord = temporalProbeCoord + uint2(x, y);
+            float2 blueNoise = BurtGIScreenProbeBlueNoiseVec2(traceNoiseCoord, temporalIndex);
+            float temporalHitNoise = BurtGIScreenProbeInterleavedGradientNoise(traceNoiseCoord ^ uint2(0x531du, 0x1badu), temporalIndex + 31u);
+            float2 octUV = (float2((float)x, (float)y) + 0.5 + (blueNoise - 0.5) * 0.65) / (float)traceResolution;
+            octUV = saturate(octUV);
+            float3 rayDirection = BurtGIEquiAreaSphericalMapping(octUV);
+            float hemisphereWeight = saturate(dot(rayDirection, normalWS));
+            if (hemisphereWeight <= 0.0001)
+            {
+                continue;
+            }
+
+            float traceHit = saturate(_BurtGIScreenProbeTraceHitTexture[atlasCoord]);
+            float3 traceRadiance = max(_BurtGIScreenProbeTraceRadianceTexture[atlasCoord].rgb, 0.0);
+            float radianceWeight = saturate(dot(traceRadiance, float3(0.2126, 0.7152, 0.0722)) * 0.5 + 0.5);
+            float legacyVisible = saturate(1.0 - traceHit * 0.85) * radianceWeight;
+            float ditheredTraceHit = saturate(traceHit + (temporalHitNoise - 0.5) * 0.08);
+            float xrenderTraceVisibility = 1.0 - smoothstep(0.18, 0.72, ditheredTraceHit);
+            float screenTraceVisibility = BurtGIScreenProbeEvaluateHiZScreenTraceVisibility(
+                currentWorldPosition + normalWS * 0.03,
+                rayDirection,
+                blueNoise.x - 0.5);
+            xrenderTraceVisibility = min(xrenderTraceVisibility, screenTraceVisibility);
+            float visibilityMode = saturate(_BurtGIScreenProbeBentNormalParams.w);
+            float visibleWeight = hemisphereWeight * lerp(legacyVisible, xrenderTraceVisibility, visibilityMode);
+            unoccludedSum += rayDirection * hemisphereWeight;
+            bentNormal += rayDirection * visibleWeight;
+            weightSum += hemisphereWeight;
+        }
+    }
+
+    float normalizeFactor = max(length(unoccludedSum), 0.0001);
+    float3 bentNormalAO = bentNormal / normalizeFactor;
+    float ao = saturate(length(bentNormalAO));
+    if (ao <= 0.0001 || weightSum <= 0.0001)
+    {
+        bentNormalAO = normalWS;
+        ao = 1.0;
+    }
+
+    float4 bentNormalOutput = float4(saturate(bentNormalAO * 0.5 + 0.5), ao);
+    if (_BurtGIScreenProbeBentNormalParams.x > 0.5)
+    {
+        float historyDistanceThreshold = max(_BurtGIScreenProbeBentNormalParams.z, 0.0001);
+        float3 historyBentNormalSum = 0.0;
+        float historyAOSum = 0.0;
+        float historyWeightSum = 0.0;
+        float historyMaxWeight = 0.0;
+
+        [unroll]
+        for (int historyOffsetY = -1; historyOffsetY <= 1; ++historyOffsetY)
+        {
+            [unroll]
+            for (int historyOffsetX = -1; historyOffsetX <= 1; ++historyOffsetX)
+            {
+                int2 historyCoordSigned = clamp(
+                    int2((int)screenProbeCoord.x, (int)screenProbeCoord.y) + int2(historyOffsetX, historyOffsetY),
+                    int2(0, 0),
+                    int2((int)screenProbeWidth - 1, (int)screenProbeHeight - 1));
+                uint2 historyCoord = (uint2)historyCoordSigned;
+                float historyRawDepth = _BurtGIScreenProbeHistoryScreenDepthTexture.Load(int3(historyCoord, 0));
+                float4 historyWorldPosition = _BurtGIScreenProbeHistoryWorldPositionTexture.Load(int3(historyCoord, 0));
+                float4 historyBentNormal = _BurtGIScreenProbeHistoryBentNormalTexture.Load(int3(historyCoord, 0));
+
+                if (historyWorldPosition.w <= 0.0001 ||
+                    BurtGIScreenProbeTraceCompactIsSkyDepth(currentRawDepth) ||
+                    BurtGIScreenProbeTraceCompactIsSkyDepth(historyRawDepth) ||
+                    historyBentNormal.a <= 0.0001)
+                {
+                    continue;
+                }
+
+                float3 historyBentNormalWS = normalize(historyBentNormal.rgb * 2.0 - 1.0);
+                float planeDistance = abs(dot(historyWorldPosition.xyz - currentWorldPosition, normalWS));
+                float worldDistance = distance(currentWorldPosition, historyWorldPosition.xyz);
+                float planeWeight = exp2(-64.0 * (planeDistance / historyDistanceThreshold) * (planeDistance / historyDistanceThreshold));
+                float distanceWeight = saturate(1.0 - worldDistance / historyDistanceThreshold);
+                float hemisphereWeight = saturate(dot(historyBentNormalWS, normalWS) * 0.5 + 0.5);
+                float historyWeight = planeWeight * distanceWeight * hemisphereWeight * saturate(historyBentNormal.a);
+                historyBentNormalSum += historyBentNormalWS * historyWeight;
+                historyAOSum += saturate(historyBentNormal.a) * historyWeight;
+                historyWeightSum += historyWeight;
+                historyMaxWeight = max(historyMaxWeight, historyWeight);
+            }
+        }
+
+        if (historyWeightSum > 0.0001)
+        {
+            float historyBentNormalLength = length(historyBentNormalSum);
+            float3 historyBentNormalWS = historyBentNormalLength > 0.0001
+                ? historyBentNormalSum / historyBentNormalLength
+                : normalWS;
+            float historyAO = saturate(historyAOSum / historyWeightSum);
+            float historyVisibilityWeight = saturate(historyMaxWeight) * saturate(historyWeightSum / 3.0);
+            float historyWeight = saturate(_BurtGIScreenProbeBentNormalParams.y) * historyVisibilityWeight;
+            float3 currentBentNormalWS = normalize(bentNormalOutput.rgb * 2.0 - 1.0);
+            float3 blendedBentNormalWS = normalize(lerp(currentBentNormalWS, historyBentNormalWS, historyWeight));
+            bentNormalOutput.rgb = saturate(blendedBentNormalWS * 0.5 + 0.5);
+            bentNormalOutput.a = saturate(lerp(bentNormalOutput.a, historyAO, historyWeight));
+        }
+    }
+
+    _BurtGIScreenProbeBentNormalTexture[screenProbeCoord] = bentNormalOutput;
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_IRRADIANCE_SH3_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_IRRADIANCE_SH3_THREADGROUP_SIZE, 1)]
+void ScreenProbeIrradianceSH3CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 screenProbeCoord = dispatchThreadId.xy;
+    if (screenProbeCoord.x >= screenProbeWidth || screenProbeCoord.y >= screenProbeHeight)
+    {
+        return;
+    }
+
+    if (!BurtGIScreenProbeHasValidPlacement(screenProbeCoord))
+    {
+        _BurtGIScreenProbeRadianceSHAmbientTexture[screenProbeCoord] = float4(0.0, 0.0, 0.0, 0.0);
+
+        [unroll]
+        for (uint clearTileIndex = 0u; clearTileIndex < 6u; ++clearTileIndex)
+        {
+            _BurtGIScreenProbeRadianceSHDirectionalTexture[uint2(screenProbeCoord.x + clearTileIndex * screenProbeWidth, screenProbeCoord.y)] =
+                float4(0.0, 0.0, 0.0, 0.0);
+        }
+
+        return;
+    }
+
+    float3 sh0 = 0.0;
+    float3 sh1 = 0.0;
+    float3 sh2 = 0.0;
+    float3 sh3 = 0.0;
+    float3 sh4 = 0.0;
+    float3 sh5 = 0.0;
+    float3 sh6 = 0.0;
+    float3 sh7 = 0.0;
+    float3 sh8 = 0.0;
+    float hitSum = 0.0;
+    float sampleCount = 0.0;
+
+    [loop]
+    for (uint y = 0u; y < traceResolution; ++y)
+    {
+        [loop]
+        for (uint x = 0u; x < traceResolution; ++x)
+        {
+            uint2 traceTexelCoord = uint2(x, y);
+            uint2 atlasCoord = screenProbeCoord * traceResolution + traceTexelCoord;
+            float2 octUV = (float2(traceTexelCoord) + 0.5) / (float)traceResolution;
+            float3 direction = BurtGIEquiAreaSphericalMapping(octUV).zxy;
+            float3 radiance = max(_BurtGIScreenProbeTraceRadianceTexture[atlasCoord].rgb, 0.0);
+            float hit = saturate(_BurtGIScreenProbeTraceHitTexture[atlasCoord]);
+            float4 basis0 = BurtGISHBasis3V0(direction);
+            float4 basis1 = BurtGISHBasis3V1(direction);
+            float basis2 = BurtGISHBasis3V2(direction);
+
+            sh0 += radiance * basis0.x;
+            sh1 += radiance * basis0.y;
+            sh2 += radiance * basis0.z;
+            sh3 += radiance * basis0.w;
+            sh4 += radiance * basis1.x;
+            sh5 += radiance * basis1.y;
+            sh6 += radiance * basis1.z;
+            sh7 += radiance * basis1.w;
+            sh8 += radiance * basis2;
+            hitSum += hit;
+            sampleCount += 1.0;
+        }
+    }
+
+    float normalizeWeight = rcp(max(sampleCount, 1.0));
+    float hitConfidence = saturate(hitSum * normalizeWeight);
+    float3 traceAmbient = sh0 * normalizeWeight;
+    float4 fixupIrradiance = _BurtGIScreenProbeFixupIrradianceTexture.Load(int3(screenProbeCoord, 0));
+    float4 fixupConfidence = _BurtGIScreenProbeFixupConfidenceTexture.Load(int3(screenProbeCoord, 0));
+    uint2 mip1Size = max(uint2(1u, 1u), (uint2(screenProbeWidth, screenProbeHeight) + 1u) >> 1u);
+    uint2 mip2Size = max(uint2(1u, 1u), (uint2(screenProbeWidth, screenProbeHeight) + 3u) >> 2u);
+    uint2 mip3Size = max(uint2(1u, 1u), (uint2(screenProbeWidth, screenProbeHeight) + 7u) >> 3u);
+    uint2 mip1Coord = min(screenProbeCoord >> 1u, mip1Size - 1u);
+    uint2 mip2Coord = min(screenProbeCoord >> 2u, mip2Size - 1u);
+    uint2 mip3Coord = min(screenProbeCoord >> 3u, mip3Size - 1u);
+    float4 mipIrradiance = _BurtGIScreenProbeMipIrradianceTexture.Load(int3(mip1Coord, 0));
+    float4 mipConfidence = _BurtGIScreenProbeMipConfidenceTexture.Load(int3(mip1Coord, 0));
+    float4 mip2Irradiance = _BurtGIScreenProbeMip2IrradianceTexture.Load(int3(mip2Coord, 0));
+    float4 mip2Confidence = _BurtGIScreenProbeMip2ConfidenceTexture.Load(int3(mip2Coord, 0));
+    float4 mip3Irradiance = _BurtGIScreenProbeMip3IrradianceTexture.Load(int3(mip3Coord, 0));
+    float4 mip3Confidence = _BurtGIScreenProbeMip3ConfidenceTexture.Load(int3(mip3Coord, 0));
+    float confidence = saturate(min(fixupIrradiance.a, fixupConfidence.r));
+    float lowFrequencyConfidence = saturate(min(mipIrradiance.a, mipConfidence.r));
+    float veryLowFrequencyConfidence = saturate(min(mip2Irradiance.a, mip2Confidence.r));
+    float ultraLowFrequencyConfidence = saturate(min(mip3Irradiance.a, mip3Confidence.r));
+    float lowFrequencyFill = saturate((0.55 - confidence) * 2.0) * lowFrequencyConfidence;
+    float veryLowFrequencyFill = saturate((0.38 - confidence) * 2.6315789) * veryLowFrequencyConfidence;
+    float ultraLowFrequencyFill = saturate((0.24 - confidence) * 4.1666665) * ultraLowFrequencyConfidence;
+    float3 veryLowFrequency = lerp(max(mip2Irradiance.rgb, 0.0), max(mip3Irradiance.rgb, 0.0), ultraLowFrequencyFill * 0.65);
+    float3 lowFrequency = lerp(max(mipIrradiance.rgb, 0.0), veryLowFrequency, veryLowFrequencyFill * 0.75);
+    float3 ambient = lerp(max(fixupIrradiance.rgb, 0.0), lowFrequency, lowFrequencyFill * 0.5 + veryLowFrequencyFill * 0.25 + ultraLowFrequencyFill * 0.15);
+    ambient = lerp(ambient, traceAmbient, hitConfidence * 0.65);
+    float ambientConfidence = saturate(max(max(max(max(confidence, hitConfidence), lowFrequencyConfidence * lowFrequencyFill), veryLowFrequencyConfidence * veryLowFrequencyFill), ultraLowFrequencyConfidence * ultraLowFrequencyFill));
+    _BurtGIScreenProbeRadianceSHAmbientTexture[screenProbeCoord] = float4(ambient, ambientConfidence);
+
+    _BurtGIScreenProbeRadianceSHDirectionalTexture[uint2(screenProbeCoord.x + 0u * screenProbeWidth, screenProbeCoord.y)] =
+        float4(sh1.r, sh2.r, sh3.r, sh4.r) * normalizeWeight;
+    _BurtGIScreenProbeRadianceSHDirectionalTexture[uint2(screenProbeCoord.x + 1u * screenProbeWidth, screenProbeCoord.y)] =
+        float4(sh5.r, sh6.r, sh7.r, sh8.r) * normalizeWeight;
+    _BurtGIScreenProbeRadianceSHDirectionalTexture[uint2(screenProbeCoord.x + 2u * screenProbeWidth, screenProbeCoord.y)] =
+        float4(sh1.g, sh2.g, sh3.g, sh4.g) * normalizeWeight;
+    _BurtGIScreenProbeRadianceSHDirectionalTexture[uint2(screenProbeCoord.x + 3u * screenProbeWidth, screenProbeCoord.y)] =
+        float4(sh5.g, sh6.g, sh7.g, sh8.g) * normalizeWeight;
+    _BurtGIScreenProbeRadianceSHDirectionalTexture[uint2(screenProbeCoord.x + 4u * screenProbeWidth, screenProbeCoord.y)] =
+        float4(sh1.b, sh2.b, sh3.b, sh4.b) * normalizeWeight;
+    _BurtGIScreenProbeRadianceSHDirectionalTexture[uint2(screenProbeCoord.x + 5u * screenProbeWidth, screenProbeCoord.y)] =
+        float4(sh5.b, sh6.b, sh7.b, sh8.b) * normalizeWeight;
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, 1)]
+void ScreenProbeIrradianceOctLiteCS(uint groupIndex : SV_GroupIndex, uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    uint uniformProbeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
+    uint atlasProbeHeight = max(screenProbeHeight, BurtGIDivRoundUp(uniformProbeCount + maxAdaptiveProbeCount, screenProbeWidth));
+    uint2 atlasScreenProbeCoord = groupId.xy;
+    uint2 octTexelCoord = groupThreadId.xy;
+
+    if (atlasScreenProbeCoord.x >= screenProbeWidth ||
+        atlasScreenProbeCoord.y >= atlasProbeHeight ||
+        octTexelCoord.x >= BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER ||
+        octTexelCoord.y >= BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER)
+    {
+        return;
+    }
+
+    uint2 atlasCoord = atlasScreenProbeCoord * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER + octTexelCoord;
+    uint screenProbeIndex = atlasScreenProbeCoord.y * screenProbeWidth + atlasScreenProbeCoord.x;
+    uint2 sourceScreenProbeCoord;
+    uint2 resolvedAtlasScreenProbeCoord;
+    bool validAtlasProbe = BurtGIResolveScreenProbeSourceAndAtlasCoord(
+        screenProbeIndex,
+        screenProbeWidth,
+        screenProbeHeight,
+        maxAdaptiveProbeCount,
+        sourceScreenProbeCoord,
+        resolvedAtlasScreenProbeCoord);
+    if (!validAtlasProbe || !BurtGIScreenProbeHasValidPlacement(sourceScreenProbeCoord))
+    {
+        _BurtGIScreenProbeIrradianceOctTexture[atlasCoord] = float4(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+
+    uint2 wrappedOctCoord = BurtGIOctahedralMapWrapBorder(
+        octTexelCoord,
+        BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER,
+        BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_BORDER_SIZE);
+    float2 octUV = (float2(wrappedOctCoord) + 0.5) / (float)BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION;
+    float3 irradianceDirection = BurtGIEquiAreaSphericalMapping(octUV).zxy;
+    uint2 mip1Size = max(uint2(1u, 1u), (uint2(screenProbeWidth, screenProbeHeight) + 1u) >> 1u);
+    uint2 mip2Size = max(uint2(1u, 1u), (uint2(screenProbeWidth, screenProbeHeight) + 3u) >> 2u);
+    uint2 mip3Size = max(uint2(1u, 1u), (uint2(screenProbeWidth, screenProbeHeight) + 7u) >> 3u);
+    uint2 mip1Coord = min(sourceScreenProbeCoord >> 1u, mip1Size - 1u);
+    uint2 mip2Coord = min(sourceScreenProbeCoord >> 2u, mip2Size - 1u);
+    uint2 mip3Coord = min(sourceScreenProbeCoord >> 3u, mip3Size - 1u);
+    float4 fixupIrradiance = _BurtGIScreenProbeFixupIrradianceTexture.Load(int3(sourceScreenProbeCoord, 0));
+    float4 fixupConfidence = _BurtGIScreenProbeFixupConfidenceTexture.Load(int3(sourceScreenProbeCoord, 0));
+    float4 mipIrradiance = _BurtGIScreenProbeMipIrradianceTexture.Load(int3(mip1Coord, 0));
+    float4 mipConfidence = _BurtGIScreenProbeMipConfidenceTexture.Load(int3(mip1Coord, 0));
+    float4 mip2Irradiance = _BurtGIScreenProbeMip2IrradianceTexture.Load(int3(mip2Coord, 0));
+    float4 mip2Confidence = _BurtGIScreenProbeMip2ConfidenceTexture.Load(int3(mip2Coord, 0));
+    float4 mip3Irradiance = _BurtGIScreenProbeMip3IrradianceTexture.Load(int3(mip3Coord, 0));
+    float4 mip3Confidence = _BurtGIScreenProbeMip3ConfidenceTexture.Load(int3(mip3Coord, 0));
+    float fixupIrradianceConfidence = saturate(min(fixupIrradiance.a, fixupConfidence.r));
+    float lowFrequencyConfidence = saturate(min(mipIrradiance.a, mipConfidence.r));
+    float veryLowFrequencyConfidence = saturate(min(mip2Irradiance.a, mip2Confidence.r));
+    float ultraLowFrequencyConfidence = saturate(min(mip3Irradiance.a, mip3Confidence.r));
+    float3 veryLowFrequency = lerp(max(mip2Irradiance.rgb, 0.0), max(mip3Irradiance.rgb, 0.0), ultraLowFrequencyConfidence * 0.65);
+    float3 lowFrequency = lerp(max(mipIrradiance.rgb, 0.0), veryLowFrequency, veryLowFrequencyConfidence * 0.75);
+    float3 fallbackRadiance = lerp(max(fixupIrradiance.rgb, 0.0), lowFrequency, saturate((1.0 - fixupIrradianceConfidence) * 0.65));
+    float fallbackConfidence = saturate(max(max(fixupIrradianceConfidence, lowFrequencyConfidence), max(veryLowFrequencyConfidence, ultraLowFrequencyConfidence)));
+    uint2 gatherTexelCoord = groupThreadId.xy;
+    bool hasTraceSample =
+        gatherTexelCoord.x < BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION &&
+        gatherTexelCoord.y < BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION;
+    float4 basis0 = 0.0;
+    float4 basis1 = 0.0;
+    float basis2 = 0.0;
+    float3 radiance = 0.0;
+    float hit = 0.0;
+    float traceConfidence = 0.0;
+    float sampleWeight = 0.0;
+    if (hasTraceSample)
+    {
+        float2 gatherUV = (float2(gatherTexelCoord) + 0.5) / (float)BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION;
+        uint2 traceTexelCoord = min(
+            (uint2)(gatherUV * (float)traceResolution),
+            traceResolution - 1u);
+        uint2 traceAtlasCoord = atlasScreenProbeCoord * traceResolution + traceTexelCoord;
+        float3 sampleDirection = BurtGIEquiAreaSphericalMapping(gatherUV).zxy;
+        radiance = max(_BurtGIScreenProbeTraceRadianceTexture[traceAtlasCoord].rgb, 0.0);
+        hit = saturate(_BurtGIScreenProbeTraceHitTexture[traceAtlasCoord]);
+        float fallbackBlend = saturate((1.0 - hit) * fallbackConfidence);
+        radiance = lerp(radiance, max(radiance, fallbackRadiance), fallbackBlend * 0.85);
+        // XRender integrates TraceRadiance over every octahedral direction. A sky ray has no geometry hit,
+        // but still carries valid radiance and must not disappear from the irradiance integral.
+        traceConfidence = max(hit, fallbackConfidence * 0.35);
+        sampleWeight = 1.0;
+        basis0 = BurtGISHBasis3V0(sampleDirection);
+        basis1 = BurtGISHBasis3V1(sampleDirection);
+        basis2 = BurtGISHBasis3V2(sampleDirection);
+    }
+
+    float3 weightedRadiance = radiance * sampleWeight;
+    BurtGIScreenProbeIrradianceOctSharedSH[groupIndex + 0u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT] = float4(weightedRadiance * basis0.x, 0.0);
+    BurtGIScreenProbeIrradianceOctSharedSH[groupIndex + 1u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT] = float4(weightedRadiance * basis0.y, 0.0);
+    BurtGIScreenProbeIrradianceOctSharedSH[groupIndex + 2u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT] = float4(weightedRadiance * basis0.z, 0.0);
+    BurtGIScreenProbeIrradianceOctSharedSH[groupIndex + 3u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT] = float4(weightedRadiance * basis0.w, 0.0);
+    BurtGIScreenProbeIrradianceOctSharedSH[groupIndex + 4u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT] = float4(weightedRadiance * basis1.x, 0.0);
+    BurtGIScreenProbeIrradianceOctSharedSH[groupIndex + 5u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT] = float4(weightedRadiance * basis1.y, 0.0);
+    BurtGIScreenProbeIrradianceOctSharedSH[groupIndex + 6u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT] = float4(weightedRadiance * basis1.z, 0.0);
+    BurtGIScreenProbeIrradianceOctSharedSH[groupIndex + 7u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT] = float4(weightedRadiance * basis1.w, 0.0);
+    BurtGIScreenProbeIrradianceOctSharedSH[groupIndex + 8u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT] = float4(weightedRadiance * basis2, 0.0);
+    BurtGIScreenProbeIrradianceOctSharedHit[groupIndex] = traceConfidence;
+    BurtGIScreenProbeIrradianceOctSharedSampleCount[groupIndex] = sampleWeight;
+    GroupMemoryBarrierWithGroupSync();
+
+    [unroll]
+    for (uint reductionStride = BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT / 2u; reductionStride > 0u; reductionStride >>= 1u)
+    {
+        if (groupIndex < reductionStride)
+        {
+            [unroll]
+            for (uint coefficientIndex = 0u; coefficientIndex < BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_SH_COEFFICIENT_COUNT; ++coefficientIndex)
+            {
+                uint sharedIndex = groupIndex + coefficientIndex * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT;
+                BurtGIScreenProbeIrradianceOctSharedSH[sharedIndex] += BurtGIScreenProbeIrradianceOctSharedSH[sharedIndex + reductionStride];
+            }
+
+            BurtGIScreenProbeIrradianceOctSharedSampleCount[groupIndex] += BurtGIScreenProbeIrradianceOctSharedSampleCount[groupIndex + reductionStride];
+            BurtGIScreenProbeIrradianceOctSharedHit[groupIndex] += BurtGIScreenProbeIrradianceOctSharedHit[groupIndex + reductionStride];
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    float normalizeWeight = rcp(max(BurtGIScreenProbeIrradianceOctSharedSampleCount[0], 1.0));
+    float3 sh0 = BurtGIScreenProbeIrradianceOctSharedSH[0u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT].rgb * normalizeWeight;
+    float3 sh1 = BurtGIScreenProbeIrradianceOctSharedSH[1u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT].rgb * normalizeWeight;
+    float3 sh2 = BurtGIScreenProbeIrradianceOctSharedSH[2u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT].rgb * normalizeWeight;
+    float3 sh3 = BurtGIScreenProbeIrradianceOctSharedSH[3u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT].rgb * normalizeWeight;
+    float3 sh4 = BurtGIScreenProbeIrradianceOctSharedSH[4u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT].rgb * normalizeWeight;
+    float3 sh5 = BurtGIScreenProbeIrradianceOctSharedSH[5u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT].rgb * normalizeWeight;
+    float3 sh6 = BurtGIScreenProbeIrradianceOctSharedSH[6u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT].rgb * normalizeWeight;
+    float3 sh7 = BurtGIScreenProbeIrradianceOctSharedSH[7u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT].rgb * normalizeWeight;
+    float3 sh8 = BurtGIScreenProbeIrradianceOctSharedSH[8u * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT].rgb * normalizeWeight;
+    float3 irradiance = BurtGIEvaluateDiffuseTransferSH3(irradianceDirection, sh0, sh1, sh2, sh3, sh4, sh5, sh6, sh7, sh8);
+    float confidence = saturate(BurtGIScreenProbeIrradianceOctSharedHit[0] * normalizeWeight);
+    _BurtGIScreenProbeIrradianceOctTexture[atlasCoord] = float4(irradiance, confidence);
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, 1)]
+void ScreenProbeRadianceOctLiteCS(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    uint uniformProbeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
+    uint atlasProbeHeight = max(screenProbeHeight, BurtGIDivRoundUp(uniformProbeCount + maxAdaptiveProbeCount, screenProbeWidth));
+    uint2 atlasScreenProbeCoord = groupId.xy;
+    uint2 octTexelCoord = groupThreadId.xy;
+
+    if (atlasScreenProbeCoord.x >= screenProbeWidth ||
+        atlasScreenProbeCoord.y >= atlasProbeHeight ||
+        octTexelCoord.x >= BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER ||
+        octTexelCoord.y >= BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER)
+    {
+        return;
+    }
+
+    uint2 atlasCoord = atlasScreenProbeCoord * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER + octTexelCoord;
+    uint screenProbeIndex = atlasScreenProbeCoord.y * screenProbeWidth + atlasScreenProbeCoord.x;
+    uint2 sourceScreenProbeCoord;
+    uint2 resolvedAtlasScreenProbeCoord;
+    bool validAtlasProbe = BurtGIResolveScreenProbeSourceAndAtlasCoord(
+        screenProbeIndex,
+        screenProbeWidth,
+        screenProbeHeight,
+        maxAdaptiveProbeCount,
+        sourceScreenProbeCoord,
+        resolvedAtlasScreenProbeCoord);
+    if (!validAtlasProbe || !BurtGIScreenProbeHasValidPlacement(sourceScreenProbeCoord))
+    {
+        _BurtGIScreenProbeRadianceOctTexture[atlasCoord] = float4(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+
+    uint2 wrappedOctTexelCoord = BurtGIOctahedralMapWrapBorder(
+        octTexelCoord,
+        BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER,
+        BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_BORDER_SIZE);
+    float2 gatherUV = (float2(wrappedOctTexelCoord) + 0.5) / (float)BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION;
+    uint2 traceTexelCoord = min((uint2)(gatherUV * (float)traceResolution), traceResolution - 1u);
+    uint2 traceAtlasCoord = atlasScreenProbeCoord * traceResolution + traceTexelCoord;
+    float4 traceRadiance = _BurtGIScreenProbeTraceRadianceTexture[traceAtlasCoord];
+    float traceHit = saturate(_BurtGIScreenProbeTraceHitTexture[traceAtlasCoord]);
+    float confidence = saturate(max(traceHit, traceRadiance.a));
+    _BurtGIScreenProbeRadianceOctTexture[atlasCoord] = float4(max(traceRadiance.rgb, 0.0), confidence);
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, 1)]
+void ScreenProbeIrradianceOctGenerateMipCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint mipLevel = max(1u, (uint)_BurtGIScreenProbeIrradianceOctMipParams.x);
+    uint baseAtlasWidth = max(1u, (uint)_BurtGIScreenProbeIrradianceOctMipParams.y);
+    uint baseAtlasHeight = max(1u, (uint)_BurtGIScreenProbeIrradianceOctMipParams.z);
+    uint mipProbeSize = max(1u, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER >> mipLevel);
+    uint parentMipProbeSize = max(1u, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER >> (mipLevel - 1u));
+    uint2 mipAtlasSize = uint2(
+        max(1u, baseAtlasWidth >> mipLevel),
+        max(1u, baseAtlasHeight >> mipLevel));
+    uint2 atlasCoord = dispatchThreadId.xy;
+
+    if (any(atlasCoord >= mipAtlasSize))
+    {
+        return;
+    }
+
+    uint2 atlasProbeCoord = atlasCoord / mipProbeSize;
+    uint2 probeTexelCoord = atlasCoord - atlasProbeCoord * mipProbeSize;
+    uint2 parentAtlasCoord = atlasProbeCoord * parentMipProbeSize + probeTexelCoord * 2u;
+    float4 sample00 = _BurtGIScreenProbeIrradianceOctParentMipTexture.Load(int3(parentAtlasCoord + uint2(0u, 0u), 0));
+    float4 sample10 = _BurtGIScreenProbeIrradianceOctParentMipTexture.Load(int3(parentAtlasCoord + uint2(1u, 0u), 0));
+    float4 sample01 = _BurtGIScreenProbeIrradianceOctParentMipTexture.Load(int3(parentAtlasCoord + uint2(0u, 1u), 0));
+    float4 sample11 = _BurtGIScreenProbeIrradianceOctParentMipTexture.Load(int3(parentAtlasCoord + uint2(1u, 1u), 0));
+    float weight00 = saturate(sample00.a);
+    float weight10 = saturate(sample10.a);
+    float weight01 = saturate(sample01.a);
+    float weight11 = saturate(sample11.a);
+    float weightSum = weight00 + weight10 + weight01 + weight11;
+    float4 mipSample = (sample00 + sample10 + sample01 + sample11) * 0.25;
+
+    if (weightSum > 0.0001)
+    {
+        mipSample.rgb =
+            (sample00.rgb * weight00 +
+                sample10.rgb * weight10 +
+                sample01.rgb * weight01 +
+                sample11.rgb * weight11) / weightSum;
+        mipSample.a = saturate(weightSum * 0.25);
+    }
+
+    _BurtGIScreenProbeIrradianceOctMipTexture[atlasCoord] = float4(max(mipSample.rgb, 0.0), saturate(mipSample.a));
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, 1)]
+void ScreenProbeImportancePDFLiteCS(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    uint uniformProbeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
+    uint atlasProbeHeight = max(screenProbeHeight, BurtGIDivRoundUp(uniformProbeCount + maxAdaptiveProbeCount, screenProbeWidth));
+    uint2 atlasScreenProbeCoord = groupId.xy;
+    uint2 pdfTexelCoord = groupThreadId.xy;
+
+    if (atlasScreenProbeCoord.x >= screenProbeWidth ||
+        atlasScreenProbeCoord.y >= atlasProbeHeight ||
+        pdfTexelCoord.x >= BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER ||
+        pdfTexelCoord.y >= BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER)
+    {
+        return;
+    }
+
+    uint2 atlasCoord = atlasScreenProbeCoord * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER + pdfTexelCoord;
+    uint screenProbeIndex = atlasScreenProbeCoord.y * screenProbeWidth + atlasScreenProbeCoord.x;
+    uint2 sourceScreenProbeCoord;
+    uint2 resolvedAtlasScreenProbeCoord;
+    bool validAtlasProbe = BurtGIResolveScreenProbeSourceAndAtlasCoord(
+        screenProbeIndex,
+        screenProbeWidth,
+        screenProbeHeight,
+        maxAdaptiveProbeCount,
+        sourceScreenProbeCoord,
+        resolvedAtlasScreenProbeCoord);
+    if (!validAtlasProbe || !BurtGIScreenProbeHasValidPlacement(sourceScreenProbeCoord))
+    {
+        _BurtGIScreenProbeImportancePDFTexture[atlasCoord] = 0.0;
+        return;
+    }
+
+    uint2 wrappedTexelCoord = BurtGIOctahedralMapWrapBorder(
+        pdfTexelCoord,
+        BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER,
+        BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_BORDER_SIZE);
+    float2 pdfUV = (float2(wrappedTexelCoord) + 0.5) / (float)BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION;
+    float3 sampleDirection = BurtGIEquiAreaSphericalMapping(pdfUV);
+    float3 sourceNormalWS = BurtGIScreenProbeDecodeNormalWS(_BurtGIScreenProbeWorldNormalTexture.Load(int3(sourceScreenProbeCoord, 0)));
+    float3 sourcePositionWS = _BurtGIScreenProbeWorldPositionTexture.Load(int3(sourceScreenProbeCoord, 0)).xyz;
+    float transferPDF = 0.0;
+    float transferWeightSum = 0.0;
+
+    [unroll]
+    for (int offsetY = -1; offsetY <= 1; ++offsetY)
+    {
+        [unroll]
+        for (int offsetX = -1; offsetX <= 1; ++offsetX)
+        {
+            int2 sampleProbeCoordInt = clamp(
+                (int2)sourceScreenProbeCoord + int2(offsetX, offsetY),
+                int2(0, 0),
+                int2((int)screenProbeWidth - 1, (int)screenProbeHeight - 1));
+            uint2 sampleProbeCoord = (uint2)sampleProbeCoordInt;
+            float3 sampleNormalWS;
+            float sampleWeight = BurtGIScreenProbeTransferPDFNeighborhoodWeight(
+                sampleProbeCoord,
+                sourcePositionWS,
+                sourceNormalWS,
+                sampleNormalWS);
+            float samplePDF = saturate(dot(sampleNormalWS, sampleDirection));
+            transferPDF += samplePDF * sampleWeight;
+            transferWeightSum += sampleWeight;
+        }
+    }
+
+    float centerPDF = saturate(dot(sourceNormalWS, sampleDirection));
+    _BurtGIScreenProbeImportancePDFTexture[atlasCoord] = transferWeightSum > 0.0001
+        ? saturate(transferPDF / transferWeightSum)
+        : centerPDF;
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, 1)]
+void ScreenProbeImportanceLightPDFLiteCS(uint groupIndex : SV_GroupIndex, uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 screenProbeCoord = groupId.xy;
+    uint2 traceTexelCoord = groupThreadId.xy;
+    float pdf = 0.0;
+
+    if (screenProbeCoord.x < screenProbeWidth &&
+        screenProbeCoord.y < screenProbeHeight &&
+        traceTexelCoord.x < traceResolution &&
+        traceTexelCoord.y < traceResolution &&
+        BurtGIScreenProbeHasValidPlacement(screenProbeCoord))
+    {
+        float2 traceUV = (float2(traceTexelCoord) + 0.5) / (float)traceResolution;
+        float3 rayDirection = BurtGIEquiAreaSphericalMapping(traceUV);
+        float4 probeRadiance = _BurtGIScreenProbeRadianceTexture.Load(int3(screenProbeCoord, 0));
+        float4 probeIrradiance = _BurtGIScreenProbeIrradianceTexture.Load(int3(screenProbeCoord, 0));
+        float4 probeConfidence = _BurtGIScreenProbeConfidenceTexture.Load(int3(screenProbeCoord, 0));
+        float currentRawDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(screenProbeCoord, 0));
+        float3 currentWorldPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(screenProbeCoord, 0)).xyz;
+        float4 historyRadiance = 0.0;
+        float historyGeometryWeight = 0.0;
+        if (_BurtGIScreenProbeImportanceLightPDFParams.x > 0.5)
+        {
+            historyRadiance = _BurtGIScreenProbeHistoryRadianceTexture.Load(int3(screenProbeCoord, 0));
+            float historyRawDepth = _BurtGIScreenProbeHistoryScreenDepthTexture.Load(int3(screenProbeCoord, 0));
+            float3 historyWorldPosition = _BurtGIScreenProbeHistoryWorldPositionTexture.Load(int3(screenProbeCoord, 0)).xyz;
+            float historyDistanceThreshold = max(_BurtGIScreenProbeImportanceLightPDFParams.z, 0.0001);
+            historyGeometryWeight = BurtGIScreenProbeTraceCompactIsSkyDepth(currentRawDepth) || BurtGIScreenProbeTraceCompactIsSkyDepth(historyRawDepth)
+                ? 0.0
+                : saturate(1.0 - distance(currentWorldPosition, historyWorldPosition) / historyDistanceThreshold);
+        }
+        float directionalEnergy = lerp(0.72, 1.18, saturate(rayDirection.z * 0.5 + 0.5));
+        float confidence = saturate(max(probeRadiance.a, max(probeIrradiance.a, probeConfidence.r)));
+        float historyWeight = saturate(_BurtGIScreenProbeImportanceLightPDFParams.x * _BurtGIScreenProbeImportanceLightPDFParams.y);
+        float historyLuminance = dot(max(historyRadiance.rgb, 0.0), float3(0.2126, 0.7152, 0.0722));
+        historyWeight *= historyGeometryWeight * saturate(historyLuminance * 4.0);
+        float3 currentLighting = max(probeRadiance.rgb, probeIrradiance.rgb * 0.65);
+        float3 predictedLighting = lerp(currentLighting, max(historyRadiance.rgb, 0.0), historyWeight) * directionalEnergy;
+        pdf = max(dot(max(predictedLighting, 0.0), float3(0.2126, 0.7152, 0.0722)), 0.0001) * max(confidence, 0.05);
+    }
+
+    BurtGIScreenProbeImportanceLightSharedPDF[groupIndex] = pdf;
+    GroupMemoryBarrierWithGroupSync();
+
+    [unroll]
+    for (uint reductionStride = BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT >> 1u; reductionStride > 0u; reductionStride >>= 1u)
+    {
+        if (groupIndex < reductionStride)
+        {
+            BurtGIScreenProbeImportanceLightSharedPDF[groupIndex] += BurtGIScreenProbeImportanceLightSharedPDF[groupIndex + reductionStride];
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (screenProbeCoord.x >= screenProbeWidth ||
+        screenProbeCoord.y >= screenProbeHeight ||
+        traceTexelCoord.x >= traceResolution ||
+        traceTexelCoord.y >= traceResolution)
+    {
+        return;
+    }
+
+    uint2 outputCoord = screenProbeCoord * traceResolution + traceTexelCoord;
+    float pdfSum = max(BurtGIScreenProbeImportanceLightSharedPDF[0], 0.0001);
+    _BurtGIScreenProbeImportanceLightPDFTexture[outputCoord] = pdf / pdfSum;
+}
+
+[numthreads(BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE, 1)]
+void ScreenProbeImportanceGenRaysLiteCS(uint groupIndex : SV_GroupIndex, uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint maxImportanceTraceResolution = min(64u, max(traceResolution, traceResolution << 1u));
+    uint uniformLevel = maxImportanceTraceResolution > traceResolution ? 1u : 0u;
+    uint threadIndex = groupThreadId.y * traceResolution + groupThreadId.x;
+    uint numRaysToTrace = traceResolution * traceResolution;
+    uint2 screenProbeCoord = groupId.xy;
+    uint2 traceTexelCoord = groupThreadId.xy;
+    bool validTexel =
+        screenProbeCoord.x < screenProbeWidth &&
+        screenProbeCoord.y < screenProbeHeight &&
+        traceTexelCoord.x < traceResolution &&
+        traceTexelCoord.y < traceResolution &&
+        BurtGIScreenProbeHasValidPlacement(screenProbeCoord);
+
+    uint2 clampedScreenProbeCoord = min(screenProbeCoord, uint2(screenProbeWidth - 1u, screenProbeHeight - 1u));
+    uint2 clampedTraceTexelCoord = min(traceTexelCoord, uint2(traceResolution - 1u, traceResolution - 1u));
+    uint2 atlasCoord = clampedScreenProbeCoord * traceResolution + clampedTraceTexelCoord;
+    float brdfPDF = validTexel ? BurtGIScreenProbeLoadImportancePDF(screenProbeCoord, traceTexelCoord, traceResolution) : 0.0;
+    float lightPDF = validTexel ? _BurtGIScreenProbeImportanceLightPDFTexture[atlasCoord] : 0.0;
+    float combinedPDF = brdfPDF * max(lightPDF * (float)(traceResolution * traceResolution), 0.1);
+    float minPDFToTrace = max(_BurtGIScreenProbeImportanceGenRaysParams.x, 0.0001);
+    bool brdfNotCulled = brdfPDF >= minPDFToTrace;
+    if (brdfNotCulled)
+    {
+        combinedPDF = max(combinedPDF, minPDFToTrace);
+    }
+
+    BurtGIScreenProbeImportanceRaySharedSort[groupIndex] = BurtGIPackScreenProbeImportanceRaySortInfo(traceTexelCoord, uniformLevel, validTexel ? combinedPDF : 0.0);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (threadIndex < numRaysToTrace)
+    {
+        uint2 rayTexelCoord;
+        uint rayLevel;
+        float sortKey;
+        BurtGIUnpackScreenProbeImportanceRaySortInfo(BurtGIScreenProbeImportanceRaySharedSort[threadIndex], rayTexelCoord, rayLevel, sortKey);
+
+        uint numSmaller = 0u;
+        [loop]
+        for (uint otherRayIndex = 0u; otherRayIndex < numRaysToTrace; ++otherRayIndex)
+        {
+            uint2 otherRayTexelCoord;
+            uint otherRayLevel;
+            float otherSortKey;
+            BurtGIUnpackScreenProbeImportanceRaySortInfo(BurtGIScreenProbeImportanceRaySharedSort[otherRayIndex], otherRayTexelCoord, otherRayLevel, otherSortKey);
+            if (otherSortKey < sortKey || (otherSortKey == sortKey && otherRayIndex > threadIndex))
+            {
+                ++numSmaller;
+            }
+        }
+
+        BurtGIScreenProbeImportanceRaySharedSort[numSmaller + numRaysToTrace] = BurtGIScreenProbeImportanceRaySharedSort[threadIndex];
+    }
+
+    if (groupIndex == 0u)
+    {
+        BurtGIScreenProbeImportanceRaySharedSubdivideCount = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (uniformLevel > 0u && threadIndex < numRaysToTrace)
+    {
+        uint mergeThreadIndex = threadIndex % 3u;
+        uint mergeIndex = threadIndex / 3u;
+        uint rayIndexToRefine = max((int)numRaysToTrace - (int)mergeIndex - 1, 0);
+        uint rayIndexToMerge2 = mergeIndex * 3u + 2u;
+
+        if (rayIndexToMerge2 < rayIndexToRefine)
+        {
+            uint2 lowRayTexelCoord;
+            uint lowRayLevel;
+            float lowPDF;
+            BurtGIUnpackScreenProbeImportanceRaySortInfo(BurtGIScreenProbeImportanceRaySharedSort[numRaysToTrace + rayIndexToMerge2], lowRayTexelCoord, lowRayLevel, lowPDF);
+            if (lowPDF < minPDFToTrace)
+            {
+                uint2 originalRayTexelCoord;
+                uint originalRayLevel;
+                float originalPDF;
+                BurtGIUnpackScreenProbeImportanceRaySortInfo(BurtGIScreenProbeImportanceRaySharedSort[numRaysToTrace + rayIndexToRefine], originalRayTexelCoord, originalRayLevel, originalPDF);
+                uint2 subdividedTexelCoord = originalRayTexelCoord * 2u + uint2((mergeThreadIndex + 1u) % 2u, (mergeThreadIndex + 1u) / 2u);
+                float subdividedPDF = max(originalPDF * 0.25, minPDFToTrace);
+                BurtGIScreenProbeImportanceRaySharedSort[numRaysToTrace + threadIndex] = BurtGIPackScreenProbeImportanceRaySortInfo(subdividedTexelCoord, (uint)max(0, (int)originalRayLevel - 1), subdividedPDF);
+                if (mergeThreadIndex == 0u)
+                {
+                    InterlockedAdd(BurtGIScreenProbeImportanceRaySharedSubdivideCount, 1u);
+                }
+            }
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (threadIndex < BurtGIScreenProbeImportanceRaySharedSubdivideCount)
+    {
+        uint rayIndexToSubdivide = numRaysToTrace - threadIndex - 1u;
+        uint2 originalRayTexelCoord;
+        uint originalRayLevel;
+        float originalPDF;
+        BurtGIUnpackScreenProbeImportanceRaySortInfo(BurtGIScreenProbeImportanceRaySharedSort[numRaysToTrace + rayIndexToSubdivide], originalRayTexelCoord, originalRayLevel, originalPDF);
+        float subdividedPDF = max(originalPDF * 0.25, minPDFToTrace);
+        BurtGIScreenProbeImportanceRaySharedSort[numRaysToTrace + rayIndexToSubdivide] =
+            BurtGIPackScreenProbeImportanceRaySortInfo(originalRayTexelCoord * 2u, (uint)max(0, (int)originalRayLevel - 1), subdividedPDF);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (!validTexel)
+    {
+        return;
+    }
+
+    uint2 selectedRayTexelCoord;
+    uint selectedRayLevel;
+    float selectedPDF;
+    BurtGIUnpackScreenProbeImportanceRaySortInfo(BurtGIScreenProbeImportanceRaySharedSort[numRaysToTrace + threadIndex], selectedRayTexelCoord, selectedRayLevel, selectedPDF);
+    _BurtGIScreenProbeImportanceRayInfoTexture[atlasCoord] = BurtGIPackScreenProbeImportanceRayInfo(selectedRayTexelCoord, selectedRayLevel);
+}

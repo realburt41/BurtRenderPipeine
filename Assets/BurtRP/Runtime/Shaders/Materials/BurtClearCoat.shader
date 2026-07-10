@@ -313,6 +313,20 @@ Shader "BurtRP/Clear Coat"
             // Ends the HLSL program for this pass.
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "BurtGI"
+            Tags { "LightMode" = "RayTracing" }
+
+            HLSLPROGRAM
+            #pragma only_renderers d3d11 d3d12
+            #pragma raytracing BurtGI
+            #pragma shader_feature_local _ BURT_ALPHA_CLIP
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
+            ENDHLSL
+        }
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtLitShaderGUI"

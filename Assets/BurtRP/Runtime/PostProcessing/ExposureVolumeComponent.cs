@@ -12,6 +12,7 @@ namespace Burt.RenderPipeline
     {
         [Title("BurtRP Exposure")]
         [InfoBox("Exposure is applied before tonemapping. Final multiplier = 2^(-EV100 + Compensation) * Calibration.")]
+        public BoolParameter enabled = new BoolParameter(true);
         public ExposureModeParameter mode = new ExposureModeParameter(ExposureMode.ManualEV100);
         public ClampedFloatParameter manualEV100 = new ClampedFloatParameter(PhysicalExposureSettings.DefaultManualEv100, -16f, 24f);
         public ClampedFloatParameter compensation = new ClampedFloatParameter(PhysicalExposureSettings.DefaultCompensation, -16f, 16f);
@@ -35,7 +36,7 @@ namespace Burt.RenderPipeline
 
         public bool IsEnabled()
         {
-            if (!active)
+            if (!active || !enabled.value)
             {
                 return false;
             }

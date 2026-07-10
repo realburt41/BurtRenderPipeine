@@ -16,6 +16,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int CameraColorTextureId = Shader.PropertyToID(CameraColorTextureShaderName); // 把中间颜色 RT 的 shader 名称转换成整数 ID，保证申请、绑定、释放都使用同一个临时 RT。
 
+        public const string OpaqueCameraColorName = "OpaqueCameraColor";
+
+        public const string OpaqueCameraColorTextureShaderName = "_BurtOpaqueCameraColorTexture";
+
+        public static readonly int OpaqueCameraColorTextureId = Shader.PropertyToID(OpaqueCameraColorTextureShaderName);
+
+        public const string OpaqueCameraColorAvailableShaderName = "_BurtOpaqueCameraColorAvailable";
+
+        public static readonly int OpaqueCameraColorAvailableId = Shader.PropertyToID(OpaqueCameraColorAvailableShaderName);
+
+        public const string RefractionDistortionName = "RefractionDistortion";
+
+        public const string RefractionDistortionTextureShaderName = "_BurtRefractionDistortionTexture";
+
+        public static readonly int RefractionDistortionTextureId = Shader.PropertyToID(RefractionDistortionTextureShaderName);
+
+        public const string RefractionSceneColorMipChainName = "RefractionSceneColorMipChain";
+
+        public const string RefractionSceneColorMipChainShaderName = "_BurtRefractionSceneColorMipChain";
+
+        public static readonly int RefractionSceneColorMipChainId = Shader.PropertyToID(RefractionSceneColorMipChainShaderName);
+
+        public const string RefractionAvailableShaderName = "_BurtRefractionAvailable";
+
+        public static readonly int RefractionAvailableId = Shader.PropertyToID(RefractionAvailableShaderName);
+
         public const string CameraDepthName = "CameraDepth"; // 定义相机深度目标的统一资源名，后续 DepthPrepass、透明排序和后处理会依赖它。
 
         public const string CameraDepthTextureShaderName = "_BurtCameraDepthTexture"; // 定义真实相机深度 RT 的 shader 名称，后续 shader 采样深度时会使用它。
@@ -154,6 +180,70 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int BurtGIRoughSpecularIndirectTextureId = Shader.PropertyToID(BurtGIRoughSpecularIndirectTextureShaderName);
 
+        public const string BurtGITranslucencyVolume0Name = "BurtGITranslucencyVolume0";
+
+        public const string BurtGITranslucencyVolume0TextureShaderName = "_BurtGITranslucencyVolume0";
+
+        public static readonly int BurtGITranslucencyVolume0TextureId = Shader.PropertyToID(BurtGITranslucencyVolume0TextureShaderName);
+
+        public const string BurtGITranslucencyVolume1Name = "BurtGITranslucencyVolume1";
+
+        public const string BurtGITranslucencyVolume1TextureShaderName = "_BurtGITranslucencyVolume1";
+
+        public static readonly int BurtGITranslucencyVolume1TextureId = Shader.PropertyToID(BurtGITranslucencyVolume1TextureShaderName);
+
+        public const string BurtGITranslucencyVolumeFilter0Name = "BurtGITranslucencyVolumeFilter0";
+
+        public const string BurtGITranslucencyVolumeFilter0TextureShaderName = "_BurtGITranslucencyVolumeFilter0";
+
+        public static readonly int BurtGITranslucencyVolumeFilter0TextureId = Shader.PropertyToID(BurtGITranslucencyVolumeFilter0TextureShaderName);
+
+        public const string BurtGITranslucencyVolumeFilter1Name = "BurtGITranslucencyVolumeFilter1";
+
+        public const string BurtGITranslucencyVolumeFilter1TextureShaderName = "_BurtGITranslucencyVolumeFilter1";
+
+        public static readonly int BurtGITranslucencyVolumeFilter1TextureId = Shader.PropertyToID(BurtGITranslucencyVolumeFilter1TextureShaderName);
+
+        public const string BurtGISceneVoxelRadianceName = "BurtGISceneVoxelRadiance";
+
+        public const string BurtGISceneVoxelRadianceTextureShaderName = "_BurtGISceneVoxelRadianceTexture";
+
+        public const string BurtGISceneVoxelRadianceReadTextureShaderName = "_BurtGISceneVoxelRadianceReadTexture";
+
+        public static readonly int BurtGISceneVoxelRadianceTextureId = Shader.PropertyToID(BurtGISceneVoxelRadianceTextureShaderName);
+
+        public static readonly int BurtGISceneVoxelRadianceReadTextureId = Shader.PropertyToID(BurtGISceneVoxelRadianceReadTextureShaderName);
+
+        public const string BurtGISceneVoxelGeometryName = "BurtGISceneVoxelGeometry";
+
+        public const string BurtGISceneVoxelGeometryTextureShaderName = "_BurtGISceneVoxelGeometryTexture";
+
+        public const string BurtGISceneVoxelGeometryReadTextureShaderName = "_BurtGISceneVoxelGeometryReadTexture";
+
+        public static readonly int BurtGISceneVoxelGeometryTextureId = Shader.PropertyToID(BurtGISceneVoxelGeometryTextureShaderName);
+
+        public static readonly int BurtGISceneVoxelGeometryReadTextureId = Shader.PropertyToID(BurtGISceneVoxelGeometryReadTextureShaderName);
+
+        public const string BurtGISceneVoxelOccupancyMipName = "BurtGISceneVoxelOccupancyMip";
+
+        public const string BurtGISceneVoxelOccupancyMipTextureShaderName = "_BurtGISceneVoxelOccupancyMipTexture";
+
+        public const string BurtGISceneVoxelOccupancyMipReadTextureShaderName = "_BurtGISceneVoxelOccupancyMipReadTexture";
+
+        public static readonly int BurtGISceneVoxelOccupancyMipTextureId = Shader.PropertyToID(BurtGISceneVoxelOccupancyMipTextureShaderName);
+
+        public static readonly int BurtGISceneVoxelOccupancyMipReadTextureId = Shader.PropertyToID(BurtGISceneVoxelOccupancyMipReadTextureShaderName);
+
+        public const string BurtGISceneVoxelLightingName = "BurtGISceneVoxelLighting";
+
+        public const string BurtGISceneVoxelLightingTextureShaderName = "_BurtGISceneVoxelLightingTexture";
+
+        public const string BurtGISceneVoxelLightingReadTextureShaderName = "_BurtGISceneVoxelLightingReadTexture";
+
+        public static readonly int BurtGISceneVoxelLightingTextureId = Shader.PropertyToID(BurtGISceneVoxelLightingTextureShaderName);
+
+        public static readonly int BurtGISceneVoxelLightingReadTextureId = Shader.PropertyToID(BurtGISceneVoxelLightingReadTextureShaderName);
+
         public const string BurtGITemporalDiagnosticsName = "BurtGITemporalDiagnostics";
 
         public const string BurtGITemporalDiagnosticsTextureShaderName = "_BurtGITemporalDiagnosticsTexture";
@@ -177,6 +267,240 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string BurtGIScreenProbeConfidenceTextureShaderName = "_BurtGIScreenProbeConfidenceTexture";
 
         public static readonly int BurtGIScreenProbeConfidenceTextureId = Shader.PropertyToID(BurtGIScreenProbeConfidenceTextureShaderName);
+
+        public const string BurtGIScreenProbeHitDistanceName = "BurtGIScreenProbeHitDistance";
+
+        public const string BurtGIScreenProbeHitDistanceTextureShaderName = "_BurtGIScreenProbeHitDistanceTexture";
+
+        public static readonly int BurtGIScreenProbeHitDistanceTextureId = Shader.PropertyToID(BurtGIScreenProbeHitDistanceTextureShaderName);
+
+        public const string BurtGIScreenProbeBentNormalName = "BurtGIScreenProbeBentNormal";
+
+        public const string BurtGIScreenProbeBentNormalTextureShaderName = "_BurtGIScreenProbeBentNormalTexture";
+
+        public static readonly int BurtGIScreenProbeBentNormalTextureId = Shader.PropertyToID(BurtGIScreenProbeBentNormalTextureShaderName);
+
+        public const string BurtGIScreenProbeScreenDepthName = "BurtGIScreenProbeScreenDepth";
+
+        public const string BurtGIScreenProbeScreenDepthTextureShaderName = "_BurtGIScreenProbeScreenDepthTexture";
+
+        public static readonly int BurtGIScreenProbeScreenDepthTextureId = Shader.PropertyToID(BurtGIScreenProbeScreenDepthTextureShaderName);
+
+        public const string BurtGIScreenProbeWorldNormalName = "BurtGIScreenProbeWorldNormal";
+
+        public const string BurtGIScreenProbeWorldNormalTextureShaderName = "_BurtGIScreenProbeWorldNormalTexture";
+
+        public static readonly int BurtGIScreenProbeWorldNormalTextureId = Shader.PropertyToID(BurtGIScreenProbeWorldNormalTextureShaderName);
+
+        public const string BurtGIScreenProbeWorldPositionName = "BurtGIScreenProbeWorldPosition";
+
+        public const string BurtGIScreenProbeWorldPositionTextureShaderName = "_BurtGIScreenProbeWorldPositionTexture";
+
+        public static readonly int BurtGIScreenProbeWorldPositionTextureId = Shader.PropertyToID(BurtGIScreenProbeWorldPositionTextureShaderName);
+
+        public const string BurtGIScreenProbeAdaptiveProbeHeaderName = "BurtGIScreenProbeAdaptiveProbeHeader";
+
+        public const string BurtGIScreenProbeAdaptiveProbeHeaderTextureShaderName = "_BurtGIScreenProbeAdaptiveProbeHeaderTexture";
+
+        public static readonly int BurtGIScreenProbeAdaptiveProbeHeaderTextureId = Shader.PropertyToID(BurtGIScreenProbeAdaptiveProbeHeaderTextureShaderName);
+
+        public const string BurtGIScreenProbeAdaptiveProbeIndicesName = "BurtGIScreenProbeAdaptiveProbeIndices";
+
+        public const string BurtGIScreenProbeAdaptiveProbeIndicesTextureShaderName = "_BurtGIScreenProbeAdaptiveProbeIndicesTexture";
+
+        public static readonly int BurtGIScreenProbeAdaptiveProbeIndicesTextureId = Shader.PropertyToID(BurtGIScreenProbeAdaptiveProbeIndicesTextureShaderName);
+
+        public const string BurtGIScreenProbeTraceRadianceName = "BurtGIScreenProbeTraceRadiance";
+
+        public const string BurtGIScreenProbeTraceRadianceTextureShaderName = "_BurtGIScreenProbeTraceRadianceTexture";
+
+        public static readonly int BurtGIScreenProbeTraceRadianceTextureId = Shader.PropertyToID(BurtGIScreenProbeTraceRadianceTextureShaderName);
+
+        public const string BurtGIScreenProbeTraceHitName = "BurtGIScreenProbeTraceHit";
+
+        public const string BurtGIScreenProbeTraceHitTextureShaderName = "_BurtGIScreenProbeTraceHitTexture";
+
+        public static readonly int BurtGIScreenProbeTraceHitTextureId = Shader.PropertyToID(BurtGIScreenProbeTraceHitTextureShaderName);
+
+        public const string BurtGIScreenProbeTemporalRadianceName = "BurtGIScreenProbeTemporalRadiance";
+
+        public const string BurtGIScreenProbeTemporalRadianceTextureShaderName = "_BurtGIScreenProbeTemporalRadianceTexture";
+
+        public static readonly int BurtGIScreenProbeTemporalRadianceTextureId = Shader.PropertyToID(BurtGIScreenProbeTemporalRadianceTextureShaderName);
+
+        public const string BurtGIScreenProbeTemporalIrradianceName = "BurtGIScreenProbeTemporalIrradiance";
+
+        public const string BurtGIScreenProbeTemporalIrradianceTextureShaderName = "_BurtGIScreenProbeTemporalIrradianceTexture";
+
+        public static readonly int BurtGIScreenProbeTemporalIrradianceTextureId = Shader.PropertyToID(BurtGIScreenProbeTemporalIrradianceTextureShaderName);
+
+        public const string BurtGIScreenProbeTemporalConfidenceName = "BurtGIScreenProbeTemporalConfidence";
+
+        public const string BurtGIScreenProbeTemporalConfidenceTextureShaderName = "_BurtGIScreenProbeTemporalConfidenceTexture";
+
+        public static readonly int BurtGIScreenProbeTemporalConfidenceTextureId = Shader.PropertyToID(BurtGIScreenProbeTemporalConfidenceTextureShaderName);
+
+        public const string BurtGIScreenProbeFilteredRadianceName = "BurtGIScreenProbeFilteredRadiance";
+
+        public const string BurtGIScreenProbeFilteredRadianceTextureShaderName = "_BurtGIScreenProbeFilteredRadianceTexture";
+
+        public static readonly int BurtGIScreenProbeFilteredRadianceTextureId = Shader.PropertyToID(BurtGIScreenProbeFilteredRadianceTextureShaderName);
+
+        public const string BurtGIScreenProbeFilteredIrradianceName = "BurtGIScreenProbeFilteredIrradiance";
+
+        public const string BurtGIScreenProbeFilteredIrradianceTextureShaderName = "_BurtGIScreenProbeFilteredIrradianceTexture";
+
+        public static readonly int BurtGIScreenProbeFilteredIrradianceTextureId = Shader.PropertyToID(BurtGIScreenProbeFilteredIrradianceTextureShaderName);
+
+        public const string BurtGIScreenProbeFilteredConfidenceName = "BurtGIScreenProbeFilteredConfidence";
+
+        public const string BurtGIScreenProbeFilteredConfidenceTextureShaderName = "_BurtGIScreenProbeFilteredConfidenceTexture";
+
+        public static readonly int BurtGIScreenProbeFilteredConfidenceTextureId = Shader.PropertyToID(BurtGIScreenProbeFilteredConfidenceTextureShaderName);
+
+        public const string BurtGIScreenProbeFixupRadianceName = "BurtGIScreenProbeFixupRadiance";
+
+        public const string BurtGIScreenProbeFixupRadianceTextureShaderName = "_BurtGIScreenProbeFixupRadianceTexture";
+
+        public static readonly int BurtGIScreenProbeFixupRadianceTextureId = Shader.PropertyToID(BurtGIScreenProbeFixupRadianceTextureShaderName);
+
+        public const string BurtGIScreenProbeFixupIrradianceName = "BurtGIScreenProbeFixupIrradiance";
+
+        public const string BurtGIScreenProbeFixupIrradianceTextureShaderName = "_BurtGIScreenProbeFixupIrradianceTexture";
+
+        public static readonly int BurtGIScreenProbeFixupIrradianceTextureId = Shader.PropertyToID(BurtGIScreenProbeFixupIrradianceTextureShaderName);
+
+        public const string BurtGIScreenProbeFixupConfidenceName = "BurtGIScreenProbeFixupConfidence";
+
+        public const string BurtGIScreenProbeFixupConfidenceTextureShaderName = "_BurtGIScreenProbeFixupConfidenceTexture";
+
+        public static readonly int BurtGIScreenProbeFixupConfidenceTextureId = Shader.PropertyToID(BurtGIScreenProbeFixupConfidenceTextureShaderName);
+
+        public const string BurtGIScreenProbeMipRadianceName = "BurtGIScreenProbeMipRadiance";
+
+        public const string BurtGIScreenProbeMipRadianceTextureShaderName = "_BurtGIScreenProbeMipRadianceTexture";
+
+        public static readonly int BurtGIScreenProbeMipRadianceTextureId = Shader.PropertyToID(BurtGIScreenProbeMipRadianceTextureShaderName);
+
+        public const string BurtGIScreenProbeMipIrradianceName = "BurtGIScreenProbeMipIrradiance";
+
+        public const string BurtGIScreenProbeMipIrradianceTextureShaderName = "_BurtGIScreenProbeMipIrradianceTexture";
+
+        public static readonly int BurtGIScreenProbeMipIrradianceTextureId = Shader.PropertyToID(BurtGIScreenProbeMipIrradianceTextureShaderName);
+
+        public const string BurtGIScreenProbeMipConfidenceName = "BurtGIScreenProbeMipConfidence";
+
+        public const string BurtGIScreenProbeMipConfidenceTextureShaderName = "_BurtGIScreenProbeMipConfidenceTexture";
+
+        public static readonly int BurtGIScreenProbeMipConfidenceTextureId = Shader.PropertyToID(BurtGIScreenProbeMipConfidenceTextureShaderName);
+
+        public const string BurtGIScreenProbeMip2RadianceName = "BurtGIScreenProbeMip2Radiance";
+
+        public const string BurtGIScreenProbeMip2RadianceTextureShaderName = "_BurtGIScreenProbeMip2RadianceTexture";
+
+        public static readonly int BurtGIScreenProbeMip2RadianceTextureId = Shader.PropertyToID(BurtGIScreenProbeMip2RadianceTextureShaderName);
+
+        public const string BurtGIScreenProbeMip2IrradianceName = "BurtGIScreenProbeMip2Irradiance";
+
+        public const string BurtGIScreenProbeMip2IrradianceTextureShaderName = "_BurtGIScreenProbeMip2IrradianceTexture";
+
+        public static readonly int BurtGIScreenProbeMip2IrradianceTextureId = Shader.PropertyToID(BurtGIScreenProbeMip2IrradianceTextureShaderName);
+
+        public const string BurtGIScreenProbeMip2ConfidenceName = "BurtGIScreenProbeMip2Confidence";
+
+        public const string BurtGIScreenProbeMip2ConfidenceTextureShaderName = "_BurtGIScreenProbeMip2ConfidenceTexture";
+
+        public static readonly int BurtGIScreenProbeMip2ConfidenceTextureId = Shader.PropertyToID(BurtGIScreenProbeMip2ConfidenceTextureShaderName);
+
+        public const string BurtGIScreenProbeMip3RadianceName = "BurtGIScreenProbeMip3Radiance";
+
+        public const string BurtGIScreenProbeMip3RadianceTextureShaderName = "_BurtGIScreenProbeMip3RadianceTexture";
+
+        public static readonly int BurtGIScreenProbeMip3RadianceTextureId = Shader.PropertyToID(BurtGIScreenProbeMip3RadianceTextureShaderName);
+
+        public const string BurtGIScreenProbeMip3IrradianceName = "BurtGIScreenProbeMip3Irradiance";
+
+        public const string BurtGIScreenProbeMip3IrradianceTextureShaderName = "_BurtGIScreenProbeMip3IrradianceTexture";
+
+        public static readonly int BurtGIScreenProbeMip3IrradianceTextureId = Shader.PropertyToID(BurtGIScreenProbeMip3IrradianceTextureShaderName);
+
+        public const string BurtGIScreenProbeMip3ConfidenceName = "BurtGIScreenProbeMip3Confidence";
+
+        public const string BurtGIScreenProbeMip3ConfidenceTextureShaderName = "_BurtGIScreenProbeMip3ConfidenceTexture";
+
+        public static readonly int BurtGIScreenProbeMip3ConfidenceTextureId = Shader.PropertyToID(BurtGIScreenProbeMip3ConfidenceTextureShaderName);
+
+        public const string BurtGIScreenProbeRadianceSHAmbientName = "BurtGIScreenProbeRadianceSHAmbient";
+
+        public const string BurtGIScreenProbeRadianceSHAmbientTextureShaderName = "_BurtGIScreenProbeRadianceSHAmbientTexture";
+
+        public static readonly int BurtGIScreenProbeRadianceSHAmbientTextureId = Shader.PropertyToID(BurtGIScreenProbeRadianceSHAmbientTextureShaderName);
+
+        public const string BurtGIScreenProbeRadianceSHDirectionalName = "BurtGIScreenProbeRadianceSHDirectional";
+
+        public const string BurtGIScreenProbeRadianceSHDirectionalTextureShaderName = "_BurtGIScreenProbeRadianceSHDirectionalTexture";
+
+        public static readonly int BurtGIScreenProbeRadianceSHDirectionalTextureId = Shader.PropertyToID(BurtGIScreenProbeRadianceSHDirectionalTextureShaderName);
+
+        public const string BurtGIScreenProbeIrradianceOctName = "BurtGIScreenProbeIrradianceOct";
+
+        public const string BurtGIScreenProbeIrradianceOctTextureShaderName = "_BurtGIScreenProbeIrradianceOctTexture";
+
+        public static readonly int BurtGIScreenProbeIrradianceOctTextureId = Shader.PropertyToID(BurtGIScreenProbeIrradianceOctTextureShaderName);
+
+        public const string BurtGIScreenProbeRadianceOctName = "BurtGIScreenProbeRadianceOct";
+
+        public const string BurtGIScreenProbeRadianceOctTextureShaderName = "_BurtGIScreenProbeRadianceOctTexture";
+
+        public static readonly int BurtGIScreenProbeRadianceOctTextureId = Shader.PropertyToID(BurtGIScreenProbeRadianceOctTextureShaderName);
+
+        public const string BurtGIScreenProbeImportancePDFName = "BurtGIScreenProbeImportancePDF";
+
+        public const string BurtGIScreenProbeImportancePDFTextureShaderName = "_BurtGIScreenProbeImportancePDFTexture";
+
+        public static readonly int BurtGIScreenProbeImportancePDFTextureId = Shader.PropertyToID(BurtGIScreenProbeImportancePDFTextureShaderName);
+
+        public const string BurtGIScreenProbeImportanceLightPDFName = "BurtGIScreenProbeImportanceLightPDF";
+
+        public const string BurtGIScreenProbeImportanceLightPDFTextureShaderName = "_BurtGIScreenProbeImportanceLightPDFTexture";
+
+        public static readonly int BurtGIScreenProbeImportanceLightPDFTextureId = Shader.PropertyToID(BurtGIScreenProbeImportanceLightPDFTextureShaderName);
+
+        public const string BurtGIScreenProbeImportanceRayInfoName = "BurtGIScreenProbeImportanceRayInfo";
+
+        public const string BurtGIScreenProbeImportanceRayInfoTextureShaderName = "_BurtGIScreenProbeImportanceRayInfoTexture";
+
+        public static readonly int BurtGIScreenProbeImportanceRayInfoTextureId = Shader.PropertyToID(BurtGIScreenProbeImportanceRayInfoTextureShaderName);
+
+        public const string BurtGIRadianceCacheClipMapIndirectionName = "BurtGIRadianceCacheClipMapIndirection";
+
+        public const string BurtGIRadianceCacheClipMapIndirectionTextureShaderName = "_BurtGIRadianceCacheClipMapIndirectionTexture";
+
+        public static readonly int BurtGIRadianceCacheClipMapIndirectionTextureId = Shader.PropertyToID(BurtGIRadianceCacheClipMapIndirectionTextureShaderName);
+
+        public const string BurtGIRadianceCacheClipMapDepthProbeAtlasName = "BurtGIRadianceCacheClipMapDepthProbeAtlas";
+
+        public const string BurtGIRadianceCacheClipMapDepthProbeAtlasTextureShaderName = "_BurtGIRadianceCacheClipMapDepthProbeAtlasTexture";
+
+        public static readonly int BurtGIRadianceCacheClipMapDepthProbeAtlasTextureId = Shader.PropertyToID(BurtGIRadianceCacheClipMapDepthProbeAtlasTextureShaderName);
+
+        public const string BurtGIRadianceCacheClipMapRadianceProbeAtlasName = "BurtGIRadianceCacheClipMapRadianceProbeAtlas";
+
+        public const string BurtGIRadianceCacheClipMapRadianceProbeAtlasTextureShaderName = "_BurtGIRadianceCacheClipMapRadianceProbeAtlasTexture";
+
+        public static readonly int BurtGIRadianceCacheClipMapRadianceProbeAtlasTextureId = Shader.PropertyToID(BurtGIRadianceCacheClipMapRadianceProbeAtlasTextureShaderName);
+
+        public const string BurtGIRadianceCacheClipMapFinalRadianceAtlasName = "BurtGIRadianceCacheClipMapFinalRadianceAtlas";
+
+        public const string BurtGIRadianceCacheClipMapFinalRadianceAtlasTextureShaderName = "_BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture";
+
+        public static readonly int BurtGIRadianceCacheClipMapFinalRadianceAtlasTextureId = Shader.PropertyToID(BurtGIRadianceCacheClipMapFinalRadianceAtlasTextureShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeOcclusionAtlasName = "BurtGIRadianceCacheClipMapProbeOcclusionAtlas";
+
+        public const string BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureShaderName = "_BurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureShaderName);
 
         public const string ScreenSpaceSubsurfaceSourceName = "ScreenSpaceSubsurfaceSource";
 
@@ -291,6 +615,230 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string ScreenSpaceSubsurfaceBurleyArgsBufferName = "ScreenSpaceSubsurfaceBurleyArgsBuffer";
 
         public const string ScreenSpaceSubsurfaceBurleyGroupBufferName = "ScreenSpaceSubsurfaceBurleyGroupBuffer";
+
+        public const string BurtGIScreenProbeIndirectArgsBufferName = "BurtGIScreenProbeIndirectArgsBuffer";
+
+        public const string BurtGIScreenProbeTraceCompactTexelCountBufferName = "BurtGIScreenProbeTraceCompactTexelCountBuffer";
+
+        public const string BurtGIScreenProbeTraceCompactTexelDataBufferName = "BurtGIScreenProbeTraceCompactTexelDataBuffer";
+
+        public const string BurtGIScreenProbeTraceCompactIndirectArgsBufferName = "BurtGIScreenProbeTraceCompactIndirectArgsBuffer";
+
+        public const string BurtGIScreenProbeTraceCompactThreadCountXBufferName = "BurtGIScreenProbeTraceCompactThreadCountXBuffer";
+
+        public const string BurtGIScreenProbeAdaptiveProbeNumBufferName = "BurtGIScreenProbeAdaptiveProbeNumBuffer";
+
+        public const string BurtGIScreenProbeAdaptiveProbeDataBufferName = "BurtGIScreenProbeAdaptiveProbeDataBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeAllocatorBufferName = "BurtGIRadianceCacheClipMapProbeAllocatorBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeAllocatorBufferShaderName = "_BurtGIRadianceCacheClipMapProbeAllocatorBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeAllocatorBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeAllocatorBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName = "BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferShaderName = "_BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeFreeListBufferName = "BurtGIRadianceCacheClipMapProbeFreeListBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeFreeListBufferShaderName = "_BurtGIRadianceCacheClipMapProbeFreeListBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeFreeListBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeFreeListBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferName = "BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferShaderName = "_BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferName = "BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferShaderName = "_BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeWorldOffsetBufferName = "BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeWorldOffsetBufferShaderName = "_BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeWorldOffsetBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeWorldOffsetBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeTraceDataBufferName = "BurtGIRadianceCacheClipMapProbeTraceDataBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeTraceDataBufferShaderName = "_BurtGIRadianceCacheClipMapProbeTraceDataBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeTraceDataBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeTraceDataBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeTraceAllocatorBufferName = "BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeTraceAllocatorBufferShaderName = "_BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeTraceAllocatorBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeTraceAllocatorBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapPriorityHistogramBufferName = "BurtGIRadianceCacheClipMapPriorityHistogramBuffer";
+
+        public const string BurtGIRadianceCacheClipMapPriorityHistogramBufferShaderName = "_BurtGIRadianceCacheClipMapPriorityHistogramBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapPriorityHistogramBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapPriorityHistogramBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapMaxUpdateBucketBufferName = "BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer";
+
+        public const string BurtGIRadianceCacheClipMapMaxUpdateBucketBufferShaderName = "_BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapMaxUpdateBucketBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapMaxUpdateBucketBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferName = "BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer";
+
+        public const string BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferShaderName = "_BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBufferName = "BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBufferShaderName = "_BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapRadianceProbePDFBufferName = "BurtGIRadianceCacheClipMapRadianceProbePDFBuffer";
+
+        public const string BurtGIRadianceCacheClipMapRadianceProbePDFBufferShaderName = "_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapRadianceProbePDFBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapRadianceProbePDFBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBufferName = "BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBuffer";
+
+        public const string BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBufferShaderName = "_BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferName = "BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer";
+
+        public const string BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferShaderName = "_BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBufferName = "BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBufferShaderName = "_BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBufferName = "BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBuffer";
+
+        public const string BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBufferShaderName = "_BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferName = "BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBuffer";
+
+        public const string BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferShaderName = "_BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferName = "BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBuffer";
+
+        public const string BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferShaderName = "_BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBufferName = "BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBuffer";
+
+        public const string BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBufferShaderName = "_BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferName = "BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBuffer";
+
+        public const string BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferShaderName = "_BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferName = "BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBuffer";
+
+        public const string BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferShaderName = "_BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferName = "BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBuffer";
+
+        public const string BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferShaderName = "_BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeTraceTileDataBufferName = "BurtGIRadianceCacheClipMapProbeTraceTileDataBuffer";
+
+        public const string BurtGIRadianceCacheClipMapProbeTraceTileDataBufferShaderName = "_BurtGIRadianceCacheClipMapProbeTraceTileDataBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeTraceTileDataBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeTraceTileDataBufferShaderName);
+
+        public const string BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferName = "BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBuffer";
+
+        public const string BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferShaderName = "_BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBuffer";
+
+        public static readonly int BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferId = Shader.PropertyToID(BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridValueBufferName = "BurtGIRadianceCacheHashGridValueBuffer";
+
+        public const string BurtGIRadianceCacheHashGridValueBufferShaderName = "_BurtGIRadianceCacheHashGridValueBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridValueBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridValueBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridTileBufferName = "BurtGIRadianceCacheHashGridTileBuffer";
+
+        public const string BurtGIRadianceCacheHashGridTileBufferShaderName = "_BurtGIRadianceCacheHashGridTileBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridTileBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridTileBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridCountBufferName = "BurtGIRadianceCacheHashGridCountBuffer";
+
+        public const string BurtGIRadianceCacheHashGridCountBufferShaderName = "_BurtGIRadianceCacheHashGridCountBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridCountBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridCountBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridVisibilityCellQueryBufferName = "BurtGIRadianceCacheHashGridVisibilityCellQueryBuffer";
+
+        public const string BurtGIRadianceCacheHashGridVisibilityCellQueryBufferShaderName = "_BurtGIRadianceCacheHashGridVisibilityCellQueryBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridVisibilityCellQueryBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridVisibilityCellQueryBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridUpdateCellValueBufferName = "BurtGIRadianceCacheHashGridUpdateCellValueBuffer";
+
+        public const string BurtGIRadianceCacheHashGridUpdateCellValueBufferShaderName = "_BurtGIRadianceCacheHashGridUpdateCellValueBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridUpdateCellValueBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridUpdateCellValueBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridUpdateTileBufferName = "BurtGIRadianceCacheHashGridUpdateTileBuffer";
+
+        public const string BurtGIRadianceCacheHashGridUpdateTileBufferShaderName = "_BurtGIRadianceCacheHashGridUpdateTileBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridUpdateTileBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridUpdateTileBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBufferName = "BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBuffer";
+
+        public const string BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBufferShaderName = "_BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBufferName = "BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBuffer";
+
+        public const string BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBufferShaderName = "_BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridDebugCellBufferName = "BurtGIRadianceCacheHashGridDebugCellBuffer";
+
+        public const string BurtGIRadianceCacheHashGridDebugCellBufferShaderName = "_BurtGIRadianceCacheHashGridDebugCellBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridDebugCellBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridDebugCellBufferShaderName);
+
+        public const string BurtGIRadianceCacheHashGridDebugDrawArgsBufferName = "BurtGIRadianceCacheHashGridDebugDrawArgsBuffer";
+
+        public const string BurtGIRadianceCacheHashGridDebugDrawArgsBufferShaderName = "_BurtGIRadianceCacheHashGridDebugDrawArgsBuffer";
+
+        public static readonly int BurtGIRadianceCacheHashGridDebugDrawArgsBufferId = Shader.PropertyToID(BurtGIRadianceCacheHashGridDebugDrawArgsBufferShaderName);
 
         public const string MainLightShadowMapName = "MainLightShadowMap"; // 定义主光阴影图在 RenderGraph 里的统一资源名，后续阴影绘制和光照采样都通过它建立依赖。
 
@@ -580,6 +1128,51 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle RegisterCameraColorTexture() // 定义注册 BurtRP 自己创建的 CameraColor 临时颜色 RT 的快捷函数。
         {
             return RegisterCameraColor(new RenderTargetIdentifier(CameraColorTextureId)); // 使用统一 ID 创建 RenderTargetIdentifier，并把它注册为 CameraColor 中间目标。
+        }
+
+        public BurtRenderTargetHandle RegisterOpaqueCameraColorTexture()
+        {
+            return RegisterOpaqueCameraColor(new RenderTargetIdentifier(OpaqueCameraColorTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterOpaqueCameraColor(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(OpaqueCameraColorName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetOpaqueCameraColor()
+        {
+            return GetRenderTarget(OpaqueCameraColorName);
+        }
+
+        public BurtRenderTargetHandle RegisterRefractionDistortionTexture()
+        {
+            return RegisterRefractionDistortion(new RenderTargetIdentifier(RefractionDistortionTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterRefractionDistortion(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(RefractionDistortionName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetRefractionDistortion()
+        {
+            return GetRenderTarget(RefractionDistortionName);
+        }
+
+        public BurtRenderTargetHandle RegisterRefractionSceneColorMipChainTexture()
+        {
+            return RegisterRefractionSceneColorMipChain(new RenderTargetIdentifier(RefractionSceneColorMipChainId));
+        }
+
+        public BurtRenderTargetHandle RegisterRefractionSceneColorMipChain(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(RefractionSceneColorMipChainName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetRefractionSceneColorMipChain()
+        {
+            return GetRenderTarget(RefractionSceneColorMipChainName);
         }
 
         public BurtRenderTargetHandle RegisterFinalCameraTarget(RenderTargetIdentifier identifier) // 定义注册最终相机输出目标的快捷函数。
@@ -907,6 +1500,126 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(BurtGIRoughSpecularIndirectName);
         }
 
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolume0Texture()
+        {
+            return RegisterBurtGITranslucencyVolume0(new RenderTargetIdentifier(BurtGITranslucencyVolume0TextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolume0(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGITranslucencyVolume0Name, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGITranslucencyVolume0()
+        {
+            return GetRenderTarget(BurtGITranslucencyVolume0Name);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolume1Texture()
+        {
+            return RegisterBurtGITranslucencyVolume1(new RenderTargetIdentifier(BurtGITranslucencyVolume1TextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolume1(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGITranslucencyVolume1Name, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGITranslucencyVolume1()
+        {
+            return GetRenderTarget(BurtGITranslucencyVolume1Name);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeFilter0Texture()
+        {
+            return RegisterBurtGITranslucencyVolumeFilter0(new RenderTargetIdentifier(BurtGITranslucencyVolumeFilter0TextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeFilter0(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGITranslucencyVolumeFilter0Name, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGITranslucencyVolumeFilter0()
+        {
+            return GetRenderTarget(BurtGITranslucencyVolumeFilter0Name);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeFilter1Texture()
+        {
+            return RegisterBurtGITranslucencyVolumeFilter1(new RenderTargetIdentifier(BurtGITranslucencyVolumeFilter1TextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeFilter1(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGITranslucencyVolumeFilter1Name, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGITranslucencyVolumeFilter1()
+        {
+            return GetRenderTarget(BurtGITranslucencyVolumeFilter1Name);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGISceneVoxelRadianceTexture()
+        {
+            return RegisterBurtGISceneVoxelRadiance(new RenderTargetIdentifier(BurtGISceneVoxelRadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGISceneVoxelRadiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGISceneVoxelRadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGISceneVoxelRadiance()
+        {
+            return GetRenderTarget(BurtGISceneVoxelRadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGISceneVoxelGeometryTexture()
+        {
+            return RegisterBurtGISceneVoxelGeometry(new RenderTargetIdentifier(BurtGISceneVoxelGeometryTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGISceneVoxelGeometry(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGISceneVoxelGeometryName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGISceneVoxelGeometry()
+        {
+            return GetRenderTarget(BurtGISceneVoxelGeometryName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGISceneVoxelOccupancyMipTexture()
+        {
+            return RegisterBurtGISceneVoxelOccupancyMip(new RenderTargetIdentifier(BurtGISceneVoxelOccupancyMipTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGISceneVoxelOccupancyMip(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGISceneVoxelOccupancyMipName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGISceneVoxelOccupancyMip()
+        {
+            return GetRenderTarget(BurtGISceneVoxelOccupancyMipName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGISceneVoxelLightingTexture()
+        {
+            return RegisterBurtGISceneVoxelLighting(new RenderTargetIdentifier(BurtGISceneVoxelLightingTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGISceneVoxelLighting(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGISceneVoxelLightingName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGISceneVoxelLighting()
+        {
+            return GetRenderTarget(BurtGISceneVoxelLightingName);
+        }
+
         public BurtRenderTargetHandle RegisterBurtGITemporalDiagnosticsTexture()
         {
             return RegisterBurtGITemporalDiagnostics(new RenderTargetIdentifier(BurtGITemporalDiagnosticsTextureId));
@@ -920,6 +1633,81 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetBurtGITemporalDiagnostics()
         {
             return GetRenderTarget(BurtGITemporalDiagnosticsName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeScreenDepthTexture()
+        {
+            return RegisterBurtGIScreenProbeScreenDepth(new RenderTargetIdentifier(BurtGIScreenProbeScreenDepthTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeScreenDepth(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeScreenDepthName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeScreenDepth()
+        {
+            return GetRenderTarget(BurtGIScreenProbeScreenDepthName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeWorldNormalTexture()
+        {
+            return RegisterBurtGIScreenProbeWorldNormal(new RenderTargetIdentifier(BurtGIScreenProbeWorldNormalTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeWorldNormal(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeWorldNormalName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeWorldNormal()
+        {
+            return GetRenderTarget(BurtGIScreenProbeWorldNormalName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeWorldPositionTexture()
+        {
+            return RegisterBurtGIScreenProbeWorldPosition(new RenderTargetIdentifier(BurtGIScreenProbeWorldPositionTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeWorldPosition(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeWorldPositionName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeWorldPosition()
+        {
+            return GetRenderTarget(BurtGIScreenProbeWorldPositionName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeAdaptiveProbeHeaderTexture()
+        {
+            return RegisterBurtGIScreenProbeAdaptiveProbeHeader(new RenderTargetIdentifier(BurtGIScreenProbeAdaptiveProbeHeaderTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeAdaptiveProbeHeader(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeAdaptiveProbeHeaderName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeAdaptiveProbeHeader()
+        {
+            return GetRenderTarget(BurtGIScreenProbeAdaptiveProbeHeaderName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeAdaptiveProbeIndicesTexture()
+        {
+            return RegisterBurtGIScreenProbeAdaptiveProbeIndices(new RenderTargetIdentifier(BurtGIScreenProbeAdaptiveProbeIndicesTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeAdaptiveProbeIndices(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeAdaptiveProbeIndicesName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeAdaptiveProbeIndices()
+        {
+            return GetRenderTarget(BurtGIScreenProbeAdaptiveProbeIndicesName);
         }
 
         public BurtRenderTargetHandle RegisterBurtGIScreenProbeRadianceTexture()
@@ -965,6 +1753,516 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetBurtGIScreenProbeConfidence()
         {
             return GetRenderTarget(BurtGIScreenProbeConfidenceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeHitDistanceTexture()
+        {
+            return RegisterBurtGIScreenProbeHitDistance(new RenderTargetIdentifier(BurtGIScreenProbeHitDistanceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeHitDistance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeHitDistanceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeHitDistance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeHitDistanceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeBentNormalTexture()
+        {
+            return RegisterBurtGIScreenProbeBentNormal(new RenderTargetIdentifier(BurtGIScreenProbeBentNormalTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeBentNormal(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeBentNormalName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeBentNormal()
+        {
+            return GetRenderTarget(BurtGIScreenProbeBentNormalName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTraceRadianceTexture()
+        {
+            return RegisterBurtGIScreenProbeTraceRadiance(new RenderTargetIdentifier(BurtGIScreenProbeTraceRadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTraceRadiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeTraceRadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeTraceRadiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeTraceRadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTraceHitTexture()
+        {
+            return RegisterBurtGIScreenProbeTraceHit(new RenderTargetIdentifier(BurtGIScreenProbeTraceHitTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTraceHit(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeTraceHitName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeTraceHit()
+        {
+            return GetRenderTarget(BurtGIScreenProbeTraceHitName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTemporalRadianceTexture()
+        {
+            return RegisterBurtGIScreenProbeTemporalRadiance(new RenderTargetIdentifier(BurtGIScreenProbeTemporalRadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTemporalRadiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeTemporalRadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeTemporalRadiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeTemporalRadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTemporalIrradianceTexture()
+        {
+            return RegisterBurtGIScreenProbeTemporalIrradiance(new RenderTargetIdentifier(BurtGIScreenProbeTemporalIrradianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTemporalIrradiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeTemporalIrradianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeTemporalIrradiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeTemporalIrradianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTemporalConfidenceTexture()
+        {
+            return RegisterBurtGIScreenProbeTemporalConfidence(new RenderTargetIdentifier(BurtGIScreenProbeTemporalConfidenceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTemporalConfidence(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeTemporalConfidenceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeTemporalConfidence()
+        {
+            return GetRenderTarget(BurtGIScreenProbeTemporalConfidenceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFilteredRadianceTexture()
+        {
+            return RegisterBurtGIScreenProbeFilteredRadiance(new RenderTargetIdentifier(BurtGIScreenProbeFilteredRadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFilteredRadiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeFilteredRadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeFilteredRadiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeFilteredRadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFilteredIrradianceTexture()
+        {
+            return RegisterBurtGIScreenProbeFilteredIrradiance(new RenderTargetIdentifier(BurtGIScreenProbeFilteredIrradianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFilteredIrradiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeFilteredIrradianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeFilteredIrradiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeFilteredIrradianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFilteredConfidenceTexture()
+        {
+            return RegisterBurtGIScreenProbeFilteredConfidence(new RenderTargetIdentifier(BurtGIScreenProbeFilteredConfidenceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFilteredConfidence(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeFilteredConfidenceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeFilteredConfidence()
+        {
+            return GetRenderTarget(BurtGIScreenProbeFilteredConfidenceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFixupRadianceTexture()
+        {
+            return RegisterBurtGIScreenProbeFixupRadiance(new RenderTargetIdentifier(BurtGIScreenProbeFixupRadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFixupRadiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeFixupRadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeFixupRadiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeFixupRadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFixupIrradianceTexture()
+        {
+            return RegisterBurtGIScreenProbeFixupIrradiance(new RenderTargetIdentifier(BurtGIScreenProbeFixupIrradianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFixupIrradiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeFixupIrradianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeFixupIrradiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeFixupIrradianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFixupConfidenceTexture()
+        {
+            return RegisterBurtGIScreenProbeFixupConfidence(new RenderTargetIdentifier(BurtGIScreenProbeFixupConfidenceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeFixupConfidence(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeFixupConfidenceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeFixupConfidence()
+        {
+            return GetRenderTarget(BurtGIScreenProbeFixupConfidenceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMipRadianceTexture()
+        {
+            return RegisterBurtGIScreenProbeMipRadiance(new RenderTargetIdentifier(BurtGIScreenProbeMipRadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMipRadiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeMipRadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeMipRadiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeMipRadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMipIrradianceTexture()
+        {
+            return RegisterBurtGIScreenProbeMipIrradiance(new RenderTargetIdentifier(BurtGIScreenProbeMipIrradianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMipIrradiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeMipIrradianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeMipIrradiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeMipIrradianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMipConfidenceTexture()
+        {
+            return RegisterBurtGIScreenProbeMipConfidence(new RenderTargetIdentifier(BurtGIScreenProbeMipConfidenceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMipConfidence(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeMipConfidenceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeMipConfidence()
+        {
+            return GetRenderTarget(BurtGIScreenProbeMipConfidenceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip2RadianceTexture()
+        {
+            return RegisterBurtGIScreenProbeMip2Radiance(new RenderTargetIdentifier(BurtGIScreenProbeMip2RadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip2Radiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeMip2RadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeMip2Radiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeMip2RadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip2IrradianceTexture()
+        {
+            return RegisterBurtGIScreenProbeMip2Irradiance(new RenderTargetIdentifier(BurtGIScreenProbeMip2IrradianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip2Irradiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeMip2IrradianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeMip2Irradiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeMip2IrradianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip2ConfidenceTexture()
+        {
+            return RegisterBurtGIScreenProbeMip2Confidence(new RenderTargetIdentifier(BurtGIScreenProbeMip2ConfidenceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip2Confidence(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeMip2ConfidenceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeMip2Confidence()
+        {
+            return GetRenderTarget(BurtGIScreenProbeMip2ConfidenceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip3RadianceTexture()
+        {
+            return RegisterBurtGIScreenProbeMip3Radiance(new RenderTargetIdentifier(BurtGIScreenProbeMip3RadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip3Radiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeMip3RadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeMip3Radiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeMip3RadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip3IrradianceTexture()
+        {
+            return RegisterBurtGIScreenProbeMip3Irradiance(new RenderTargetIdentifier(BurtGIScreenProbeMip3IrradianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip3Irradiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeMip3IrradianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeMip3Irradiance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeMip3IrradianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip3ConfidenceTexture()
+        {
+            return RegisterBurtGIScreenProbeMip3Confidence(new RenderTargetIdentifier(BurtGIScreenProbeMip3ConfidenceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeMip3Confidence(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeMip3ConfidenceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeMip3Confidence()
+        {
+            return GetRenderTarget(BurtGIScreenProbeMip3ConfidenceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeRadianceSHAmbientTexture()
+        {
+            return RegisterBurtGIScreenProbeRadianceSHAmbient(new RenderTargetIdentifier(BurtGIScreenProbeRadianceSHAmbientTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeRadianceSHAmbient(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeRadianceSHAmbientName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeRadianceSHAmbient()
+        {
+            return GetRenderTarget(BurtGIScreenProbeRadianceSHAmbientName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeRadianceSHDirectionalTexture()
+        {
+            return RegisterBurtGIScreenProbeRadianceSHDirectional(new RenderTargetIdentifier(BurtGIScreenProbeRadianceSHDirectionalTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeRadianceSHDirectional(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeRadianceSHDirectionalName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeRadianceSHDirectional()
+        {
+            return GetRenderTarget(BurtGIScreenProbeRadianceSHDirectionalName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeIrradianceOctTexture()
+        {
+            return RegisterBurtGIScreenProbeIrradianceOct(new RenderTargetIdentifier(BurtGIScreenProbeIrradianceOctTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeIrradianceOct(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeIrradianceOctName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeIrradianceOct()
+        {
+            return GetRenderTarget(BurtGIScreenProbeIrradianceOctName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeRadianceOctTexture()
+        {
+            return RegisterBurtGIScreenProbeRadianceOct(new RenderTargetIdentifier(BurtGIScreenProbeRadianceOctTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeRadianceOct(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeRadianceOctName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeRadianceOct()
+        {
+            return GetRenderTarget(BurtGIScreenProbeRadianceOctName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeImportancePDFTexture()
+        {
+            return RegisterBurtGIScreenProbeImportancePDF(new RenderTargetIdentifier(BurtGIScreenProbeImportancePDFTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeImportancePDF(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeImportancePDFName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeImportancePDF()
+        {
+            return GetRenderTarget(BurtGIScreenProbeImportancePDFName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeImportanceLightPDFTexture()
+        {
+            return RegisterBurtGIScreenProbeImportanceLightPDF(new RenderTargetIdentifier(BurtGIScreenProbeImportanceLightPDFTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeImportanceLightPDF(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeImportanceLightPDFName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeImportanceLightPDF()
+        {
+            return GetRenderTarget(BurtGIScreenProbeImportanceLightPDFName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeImportanceRayInfoTexture()
+        {
+            return RegisterBurtGIScreenProbeImportanceRayInfo(new RenderTargetIdentifier(BurtGIScreenProbeImportanceRayInfoTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeImportanceRayInfo(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeImportanceRayInfoName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeImportanceRayInfo()
+        {
+            return GetRenderTarget(BurtGIScreenProbeImportanceRayInfoName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapIndirectionTexture()
+        {
+            return RegisterBurtGIRadianceCacheClipMapIndirection(new RenderTargetIdentifier(BurtGIRadianceCacheClipMapIndirectionTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapIndirection(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRadianceCacheClipMapIndirectionName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRadianceCacheClipMapIndirection()
+        {
+            return GetRenderTarget(BurtGIRadianceCacheClipMapIndirectionName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapDepthProbeAtlasTexture()
+        {
+            return RegisterBurtGIRadianceCacheClipMapDepthProbeAtlas(new RenderTargetIdentifier(BurtGIRadianceCacheClipMapDepthProbeAtlasTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapDepthProbeAtlas(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRadianceCacheClipMapDepthProbeAtlasName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRadianceCacheClipMapDepthProbeAtlas()
+        {
+            return GetRenderTarget(BurtGIRadianceCacheClipMapDepthProbeAtlasName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapRadianceProbeAtlasTexture()
+        {
+            return RegisterBurtGIRadianceCacheClipMapRadianceProbeAtlas(new RenderTargetIdentifier(BurtGIRadianceCacheClipMapRadianceProbeAtlasTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapRadianceProbeAtlas(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRadianceCacheClipMapRadianceProbeAtlasName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRadianceCacheClipMapRadianceProbeAtlas()
+        {
+            return GetRenderTarget(BurtGIRadianceCacheClipMapRadianceProbeAtlasName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapFinalRadianceAtlasTexture()
+        {
+            return RegisterBurtGIRadianceCacheClipMapFinalRadianceAtlas(new RenderTargetIdentifier(BurtGIRadianceCacheClipMapFinalRadianceAtlasTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapFinalRadianceAtlas(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRadianceCacheClipMapFinalRadianceAtlasName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRadianceCacheClipMapFinalRadianceAtlas()
+        {
+            return GetRenderTarget(BurtGIRadianceCacheClipMapFinalRadianceAtlasName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture()
+        {
+            return RegisterBurtGIRadianceCacheClipMapProbeOcclusionAtlas(new RenderTargetIdentifier(BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapProbeOcclusionAtlas(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRadianceCacheClipMapProbeOcclusionAtlasName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRadianceCacheClipMapProbeOcclusionAtlas()
+        {
+            return GetRenderTarget(BurtGIRadianceCacheClipMapProbeOcclusionAtlasName);
         }
 
         public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceSourceTexture()

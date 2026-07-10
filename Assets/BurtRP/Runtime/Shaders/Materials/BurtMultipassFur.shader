@@ -208,6 +208,20 @@ Shader "BurtRP/Multipass Fur"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "BurtGI"
+            Tags { "LightMode" = "RayTracing" }
+
+            HLSLPROGRAM
+            #pragma only_renderers d3d11 d3d12
+            #pragma raytracing BurtGI
+            #pragma shader_feature_local _ BURT_ALPHA_CLIP
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingFur.hlsl"
+            ENDHLSL
+        }
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtMultipassFurShaderGUI"

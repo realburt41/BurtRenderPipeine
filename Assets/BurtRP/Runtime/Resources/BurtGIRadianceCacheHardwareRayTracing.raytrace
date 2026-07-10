@@ -1,0 +1,576 @@
+#pragma max_recursion_depth 1
+
+#define BURT_GI_HARDWARE_RAY_MAX_BOUNCES 4
+
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingShared.hlsl"
+
+RaytracingAccelerationStructure _BurtGIRayTracingAccelerationStructure;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer;
+StructuredBuffer<uint2> _BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBuffer;
+StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer;
+RWTexture2D<float4> _BurtGIRadianceCacheClipMapRadianceProbeAtlasTexture;
+RWTexture2D<float> _BurtGIRadianceCacheClipMapDepthProbeAtlasTexture;
+
+StructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelCountBuffer;
+StructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelDataBuffer;
+StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
+StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+Texture2D<float> _BurtGIScreenProbeScreenDepthTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldNormalTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
+Texture2D<uint> _BurtGIScreenProbeImportanceRayInfoTexture;
+RWTexture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
+RWTexture2D<float> _BurtGIScreenProbeTraceHitTexture;
+
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
+uint _BurtGIRadianceCacheClipMapTraceTileSize1D;
+float4 _BurtGIRadianceCacheClipMapParams;
+float _BurtGIHardwareRayMaxDistance;
+float3 _BurtGIHardwareRayMissRadiance;
+float3 _BurtGIHardwareRayMainLightDirection;
+float3 _BurtGIHardwareRayMainLightColor;
+float3 _BurtGIHardwareRayAmbientRadiance;
+float4 _BurtGIHardwareRayAdditionalLightPositionAndRange[8];
+float4 _BurtGIHardwareRayAdditionalLightColorAndType[8];
+float4 _BurtGIHardwareRayAdditionalLightDirectionAndSpot[8];
+float4 _BurtGIHardwareRayAdditionalLightSpotParams[8];
+uint _BurtGIHardwareRayAdditionalLightCount;
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGIScreenProbeTraceParams;
+float4 _BurtGIScreenProbeAdaptiveParams;
+
+uint2 BurtGIHardwareRayUnpackTileCoord(uint packedTraceTile)
+{
+    return uint2(packedTraceTile & 0xffu, (packedTraceTile >> 8u) & 0xffu);
+}
+
+uint BurtGIHardwareRayUnpackTileLevel(uint packedTraceTile)
+{
+    return (packedTraceTile >> 16u) & 0xffu;
+}
+
+uint BurtGIHardwareRayProbeIndex(uint probeTraceIndex)
+{
+    return asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) & 0x00ffffffu;
+}
+
+float3 BurtGIHardwareRayProbeWorldCenter(uint probeTraceIndex, uint probeIndex)
+{
+    return _BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].xyz +
+        _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex].xyz;
+}
+
+uint2 BurtGIHardwareRayProbeAtlasBaseCoord(uint probeIndex, uint probeResolution)
+{
+    uint atlasResolutionInProbes = max(1u, (uint)_BurtGIRadianceCacheClipMapParams.x);
+    return uint2(probeIndex % atlasResolutionInProbes, probeIndex / atlasResolutionInProbes) * probeResolution;
+}
+
+float3 BurtGIHardwareRayEquiAreaDirection(float2 uv)
+{
+    uv = 2.0 * uv - 1.0;
+    float d = 1.0 - (abs(uv.x) + abs(uv.y));
+    float r = 1.0 - abs(d);
+    float phi = r == 0.0 ? 0.0 : 0.7853981633974483 * ((abs(uv.y) - abs(uv.x)) / r + 1.0);
+    float f = r * sqrt(2.0 - r * r);
+    return float3(f * sign(uv.x) * cos(phi), f * sign(uv.y) * sin(phi), sign(d) * (1.0 - r * r));
+}
+
+void BurtGIHardwareRayTrace(float3 origin, float3 direction, out BurtGIRayPayload payload)
+{
+    payload.Radiance = _BurtGIHardwareRayMissRadiance;
+    payload.HitDistance = _BurtGIHardwareRayMaxDistance;
+    payload.Albedo = 0.0;
+    payload.Emission = 0.0;
+    payload.NormalWS = 0.0;
+    payload.Hit = 0.0;
+    payload.Padding = 0.0;
+
+    RayDesc ray;
+    ray.Origin = origin + direction * 0.01;
+    ray.Direction = direction;
+    ray.TMin = 0.0;
+    ray.TMax = max(_BurtGIHardwareRayMaxDistance, 0.01);
+    TraceRay(_BurtGIRayTracingAccelerationStructure, RAY_FLAG_NONE, 0xffu, 0, 1, 0, ray, payload);
+}
+
+float BurtGIHardwareRayVisibility(float3 origin, float3 normalWS, float3 lightDirection, float maxDistance)
+{
+    BurtGIRayPayload payload;
+    payload.Radiance = 0.0;
+    payload.HitDistance = 0.0;
+    payload.Albedo = 0.0;
+    payload.Emission = 0.0;
+    payload.NormalWS = 0.0;
+    payload.Hit = 1.0;
+    payload.Padding = 0.0;
+
+    RayDesc ray;
+    ray.Origin = origin + normalWS * 0.01;
+    ray.Direction = normalize(lightDirection);
+    ray.TMin = 0.0;
+    ray.TMax = max(maxDistance, 0.01);
+    TraceRay(
+        _BurtGIRayTracingAccelerationStructure,
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+        0xffu,
+        0,
+        1,
+        1,
+        ray,
+        payload);
+    return 1.0 - saturate(payload.Hit);
+}
+
+float3 BurtGIHardwareRayEvaluateAdditionalLightSample(float3 origin, float3 normalWS, float randomValue)
+{
+    uint lightCount = min(_BurtGIHardwareRayAdditionalLightCount, 8u);
+    if (lightCount == 0u)
+    {
+        return 0.0;
+    }
+
+    uint lightIndex = min((uint)floor(saturate(randomValue) * lightCount), lightCount - 1u);
+    float4 positionAndRange = _BurtGIHardwareRayAdditionalLightPositionAndRange[lightIndex];
+    float4 colorAndType = _BurtGIHardwareRayAdditionalLightColorAndType[lightIndex];
+    float lightType = colorAndType.w;
+    float3 lightDirection;
+    float maxDistance = _BurtGIHardwareRayMaxDistance;
+    float attenuation = 1.0;
+
+    if (lightType < 0.5)
+    {
+        lightDirection = normalize(_BurtGIHardwareRayAdditionalLightDirectionAndSpot[lightIndex].xyz);
+    }
+    else
+    {
+        float3 toLight = positionAndRange.xyz - origin;
+        float distanceToLight = length(toLight);
+        float lightRange = max(positionAndRange.w, 0.001);
+        if (distanceToLight >= lightRange)
+        {
+            return 0.0;
+        }
+
+        lightDirection = toLight / max(distanceToLight, 0.0001);
+        maxDistance = max(0.01, distanceToLight - 0.02);
+        float rangeAttenuation = saturate(1.0 - distanceToLight / lightRange);
+        attenuation = rangeAttenuation * rangeAttenuation;
+
+        if (lightType > 1.5)
+        {
+            float3 lightForward = normalize(_BurtGIHardwareRayAdditionalLightDirectionAndSpot[lightIndex].xyz);
+            float4 spotParams = _BurtGIHardwareRayAdditionalLightSpotParams[lightIndex];
+            attenuation *= saturate((dot(lightForward, -lightDirection) - spotParams.y) * spotParams.z);
+        }
+    }
+
+    float directWeight = saturate(dot(normalWS, lightDirection));
+    if (directWeight <= 0.0 || attenuation <= 0.0)
+    {
+        return 0.0;
+    }
+
+    float visibility = BurtGIHardwareRayVisibility(origin, normalWS, lightDirection, maxDistance);
+    return max(colorAndType.rgb, 0.0) * (directWeight * attenuation * visibility * (float)lightCount);
+}
+
+float BurtGIHardwareRayHash(float3 value)
+{
+    return frac(sin(dot(value, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+
+float3 BurtGIHardwareRayCosineSampleHemisphere(float3 normalWS, float2 sampleUV)
+{
+    float radius = sqrt(saturate(sampleUV.x));
+    float phi = 6.28318530718 * sampleUV.y;
+    float3 localDirection = float3(radius * cos(phi), radius * sin(phi), sqrt(saturate(1.0 - sampleUV.x)));
+    float3 tangent = abs(normalWS.z) < 0.999 ? normalize(cross(float3(0.0, 0.0, 1.0), normalWS)) : float3(1.0, 0.0, 0.0);
+    float3 bitangent = cross(normalWS, tangent);
+    return normalize(tangent * localDirection.x + bitangent * localDirection.y + normalWS * localDirection.z);
+}
+
+void BurtGIHardwareRayEvaluateRadiance(float3 origin, float3 direction, out float3 radiance, out float hitDistance, out float hit)
+{
+    float3 pathOrigin = origin;
+    float3 pathDirection = normalize(direction);
+    float3 throughput = 1.0;
+    radiance = 0.0;
+    hitDistance = _BurtGIHardwareRayMaxDistance;
+    hit = 0.0;
+
+    [loop]
+    for (uint bounceIndex = 0u; bounceIndex < BURT_GI_HARDWARE_RAY_MAX_BOUNCES; ++bounceIndex)
+    {
+        BurtGIRayPayload payload;
+        BurtGIHardwareRayTrace(pathOrigin, pathDirection, payload);
+        if (bounceIndex == 0u)
+        {
+            hitDistance = min(max(payload.HitDistance, 0.0), 65504.0);
+            hit = payload.Hit;
+        }
+
+        if (payload.Hit < 0.5)
+        {
+            radiance += throughput * max(payload.Radiance, 0.0);
+            break;
+        }
+
+        float3 normalWS = payload.NormalWS;
+        float normalLengthSq = dot(normalWS, normalWS);
+        normalWS = normalLengthSq > 0.0001 ? normalWS * rsqrt(normalLengthSq) : -pathDirection;
+        float3 lightDirection = normalize(_BurtGIHardwareRayMainLightDirection);
+        float directWeight = saturate(dot(normalWS, lightDirection));
+        float3 hitPositionWS = pathOrigin + pathDirection * max(payload.HitDistance, 0.0);
+        float visibility = directWeight > 0.0 ? BurtGIHardwareRayVisibility(hitPositionWS, normalWS, lightDirection, _BurtGIHardwareRayMaxDistance) : 0.0;
+        float additionalLightSeed = BurtGIHardwareRayHash(hitPositionWS.yzx + normalWS * (float)(bounceIndex + 3u));
+        float3 diffuseIrradiance = max(_BurtGIHardwareRayAmbientRadiance, 0.0) +
+            max(_BurtGIHardwareRayMainLightColor, 0.0) * (directWeight * visibility) +
+            BurtGIHardwareRayEvaluateAdditionalLightSample(hitPositionWS, normalWS, additionalLightSeed);
+        radiance += throughput * (max(payload.Emission, 0.0) + max(payload.Albedo, 0.0) * (diffuseIrradiance * 0.31830988618));
+
+        throughput *= saturate(payload.Albedo);
+        if (max(throughput.r, max(throughput.g, throughput.b)) <= 0.001)
+        {
+            break;
+        }
+
+        float seed0 = BurtGIHardwareRayHash(hitPositionWS + pathDirection * (float)(bounceIndex + 1u));
+        float seed1 = BurtGIHardwareRayHash(hitPositionWS.zxy + normalWS * (float)(bounceIndex + 7u));
+        pathOrigin = hitPositionWS + normalWS * 0.02;
+        pathDirection = BurtGIHardwareRayCosineSampleHemisphere(normalWS, float2(seed0, seed1));
+    }
+
+    radiance = max(radiance, 0.0);
+}
+
+[shader("raygeneration")]
+void BurtGIRadianceCacheTraceRGS()
+{
+    uint2 dispatchIndex = DispatchRaysIndex().xy;
+    uint traceTileSize1D = max(1u, _BurtGIRadianceCacheClipMapTraceTileSize1D);
+    if (dispatchIndex.x >= traceTileSize1D || dispatchIndex.y >= _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer[0])
+    {
+        return;
+    }
+
+    uint traceTileIndex = dispatchIndex.y;
+    uint2 traceTileData = _BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBuffer[traceTileIndex];
+    uint2 traceTileCoord = BurtGIHardwareRayUnpackTileCoord(traceTileData.x);
+    uint traceTileLevel = BurtGIHardwareRayUnpackTileLevel(traceTileData.x);
+    uint probeTraceIndex = traceTileData.y;
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0])
+    {
+        return;
+    }
+
+    const uint traceTileWidth = 8u;
+    uint2 localTexelCoord = uint2(dispatchIndex.x % traceTileWidth, dispatchIndex.x / traceTileWidth);
+    uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
+    uint traceResolution = max(1u, max(1u, radianceProbeResolution / 2u) << min(traceTileLevel, 4u));
+    uint probeIndex = BurtGIHardwareRayProbeIndex(probeTraceIndex);
+    if (probeIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        return;
+    }
+
+    float3 probeWorldCenter = BurtGIHardwareRayProbeWorldCenter(probeTraceIndex, probeIndex);
+    uint2 atlasBaseCoord = BurtGIHardwareRayProbeAtlasBaseCoord(probeIndex, radianceProbeResolution);
+    if (traceResolution < radianceProbeResolution)
+    {
+        uint2 traceTexelCoord = traceTileCoord * traceTileWidth + localTexelCoord;
+        if (any(traceTexelCoord >= traceResolution))
+        {
+            return;
+        }
+
+        float3 radiance;
+        float hitDistance;
+        float hit;
+        BurtGIHardwareRayEvaluateRadiance(probeWorldCenter, BurtGIHardwareRayEquiAreaDirection((float2(traceTexelCoord) + 0.5) / traceResolution), radiance, hitDistance, hit);
+        uint upsampleFactor = max(1u, radianceProbeResolution / traceResolution);
+        uint2 atlasTexelBaseCoord = traceTexelCoord * upsampleFactor;
+        [loop]
+        for (uint y = 0u; y < upsampleFactor; ++y)
+        {
+            [loop]
+            for (uint x = 0u; x < upsampleFactor; ++x)
+            {
+                uint2 atlasTexelCoord = atlasTexelBaseCoord + uint2(x, y);
+                if (all(atlasTexelCoord < radianceProbeResolution))
+                {
+                    _BurtGIRadianceCacheClipMapRadianceProbeAtlasTexture[atlasBaseCoord + atlasTexelCoord] = float4(radiance, 1.0);
+                    _BurtGIRadianceCacheClipMapDepthProbeAtlasTexture[atlasBaseCoord + atlasTexelCoord] = hitDistance;
+                }
+            }
+        }
+        return;
+    }
+
+    uint downsampleFactor = min(max(1u, traceResolution / radianceProbeResolution), traceTileWidth);
+    uint writeTileSize = max(1u, traceTileWidth / downsampleFactor);
+    if (any(localTexelCoord >= writeTileSize))
+    {
+        return;
+    }
+
+    float3 radianceSum = 0.0;
+    float hitDistanceMin = 65504.0;
+    [loop]
+    for (uint sampleY = 0u; sampleY < downsampleFactor; ++sampleY)
+    {
+        [loop]
+        for (uint sampleX = 0u; sampleX < downsampleFactor; ++sampleX)
+        {
+            uint2 traceTexelCoord = traceTileCoord * traceTileWidth + localTexelCoord * downsampleFactor + uint2(sampleX, sampleY);
+            if (all(traceTexelCoord < traceResolution))
+            {
+                float3 sampleRadiance;
+                float sampleHitDistance;
+                float hit;
+                BurtGIHardwareRayEvaluateRadiance(probeWorldCenter, BurtGIHardwareRayEquiAreaDirection((float2(traceTexelCoord) + 0.5) / traceResolution), sampleRadiance, sampleHitDistance, hit);
+                radianceSum += sampleRadiance;
+                hitDistanceMin = min(hitDistanceMin, sampleHitDistance);
+            }
+        }
+    }
+
+    uint2 atlasTexelCoord = traceTileCoord * writeTileSize + localTexelCoord;
+    if (all(atlasTexelCoord < radianceProbeResolution))
+    {
+        float invSampleCount = rcp((float)(downsampleFactor * downsampleFactor));
+        _BurtGIRadianceCacheClipMapRadianceProbeAtlasTexture[atlasBaseCoord + atlasTexelCoord] = float4(radianceSum * invSampleCount, 1.0);
+        _BurtGIRadianceCacheClipMapDepthProbeAtlasTexture[atlasBaseCoord + atlasTexelCoord] = hitDistanceMin;
+    }
+}
+
+uint BurtGIHardwareRayScreenProbeUniformCount(uint screenProbeWidth, uint screenProbeHeight)
+{
+    return max(1u, screenProbeWidth * screenProbeHeight);
+}
+
+void BurtGIHardwareRayDecodeScreenProbeTraceTexel(uint packedData, out uint screenProbeIndex, out uint2 traceTexelCoord)
+{
+    screenProbeIndex = packedData & 0xfffffu;
+    traceTexelCoord = uint2((packedData >> 20u) & 0x1fu, (packedData >> 25u) & 0x1fu);
+}
+
+bool BurtGIHardwareRayResolveScreenProbeCoord(
+    uint screenProbeIndex,
+    uint screenProbeWidth,
+    uint screenProbeHeight,
+    uint maxAdaptiveProbeCount,
+    out uint2 sourceScreenProbeCoord,
+    out uint2 atlasScreenProbeCoord)
+{
+    uint uniformProbeCount = BurtGIHardwareRayScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
+    atlasScreenProbeCoord = uint2(screenProbeIndex % screenProbeWidth, screenProbeIndex / screenProbeWidth);
+    if (screenProbeIndex < uniformProbeCount)
+    {
+        sourceScreenProbeCoord = atlasScreenProbeCoord;
+        return sourceScreenProbeCoord.y < screenProbeHeight;
+    }
+
+    uint adaptiveProbeIndex = screenProbeIndex - uniformProbeCount;
+    uint adaptiveProbeCount = min(_BurtGIScreenProbeAdaptiveProbeNumBuffer[0], maxAdaptiveProbeCount);
+    if (adaptiveProbeIndex >= adaptiveProbeCount)
+    {
+        sourceScreenProbeCoord = 0u;
+        return false;
+    }
+
+    uint packedProbeData = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex];
+    uint2 adaptiveFineProbeCoord = uint2(packedProbeData & 0x3fffu, (packedProbeData >> 14u) & 0x3fffu);
+    uint adaptiveLevel = (packedProbeData >> 28u) & 0xfu;
+    uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
+    sourceScreenProbeCoord = min(adaptiveFineProbeCoord / max(1u, adaptiveSubGridSize), uint2(screenProbeWidth - 1u, screenProbeHeight - 1u));
+    return true;
+}
+
+float3 BurtGIHardwareRayDecodeScreenProbeNormal(float4 encodedNormal)
+{
+    float3 normalWS = encodedNormal.xyz * 2.0 - 1.0;
+    float normalLengthSq = dot(normalWS, normalWS);
+    return normalLengthSq > 0.0001 ? normalWS * rsqrt(normalLengthSq) : float3(0.0, 1.0, 0.0);
+}
+
+bool BurtGIHardwareRayIsSkyDepth(float rawDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return rawDepth <= 0.000001;
+#else
+    return rawDepth >= 0.999999;
+#endif
+}
+
+bool BurtGIHardwareRayHasValidScreenProbePlacement(uint2 screenProbeCoord)
+{
+    float rawDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(screenProbeCoord, 0));
+    return encodedNormal.a > 0.5 && encodedPosition.a > 0.5 && !BurtGIHardwareRayIsSkyDepth(rawDepth);
+}
+
+bool BurtGIHardwareRayResolveScreenProbeTracePlacement(
+    uint screenProbeIndex,
+    uint screenProbeWidth,
+    uint screenProbeHeight,
+    uint maxAdaptiveProbeCount,
+    out uint2 atlasScreenProbeCoord,
+    out float3 sourcePositionWS,
+    out float3 sourceNormalWS)
+{
+    uint2 sourceScreenProbeCoord;
+    sourcePositionWS = 0.0;
+    sourceNormalWS = float3(0.0, 1.0, 0.0);
+    if (!BurtGIHardwareRayResolveScreenProbeCoord(
+            screenProbeIndex,
+            screenProbeWidth,
+            screenProbeHeight,
+            maxAdaptiveProbeCount,
+            sourceScreenProbeCoord,
+            atlasScreenProbeCoord))
+    {
+        return false;
+    }
+
+    uint uniformProbeCount = BurtGIHardwareRayScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
+    if (screenProbeIndex < uniformProbeCount)
+    {
+        if (!BurtGIHardwareRayHasValidScreenProbePlacement(sourceScreenProbeCoord))
+        {
+            return false;
+        }
+
+        float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(sourceScreenProbeCoord, 0));
+        float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(sourceScreenProbeCoord, 0));
+        sourcePositionWS = encodedPosition.xyz;
+        sourceNormalWS = BurtGIHardwareRayDecodeScreenProbeNormal(encodedNormal);
+        return true;
+    }
+
+    uint adaptiveProbeIndex = screenProbeIndex - uniformProbeCount;
+    uint packedProbeData = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex];
+    uint2 adaptiveFineProbeCoord = uint2(packedProbeData & 0x3fffu, (packedProbeData >> 14u) & 0x3fffu);
+    uint adaptiveLevel = (packedProbeData >> 28u) & 0xfu;
+    uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
+    uint2 baseProbeCoord = min(
+        adaptiveFineProbeCoord / max(1u, adaptiveSubGridSize),
+        uint2(screenProbeWidth - 1u, screenProbeHeight - 1u));
+    uint2 adaptiveCellCoord = adaptiveFineProbeCoord - baseProbeCoord * adaptiveSubGridSize;
+    float2 bilinearUV = saturate((float2(adaptiveCellCoord) + 0.5) / max(1.0, (float)adaptiveSubGridSize));
+    float4 bilinearWeights = float4(
+        (1.0 - bilinearUV.x) * (1.0 - bilinearUV.y),
+        bilinearUV.x * (1.0 - bilinearUV.y),
+        (1.0 - bilinearUV.x) * bilinearUV.y,
+        bilinearUV.x * bilinearUV.y);
+
+    uint2 rightProbeCoord = uint2(min(baseProbeCoord.x + 1u, screenProbeWidth - 1u), baseProbeCoord.y);
+    uint2 downProbeCoord = uint2(baseProbeCoord.x, min(baseProbeCoord.y + 1u, screenProbeHeight - 1u));
+    uint2 rightDownProbeCoord = uint2(rightProbeCoord.x, downProbeCoord.y);
+    float4 encodedNormal00 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(baseProbeCoord, 0));
+    float4 encodedNormal10 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(rightProbeCoord, 0));
+    float4 encodedNormal01 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(downProbeCoord, 0));
+    float4 encodedNormal11 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(rightDownProbeCoord, 0));
+    float4 encodedPosition00 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(baseProbeCoord, 0));
+    float4 encodedPosition10 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightProbeCoord, 0));
+    float4 encodedPosition01 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(downProbeCoord, 0));
+    float4 encodedPosition11 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightDownProbeCoord, 0));
+    float rawDepth00 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(baseProbeCoord, 0));
+    float rawDepth10 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(rightProbeCoord, 0));
+    float rawDepth01 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(downProbeCoord, 0));
+    float rawDepth11 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(rightDownProbeCoord, 0));
+    bool valid00 = encodedNormal00.a > 0.5 && encodedPosition00.a > 0.5 && !BurtGIHardwareRayIsSkyDepth(rawDepth00);
+    bool valid10 = encodedNormal10.a > 0.5 && encodedPosition10.a > 0.5 && !BurtGIHardwareRayIsSkyDepth(rawDepth10);
+    bool valid01 = encodedNormal01.a > 0.5 && encodedPosition01.a > 0.5 && !BurtGIHardwareRayIsSkyDepth(rawDepth01);
+    bool valid11 = encodedNormal11.a > 0.5 && encodedPosition11.a > 0.5 && !BurtGIHardwareRayIsSkyDepth(rawDepth11);
+    float4 validWeights = bilinearWeights * float4(valid00 ? 1.0 : 0.0, valid10 ? 1.0 : 0.0, valid01 ? 1.0 : 0.0, valid11 ? 1.0 : 0.0);
+    float validWeightSum = dot(validWeights, float4(1.0, 1.0, 1.0, 1.0));
+    if (validWeightSum <= 0.0001)
+    {
+        return false;
+    }
+
+    float3 normal00 = valid00 ? BurtGIHardwareRayDecodeScreenProbeNormal(encodedNormal00) : sourceNormalWS;
+    float3 normal10 = valid10 ? BurtGIHardwareRayDecodeScreenProbeNormal(encodedNormal10) : normal00;
+    float3 normal01 = valid01 ? BurtGIHardwareRayDecodeScreenProbeNormal(encodedNormal01) : normal00;
+    float3 normal11 = valid11 ? BurtGIHardwareRayDecodeScreenProbeNormal(encodedNormal11) : normal00;
+    sourcePositionWS = (encodedPosition00.xyz * validWeights.x + encodedPosition10.xyz * validWeights.y + encodedPosition01.xyz * validWeights.z + encodedPosition11.xyz * validWeights.w) / validWeightSum;
+    sourceNormalWS = normal00 * validWeights.x + normal10 * validWeights.y + normal01 * validWeights.z + normal11 * validWeights.w;
+    float sourceNormalLengthSq = dot(sourceNormalWS, sourceNormalWS);
+    sourceNormalWS = sourceNormalLengthSq > 0.0001 ? sourceNormalWS * rsqrt(sourceNormalLengthSq) : normal00;
+    return true;
+}
+
+[shader("raygeneration")]
+void BurtGIScreenProbeTraceRGS()
+{
+    uint dispatchIndex = DispatchRaysIndex().x;
+    if (dispatchIndex >= _BurtGIScreenProbeTraceCompactTexelCountBuffer[0])
+    {
+        return;
+    }
+
+    uint screenProbeIndex;
+    uint2 traceTexelCoord;
+    BurtGIHardwareRayDecodeScreenProbeTraceTexel(_BurtGIScreenProbeTraceCompactTexelDataBuffer[dispatchIndex], screenProbeIndex, traceTexelCoord);
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 atlasScreenProbeCoord;
+    float3 sourcePositionWS;
+    float3 sourceNormalWS;
+    if (traceTexelCoord.x >= traceResolution || traceTexelCoord.y >= traceResolution ||
+        !BurtGIHardwareRayResolveScreenProbeTracePlacement(
+            screenProbeIndex,
+            screenProbeWidth,
+            screenProbeHeight,
+            max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w),
+            atlasScreenProbeCoord,
+            sourcePositionWS,
+            sourceNormalWS))
+    {
+        return;
+    }
+
+    uint2 atlasCoord = atlasScreenProbeCoord * traceResolution + traceTexelCoord;
+
+    uint rayInfo = _BurtGIScreenProbeImportanceRayInfoTexture.Load(int3(atlasCoord, 0));
+    uint2 sourceTraceTexelCoord = uint2(rayInfo & 0x3fu, (rayInfo >> 6u) & 0x3fu);
+    uint sourceTraceLevel = (rayInfo >> 12u) & 0xfu;
+    uint sourceMipSize = max(1u, min(64u, traceResolution << 1u) >> min(sourceTraceLevel, 5u));
+    if (sourceTraceTexelCoord.x >= sourceMipSize || sourceTraceTexelCoord.y >= sourceMipSize)
+    {
+        sourceTraceTexelCoord = traceTexelCoord;
+        sourceMipSize = traceResolution;
+    }
+
+    float3 directionWS = BurtGIHardwareRayEquiAreaDirection((float2(sourceTraceTexelCoord) + 0.5) / sourceMipSize);
+    float3 radiance;
+    float hitDistance;
+    float hit;
+    BurtGIHardwareRayEvaluateRadiance(sourcePositionWS + sourceNormalWS * 0.05 + directionWS * 0.05, directionWS, radiance, hitDistance, hit);
+    _BurtGIScreenProbeTraceRadianceTexture[atlasCoord] = float4(max(radiance, 0.0), saturate(hit));
+    _BurtGIScreenProbeTraceHitTexture[atlasCoord] = saturate(hit);
+}
+
+[shader("miss")]
+void BurtGIRadianceCacheMiss(inout BurtGIRayPayload payload : SV_RayPayload)
+{
+    payload.Radiance = _BurtGIHardwareRayMissRadiance;
+    payload.HitDistance = _BurtGIHardwareRayMaxDistance;
+    payload.Albedo = 0.0;
+    payload.Emission = 0.0;
+    payload.NormalWS = 0.0;
+    payload.Hit = 0.0;
+    payload.Padding = 0.0;
+}
+
+[shader("miss")]
+void BurtGIRadianceCacheShadowMiss(inout BurtGIRayPayload payload : SV_RayPayload)
+{
+    payload.Hit = 0.0;
+}

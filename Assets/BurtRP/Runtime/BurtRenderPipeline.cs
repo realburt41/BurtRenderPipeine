@@ -66,6 +66,12 @@ namespace Burt.RenderPipeline
         {
             BurtAtmosphereReflectionUtility.Release();
             BurtImageBasedFilterUtility.Release();
+            BurtRadianceCacheClipMapHistoryUtility.ReleaseAll();
+            BurtRadianceCacheClipMapPersistentBufferUtility.ReleaseAll();
+            BurtRadianceCacheHashGridHistoryUtility.ReleaseAll();
+            BurtGISceneVoxelHistoryUtility.ReleaseAll();
+            BurtGISceneVoxelMeshRasterizerUtility.ReleaseAll();
+            BurtRayTracingAccelerationStructureUtility.ReleaseAll();
             base.Dispose(disposing);
         }
 

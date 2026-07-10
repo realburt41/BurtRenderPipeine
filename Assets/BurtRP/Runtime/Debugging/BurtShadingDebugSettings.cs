@@ -114,6 +114,10 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         AdditionalShadowUV = 229,
         AdditionalShadowDepth = 230,
         AdditionalShadowDepthDelta = 231,
+        MainLightShadowReceiverDepth = 234, // Main light shadow debug: receiver depth used as hardware compare reference.
+        MainLightShadowRawDepth = 235, // Main light shadow debug: raw depth loaded from the shadow atlas at receiver UV.
+        MainLightShadowCompare = 236, // Main light shadow debug: direct hardware compare visibility at receiver UV.
+        MainLightShadowProjectionValidity = 237, // Main light shadow debug: valid projection and manual-vs-hardware depth comparison diagnosis.
         CameraDepth = 300, // 全屏调试：复用 BurtRP 当前已有的 CameraDepth debug pass。
         MainLightShadow = 301, // 全屏调试：复用 BurtRP 当前已有的 MainLightShadow debug pass。
         PerObjectShadowAtlas = 475, // Fullscreen debug: per-object shadow atlas.
@@ -309,7 +313,8 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         FurBlurReprojection = 488, // Fur blur debug: red = reprojected, green = property-compatible, blue = property history valid.
         ScreenSpaceShadow = 492, // SS Shadow debug: screen-space main-light visibility texture consumed by deferred lighting.
         PerObjectShadowTransmissionThickness = 493, // Per-object shadow debug: transmission object index, resolved thickness, and validity state.
-        ScreenSpaceShadowFinalMultiplier = 494 // SS Shadow debug: final deferred main-light multiplier after material-specific weighting.
+        ScreenSpaceShadowFinalMultiplier = 494, // SS Shadow debug: final deferred main-light multiplier after material-specific weighting.
+        ScreenSpaceGlobalIlluminationHashGridDebug = 496 // BurtGI debug: Radiance Cache HashGrid debug buffer heatmap.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -443,6 +448,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.AdditionalShadowAttenuation:
                 case BurtShadingDebugMode.ShadowCascadeIndex:
                 case BurtShadingDebugMode.ShadowReceiverDepthDelta:
+                case BurtShadingDebugMode.ShadowPCSSBlockerFraction:
+                case BurtShadingDebugMode.MainLightShadowReceiverDepth:
+                case BurtShadingDebugMode.MainLightShadowRawDepth:
+                case BurtShadingDebugMode.MainLightShadowCompare:
+                case BurtShadingDebugMode.MainLightShadowProjectionValidity:
                 case BurtShadingDebugMode.MainLightShadow:
                 case BurtShadingDebugMode.PerObjectShadowAtlas:
                 case BurtShadingDebugMode.PerObjectShadowObjectIndex:
@@ -464,6 +474,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHashGridDebug:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:
@@ -554,10 +565,69 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
             return mode == BurtShadingDebugMode.ShadowAttenuation
                 || (mode >= BurtShadingDebugMode.ShadowCascadeIndex && mode <= BurtShadingDebugMode.ShadowReceiverDepthDelta)
                 || mode == BurtShadingDebugMode.ShadowPCSSBlockerFraction
+                || (mode >= BurtShadingDebugMode.MainLightShadowReceiverDepth && mode <= BurtShadingDebugMode.MainLightShadowProjectionValidity)
                 || mode == BurtShadingDebugMode.MainLightShadow
                 || mode == BurtShadingDebugMode.PerObjectShadowAtlas
                 || (mode >= BurtShadingDebugMode.PerObjectShadowObjectIndex && mode <= BurtShadingDebugMode.PerObjectShadowTransmissionDepth)
                 || mode == BurtShadingDebugMode.PerObjectShadowTransmissionThickness;
+        }
+
+        public static bool IsSceneEffectDebugMode(BurtShadingDebugMode mode)
+        {
+            return IsAtmosphereDebugMode(mode) || IsFogDebugMode(mode) || IsVolumetricFogDebugMode(mode);
+        }
+
+        public static bool IsAtmosphereDebugMode(BurtShadingDebugMode mode)
+        {
+            switch (mode)
+            {
+                case BurtShadingDebugMode.Atmosphere:
+                case BurtShadingDebugMode.AtmosphereRayleigh:
+                case BurtShadingDebugMode.AtmosphereMie:
+                case BurtShadingDebugMode.AtmosphereTransmittance:
+                case BurtShadingDebugMode.AtmosphereAerialTransmittance:
+                case BurtShadingDebugMode.AtmosphereAerialInscatter:
+                case BurtShadingDebugMode.AtmosphereAerialFogAmount:
+                case BurtShadingDebugMode.AtmosphereAerialHeightFade:
+                case BurtShadingDebugMode.AtmosphereAerialSummary:
+                case BurtShadingDebugMode.AtmosphereSunDisk:
+                case BurtShadingDebugMode.AtmosphereSunHalo:
+                case BurtShadingDebugMode.AtmosphereHorizon:
+                case BurtShadingDebugMode.AtmosphereGroundBlend:
+                case BurtShadingDebugMode.AtmosphereViewDirection:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        public static bool IsFogDebugMode(BurtShadingDebugMode mode)
+        {
+            switch (mode)
+            {
+                case BurtShadingDebugMode.FogAmount:
+                case BurtShadingDebugMode.FogTransmittance:
+                case BurtShadingDebugMode.FogHeight:
+                case BurtShadingDebugMode.FogDistance:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        public static bool IsVolumetricFogDebugMode(BurtShadingDebugMode mode)
+        {
+            switch (mode)
+            {
+                case BurtShadingDebugMode.VolumetricFogScattering:
+                case BurtShadingDebugMode.VolumetricFogTransmittance:
+                case BurtShadingDebugMode.VolumetricFogDensity:
+                case BurtShadingDebugMode.VolumetricFogDistance:
+                case BurtShadingDebugMode.VolumetricFogStepCount:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         public static void ApplyGlobalShaderProperties() // 把当前 shading debug 状态上传给 shader。

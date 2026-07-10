@@ -8,7 +8,7 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
         public const float DefaultMainLightShadowDistance = 50f; // 定义默认阴影剔除距离，避免 Unity culling 阶段因为 shadowDistance 为 0 而不收集投影物。
         public const float DefaultMainLightShadowDepthBias = 0.05f; // 定义默认常量深度偏移，数值贴近 Unity Light 的 shadowBias 默认量级。
         public const float DefaultMainLightShadowNormalBias = 0.4f; // 定义默认 ShadowCaster normal bias 倍率，后续会按 shadow texel 折算成世界空间顶点偏移。
-        public const float DefaultMainLightShadowSampleBias = 0.001f; // 定义默认接收端采样偏移，替代 shader 中不可调的硬编码偏移。
+        public const float DefaultMainLightShadowSampleBias = 0f; // XRender main-light CSM defaults to no constant receiver-depth bias.
         public const float DefaultMainLightShadowPCSSLightSize = 6f;
         public const float DefaultMainLightShadowPCSSBlockerSearchRadius = 8f;
         public const float DefaultMainLightShadowPCSSMaxFilterRadius = 24f;
@@ -66,7 +66,7 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
             data.MainLightShadowResolution = ResolveShadowResolution(light); // 解析 Light 自身的分辨率设置，后续可再被 PipelineAsset 默认值覆盖。
             data.MainLightShadowDepthBias = Mathf.Max(0f, light.shadowBias); // 读取 Light 的常量 bias 作为资产缺失时的兜底值。
             data.MainLightShadowNormalBias = Mathf.Max(0f, light.shadowNormalBias); // 读取 Light 的 normal bias 作为资产缺失时的顶点偏移兜底值。
-            data.MainLightShadowSampleBias = DefaultMainLightShadowSampleBias; // 接收端采样偏移由 BurtRP 自己控制，默认使用很小的正数。
+            data.MainLightShadowSampleBias = DefaultMainLightShadowSampleBias; // 接收端采样偏移由 BurtRP 自己控制，默认跟随 XRender 主光常量 bias。
             data.RefreshMainLightShadowEnabled(); // 根据阴影类型、强度和分辨率重新计算 HasMainLightShadow。
             return data; // 返回从主光提取出的阴影数据。
         }

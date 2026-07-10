@@ -129,19 +129,19 @@ BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
     BurtEncodedGBuffer encodedGBuffer;
 
     // GBuffer0: prepass normal.rgb + perceptual roughness.a.
-    encodedGBuffer.GBuffer0 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer0, screenUV);
+    encodedGBuffer.GBuffer0 = BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer0, screenUV, 0.0f);
 
     // GBuffer1: baseColor.rgb + occlusion.a.
-    encodedGBuffer.GBuffer1 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer1, screenUV);
+    encodedGBuffer.GBuffer1 = BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer1, screenUV, 0.0f);
 
     // GBuffer2: packed(shadingModelID, material channel), metallic, smoothness, reflectance.
-    encodedGBuffer.GBuffer2 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer2, screenUV);
+    encodedGBuffer.GBuffer2 = BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer2, screenUV, 0.0f);
 
-    encodedGBuffer.GBuffer3 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer3, screenUV);
+    encodedGBuffer.GBuffer3 = BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer3, screenUV, 0.0f);
 
-    encodedGBuffer.GBuffer4 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer4, screenUV);
+    encodedGBuffer.GBuffer4 = BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer4, screenUV, 0.0f);
 
-    encodedGBuffer.GBuffer5 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer5, screenUV);
+    encodedGBuffer.GBuffer5 = BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer5, screenUV, 0.0f);
 
     // 返回采样结果，让调用方继续 Decode 或做原始 GBuffer Debug。
     return encodedGBuffer;
@@ -149,8 +149,8 @@ BurtEncodedGBuffer BurtSampleEncodedGBuffer(float2 screenUV)
 
 float BurtSampleDeferredPackedGBufferShadingModelID(float2 screenUV)
 {
-    float packedShadingModelAndMaterial = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer2, screenUV).r;
-    float shadingModelID;
+    float packedShadingModelAndMaterial = BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer2, screenUV, 0.0f).r;
+    float shadingModelID = 0.0f;
     BurtDecodeMetallicAndShadingModelFromGBuffer(packedShadingModelAndMaterial, shadingModelID);
     return shadingModelID;
 }
@@ -217,30 +217,30 @@ float BurtSampleDeferredShadingModelID(float2 screenUV)
 
 float3 BurtSampleDeferredGBufferNormalWS(float2 screenUV)
 {
-    return BurtDecodeNormalWS888FromGBuffer(BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer0, screenUV).rgb);
+    return BurtDecodeNormalWS888FromGBuffer(BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer0, screenUV, 0.0f).rgb);
 }
 
 float3 BurtSampleDeferredSurfaceNormalWS(float2 screenUV)
 {
-    float3 normalWS = BurtSampleDeferredGBufferNormalWS(screenUV);
+    float3 surfaceNormalWS = BurtSampleDeferredGBufferNormalWS(screenUV);
 #if BURT_ENABLE_SUBSURFACE_SHADING
     float shadingModelID = BurtSampleDeferredShadingModelID(screenUV);
     if (BurtIsActiveSubsurfaceShadingModel(shadingModelID))
     {
-        float distortion;
-        float scatteringMode;
+        float distortion = 0.0f;
+        float scatteringMode = 0.0f;
         BurtDecodeSubsurfaceDistortionModeFromGBuffer(
-            BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer5, screenUV).b,
+            BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer5, screenUV, 0.0f).b,
             distortion,
             scatteringMode);
         if (BurtIsSubsurface3SPreIntegratedMode(scatteringMode))
         {
-            return BurtDecodeNormalWSFromGBuffer(BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer3, screenUV).rg);
+            surfaceNormalWS = BurtDecodeNormalWSFromGBuffer(BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer3, screenUV, 0.0f).rg);
         }
     }
 #endif
 
-    return normalWS;
+    return surfaceNormalWS;
 }
 
 float4 BurtDeferredDebugStencilShadingModelColor(float shadingModelID)
@@ -272,7 +272,7 @@ BurtGBufferData BurtSampleDeferredGBufferData(float2 screenUV)
 
 int BurtSampleDeferredPerObjectShadowObjectIndex(float2 screenUV)
 {
-    float encodedObjectIndex = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBufferObjectIndex, screenUV).r;
+    float encodedObjectIndex = BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBufferObjectIndex, screenUV, 0.0f).r;
     return (int)floor(saturate(encodedObjectIndex) * 255.0f + 0.5f);
 }
 

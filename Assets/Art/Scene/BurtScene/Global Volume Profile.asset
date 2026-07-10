@@ -13,6 +13,9 @@ MonoBehaviour:
   m_Name: SubpixelMorphologicalAAVolumeComponent
   m_EditorClassIdentifier: 
   active: 0
+  enabled:
+    m_OverrideState: 0
+    m_Value: 1
   threshold:
     m_OverrideState: 1
     m_Value: 0.1
@@ -35,6 +38,9 @@ MonoBehaviour:
   m_Name: FastApproximateAAVolumeComponent
   m_EditorClassIdentifier: 
   active: 0
+  enabled:
+    m_OverrideState: 0
+    m_Value: 1
   subpixel:
     m_OverrideState: 1
     m_Value: 0.75
@@ -57,6 +63,9 @@ MonoBehaviour:
   m_Name: BurtExposureVolumeComponent
   m_EditorClassIdentifier: 
   active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 1
   mode:
     m_OverrideState: 1
     m_Value: 3
@@ -118,6 +127,9 @@ MonoBehaviour:
   m_Name: BurtVignetteVolumeComponent
   m_EditorClassIdentifier: 
   active: 1
+  enabled:
+    m_OverrideState: 1
+    m_Value: 0
   color:
     m_OverrideState: 1
     m_Value: {r: 0, g: 0, b: 0, a: 1}
@@ -149,6 +161,9 @@ MonoBehaviour:
   m_Name: BurtBloomVolumeComponent
   m_EditorClassIdentifier: 
   active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 1
   threshold:
     m_OverrideState: 0
     m_Value: 1
@@ -331,7 +346,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4d1e8bb77bb94a9682b3d339da9bf4e6, type: 3}
   m_Name: ColorGradingVolumeComponent
   m_EditorClassIdentifier: 
-  active: 0
+  active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 1
   enableWhiteBalance:
     m_OverrideState: 1
     m_Value: 1
@@ -441,7 +459,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 86661e7ddcd744b5aa580dbb028d99d5, type: 3}
   m_Name: RCASVolumeComponent
   m_EditorClassIdentifier: 
-  active: 0
+  active: 1
+  enabled:
+    m_OverrideState: 1
+    m_Value: 1
   sharpness:
     m_OverrideState: 1
     m_Value: 1
@@ -458,6 +479,9 @@ MonoBehaviour:
   m_Name: BurtColorAdjustmentsVolumeComponent
   m_EditorClassIdentifier: 
   active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 1
   saturation:
     m_OverrideState: 0
     m_Value: 1
@@ -626,6 +650,7 @@ MonoBehaviour:
   - {fileID: -1826804953292601650}
   - {fileID: -9050926445519798143}
   - {fileID: -9066545745583481370}
+  - {fileID: 8370899641374450958}
 --- !u!114 &1128726436058786600
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -872,6 +897,24 @@ MonoBehaviour:
   screenProbeApplyStrength:
     m_OverrideState: 0
     m_Value: 0
+  screenProbeSpatialFilterPasses:
+    m_OverrideState: 0
+    m_Value: 3
+  screenProbeSpatialFilterHalfKernelSize:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeFixupBorders:
+    m_OverrideState: 0
+    m_Value: 1
+  shortRangeAO:
+    m_OverrideState: 0
+    m_Value: 0
+  shortRangeAOWeight:
+    m_OverrideState: 0
+    m_Value: 1
+  shortRangeAOSlopeCompareToleranceScale:
+    m_OverrideState: 0
+    m_Value: 0.5
 --- !u!114 &3018446027813319552
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -925,6 +968,9 @@ MonoBehaviour:
   m_Name: BurtTonemappingVolumeComponent
   m_EditorClassIdentifier: 
   active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 1
   mode:
     m_OverrideState: 1
     m_Value: 2
@@ -1011,6 +1057,49 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 0
   quarterResolution:
+    m_OverrideState: 0
+    m_Value: 0
+--- !u!114 &8370899641374450958
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1bea51c7cf3045429f18b2925cb2cf5a, type: 3}
+  m_Name: DiaphragmDepthOfFieldVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 0
+  enabled:
+    m_OverrideState: 1
+    m_Value: 0
+  focalDistance:
+    m_OverrideState: 0
+    m_Value: 150
+  fStop:
+    m_OverrideState: 0
+    m_Value: 1.2
+  sensorWidth:
+    m_OverrideState: 0
+    m_Value: 24.576
+  squeezeFactor:
+    m_OverrideState: 0
+    m_Value: 1
+  depthBlurAmount:
+    m_OverrideState: 0
+    m_Value: 1
+  depthBlurRadius:
+    m_OverrideState: 0
+    m_Value: 0
+  recombineQuality:
+    m_OverrideState: 0
+    m_Value: 0
+  smoothGather:
+    m_OverrideState: 0
+    m_Value: 0
+  visualizeDOF:
     m_OverrideState: 0
     m_Value: 0
 --- !u!114 &9113136322530897853

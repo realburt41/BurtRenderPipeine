@@ -18,6 +18,9 @@ namespace Burt.RenderPipeline
     {
         private const float NeutralEpsilon = 0.0001f;
 
+        [Title("BurtRP Color Grading")]
+        public BoolParameter enabled = new BoolParameter(true);
+
         [Title("White Balance")]
         public BoolParameter enableWhiteBalance = new BoolParameter(false);
         public ColorGradingTemperatureModeParameter temperatureMode = new ColorGradingTemperatureModeParameter(ColorGradingTemperatureMode.WhiteBalance);
@@ -64,7 +67,7 @@ namespace Burt.RenderPipeline
 
         public bool IsEnabled()
         {
-            if (!active)
+            if (!active || !enabled.value)
             {
                 return false;
             }

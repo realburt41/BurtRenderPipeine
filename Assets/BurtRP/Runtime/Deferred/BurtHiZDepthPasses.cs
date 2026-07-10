@@ -316,8 +316,21 @@ namespace Burt.RenderPipeline
             }
 
             return BurtDebugHiZDepthPass.ShouldUseHiZDebugView(asset) ||
+                PostProcessUtility.ShouldUseLensFlare(request, asset) ||
+                ShouldUseScreenSpaceGlobalIlluminationHiZ(request, asset) ||
                 BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflectionHiZTrace(request, asset) ||
                 BurtScreenSpaceReflectionPassUtility.ShouldUseScreenSpaceReflectionHiZDiagnostics();
+        }
+
+        private static bool ShouldUseScreenSpaceGlobalIlluminationHiZ(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(request, asset))
+            {
+                return false;
+            }
+
+            var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
+            return settings.Enabled && settings.ShortRangeAO && settings.ShortRangeAOWeight > 0.0001f;
         }
     }
 }

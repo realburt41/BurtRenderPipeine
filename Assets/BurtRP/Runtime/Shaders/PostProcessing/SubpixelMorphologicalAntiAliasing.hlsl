@@ -557,7 +557,7 @@
 //SamplerState LinearSampler { Filter = MIN_MAG_LINEAR_MIP_POINT; AddressU = Clamp; AddressV = Clamp; };
 //SamplerState PointSampler { Filter = MIN_MAG_MIP_POINT; AddressU = Clamp; AddressV = Clamp; };
 //TODO(airfeng): remove all _X like :#define SMAATexture2D(tex) TEXTURE2D_X(tex)
-#define SMAATexture2D(tex) TEXTURE2D(tex) 
+#define SMAATexture2D(tex) TEXTURE2D(tex)
 #define SMAATexture2D_Non_Array(tex) Texture2D tex
 #define SMAATexturePass2D(tex) tex
 #define SMAASampleLevelZero(tex, coord) SAMPLE_TEXTURE2D_LOD(tex, LinearSampler, ClampAndScaleUVForBilinear(coord), 0)

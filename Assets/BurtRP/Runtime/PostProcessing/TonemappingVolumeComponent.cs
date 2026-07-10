@@ -11,6 +11,7 @@ namespace Burt.RenderPipeline
     {
         [Title("BurtRP Tonemapping")]
         [InfoBox("Tonemapping parameters are stored in Global Volume; BurtRenderPipelineAsset only controls the post-processing framework switch.")]
+        public BoolParameter enabled = new BoolParameter(true);
         public TonemappingModeParameter mode = new TonemappingModeParameter(TonemappingMode.None);
 
         [Title("UE / XRender Filmic Parameters")]
@@ -28,7 +29,7 @@ namespace Burt.RenderPipeline
 
         public bool IsEnabled()
         {
-            return active && mode.value != TonemappingMode.None;
+            return active && enabled.value && mode.value != TonemappingMode.None;
         }
     }
 }

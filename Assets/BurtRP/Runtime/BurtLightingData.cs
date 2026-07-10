@@ -22,7 +22,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
     public sealed class BurtLightingData // 保存一个 BurtRenderRequest 收集到的灯光信息。
     {
-        public const int MaxAdditionalLights = 32; // 第一版追加光源走全局数组，先限制数量避免 shader 常量数组过大。
+        public const int MaxAdditionalLights = 8; // Keep CPU packing, GPU buffer allocation, and shader array capacity aligned with the mobile-oriented additional-light budget.
         public const int MaxShadowedAdditionalLights = 4; // ?????????????????????????? atlas ???
         public const int PointLightShadowFaceCount = 6;
         public const int MaxAdditionalLightShadowSlices = MaxShadowedAdditionalLights * PointLightShadowFaceCount;

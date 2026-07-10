@@ -14,6 +14,7 @@ namespace Burt.RenderPipeline
 
         [Title("BurtRP Vignette")]
         [InfoBox("Runs inside the Burt post-process copy/composite pass after tonemapping and color adjustments.")]
+        public BoolParameter enabled = new BoolParameter(true);
         public ColorParameter color = new ColorParameter(VignetteSettings.DefaultColor, true, true, true);
         public ClampedFloatParameter intensity = new ClampedFloatParameter(VignetteSettings.DefaultIntensity, 0f, 1f);
         public ClampedFloatParameter edgeWidth = new ClampedFloatParameter(VignetteSettings.DefaultEdgeWidth, 0f, 2f);
@@ -25,7 +26,7 @@ namespace Burt.RenderPipeline
 
         public bool IsEnabled()
         {
-            return active && (intensity.value > ActiveEpsilon || fisheyeFovDeg.value > ActiveEpsilon);
+            return active && enabled.value && (intensity.value > ActiveEpsilon || fisheyeFovDeg.value > ActiveEpsilon);
         }
     }
 

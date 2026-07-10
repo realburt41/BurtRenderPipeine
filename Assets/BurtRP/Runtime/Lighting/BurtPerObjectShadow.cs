@@ -13,6 +13,7 @@ namespace Burt.RenderPipeline
         public const float DefaultReceiverDistance = 3f;
         public const float DefaultNormalBias = 5f;
         internal const uint MainLightRenderingLayerMask = 0xFFu;
+        private const uint DefaultMainLightRenderingLayerMask = 1u;
         internal const uint PerObjectShadowRenderingLayerMask = 1u << 22;
 
         [SerializeField]
@@ -183,11 +184,20 @@ namespace Burt.RenderPipeline
                 var currentMask = renderer.renderingLayerMask;
                 if (!originalRenderingLayerMasks.TryGetValue(renderer, out var originalMask))
                 {
-                    originalMask = currentMask;
+                    originalMask = NormalizeOriginalRenderingLayerMask(currentMask);
                     originalRenderingLayerMasks.Add(renderer, originalMask);
                 }
+                else
+                {
+                    var normalizedOriginalMask = NormalizeOriginalRenderingLayerMask(originalMask);
+                    if (normalizedOriginalMask != originalMask)
+                    {
+                        originalMask = normalizedOriginalMask;
+                        originalRenderingLayerMasks[renderer] = originalMask;
+                    }
+                }
 
-                var perObjectMask = (originalMask & ~MainLightRenderingLayerMask) | PerObjectShadowRenderingLayerMask;
+                var perObjectMask = originalMask | PerObjectShadowRenderingLayerMask;
                 if (currentMask != perObjectMask)
                 {
                     renderer.renderingLayerMask = perObjectMask;
@@ -256,11 +266,20 @@ namespace Burt.RenderPipeline
                 var currentMask = multipassRenderer.m_RenderingLayerMask;
                 if (!originalMultipassRenderingLayerMasks.TryGetValue(multipassRenderer, out var originalMask))
                 {
-                    originalMask = currentMask;
+                    originalMask = NormalizeOriginalRenderingLayerMask(currentMask);
                     originalMultipassRenderingLayerMasks.Add(multipassRenderer, originalMask);
                 }
+                else
+                {
+                    var normalizedOriginalMask = NormalizeOriginalRenderingLayerMask(originalMask);
+                    if (normalizedOriginalMask != originalMask)
+                    {
+                        originalMask = normalizedOriginalMask;
+                        originalMultipassRenderingLayerMasks[multipassRenderer] = originalMask;
+                    }
+                }
 
-                var perObjectMask = (originalMask & ~(int)MainLightRenderingLayerMask) | (int)PerObjectShadowRenderingLayerMask;
+                var perObjectMask = originalMask | (int)PerObjectShadowRenderingLayerMask;
                 if (currentMask != perObjectMask)
                 {
                     multipassRenderer.m_RenderingLayerMask = perObjectMask;
@@ -314,6 +333,21 @@ namespace Burt.RenderPipeline
                 var multipassRenderer = multipassRendererScratch[index];
                 SetRendererObjectIndex(multipassRenderer != null ? multipassRenderer.m_Renderer : null, objectIndex);
             }
+        }
+
+        private static uint NormalizeOriginalRenderingLayerMask(uint originalMask)
+        {
+            if ((originalMask & MainLightRenderingLayerMask) != 0u)
+            {
+                return originalMask;
+            }
+
+            return (originalMask & ~PerObjectShadowRenderingLayerMask) | DefaultMainLightRenderingLayerMask;
+        }
+
+        private static int NormalizeOriginalRenderingLayerMask(int originalMask)
+        {
+            return unchecked((int)NormalizeOriginalRenderingLayerMask(unchecked((uint)originalMask)));
         }
 
         private static void SetRendererObjectIndex(Renderer renderer, int objectIndex)

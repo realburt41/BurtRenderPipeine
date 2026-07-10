@@ -12,11 +12,12 @@ namespace Burt.RenderPipeline
     {
         [Title("RCAS")]
         [InfoBox("Runs after tonemapping and color grading as a final sharpening pass.")]
+        public BoolParameter enabled = new BoolParameter(true);
         public ClampedFloatParameter sharpness = new ClampedFloatParameter(RCASSettings.DefaultSharpness, 0f, 1f);
 
         public bool IsEnabled()
         {
-            return active && sharpness.value > 0f;
+            return active && (enabled.overrideState || sharpness.overrideState) && enabled.value && sharpness.value > 0f;
         }
     }
 }

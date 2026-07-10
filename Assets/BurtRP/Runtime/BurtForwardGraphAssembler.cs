@@ -39,8 +39,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
         private readonly BurtRenderPass applyFogPass = new BurtApplyFogPass();
         private readonly BurtRenderPass applyVolumetricFogPass = new BurtApplyVolumetricFogPass();
 
+        private readonly BurtRenderPass allocateRefractionDistortionPass = new BurtAllocateRefractionDistortionPass();
+        private readonly BurtRenderPass allocateRefractionSceneColorMipChainPass = new BurtAllocateRefractionSceneColorMipChainPass();
+        private readonly BurtRenderPass buildRefractionSceneColorMipChainPass = new BurtBuildRefractionSceneColorMipChainPass();
+        private readonly BurtRenderPass drawRefractionDistortionPass = new BurtDrawRefractionDistortionPass();
+        private readonly BurtRenderPass applyRefractionDistortionPass = new BurtApplyRefractionDistortionPass();
         private readonly BurtRenderPass drawTransparentPass = new BurtDrawTransparentPass(); // 创建透明物体绘制 Pass，并在整个管线生命周期内复用它。
         private readonly BurtRenderPass drawMultipassTransparentPass = new BurtDrawMultipassTransparentPass();
+        private readonly BurtRenderPass releaseRefractionPass = new BurtReleaseRefractionPass();
 
         private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // 创建不支持 Shader 的调试 Pass，让非 BurtRP 材质显示为明显的错误材质。
 
@@ -50,7 +56,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
         private readonly BurtRenderPass allocatePostProcessColorPass = new AllocatePostProcessColorPass(); // 创建后处理颜色分配 Pass，用来申请 PostProcessColor 中间 RT。
 
+        private readonly BurtRenderPass temporalAAPass = new PostProcessPass.TemporalAAPass();
+        private readonly BurtRenderPass diaphragmDepthOfFieldPass = new PostProcessPass.DiaphragmDepthOfFieldPass();
+        private readonly BurtRenderPass lensFlarePass = new PostProcessPass.LensFlarePass();
+        private readonly BurtRenderPass bloomPass = new PostProcessPass.BloomPass();
         private readonly BurtRenderPass postProcessPass = new PostProcessPass(); // 创建第一版后处理 Pass，用来执行 No-op Copy 或 Tonemapping。
+        private readonly BurtRenderPass subpixelMorphologicalAAPass = new PostProcessPass.SubpixelMorphologicalAAPass();
+        private readonly BurtRenderPass fastApproximateAAPass = new PostProcessPass.FastApproximateAAPass();
+        private readonly BurtRenderPass rcasPass = new PostProcessPass.RCASPass();
 
         private readonly BurtRenderPass releasePostProcessColorPass = new ReleasePostProcessColorPass(); // 创建后处理颜色释放 Pass，用来在后处理完成后释放 PostProcessColor。
 
@@ -108,6 +121,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             }
 
             var safeRenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // options 为空时使用旧行为，避免 RT 生命周期决策全部为 false。
+            var preserveShadingDebugOutputBeforeSceneEffects = ShouldPreserveShadingDebugOutputBeforeSceneEffects();
 
             var useMainLightShadow = BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 合并 Light 与 PipelineAsset 设置后判断本相机是否需要主光阴影。
             var useAdditionalLightShadow = BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(request);
@@ -170,38 +184,59 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
                 graph.AddPass(drawOpaquePass); // 把不透明物体绘制 Pass 添加到 RenderGraph，让它在已有深度基础上写入颜色。
                 graph.AddPass(drawMultipassForwardOpaquePass);
-                if (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterOpaqueBeforeSky(request))
+                if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterOpaqueBeforeSky(request))
                 {
                     graph.AddPass(applyAtmosphereAerialPerspectivePass);
                 }
 
-                if (BurtFogUtility.ShouldUseFog(request))
+                if (!preserveShadingDebugOutputBeforeSceneEffects && BurtFogUtility.ShouldUseFog(request))
                 {
                     graph.AddPass(applyFogPass);
                 }
 
-                graph.AddPass(drawSkyboxPass); // 把天空盒 Pass 添加到 RenderGraph，由 Pass 自己决定是否真正绘制。
-                if (BurtAtmosphereUtility.ShouldUseAtmosphere(request))
+                if (!preserveShadingDebugOutputBeforeSceneEffects)
+                {
+                    graph.AddPass(drawSkyboxPass); // 把天空盒 Pass 添加到 RenderGraph，由 Pass 自己决定是否真正绘制。
+                }
+
+                if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldUseAtmosphere(request))
                 {
                     graph.AddPass(drawAtmospherePass);
                 }
-                if (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(request)
-                    || BurtAtmosphereUtility.ShouldApplyAerialPerspectiveBeforeTransparent(request))
+                if (!preserveShadingDebugOutputBeforeSceneEffects &&
+                    (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(request) ||
+                        BurtAtmosphereUtility.ShouldApplyAerialPerspectiveBeforeTransparent(request)))
                 {
                     graph.AddPass(applyAtmosphereAerialPerspectivePass);
                 }
 
-                if (BurtVolumetricFogUtility.ShouldUseVolumetricFog(request))
+                if (!preserveShadingDebugOutputBeforeSceneEffects && BurtVolumetricFogUtility.ShouldUseVolumetricFog(request))
                 {
                     graph.AddPass(applyVolumetricFogPass);
                 }
 
-                graph.AddPass(drawTransparentPass); // 把透明物体绘制 Pass 添加到 RenderGraph，让透明物体最后做混合。
-                graph.AddPass(drawMultipassTransparentPass);
-
-                if (ShouldUseUnsupportedShaderDebug(request, asset)) // 如果开启了不支持 Shader 调试，就在普通场景绘制后插入错误材质绘制。
+                if (!preserveShadingDebugOutputBeforeSceneEffects)
                 {
-                    graph.AddPass(drawUnsupportedShadersPass); // 添加不支持 Shader 调试 Pass，让非 BurtRP 材质容易被发现。
+                    if (BurtRefractionPassUtility.ShouldUseRefraction(request, asset))
+                    {
+                        graph.AddPass(allocateRefractionDistortionPass);
+                        graph.AddPass(allocateRefractionSceneColorMipChainPass);
+                        graph.AddPass(buildRefractionSceneColorMipChainPass);
+                        graph.AddPass(drawRefractionDistortionPass);
+                        graph.AddPass(applyRefractionDistortionPass);
+                    }
+
+                    graph.AddPass(drawTransparentPass); // 把透明物体绘制 Pass 添加到 RenderGraph，让透明物体最后做混合。
+                    graph.AddPass(drawMultipassTransparentPass);
+                    if (BurtRefractionPassUtility.ShouldUseRefraction(request, asset))
+                    {
+                        graph.AddPass(releaseRefractionPass);
+                    }
+
+                    if (ShouldUseUnsupportedShaderDebug(request, asset)) // 如果开启了不支持 Shader 调试，就在普通场景绘制后插入错误材质绘制。
+                    {
+                        graph.AddPass(drawUnsupportedShadersPass); // 添加不支持 Shader 调试 Pass，让非 BurtRP 材质容易被发现。
+                    }
                 }
             }
 
@@ -213,7 +248,42 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             if (ShouldUsePostProcessFramework(request, asset, safeRenderOptions)) // 如果后处理框架启用且当前 request 会 FinalBlit，就插入全屏后处理链路。
             {
                 graph.AddPass(allocatePostProcessColorPass); // 申请后处理中间颜色 RT，避免 CameraColor 自读自写导致平台不稳定。
+                if (PostProcessPass.ShouldUseTemporalAAPass(request, asset))
+                {
+                    graph.AddPass(temporalAAPass);
+                }
+
+                if (PostProcessPass.ShouldUseDiaphragmDepthOfFieldPass(request, asset))
+                {
+                    graph.AddPass(diaphragmDepthOfFieldPass);
+                }
+
+                if (PostProcessPass.ShouldUseLensFlarePass(request, asset))
+                {
+                    graph.AddPass(lensFlarePass);
+                }
+
+                if (PostProcessPass.ShouldUseBloomPass(request, asset))
+                {
+                    graph.AddPass(bloomPass);
+                }
+
                 graph.AddPass(postProcessPass); // 执行 CameraColor -> PostProcessColor -> CameraColor，必要时在第一段拷贝里应用 Tonemapping。
+                if (PostProcessPass.ShouldUseSubpixelMorphologicalAAPass(request, asset))
+                {
+                    graph.AddPass(subpixelMorphologicalAAPass);
+                }
+
+                if (PostProcessPass.ShouldUseFastApproximateAAPass(request, asset))
+                {
+                    graph.AddPass(fastApproximateAAPass);
+                }
+
+                if (PostProcessPass.ShouldUseRCASPass(request, asset))
+                {
+                    graph.AddPass(rcasPass);
+                }
+
                 graph.AddPass(releasePostProcessColorPass); // 释放后处理中间 RT，确保临时资源生命周期清晰。
             }
 
@@ -320,6 +390,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             }
 
             return asset.EnableUnsupportedShaderDebug; // 返回资产 Inspector 上配置的不支持 Shader 调试开关。
+        }
+
+        private static bool ShouldPreserveShadingDebugOutputBeforeSceneEffects()
+        {
+            return BurtShadingDebugSettings.IsDebugging &&
+                !BurtShadingDebugSettings.IsSceneEffectDebugMode(BurtShadingDebugSettings.Mode) &&
+                !PostProcessUtility.IsBloomDebugRequested() &&
+                !PostProcessUtility.IsTemporalAADebugRequested() &&
+                !PostProcessUtility.IsAutoExposureDebugRequested();
         }
 
         private static bool ShouldUsePostProcessFramework( // 定义判断是否启用后处理框架的辅助函数。
