@@ -108,7 +108,7 @@ Shader "BurtRP/Lit"
             #include "UnityCG.cginc"
 
             // 引入 BurtRP Lit 统一材质 CBUFFER，让 DepthOnly、ShadowCaster、Forward 的 SRP Batcher 布局完全一致。
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
 
@@ -142,7 +142,39 @@ Shader "BurtRP/Lit"
             #pragma target 3.5
 
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Lit Transparent Motion Vectors"
+            Tags { "LightMode" = "BurtTransparentMotionVectors" }
+
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+
+            Stencil
+            {
+                Ref [_MotionVectorsStencilRef]
+                ReadMask 8
+                WriteMask [_MotionVectorsStencilMask]
+                Comp Always
+                Pass Replace
+            }
+
+            HLSLPROGRAM
+            #pragma vertex VertMotionVector
+            #pragma fragment FragMotionVector
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #define BURT_MOTION_VECTOR_TRANSPARENT 1
+
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
             ENDHLSL
         }
@@ -186,7 +218,7 @@ Shader "BurtRP/Lit"
             #include "UnityCG.cginc"
 
             // 引入 BurtRP Lit 统一材质 CBUFFER，让 ShadowCaster 和其它 Lit pass 使用同一份材质字段顺序。
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadowCasterPass.hlsl"
 
@@ -210,7 +242,7 @@ Shader "BurtRP/Lit"
             #pragma multi_compile_instancing
             #pragma target 4.5
 
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
@@ -263,7 +295,7 @@ Shader "BurtRP/Lit"
             #pragma target 4.5
 
             // 引入 Lit 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
@@ -290,7 +322,7 @@ Shader "BurtRP/Lit"
             #pragma target 3.5
 
             #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtRefractionDistortionPass.hlsl"
             ENDHLSL
         }
@@ -305,7 +337,7 @@ Shader "BurtRP/Lit"
             #pragma raytracing BurtGI
             #pragma shader_feature_local _ BURT_ALPHA_CLIP
 
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
             ENDHLSL
         }
@@ -353,7 +385,7 @@ Shader "BurtRP/Lit"
             #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
 
             // Includes the material CBUFFER first so the shared pass can read the same SRP Batcher layout.
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
 

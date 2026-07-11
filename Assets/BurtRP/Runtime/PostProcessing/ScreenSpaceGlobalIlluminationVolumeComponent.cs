@@ -148,7 +148,7 @@ namespace Burt.RenderPipeline
         public ScreenSpaceGlobalIlluminationQualityParameter quality = new ScreenSpaceGlobalIlluminationQualityParameter(ScreenSpaceGlobalIlluminationQuality.Medium);
         [InfoBox("Used by Custom. Low and Medium force Half for performance; High forces Full for quality.")]
         public ScreenSpaceGlobalIlluminationResolutionParameter resolution = new ScreenSpaceGlobalIlluminationResolutionParameter(ScreenSpaceGlobalIlluminationResolution.Half);
-        public ClampedFloatParameter intensity = new ClampedFloatParameter(0.6f, 0f, 4f);
+        public ClampedFloatParameter intensity = new ClampedFloatParameter(1f, 0f, 2f);
         public ClampedFloatParameter radius = new ClampedFloatParameter(2f, 0.05f, 20f);
         public ClampedIntParameter sampleCount = new ClampedIntParameter(12, 1, 32);
         public ClampedIntParameter maxSteps = new ClampedIntParameter(8, 1, 64);
@@ -192,14 +192,19 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter screenProbeGatherMaxRayIntensity = new ClampedFloatParameter(1f, 0.01f, 40f);
         public ClampedIntParameter screenProbeSampleCount = new ClampedIntParameter(8, 1, 32);
         public ClampedFloatParameter screenProbeTemporalFeedback = new ClampedFloatParameter(0.9f, 0f, 0.98f);
+        public ClampedFloatParameter screenProbeTemporalFilterHistoryWeight = new ClampedFloatParameter(0.5f, 0f, 0.98f);
         public BoolParameter screenProbeTemporalFilter = new BoolParameter(true);
         public BoolParameter screenProbeTemporalReprojection = new BoolParameter(true);
         public ClampedIntParameter screenProbeReprojectionMaxFramesAccumulated = new ClampedIntParameter(20, 1, 50);
         public ClampedFloatParameter screenProbeHistoryDistanceThreshold = new ClampedFloatParameter(0.02f, 0.02f, 1f);
+        public ClampedFloatParameter screenProbeTemporalHistoryNormalThreshold = new ClampedFloatParameter(45f, 0f, 180f);
         public ClampedFloatParameter screenProbeReprojectionDepthRejectParamsA = new ClampedFloatParameter(4f, 1f, 50f);
         public ClampedFloatParameter screenProbeReprojectionDepthRejectParamsB = new ClampedFloatParameter(2f, 1f, 50f);
+        public ClampedFloatParameter screenProbeTemporalExposureCheckThreshold = new ClampedFloatParameter(0.1f, 0.01f, 2f);
+        public ClampedFloatParameter screenProbeTemporalPlayerVelocityThreshold = new ClampedFloatParameter(0.1f, 0.1f, 1f);
         public ClampedFloatParameter screenProbeApplyStrength = new ClampedFloatParameter(0f, 0f, 1f);
         public BoolParameter screenProbeTraceCompact = new BoolParameter(true);
+        public BoolParameter screenProbeTraceHardwareRay = new BoolParameter(false);
         public BoolParameter screenProbeTraceUseWorldRadianceClipMap = new BoolParameter(true);
         public BoolParameter screenProbeImportanceSampling = new BoolParameter(true);
         public BoolParameter screenProbeImportanceSampleLighting = new BoolParameter(true);
@@ -207,12 +212,13 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter screenProbeImportanceSamplingHistoryDistanceThreshold = new ClampedFloatParameter(0.3f, 0.001f, 10f);
         public ClampedIntParameter screenProbeFixedJitterIndex = new ClampedIntParameter(-1, -1, 16);
         public BoolParameter screenProbeSpatialFilter = new BoolParameter(true);
-        public ClampedIntParameter screenProbeSpatialFilterPasses = new ClampedIntParameter(3, 0, 4);
+        public ClampedIntParameter screenProbeSpatialFilterPasses = new ClampedIntParameter(3, 1, 8);
         public ClampedIntParameter screenProbeSpatialFilterHalfKernelSize = new ClampedIntParameter(1, 0, 2);
         public BoolParameter screenProbeFixupBorders = new BoolParameter(true);
 
         [Title("Radiance Cache")]
         public BoolParameter screenProbeRadianceCacheForceFullUpdate = new BoolParameter(false);
+        public BoolParameter screenProbeRadianceCacheTraceHardwareRay = new BoolParameter(false);
 
         [Title("XGI Final Gather")]
         [InfoBox("ScreenProbe gathers the filtered probe atlas. IrradianceField directly interpolates the Radiance Cache ClipMap onto the full-resolution GBuffer, matching XRender's alternate final-gather path.")]
@@ -223,6 +229,7 @@ namespace Burt.RenderPipeline
         [InfoBox("Matches XRender's XGI light controls. These gates affect deferred application and invalidate the channel history when changed.")]
         public BoolParameter enableBackfaceDiffuse = new BoolParameter(false);
         public BoolParameter enableRoughSpecular = new BoolParameter(true);
+        public ClampedFloatParameter xgiCharacterIntensity = new ClampedFloatParameter(1.5f, 0f, 2f);
         public BoolParameter useTranslucencyVolume = new BoolParameter(true);
         public ClampedIntParameter translucencyVolumeGridPixelSize = new ClampedIntParameter(64, 8, 128);
         public ClampedFloatParameter translucencyVolumeEndDistanceFromCamera = new ClampedFloatParameter(80f, 10f, 1000f);
@@ -231,6 +238,7 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter translucencyVolumeHistoryWeight = new ClampedFloatParameter(0.95f, 0.9f, 0.99f);
         public BoolParameter translucencyVolumeSpatialFilter = new BoolParameter(true);
         public ClampedIntParameter translucencyVolumeSpatialFilterSampleCount = new ClampedIntParameter(3, 1, 5);
+        public ClampedFloatParameter translucencyVolumeSpatialFilterStandardDeviation = new ClampedFloatParameter(5f, 0.1f, 20f);
         public ClampedFloatParameter sceneVoxelClipMapFirstWorldExtent = new ClampedFloatParameter(25f, 1f, 1000f);
         public ClampedFloatParameter sceneVoxelDiffuseColorBoost = new ClampedFloatParameter(1f, 1f, 4f);
         public ClampedFloatParameter sceneVoxelAvoidBleeding = new ClampedFloatParameter(0.5f, 0f, 1f);
@@ -246,9 +254,9 @@ namespace Burt.RenderPipeline
 
         [Title("Short Range AO")]
         [InfoBox("XGI-style near-field occlusion for indirect lighting, evaluated from the ScreenProbe trace-atlas bent-normal texture and its temporal history.")]
-        public BoolParameter shortRangeAO = new BoolParameter(false);
-        public ClampedFloatParameter shortRangeAOWeight = new ClampedFloatParameter(1f, 0f, 2f);
-        public ClampedFloatParameter shortRangeAOSlopeCompareToleranceScale = new ClampedFloatParameter(0.5f, 0f, 2f);
+        public BoolParameter shortRangeAO = new BoolParameter(true);
+        public ClampedFloatParameter shortRangeAOWeight = new ClampedFloatParameter(1f, 0f, 1f);
+        public ClampedFloatParameter shortRangeAOSlopeCompareToleranceScale = new ClampedFloatParameter(1f, 0f, 10f);
 
         public bool IsEnabled()
         {

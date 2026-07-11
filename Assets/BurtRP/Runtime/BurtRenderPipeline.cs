@@ -21,6 +21,8 @@ namespace Burt.RenderPipeline
 
         // 创建单相机渲染器。
         private readonly BurtCameraRenderer cameraRenderer = new();
+        private readonly BurtAvatarDecalPositionMapManager avatarDecalPositionMapManager = new();
+        private readonly BurtAvatarDecalManager avatarDecalManager;
 
         private readonly BurtRenderGraphAssembler forwardGraphAssembler = new BurtForwardGraphAssembler(); // 创建 Forward 组装器，默认模式和稳定画面都使用它。
 
@@ -31,10 +33,17 @@ namespace Burt.RenderPipeline
         private readonly BurtRenderFrame renderFrame = new(); // 缓存当前帧的 Frame/Stack 分组快照；现阶段只用于诊断，不改变渲染顺序。
 
         // BurtRenderPipeline 构造函数。
+        public static BurtRenderPipeline Current { get; private set; }
+
+        public BurtAvatarDecalPositionMapManager AvatarDecalPositionMapManager => avatarDecalPositionMapManager;
+        public BurtAvatarDecalManager AvatarDecalManager => avatarDecalManager;
+
         public BurtRenderPipeline(BurtRenderPipelineAsset asset)
         {
             // 保存传入的配置资产。
             this.asset = asset;
+            Current = this;
+            avatarDecalManager = new BurtAvatarDecalManager(avatarDecalPositionMapManager);
 
             // 开启 SRP Batcher。
             GraphicsSettings.useScriptableRenderPipelineBatching = true;
@@ -64,6 +73,12 @@ namespace Burt.RenderPipeline
 
         protected override void Dispose(bool disposing)
         {
+            avatarDecalManager.ReleaseAll();
+            avatarDecalPositionMapManager.ReleaseAll();
+            if (Current == this)
+            {
+                Current = null;
+            }
             BurtAtmosphereReflectionUtility.Release();
             BurtImageBasedFilterUtility.Release();
             BurtRadianceCacheClipMapHistoryUtility.ReleaseAll();
@@ -82,6 +97,8 @@ namespace Burt.RenderPipeline
         {
             // 清空上一帧的 request 列表。
             requests.Clear();
+            avatarDecalPositionMapManager.ExecutePending(context);
+            avatarDecalManager.ExecutePending(context);
 
             // 遍历 Unity 传入的相机数组。
             foreach (var camera in cameras)
@@ -111,6 +128,8 @@ namespace Burt.RenderPipeline
         {
             // 清空上一帧的 request 列表。
             requests.Clear();
+            avatarDecalPositionMapManager.ExecutePending(context);
+            avatarDecalManager.ExecutePending(context);
 
             // 遍历 Unity 传入的相机列表。
             foreach (var camera in cameras)
@@ -208,6 +227,7 @@ namespace Burt.RenderPipeline
 
             // 按 Frame -> Stack -> Request 的层级执行当前帧；这里会把相机栈信息传给后续 RenderTarget 生命周期决策。
             ExecuteRenderFrame(context);
+            avatarDecalManager.FlushDeferredReleases();
         }
 
         // 执行当前帧里的所有相机栈；这是从 request 驱动走向 stack/frame 驱动的第一层调度。

@@ -14,6 +14,7 @@ namespace Burt.RenderPipeline
         GBuffer = 4,
         FurBlurProperty = 5,
         FurBlurVelocity = 6,
+        MotionVectors = 7,
     }
 
     [DisallowMultipleComponent]
@@ -25,7 +26,7 @@ namespace Burt.RenderPipeline
         public const string SupportedShaderName = "BurtRP/Multipass Fur";
         private const int DefaultMultipassLayerCount = 16;
 
-        private const int MaxShaderPassTypeCount = 7;
+        private const int MaxShaderPassTypeCount = 8;
         private static readonly List<BurtMultipassRenderer> s_Renderers = new List<BurtMultipassRenderer>();
         private static readonly Matrix4x4[] s_InstanceMatrices = new Matrix4x4[MaxMultipassLayerCount];
         private static MaterialPropertyBlock s_DrawPropertyBlock;
@@ -67,6 +68,10 @@ namespace Burt.RenderPipeline
             new[]
             {
                 "Burt Multipass Fur Blur Velocity"
+            },
+            new[]
+            {
+                "Burt Multipass Fur Motion Vectors"
             }
         };
 

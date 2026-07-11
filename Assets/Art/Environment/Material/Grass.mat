@@ -25,6 +25,7 @@ Material:
   - BurtDepthOnly
   - BurtForward
   - BurtRefractionDistortion
+  - BurtTransparentMotionVectors
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3

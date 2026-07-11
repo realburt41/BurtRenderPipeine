@@ -57,6 +57,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
         private readonly BurtRenderPass allocatePostProcessColorPass = new AllocatePostProcessColorPass(); // 创建后处理颜色分配 Pass，用来申请 PostProcessColor 中间 RT。
 
         private readonly BurtRenderPass temporalAAPass = new PostProcessPass.TemporalAAPass();
+        private readonly BurtRenderPass temporalAAFinalCopyPass = new PostProcessPass.TemporalAAFinalCopyPass();
         private readonly BurtRenderPass diaphragmDepthOfFieldPass = new PostProcessPass.DiaphragmDepthOfFieldPass();
         private readonly BurtRenderPass lensFlarePass = new PostProcessPass.LensFlarePass();
         private readonly BurtRenderPass bloomPass = new PostProcessPass.BloomPass();
@@ -251,6 +252,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 if (PostProcessPass.ShouldUseTemporalAAPass(request, asset))
                 {
                     graph.AddPass(temporalAAPass);
+                    graph.AddPass(temporalAAFinalCopyPass);
                 }
 
                 if (PostProcessPass.ShouldUseDiaphragmDepthOfFieldPass(request, asset))

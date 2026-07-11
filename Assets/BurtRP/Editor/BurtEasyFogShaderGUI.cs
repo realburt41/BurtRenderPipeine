@@ -83,6 +83,7 @@ namespace Burt.RenderPipeline.Editor
 
             material.SetShaderPassEnabled("BurtDepthOnly", false);
             material.SetShaderPassEnabled("BurtMotionVectors", false);
+            material.SetShaderPassEnabled("BurtTransparentMotionVectors", true);
             material.SetShaderPassEnabled("BurtDepthNormals", false);
             material.SetShaderPassEnabled("BurtGBuffer", false);
             material.SetShaderPassEnabled("BurtSubsurfaceForward", false);

@@ -570,7 +570,9 @@ namespace Burt.RenderPipeline.Editor
             material.SetOverrideTag("Queue", "AlphaTest");
             material.renderQueue = (int)RenderQueue.AlphaTest;
             material.enableInstancing = true;
+            BurtShadingModelIds.ApplyMotionVectorStencilProperties(material);
             material.SetShaderPassEnabled("BurtDepthOnly", true);
+            material.SetShaderPassEnabled("BurtMotionVectors", true);
             material.SetShaderPassEnabled("BurtGBuffer", true);
             material.SetShaderPassEnabled("ShadowCaster", true);
             material.SetShaderPassEnabled("BurtForward", true);

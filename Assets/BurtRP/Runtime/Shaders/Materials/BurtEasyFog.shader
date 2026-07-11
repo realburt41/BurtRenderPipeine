@@ -53,6 +53,34 @@ Shader "BurtRP/Easy Fog"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEasyFogPass.hlsl"
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "Burt Easy Fog Transparent Motion Vectors"
+            Tags { "LightMode" = "BurtTransparentMotionVectors" }
+
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+
+            Stencil
+            {
+                Ref 8
+                ReadMask 8
+                WriteMask 8
+                Comp Always
+                Pass Replace
+            }
+
+            HLSLPROGRAM
+            #pragma vertex BurtEasyFogMotionVectorVert
+            #pragma fragment BurtEasyFogMotionVectorFrag
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEasyFogPass.hlsl"
+            ENDHLSL
+        }
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtEasyFogShaderGUI"

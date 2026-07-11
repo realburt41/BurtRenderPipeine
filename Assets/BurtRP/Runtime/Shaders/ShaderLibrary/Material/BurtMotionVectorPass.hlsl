@@ -57,6 +57,8 @@ struct MotionVectorAttributes
     float4 PositionOS : POSITION;
     float3 NormalOS : NORMAL;
     float2 UV0 : TEXCOORD0;
+    // Unity/XRender populate UV4 with the previous skinned position when deformation motion vectors are enabled.
+    float3 PreviousPositionOS : TEXCOORD4;
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
         float4 Color : COLOR;
     #endif
@@ -104,40 +106,30 @@ MotionVectorVaryings VertMotionVector(MotionVectorAttributes input)
     UNITY_SETUP_INSTANCE_ID(input);
 
     float4 positionOS = BurtApplyMultipassObjectShellOffset(input.PositionOS, input.NormalOS);
+    float hasDeformation = step(1e-6, unity_MotionVectorsParams.x);
+    float4 previousPositionOS = float4(lerp(positionOS.xyz, input.PreviousPositionOS, hasDeformation), positionOS.w);
     #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         float previousTimeSeconds = max(_Time.y - unity_DeltaTime.x, 0.0f);
         float4 currentWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.Color, unity_ObjectToWorld, _Time.y);
-        float4 previousObjectWorld = BurtGetTrunkAnimatedWorldPosition(positionOS, input.Color, unity_MatrixPreviousM, previousTimeSeconds);
+        float4 previousObjectWorld = BurtGetTrunkAnimatedWorldPosition(previousPositionOS, input.Color, unity_MatrixPreviousM, previousTimeSeconds);
     #elif defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
         float previousTimeSeconds = max(_Time.y - unity_DeltaTime.x, 0.0f);
         #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
         float4 currentWorld = BurtGetGrassAnimatedWorldPosition(positionOS, input.NormalOS, input.Color, unity_ObjectToWorld, _Time.y);
-        float4 previousObjectWorld = BurtGetGrassAnimatedWorldPosition(positionOS, input.NormalOS, input.Color, unity_MatrixPreviousM, previousTimeSeconds);
+        float4 previousObjectWorld = BurtGetGrassAnimatedWorldPosition(previousPositionOS, input.NormalOS, input.Color, unity_MatrixPreviousM, previousTimeSeconds);
         #else
         float4 currentWorld = BurtGetFoliageAnimatedWorldPosition(positionOS, input.Color, unity_ObjectToWorld, _Time.y);
-        float4 previousObjectWorld = BurtGetFoliageAnimatedWorldPosition(positionOS, input.Color, unity_MatrixPreviousM, previousTimeSeconds);
+        float4 previousObjectWorld = BurtGetFoliageAnimatedWorldPosition(previousPositionOS, input.Color, unity_MatrixPreviousM, previousTimeSeconds);
         #endif
     #else
         float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
-        float4 previousObjectWorld = mul(unity_MatrixPreviousM, positionOS);
+        float4 previousObjectWorld = mul(unity_MatrixPreviousM, previousPositionOS);
     #endif
 
-    float materialVertexAnimation = 0.0;
-    #if defined(BURT_MATERIAL_SHADING_MODEL_TRUNK) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        materialVertexAnimation = step(BURT_EPSILON, max(_MaxBendAngle, _SwayIntensity));
-    #elif defined(BURT_MATERIAL_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-        #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
-        materialVertexAnimation = step(BURT_EPSILON, max(_WindStrength, _TiltingStrength));
-        #else
-        materialVertexAnimation = step(BURT_EPSILON, max(max(_MaxBendAngle, _SwayIntensity), _FlutterTipIntensity));
-        #endif
-    #endif
-
-    float forceNoMotion = step(unity_MotionVectorsParams.y, 0.5);
-    float cameraMotion = step(unity_MotionVectorsParams.w, 0.5);
-    float allowObjectMotion = max((1.0 - forceNoMotion) * (1.0 - cameraMotion), materialVertexAnimation);
     float3 objectDelta = previousObjectWorld.xyz - currentWorld.xyz;
-    float objectMoved = step(1e-8, dot(objectDelta, objectDelta)) * allowObjectMotion;
+    // BRP writes camera motion in a separate full-screen pass. DrawRenderers does not reliably populate
+    // unity_MotionVectorsParams.y/w for this custom ShaderTag, so matrix/deformation deltas are authoritative here.
+    float objectMoved = step(1e-8, dot(objectDelta, objectDelta));
     float4 previousWorld = lerp(currentWorld, previousObjectWorld, objectMoved);
 
     MotionVectorVaryings output;
@@ -175,11 +167,14 @@ float4 FragMotionVector(MotionVectorVaryings input) : SV_Target
     float previousAvailable = step(1e-5, input.PreviousClipNoJitter.w);
     previousAvailable *= step(0.0, previousUv.x) * step(previousUv.x, 1.0) * step(0.0, previousUv.y) * step(previousUv.y, 1.0);
 
+    float visible = surfaceValid * currentInBounds * motionInBounds;
+#if !defined(BURT_MOTION_VECTOR_TRANSPARENT)
     float sceneRawDepth = tex2D(_BurtTAACurrentDepthTexture, saturate(currentScreenUv)).r;
     float currentEyeDepth = LinearEyeDepth(currentRawDepth);
     float sceneEyeDepth = LinearEyeDepth(sceneRawDepth);
     float depthTolerance = max(currentEyeDepth * 0.018, 0.035);
-    float visible = surfaceValid * currentInBounds * motionInBounds * step(abs(currentEyeDepth - sceneEyeDepth), depthTolerance);
+    visible *= step(abs(currentEyeDepth - sceneEyeDepth), depthTolerance);
+#endif
     clip(visible - 0.5);
 
     clip(previousAvailable - 0.5);

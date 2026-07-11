@@ -542,11 +542,13 @@ namespace Burt.RenderPipeline.Editor
 
             BurtShaderGUIUtility.ApplyDoubleSidedState(material, true);
             BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
+            BurtShadingModelIds.ApplyMotionVectorStencilProperties(material);
             SyncHairOpacityCutoff(material);
             material.SetOverrideTag("RenderType", "Opaque");
             material.SetOverrideTag("Queue", string.Empty);
             material.renderQueue = (int)RenderQueue.Geometry;
             material.SetShaderPassEnabled("BurtDepthOnly", true);
+            material.SetShaderPassEnabled("BurtMotionVectors", true);
             material.SetShaderPassEnabled("BurtGBuffer", true);
             material.SetShaderPassEnabled("ShadowCaster", true);
             material.SetShaderPassEnabled("BurtForward", true);

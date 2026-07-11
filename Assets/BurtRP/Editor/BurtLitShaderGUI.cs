@@ -1828,6 +1828,8 @@ namespace Burt.RenderPipeline.Editor
             material.SetShaderPassEnabled("BurtDepthOnly", !transparent && hasDepthOnlyPass);
             material.SetShaderPassEnabled("BurtDepthNormals", !transparent);
             material.SetShaderPassEnabled("BurtGBuffer", !transparent);
+            material.SetShaderPassEnabled("BurtMotionVectors", !transparent);
+            material.SetShaderPassEnabled("BurtTransparentMotionVectors", transparent && material.shader != null && material.shader.name == "BurtRP/Lit");
             if (IsSubsurfaceShader(material))
             {
                 material.SetShaderPassEnabled("BurtSubsurfaceForward", !transparent);

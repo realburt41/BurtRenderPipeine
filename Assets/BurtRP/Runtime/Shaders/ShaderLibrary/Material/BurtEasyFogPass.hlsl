@@ -24,6 +24,21 @@ struct BurtEasyFogVaryings
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
+struct BurtEasyFogMotionVectorVaryings
+{
+    float4 PositionCS : SV_POSITION;
+    float4 CurrentClipNoJitter : TEXCOORD0;
+    float4 PreviousClipNoJitter : TEXCOORD1;
+    float2 UV0 : TEXCOORD2;
+    float SourceConfidence : TEXCOORD3;
+};
+
+float4x4 _BurtTAACurrentViewProjection;
+float4x4 _BurtTAACurrentNonJitteredViewProjection;
+float4x4 _BurtTAAPreviousNonJitteredViewProjection;
+float4x4 unity_MatrixPreviousM;
+float4 _BurtTAATexelSize;
+
 float3 BurtEasyFogObjectCenterWS()
 {
     return float3(unity_ObjectToWorld._m03, unity_ObjectToWorld._m13, unity_ObjectToWorld._m23);
@@ -122,6 +137,46 @@ float4 BurtEasyFogFrag(BurtEasyFogVaryings input) : SV_Target
 
     float3 fogColor = _BaseColorTink.rgb * max(_EmissiveIntensity, 0.0f);
     return float4(BurtApplyPreExposure(fogColor * opacity), opacity);
+}
+
+BurtEasyFogMotionVectorVaryings BurtEasyFogMotionVectorVert(BurtEasyFogAttributes input)
+{
+    UNITY_SETUP_INSTANCE_ID(input);
+
+    float4 positionOS = BurtEasyFogApplyBillboard(input.PositionOS);
+    float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
+    float4 previousWorld = mul(unity_MatrixPreviousM, positionOS);
+    float3 objectDelta = previousWorld.xyz - currentWorld.xyz;
+
+    BurtEasyFogMotionVectorVaryings output;
+    output.PositionCS = mul(_BurtTAACurrentViewProjection, currentWorld);
+    output.CurrentClipNoJitter = mul(_BurtTAACurrentNonJitteredViewProjection, currentWorld);
+    output.PreviousClipNoJitter = mul(_BurtTAAPreviousNonJitteredViewProjection, previousWorld);
+    output.UV0 = input.UV0;
+    output.SourceConfidence = step(1e-8f, dot(objectDelta, objectDelta));
+    return output;
+}
+
+float4 BurtEasyFogMotionVectorFrag(BurtEasyFogMotionVectorVaryings input) : SV_Target
+{
+    float opacity = saturate(BurtEasyFogSampleFlowOpacity(input.UV0) * _FogIntensity);
+    clip(opacity - 0.0001f);
+    clip(input.SourceConfidence - 0.5f);
+
+    float2 currentUv = input.CurrentClipNoJitter.xy / max(abs(input.CurrentClipNoJitter.w), 1e-6f) * 0.5f + 0.5f;
+    float2 previousUv = input.PreviousClipNoJitter.xy / max(abs(input.PreviousClipNoJitter.w), 1e-6f) * 0.5f + 0.5f;
+#if UNITY_UV_STARTS_AT_TOP
+    currentUv.y = 1.0f - currentUv.y;
+    previousUv.y = 1.0f - previousUv.y;
+#endif
+    float valid = step(1e-5f, input.PreviousClipNoJitter.w);
+    valid *= step(0.0f, currentUv.x) * step(currentUv.x, 1.0f) * step(0.0f, currentUv.y) * step(currentUv.y, 1.0f);
+    valid *= step(0.0f, previousUv.x) * step(previousUv.x, 1.0f) * step(0.0f, previousUv.y) * step(previousUv.y, 1.0f);
+
+    float2 velocity = currentUv - previousUv;
+    float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
+    clip(max(velocityPixels.x, velocityPixels.y) - 0.02f);
+    return float4(velocity * valid, 1.0f, 1.0f);
 }
 
 #endif // BURT_EASY_FOG_PASS_INCLUDED

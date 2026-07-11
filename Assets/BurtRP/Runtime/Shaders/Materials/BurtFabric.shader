@@ -59,7 +59,7 @@ Shader "BurtRP/Fabric"
             #pragma multi_compile_instancing
             #pragma target 3.5
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFabricProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
             ENDHLSL
         }
@@ -81,7 +81,7 @@ Shader "BurtRP/Fabric"
             #pragma target 3.5
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFabricProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -101,7 +101,7 @@ Shader "BurtRP/Fabric"
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFabricProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_FABRIC 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
             ENDHLSL
@@ -133,7 +133,7 @@ Shader "BurtRP/Fabric"
             #pragma target 3.5
 
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFabricProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
             ENDHLSL
         }
@@ -163,7 +163,7 @@ Shader "BurtRP/Fabric"
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma multi_compile_instancing
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFabricProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_FABRIC 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
             ENDHLSL
@@ -188,7 +188,7 @@ Shader "BurtRP/Fabric"
             #pragma multi_compile_instancing
             #pragma target 3.5
             #define BURT_MATERIAL_SHADING_MODEL_FABRIC 1
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFabricProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
             ENDHLSL
         }
@@ -202,7 +202,7 @@ Shader "BurtRP/Fabric"
             #pragma only_renderers d3d11 d3d12
             #pragma raytracing BurtGI
             #pragma shader_feature_local _ BURT_ALPHA_CLIP
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFabricProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
             ENDHLSL
         }

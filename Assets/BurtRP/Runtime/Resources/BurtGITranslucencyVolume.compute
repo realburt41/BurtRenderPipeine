@@ -3,6 +3,7 @@
 
 #define BURT_GI_TRANSLUCENCY_VOLUME_THREADGROUP_SIZE 4
 #define BURT_GI_CLIPMAP_COUNT 5
+#define BURT_GI_TRANSLUCENCY_VOLUME_MAX_RAY_INTENSITY 20.0f
 
 Texture2D<float4> _BurtGIDiffuseIndirectTexture;
 Texture2D<float4> _BurtGIBackfaceDiffuseIndirectTexture;
@@ -74,6 +75,17 @@ float4x4 _BurtGIPreviousViewProjectionMatrix;
 float BurtGITranslucencyVolumeLuminance(float3 color)
 {
     return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+float3 BurtGITranslucencyVolumeClampRayIntensity(float3 radiance)
+{
+    float maxLighting = max(max(abs(radiance.r), abs(radiance.g)), abs(radiance.b));
+    if (maxLighting > BURT_GI_TRANSLUCENCY_VOLUME_MAX_RAY_INTENSITY)
+    {
+        radiance *= BURT_GI_TRANSLUCENCY_VOLUME_MAX_RAY_INTENSITY / maxLighting;
+    }
+
+    return radiance;
 }
 
 float2 BurtGITranslucencyVolumeClipToUV(float2 clipXY)
@@ -609,6 +621,8 @@ void GenerateTranslucencyVolumeFromScreenGICS(uint3 id : SV_DispatchThreadID)
         }
     }
 
+    ambient = BurtGITranslucencyVolumeClampRayIntensity(ambient);
+    directionalCoefficients = BurtGITranslucencyVolumeClampRayIntensity(directionalCoefficients);
     _BurtGITranslucencyVolume0[id] = float4(ambient, confidence);
     _BurtGITranslucencyVolume1[id] = float4(directionalCoefficients, confidence);
 }

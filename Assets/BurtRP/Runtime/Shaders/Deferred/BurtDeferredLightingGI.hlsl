@@ -9,7 +9,8 @@ Texture3D<float4> _BurtGITranslucencyVolume0;
 Texture3D<float4> _BurtGITranslucencyVolume1;
 float _BurtScreenSpaceAmbientOcclusionEnabled;
 float _BurtScreenSpaceShadowEnabled;
-float4 _BurtGIApplyIndirectParams; // x=diffuse enabled, y=intensity, z=backface enabled, w=rough-specular enabled.
+float4 _BurtGIApplyIndirectParams; // x=diffuse enabled, y=diffuse/transmission intensity, z=backface enabled, w=rough-specular enabled.
+float4 _BurtGIApplyIndirectParams1; // x=XRender character diffuse intensity.
 float4 _BurtGIShortRangeAOParams; // x=enabled, y=weight, z=slope tolerance scale, w=radius pixels.
 float4 _BurtGITranslucencyVolumeParams; // x=enabled, y=intensity, z=grazing power, w=backface mix.
 float4 _BurtGITranslucencyVolumeGridSize; // xyz=volume grid size, w=apply scale.
@@ -96,7 +97,23 @@ float3 BurtSampleDeferredGIRoughSpecularIndirect(float2 ScreenUV)
         return 0.0f;
     }
 
-    return max(BURT_SAMPLE_TEXTURE2D_CLAMP(_BurtGIRoughSpecularIndirectTexture, ScreenUV).rgb, 0.0f) * max(_BurtGIApplyIndirectParams.y, 0.0f);
+    return max(BURT_SAMPLE_TEXTURE2D_CLAMP(_BurtGIRoughSpecularIndirectTexture, ScreenUV).rgb, 0.0f);
+}
+
+float BurtDeferredGIRoughSpecularSmoothReflectionFade(float PerceptualRoughness)
+{
+    const float SpecularReflectionsRoughnessMask = 0.6f;
+    return saturate(PerceptualRoughness * (-2.0f / SpecularReflectionsRoughnessMask) + 2.0f);
+}
+
+float BurtResolveDeferredGIXGICharacterIntensity(BurtGBufferData GBufferData)
+{
+    bool IsCharacterLike =
+        BurtIsActiveHairShadingModel(GBufferData.ShadingModelID) ||
+        BurtIsActiveSubsurfaceShadingModel(GBufferData.ShadingModelID) ||
+        BurtIsActiveFoliageShadingModel(GBufferData.ShadingModelID) ||
+        BurtIsActiveEyeShadingModel(GBufferData.ShadingModelID);
+    return IsCharacterLike ? max(_BurtGIApplyIndirectParams1.x, 0.0f) : 1.0f;
 }
 
 float2 BurtDeferredGIShortRangeAODirection(int Index)
@@ -113,9 +130,22 @@ float2 BurtDeferredGIShortRangeAODirection(int Index)
     return Direction;
 }
 
+float BurtResolveDeferredGIShortRangeAOWeight()
+{
+    return _BurtGIShortRangeAOParams.x >= 0.5f ? saturate(_BurtGIShortRangeAOParams.y) : 0.0f;
+}
+
+float3 BurtResolveDeferredGIMaterialShortRangeAO(BurtGBufferData GBufferData)
+{
+    float Weight = BurtResolveDeferredGIShortRangeAOWeight();
+    float3 MaterialAO = BurtGTAOMultiBounce(GBufferData.Occlusion, GBufferData.BaseColor);
+    return lerp(float3(1.0f, 1.0f, 1.0f), MaterialAO, Weight);
+}
+
 float BurtResolveDeferredGIShortRangeAO(float2 ScreenUV, BurtGBufferData GBufferData)
 {
-    if (_BurtGIShortRangeAOParams.x < 0.5f || _BurtGIShortRangeAOParams.y <= 0.0001f)
+    float Weight = BurtResolveDeferredGIShortRangeAOWeight();
+    if (Weight <= 0.0001f)
     {
         return 1.0f;
     }
@@ -148,7 +178,7 @@ float BurtResolveDeferredGIShortRangeAO(float2 ScreenUV, BurtGBufferData GBuffer
     }
 
     float Occlusion = saturate(OcclusionSum / max(WeightSum, 0.0001f));
-    return saturate(1.0f - Occlusion * max(_BurtGIShortRangeAOParams.y, 0.0f));
+    return saturate(1.0f - Occlusion * Weight);
 }
 
 float BurtDeferredGIBackfaceDiffuseBlend(BurtGBufferData GBufferData)
@@ -235,10 +265,12 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
     float3 RoughSpecularIndirect = BurtSampleDeferredGIRoughSpecularIndirect(ScreenUV);
     float3 TranslucencyVolumeIndirect = BurtResolveDeferredGITranslucencyVolumeLite(ScreenUV, GBufferData, ViewDirectionWS);
     float ShortRangeAO = BurtResolveDeferredGIShortRangeAO(ScreenUV, GBufferData);
-    DiffuseIndirect *= ShortRangeAO;
-    BackfaceDiffuseIndirect *= lerp(1.0f, ShortRangeAO, 0.75f);
+    float3 MaterialShortRangeAO = BurtResolveDeferredGIMaterialShortRangeAO(GBufferData);
+    DiffuseIndirect *= BurtResolveDeferredGIXGICharacterIntensity(GBufferData);
+    DiffuseIndirect *= MaterialShortRangeAO * ShortRangeAO;
+    BackfaceDiffuseIndirect *= MaterialShortRangeAO * lerp(1.0f, ShortRangeAO, 0.75f);
     RoughSpecularIndirect *= lerp(1.0f, ShortRangeAO, 0.35f);
-    TranslucencyVolumeIndirect *= lerp(1.0f, ShortRangeAO, 0.5f);
+    TranslucencyVolumeIndirect *= MaterialShortRangeAO * lerp(1.0f, ShortRangeAO, 0.5f);
     DiffuseIndirect += BackfaceDiffuseIndirect * BurtDeferredGIBackfaceDiffuseBlend(GBufferData);
 
     float3 SubsurfaceIndirectTransmission = max(Components.SubsurfaceIndirectTransmission, float3(0.0f, 0.0f, 0.0f));
@@ -252,7 +284,11 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
 #endif
     Components.SubsurfaceIndirectTransmission = SubsurfaceIndirectTransmission + TranslucencyVolumeIndirect;
     Components.IndirectDiffuse += DiffuseIndirect;
-    Components.IndirectSpecular += RoughSpecularIndirect;
+    if (_BurtGIApplyIndirectParams.w >= 0.5f && any(RoughSpecularIndirect > 0.0001f))
+    {
+        float SmoothReflectionFade = BurtDeferredGIRoughSpecularSmoothReflectionFade(GBufferData.PerceptualRoughness);
+        Components.IndirectSpecular = lerp(RoughSpecularIndirect, Components.IndirectSpecular, SmoothReflectionFade);
+    }
     Components.SubsurfaceIndirect = Components.IndirectDiffuse;
     Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular + SubsurfaceIndirectTransmissionForLighting + TranslucencyVolumeIndirect;
     Components.Lighting = Components.DirectLighting + Components.IndirectLighting;

@@ -1,6 +1,9 @@
 #pragma max_recursion_depth 1
 
 #define BURT_GI_HARDWARE_RAY_MAX_BOUNCES 4
+#define BURT_GI_HARDWARE_RAY_CLIPMAP_COUNT 5
+#define BURT_GI_SCREEN_PROBE_HARDWARE_RAY_SURFACE_BIAS 0.1
+#define BURT_GI_SCREEN_PROBE_HARDWARE_RAY_MIN_TRACE_DISTANCE 0.0001
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingShared.hlsl"
 
@@ -24,10 +27,14 @@ Texture2D<uint> _BurtGIScreenProbeImportanceRayInfoTexture;
 RWTexture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
 RWTexture2D<float> _BurtGIScreenProbeTraceHitTexture;
 
+TextureCube<float4> _BurtSkyReflectionTexture;
+SamplerState sampler_BurtSkyReflectionTexture;
+
 uint _BurtGIRadianceCacheClipMapMaxProbeCount;
 uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
 uint _BurtGIRadianceCacheClipMapTraceTileSize1D;
 float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapClipmapParams[BURT_GI_HARDWARE_RAY_CLIPMAP_COUNT];
 float _BurtGIHardwareRayMaxDistance;
 float3 _BurtGIHardwareRayMissRadiance;
 float3 _BurtGIHardwareRayMainLightDirection;
@@ -52,6 +59,15 @@ float4 _BurtGIScreenProbeTraceParams;
 float4 _BurtGIScreenProbeAdaptiveParams;
 float4 _BurtGIScreenProbeSkyLeakParams;
 float4 _BurtGIScreenProbeTraceModeParams;
+float4 _BurtSkyReflectionHDR;
+float4 _BurtSkyReflectionTint;
+float4 _BurtSkyReflectionRotation;
+float4 _BurtSkyLowerHemisphereDiffuseColor;
+float _BurtSkyReflectionIntensity;
+float _BurtSkyReflectionEnabled;
+float _BurtSkyReflectionMaxMip;
+float _BurtSkyLowerHemisphereEnabled;
+float _BurtGIHardwareRaySkyMissEnabled;
 
 uint2 BurtGIHardwareRayUnpackTileCoord(uint packedTraceTile)
 {
@@ -66,6 +82,16 @@ uint BurtGIHardwareRayUnpackTileLevel(uint packedTraceTile)
 uint BurtGIHardwareRayProbeIndex(uint probeTraceIndex)
 {
     return asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) & 0x00ffffffu;
+}
+
+uint BurtGIHardwareRayProbeClipmapIndex(uint probeTraceIndex)
+{
+    return min((asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) >> 24u) & 0xffu, BURT_GI_HARDWARE_RAY_CLIPMAP_COUNT - 1u);
+}
+
+float BurtGIHardwareRayProbeTMin(uint clipmapIndex)
+{
+    return max(_BurtGIRadianceCacheClipMapClipmapParams[min(clipmapIndex, BURT_GI_HARDWARE_RAY_CLIPMAP_COUNT - 1u)].y, 0.001);
 }
 
 float3 BurtGIHardwareRayProbeWorldCenter(uint probeTraceIndex, uint probeIndex)
@@ -90,9 +116,49 @@ float3 BurtGIHardwareRayEquiAreaDirection(float2 uv)
     return float3(f * sign(uv.x) * cos(phi), f * sign(uv.y) * sin(phi), sign(d) * (1.0 - r * r));
 }
 
-void BurtGIHardwareRayTrace(float3 origin, float3 direction, out BurtGIRayPayload payload)
+float3 BurtGIHardwareRaySafeNormalize(float3 value, float3 fallback)
 {
-    payload.Radiance = _BurtGIHardwareRayMissRadiance;
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+
+bool BurtGIHardwareRayTrySampleSkyRadiance(float3 directionWS, float roughness, out float3 skyRadiance)
+{
+    skyRadiance = 0.0;
+    if (_BurtGIHardwareRaySkyMissEnabled <= 0.5 || _BurtSkyReflectionEnabled <= 0.5)
+    {
+        return false;
+    }
+
+    float3 safeDirectionWS = BurtGIHardwareRaySafeNormalize(directionWS, float3(0.0, 1.0, 0.0));
+    float2 rotation = _BurtSkyReflectionRotation.xy;
+    float2 rotatedXZ = float2(
+        safeDirectionWS.x * rotation.x - safeDirectionWS.z * rotation.y,
+        safeDirectionWS.x * rotation.y + safeDirectionWS.z * rotation.x);
+    float3 sampleDirectionWS = BurtGIHardwareRaySafeNormalize(
+        float3(rotatedXZ.x, safeDirectionWS.y, rotatedXZ.y),
+        safeDirectionWS);
+    float mipLevel = saturate(roughness) * max(_BurtSkyReflectionMaxMip, 0.0);
+    float4 encodedSky = _BurtSkyReflectionTexture.SampleLevel(sampler_BurtSkyReflectionTexture, sampleDirectionWS, mipLevel);
+    float hdrMultiplier = _BurtSkyReflectionHDR.x * pow(max(abs(encodedSky.a), 0.0001), _BurtSkyReflectionHDR.y);
+    skyRadiance = max(encodedSky.rgb * hdrMultiplier, 0.0) *
+        max(_BurtSkyReflectionTint.rgb, 0.0) *
+        max(_BurtSkyReflectionIntensity, 0.0);
+
+    if (_BurtSkyLowerHemisphereEnabled > 0.5 && safeDirectionWS.y < 0.0)
+    {
+        skyRadiance = lerp(skyRadiance, max(_BurtSkyLowerHemisphereDiffuseColor.rgb, 0.0), saturate(_BurtSkyLowerHemisphereDiffuseColor.a));
+    }
+
+    return dot(skyRadiance, skyRadiance) > 0.000001;
+}
+
+void BurtGIHardwareRayTrace(float3 origin, float3 direction, float minTraceDistance, out BurtGIRayPayload payload)
+{
+    float3 skyMissRadiance;
+    payload.Radiance = BurtGIHardwareRayTrySampleSkyRadiance(direction, 0.18, skyMissRadiance)
+        ? skyMissRadiance
+        : _BurtGIHardwareRayMissRadiance;
     payload.HitDistance = _BurtGIHardwareRayMaxDistance;
     payload.Albedo = 0.0;
     payload.Emission = 0.0;
@@ -101,11 +167,16 @@ void BurtGIHardwareRayTrace(float3 origin, float3 direction, out BurtGIRayPayloa
     payload.Padding = 0.0;
 
     RayDesc ray;
-    ray.Origin = origin + direction * 0.01;
+    ray.Origin = origin;
     ray.Direction = direction;
-    ray.TMin = 0.0;
-    ray.TMax = max(_BurtGIHardwareRayMaxDistance, 0.01);
+    ray.TMin = max(minTraceDistance, 0.0);
+    ray.TMax = max(_BurtGIHardwareRayMaxDistance, ray.TMin + 0.01);
     TraceRay(_BurtGIRayTracingAccelerationStructure, RAY_FLAG_NONE, 0xffu, 0, 1, 0, ray, payload);
+}
+
+void BurtGIHardwareRayTrace(float3 origin, float3 direction, out BurtGIRayPayload payload)
+{
+    BurtGIHardwareRayTrace(origin + direction * 0.01, direction, 0.0, payload);
 }
 
 float BurtGIHardwareRayVisibility(float3 origin, float3 normalWS, float3 lightDirection, float maxDistance)
@@ -296,7 +367,7 @@ float3 BurtGIHardwareRayCosineSampleHemisphere(float3 normalWS, float2 sampleUV)
     return normalize(tangent * localDirection.x + bitangent * localDirection.y + normalWS * localDirection.z);
 }
 
-void BurtGIHardwareRayEvaluateRadiance(float3 origin, float3 direction, out float3 radiance, out float hitDistance, out float hit)
+void BurtGIHardwareRayEvaluateRadiance(float3 origin, float3 direction, float minTraceDistance, out float3 radiance, out float hitDistance, out float hit)
 {
     float3 pathOrigin = origin;
     float3 pathDirection = normalize(direction);
@@ -309,7 +380,7 @@ void BurtGIHardwareRayEvaluateRadiance(float3 origin, float3 direction, out floa
     for (uint bounceIndex = 0u; bounceIndex < BURT_GI_HARDWARE_RAY_MAX_BOUNCES; ++bounceIndex)
     {
         BurtGIRayPayload payload;
-        BurtGIHardwareRayTrace(pathOrigin, pathDirection, payload);
+        BurtGIHardwareRayTrace(pathOrigin, pathDirection, bounceIndex == 0u ? minTraceDistance : 0.01, payload);
         if (bounceIndex == 0u)
         {
             hitDistance = min(max(payload.HitDistance, 0.0), 65504.0);
@@ -350,6 +421,11 @@ void BurtGIHardwareRayEvaluateRadiance(float3 origin, float3 direction, out floa
     radiance = max(radiance, 0.0);
 }
 
+void BurtGIHardwareRayEvaluateRadiance(float3 origin, float3 direction, out float3 radiance, out float hitDistance, out float hit)
+{
+    BurtGIHardwareRayEvaluateRadiance(origin, direction, 0.0, radiance, hitDistance, hit);
+}
+
 [shader("raygeneration")]
 void BurtGIRadianceCacheTraceRGS()
 {
@@ -375,6 +451,7 @@ void BurtGIRadianceCacheTraceRGS()
     uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
     uint traceResolution = max(1u, max(1u, radianceProbeResolution / 2u) << min(traceTileLevel, 4u));
     uint probeIndex = BurtGIHardwareRayProbeIndex(probeTraceIndex);
+    uint clipmapIndex = BurtGIHardwareRayProbeClipmapIndex(probeTraceIndex);
     if (probeIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
     {
         return;
@@ -393,7 +470,7 @@ void BurtGIRadianceCacheTraceRGS()
         float3 radiance;
         float hitDistance;
         float hit;
-        BurtGIHardwareRayEvaluateRadiance(probeWorldCenter, BurtGIHardwareRayEquiAreaDirection((float2(traceTexelCoord) + 0.5) / traceResolution), radiance, hitDistance, hit);
+        BurtGIHardwareRayEvaluateRadiance(probeWorldCenter, BurtGIHardwareRayEquiAreaDirection((float2(traceTexelCoord) + 0.5) / traceResolution), BurtGIHardwareRayProbeTMin(clipmapIndex), radiance, hitDistance, hit);
         uint upsampleFactor = max(1u, radianceProbeResolution / traceResolution);
         uint2 atlasTexelBaseCoord = traceTexelCoord * upsampleFactor;
         [loop]
@@ -434,7 +511,7 @@ void BurtGIRadianceCacheTraceRGS()
                 float3 sampleRadiance;
                 float sampleHitDistance;
                 float hit;
-                BurtGIHardwareRayEvaluateRadiance(probeWorldCenter, BurtGIHardwareRayEquiAreaDirection((float2(traceTexelCoord) + 0.5) / traceResolution), sampleRadiance, sampleHitDistance, hit);
+                BurtGIHardwareRayEvaluateRadiance(probeWorldCenter, BurtGIHardwareRayEquiAreaDirection((float2(traceTexelCoord) + 0.5) / traceResolution), BurtGIHardwareRayProbeTMin(clipmapIndex), sampleRadiance, sampleHitDistance, hit);
                 radianceSum += sampleRadiance;
                 hitDistanceMin = min(hitDistanceMin, sampleHitDistance);
             }
@@ -655,11 +732,21 @@ void BurtGIScreenProbeTraceRGS()
     float3 radiance;
     float hitDistance;
     float hit;
-    BurtGIHardwareRayEvaluateRadiance(sourcePositionWS + sourceNormalWS * 0.05 + directionWS * 0.05, directionWS, radiance, hitDistance, hit);
+    BurtGIHardwareRayEvaluateRadiance(
+        sourcePositionWS + sourceNormalWS * BURT_GI_SCREEN_PROBE_HARDWARE_RAY_SURFACE_BIAS,
+        directionWS,
+        BURT_GI_SCREEN_PROBE_HARDWARE_RAY_MIN_TRACE_DISTANCE,
+        radiance,
+        hitDistance,
+        hit);
     if (hit > 0.001f && _BurtGIScreenProbeSkyLeakParams.x > 0.0001f)
     {
-        float skyLeakAmount = saturate(_BurtGIScreenProbeSkyLeakParams.x * hitDistance * _BurtGIScreenProbeSkyLeakParams.y);
-        radiance += max(_BurtGIHardwareRayAmbientRadiance, 0.0f) * skyLeakAmount;
+        float3 skyLeakRadiance;
+        if (BurtGIHardwareRayTrySampleSkyRadiance(directionWS, saturate(_BurtGIScreenProbeSkyLeakParams.z), skyLeakRadiance))
+        {
+            float skyLeakAmount = saturate(_BurtGIScreenProbeSkyLeakParams.x * hitDistance * _BurtGIScreenProbeSkyLeakParams.y);
+            radiance += skyLeakRadiance * skyLeakAmount;
+        }
     }
     float maxRayIntensity = max(_BurtGIScreenProbeTraceModeParams.z, 0.01f);
     float maxTraceRadiance = max(radiance.r, max(radiance.g, radiance.b));
@@ -674,7 +761,10 @@ void BurtGIScreenProbeTraceRGS()
 [shader("miss")]
 void BurtGIRadianceCacheMiss(inout BurtGIRayPayload payload : SV_RayPayload)
 {
-    payload.Radiance = _BurtGIHardwareRayMissRadiance;
+    float3 skyMissRadiance;
+    payload.Radiance = BurtGIHardwareRayTrySampleSkyRadiance(WorldRayDirection(), 0.18, skyMissRadiance)
+        ? skyMissRadiance
+        : _BurtGIHardwareRayMissRadiance;
     payload.HitDistance = _BurtGIHardwareRayMaxDistance;
     payload.Albedo = 0.0;
     payload.Emission = 0.0;

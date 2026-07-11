@@ -96,7 +96,7 @@ Shader "BurtRP/Subsurface"
             #pragma target 3.5
 
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
             ENDHLSL
         }
@@ -138,7 +138,7 @@ Shader "BurtRP/Subsurface"
             #include "UnityCG.cginc"
 
             // 引入 BurtRP Lit 统一材质 CBUFFER，让 ShadowCaster 和其它 Lit pass 使用同一份材质字段顺序。
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadowCasterPass.hlsl"
 
@@ -161,7 +161,7 @@ Shader "BurtRP/Subsurface"
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma target 4.5
 
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
@@ -215,7 +215,7 @@ Shader "BurtRP/Subsurface"
             #pragma target 4.5
 
             // 引入 Lit 材质 CBUFFER，让 GBuffer、DepthOnly、ShadowCaster、Forward 使用同一套材质属性布局。
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
             #define BURT_USE_PRESKIN_POSITION 1
@@ -243,7 +243,7 @@ Shader "BurtRP/Subsurface"
             #pragma multi_compile _ XSKIN_MESH_COMPRESSED
             #pragma target 4.5
 
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
             #define BURT_USE_PRESKIN_POSITION 1
@@ -275,7 +275,7 @@ Shader "BurtRP/Subsurface"
 
             #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
             #define BURT_USE_PRESKIN_POSITION 1
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
             ENDHLSL
         }
@@ -289,7 +289,7 @@ Shader "BurtRP/Subsurface"
             #pragma only_renderers d3d11 d3d12
             #pragma raytracing BurtGI
             #pragma shader_feature_local _ BURT_ALPHA_CLIP
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
             ENDHLSL
         }

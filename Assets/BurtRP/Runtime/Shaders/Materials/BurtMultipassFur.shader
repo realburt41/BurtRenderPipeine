@@ -64,6 +64,8 @@ Shader "BurtRP/Multipass Fur"
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 224
         [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
+        [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
 
     SubShader
@@ -157,6 +159,36 @@ Shader "BurtRP/Multipass Fur"
             HLSLPROGRAM
             #pragma vertex VertMultipassFur
             #pragma fragment FragMultipassFurForward
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_FUR 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Multipass Fur Motion Vectors"
+            Tags { "LightMode" = "BurtMotionVectors" }
+            ZWrite Off
+            ZTest Equal
+            Cull [_Cull]
+
+            Stencil
+            {
+                Ref [_MotionVectorsStencilRef]
+                ReadMask 8
+                WriteMask [_MotionVectorsStencilMask]
+                Comp Always
+                Pass Replace
+            }
+
+            HLSLPROGRAM
+            #pragma vertex VertMultipassFurVelocity
+            #pragma fragment FragMultipassFurTemporalAAMotionVectors
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
             #pragma multi_compile_instancing

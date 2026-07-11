@@ -210,6 +210,7 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGIApplyIndirectBackfaceDiffuseTextureId = Shader.PropertyToID("_BurtGIBackfaceDiffuseIndirectTexture");
         private static readonly int BurtGIApplyIndirectRoughSpecularTextureId = Shader.PropertyToID("_BurtGIRoughSpecularIndirectTexture");
         private static readonly int BurtGIApplyIndirectParamsId = Shader.PropertyToID("_BurtGIApplyIndirectParams");
+        private static readonly int BurtGIApplyIndirectParams1Id = Shader.PropertyToID("_BurtGIApplyIndirectParams1");
         private static readonly int BurtGIShortRangeAOParamsId = Shader.PropertyToID("_BurtGIShortRangeAOParams");
         private static readonly int BurtGITranslucencyVolumeParamsId = Shader.PropertyToID("_BurtGITranslucencyVolumeParams");
         private static readonly int BurtGITranslucencyVolume0TextureId = BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume0TextureId;
@@ -450,6 +451,10 @@ namespace Burt.RenderPipeline
         {
             var enabled = false;
             var intensity = 0f;
+            var backfaceDiffuseEnabled = false;
+            var roughSpecularEnabled = false;
+            var translucencyVolumeEnabled = false;
+            var characterIntensity = 1f;
             var shortRangeAOParams = Vector4.zero;
             var translucencyVolumeParams = Vector4.zero;
             var target = context != null
@@ -488,6 +493,10 @@ namespace Burt.RenderPipeline
                 var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(context.Request, context.Asset);
                 enabled = settings.Enabled;
                 intensity = settings.Intensity;
+                backfaceDiffuseEnabled = settings.EnableBackfaceDiffuse;
+                roughSpecularEnabled = settings.EnableRoughSpecular;
+                translucencyVolumeEnabled = settings.UseTranslucencyVolume;
+                characterIntensity = settings.XGICharacterIntensity;
                 shortRangeAOParams = new Vector4(
                     settings.ShortRangeAO ? 1f : 0f,
                     settings.ShortRangeAOWeight,
@@ -505,20 +514,23 @@ namespace Burt.RenderPipeline
                 cmd.SetGlobalTexture(BurtGIApplyIndirectDiffuseTextureId, Texture2D.blackTexture);
             }
 
-            cmd.SetGlobalTexture(BurtGIApplyIndirectBackfaceDiffuseTextureId, enabled ? backfaceDiffuseTarget.Identifier : Texture2D.blackTexture);
-            cmd.SetGlobalTexture(BurtGIApplyIndirectRoughSpecularTextureId, enabled ? roughSpecularTarget.Identifier : Texture2D.blackTexture);
-            var volumeEnabled = enabled && translucencyVolume0Target.IsValid && translucencyVolume1Target.IsValid;
+            cmd.SetGlobalTexture(BurtGIApplyIndirectBackfaceDiffuseTextureId, enabled && backfaceDiffuseEnabled ? backfaceDiffuseTarget.Identifier : Texture2D.blackTexture);
+            cmd.SetGlobalTexture(BurtGIApplyIndirectRoughSpecularTextureId, enabled && roughSpecularEnabled ? roughSpecularTarget.Identifier : Texture2D.blackTexture);
+            var volumeEnabled = enabled && translucencyVolumeEnabled && translucencyVolume0Target.IsValid && translucencyVolume1Target.IsValid;
             var fallbackVolumeTexture = BurtGITranslucencyVolumeFallbackUtility.BlackVolumeTexture;
             cmd.SetGlobalTexture(BurtGITranslucencyVolume0TextureId, volumeEnabled ? translucencyVolume0Target.Identifier : fallbackVolumeTexture);
             cmd.SetGlobalTexture(BurtGITranslucencyVolume1TextureId, volumeEnabled ? translucencyVolume1Target.Identifier : fallbackVolumeTexture);
-            var applyParams = new Vector4(enabled ? 1f : 0f, intensity, enabled ? 1f : 0f, enabled ? 1f : 0f);
+            var applyParams = new Vector4(enabled ? 1f : 0f, intensity, enabled && backfaceDiffuseEnabled ? 1f : 0f, enabled && roughSpecularEnabled ? 1f : 0f);
+            var applyParams1 = new Vector4(enabled ? characterIntensity : 1f, 0f, 0f, 0f);
             cmd.SetGlobalVector(BurtGIApplyIndirectParamsId, applyParams);
+            cmd.SetGlobalVector(BurtGIApplyIndirectParams1Id, applyParams1);
             cmd.SetGlobalVector(BurtGIShortRangeAOParamsId, enabled ? shortRangeAOParams : Vector4.zero);
             cmd.SetGlobalVector(BurtGITranslucencyVolumeParamsId, volumeEnabled ? translucencyVolumeParams : Vector4.zero);
             UploadTranslucencyVolumeGlobals(context, cmd, volumeEnabled);
             if (material != null)
             {
                 material.SetVector(BurtGIApplyIndirectParamsId, applyParams);
+                material.SetVector(BurtGIApplyIndirectParams1Id, applyParams1);
                 material.SetVector(BurtGIShortRangeAOParamsId, enabled ? shortRangeAOParams : Vector4.zero);
                 material.SetVector(BurtGITranslucencyVolumeParamsId, volumeEnabled ? translucencyVolumeParams : Vector4.zero);
             }

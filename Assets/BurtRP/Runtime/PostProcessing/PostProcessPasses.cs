@@ -69,6 +69,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             lowerBound = (int)RenderQueue.Geometry,
             upperBound = (int)RenderQueue.AlphaTest + 45
         };
+        private static readonly RenderQueueRange TemporalAATransparentMotionVectorQueueRange = new RenderQueueRange
+        {
+            lowerBound = (int)RenderQueue.Transparent,
+            upperBound = (int)RenderQueue.Overlay - 1
+        };
         private enum PostProcessShaderPass
         {
             CopyAndComposite = 0,
@@ -590,8 +595,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 builder.ReadCameraColor();
                 builder.ReadCameraDepth();
                 builder.WritePostProcessColor();
-                builder.ReadPostProcessColor();
-                builder.WriteCameraColor();
 
                 var temporalAA = builder.Request != null ? builder.Request.TemporalAA : null;
                 if (temporalAA != null &&
@@ -655,7 +658,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
                 if (temporalAADebugRequested && !useTemporalAA)
                 {
-                    ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
+                    ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, postProcessColorTarget);
                     context.ScriptableContext.ExecuteCommandBuffer(cmd);
                     CommandBufferPool.Release(cmd);
                     return;
@@ -665,9 +668,67 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 useTemporalAA = ExecuteTemporalAA(context, cmd, context.Request.Camera, cameraColorTarget, cameraDepthTarget, postProcessColorTarget, material, temporalAA, useTemporalAADebug);
                 if (!useTemporalAA && temporalAADebugRequested)
                 {
-                    ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, cameraColorTarget);
+                    ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, postProcessColorTarget);
+                }
+                else if (!useTemporalAA)
+                {
+                    DrawFinalPostProcessPass(
+                        cmd,
+                        context.Request.Camera,
+                        material,
+                        cameraColorTarget.Identifier,
+                        postProcessColorTarget.Identifier,
+                        PostProcessShaderPass.PlainCopy);
                 }
 
+                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
+        internal sealed class TemporalAAFinalCopyPass : BurtRenderPass
+        {
+            public override string Name => "Temporal AA Final Copy";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
+                    !ShouldUseTemporalAAPass(builder.Request, builder.Asset))
+                {
+                    return;
+                }
+
+                builder.ReadPostProcessColor();
+                builder.WriteCameraColor();
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset) ||
+                    !ShouldUseTemporalAAPass(context.Request, context.Asset) ||
+                    context.Request == null ||
+                    context.Request.Camera == null ||
+                    !context.CameraColorTarget.IsValid ||
+                    !context.PostProcessColorTarget.IsValid)
+                {
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                if (material == null)
+                {
+                    return;
+                }
+
+                var cmd = CommandBufferPool.Get(Name);
+                DisablePostProcessEffects(cmd);
+                DrawFinalPostProcessPass(
+                    cmd,
+                    context.Request.Camera,
+                    material,
+                    context.PostProcessColorTarget.Identifier,
+                    context.CameraColorTarget.Identifier,
+                    PostProcessShaderPass.TemporalAACopy);
                 context.ScriptableContext.ExecuteCommandBuffer(cmd);
                 CommandBufferPool.Release(cmd);
             }
@@ -1539,6 +1600,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.ClearRenderTarget(false, true, Color.clear);
 
             var drewObjectMotionVectors = DrawTemporalAAObjectMotionVectors(context, cmd, camera, velocity, cameraDepthTarget, width, height, !useTemporalAAUpscale);
+            drewObjectMotionVectors |= DrawTemporalAAMultipassFurMotionVectors(context, cmd, velocity, cameraDepthTarget, width, height);
             temporalAA.ObjectMotionVectorPassDrawn = drewObjectMotionVectors;
             temporalAA.VelocityMode = drewObjectMotionVectors ? BurtTemporalAAVelocityMode.CameraAndObject : BurtTemporalAAVelocityMode.CameraOnly;
 
@@ -1685,11 +1747,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 : (useTemporalAAUpscale ? PostProcessShaderPass.TemporalAAUpscale : PostProcessShaderPass.TemporalAACopy);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(postProcessCopyPass), MeshTopology.Triangles, 3, 1);
 
-            cmd.SetRenderTarget(cameraColorTarget.Identifier);
-            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            DisablePostProcessEffects(cmd);
-            cmd.SetGlobalTexture(SourceTextureId, postProcessColorTarget.Identifier);
-            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACopy), MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalFloat(ShadingDebugEnabledId, BurtShadingDebugSettings.IsDebugging ? 1f : 0f);
 
             if (useTemporalAADebug)
@@ -1975,6 +2032,38 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var filteringSettings = new FilteringSettings(TemporalAAObjectMotionVectorQueueRange, camera.cullingMask);
             context.ScriptableContext.DrawRenderers(context.Request.CullingResults, ref drawingSettings, ref filteringSettings);
+
+            var transparentSortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonTransparent };
+            var transparentDrawingSettings = new DrawingSettings(new ShaderTagId("BurtTransparentMotionVectors"), transparentSortingSettings)
+            {
+                perObjectData = PerObjectData.MotionVectors,
+                enableDynamicBatching = false,
+                enableInstancing = true
+            };
+            var transparentFilteringSettings = new FilteringSettings(TemporalAATransparentMotionVectorQueueRange, camera.cullingMask);
+            context.ScriptableContext.DrawRenderers(context.Request.CullingResults, ref transparentDrawingSettings, ref transparentFilteringSettings);
+            return true;
+        }
+
+        private static bool DrawTemporalAAMultipassFurMotionVectors(
+            BurtRenderGraphContext context,
+            CommandBuffer cmd,
+            RenderTargetIdentifier velocityTarget,
+            BurtRenderTargetHandle cameraDepthTarget,
+            int width,
+            int height)
+        {
+            if (context == null || cmd == null || !cameraDepthTarget.IsValid || BurtMultipassRenderer.RegisteredRendererCount <= 0)
+            {
+                return false;
+            }
+
+            cmd.SetRenderTarget(velocityTarget, cameraDepthTarget.Identifier);
+            SetTemporalAAViewport(cmd, width, height);
+            BurtFurBlurPassUtility.UploadMotionVectorGlobals(cmd, context.Request, width, height);
+            BurtMultipassRenderer.DrawAll(cmd, context, BurtMultipassShaderPass.MotionVectors, RenderQueueRange.opaque);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            cmd.Clear();
             return true;
         }
 

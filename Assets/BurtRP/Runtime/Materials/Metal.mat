@@ -21,6 +21,7 @@ Material:
     RenderType: Opaque
   disabledShaderPasses:
   - BurtRefractionDistortion
+  - BurtTransparentMotionVectors
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3

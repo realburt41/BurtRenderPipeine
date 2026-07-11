@@ -91,7 +91,7 @@ Shader "BurtRP/Foliage"
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFoliageProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -112,7 +112,7 @@ Shader "BurtRP/Foliage"
             #pragma shader_feature_local _ BURT_FOLIAGE_USE_BAKED_NORMALS
             #pragma multi_compile_instancing
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFoliageProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
             ENDHLSL
@@ -143,7 +143,7 @@ Shader "BurtRP/Foliage"
             #pragma target 3.5
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFoliageProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
             ENDHLSL
         }
@@ -174,7 +174,7 @@ Shader "BurtRP/Foliage"
             #pragma shader_feature_local _ BURT_FOLIAGE_USE_BAKED_NORMALS
             #pragma multi_compile_instancing
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFoliageProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
             ENDHLSL
@@ -189,7 +189,7 @@ Shader "BurtRP/Foliage"
             #pragma only_renderers d3d11 d3d12
             #pragma raytracing BurtGI
             #pragma shader_feature_local _ BURT_ALPHA_CLIP
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtFoliageProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
             ENDHLSL
         }

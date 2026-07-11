@@ -1,0 +1,57 @@
+#pragma kernel BurtAvatarDecalCombineBaseMap
+
+Texture2D<float4> _BurtAvatarBaseMap;
+Texture2D<float4> _BurtAvatarPositionMap;
+Texture2D<float4> _BurtAvatarDecalBaseMap;
+RWTexture2D<float4> _BurtAvatarResultBaseMap;
+RWTexture2D<float4> _BurtAvatarProjectionDebugMap;
+SamplerState sampler_BurtAvatarPositionMap;
+SamplerState sampler_BurtAvatarDecalBaseMap;
+
+float4 _BurtAvatarResultSize;
+float4x4 _BurtAvatarBodyMatrix;
+float4x4 _BurtAvatarDecalInverseMatrix;
+float4 _BurtAvatarDecalBaseColor;
+
+[numthreads(8, 8, 1)]
+void BurtAvatarDecalCombineBaseMap(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint2 pixel = dispatchThreadID.xy;
+    uint2 resultSize = uint2(_BurtAvatarResultSize.xy);
+    if (any(pixel >= resultSize))
+    {
+        return;
+    }
+
+    float4 sourceBaseColor = _BurtAvatarBaseMap.Load(int3(pixel, 0));
+
+    // The PositionMap resolution is independent from the source BaseMap resolution.
+    // XRender converts the BaseMap pixel into normalized UV before sampling the PositionMap;
+    // direct Load(pixel) only works when both textures happen to have identical dimensions.
+    float2 positionMapUV = (float2(pixel) + 0.5f) / _BurtAvatarResultSize.xy;
+    float4 positionMapValue = _BurtAvatarPositionMap.SampleLevel(sampler_BurtAvatarPositionMap, positionMapUV, 0);
+    if (positionMapValue.a <= 0.5f)
+    {
+        _BurtAvatarProjectionDebugMap[pixel] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        _BurtAvatarResultBaseMap[pixel] = sourceBaseColor;
+        return;
+    }
+
+    float3 bodyPositionWS = mul(_BurtAvatarBodyMatrix, float4(positionMapValue.rgb, 1.0f)).xyz;
+    float3 decalPositionOS = mul(_BurtAvatarDecalInverseMatrix, float4(bodyPositionWS, 1.0f)).xyz;
+    if (any(abs(decalPositionOS) > 0.5f))
+    {
+        _BurtAvatarProjectionDebugMap[pixel] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        _BurtAvatarResultBaseMap[pixel] = sourceBaseColor;
+        return;
+    }
+
+    float2 decalUV = decalPositionOS.xy + 0.5f;
+    decalUV.x = 1.0f - decalUV.x;
+    float4 decalBaseColor = _BurtAvatarDecalBaseMap.SampleLevel(sampler_BurtAvatarDecalBaseMap, decalUV, 0) * _BurtAvatarDecalBaseColor;
+    float decalAlpha = saturate(decalBaseColor.a);
+    _BurtAvatarProjectionDebugMap[pixel] = float4(1.0f, decalAlpha, 0.0f, 1.0f);
+    _BurtAvatarResultBaseMap[pixel] = float4(
+        lerp(sourceBaseColor.rgb, decalBaseColor.rgb, decalAlpha),
+        sourceBaseColor.a);
+}

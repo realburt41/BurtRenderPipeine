@@ -204,6 +204,51 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             BurtGIProbeVolumeUtility.Upload(cmd, camera);
         }
 
+        public static void UploadSkyReflectionForTracing(CommandBuffer cmd, BurtRenderRequest request)
+        {
+            UploadSkyReflectionForTracing(cmd, request, request != null ? request.Camera : null);
+        }
+
+        public static void UploadSkyReflectionForTracing(CommandBuffer cmd, Camera camera)
+        {
+            UploadSkyReflectionForTracing(cmd, null, camera);
+        }
+
+        private static void UploadSkyReflectionForTracing(CommandBuffer cmd, BurtRenderRequest request, Camera camera)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            var skyLightActive = TryResolveActiveSkyLight(camera, out var skyLight);
+            var skyReflection = skyLightActive ? ResolveSkyLightReflection(cmd, request, camera, skyLight) : ResolveSkyReflection(cmd, request, camera);
+            var lowerHemisphere = skyLightActive ? ResolveSkyLightLowerHemisphere(skyLight) : CreateDisabledLowerHemisphere();
+            var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity);
+            var skyReflectionIntensity = skyLightActive ? skyReflection.IntensityMultiplier : renderSettingsReflectionIntensity * Mathf.Max(0f, skyReflection.IntensityMultiplier);
+            var skyDiffuseIntensity = skyLightActive && skyLight != null && skyLight.affectDiffuse ? skyLight.EffectiveDiffuseIntensity : 0f;
+            var imageBasedFilterBakeIntensity = skyLightActive ? Mathf.Max(skyReflectionIntensity, skyDiffuseIntensity) : skyReflectionIntensity;
+            var bakeSettings = CreateImageBasedFilterBakeSettings(skyReflection, imageBasedFilterBakeIntensity, lowerHemisphere);
+            var imageBasedFilter = BurtImageBasedFilterUtility.Filter(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflection.Source, bakeSettings);
+            var runtimeSkyReflectionIntensity = imageBasedFilter.Filtered ? ResolveBakedIntensityScale(skyReflectionIntensity, imageBasedFilter.BakedIntensity) : skyReflectionIntensity;
+            var runtimeSkyReflectionTint = imageBasedFilter.Filtered ? Color.white : skyReflection.Tint;
+            var runtimeSkyReflectionRotation = imageBasedFilter.Filtered ? DefaultSkyReflectionRotation : skyReflection.Rotation;
+
+            UploadSkyReflection(
+                cmd,
+                imageBasedFilter.SpecularTexture,
+                imageBasedFilter.SpecularHDRDecodeValues,
+                imageBasedFilter.SpecularMaxMip,
+                skyReflection.Texture,
+                skyReflection.HDRDecodeValues,
+                CalculateSkyReflectionSpecularMipMax(skyReflection.Texture),
+                runtimeSkyReflectionIntensity,
+                runtimeSkyReflectionTint,
+                skyReflection.ForceOverride,
+                runtimeSkyReflectionRotation);
+            BurtLocalSkyProbeUtility.Upload(cmd, camera);
+        }
+
         public static void AppendDebugState(StringBuilder builder) // 保留旧入口，旧调用没有相机上下文时只输出全局自定义/默认反射。
         {
             AppendDebugState(builder, (Camera)null); // 转发到新入口，避免 Debug 文本和上传逻辑分叉。
@@ -243,6 +288,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             builder.Append(" MaxMip=").Append(CalculateSkyReflectionMaxMip(snapshot.SkyReflection.Texture).ToString("0.###"));
             builder.Append(" CubemapAngle=").Append(snapshot.CubemapAngle.ToString("0.###"));
             builder.Append(" SpecularOverride=").Append(snapshot.SkyReflection.ForceOverride);
+            builder.AppendLine();
+
+            var localSkyProbeActive = BurtLocalSkyProbe.TryGetBestForCamera(camera, out var localSkyProbe);
+            builder.Append("  LocalSkyProbeActive=").Append(localSkyProbeActive);
+            builder.Append(" Name=").Append(localSkyProbeActive ? localSkyProbe.name : "<none>");
+            builder.Append(" Shape=").Append(localSkyProbeActive ? localSkyProbe.shape.ToString() : "<none>");
+            builder.Append(" Priority=").Append(localSkyProbeActive ? localSkyProbe.priority.ToString() : "<none>");
+            builder.Append(" OffsetMax=").Append(localSkyProbeActive ? localSkyProbe.probeOffsetDistanceMax.ToString("0.###") : "<none>");
+            builder.Append(" SampleLerpMax=").Append(localSkyProbeActive ? localSkyProbe.probeSampleLerpDistanceMax.ToString("0.###") : "<none>");
+            builder.Append(" Intensity=").Append(localSkyProbeActive ? localSkyProbe.intensity.ToString("0.###") : "<none>");
+            builder.Append(" ColorCube=").Append(localSkyProbeActive ? FormatTextureName(localSkyProbe.colorCubemap) : "<none>");
+            builder.Append(" DepthCube=").Append(localSkyProbeActive ? FormatTextureName(localSkyProbe.depthCubemap) : "<none>");
             builder.AppendLine();
 
             builder.Append("  IndirectDiffuseSource=").Append(snapshot.EffectiveDiffuseSource);
@@ -1099,7 +1156,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             cmd.SetGlobalVector(Params1Id, new Vector4(
                 Mathf.Max(0.01f, probe.probeOffsetDistanceMax),
                 Mathf.Max(0f, probe.intensity),
-                0f,
+                Mathf.Max(0.01f, probe.probeSampleLerpDistanceMax),
                 0f));
         }
     }

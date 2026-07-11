@@ -81,6 +81,8 @@ Shader "BurtRP/Hair"
         [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 96
         [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
+        [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
 
     SubShader
@@ -132,6 +134,37 @@ Shader "BurtRP/Hair"
 
             #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadowCasterPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Hair Motion Vectors"
+            Tags { "LightMode" = "BurtMotionVectors" }
+            ZWrite Off
+            ZTest Equal
+            Cull [_Cull]
+
+            Stencil
+            {
+                Ref [_MotionVectorsStencilRef]
+                ReadMask 8
+                WriteMask [_MotionVectorsStencilMask]
+                Comp Always
+                Pass Replace
+            }
+
+            HLSLPROGRAM
+            #pragma vertex VertMotionVector
+            #pragma fragment FragMotionVector
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHairProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_HAIR 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
             ENDHLSL
         }
 

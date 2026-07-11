@@ -67,8 +67,10 @@ Texture2D<float> _BurtCameraDepthTexture;
 Texture2D<float4> _BurtGIScreenProbeWorldNormalTexture;
 Texture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
 Texture2D<float> _BurtGIScreenProbeTraceHitTexture;
+Texture2D<uint> _BurtGIScreenProbeImportanceRayInfoTexture;
 RWTexture2D<float4> _BurtGIScreenProbeTraceRadianceRWTexture;
 Texture2D<float4> _BurtScreenSpaceGlobalIlluminationRawTexture;
+TextureCube<float4> _BurtSkyReflectionTexture;
 Texture3D<float4> _BurtGISceneVoxelRadianceReadTexture;
 RWTexture3D<float4> _BurtGISceneVoxelRadianceTexture;
 Texture3D<float4> _BurtGISceneVoxelGeometryReadTexture;
@@ -123,6 +125,7 @@ SamplerState sampler_BurtGISceneVoxelOccupancyMipReadTexture;
 SamplerState sampler_BurtGISceneVoxelHistoryRadianceTexture;
 SamplerState sampler_BurtGISceneVoxelHistoryGeometryTexture;
 SamplerState sampler_BurtGISceneVoxelHistoryLightingTexture;
+SamplerState sampler_BurtSkyReflectionTexture;
 
 struct BurtGISceneVoxelTriangle
 {
@@ -220,6 +223,14 @@ float4 _BurtGIRadianceCacheHashGridParams1;
 float4 _BurtDeferredCameraWorldPosition;
 float4x4 _BurtDeferredInverseViewProjectionMatrix;
 float4 _BurtGIRadianceCacheClipMapSkyRadiance;
+float4 _BurtSkyReflectionHDR;
+float4 _BurtSkyReflectionTint;
+float4 _BurtSkyReflectionRotation;
+float4 _BurtSkyLowerHemisphereDiffuseColor;
+float _BurtSkyReflectionIntensity;
+float _BurtSkyReflectionEnabled;
+float _BurtSkyReflectionMaxMip;
+float _BurtSkyLowerHemisphereEnabled;
 float4 _BurtGIMainLightDirection;
 float4 _BurtGIMainLightColor;
 float4 _BurtGIAdditionalLightPositionAndRange[8];
@@ -834,10 +845,117 @@ uint2 BurtGIWrapRawProbeTexel(int2 rawProbeTexelCoord)
     return (uint2)wrappedCoord;
 }
 
+float3 BurtGISafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+
+bool BurtGIRadianceCacheTrySampleSkyRadiance(float3 directionWS, float roughness, out float3 skyRadiance)
+{
+    skyRadiance = 0.0;
+    if (_BurtSkyReflectionEnabled <= 0.5)
+    {
+        return false;
+    }
+
+    float3 safeDirectionWS = BurtGISafeNormalize(directionWS, float3(0.0, 1.0, 0.0));
+    float2 rotation = _BurtSkyReflectionRotation.xy;
+    float2 rotatedXZ = float2(
+        safeDirectionWS.x * rotation.x - safeDirectionWS.z * rotation.y,
+        safeDirectionWS.x * rotation.y + safeDirectionWS.z * rotation.x);
+    float3 sampleDirectionWS = BurtGISafeNormalize(
+        float3(rotatedXZ.x, safeDirectionWS.y, rotatedXZ.y),
+        safeDirectionWS);
+    float mipLevel = saturate(roughness) * max(_BurtSkyReflectionMaxMip, 0.0);
+    float4 encodedSky = _BurtSkyReflectionTexture.SampleLevel(sampler_BurtSkyReflectionTexture, sampleDirectionWS, mipLevel);
+    float hdrMultiplier = _BurtSkyReflectionHDR.x * pow(max(abs(encodedSky.a), 0.0001), _BurtSkyReflectionHDR.y);
+    skyRadiance = max(encodedSky.rgb * hdrMultiplier, 0.0) *
+        max(_BurtSkyReflectionTint.rgb, 0.0) *
+        max(_BurtSkyReflectionIntensity, 0.0);
+
+    if (_BurtSkyLowerHemisphereEnabled > 0.5 && safeDirectionWS.y < 0.0)
+    {
+        skyRadiance = lerp(skyRadiance, max(_BurtSkyLowerHemisphereDiffuseColor.rgb, 0.0), saturate(_BurtSkyLowerHemisphereDiffuseColor.a));
+    }
+
+    return dot(skyRadiance, skyRadiance) > 0.000001;
+}
+
+float3 BurtGIRadianceCacheResolveSkyRadiance(float3 directionWS, float roughness)
+{
+    float3 skyRadiance = max(_BurtGIRadianceCacheClipMapSkyRadiance.rgb, 0.0);
+    if (_BurtGIRadianceCacheClipMapSkyRadiance.w > 0.5)
+    {
+        float3 sampledSkyRadiance;
+        if (BurtGIRadianceCacheTrySampleSkyRadiance(directionWS, roughness, sampledSkyRadiance))
+        {
+            skyRadiance = sampledSkyRadiance;
+        }
+    }
+
+    return skyRadiance;
+}
+
+void BurtGIUnpackScreenProbeImportanceRayInfo(uint rayInfo, out uint2 texelCoord, out uint level)
+{
+    texelCoord.x = rayInfo & 0x3fu;
+    texelCoord.y = (rayInfo >> 6) & 0x3fu;
+    level = (rayInfo >> 12) & 0xfu;
+}
+
+void BurtGISampleScreenProbeImportanceTraceByDirection(
+    uint2 traceProbeCoord,
+    float3 direction,
+    uint traceResolution,
+    uint2 traceAtlasSize,
+    out float4 traceRadiance,
+    out float traceHit)
+{
+    uint maxImportanceTraceResolution = min(64u, max(traceResolution, traceResolution << 1u));
+    float bestDirectionDot = -2.0;
+    uint2 bestTraceAtlasCoord = min(traceProbeCoord * traceResolution, traceAtlasSize - 1u);
+
+    [loop]
+    for (uint y = 0u; y < traceResolution; ++y)
+    {
+        [loop]
+        for (uint x = 0u; x < traceResolution; ++x)
+        {
+            uint2 traceTexelCoord = uint2(x, y);
+            uint2 traceAtlasCoord = min(traceProbeCoord * traceResolution + traceTexelCoord, traceAtlasSize - 1u);
+            uint2 sourceTraceTexelCoord = traceTexelCoord;
+            uint sourceTraceLevel = 0u;
+            BurtGIUnpackScreenProbeImportanceRayInfo(
+                _BurtGIScreenProbeImportanceRayInfoTexture.Load(int3((int)traceAtlasCoord.x, (int)traceAtlasCoord.y, 0)),
+                sourceTraceTexelCoord,
+                sourceTraceLevel);
+
+            uint sourceMipSize = max(1u, maxImportanceTraceResolution >> min(sourceTraceLevel, 5u));
+            if (sourceTraceTexelCoord.x >= sourceMipSize || sourceTraceTexelCoord.y >= sourceMipSize)
+            {
+                sourceTraceTexelCoord = traceTexelCoord;
+                sourceMipSize = traceResolution;
+            }
+
+            float3 sourceDirection = BurtGIEquiAreaSphericalMapping((float2(sourceTraceTexelCoord) + 0.5) / (float)sourceMipSize);
+            float directionDot = dot(sourceDirection, direction);
+            if (directionDot > bestDirectionDot)
+            {
+                bestDirectionDot = directionDot;
+                bestTraceAtlasCoord = traceAtlasCoord;
+            }
+        }
+    }
+
+    traceRadiance = _BurtGIScreenProbeTraceRadianceTexture.Load(int3((int)bestTraceAtlasCoord.x, (int)bestTraceAtlasCoord.y, 0));
+    traceHit = _BurtGIScreenProbeTraceHitTexture.Load(int3((int)bestTraceAtlasCoord.x, (int)bestTraceAtlasCoord.y, 0));
+}
+
 float3 BurtGISampleRawScreenGI(uint probeIndex, float3 direction, float3 probeWorldCenter, out float hitDistance)
 {
     float skyTraceEnabled = _BurtGIRadianceCacheClipMapSkyRadiance.w > 0.5 ? 1.0 : 0.0;
-    float3 skyRadiance = max(_BurtGIRadianceCacheClipMapSkyRadiance.rgb, 0.0);
+    float3 skyRadiance = BurtGIRadianceCacheResolveSkyRadiance(direction, 0.18);
 
     if (_BurtGIRadianceCacheClipMapUseIrradianceField != 0u)
     {
@@ -874,11 +992,10 @@ float3 BurtGISampleRawScreenGI(uint probeIndex, float3 direction, float3 probeWo
     uint2 traceAtlasSize = max(uint2(traceWidth, traceHeight), uint2(1u, 1u));
     uint2 traceProbeCapacity = max(traceAtlasSize / traceResolution, uint2(1u, 1u));
     uint2 traceProbeCoord = min(screenProbeCoord, traceProbeCapacity - 1u);
-    float2 traceUV = BurtGIInverseEquiAreaSphericalMapping(direction);
-    uint2 traceTexelCoord = min((uint2)(traceUV * (float)traceResolution), traceResolution - 1u);
-    uint2 traceAtlasCoord = min(traceProbeCoord * traceResolution + traceTexelCoord, traceAtlasSize - 1u);
-    float4 traceRadiance = _BurtGIScreenProbeTraceRadianceTexture.Load(int3((int)traceAtlasCoord.x, (int)traceAtlasCoord.y, 0));
-    float traceHit = saturate(_BurtGIScreenProbeTraceHitTexture.Load(int3((int)traceAtlasCoord.x, (int)traceAtlasCoord.y, 0)));
+    float4 traceRadiance;
+    float traceHit;
+    BurtGISampleScreenProbeImportanceTraceByDirection(traceProbeCoord, direction, traceResolution, traceAtlasSize, traceRadiance, traceHit);
+    traceHit = saturate(traceHit);
     float traceConfidence = saturate(max(traceRadiance.a, traceHit) * traceHit);
     float traceDistance = maxTraceDistance * lerp(1.0, 0.35, traceConfidence);
     hitDistance = min(hitDistance, traceDistance);
@@ -2854,7 +2971,22 @@ void RadianceCacheHashGridPopulateScreenProbesLiteCS(uint3 dispatchThreadId : SV
         return;
     }
 
-    float2 octUV = (float2((float)(traceX % octResolution), (float)(traceY % octResolution)) + 0.5) / (float)octResolution;
+    uint2 traceTexelCoord = uint2(traceX % octResolution, traceY % octResolution);
+    uint2 sourceTraceTexelCoord = traceTexelCoord;
+    uint sourceTraceLevel = 0u;
+    BurtGIUnpackScreenProbeImportanceRayInfo(
+        _BurtGIScreenProbeImportanceRayInfoTexture.Load(int3((int)traceX, (int)traceY, 0)),
+        sourceTraceTexelCoord,
+        sourceTraceLevel);
+    uint maxImportanceTraceResolution = min(64u, max(octResolution, octResolution << 1u));
+    uint sourceMipSize = max(1u, maxImportanceTraceResolution >> min(sourceTraceLevel, 5u));
+    if (sourceTraceTexelCoord.x >= sourceMipSize || sourceTraceTexelCoord.y >= sourceMipSize)
+    {
+        sourceTraceTexelCoord = traceTexelCoord;
+        sourceMipSize = octResolution;
+    }
+
+    float2 octUV = (float2(sourceTraceTexelCoord) + 0.5) / (float)sourceMipSize;
     float3 rayDirection = BurtGIEquiAreaSphericalMapping(octUV);
     uint tileHash = BurtGIRadianceCacheHashGridTileHash(worldPositionValue.xyz, rayDirection);
     uint tileIndex;
@@ -3994,7 +4126,7 @@ void TraceFromProbesCS(
         float skyTraceEnabled = _BurtGIRadianceCacheClipMapSkyRadiance.w > 0.5 ? 1.0 : 0.0;
         float sceneTraceConfidence = saturate(max(sceneVoxelConfidence, sceneCacheConfidence));
         float skyMissWeight = skyTraceEnabled * saturate(1.0 - sceneTraceConfidence);
-        float3 skyRadiance = max(_BurtGIRadianceCacheClipMapSkyRadiance.rgb, 0.0);
+        float3 skyRadiance = BurtGIRadianceCacheResolveSkyRadiance(direction, 0.18);
         radiance = lerp(radiance, max(radiance, skyRadiance), skyMissWeight * 0.5);
         hitDistance = lerp(hitDistance, maxTraceDistance, skyMissWeight);
 

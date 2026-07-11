@@ -388,6 +388,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass drawPostImageEffectsGizmosPass = new BurtDrawPostImageEffectsGizmosPass(); // 创建后处理后的编辑器 Gizmos Pass，避免直接画到外部最终目标。
         private readonly BurtRenderPass allocatePostProcessColorPass = new AllocatePostProcessColorPass(); // 创建后处理中间 RT 分配 Pass，保持后处理尾部链路不分 Forward/Deferred。
         private readonly BurtRenderPass temporalAAPass = new PostProcessPass.TemporalAAPass();
+        private readonly BurtRenderPass temporalAAFinalCopyPass = new PostProcessPass.TemporalAAFinalCopyPass();
         private readonly BurtRenderPass diaphragmDepthOfFieldPass = new PostProcessPass.DiaphragmDepthOfFieldPass();
         private readonly BurtRenderPass lensFlarePass = new PostProcessPass.LensFlarePass();
         private readonly BurtRenderPass bloomPass = new PostProcessPass.BloomPass();
@@ -1474,6 +1475,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             if (PostProcessPass.ShouldUseTemporalAAPass(request, asset))
             {
                 graph.AddPass(temporalAAPass);
+                graph.AddPass(temporalAAFinalCopyPass);
             }
 
             if (PostProcessPass.ShouldUseDiaphragmDepthOfFieldPass(request, asset))

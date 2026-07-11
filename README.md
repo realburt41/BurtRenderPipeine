@@ -205,6 +205,7 @@
         - [x] DefaultLit (Aniso)
         - [x] Clear Coat
         - [ ] Crystal
+        - [x] HexLighting
     - Character
         - Subsurface
             - [x] 5S
@@ -215,9 +216,10 @@
         - Hair
             - [ ] Dither
             - [ ] Dual Pass
-        - [ ] Eye
+        - [x] Eye
         - [ ] Skinne Decal
-        - [ ] Combine Texture Decal
+        - [x] Combine Texture Decal
+            - [x] Combine Texture Decal Compress
     - Environment
         - [ ] Ocean
         - Weather

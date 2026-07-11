@@ -80,7 +80,7 @@ Shader "BurtRP/Grass"
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #define BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS 1
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGrassProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthOnlyPass.hlsl"
             ENDHLSL
         }
@@ -104,7 +104,7 @@ Shader "BurtRP/Grass"
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #define BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS 1
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGrassProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -123,7 +123,7 @@ Shader "BurtRP/Grass"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma multi_compile_instancing
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGrassProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #define BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
@@ -156,7 +156,7 @@ Shader "BurtRP/Grass"
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #define BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS 1
             #include "UnityCG.cginc"
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGrassProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
             ENDHLSL
         }
@@ -185,7 +185,7 @@ Shader "BurtRP/Grass"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma multi_compile_instancing
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGrassProperties.hlsl"
             #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
             #define BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
@@ -201,7 +201,7 @@ Shader "BurtRP/Grass"
             #pragma only_renderers d3d11 d3d12
             #pragma raytracing BurtGI
             #pragma shader_feature_local _ BURT_ALPHA_CLIP
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGrassProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
             ENDHLSL
         }

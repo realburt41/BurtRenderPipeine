@@ -23,6 +23,7 @@ Material:
   - BurtDepthOnly
   - BurtForward
   - BurtRefractionDistortion
+  - BurtTransparentMotionVectors
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -132,7 +133,7 @@ Material:
     - _Mode: 0
     - _MotionVectorsStencilMask: 8
     - _MotionVectorsStencilRef: 8
-    - _NormalScale: 1
+    - _NormalScale: 0
     - _Occlusion: 1
     - _OcclusionStrength: 1
     - _Parallax: 0.02

@@ -22,6 +22,7 @@ Material:
   disabledShaderPasses:
   - BurtRefractionDistortion
   - BurtDepthOnly
+  - BurtTransparentMotionVectors
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3

@@ -2,6 +2,10 @@
 #ifndef BURT_MATERIAL_PASS_SURFACE_INCLUDED
 #define BURT_MATERIAL_PASS_SURFACE_INCLUDED
 
+#if !defined(BURT_MATERIAL_COMPILE_GRASS_FOLIAGE)
+#define BURT_MATERIAL_COMPILE_GRASS_FOLIAGE 0
+#endif
+
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
 float BurtEvaluateMaterialPassOpacity(float Alpha, float2 BaseMapUV, float3 PositionWS)
 {
@@ -63,7 +67,7 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 BaseColor, floa
     float Subsurface3SCurvature = saturate(MaskMap.b * _Subsurface3SCurvatureScale + _Subsurface3SCurvatureBias);
     return BurtApplySubsurfaceSurfaceSemantics(SurfaceData, _SubsurfaceThickness, _SubsurfacePower, _SubsurfaceDistortion, _SubsurfaceAmbient, Subsurface3SCurvature, _SubsurfaceProfileIndex, _SubsurfaceScatteringMode);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     return BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
     #else
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, _Smoothness, 0.0f, MaskMap, _OcclusionStrength);
@@ -111,7 +115,7 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 BaseColor, floa
     BurtSurfaceData SurfaceData = BurtCreateFabricSurfaceData(BaseColor, _Reflectance, _Roughness, _Metallic, MaskMap, _OcclusionStrength);
     return BurtApplyFabricPassSurfaceSemantics(SurfaceData, MaskMap, UV0);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     return BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
     #else
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, _Smoothness, 0.0f, MaskMap, _OcclusionStrength);
@@ -132,7 +136,7 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(float4 BaseColor, floa
     float NdotV = saturate(dot(BurtSafeNormalize(NormalWS), BurtSafeNormalize(ViewDirectionWS)));
     return BurtApplyFabricPassSurfaceSemantics(SurfaceData, MaskMap, UV0, NdotV);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     return BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
     #else
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, _Smoothness, 0.0f, MaskMap, _OcclusionStrength);
@@ -181,7 +185,7 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
     return BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, UV0, GeometryNormalWS, ViewDirectionWS);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     return BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
     #else
     BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, _Smoothness, 0.0f, MaskMap, _OcclusionStrength);
@@ -204,7 +208,7 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
     float4 VertexColor)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     BurtSurfaceData SurfaceData = BurtCreateGrassXRenderSurfaceData(BaseColor, MaskMap);
     SurfaceData = BurtApplyGrassMaterialExtras(SurfaceData, PositionWS, VertexColor);
     return BurtApplyGrassXRenderSurfaceSemantics(SurfaceData, NormalWS, ViewDirectionWS, PositionWS, VertexColor);
@@ -244,7 +248,7 @@ BurtSurfaceData BurtCreateMaterialShadingModelSurfaceData(
 
 float3 BurtGetMaterialPassNormalWS(float2 NormalMapUV, float3 NormalWS, float4 TangentWS, float Facing)
 {
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) && !BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     return BurtSampleFoliageNSRNormalWS(NormalMapUV, NormalWS, TangentWS, _NormalScale, Facing, _DoubleSidedNormalModeConstants);
 #else
     return BurtSampleNormalWS(NormalMapUV, NormalWS, TangentWS, _NormalScale, Facing, _DoubleSidedNormalModeConstants);

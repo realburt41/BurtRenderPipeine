@@ -8,6 +8,12 @@ float4 _VegetationBoundsMax;
 Texture2D _GlobalBaseColorMap;
 float4 GlobalTexture_ST;
 
+#if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS) && defined(BURT_GRASS_PROPERTIES_INCLUDED)
+    #define BURT_MATERIAL_COMPILE_GRASS_FOLIAGE 1
+#else
+    #define BURT_MATERIAL_COMPILE_GRASS_FOLIAGE 0
+#endif
+
 float3 BurtApplyFoliageSaturation(float3 Color, float SaturationBoost)
 {
     float Luminance = PerceivedLuminance(Color);
@@ -60,6 +66,7 @@ float3 BurtResolveFoliageObjectUpWS()
     return BurtSafeNormalize(UnityObjectToWorldDir(float3(0.0f, 1.0f, 0.0f)));
 }
 
+#if !BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
 float BurtEvaluateFoliageNormalizedHeight(float3 PositionOS, float3 PositionWS)
 {
     float VegetationHeight = _VegetationBoundsMax.y - _VegetationBoundsMin.y;
@@ -89,6 +96,7 @@ float BurtEvaluateFoliageTintValue()
 
     return saturate(_TintValue);
 }
+#endif
 
 float4 BurtSampleFoliageNSRMap(float2 BaseMapUV)
 {
@@ -97,7 +105,7 @@ float4 BurtSampleFoliageNSRMap(float2 BaseMapUV)
 
 float4 BurtResolveFoliageSurfaceMap(float2 BaseMapUV, float4 FallbackMap)
 {
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) && !BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     return BurtSampleFoliageNSRMap(BaseMapUV);
 #else
     return FallbackMap;
@@ -125,7 +133,7 @@ float4 BurtEvaluateMaterialPassBaseColor(float2 BaseMapUV, float3 PositionWS, fl
     float4 BaseColor = BaseMap * _BaseColor;
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
         float CameraDistance = distance(_WorldSpaceCameraPos.xyz, PositionWS);
         float FadeDistance = 250.0f;
         float FadeDis = saturate((FadeDistance - CameraDistance) / (0.15f * FadeDistance));
@@ -176,13 +184,13 @@ float4 BurtEvaluateMaterialPassBaseColor(float2 BaseMapUV, float3 PositionWS, fl
 float BurtEvaluateMaterialPassOpacity(float Alpha, float2 BaseMapUV, float3 PositionWS)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
         float AlphaMap = SAMPLE_TEXTURE2D_BIAS(_AlphaMap, sampler_LinearRepeat, BaseMapUV, -1.0f).r;
     #else
         float AlphaMap = SAMPLE_TEXTURE2D(_AlphaMap, sampler_LinearRepeat, BaseMapUV).r;
     #endif
     float DistanceToCamera = distance(_WorldSpaceCameraPos.xyz, PositionWS);
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
         float DistanceFactor = saturate(DistanceToCamera / 150.0f);
     #else
         float DistanceFactor = saturate((DistanceToCamera - 20.0f) / 200.0f);
@@ -196,7 +204,7 @@ float BurtEvaluateMaterialPassOpacity(float Alpha, float2 BaseMapUV, float3 Posi
 float3 BurtApplyFoliageMaterialNormalWS(float3 NormalWS, float3 PositionWS, float4 VertexColor)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
-    #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+    #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
         float CameraDistance = distance(_WorldSpaceCameraPos.xyz, PositionWS);
         float FadeDistance = 250.0f;
         float FadeDis = saturate((FadeDistance - CameraDistance) / (0.15f * FadeDistance));
@@ -262,7 +270,7 @@ BurtSurfaceData BurtApplyFoliageXRenderSurfaceSemantics(
 
 BurtSurfaceData BurtApplyGrassMaterialExtras(BurtSurfaceData SurfaceData, float3 PositionWS, float4 VertexColor)
 {
-#if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+#if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     float HeightMask = BurtGrassHeightFromVertexColor(VertexColor);
     float CameraDistance = distance(_WorldSpaceCameraPos.xyz, PositionWS);
     float NearRange = BurtMaterialSafePow(1.0f - saturate(CameraDistance / max(_HeightAOFallOff, BURT_EPSILON)), 0.7f);
@@ -274,7 +282,7 @@ BurtSurfaceData BurtApplyGrassMaterialExtras(BurtSurfaceData SurfaceData, float3
 
 BurtSurfaceData BurtApplyFoliageMaterialExtras(BurtSurfaceData SurfaceData, float3 PositionWS, float3 PositionOS, float4 VertexColor)
 {
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) && !defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) && !BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     float CameraDistance = distance(_WorldSpaceCameraPos.xyz, PositionWS);
     float FoliageScreenSpaceShadow = saturate(CameraDistance * 0.025f);
     SurfaceData.Occlusion = BurtMaterialRangeRemap(_VertexAORemap.x, _VertexAORemap.y, saturate(VertexColor.a));
@@ -283,6 +291,7 @@ BurtSurfaceData BurtApplyFoliageMaterialExtras(BurtSurfaceData SurfaceData, floa
     return SurfaceData;
 }
 
+#if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
 BurtSurfaceData BurtCreateGrassXRenderSurfaceData(float4 BaseColor, float4 MaskMap)
 {
     float4 GrassMaskMap = float4(0.0f, MaskMap.g, 0.5f, 1.0f);
@@ -303,6 +312,7 @@ BurtSurfaceData BurtCreateGrassXRenderSurfaceData(float4 BaseColor, float4 MaskM
     SurfaceData.ShadingModelID = BURT_SHADING_MODEL_FOLIAGE;
     return SurfaceData;
 }
+#endif
 
 BurtSurfaceData BurtApplyGrassXRenderSurfaceSemantics(
     BurtSurfaceData SurfaceData,
@@ -311,7 +321,7 @@ BurtSurfaceData BurtApplyGrassXRenderSurfaceSemantics(
     float3 PositionWS,
     float4 VertexColor)
 {
-#if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+#if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
     float CameraDistance = distance(_WorldSpaceCameraPos.xyz, PositionWS);
     float FadeDistance = 250.0f;
     float FadeDis = saturate((FadeDistance - CameraDistance) / (0.15f * FadeDistance));

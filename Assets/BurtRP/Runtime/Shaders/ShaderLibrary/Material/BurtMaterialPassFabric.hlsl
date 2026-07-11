@@ -3,6 +3,7 @@
 #define BURT_MATERIAL_PASS_FABRIC_INCLUDED
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC) && !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR) && !defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
+#if !defined(BURT_MATERIAL_SELECTED_FABRIC_IS_SILK)
 float2 BurtTransformFuzzMapUV(float2 UV0, float4 FuzzMapST)
 {
     return UV0 * FuzzMapST.xy + FuzzMapST.zw;
@@ -18,6 +19,7 @@ float BurtEvaluateFabricFuzzWeight(float2 UV0)
 {
     return SAMPLE_TEXTURE2D(_FuzzMask, sampler_LinearRepeat, UV0).r * _FuzzAmount;
 }
+#endif
 
 BurtSurfaceData BurtApplyFabricPassSurfaceSemantics(BurtSurfaceData SurfaceData, float4 MaskMap, float2 UV0, float NdotV)
 {

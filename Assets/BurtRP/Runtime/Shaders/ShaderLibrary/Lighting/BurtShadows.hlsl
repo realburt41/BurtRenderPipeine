@@ -8,6 +8,11 @@ Texture2D _BurtMainLightShadowMap;
 Texture2D _BurtAdditionalLightShadowAtlas;
 Texture2D _BurtPerObjectShadowAtlas;
 
+#if !defined(BURT_MAIN_LIGHT_DIRECTION_DECLARED)
+#define BURT_MAIN_LIGHT_DIRECTION_DECLARED
+float4 _BurtMainLightDirection;
+#endif
+
 #define BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES 4
 #define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT 8
 #define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES 24

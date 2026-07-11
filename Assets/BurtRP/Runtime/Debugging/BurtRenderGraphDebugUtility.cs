@@ -2606,7 +2606,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGITranslucencyVolumeHistoryMode=WorldReprojectUVZTrilinearLite");
                 builder.Append(" BurtGITemporalDiagnosticsTarget=BurtGITemporalDiagnostics");
                 builder.Append(" BurtGIScreenProbe=").Append(burtGIScreenProbeSettings.Enabled ? "Enabled" : "Disabled");
-                builder.Append(" BurtGIRadianceCacheClipMap=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapResourceContractLabel(request != null ? request.Camera : null, burtGIScreenProbeSettings));
+                builder.Append(" BurtGIRadianceCacheClipMap=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapResourceContractLabel(request != null ? request.Camera : null, burtGIScreenProbeSettings, asset));
+                builder.Append(" BurtGIScreenProbeTraceHardwareRay=").Append(burtGIScreenProbeSettings.TraceHardwareRay ? "Requested" : "VolumeOff");
+                builder.Append(" BurtGIRadianceCacheTraceHardwareRay=").Append(burtGIScreenProbeSettings.RadianceCacheTraceHardwareRay ? "Requested" : "VolumeOff");
+                builder.Append(" BurtGIRadianceCacheTracePath=").Append(BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheHardwareRayTracingStatusLabel(asset, burtGIScreenProbeSettings));
                 var burtGIRadianceCacheClipMapHistory = BurtRadianceCacheClipMapHistoryUtility.GetHistoryStatus(request, burtGIScreenProbeSettings);
                 builder.Append(" BurtGIRadianceCacheClipMapHistoryValid=").Append(burtGIRadianceCacheClipMapHistory.HasHistory);
                 builder.Append(" BurtGIRadianceCacheClipMapHistoryMatches=").Append(burtGIRadianceCacheClipMapHistory.DescriptorMatches);
@@ -2701,6 +2704,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGIScreenProbeHistorySize=").Append(burtGIScreenProbeHistory.Width).Append('x').Append(burtGIScreenProbeHistory.Height);
                 builder.Append(" BurtGIScreenProbeHistoryFrame=").Append(burtGIScreenProbeHistory.FrameIndex);
                 builder.Append(" BurtGIScreenProbeHistoryReason=").Append(burtGIScreenProbeHistory.LastInvalidationReason);
+                builder.Append(" BurtGIScreenProbeExposureCheckThreshold=").Append(burtGIScreenProbeSettings.TemporalExposureCheckThreshold.ToString("0.###"));
+                builder.Append(" BurtGIScreenProbePlayerVelocityThreshold=").Append(burtGIScreenProbeSettings.TemporalPlayerVelocityThreshold.ToString("0.###"));
+                builder.Append(" BurtGIScreenProbeHistoryNormalThreshold=").Append(burtGIScreenProbeSettings.TemporalHistoryNormalThreshold.ToString("0.###"));
                 builder.Append(" BurtGIQuality=").Append(burtGISettings.Quality);
                 builder.Append(" BurtGIResolution=").Append(burtGISettings.Resolution);
                 builder.Append(" BurtGIIntensity=").Append(FormatFloat(burtGISettings.Intensity));

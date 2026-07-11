@@ -62,11 +62,8 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
                 Varyings output;
                 float4 currentWorld = mul(unity_ObjectToWorld, float4(input.positionOS, 1.0));
                 float4 previousObjectWorld = mul(unity_MatrixPreviousM, float4(input.positionOS, 1.0));
-                float forceNoMotion = step(unity_MotionVectorsParams.y, 0.5);
-                float cameraMotion = step(unity_MotionVectorsParams.w, 0.5);
-                float allowObjectMotion = (1.0 - forceNoMotion) * (1.0 - cameraMotion);
                 float3 objectDelta = previousObjectWorld.xyz - currentWorld.xyz;
-                float objectMoved = step(1e-8, dot(objectDelta, objectDelta)) * allowObjectMotion;
+                float objectMoved = step(1e-8, dot(objectDelta, objectDelta));
                 float4 previousWorld = lerp(currentWorld, previousObjectWorld, objectMoved);
                 output.positionCS = mul(_BurtTAACurrentViewProjection, currentWorld);
                 #if defined(UNITY_REVERSED_Z)

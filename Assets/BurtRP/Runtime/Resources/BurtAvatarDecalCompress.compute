@@ -1,0 +1,205 @@
+#pragma kernel BurtAvatarDecalCompressBC3
+#pragma kernel BurtAvatarDecalCompressBC7Mode6
+
+Texture2D<float4> _BurtAvatarCompressionSource;
+RWTexture2D<uint4> _BurtAvatarCompressionTarget;
+float4 _BurtAvatarCompressionBlockSize;
+
+uint ToColor565(float3 color)
+{
+    uint r = uint(color.r * (255.0f / 8.0f));
+    uint g = uint(color.g * (255.0f / 4.0f));
+    uint b = uint(color.b * (255.0f / 8.0f));
+    return (r << 11u) | (g << 5u) | b;
+}
+
+void LoadBlock(uint2 blockCoordinate, out float4 colors[16])
+{
+    uint2 basePixel = blockCoordinate * 4u;
+    [unroll]
+    for (uint y = 0u; y < 4u; y++)
+    {
+        [unroll]
+        for (uint x = 0u; x < 4u; x++)
+        {
+            colors[y * 4u + x] = _BurtAvatarCompressionSource.Load(int3(basePixel + uint2(x, y), 0));
+        }
+    }
+}
+
+uint SelectAlphaIndex(float alpha, float minAlpha, float maxAlpha)
+{
+    float normalizedAlpha = (alpha - minAlpha) / max(maxAlpha - minAlpha, 0.001f);
+    return uint(
+        float(normalizedAlpha < 1.0f / 14.0f) * -6.0f +
+        float(normalizedAlpha < 3.0f / 14.0f) +
+        float(normalizedAlpha < 5.0f / 14.0f) +
+        float(normalizedAlpha < 7.0f / 14.0f) +
+        float(normalizedAlpha < 9.0f / 14.0f) +
+        float(normalizedAlpha < 11.0f / 14.0f) +
+        float(normalizedAlpha < 13.0f / 14.0f) * 2.0f);
+}
+
+uint4 EncodeBC3(float4 colors[16])
+{
+    float4 minimumColor = colors[0];
+    float4 maximumColor = colors[0];
+    [unroll]
+    for (uint index = 1u; index < 16u; index++)
+    {
+        minimumColor = min(minimumColor, colors[index]);
+        maximumColor = max(maximumColor, colors[index]);
+    }
+
+    float3 inset = (maximumColor.rgb - minimumColor.rgb) / 16.0f;
+    maximumColor.rgb = clamp(maximumColor.rgb - inset, 0.0f, 1.0f);
+    minimumColor.rgb = clamp(minimumColor.rgb + inset, 0.0f, 1.0f);
+
+    uint4 encoded = 0u;
+
+    // BC3 alpha: endpoints and sixteen 3-bit indices packed into the first two uints.
+    encoded.x = (uint(minimumColor.a * 255.0f) << 8u) | uint(maximumColor.a * 255.0f);
+    [unroll]
+    for (uint index = 0u; index < 5u; index++)
+    {
+        encoded.x |= SelectAlphaIndex(colors[index].a, minimumColor.a, maximumColor.a) << (index * 3u + 16u);
+    }
+    uint sixthAlphaIndex = SelectAlphaIndex(colors[5].a, minimumColor.a, maximumColor.a);
+    encoded.x |= sixthAlphaIndex << 31u;
+    encoded.y |= sixthAlphaIndex >> 1u;
+    [unroll]
+    for (uint index = 6u; index < 16u; index++)
+    {
+        encoded.y |= SelectAlphaIndex(colors[index].a, minimumColor.a, maximumColor.a) << ((index - 6u) * 3u + 2u);
+    }
+
+    // BC1-compatible RGB payload used by BC3.
+    encoded.z = (ToColor565(minimumColor.rgb) << 16u) | ToColor565(maximumColor.rgb);
+    float3 colorLine = maximumColor.rgb - minimumColor.rgb;
+    float colorLineLength = max(length(colorLine), 0.001f);
+    colorLine /= colorLineLength;
+    [unroll]
+    for (uint index = 0u; index < 16u; index++)
+    {
+        float normalizedColor = dot(colors[index].rgb - minimumColor.rgb, colorLine) / colorLineLength;
+        float3 thresholds = float3(
+            step(normalizedColor, 1.0f / 6.0f),
+            step(normalizedColor, 1.0f / 2.0f),
+            step(normalizedColor, 5.0f / 6.0f));
+        uint colorIndex = uint(dot(thresholds, float3(-2.0f, 1.0f, 2.0f)));
+        encoded.w |= colorIndex << (index * 2u);
+    }
+
+    return encoded;
+}
+
+void WriteBits(inout uint4 encoded, uint bitOffset, uint value, uint bitCount)
+{
+    [unroll]
+    for (uint bit = 0u; bit < bitCount; bit++)
+    {
+        uint targetBit = bitOffset + bit;
+        uint targetWord = targetBit >> 5u;
+        uint targetWordBit = targetBit & 31u;
+        encoded[targetWord] |= ((value >> bit) & 1u) << targetWordBit;
+    }
+}
+
+uint4 ToByteColor(float4 color)
+{
+    return uint4(saturate(color) * 255.0f + 0.5f);
+}
+
+uint4 EncodeBC7Mode6(float4 colors[16])
+{
+    float4 minimumColor = colors[0];
+    float4 maximumColor = colors[0];
+    [unroll]
+    for (uint index = 1u; index < 16u; index++)
+    {
+        minimumColor = min(minimumColor, colors[index]);
+        maximumColor = max(maximumColor, colors[index]);
+    }
+
+    uint4 lowEndpoint = ToByteColor(minimumColor);
+    uint4 highEndpoint = ToByteColor(maximumColor);
+    float4 colorLine = max(float4(highEndpoint) - float4(lowEndpoint), 0.0f);
+    float lineLengthSquared = max(dot(colorLine, colorLine), 1.0f);
+
+    uint indices[16];
+    [unroll]
+    for (uint index = 0u; index < 16u; index++)
+    {
+        float projection = dot(float4(ToByteColor(colors[index])) - float4(lowEndpoint), colorLine) / lineLengthSquared;
+        indices[index] = uint(round(saturate(projection) * 15.0f));
+    }
+
+    // BC7's first texel is a fixup index with only three stored bits.
+    if (indices[0] > 7u)
+    {
+        uint4 endpoint = lowEndpoint;
+        lowEndpoint = highEndpoint;
+        highEndpoint = endpoint;
+        [unroll]
+        for (uint index = 0u; index < 16u; index++)
+        {
+            indices[index] = 15u - indices[index];
+        }
+    }
+
+    uint4 encoded = 0u;
+    // Mode 6 prefix (bits 0..6), followed by R0/R1/G0/G1/B0/B1/A0/A1.
+    WriteBits(encoded, 0u, 0x40u, 7u);
+    uint bitOffset = 7u;
+    [unroll]
+    for (uint channel = 0u; channel < 4u; channel++)
+    {
+        WriteBits(encoded, bitOffset, lowEndpoint[channel] >> 1u, 7u);
+        bitOffset += 7u;
+        WriteBits(encoded, bitOffset, highEndpoint[channel] >> 1u, 7u);
+        bitOffset += 7u;
+    }
+    // Mode 6 has one shared p-bit per endpoint; use each endpoint's R LSB, as in XRender's packer.
+    WriteBits(encoded, bitOffset, lowEndpoint.r & 1u, 1u);
+    bitOffset += 1u;
+    WriteBits(encoded, bitOffset, highEndpoint.r & 1u, 1u);
+    bitOffset += 1u;
+
+    WriteBits(encoded, bitOffset, indices[0], 3u);
+    bitOffset += 3u;
+    [unroll]
+    for (uint index = 1u; index < 16u; index++)
+    {
+        WriteBits(encoded, bitOffset, indices[index], 4u);
+        bitOffset += 4u;
+    }
+    return encoded;
+}
+
+[numthreads(8, 8, 1)]
+void BurtAvatarDecalCompressBC3(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint2 blockCoordinate = dispatchThreadID.xy;
+    if (any(blockCoordinate >= uint2(_BurtAvatarCompressionBlockSize.xy)))
+    {
+        return;
+    }
+
+    float4 colors[16];
+    LoadBlock(blockCoordinate, colors);
+    _BurtAvatarCompressionTarget[blockCoordinate] = EncodeBC3(colors);
+}
+
+[numthreads(8, 8, 1)]
+void BurtAvatarDecalCompressBC7Mode6(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint2 blockCoordinate = dispatchThreadID.xy;
+    if (any(blockCoordinate >= uint2(_BurtAvatarCompressionBlockSize.xy)))
+    {
+        return;
+    }
+
+    float4 colors[16];
+    LoadBlock(blockCoordinate, colors);
+    _BurtAvatarCompressionTarget[blockCoordinate] = EncodeBC7Mode6(colors);
+}

@@ -802,6 +802,30 @@ namespace Burt.RenderPipeline
             return "Valid=0x" + state.ValidMask.ToString("X") + ";Update=0x" + state.UpdateMask.ToString("X") + resourceStatus;
         }
 
+        public static bool HasValidTraceResources(Camera camera)
+        {
+            if (BurtGISceneVoxelOctreeUtility.IsValid)
+            {
+                return true;
+            }
+
+            if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
+            {
+                return false;
+            }
+
+            for (var level = 1; level < ClipmapCount; ++level)
+            {
+                var resources = state.Resources[level];
+                if ((state.ValidMask & (1u << level)) != 0u && resources != null && resources.IsValid && resources.Octree.Valid)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public static void ReleaseAll()
         {
             foreach (var pair in CameraStates)

@@ -599,4 +599,32 @@ float4 FragMultipassFurBlurVelocity(BurtMultipassFurVelocityVaryings input) : SV
     return float4(velocity * valid * keepVelocity, valid, 1.0f);
 }
 
+float4 FragMultipassFurTemporalAAMotionVectors(BurtMultipassFurVelocityVaryings input) : SV_Target
+{
+    float4 baseMap = SAMPLE_TEXTURE2D(_BaseMap, sampler_LinearRepeat, BurtMultipassFurPanner(input.UV0 * _BaseMapPanner.xy, _BaseMapPanner.zw));
+    float furAtten = BurtMultipassFurAttenuation(input.LayerIndex);
+    float4 baseColor = baseMap * _BaseColor;
+    baseColor = lerp(baseColor * lerp(float4(1.0f, 1.0f, 1.0f, 1.0f), _DarkColor, baseColor.a), baseColor, furAtten);
+    float flowUVSource = _FlowTexUV2 > 0.5f ? 1.0f : 0.0f;
+    float2 flowUV = lerp(input.UV0, input.UV1, flowUVSource) * _FlowTilling.xx * 0.1f;
+    flowUV += BurtMultipassFurPanner(flowUV, _FlowPanner.xy);
+    float flowValue = SAMPLE_TEXTURE2D(_FlowTex, sampler_LinearRepeat, flowUV).r;
+    float furAlphaOffset = pow(max(furAtten * 2.0f, 0.0f), 0.8f + _FurTickness);
+    furAlphaOffset = pow(max(furAlphaOffset, 0.0f), _FurTicknessCurve);
+    float flowAlpha = input.LayerIndex == 0.0f ? 1.0f : saturate(flowValue - furAlphaOffset);
+    baseColor.a = BurtEvaluateMultipassFurDitheredAlpha(input.PositionCS, input.UV0, input.LayerIndex, flowAlpha, baseColor.a);
+    BurtApplyMultipassFurClip(baseColor.a, input.PositionCS);
+
+    float valid = step(1e-5f, input.CurrentClipNoJitter.w) * step(1e-5f, input.PreviousClipNoJitter.w);
+    float2 currentUv = BurtMultipassFurClipToUv(input.CurrentClipNoJitter);
+    float2 previousUv = BurtMultipassFurClipToUv(input.PreviousClipNoJitter);
+    valid *= step(0.0f, currentUv.x) * step(currentUv.x, 1.0f) * step(0.0f, currentUv.y) * step(currentUv.y, 1.0f);
+    valid *= step(0.0f, previousUv.x) * step(previousUv.x, 1.0f) * step(0.0f, previousUv.y) * step(previousUv.y, 1.0f);
+
+    float2 velocity = currentUv - previousUv;
+    float2 velocityPixels = abs(velocity * _BurtFurBlurScreenSize.xy);
+    clip(max(velocityPixels.x, velocityPixels.y) - 0.02f);
+    return float4(velocity * valid, 1.0f, 1.0f);
+}
+
 #endif // BURT_MULTIPASS_FUR_PASS_INCLUDED
