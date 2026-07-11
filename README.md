@@ -233,7 +233,7 @@
         - Cloud
             - [ ] Cloud Skybox
             - [ ] Light Function
-        - [ ] Interior Mapping
+        - [x] Interior Mapping
     - Fur
         - [ ] Fur Shading
         - [x] Fur Blur
@@ -243,6 +243,7 @@
     - Anti-Aliasing
         - [ ] TAA
         - [ ] SMAA
+        - [ ] FXAA
     - Exposure
         - [x] Mannual Exposure
         - [ ] Physical Light Units

@@ -2621,6 +2621,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGISceneVoxelHistoryFrame=").Append(burtGISceneVoxelHistory.FrameIndex);
                 builder.Append(" BurtGISceneVoxelHistoryReason=").Append(burtGISceneVoxelHistory.LastInvalidationReason);
                 builder.Append(" BurtGISceneVoxelHistoryMode=RestoreThenVisibleProbeOverlay");
+                builder.Append(" BurtGISceneVoxelOctree=").Append(BurtGISceneVoxelOctreeUtility.DebugStatus);
+                builder.Append(" BurtGISceneVoxelClipmaps=").Append(BurtGISceneVoxelClipmapStateUtility.GetDebugStatus(request != null ? request.Camera : null));
+                builder.Append(" BurtGIXGILightGrid=").Append(BurtGIXGILightGridUtility.GetDebugStatus(request != null ? request.Camera : null));
                 var burtGISceneVoxelVolumeActive = BurtGISceneVoxelVolume.TryGetBestForCamera(request != null ? request.Camera : null, out var burtGISceneVoxelVolume);
                 builder.Append(" BurtGISceneVoxelVolumeActive=").Append(burtGISceneVoxelVolumeActive);
                 if (burtGISceneVoxelVolumeActive)
@@ -2632,6 +2635,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGISceneVoxelTerrainTriangleCount=").Append(BurtGISceneVoxelMeshRasterizerUtility.LastCollectedTerrainTriangleCount);
                 builder.Append(" BurtGISceneVoxelTexturedTriangleCount=").Append(BurtGISceneVoxelMeshRasterizerUtility.LastCollectedTexturedTriangleCount);
                 builder.Append(" BurtGISceneVoxelAlphaClippedTriangleCount=").Append(BurtGISceneVoxelMeshRasterizerUtility.LastAlphaClippedTriangleCount);
+                builder.Append(" BurtGIVoxelLightTriangleCount=").Append(BurtGISceneVoxelMeshRasterizerUtility.LastCollectedVoxelLightTriangleCount);
                 builder.Append(" BurtGISceneVoxelCandidateRendererCount=").Append(BurtGISceneVoxelMeshRasterizerUtility.LastCandidateRendererCount);
                 builder.Append(" BurtGISceneVoxelCandidateTerrainCount=").Append(BurtGISceneVoxelMeshRasterizerUtility.LastCandidateTerrainCount);
                 builder.Append(" BurtGISceneVoxelMeshUpdateInterval=").Append(BurtGISceneVoxelMeshRasterizerUtility.UpdateInterval);

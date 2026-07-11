@@ -141,13 +141,12 @@ float3 BurtInteriorMappingRayMarchInteriorObjects(float2 UV, float3 ViewDirTS, f
 
 BurtSurfaceData BurtCreateInteriorMappingSurfaceData(float4 BaseColor, float4 MaskMap)
 {
-    BurtSurfaceData SurfaceData = BurtCreateSurfaceData(BaseColor, _Reflectance, 1.0f, 1.0f, MaskMap, 1.0f);
-    float Roughness = saturate(MaskMap.a * _Roughness);
-    SurfaceData.Metallic = 1.0f;
-    SurfaceData.Smoothness = saturate(1.0f - Roughness);
-    SurfaceData.Occlusion = saturate(lerp(1.0f, MaskMap.g, saturate(_Occlusion)));
-    SurfaceData.Reflectance = saturate(_Reflectance);
-    SurfaceData.Height = saturate(MaskMap.b);
+    BurtSurfaceData SurfaceData = BurtCreateSurfaceData(float4(0.0f, 0.0f, 0.0f, BaseColor.a), 0.0f, 0.0f, 0.0f);
+    SurfaceData.Metallic = 0.0f;
+    SurfaceData.Smoothness = 0.0f;
+    SurfaceData.Occlusion = 1.0f;
+    SurfaceData.Reflectance = 0.0f;
+    SurfaceData.Height = 0.5f;
     SurfaceData.ShadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
     return SurfaceData;
 }

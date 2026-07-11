@@ -11,6 +11,40 @@ Texture2D<float4> _BurtGIScreenProbeConfidenceTexture;
 Texture3D<float4> _BurtGISceneVoxelGeometryReadTexture;
 Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
 Texture3D<float4> _BurtGISceneVoxelLightingReadTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeRootHighTexture;
+float _BurtGISceneVoxelOctreeValid;
+Texture3D<float4> _BurtGISceneVoxelClipmap1GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap1OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap1LightingReadTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeRootHighTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2LightingReadTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeRootHighTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3LightingReadTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeRootHighTexture;
 Texture3D<float4> _BurtGITranslucencyVolumeHistory0;
 Texture3D<float4> _BurtGITranslucencyVolumeHistory1;
 Texture3D<float4> _BurtGITranslucencyVolumeRead0;
@@ -29,8 +63,13 @@ float4 _BurtGITranslucencyVolumeGridZParams; // x=log scale, y=log bias, z=slice
 float4 _BurtDeferredCameraWorldPosition;
 float4 _BurtGIRadianceCacheClipMapClipmapCenterExtent[BURT_GI_CLIPMAP_COUNT];
 float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelTraceControls;
+float4 _BurtGISceneVoxelClipmapCenterExtent[4];
+uint _BurtGISceneVoxelClipmapValidMask;
 float4x4 _BurtDeferredInverseViewProjectionMatrix;
 float4x4 _BurtGIPreviousViewProjectionMatrix;
+
+#include "BurtGISceneVoxelOctree.hlsl"
 
 float BurtGITranslucencyVolumeLuminance(float3 color)
 {
@@ -95,9 +134,68 @@ float3 BurtGITranslucencyVolumeSceneVoxelWorldToUVW(float3 worldPosition)
     return (worldPosition - centerExtent.xyz) / (extent * 2.0f) + 0.5f;
 }
 
+bool BurtGITranslucencyVolumeOctreeMaskContains(uint lowMask, uint highMask, uint bitIndex)
+{
+    uint word = bitIndex < 32u ? lowMask : highMask;
+    return ((word >> (bitIndex & 31u)) & 1u) != 0u;
+}
+
+bool BurtGITranslucencyVolumeSceneVoxelOctreeMayContain(float3 samplePosition)
+{
+    if (_BurtGISceneVoxelOctreeValid <= 0.5f)
+    {
+        return true;
+    }
+
+    uint width;
+    uint height;
+    uint depth;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float3 uvw = BurtGITranslucencyVolumeSceneVoxelWorldToUVW(samplePosition);
+    if (any(uvw < 0.0f) || any(uvw > 1.0f))
+    {
+        return false;
+    }
+
+    uint3 voxelCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
+    uint3 parentCoord = voxelCoord >> 4u;
+    uint3 leafCoord = voxelCoord >> 2u;
+    uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+    if (!BurtGITranslucencyVolumeOctreeMaskContains(
+            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            rootBit))
+    {
+        return false;
+    }
+
+    uint3 parentChild = leafCoord & 3u;
+    uint parentBit = parentChild.x + parentChild.y * 4u + parentChild.z * 16u;
+    if (!BurtGITranslucencyVolumeOctreeMaskContains(
+            _BurtGISceneVoxelOctreeParentLowTexture[parentCoord],
+            _BurtGISceneVoxelOctreeParentHighTexture[parentCoord],
+            parentBit))
+    {
+        return false;
+    }
+
+    uint3 leafChild = voxelCoord & 3u;
+    uint leafBit = leafChild.x + leafChild.y * 4u + leafChild.z * 16u;
+    return BurtGITranslucencyVolumeOctreeMaskContains(
+        _BurtGISceneVoxelOctreeLeafLowTexture[leafCoord],
+        _BurtGISceneVoxelOctreeLeafHighTexture[leafCoord],
+        leafBit);
+}
+
 bool BurtGITranslucencyVolumeTrySampleSceneVoxelOccupancy(float3 samplePosition, out float occupancy)
 {
     occupancy = 0.0f;
+
+    if (!BurtGITranslucencyVolumeSceneVoxelOctreeMayContain(samplePosition))
+    {
+        return false;
+    }
 
     uint width;
     uint height;
@@ -149,6 +247,111 @@ bool BurtGITranslucencyVolumeTrySampleSceneVoxelGeometry(
     return normalFacingWeight > 0.001f;
 }
 
+bool BurtGITranslucencyVolumeTrySampleSceneVoxelClipmapHit(
+    Texture3D<float4> geometryTexture,
+    Texture3D<float4> lightingTexture,
+    float4 centerExtent,
+    float3 samplePosition,
+    float3 traceDirection,
+    out float3 radiance,
+    out float occupancy,
+    out float normalFacingWeight)
+{
+    radiance = 0.0f;
+    occupancy = 0.0f;
+    normalFacingWeight = 0.0f;
+    uint width;
+    uint height;
+    uint depth;
+    geometryTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1, 1, 1));
+    float extent = max(centerExtent.w, 0.001f);
+    float3 uvw = (samplePosition - centerExtent.xyz) / (extent * 2.0f) + 0.5f;
+    if (any(uvw < 0.0f) || any(uvw > 1.0f))
+    {
+        return false;
+    }
+
+    uint3 coord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1);
+    float4 geometry = geometryTexture.Load(int4((int3)coord, 0));
+    float4 lighting = lightingTexture.Load(int4((int3)coord, 0));
+    occupancy = saturate(geometry.a);
+    radiance = max(lighting.rgb, 0.0f);
+    if (occupancy <= 0.001f || lighting.a <= 0.001f || dot(radiance, radiance) <= 0.0f)
+    {
+        return false;
+    }
+
+    float3 normalWS = normalize(geometry.xyz * 2.0f - 1.0f);
+    normalFacingWeight = saturate(dot(normalWS, -normalize(traceDirection)) * 0.65f + 0.35f);
+    return normalFacingWeight > 0.001f;
+}
+
+bool BurtGITranslucencyVolumeTrySampleSceneVoxelClipmapHitByLevel(
+    uint clipmapLevel,
+    float3 samplePosition,
+    float3 traceDirection,
+    out float3 radiance,
+    out float occupancy,
+    out float normalFacingWeight)
+{
+    if (clipmapLevel == 1u)
+    {
+        return BurtGITranslucencyVolumeTrySampleSceneVoxelClipmapHit(
+            _BurtGISceneVoxelClipmap1GeometryReadTexture,
+            _BurtGISceneVoxelClipmap1LightingReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[1],
+            samplePosition,
+            traceDirection,
+            radiance,
+            occupancy,
+            normalFacingWeight);
+    }
+
+    if (clipmapLevel == 2u)
+    {
+        return BurtGITranslucencyVolumeTrySampleSceneVoxelClipmapHit(
+            _BurtGISceneVoxelClipmap2GeometryReadTexture,
+            _BurtGISceneVoxelClipmap2LightingReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[2],
+            samplePosition,
+            traceDirection,
+            radiance,
+            occupancy,
+            normalFacingWeight);
+    }
+
+    if (clipmapLevel == 3u)
+    {
+        return BurtGITranslucencyVolumeTrySampleSceneVoxelClipmapHit(
+            _BurtGISceneVoxelClipmap3GeometryReadTexture,
+            _BurtGISceneVoxelClipmap3LightingReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[3],
+            samplePosition,
+            traceDirection,
+            radiance,
+            occupancy,
+            normalFacingWeight);
+    }
+
+    if (!BurtGITranslucencyVolumeTrySampleSceneVoxelGeometry(samplePosition, traceDirection, occupancy, normalFacingWeight))
+    {
+        radiance = 0.0f;
+        return false;
+    }
+
+    uint width;
+    uint height;
+    uint depth;
+    _BurtGISceneVoxelLightingReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1, 1, 1));
+    float3 uvw = BurtGITranslucencyVolumeSceneVoxelWorldToUVW(samplePosition);
+    uint3 coord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1);
+    float4 lighting = _BurtGISceneVoxelLightingReadTexture.Load(int4((int3)coord, 0));
+    radiance = max(lighting.rgb, 0.0f);
+    return lighting.a > 0.001f && dot(radiance, radiance) > 0.0f;
+}
+
 bool BurtGITranslucencyVolumeTraceSceneVoxelLite(
     float3 worldPosition,
     float3 traceDirection,
@@ -168,10 +371,48 @@ bool BurtGITranslucencyVolumeTraceSceneVoxelLite(
     float maxTraceDistance = lerp(voxelSizeWS * 2.0f, voxelSizeWS * 8.0f, saturate(z01));
     float3 direction = normalize(traceDirection);
 
-    [loop]
-    for (uint stepIndex = 0u; stepIndex < 8u; ++stepIndex)
+    if (_BurtGISceneVoxelOctreeValid > 0.5f || (_BurtGISceneVoxelClipmapValidMask & 14u) != 0u)
     {
-        float stepT = ((float)stepIndex + 0.5f) / 8.0f;
+        float startDistance = voxelSizeWS * 0.5f;
+        float octreeHitDistance;
+        uint octreeClipmapLevel;
+        if (!BurtGIVoxelOctreeRayTraceClipmaps(
+                worldPosition + direction * startDistance,
+                direction,
+                max(maxTraceDistance - startDistance, 0.0f),
+                octreeHitDistance,
+                octreeClipmapLevel))
+        {
+            return false;
+        }
+
+        float3 hitPosition = worldPosition + direction * (startDistance + octreeHitDistance);
+        float occupancy;
+        float normalFacingWeight;
+        if (!BurtGITranslucencyVolumeTrySampleSceneVoxelClipmapHitByLevel(
+                octreeClipmapLevel,
+                hitPosition,
+                direction,
+                voxelRadiance,
+                occupancy,
+                normalFacingWeight))
+        {
+            return false;
+        }
+
+        voxelConfidence = saturate(occupancy * normalFacingWeight);
+        return voxelConfidence > 0.001f && dot(voxelRadiance, voxelRadiance) > 0.0f;
+    }
+
+    uint maxTraceSteps = min((uint)max(_BurtGISceneVoxelTraceControls.x, 1.0), 64u);
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < maxTraceSteps; ++stepIndex)
+    {
+        float stepT = ((float)stepIndex + 0.5f) * max(_BurtGISceneVoxelTraceControls.y, 0.1f) / max((float)maxTraceSteps, 1.0f);
+        if (stepT >= 1.0f)
+        {
+            break;
+        }
         float sampleDistance = lerp(voxelSizeWS * 0.5f, maxTraceDistance, stepT);
         float3 samplePosition = worldPosition + direction * sampleDistance;
 
@@ -432,7 +673,7 @@ void FilterTranslucencyVolumeSpatialCS(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    int sampleCount = (int)clamp(_BurtGITranslucencyVolumeSpatialFilterParams.x, 1.0f, 2.0f);
+    int sampleCount = (int)clamp(_BurtGITranslucencyVolumeSpatialFilterParams.x, 1.0f, 3.0f);
     float sigma = max(_BurtGITranslucencyVolumeSpatialFilterParams.y, 0.01f);
     float4 sum0 = center0;
     float4 sum1 = center1;

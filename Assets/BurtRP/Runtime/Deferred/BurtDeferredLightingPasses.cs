@@ -169,7 +169,22 @@ namespace Burt.RenderPipeline
 
     internal abstract class BurtDeferredLightingPass : BurtRenderPass
     {
+        private enum DeferredLightingDebugCategory
+        {
+            None,
+            Lighting,
+            Brdf,
+            Shadow,
+            Transmission,
+            Full
+        }
+
         private const string DeferredLightingShaderName = "Hidden/BurtRP/DeferredLighting";
+        private const string DeferredLightingDebugShaderName = "Hidden/BurtRP/DeferredLightingDebug";
+        private const string DeferredLightingDebugLightingKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING";
+        private const string DeferredLightingDebugBrdfKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF";
+        private const string DeferredLightingDebugShadowKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW";
+        private const string DeferredLightingDebugTransmissionKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION";
 
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -207,7 +222,9 @@ namespace Burt.RenderPipeline
         private readonly int shaderPassIndex;
         private readonly bool readsExistingCameraColor;
         private Material deferredLightingMaterial;
+        private Material deferredLightingDebugMaterial;
         private bool hasLoggedMissingShader;
+        private bool hasLoggedMissingDebugShader;
         private bool hasLoggedMissingShaderPass;
 
         protected BurtDeferredLightingPass(string passName, int shaderPassIndex, bool readsExistingCameraColor)
@@ -521,9 +538,10 @@ namespace Burt.RenderPipeline
             var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context != null ? context.Request : null, context != null ? context.Asset : null);
             var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationTranslucencyVolumeDescriptor(camera, settings);
             var nearPlane = camera != null ? Mathf.Max(camera.nearClipPlane, 0.01f) : 0.1f;
-            var farPlane = camera != null ? Mathf.Max(camera.farClipPlane, nearPlane + 1f) : 1000f;
+            var cameraFarPlane = camera != null ? Mathf.Max(camera.farClipPlane, nearPlane + 1f) : 1000f;
+            var farPlane = Mathf.Min(cameraFarPlane, nearPlane + settings.TranslucencyVolumeEndDistanceFromCamera);
             cmd.SetGlobalVector(BurtGITranslucencyVolumeGridSizeId, new Vector4(descriptor.width, descriptor.height, descriptor.volumeDepth, 0.65f));
-            cmd.SetGlobalVector(BurtGITranslucencyVolumeGridZParamsId, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveTranslucencyVolumeGridZParams());
+            cmd.SetGlobalVector(BurtGITranslucencyVolumeGridZParamsId, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveTranslucencyVolumeGridZParams(settings));
             cmd.SetGlobalVector(BurtGITranslucencyVolumeParams0Id, new Vector4(nearPlane, farPlane, 0.75f, 0.65f));
         }
 
@@ -820,30 +838,188 @@ namespace Burt.RenderPipeline
 
         private Material GetDeferredLightingMaterial()
         {
-            if (deferredLightingMaterial != null)
+            if (ShouldUseDeferredLightingDebugShader())
             {
-                BurtShadingModelIds.ApplyDeferredLightingStencilProperties(deferredLightingMaterial);
-                return deferredLightingMaterial;
+                var debugMaterial = GetDeferredLightingMaterial(
+                    DeferredLightingDebugShaderName,
+                    ref deferredLightingDebugMaterial,
+                    ref hasLoggedMissingDebugShader);
+                ApplyDeferredLightingDebugCategoryKeywords(debugMaterial, BurtShadingDebugSettings.Mode);
+                return debugMaterial;
             }
 
-            var shader = Shader.Find(DeferredLightingShaderName);
+            return GetDeferredLightingMaterial(
+                DeferredLightingShaderName,
+                ref deferredLightingMaterial,
+                ref hasLoggedMissingShader);
+        }
+
+        private static bool ShouldUseDeferredLightingDebugShader()
+        {
+            if (!BurtShadingDebugSettings.IsDebugging)
+            {
+                return false;
+            }
+
+            if (BurtGBufferDebugViewUtility.ResolveGBufferDebugViewMode(BurtShadingDebugSettings.Mode) != BurtGBufferDebugViewMode.Disabled)
+            {
+                return false;
+            }
+
+            return ResolveDeferredLightingDebugCategory(BurtShadingDebugSettings.Mode) != DeferredLightingDebugCategory.None;
+        }
+
+        private static void ApplyDeferredLightingDebugCategoryKeywords(Material material, BurtShadingDebugMode mode)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            material.DisableKeyword(DeferredLightingDebugLightingKeyword);
+            material.DisableKeyword(DeferredLightingDebugBrdfKeyword);
+            material.DisableKeyword(DeferredLightingDebugShadowKeyword);
+            material.DisableKeyword(DeferredLightingDebugTransmissionKeyword);
+
+            switch (ResolveDeferredLightingDebugCategory(mode))
+            {
+                case DeferredLightingDebugCategory.Lighting:
+                    material.EnableKeyword(DeferredLightingDebugLightingKeyword);
+                    break;
+                case DeferredLightingDebugCategory.Brdf:
+                    material.EnableKeyword(DeferredLightingDebugBrdfKeyword);
+                    break;
+                case DeferredLightingDebugCategory.Shadow:
+                    material.EnableKeyword(DeferredLightingDebugShadowKeyword);
+                    break;
+                case DeferredLightingDebugCategory.Transmission:
+                    material.EnableKeyword(DeferredLightingDebugTransmissionKeyword);
+                    break;
+            }
+        }
+
+        private static DeferredLightingDebugCategory ResolveDeferredLightingDebugCategory(BurtShadingDebugMode mode)
+        {
+            switch (mode)
+            {
+                case BurtShadingDebugMode.Height:
+                case BurtShadingDebugMode.SpecularAARoughness:
+                case BurtShadingDebugMode.SpecularEnergyCompensation:
+                case BurtShadingDebugMode.SpecularOcclusion:
+                case BurtShadingDebugMode.EnergyPreservation:
+                case BurtShadingDebugMode.IndirectSpecularEnergyCompensation:
+                case BurtShadingDebugMode.DirectBRDFD:
+                case BurtShadingDebugMode.DirectBRDFVisibility:
+                case BurtShadingDebugMode.DirectBRDFFresnel:
+                case BurtShadingDebugMode.DirectDiffuseLobe:
+                case BurtShadingDebugMode.DirectDiffuseBRDF:
+                case BurtShadingDebugMode.DirectSpecularBRDF:
+                case BurtShadingDebugMode.SpecularAANormalVariance:
+                case BurtShadingDebugMode.SpecularAARoughnessDelta:
+                case BurtShadingDebugMode.IndirectSpecularDFG:
+                case BurtShadingDebugMode.IndirectSpecularEnvBRDF:
+                    return DeferredLightingDebugCategory.Brdf;
+
+                case BurtShadingDebugMode.SubsurfaceProfileId:
+                case BurtShadingDebugMode.SubsurfaceTransmission:
+                case BurtShadingDebugMode.SubsurfaceKernelWeight:
+                case BurtShadingDebugMode.SubsurfaceIndirect:
+                case BurtShadingDebugMode.SubsurfaceDirectTransmission:
+                case BurtShadingDebugMode.SubsurfaceTransmissionBRDF:
+                case BurtShadingDebugMode.SubsurfaceTransmissionShadow:
+                case BurtShadingDebugMode.SubsurfaceTransmissionPhase:
+                case BurtShadingDebugMode.SubsurfaceTransmissionThickness:
+                case BurtShadingDebugMode.FoliageTransmission:
+                case BurtShadingDebugMode.FoliageDirectTransmission:
+                case BurtShadingDebugMode.FoliageTransmissionBRDF:
+                case BurtShadingDebugMode.FoliageTransmissionShadow:
+                case BurtShadingDebugMode.FoliageSpecularBRDF:
+                case BurtShadingDebugMode.GrassTransmission:
+                case BurtShadingDebugMode.GrassDirectTransmission:
+                case BurtShadingDebugMode.GrassTransmissionBRDF:
+                case BurtShadingDebugMode.GrassTransmissionShadow:
+                case BurtShadingDebugMode.GrassSpecularBRDF:
+                case BurtShadingDebugMode.HairPrimaryLobe:
+                case BurtShadingDebugMode.HairSecondaryLobe:
+                case BurtShadingDebugMode.HairTransmissionLobe:
+                case BurtShadingDebugMode.HairScatter:
+                    return DeferredLightingDebugCategory.Transmission;
+
+                case BurtShadingDebugMode.ShadowAttenuation:
+                case BurtShadingDebugMode.ShadowCascadeIndex:
+                case BurtShadingDebugMode.ShadowCascadeBlend:
+                case BurtShadingDebugMode.ShadowDistanceFade:
+                case BurtShadingDebugMode.ShadowPCSSRadius:
+                case BurtShadingDebugMode.ShadowReceiverDepthDelta:
+                case BurtShadingDebugMode.ShadowPCSSBlockerFraction:
+                case BurtShadingDebugMode.AdditionalShadowAttenuation:
+                case BurtShadingDebugMode.AdditionalShadowFace:
+                case BurtShadingDebugMode.AdditionalShadowUV:
+                case BurtShadingDebugMode.AdditionalShadowDepth:
+                case BurtShadingDebugMode.AdditionalShadowDepthDelta:
+                case BurtShadingDebugMode.MainLightShadowReceiverDepth:
+                case BurtShadingDebugMode.MainLightShadowRawDepth:
+                case BurtShadingDebugMode.MainLightShadowCompare:
+                case BurtShadingDebugMode.MainLightShadowProjectionValidity:
+                case BurtShadingDebugMode.PerObjectShadowObjectIndex:
+                case BurtShadingDebugMode.PerObjectShadowSlice:
+                case BurtShadingDebugMode.PerObjectShadowUV:
+                case BurtShadingDebugMode.PerObjectShadowDepth:
+                case BurtShadingDebugMode.PerObjectShadowCompare:
+                case BurtShadingDebugMode.PerObjectShadowTransmissionDepth:
+                case BurtShadingDebugMode.PerObjectShadowTransmissionThickness:
+                    return DeferredLightingDebugCategory.Shadow;
+
+                case BurtShadingDebugMode.DetailLighting:
+                case BurtShadingDebugMode.IndirectLighting:
+                case BurtShadingDebugMode.DirectDiffuse:
+                case BurtShadingDebugMode.DirectSpecular:
+                case BurtShadingDebugMode.IndirectDiffuse:
+                case BurtShadingDebugMode.IndirectSpecular:
+                case BurtShadingDebugMode.AmbientOcclusion:
+                case BurtShadingDebugMode.Emission:
+                case BurtShadingDebugMode.FinalLighting:
+                case BurtShadingDebugMode.AdditionalLighting:
+                case BurtShadingDebugMode.AdditionalDiffuse:
+                case BurtShadingDebugMode.AdditionalSpecular:
+                case BurtShadingDebugMode.HairAdditionalLighting:
+                case BurtShadingDebugMode.AdditionalLightingUnshadowed:
+                    return DeferredLightingDebugCategory.Lighting;
+
+                default:
+                    return DeferredLightingDebugCategory.None;
+            }
+        }
+
+        private static Material GetDeferredLightingMaterial(
+            string shaderName,
+            ref Material material,
+            ref bool hasLoggedMissingShader)
+        {
+            if (material != null)
+            {
+                BurtShadingModelIds.ApplyDeferredLightingStencilProperties(material);
+                return material;
+            }
+
+            var shader = Shader.Find(shaderName);
             if (shader == null)
             {
                 if (!hasLoggedMissingShader)
                 {
-                    Debug.LogWarning("BurtRP could not find shader: " + DeferredLightingShaderName);
+                    Debug.LogWarning("BurtRP could not find shader: " + shaderName);
                     hasLoggedMissingShader = true;
                 }
 
                 return null;
             }
 
-            deferredLightingMaterial = new Material(shader)
+            material = new Material(shader)
             {
                 hideFlags = HideFlags.HideAndDontSave
             };
-            BurtShadingModelIds.ApplyDeferredLightingStencilProperties(deferredLightingMaterial);
-            return deferredLightingMaterial;
+            BurtShadingModelIds.ApplyDeferredLightingStencilProperties(material);
+            return material;
         }
 
         private bool HasRequiredShaderPass(Material material)
@@ -855,7 +1031,8 @@ namespace Burt.RenderPipeline
 
             if (!hasLoggedMissingShaderPass)
             {
-                Debug.LogWarning("BurtRP deferred lighting shader pass missing: " + DeferredLightingShaderName + " pass " + shaderPassIndex + " for " + Name);
+                var shaderName = material != null && material.shader != null ? material.shader.name : DeferredLightingShaderName;
+                Debug.LogWarning("BurtRP deferred lighting shader pass missing: " + shaderName + " pass " + shaderPassIndex + " for " + Name);
                 hasLoggedMissingShaderPass = true;
             }
 

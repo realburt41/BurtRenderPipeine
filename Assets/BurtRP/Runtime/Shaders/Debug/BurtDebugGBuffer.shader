@@ -37,7 +37,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
             {
                 Varyings output;
                 output.PositionCS = BurtGetFullScreenTriangleVertexPosition(input.VertexID);
-                output.ScreenUV = BurtGetFullScreenTriangleTexCoord(input.VertexID);
+                output.ScreenUV = BurtGetFullScreenTriangleRawCoord(input.VertexID);
                 return output;
             }
 

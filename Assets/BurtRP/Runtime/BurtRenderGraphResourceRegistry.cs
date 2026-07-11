@@ -496,11 +496,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int BurtGIRadianceCacheClipMapFinalRadianceAtlasTextureId = Shader.PropertyToID(BurtGIRadianceCacheClipMapFinalRadianceAtlasTextureShaderName);
 
+        public const string BurtGIRadianceCacheClipMapFinalIrradianceAtlasName = "BurtGIRadianceCacheClipMapFinalIrradianceAtlas";
+
+        public const string BurtGIRadianceCacheClipMapFinalIrradianceAtlasTextureShaderName = "_BurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture";
+
+        public static readonly int BurtGIRadianceCacheClipMapFinalIrradianceAtlasTextureId = Shader.PropertyToID(BurtGIRadianceCacheClipMapFinalIrradianceAtlasTextureShaderName);
+
         public const string BurtGIRadianceCacheClipMapProbeOcclusionAtlasName = "BurtGIRadianceCacheClipMapProbeOcclusionAtlas";
 
         public const string BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureShaderName = "_BurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture";
 
         public static readonly int BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureShaderName);
+
+        public const string BurtGIRadianceCacheClipMapProbeSkyAOAtlasName = "BurtGIRadianceCacheClipMapProbeSkyAOAtlas";
+
+        public const string BurtGIRadianceCacheClipMapProbeSkyAOAtlasTextureShaderName = "_BurtGIRadianceCacheClipMapProbeSkyAOAtlasTexture";
+
+        public static readonly int BurtGIRadianceCacheClipMapProbeSkyAOAtlasTextureId = Shader.PropertyToID(BurtGIRadianceCacheClipMapProbeSkyAOAtlasTextureShaderName);
 
         public const string ScreenSpaceSubsurfaceSourceName = "ScreenSpaceSubsurfaceSource";
 
@@ -2250,6 +2262,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(BurtGIRadianceCacheClipMapFinalRadianceAtlasName);
         }
 
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture()
+        {
+            return RegisterBurtGIRadianceCacheClipMapFinalIrradianceAtlas(new RenderTargetIdentifier(BurtGIRadianceCacheClipMapFinalIrradianceAtlasTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapFinalIrradianceAtlas(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRadianceCacheClipMapFinalIrradianceAtlasName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRadianceCacheClipMapFinalIrradianceAtlas()
+        {
+            return GetRenderTarget(BurtGIRadianceCacheClipMapFinalIrradianceAtlasName);
+        }
+
         public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture()
         {
             return RegisterBurtGIRadianceCacheClipMapProbeOcclusionAtlas(new RenderTargetIdentifier(BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureId));
@@ -2263,6 +2290,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetBurtGIRadianceCacheClipMapProbeOcclusionAtlas()
         {
             return GetRenderTarget(BurtGIRadianceCacheClipMapProbeOcclusionAtlasName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapProbeSkyAOAtlasTexture()
+        {
+            return RegisterBurtGIRadianceCacheClipMapProbeSkyAOAtlas(new RenderTargetIdentifier(BurtGIRadianceCacheClipMapProbeSkyAOAtlasTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheClipMapProbeSkyAOAtlas(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRadianceCacheClipMapProbeSkyAOAtlasName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRadianceCacheClipMapProbeSkyAOAtlas()
+        {
+            return GetRenderTarget(BurtGIRadianceCacheClipMapProbeSkyAOAtlasName);
         }
 
         public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceSourceTexture()

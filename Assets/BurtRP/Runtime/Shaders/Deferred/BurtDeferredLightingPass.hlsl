@@ -5,12 +5,13 @@
 #define BURT_USE_ADDITIONAL_LIGHT_BUFFER 1
 #define BURT_USE_TILED_LIGHTING 1
 
-// Enable Shading Debug only in Editor.
-#if defined(UNITY_EDITOR)
-    #define BURT_ENABLE_SHADING_DEBUG 1
-#else
-    #define BURT_ENABLE_SHADING_DEBUG 0
+// Normal deferred lighting must not compile shading-debug code. The dedicated
+// Hidden/BurtRP/DeferredLightingDebug shader defines BURT_COMPILE_SHADING_DEBUG.
+#ifndef BURT_COMPILE_SHADING_DEBUG
+#define BURT_COMPILE_SHADING_DEBUG 0
 #endif
+
+#define BURT_ENABLE_SHADING_DEBUG BURT_COMPILE_SHADING_DEBUG
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
@@ -19,11 +20,6 @@
 #define BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS 1
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
-
-// Include debug shader only in Editor.
-#if BURT_ENABLE_SHADING_DEBUG
-    #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
-#endif
 
 Texture2D<float> _BurtScreenSpaceAmbientOcclusionTexture;
 Texture2D<float> _BurtScreenSpaceShadowTexture;
@@ -335,57 +331,7 @@ BurtPBRShadingComponents BurtEvaluateDeferredLightingShadingModelComponents(
 }
 
 #if BURT_ENABLE_SHADING_DEBUG
-float BurtGetDeferredLightingDebugMaterialChannel(BurtGBufferData GBufferData)
-{
-#if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
-    return BurtGetHairScatter(GBufferData);
-#elif defined(BURT_DEFERRED_SHADING_MODEL_FUR)
-    return 0.0f;
-#elif defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
-    return 1.0f;
-#else
-    return saturate(GBufferData.Metallic);
-#endif
-}
-
-void BurtApplyDeferredLightingDebugBaseline(
-    BurtGBufferData ShadingGBufferData,
-    BurtLight MainLight,
-    float3 ViewDirectionWS,
-    float3 PositionWS,
-    float3 ShadowPositionWS,
-    float2 ScreenUV,
-    inout BurtPBRShadingComponents DebugComponents)
-{
-#if defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
-    ShadingGBufferData.ShadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
-
-    BurtPBRShadingCoreData DebugCoreData = BurtPreparePBRShadingCoreData(ShadingGBufferData, ViewDirectionWS);
-    BurtDirectPBRComponents MainDirectComponents = BurtEvaluatePBRDirectFromCore(DebugCoreData, MainLight);
-    BurtDirectPBRComponents AdditionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(DebugCoreData, PositionWS, ShadowPositionWS, ScreenUV);
-    BurtDirectPBRComponents DirectComponents = BurtAddPBRDirectComponents(MainDirectComponents, AdditionalDirectComponents);
-    BurtIndirectPBRComponents IndirectComponents = BurtEvaluatePBRIndirectFromCore(DebugCoreData);
-    DebugComponents = BurtComposePBRShadingComponentsWithAdditional(DebugCoreData, DirectComponents, IndirectComponents, AdditionalDirectComponents);
-#endif
-}
-
-float3 BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(
-    BurtGBufferData GBufferData,
-    float3 ViewDirectionWS,
-    float3 PositionWS,
-    float2 ScreenUV)
-{
-#if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
-    GBufferData = BurtResolveHairDeferredGeometryData(GBufferData, ViewDirectionWS, PositionWS);
-    BurtPBRGeometryData HairGeometryData = BurtPrepareHairGeometryData(GBufferData, ViewDirectionWS);
-    BurtHairDirectComponents HairAdditional = BurtEvaluateHairAdditionalDirectLightingUnshadowedComponents(GBufferData, HairGeometryData, PositionWS, ScreenUV);
-    return HairAdditional.Diffuse + HairAdditional.Specular;
-#else
-    BurtPBRShadingCoreData CoreData = BurtPreparePBRShadingCoreData(GBufferData, ViewDirectionWS);
-    BurtDirectPBRComponents Additional = BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(CoreData, PositionWS, ScreenUV);
-    return Additional.Diffuse + Additional.Specular;
-#endif
-}
+#include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingDebug.hlsl"
 #endif
 
 float4 Frag(Varyings input) : SV_Target
@@ -428,10 +374,7 @@ float4 Frag(Varyings input) : SV_Target
     ShadingGBufferData.Occlusion = min(saturate(ShadingGBufferData.Occlusion), ScreenSpaceAmbientOcclusion);
 
 #if BURT_ENABLE_SHADING_DEBUG
-    if (BurtIsShadingDebugEnabled() && BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING))
-    {
-        ShadingGBufferData.BaseColor = float3(0.18f, 0.18f, 0.18f);
-    }
+    BurtApplyDeferredLightingDetailDebugOverride(ShadingGBufferData);
 #endif
 
     BurtPBRShadingComponents PBRComponents = BurtEvaluateDeferredLightingShadingModelComponents(
@@ -448,198 +391,20 @@ float4 Frag(Varyings input) : SV_Target
     float OutputAlpha = BurtEvaluateDeferredOutputAlpha(PBRComponents);
 
 #if BURT_ENABLE_SHADING_DEBUG
-    if (!BurtIsShadingDebugEnabled())
-    {
-        return float4(FinalPreExposedColor, OutputAlpha);
-    }
-
-    BurtSurfaceData DebugSurfaceData = BurtCreateSurfaceData(float4(GBufferData.BaseColor, 1.0f));
-    DebugSurfaceData.BaseColor = float4(GBufferData.BaseColor, 1.0f);
-    DebugSurfaceData.Alpha = 1.0f;
-    DebugSurfaceData.Reflectance = GBufferData.Reflectance;
-    DebugSurfaceData.Smoothness = GBufferData.Smoothness;
-    DebugSurfaceData.Metallic = BurtGetDeferredLightingDebugMaterialChannel(GBufferData);
-    DebugSurfaceData.Anisotropy = GBufferData.Anisotropy;
-    DebugSurfaceData.Height = 0.5f;
-#if BURT_ENABLE_CLEAR_COAT_SHADING
-    DebugSurfaceData.ClearCoatMask = BurtGetClearCoatMask(GBufferData);
-    DebugSurfaceData.ClearCoatRoughness = BurtGetClearCoatRoughness(GBufferData);
-#else
-    DebugSurfaceData.ClearCoatMask = 0.0f;
-    DebugSurfaceData.ClearCoatRoughness = 0.2f;
-#endif
-#if BURT_ENABLE_SUBSURFACE_SHADING
-    DebugSurfaceData.SubsurfaceThickness = BurtGetSubsurfaceThickness(GBufferData);
-    DebugSurfaceData.SubsurfacePower = BurtGetSubsurfacePower(GBufferData);
-    DebugSurfaceData.SubsurfaceDistortion = BurtGetSubsurfaceDistortion(GBufferData);
-    DebugSurfaceData.SubsurfaceAmbient = BurtGetSubsurfaceAmbient(GBufferData);
-    DebugSurfaceData.SubsurfaceScatteringMode = BurtGetSubsurfaceScatteringMode(GBufferData);
-    DebugSurfaceData.Subsurface3SCurvature = saturate(GBufferData.Subsurface3SCurvature);
-    DebugSurfaceData.SubsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(GBufferData);
-#else
-    DebugSurfaceData.SubsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
-    DebugSurfaceData.SubsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
-    DebugSurfaceData.SubsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
-    DebugSurfaceData.SubsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
-    DebugSurfaceData.SubsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
-    DebugSurfaceData.Subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
-    DebugSurfaceData.SubsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
-#endif
-#if BURT_ENABLE_FABRIC_SHADING
-    DebugSurfaceData.FabricIsSilk = BurtGetFabricIsSilk(GBufferData);
-    DebugSurfaceData.FabricFuzzWeight = BurtGetFabricFuzzWeight(GBufferData);
-    DebugSurfaceData.FabricFuzzRoughness = BurtGetFabricFuzzRoughness(GBufferData);
-    DebugSurfaceData.FabricFuzzColor = BurtGetFabricFuzzColor(GBufferData);
-#else
-    DebugSurfaceData.FabricIsSilk = 0.0f;
-    DebugSurfaceData.FabricFuzzWeight = 0.0f;
-    DebugSurfaceData.FabricFuzzRoughness = 0.75f;
-    DebugSurfaceData.FabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
-#endif
-    DebugSurfaceData.Occlusion = GBufferData.Occlusion;
-    DebugSurfaceData.ShadingModelID = GBufferData.ShadingModelID;
-
-    BurtPBRMaterialData DebugGBufferMaterialData = BurtPreparePBRMaterialData(GBufferData);
-    BurtPBRShadingComponents DebugLightingComponents = PBRComponents;
-    BurtApplyDeferredLightingDebugBaseline(
+    return BurtEvaluateDeferredLightingDebugOutput(
+        GBufferData,
         ShadingGBufferData,
         MainLight,
+        PBRComponents,
+        FinalColor,
+        FinalPreExposedColor,
+        OutputAlpha,
         ViewDirectionWS,
         PositionWS,
         ShadowPositionWS,
-        ScreenUV,
-        DebugLightingComponents);
-
-    float3 DeferredAONormalWS = BurtGetDeferredSurfaceNormalWS(GBufferData);
-    BurtShadingDebugData DebugData = BurtCreateDefaultShadingDebugData(DeferredAONormalWS);
-    DebugData.NormalWS = DeferredAONormalWS;
-    DebugData.DetailLightingColor = DebugLightingComponents.Lighting;
-    DebugData.DirectDiffuseColor = DebugLightingComponents.DirectDiffuse;
-    DebugData.DirectSpecularColor = DebugLightingComponents.DirectSpecular;
-    DebugData.AdditionalDiffuseColor = DebugLightingComponents.AdditionalDiffuse;
-    DebugData.AdditionalSpecularColor = DebugLightingComponents.AdditionalSpecular;
-    DebugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
-        ? BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(ShadingGBufferData, ViewDirectionWS, PositionWS, ScreenUV)
-        : float3(0.0f, 0.0f, 0.0f);
-    DebugData.IndirectDiffuseColor = DebugLightingComponents.IndirectDiffuse;
-    DebugData.IndirectSpecularColor = DebugLightingComponents.IndirectSpecular;
-    DebugData.ShadowAttenuation = BurtSampleMainLightShadowWithoutPerObject(ShadowPositionWS, ShadowNormalWS);
-    DebugData.AdditionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
-        ? BurtEvaluateAdditionalShadowAttenuationDebug(ShadowPositionWS, DeferredAONormalWS, ScreenUV)
-        : 1.0f;
-
-    if (BurtNeedsAdditionalShadowProjectionShadingDebug())
-    {
-        BurtFillAdditionalLightShadowProjectionDebugData(
-            ShadowPositionWS,
-            DeferredAONormalWS,
-            ScreenUV,
-            DebugData.AdditionalShadowFaceColor,
-            DebugData.AdditionalShadowUVColor,
-            DebugData.AdditionalShadowDepthColor,
-            DebugData.AdditionalShadowDepthDeltaColor);
-    }
-
-    BurtFillMainLightShadowShadingDebugData(
-        ShadowPositionWS,
-        DebugData.NormalWS,
-        DebugData.ShadowCascadeColor,
-        DebugData.ShadowCascadeBlend,
-        DebugData.ShadowDistanceFade,
-        DebugData.ShadowPCSSRadius,
-        DebugData.ShadowReceiverDepthDelta,
-        DebugData.MainLightShadowReceiverDepth,
-        DebugData.MainLightShadowRawDepth,
-        DebugData.MainLightShadowCompare,
-        DebugData.MainLightShadowProjectionValidity,
-        DebugData.ShadowPCSSBlockerFraction);
-
-    BurtFillPerObjectShadowShadingDebugData(
-        ShadowPositionWS,
         ShadowNormalWS,
         PerObjectShadowObjectIndex,
-        DebugData.PerObjectShadowObjectIndexColor,
-        DebugData.PerObjectShadowSliceColor,
-        DebugData.PerObjectShadowUVColor,
-        DebugData.PerObjectShadowDepthColor,
-        DebugData.PerObjectShadowCompareColor,
-        DebugData.PerObjectShadowTransmissionDepthColor,
-        DebugData.PerObjectShadowTransmissionThicknessColor);
-
-    DebugData.AmbientOcclusion = ShadingGBufferData.Occlusion;
-    DebugData.EmissionColor = GBufferData.Emission;
-    DebugData.FinalLightingColor = FinalColor;
-    DebugData.Reflectance = GBufferData.Reflectance;
-    DebugData.PerceptualRoughness = DebugLightingComponents.PerceptualRoughness;
-    DebugData.SpecularAARoughness = DebugLightingComponents.SpecularAARoughness;
-    DebugData.SpecularEnergyCompensation = DebugLightingComponents.SpecularEnergyCompensation;
-    DebugData.IndirectSpecularEnergyCompensation = DebugLightingComponents.IndirectSpecularEnergyCompensation;
-    DebugData.EnergyPreservation = DebugLightingComponents.EnergyPreservation;
-    DebugData.SpecularOcclusion = DebugLightingComponents.SpecularOcclusion;
-    DebugData.DiffuseColor = DebugLightingComponents.DiffuseColor;
-    DebugData.DirectBRDFD = DebugLightingComponents.DirectBRDFD;
-    DebugData.DirectBRDFVisibility = DebugLightingComponents.DirectBRDFVisibility;
-    DebugData.DirectBRDFFresnel = DebugLightingComponents.DirectBRDFFresnel;
-    DebugData.DirectDiffuseLobe = DebugLightingComponents.DirectDiffuseLobe;
-    DebugData.DirectDiffuseBRDF = DebugLightingComponents.DirectDiffuseBRDF;
-    DebugData.DirectSpecularBRDF = DebugLightingComponents.DirectSpecularBRDF;
-    DebugData.SpecularAANormalVariance = DebugLightingComponents.SpecularAANormalVariance;
-    DebugData.SpecularAARoughnessDelta = DebugLightingComponents.SpecularAARoughnessDelta;
-    DebugData.IndirectSpecularDFG = DebugLightingComponents.IndirectSpecularDFG;
-    DebugData.IndirectSpecularEnvBRDF = DebugLightingComponents.IndirectSpecularEnvBRDF;
-    DebugData.SubsurfaceProfileIndex = PBRComponents.SubsurfaceProfileIndex;
-    DebugData.SubsurfaceTransmission = PBRComponents.SubsurfaceTransmission;
-    DebugData.SubsurfaceDirectTransmission = PBRComponents.SubsurfaceDirectTransmission;
-    DebugData.SubsurfaceTransmissionBRDF = PBRComponents.SubsurfaceTransmissionBRDF;
-    DebugData.SubsurfaceTransmissionShadow = PBRComponents.SubsurfaceTransmissionShadow;
-    DebugData.SubsurfaceTransmissionPhase = PBRComponents.SubsurfaceTransmissionPhase;
-    DebugData.SubsurfaceTransmissionThickness = PBRComponents.SubsurfaceTransmissionThickness;
-    DebugData.SubsurfaceKernelWeight = PBRComponents.SubsurfaceKernelWeight;
-    DebugData.SubsurfaceIndirect = PBRComponents.SubsurfaceIndirect;
-    DebugData.FoliageMask = PBRComponents.FoliageMask;
-    DebugData.FoliageTransmission = PBRComponents.FoliageTransmission;
-    DebugData.FoliageDirectTransmission = PBRComponents.FoliageDirectTransmission;
-    DebugData.FoliageTransmissionBRDF = PBRComponents.FoliageTransmissionBRDF;
-    DebugData.FoliageTransmissionShadow = PBRComponents.FoliageTransmissionShadow;
-    DebugData.FoliageSpecularBRDF = PBRComponents.FoliageSpecularBRDF;
-    DebugData.HairPrimaryLobe = PBRComponents.HairPrimaryLobe;
-    DebugData.HairSecondaryLobe = PBRComponents.HairSecondaryLobe;
-    DebugData.HairTransmissionLobe = PBRComponents.HairTransmissionLobe;
-    DebugData.HairScatter = PBRComponents.HairScatter;
-    DebugData.GBufferBaseColor = GBufferData.BaseColor;
-    DebugData.GBufferNormalWS = BurtGetGBufferDirectionWS(GBufferData);
-    DebugData.GBufferMetallic = BurtGetDeferredLightingDebugMaterialChannel(GBufferData);
-#if BURT_ENABLE_CLEAR_COAT_SHADING
-    DebugData.GBufferClearCoatMask = BurtGetClearCoatMask(GBufferData);
-    DebugData.GBufferClearCoatNormalWS = BurtGetClearCoatNormalWS(GBufferData);
-    DebugData.GBufferClearCoatRoughness = BurtGetClearCoatRoughness(GBufferData);
-#else
-    DebugData.GBufferClearCoatMask = 0.0f;
-    DebugData.GBufferClearCoatNormalWS = BurtGetDeferredSurfaceNormalWS(GBufferData);
-    DebugData.GBufferClearCoatRoughness = 0.2f;
-#endif
-#if BURT_ENABLE_SUBSURFACE_SHADING
-    DebugData.GBufferSubsurfaceStrength = BurtGetSubsurfaceStrength(GBufferData);
-    DebugData.GBufferSubsurfaceThickness = BurtGetSubsurfaceThickness(GBufferData);
-    DebugData.GBufferSubsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(GBufferData);
-#else
-    DebugData.GBufferSubsurfaceStrength = 0.0f;
-    DebugData.GBufferSubsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
-    DebugData.GBufferSubsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
-#endif
-    DebugData.GBufferAnisotropy = GBufferData.Anisotropy;
-    DebugData.GBufferTangentWS = GBufferData.TangentWS;
-    DebugData.GBufferSmoothness = GBufferData.Smoothness;
-    DebugData.GBufferOcclusion = GBufferData.Occlusion;
-    DebugData.GBufferReflectance = GBufferData.Reflectance;
-    DebugData.GBufferRoughness = DebugGBufferMaterialData.PerceptualRoughness;
-    DebugData.GBufferDiffuseColor = DebugGBufferMaterialData.DiffuseColor;
-
-    float3 DebugColor;
-    if (BurtTryEvaluateMaterialShadingDebug(DebugSurfaceData, DebugData, DebugColor))
-    {
-        return float4(DebugColor, 1.0f);
-    }
+        ScreenUV);
 #endif
 
     return float4(FinalPreExposedColor, OutputAlpha);

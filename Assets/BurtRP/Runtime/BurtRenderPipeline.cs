@@ -71,6 +71,9 @@ namespace Burt.RenderPipeline
             BurtRadianceCacheHashGridHistoryUtility.ReleaseAll();
             BurtGISceneVoxelHistoryUtility.ReleaseAll();
             BurtGISceneVoxelMeshRasterizerUtility.ReleaseAll();
+            BurtGISceneVoxelOctreeUtility.Release();
+            BurtGISceneVoxelClipmapStateUtility.ReleaseAll();
+            BurtGIXGILightGridUtility.ReleaseAll();
             BurtRayTracingAccelerationStructureUtility.ReleaseAll();
             base.Dispose(disposing);
         }

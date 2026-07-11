@@ -45,6 +45,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Diffuse Color"; // 显示 metallic 扣除后的漫反射颜色。
                 case BurtShadingDebugMode.Height:
                     return "Height";
+                case BurtShadingDebugMode.PreSkinPosition:
+                    return "PreSkin Position";
                 case BurtShadingDebugMode.DirectBRDFD:
                     return "Direct BRDF D (GGX)"; // 显示 GGX NDF D 项。
                 case BurtShadingDebugMode.DirectBRDFVisibility:
@@ -307,6 +309,8 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "BurtGI Confidence";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHashGridDebug:
                     return "BurtGI HashGrid Debug";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO:
+                    return "BurtGI RadianceCache SkyAO";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
                     return "SSS Setup";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
@@ -633,6 +637,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.Metallic, // 最终金属度。
             BurtShadingDebugMode.Occlusion, // 最终 AO。
             BurtShadingDebugMode.Height, // Mask Map B height channel.
+            BurtShadingDebugMode.PreSkinPosition, // Linear [-16,16] pre-skin object-space position decoded from mesh UV3.
             BurtShadingDebugMode.Reflectance // XRender reflectance 输入。
         });
 
@@ -823,6 +828,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO,
             BurtShadingDebugMode.BloomPrefilter,
             BurtShadingDebugMode.BloomFinalBloom,
             BurtShadingDebugMode.BloomMip1,
@@ -940,6 +946,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHashGridDebug
         });
 

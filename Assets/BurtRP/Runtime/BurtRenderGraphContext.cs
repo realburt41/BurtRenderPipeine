@@ -1013,6 +1013,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle BurtGIRadianceCacheClipMapFinalIrradianceAtlasTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFinalIrradianceAtlasName);
+                }
+
+                return ResourceRegistry.GetBurtGIRadianceCacheClipMapFinalIrradianceAtlas();
+            }
+        }
+
         public BurtRenderTargetHandle BurtGIRadianceCacheClipMapProbeOcclusionAtlasTarget
         {
             get
@@ -1023,6 +1036,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetBurtGIRadianceCacheClipMapProbeOcclusionAtlas();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIRadianceCacheClipMapProbeSkyAOAtlasTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeSkyAOAtlasName);
+                }
+
+                return ResourceRegistry.GetBurtGIRadianceCacheClipMapProbeSkyAOAtlas();
             }
         }
 

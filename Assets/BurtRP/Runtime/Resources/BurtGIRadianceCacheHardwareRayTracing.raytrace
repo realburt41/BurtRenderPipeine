@@ -38,9 +38,20 @@ float4 _BurtGIHardwareRayAdditionalLightColorAndType[8];
 float4 _BurtGIHardwareRayAdditionalLightDirectionAndSpot[8];
 float4 _BurtGIHardwareRayAdditionalLightSpotParams[8];
 uint _BurtGIHardwareRayAdditionalLightCount;
+StructuredBuffer<float4> _BurtGIXGILightData;
+StructuredBuffer<uint> _BurtGIXGILightGridCount;
+StructuredBuffer<uint> _BurtGIXGILightGridList;
+float4 _BurtGIXGILightGridBoundMin[4];
+float4 _BurtGIXGILightGridBoundMax[4];
+float4 _BurtGIXGILightGridAxis[4];
+uint _BurtGIXGILightGridResolution;
+uint _BurtGIXGILightGridMaxLights;
+uint _BurtGIXGILightGridValid;
 float4 _BurtGIScreenProbeGridParams;
 float4 _BurtGIScreenProbeTraceParams;
 float4 _BurtGIScreenProbeAdaptiveParams;
+float4 _BurtGIScreenProbeSkyLeakParams;
+float4 _BurtGIScreenProbeTraceModeParams;
 
 uint2 BurtGIHardwareRayUnpackTileCoord(uint packedTraceTile)
 {
@@ -178,6 +189,98 @@ float3 BurtGIHardwareRayEvaluateAdditionalLightSample(float3 origin, float3 norm
     return max(colorAndType.rgb, 0.0) * (directWeight * attenuation * visibility * (float)lightCount);
 }
 
+uint BurtGIHardwareRayResolveXGILightGridLevel(float3 positionWS)
+{
+    [unroll]
+    for (uint level = 0u; level < 4u; ++level)
+    {
+        if (all(positionWS >= _BurtGIXGILightGridBoundMin[level].xyz) && all(positionWS <= _BurtGIXGILightGridBoundMax[level].xyz))
+        {
+            return level;
+        }
+    }
+
+    return 0u;
+}
+
+uint BurtGIHardwareRayXGILightGridCell(float3 positionWS, uint level)
+{
+    uint resolution = max(1u, _BurtGIXGILightGridResolution);
+    float3 boundMin = _BurtGIXGILightGridBoundMin[level].xyz;
+    float3 boundSize = max(_BurtGIXGILightGridBoundMax[level].xyz - boundMin, 0.0001);
+    float3 normalizedPosition = saturate((positionWS - boundMin) / boundSize);
+    uint axis = min((uint)max(_BurtGIXGILightGridAxis[level].x, 0.0), 2u);
+    uint2 coord = axis == 0u
+        ? min((uint2)floor(normalizedPosition.yz * resolution), resolution - 1u)
+        : axis == 1u
+            ? min((uint2)floor(normalizedPosition.xz * resolution), resolution - 1u)
+            : min((uint2)floor(normalizedPosition.xy * resolution), resolution - 1u);
+    return level * resolution * resolution + coord.x + coord.y * resolution;
+}
+
+float3 BurtGIHardwareRayEvaluateXGILight(float3 origin, float3 normalWS, uint lightIndex)
+{
+    uint baseIndex = lightIndex * 4u;
+    float4 positionAndRange = _BurtGIXGILightData[baseIndex];
+    float4 colorAndType = _BurtGIXGILightData[baseIndex + 1u];
+    float4 directionAndPadding = _BurtGIXGILightData[baseIndex + 2u];
+    float4 spotParams = _BurtGIXGILightData[baseIndex + 3u];
+    float lightType = colorAndType.w;
+    float3 lightDirection;
+    float maxDistance = _BurtGIHardwareRayMaxDistance;
+    float attenuation = 1.0;
+    if (lightType < 0.5)
+    {
+        lightDirection = normalize(directionAndPadding.xyz);
+    }
+    else
+    {
+        float3 toLight = positionAndRange.xyz - origin;
+        float distanceToLight = length(toLight);
+        float lightRange = max(positionAndRange.w, 0.001);
+        if (distanceToLight >= lightRange)
+        {
+            return 0.0;
+        }
+
+        lightDirection = toLight / max(distanceToLight, 0.0001);
+        maxDistance = max(0.01, distanceToLight - 0.02);
+        float rangeAttenuation = saturate(1.0 - distanceToLight / lightRange);
+        attenuation = rangeAttenuation * rangeAttenuation;
+        if (lightType > 1.5)
+        {
+            attenuation *= saturate((dot(normalize(directionAndPadding.xyz), -lightDirection) - spotParams.y) * spotParams.z);
+        }
+    }
+
+    float directWeight = saturate(dot(normalWS, lightDirection));
+    if (directWeight <= 0.0 || attenuation <= 0.0)
+    {
+        return 0.0;
+    }
+
+    return max(colorAndType.rgb, 0.0) * (directWeight * attenuation * BurtGIHardwareRayVisibility(origin, normalWS, lightDirection, maxDistance));
+}
+
+float3 BurtGIHardwareRayEvaluateXGILightGrid(float3 origin, float3 normalWS, float randomValue)
+{
+    if (_BurtGIXGILightGridValid == 0u)
+    {
+        return BurtGIHardwareRayEvaluateAdditionalLightSample(origin, normalWS, randomValue);
+    }
+
+    uint cellIndex = BurtGIHardwareRayXGILightGridCell(origin, BurtGIHardwareRayResolveXGILightGridLevel(origin));
+    uint lightCount = min(_BurtGIXGILightGridCount[cellIndex], _BurtGIXGILightGridMaxLights);
+    float3 radiance = 0.0;
+    [loop]
+    for (uint listIndex = 0u; listIndex < lightCount; ++listIndex)
+    {
+        radiance += BurtGIHardwareRayEvaluateXGILight(origin, normalWS, _BurtGIXGILightGridList[cellIndex * _BurtGIXGILightGridMaxLights + listIndex]);
+    }
+
+    return radiance;
+}
+
 float BurtGIHardwareRayHash(float3 value)
 {
     return frac(sin(dot(value, float3(12.9898, 78.233, 37.719))) * 43758.5453);
@@ -229,7 +332,7 @@ void BurtGIHardwareRayEvaluateRadiance(float3 origin, float3 direction, out floa
         float additionalLightSeed = BurtGIHardwareRayHash(hitPositionWS.yzx + normalWS * (float)(bounceIndex + 3u));
         float3 diffuseIrradiance = max(_BurtGIHardwareRayAmbientRadiance, 0.0) +
             max(_BurtGIHardwareRayMainLightColor, 0.0) * (directWeight * visibility) +
-            BurtGIHardwareRayEvaluateAdditionalLightSample(hitPositionWS, normalWS, additionalLightSeed);
+            BurtGIHardwareRayEvaluateXGILightGrid(hitPositionWS, normalWS, additionalLightSeed);
         radiance += throughput * (max(payload.Emission, 0.0) + max(payload.Albedo, 0.0) * (diffuseIrradiance * 0.31830988618));
 
         throughput *= saturate(payload.Albedo);
@@ -553,6 +656,17 @@ void BurtGIScreenProbeTraceRGS()
     float hitDistance;
     float hit;
     BurtGIHardwareRayEvaluateRadiance(sourcePositionWS + sourceNormalWS * 0.05 + directionWS * 0.05, directionWS, radiance, hitDistance, hit);
+    if (hit > 0.001f && _BurtGIScreenProbeSkyLeakParams.x > 0.0001f)
+    {
+        float skyLeakAmount = saturate(_BurtGIScreenProbeSkyLeakParams.x * hitDistance * _BurtGIScreenProbeSkyLeakParams.y);
+        radiance += max(_BurtGIHardwareRayAmbientRadiance, 0.0f) * skyLeakAmount;
+    }
+    float maxRayIntensity = max(_BurtGIScreenProbeTraceModeParams.z, 0.01f);
+    float maxTraceRadiance = max(radiance.r, max(radiance.g, radiance.b));
+    if (maxTraceRadiance > maxRayIntensity)
+    {
+        radiance *= maxRayIntensity / maxTraceRadiance;
+    }
     _BurtGIScreenProbeTraceRadianceTexture[atlasCoord] = float4(max(radiance, 0.0), saturate(hit));
     _BurtGIScreenProbeTraceHitTexture[atlasCoord] = saturate(hit);
 }

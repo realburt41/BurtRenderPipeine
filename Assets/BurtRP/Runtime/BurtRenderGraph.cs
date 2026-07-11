@@ -205,7 +205,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                         resources.RegisterBurtGIRadianceCacheClipMapDepthProbeAtlasTexture();
                         resources.RegisterBurtGIRadianceCacheClipMapRadianceProbeAtlasTexture();
                         resources.RegisterBurtGIRadianceCacheClipMapFinalRadianceAtlasTexture();
+                        resources.RegisterBurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture();
                         resources.RegisterBurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture();
+                        resources.RegisterBurtGIRadianceCacheClipMapProbeSkyAOAtlasTexture();
                         resources.RegisterBurtGITranslucencyVolume0Texture();
                         resources.RegisterBurtGITranslucencyVolume1Texture();
                         resources.RegisterBurtGITranslucencyVolumeFilter0Texture();

@@ -75,7 +75,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasPass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeSkyAOAtlasPass = new BurtAllocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeSkyAOAtlasPass();
         private readonly BurtRenderPass allocateBurtGITranslucencyVolume0Pass = new BurtAllocateBurtGITranslucencyVolume0Pass();
         private readonly BurtRenderPass allocateBurtGITranslucencyVolume1Pass = new BurtAllocateBurtGITranslucencyVolume1Pass();
         private readonly BurtRenderPass allocateBurtGITranslucencyVolumeFilter0Pass = new BurtAllocateBurtGITranslucencyVolumeFilter0Pass();
@@ -241,7 +243,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName);
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName);
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeSkyAOAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeSkyAOAtlasPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass = new BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass();
@@ -996,7 +1000,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeSkyAOAtlasPass);
                 graph.AddPass(allocateBurtGITranslucencyVolume0Pass);
                 graph.AddPass(allocateBurtGITranslucencyVolume1Pass);
                 graph.AddPass(allocateBurtGITranslucencyVolumeFilter0Pass);
@@ -1169,7 +1175,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeSkyAOAtlasPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass);
@@ -1614,7 +1622,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeSkyAOAtlasPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass);

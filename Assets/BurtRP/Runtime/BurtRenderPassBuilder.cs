@@ -1306,6 +1306,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFinalRadianceAtlasName);
         }
 
+        public BurtRenderTargetHandle ReadBurtGIRadianceCacheClipMapFinalIrradianceAtlas()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFinalIrradianceAtlasName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGIRadianceCacheClipMapFinalIrradianceAtlas()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFinalIrradianceAtlasName);
+        }
+
         public BurtRenderTargetHandle ReadBurtGIRadianceCacheClipMapProbeOcclusionAtlas()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeOcclusionAtlasName);
@@ -1314,6 +1324,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
         public BurtRenderTargetHandle WriteBurtGIRadianceCacheClipMapProbeOcclusionAtlas()
         {
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeOcclusionAtlasName);
+        }
+
+        public BurtRenderTargetHandle ReadBurtGIRadianceCacheClipMapProbeSkyAOAtlas()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeSkyAOAtlasName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGIRadianceCacheClipMapProbeSkyAOAtlas()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeSkyAOAtlasName);
         }
 
         public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceSource()

@@ -62,20 +62,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
         {
             switch (shadingDebugMode) // 逐项映射，避免 enum 数值偶然相近时误判。
             {
+                case BurtShadingDebugMode.Albedo: // 便宜的材质基础色调试直接复用 GBuffer BaseColor，避免触发重型 DeferredLightingDebug 编译。
+                case BurtShadingDebugMode.PreSkinPosition: // Subsurface PreSkin 已在 GBuffer 写入调试色，这里直接读取 BaseColor 可视化。
                 case BurtShadingDebugMode.GBufferBaseColor: // Overlay 选择 GBuffer Base Color 时。
                     return BurtGBufferDebugViewMode.BaseColor; // 显示真实 GBuffer1 解码后的 baseColor。
+                case BurtShadingDebugMode.NormalWS: // 便宜的材质法线调试直接复用 GBuffer NormalWS。
                 case BurtShadingDebugMode.GBufferNormalWS: // Overlay 选择 GBuffer Direction WS 时。
                     return BurtGBufferDebugViewMode.NormalWS; // 显示真实 GBuffer1 解码后的向量槽。
+                case BurtShadingDebugMode.Metallic: // 便宜的材质 metallic 调试直接复用 GBuffer material channel。
                 case BurtShadingDebugMode.GBufferMetallic: // Overlay 选择 GBuffer Material Channel 时。
                     return BurtGBufferDebugViewMode.Metallic; // 显示真实 GBuffer2.r 解包出的材质通道。
+                case BurtShadingDebugMode.Smoothness: // 便宜的材质 smoothness 调试直接复用 GBuffer smoothness。
                 case BurtShadingDebugMode.GBufferSmoothness: // Overlay 选择 GBuffer Smoothness 时。
                     return BurtGBufferDebugViewMode.Smoothness; // 显示真实 GBuffer1.a 的光滑度。
+                case BurtShadingDebugMode.Occlusion: // 便宜的材质 AO 调试直接复用 GBuffer occlusion。
                 case BurtShadingDebugMode.GBufferOcclusion: // Overlay 选择 GBuffer Occlusion 时。
                     return BurtGBufferDebugViewMode.Occlusion; // 显示真实 GBuffer0.a 的 AO。
+                case BurtShadingDebugMode.Reflectance: // 便宜的材质 reflectance 调试直接复用 GBuffer reflectance。
                 case BurtShadingDebugMode.GBufferReflectance: // Overlay 选择 GBuffer Reflectance 时。
                     return BurtGBufferDebugViewMode.Reflectance; // 显示真实 GBuffer2.a 的 reflectance。
+                case BurtShadingDebugMode.Roughness: // 便宜的材质 roughness 调试直接复用 GBuffer smoothness 反推。
                 case BurtShadingDebugMode.GBufferRoughness: // Overlay 选择 GBuffer Roughness 时。
                     return BurtGBufferDebugViewMode.Roughness; // 显示从真实 GBuffer smoothness 还原出的 perceptual roughness。
+                case BurtShadingDebugMode.DiffuseColor: // 便宜的 diffuseColor 调试直接复用 GBuffer 重建结果。
                 case BurtShadingDebugMode.GBufferDiffuseColor: // Overlay 选择 GBuffer Diffuse Color 时。
                     return BurtGBufferDebugViewMode.DiffuseColor; // 显示从真实 GBuffer 重建 PBRMaterialData 后的 diffuseColor。
                 case BurtShadingDebugMode.GBufferHairStrandDirection: // Overlay 选择 Hair strand direction 时。
@@ -120,6 +129,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                     return BurtGBufferDebugViewMode.ClearCoatNormalWS;
                 case BurtShadingDebugMode.GBufferClearCoatRoughness:
                     return BurtGBufferDebugViewMode.ClearCoatRoughness;
+                case BurtShadingDebugMode.GBufferAnisotropy:
+                    return BurtGBufferDebugViewMode.Anisotropy;
+                case BurtShadingDebugMode.GBufferTangentWS:
+                    return BurtGBufferDebugViewMode.TangentWS;
                 default: // 其他 Shading Debug 模式不是全屏 GBuffer 数据源。
                     return BurtGBufferDebugViewMode.Disabled; // 返回 Disabled，让 Deferred 正常渲染或交给其他 Debug Pass。
             }
@@ -142,7 +155,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
         private static readonly int GBuffer5Id = BurtRenderGraphResourceRegistry.GBuffer5Id;
         private static readonly int CameraDepthId = BurtRenderGraphResourceRegistry.CameraDepthTextureId; // 缓存 CameraDepth 全局纹理 ID，让 RawDepth 调试模式能读取当前相机深度。
         private static readonly int DebugModeId = Shader.PropertyToID("_BurtGBufferDebugMode"); // 缓存调试模式属性 ID，shader 通过它决定显示哪个 GBuffer 通道。
-        private static readonly int DebugYFlipId = Shader.PropertyToID("_BurtGBufferDebugYFlip"); // 保留 GBuffer 调试 shader 的 Y 翻转属性 ID；当前默认传 0，因为采样 UV 已在 BurtDeferred.hlsl 中按平台修正。
+        private static readonly int DebugYFlipId = Shader.PropertyToID("_BurtGBufferDebugYFlip"); // GBuffer Debug uses raw fullscreen UV and applies this single pre-flip to match the later FinalBlit display direction.
         private Material debugGBufferMaterial; // 缓存运行时 GBuffer 调试材质，避免每帧重复创建 Material。
         private bool hasLoggedMissingShader; // 记录是否已经提示过 shader 缺失，避免 Console 每帧重复刷警告。
 

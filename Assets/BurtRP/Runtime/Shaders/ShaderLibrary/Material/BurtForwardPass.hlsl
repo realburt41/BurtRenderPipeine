@@ -3,7 +3,50 @@
 #define BURT_FORWARD_PASS_INCLUDED
 
 #define BURT_FORWARD_SINGLE_SHADING_MODEL 1
+#if (defined(BURT_SHADING_DEBUG) || (defined(BURT_COMPILE_SHADING_DEBUG) && BURT_COMPILE_SHADING_DEBUG)) && !defined(BURT_ENABLE_SHADING_DEBUG)
 #define BURT_ENABLE_SHADING_DEBUG 1
+#endif
+
+#if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
+#if !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING) && !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF) && !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW) && !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION)
+#define BURT_FORWARD_SHADING_DEBUG_CATEGORY_FULL 1
+#endif
+
+#ifndef BURT_FORWARD_SHADING_DEBUG_CATEGORY_FULL
+#define BURT_FORWARD_SHADING_DEBUG_CATEGORY_FULL 0
+#endif
+
+#if defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING)
+#define BURT_FORWARD_SHADING_DEBUG_FILL_LIGHTING 1
+#else
+#define BURT_FORWARD_SHADING_DEBUG_FILL_LIGHTING BURT_FORWARD_SHADING_DEBUG_CATEGORY_FULL
+#endif
+
+#if defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF)
+#define BURT_FORWARD_SHADING_DEBUG_FILL_BRDF 1
+#else
+#define BURT_FORWARD_SHADING_DEBUG_FILL_BRDF BURT_FORWARD_SHADING_DEBUG_CATEGORY_FULL
+#endif
+
+#if defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW)
+#define BURT_FORWARD_SHADING_DEBUG_FILL_SHADOW 1
+#else
+#define BURT_FORWARD_SHADING_DEBUG_FILL_SHADOW BURT_FORWARD_SHADING_DEBUG_CATEGORY_FULL
+#endif
+
+#if defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION)
+#define BURT_FORWARD_SHADING_DEBUG_FILL_TRANSMISSION 1
+#else
+#define BURT_FORWARD_SHADING_DEBUG_FILL_TRANSMISSION BURT_FORWARD_SHADING_DEBUG_CATEGORY_FULL
+#endif
+
+#define BURT_FORWARD_SHADING_DEBUG_FILL_GBUFFER BURT_FORWARD_SHADING_DEBUG_CATEGORY_FULL
+
+#if !BURT_FORWARD_SHADING_DEBUG_FILL_SHADOW
+#define BURT_SHADING_DEBUG_INCLUDE_SHADOW 0
+#define BURT_SHADING_DEBUG_INCLUDE_ADDITIONAL_LIGHTS 0
+#endif
+#endif
 
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
@@ -14,7 +57,9 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEmission.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
+#if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
+#endif
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMaterialShadingModelPassCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkVertexAnimation.hlsl"
 
@@ -24,6 +69,16 @@ float _BurtOpaqueCameraColorAvailable;
 
 #ifndef BURT_FORWARD_ENABLE_REFRACTION
 #define BURT_FORWARD_ENABLE_REFRACTION 0
+#endif
+
+#if defined(BURT_USE_PRESKIN_POSITION) && BURT_USE_PRESKIN_POSITION && defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
+    #define BURT_FORWARD_ENABLE_PRESKIN_POSITION 1
+#else
+    #define BURT_FORWARD_ENABLE_PRESKIN_POSITION 0
+#endif
+
+#if BURT_FORWARD_ENABLE_PRESKIN_POSITION
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreSkinPosition.hlsl"
 #endif
 
 struct Attributes
@@ -37,6 +92,13 @@ struct Attributes
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 UV1 : TEXCOORD1;
+#endif
+#if BURT_FORWARD_ENABLE_PRESKIN_POSITION
+    #if BURT_PRESKIN_POSITION_UV3_PACKED
+        uint2 PreSkinPositionUV3 : TEXCOORD3;
+    #else
+        float3 PreSkinPositionUV3 : TEXCOORD3;
+    #endif
 #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
@@ -55,7 +117,9 @@ struct Varyings
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 MaskMapUV : TEXCOORD6;
 #endif
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+#if BURT_FORWARD_ENABLE_PRESKIN_POSITION
+    float3 PreSkinPositionOS : TEXCOORD7;
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 UV0 : TEXCOORD7;
     float2 UV1 : TEXCOORD8;
     float3 PositionOS : TEXCOORD9;
@@ -104,7 +168,9 @@ Varyings Vert(Attributes Input)
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     Output.MaskMapUV = BurtTransformMaskMapUV(Input.UV0, _MaskMap_ST);
 #endif
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
+#if BURT_FORWARD_ENABLE_PRESKIN_POSITION
+    Output.PreSkinPositionOS = BurtDecodePreSkinPositionOS(Input.PreSkinPositionUV3);
+#elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     Output.UV0 = Input.UV0;
     Output.UV1 = Input.UV1;
     Output.PositionOS = PositionOS.xyz;
@@ -265,7 +331,8 @@ BurtPBRShadingComponents BurtEvaluateForwardShadingComponents(BurtSurfaceData Su
 #endif
 }
 
-#if defined(BURT_ENABLE_SHADING_DEBUG)
+#if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
+#if BURT_FORWARD_SHADING_DEBUG_FILL_GBUFFER
 BurtGBufferData BurtCreateForwardDebugGBufferData(BurtSurfaceData SurfaceData, Varyings Input, float3 NormalWS, float3 ShadingDirectionWS, float Facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
@@ -275,7 +342,9 @@ BurtGBufferData BurtCreateForwardDebugGBufferData(BurtSurfaceData SurfaceData, V
     return BurtCreateMaterialPassGBufferData(SurfaceData, Input.BaseMapUV, Input.NormalWS, NormalWS, Input.TangentWS, ShadingDirectionWS, Facing, float3(0.0f, 0.0f, 0.0f));
 #endif
 }
+#endif
 
+#if BURT_FORWARD_SHADING_DEBUG_FILL_LIGHTING
 float3 BurtEvaluateForwardAdditionalUnshadowedDebug(BurtSurfaceData SurfaceData, Varyings Input, float3 NormalWS, float3 ShadingDirectionWS, float3 ViewDirectionWS, float Facing)
 {
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
@@ -290,6 +359,7 @@ float3 BurtEvaluateForwardAdditionalUnshadowedDebug(BurtSurfaceData SurfaceData,
     return Additional.Diffuse + Additional.Specular;
 #endif
 }
+#endif
 
 void BurtFillForwardShadingDebugData(
     inout BurtShadingDebugData DebugData,
@@ -309,6 +379,13 @@ void BurtFillForwardShadingDebugData(
     float3 FinalColor)
 {
     DebugData.NormalWS = NormalWS;
+#if BURT_FORWARD_SHADING_DEBUG_FILL_GBUFFER && BURT_FORWARD_ENABLE_PRESKIN_POSITION
+    DebugData.PreSkinPositionOS = Input.PreSkinPositionOS;
+    DebugData.PreSkinPositionDebugColor = BurtEncodePreSkinPositionForDebug(Input.PreSkinPositionOS);
+    DebugData.PreSkinPositionAvailable = 1.0f;
+#endif
+
+#if BURT_FORWARD_SHADING_DEBUG_FILL_LIGHTING
     DebugData.DetailLightingColor = PBRComponents.Lighting;
     DebugData.DirectDiffuseColor = PBRComponents.DirectDiffuse;
     DebugData.DirectSpecularColor = PBRComponents.DirectSpecular;
@@ -319,6 +396,12 @@ void BurtFillForwardShadingDebugData(
         : float3(0.0f, 0.0f, 0.0f);
     DebugData.IndirectDiffuseColor = PBRComponents.IndirectDiffuse;
     DebugData.IndirectSpecularColor = PBRComponents.IndirectSpecular;
+    DebugData.AmbientOcclusion = SurfaceData.Occlusion;
+    DebugData.EmissionColor = EmissionColor;
+    DebugData.FinalLightingColor = FinalColor;
+#endif
+
+#if BURT_FORWARD_SHADING_DEBUG_FILL_SHADOW
     DebugData.ShadowAttenuation = BurtSampleMainLightShadowWithoutPerObject(PositionWS, NormalWS);
     DebugData.AdditionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
         ? BurtEvaluateAdditionalShadowAttenuationDebug(PositionWS, NormalWS)
@@ -359,10 +442,9 @@ void BurtFillForwardShadingDebugData(
         DebugData.PerObjectShadowCompareColor,
         DebugData.PerObjectShadowTransmissionDepthColor,
         DebugData.PerObjectShadowTransmissionThicknessColor);
+#endif
 
-    DebugData.AmbientOcclusion = SurfaceData.Occlusion;
-    DebugData.EmissionColor = EmissionColor;
-    DebugData.FinalLightingColor = FinalColor;
+#if BURT_FORWARD_SHADING_DEBUG_FILL_BRDF
     DebugData.Reflectance = SurfaceData.Reflectance;
     DebugData.PerceptualRoughness = PBRComponents.PerceptualRoughness;
     DebugData.SpecularAARoughness = PBRComponents.SpecularAARoughness;
@@ -381,6 +463,9 @@ void BurtFillForwardShadingDebugData(
     DebugData.SpecularAARoughnessDelta = PBRComponents.SpecularAARoughnessDelta;
     DebugData.IndirectSpecularDFG = PBRComponents.IndirectSpecularDFG;
     DebugData.IndirectSpecularEnvBRDF = PBRComponents.IndirectSpecularEnvBRDF;
+#endif
+
+#if BURT_FORWARD_SHADING_DEBUG_FILL_TRANSMISSION
     DebugData.SubsurfaceProfileIndex = PBRComponents.SubsurfaceProfileIndex;
     DebugData.SubsurfaceTransmission = PBRComponents.SubsurfaceTransmission;
     DebugData.SubsurfaceDirectTransmission = PBRComponents.SubsurfaceDirectTransmission;
@@ -400,6 +485,9 @@ void BurtFillForwardShadingDebugData(
     DebugData.HairSecondaryLobe = PBRComponents.HairSecondaryLobe;
     DebugData.HairTransmissionLobe = PBRComponents.HairTransmissionLobe;
     DebugData.HairScatter = PBRComponents.HairScatter;
+#endif
+
+#if BURT_FORWARD_SHADING_DEBUG_FILL_GBUFFER
     DebugData.GBufferBaseColor = DebugDecodedGBufferData.BaseColor;
 #if BURT_ENABLE_HAIR_SHADING
     float3 DebugHairStrandDirectionWS = BurtGetHairStrandDirectionWS(DebugDecodedGBufferData);
@@ -433,6 +521,7 @@ void BurtFillForwardShadingDebugData(
     DebugData.GBufferReflectance = DebugDecodedGBufferData.Reflectance;
     DebugData.GBufferRoughness = DebugGBufferMaterialData.PerceptualRoughness;
     DebugData.GBufferDiffuseColor = DebugGBufferMaterialData.DiffuseColor;
+#endif
 }
 #endif
 
@@ -494,7 +583,7 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
     BurtLight MainLight = BurtCreateMainLight(ShadowAttenuation, TransmissionShadowAttenuation, TransmissionThickness);
     BurtSurfaceData ShadingSurfaceData = SurfaceData;
 
-#if defined(BURT_ENABLE_SHADING_DEBUG)
+#if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG && BURT_FORWARD_SHADING_DEBUG_FILL_LIGHTING
     if (BurtIsShadingDebugEnabled() && BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING))
     {
         ShadingSurfaceData.BaseColor.rgb = float3(0.18f, 0.18f, 0.18f);
@@ -511,16 +600,21 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
     float OutputAlpha = SurfaceData.Alpha;
     BurtApplyForwardRefraction(Input, NormalWS, SurfaceData, FinalColor, OutputAlpha);
 
-#if defined(BURT_ENABLE_SHADING_DEBUG)
+#if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
     if (!BurtIsShadingDebugEnabled())
     {
         return float4(BurtApplyPreExposure(FinalColor), OutputAlpha);
     }
 
+#if BURT_FORWARD_SHADING_DEBUG_FILL_GBUFFER
     BurtGBufferData DebugGBufferSourceData = BurtCreateForwardDebugGBufferData(SurfaceData, Input, NormalWS, ShadingDirectionWS, Facing);
     BurtEncodedGBuffer DebugEncodedGBuffer = BurtEncodeGBuffer(DebugGBufferSourceData);
     BurtGBufferData DebugDecodedGBufferData = BurtDecodeGBuffer(DebugEncodedGBuffer);
     BurtPBRMaterialData DebugGBufferMaterialData = BurtPreparePBRMaterialData(DebugDecodedGBufferData);
+#else
+    BurtGBufferData DebugDecodedGBufferData = (BurtGBufferData)0;
+    BurtPBRMaterialData DebugGBufferMaterialData = (BurtPBRMaterialData)0;
+#endif
     BurtShadingDebugData DebugData = BurtCreateDefaultShadingDebugData(NormalWS);
     BurtFillForwardShadingDebugData(
         DebugData,
@@ -539,7 +633,7 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
         EmissionColor,
         FinalColor);
 
-#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
+#if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE) && (BURT_FORWARD_SHADING_DEBUG_FILL_LIGHTING || BURT_FORWARD_SHADING_DEBUG_FILL_BRDF)
     BurtSurfaceData DebugLightingSurfaceData = ShadingSurfaceData;
     DebugLightingSurfaceData.ShadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
     BurtPBRShadingComponents DebugLightingComponents = BurtEvaluateForwardShadingComponents(
@@ -550,6 +644,7 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
         ShadingDirectionWS,
         ViewDirectionWS,
         Facing);
+#if BURT_FORWARD_SHADING_DEBUG_FILL_LIGHTING
     DebugData.DetailLightingColor = DebugLightingComponents.Lighting;
     DebugData.DirectDiffuseColor = DebugLightingComponents.DirectDiffuse;
     DebugData.DirectSpecularColor = DebugLightingComponents.DirectSpecular;
@@ -560,6 +655,8 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
         : float3(0.0f, 0.0f, 0.0f);
     DebugData.IndirectDiffuseColor = DebugLightingComponents.IndirectDiffuse;
     DebugData.IndirectSpecularColor = DebugLightingComponents.IndirectSpecular;
+#endif
+#if BURT_FORWARD_SHADING_DEBUG_FILL_BRDF
     DebugData.PerceptualRoughness = DebugLightingComponents.PerceptualRoughness;
     DebugData.SpecularAARoughness = DebugLightingComponents.SpecularAARoughness;
     DebugData.SpecularEnergyCompensation = DebugLightingComponents.SpecularEnergyCompensation;
@@ -577,6 +674,7 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
     DebugData.SpecularAARoughnessDelta = DebugLightingComponents.SpecularAARoughnessDelta;
     DebugData.IndirectSpecularDFG = DebugLightingComponents.IndirectSpecularDFG;
     DebugData.IndirectSpecularEnvBRDF = DebugLightingComponents.IndirectSpecularEnvBRDF;
+#endif
 #endif
 
     float3 DebugColor;

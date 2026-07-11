@@ -208,6 +208,8 @@ Shader "BurtRP/Subsurface"
             #pragma fragment FragGBuffer
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
+            #pragma multi_compile _ XSKIN_MESH_COMPRESSED
 
             // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
             #pragma target 4.5
@@ -216,6 +218,7 @@ Shader "BurtRP/Subsurface"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
+            #define BURT_USE_PRESKIN_POSITION 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
 
             // 结束 GBuffer pass 的 HLSL 程序。
@@ -236,12 +239,44 @@ Shader "BurtRP/Subsurface"
             #pragma fragment FragSubsurfaceForward
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
+            #pragma multi_compile _ XSKIN_MESH_COMPRESSED
             #pragma target 4.5
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
+            #define BURT_USE_PRESKIN_POSITION 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Subsurface Forward Preview"
+            Tags { "LightMode" = "BurtForward" }
+
+            ZWrite [_ZWrite]
+            ZTest [_ZTest]
+            Blend [_SrcBlend] [_DstBlend]
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
+            #pragma multi_compile _ XSKIN_MESH_COMPRESSED
+            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+
+            #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
+            #define BURT_USE_PRESKIN_POSITION 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtLitProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
             ENDHLSL
         }
 

@@ -19,6 +19,17 @@
 
 int _BurtPerObjectShadowObjectIndex;
 
+#if defined(BURT_USE_PRESKIN_POSITION) && BURT_USE_PRESKIN_POSITION && defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
+    #define BURT_MATERIAL_ENABLE_PRESKIN_POSITION 1
+#else
+    #define BURT_MATERIAL_ENABLE_PRESKIN_POSITION 0
+#endif
+
+#if BURT_MATERIAL_ENABLE_PRESKIN_POSITION
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreSkinPosition.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebugModes.hlsl"
+#endif
+
 struct GBufferAttributes
 {
     float4 PositionOS : POSITION;
@@ -30,6 +41,13 @@ struct GBufferAttributes
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     float2 UV1 : TEXCOORD1;
+#endif
+#if BURT_MATERIAL_ENABLE_PRESKIN_POSITION
+    #if BURT_PRESKIN_POSITION_UV3_PACKED
+        uint2 PreSkinPositionUV3 : TEXCOORD3;
+    #else
+        float3 PreSkinPositionUV3 : TEXCOORD3;
+    #endif
 #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
@@ -53,12 +71,16 @@ struct GBufferVaryings
     float3 PositionWS : TEXCOORD8;
 #else
     float3 PositionWS : TEXCOORD5;
-    #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
-        float2 UV0 : TEXCOORD6;
-    #endif
-    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        float4 VertexColor : TEXCOORD6;
-        float3 PositionOS : TEXCOORD7;
+    #if BURT_MATERIAL_ENABLE_PRESKIN_POSITION
+        float3 PreSkinPositionOS : TEXCOORD6;
+    #else
+        #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
+            float2 UV0 : TEXCOORD6;
+        #endif
+        #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+            float4 VertexColor : TEXCOORD6;
+            float3 PositionOS : TEXCOORD7;
+        #endif
     #endif
 #endif
 };
@@ -123,12 +145,16 @@ GBufferVaryings VertGBuffer(GBufferAttributes Input)
     Output.BaseMapUV = BurtTransformBaseMapUV(Input.UV0, _BaseMap_ST);
     Output.MaskMapUV = BurtTransformMaskMapUV(Input.UV0, _MaskMap_ST);
     Output.PositionWS = mul(unity_ObjectToWorld, PositionOS).xyz;
-    #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
-        Output.UV0 = Input.UV0;
-    #endif
-    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
-        Output.VertexColor = Input.Color;
-        Output.PositionOS = PositionOS.xyz;
+    #if BURT_MATERIAL_ENABLE_PRESKIN_POSITION
+        Output.PreSkinPositionOS = BurtDecodePreSkinPositionOS(Input.PreSkinPositionUV3);
+    #else
+        #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
+            Output.UV0 = Input.UV0;
+        #endif
+        #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+            Output.VertexColor = Input.Color;
+            Output.PositionOS = PositionOS.xyz;
+        #endif
     #endif
 #endif
     Output.EmissionMapUV = BurtTransformEmissionMapUV(Input.UV0, _EmissionMap_ST);
@@ -140,6 +166,22 @@ GBufferVaryings VertGBuffer(GBufferAttributes Input)
 #endif
     return Output;
 }
+
+#if BURT_MATERIAL_ENABLE_PRESKIN_POSITION
+bool BurtShouldWriteSubsurfacePreSkinPositionDebug()
+{
+    return _BurtShadingDebugEnabled > 0.5f
+        && abs(_BurtShadingDebugMode - BURT_SHADING_DEBUG_MODE_PRESKIN_POSITION) < 0.5f;
+}
+
+void BurtApplySubsurfacePreSkinPositionDebug(inout float4 BaseColor, float3 PreSkinPositionOS)
+{
+    if (BurtShouldWriteSubsurfacePreSkinPositionDebug())
+    {
+        BaseColor.rgb = BurtEncodePreSkinPositionForDebug(PreSkinPositionOS);
+    }
+}
+#endif
 
 GBufferFragmentOutput BurtPackGBufferOutput(BurtEncodedGBuffer EncodedGBuffer)
 {
@@ -188,11 +230,16 @@ BurtGBufferData BurtCreateMaterialPassGBufferDataFromInput(GBufferVaryings Input
     float4 MaskMap = BurtEvaluateMaterialPassMaskMap(Input.UV0, Input.UV1);
     float4 BaseColor = BurtEvaluateMaterialPassBaseColor(Input.UV0, Input.UV1, Input.PositionOS, MaskMap);
 #else
-    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+    #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
+        float4 BaseColor = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
         float4 BaseColor = BurtEvaluateMaterialPassBaseColor(Input.BaseMapUV, Input.PositionWS, Input.PositionOS, Input.VertexColor);
     #else
         float4 BaseColor = BurtSampleBaseMap(Input.BaseMapUV) * _BaseColor;
     #endif
+#endif
+#if BURT_MATERIAL_ENABLE_PRESKIN_POSITION
+    BurtApplySubsurfacePreSkinPositionDebug(BaseColor, Input.PreSkinPositionOS);
 #endif
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     BurtApplyMaterialPassAlphaClip(BaseColor.a, _AlphaClip, _Cutoff, Input.PositionCS);
@@ -207,7 +254,7 @@ BurtGBufferData BurtCreateMaterialPassGBufferDataFromInput(GBufferVaryings Input
     BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.UV0, Input.UV1, Input.PositionOS, Input.NormalWS, Input.TangentWS, ViewDirectionWS);
 #else
     #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
-        float4 MaskMap = BurtSampleMaskMap(Input.BaseMapUV);
+        float4 MaskMap = float4(0.0f, 1.0f, 0.5f, 1.0f);
     #else
         float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
     #endif
@@ -246,6 +293,9 @@ SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings Input, fix
 {
     float4 BaseColor = BurtSampleBaseMap(Input.BaseMapUV) * _BaseColor;
     BurtApplyMaterialPassAlphaClip(BaseColor.a, _AlphaClip, _Cutoff, Input.PositionCS);
+#if BURT_MATERIAL_ENABLE_PRESKIN_POSITION
+    BurtApplySubsurfacePreSkinPositionDebug(BaseColor, Input.PreSkinPositionOS);
+#endif
 
     float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
     BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV);

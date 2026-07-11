@@ -20,6 +20,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         IndirectSpecularEnergyCompensation = 111, // 材质调试：显示间接高光能量补偿，也就是 Reflection Probe 高光补回的多次散射能量。
         DiffuseColor = 112, // 材质调试：显示 XRender GenericData.DiffuseColor，方便检查 metallic 是否正确扣除 diffuse。
         Height = 113, // Material debug: Mask Map B height channel.
+        PreSkinPosition = 114, // Material debug: linear [-16,16] pre-skin object-space position decoded from mesh UV3.
         DirectBRDFD = 115, // 材质调试：显示直接光 GGX D 项，用来检查高 smoothness 时的 NDF 峰值。
         DirectBRDFVisibility = 116, // 材质调试：显示直接光 Smith Joint Visibility，用来排查几何遮蔽是否压暗高光。
         DirectBRDFFresnel = 117, // 材质调试：显示直接光 Schlick Fresnel，用来检查 F0 和视角输入。
@@ -314,15 +315,29 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceShadow = 492, // SS Shadow debug: screen-space main-light visibility texture consumed by deferred lighting.
         PerObjectShadowTransmissionThickness = 493, // Per-object shadow debug: transmission object index, resolved thickness, and validity state.
         ScreenSpaceShadowFinalMultiplier = 494, // SS Shadow debug: final deferred main-light multiplier after material-specific weighting.
-        ScreenSpaceGlobalIlluminationHashGridDebug = 496 // BurtGI debug: Radiance Cache HashGrid debug buffer heatmap.
+        ScreenSpaceGlobalIlluminationHashGridDebug = 496, // BurtGI debug: Radiance Cache HashGrid debug buffer heatmap.
+        ScreenSpaceGlobalIlluminationRadianceCacheSkyAO = 497 // BurtGI debug: Radiance Cache ProbeSkyAO atlas sampled through the active clipmap.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
     public static class BurtShadingDebugSettings
     {
+        private enum ForwardShadingDebugCategory
+        {
+            None,
+            Lighting,
+            Brdf,
+            Shadow,
+            Transmission
+        }
+
         public const string ModeShaderName = "_BurtShadingDebugMode"; // 定义 shader 侧读取 debug 模式的全局属性名。
         public const string EnabledShaderName = "_BurtShadingDebugEnabled"; // 定义 shader 侧读取 debug 是否开启的全局属性名。
         public const string KeywordName = "BURT_SHADING_DEBUG";
+        private const string ForwardDebugLightingKeywordName = "BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING";
+        private const string ForwardDebugBrdfKeywordName = "BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF";
+        private const string ForwardDebugShadowKeywordName = "BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW";
+        private const string ForwardDebugTransmissionKeywordName = "BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION";
 
         private static readonly int ModeShaderId = Shader.PropertyToID(ModeShaderName); // 缓存模式属性 ID，避免每帧字符串查找。
         private static readonly int EnabledShaderId = Shader.PropertyToID(EnabledShaderName); // 缓存开关属性 ID，避免每帧字符串查找。
@@ -374,6 +389,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.Metallic:
                 case BurtShadingDebugMode.Occlusion:
                 case BurtShadingDebugMode.Height:
+                case BurtShadingDebugMode.PreSkinPosition:
                 case BurtShadingDebugMode.Reflectance:
                 case BurtShadingDebugMode.GBufferBaseColor:
                 case BurtShadingDebugMode.GBufferNormalWS:
@@ -475,6 +491,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHashGridDebug:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:
@@ -630,11 +647,131 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
             }
         }
 
+        private static ForwardShadingDebugCategory ResolveForwardShadingDebugCategory(BurtShadingDebugMode mode)
+        {
+            switch (mode)
+            {
+                case BurtShadingDebugMode.Height:
+                case BurtShadingDebugMode.SpecularAARoughness:
+                case BurtShadingDebugMode.SpecularEnergyCompensation:
+                case BurtShadingDebugMode.SpecularOcclusion:
+                case BurtShadingDebugMode.EnergyPreservation:
+                case BurtShadingDebugMode.IndirectSpecularEnergyCompensation:
+                case BurtShadingDebugMode.DirectBRDFD:
+                case BurtShadingDebugMode.DirectBRDFVisibility:
+                case BurtShadingDebugMode.DirectBRDFFresnel:
+                case BurtShadingDebugMode.DirectDiffuseLobe:
+                case BurtShadingDebugMode.DirectDiffuseBRDF:
+                case BurtShadingDebugMode.DirectSpecularBRDF:
+                case BurtShadingDebugMode.SpecularAANormalVariance:
+                case BurtShadingDebugMode.SpecularAARoughnessDelta:
+                case BurtShadingDebugMode.IndirectSpecularDFG:
+                case BurtShadingDebugMode.IndirectSpecularEnvBRDF:
+                    return ForwardShadingDebugCategory.Brdf;
+
+                case BurtShadingDebugMode.SubsurfaceProfileId:
+                case BurtShadingDebugMode.SubsurfaceTransmission:
+                case BurtShadingDebugMode.SubsurfaceKernelWeight:
+                case BurtShadingDebugMode.SubsurfaceIndirect:
+                case BurtShadingDebugMode.SubsurfaceDirectTransmission:
+                case BurtShadingDebugMode.SubsurfaceTransmissionBRDF:
+                case BurtShadingDebugMode.SubsurfaceTransmissionShadow:
+                case BurtShadingDebugMode.SubsurfaceTransmissionPhase:
+                case BurtShadingDebugMode.SubsurfaceTransmissionThickness:
+                case BurtShadingDebugMode.FoliageTransmission:
+                case BurtShadingDebugMode.FoliageDirectTransmission:
+                case BurtShadingDebugMode.FoliageTransmissionBRDF:
+                case BurtShadingDebugMode.FoliageTransmissionShadow:
+                case BurtShadingDebugMode.FoliageSpecularBRDF:
+                case BurtShadingDebugMode.GrassTransmission:
+                case BurtShadingDebugMode.GrassDirectTransmission:
+                case BurtShadingDebugMode.GrassTransmissionBRDF:
+                case BurtShadingDebugMode.GrassTransmissionShadow:
+                case BurtShadingDebugMode.GrassSpecularBRDF:
+                case BurtShadingDebugMode.HairPrimaryLobe:
+                case BurtShadingDebugMode.HairSecondaryLobe:
+                case BurtShadingDebugMode.HairTransmissionLobe:
+                case BurtShadingDebugMode.HairScatter:
+                    return ForwardShadingDebugCategory.Transmission;
+
+                case BurtShadingDebugMode.ShadowAttenuation:
+                case BurtShadingDebugMode.ShadowCascadeIndex:
+                case BurtShadingDebugMode.ShadowCascadeBlend:
+                case BurtShadingDebugMode.ShadowDistanceFade:
+                case BurtShadingDebugMode.ShadowPCSSRadius:
+                case BurtShadingDebugMode.ShadowReceiverDepthDelta:
+                case BurtShadingDebugMode.ShadowPCSSBlockerFraction:
+                case BurtShadingDebugMode.AdditionalShadowAttenuation:
+                case BurtShadingDebugMode.AdditionalShadowFace:
+                case BurtShadingDebugMode.AdditionalShadowUV:
+                case BurtShadingDebugMode.AdditionalShadowDepth:
+                case BurtShadingDebugMode.AdditionalShadowDepthDelta:
+                case BurtShadingDebugMode.MainLightShadowReceiverDepth:
+                case BurtShadingDebugMode.MainLightShadowRawDepth:
+                case BurtShadingDebugMode.MainLightShadowCompare:
+                case BurtShadingDebugMode.MainLightShadowProjectionValidity:
+                case BurtShadingDebugMode.PerObjectShadowObjectIndex:
+                case BurtShadingDebugMode.PerObjectShadowSlice:
+                case BurtShadingDebugMode.PerObjectShadowUV:
+                case BurtShadingDebugMode.PerObjectShadowDepth:
+                case BurtShadingDebugMode.PerObjectShadowCompare:
+                case BurtShadingDebugMode.PerObjectShadowTransmissionDepth:
+                case BurtShadingDebugMode.PerObjectShadowTransmissionThickness:
+                    return ForwardShadingDebugCategory.Shadow;
+
+                case BurtShadingDebugMode.DetailLighting:
+                case BurtShadingDebugMode.IndirectLighting:
+                case BurtShadingDebugMode.DirectDiffuse:
+                case BurtShadingDebugMode.DirectSpecular:
+                case BurtShadingDebugMode.IndirectDiffuse:
+                case BurtShadingDebugMode.IndirectSpecular:
+                case BurtShadingDebugMode.AmbientOcclusion:
+                case BurtShadingDebugMode.Emission:
+                case BurtShadingDebugMode.FinalLighting:
+                case BurtShadingDebugMode.AdditionalLighting:
+                case BurtShadingDebugMode.AdditionalDiffuse:
+                case BurtShadingDebugMode.AdditionalSpecular:
+                case BurtShadingDebugMode.HairAdditionalLighting:
+                case BurtShadingDebugMode.AdditionalLightingUnshadowed:
+                    return ForwardShadingDebugCategory.Lighting;
+
+                default:
+                    return ForwardShadingDebugCategory.None;
+            }
+        }
+
+        private static void ApplyForwardShadingDebugKeywords(ForwardShadingDebugCategory category)
+        {
+            Shader.DisableKeyword(ForwardDebugLightingKeywordName);
+            Shader.DisableKeyword(ForwardDebugBrdfKeywordName);
+            Shader.DisableKeyword(ForwardDebugShadowKeywordName);
+            Shader.DisableKeyword(ForwardDebugTransmissionKeywordName);
+
+            switch (category)
+            {
+                case ForwardShadingDebugCategory.Lighting:
+                    Shader.EnableKeyword(ForwardDebugLightingKeywordName);
+                    break;
+                case ForwardShadingDebugCategory.Brdf:
+                    Shader.EnableKeyword(ForwardDebugBrdfKeywordName);
+                    break;
+                case ForwardShadingDebugCategory.Shadow:
+                    Shader.EnableKeyword(ForwardDebugShadowKeywordName);
+                    break;
+                case ForwardShadingDebugCategory.Transmission:
+                    Shader.EnableKeyword(ForwardDebugTransmissionKeywordName);
+                    break;
+            }
+        }
+
         public static void ApplyGlobalShaderProperties() // 把当前 shading debug 状态上传给 shader。
         {
+            var forwardDebugCategory = ResolveForwardShadingDebugCategory(currentMode);
+            var enableForwardMaterialDebug = IsDebugging && forwardDebugCategory != ForwardShadingDebugCategory.None;
             Shader.SetGlobalInt(ModeShaderId, (int)currentMode); // 上传整数模式 ID，后续 shader 可以 switch 或 if 判断。
             Shader.SetGlobalFloat(EnabledShaderId, IsDebugging ? 1f : 0f); // 上传 0/1 开关，方便 shader 快速判断是否走调试分支。
-            if (IsDebugging)
+            ApplyForwardShadingDebugKeywords(forwardDebugCategory);
+            if (enableForwardMaterialDebug)
             {
                 Shader.EnableKeyword(KeywordName);
             }

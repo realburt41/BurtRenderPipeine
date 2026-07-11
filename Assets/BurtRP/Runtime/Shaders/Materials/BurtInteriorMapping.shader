@@ -2,22 +2,22 @@ Shader "BurtRP/InteriorMapping"
 {
     Properties
     {
-        _BaseMap ("Base Map", 2D) = "white" {}
-        [HDR] _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
+        [HideInInspector] _BaseMap ("Base Map", 2D) = "white" {}
+        [HideInInspector] [HDR] _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
         [NoScaleOffset] [Normal] _NormalMap ("Normal Map", 2D) = "bump" {}
         _NormalScale ("Normal Scale", Range(0, 2)) = 1
 
-        [NoScaleOffset] _MaskMap ("Mask Map (MOHR)", 2D) = "white" {}
-        _Metallic ("Metallic", Range(0, 1)) = 0
-        _Occlusion ("Occlusion", Range(0, 1)) = 1
-        _Roughness ("Roughness", Range(0, 1)) = 1
-        _Reflectance ("Reflectance", Range(0, 1)) = 0.5
+        [HideInInspector] [NoScaleOffset] _MaskMap ("Mask Map (MOHR)", 2D) = "white" {}
+        [HideInInspector] _Metallic ("Metallic", Range(0, 1)) = 0
+        [HideInInspector] _Occlusion ("Occlusion", Range(0, 1)) = 1
+        [HideInInspector] _Roughness ("Roughness", Range(0, 1)) = 1
+        [HideInInspector] _Reflectance ("Reflectance", Range(0, 1)) = 0
 
-        [NoScaleOffset] _EmissiveMap ("Emissive Map", 2D) = "white" {}
-        [HDR] _EmissiveColor ("Emissive Color", Color) = (0, 0, 0, 1)
+        [HideInInspector] [NoScaleOffset] _EmissiveMap ("Emissive Map", 2D) = "white" {}
+        [HideInInspector] [HDR] _EmissiveColor ("Emissive Color", Color) = (0, 0, 0, 1)
 
-        [ToggleUI] _PreserveSpecular ("Preserve Specular", Float) = 0
-        _IOR ("IOR", Range(-3, 3)) = 1.5
+        [HideInInspector] [ToggleUI] _PreserveSpecular ("Preserve Specular", Float) = 0
+        [HideInInspector] _IOR ("IOR", Range(-3, 3)) = 1.5
 
         [Toggle(BURT_INTERIOR_ATLAS_MODE)] _AtlasMode ("Atlas Mode", Float) = 0
         _AtlasMap ("Atlas2D Room", 2D) = "white" {}

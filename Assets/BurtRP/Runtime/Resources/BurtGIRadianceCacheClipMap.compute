@@ -30,6 +30,9 @@
 #pragma kernel SceneVoxelBuildOccupancyMipLiteCS
 #pragma kernel SceneVoxelDownsampleOccupancyMipCS
 #pragma kernel SceneVoxelBuildLightingLiteCS
+#pragma kernel SceneVoxelBuildOctreeLeafCS
+#pragma kernel SceneVoxelBuildOctreeParentCS
+#pragma kernel SceneVoxelBuildOctreeRootCS
 
 #define BURT_GI_CLIPMAP_COUNT 5
 #define BURT_GI_PRIORITY_HISTOGRAM_SIZE 16
@@ -74,6 +77,43 @@ Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
 RWTexture3D<float4> _BurtGISceneVoxelOccupancyMipTexture;
 Texture3D<float4> _BurtGISceneVoxelLightingReadTexture;
 RWTexture3D<float4> _BurtGISceneVoxelLightingTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeLeafLowTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeLeafHighTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeParentLowTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeParentHighTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeRootLowTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeRootHighTexture;
+float _BurtGISceneVoxelOctreeValid;
+Texture3D<float4> _BurtGISceneVoxelClipmap1RadianceReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap1GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap1OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap1LightingReadTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap1OctreeRootHighTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2RadianceReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2LightingReadTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap2OctreeRootHighTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3RadianceReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3LightingReadTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelClipmap3OctreeRootHighTexture;
 Texture3D<float4> _BurtGISceneVoxelHistoryRadianceTexture;
 Texture3D<float4> _BurtGISceneVoxelHistoryGeometryTexture;
 Texture3D<float4> _BurtGISceneVoxelHistoryLightingTexture;
@@ -94,8 +134,10 @@ struct BurtGISceneVoxelTriangle
     float Padding2;
     float3 Normal;
     float Padding3;
-    float3 Radiance;
+    float3 Albedo;
     float Padding4;
+    float3 Emission;
+    float Padding5;
 };
 
 StructuredBuffer<BurtGISceneVoxelTriangle> _BurtGISceneVoxelTriangleBuffer;
@@ -107,9 +149,11 @@ RWTexture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
 RWTexture2D<float> _BurtGIRadianceCacheClipMapDepthProbeAtlasTexture;
 RWTexture2D<float4> _BurtGIRadianceCacheClipMapRadianceProbeAtlasTexture;
 RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture;
+RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture;
 RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip1Texture;
 RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip2Texture;
 RWTexture2D<float2> _BurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture;
+RWTexture2D<float> _BurtGIRadianceCacheClipMapProbeSkyAOAtlasTexture;
 
 RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeAllocatorBuffer;
 RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer;
@@ -159,6 +203,12 @@ float4 _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[BURT_GI_CLIPMAP_COUNT]
 float4 _BurtGIRadianceCacheClipMapLastFrameProbeCoordToWorldCenter[BURT_GI_CLIPMAP_COUNT];
 float4 _BurtGIRadianceCacheClipMapClipmapCenterExtent[BURT_GI_CLIPMAP_COUNT];
 float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelLightingParams;
+float4 _BurtGISceneVoxelDirectLightTint;
+float4 _BurtGISceneVoxelIndirectLightTint;
+float4 _BurtGISceneVoxelTraceControls;
+float4 _BurtGISceneVoxelClipmapCenterExtent[4];
+uint _BurtGISceneVoxelClipmapValidMask;
 float4 _BurtGIRadianceCacheClipMapClipmapParams[BURT_GI_CLIPMAP_COUNT];
 float4 _BurtGIRadianceCacheClipMapHistoryParams;
 float4 _BurtGIScreenProbeGridParams;
@@ -176,6 +226,15 @@ float4 _BurtGIAdditionalLightPositionAndRange[8];
 float4 _BurtGIAdditionalLightColorAndType[8];
 float4 _BurtGIAdditionalLightDirectionAndSpot[8];
 float4 _BurtGIAdditionalLightSpotParams[8];
+StructuredBuffer<float4> _BurtGIXGILightData;
+StructuredBuffer<uint> _BurtGIXGILightGridCount;
+StructuredBuffer<uint> _BurtGIXGILightGridList;
+float4 _BurtGIXGILightGridBoundMin[4];
+float4 _BurtGIXGILightGridBoundMax[4];
+float4 _BurtGIXGILightGridAxis[4];
+uint _BurtGIXGILightGridResolution;
+uint _BurtGIXGILightGridMaxLights;
+uint _BurtGIXGILightGridValid;
 
 uint _BurtGIRadianceCacheClipMapMaxProbeCount;
 uint _BurtGIRadianceCacheClipMapFrameIndex;
@@ -195,7 +254,9 @@ uint _BurtGIRadianceCacheClipMapSortTraceTilesGroupSize;
 uint _BurtGIRadianceCacheClipMapTraceTileGroupStride;
 uint _BurtGIRadianceCacheClipMapTraceTileSize1D;
 uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
 uint _BurtGIRadianceCacheClipMapFinalProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution;
 uint _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution;
 uint _BurtGISceneVoxelOccupancyMipSourceMip;
 
@@ -704,32 +765,47 @@ float BurtGIRadianceCacheScreenProbeTransferPDF(uint probeIndex, float3 directio
     return transferWeightSum > 0.0001 ? saturate(transferPDF / transferWeightSum) : centerPDF;
 }
 
+uint2 BurtGIWrapProbeTexelToRaw(uint2 finalProbeTexelCoord, uint finalProbeResolution, uint rawProbeResolution)
+{
+    rawProbeResolution = max(1u, rawProbeResolution);
+    finalProbeResolution = max(rawProbeResolution, finalProbeResolution);
+    uint borderSize = max(0u, (finalProbeResolution - rawProbeResolution) / 2u);
+
+    if (borderSize == 0u)
+    {
+        return min(finalProbeTexelCoord, uint2(rawProbeResolution - 1u, rawProbeResolution - 1u));
+    }
+
+    uint2 wrappedCoord = min(finalProbeTexelCoord, uint2(finalProbeResolution - 1u, finalProbeResolution - 1u));
+    if (wrappedCoord.x < borderSize)
+    {
+        wrappedCoord.x = borderSize - 1u + borderSize - wrappedCoord.x;
+        wrappedCoord.y = finalProbeResolution - 1u - wrappedCoord.y;
+    }
+    if (wrappedCoord.x >= finalProbeResolution - borderSize)
+    {
+        wrappedCoord.x = (finalProbeResolution - borderSize) - (wrappedCoord.x - (finalProbeResolution - borderSize - 1u));
+        wrappedCoord.y = finalProbeResolution - 1u - wrappedCoord.y;
+    }
+    if (wrappedCoord.y < borderSize)
+    {
+        wrappedCoord.y = borderSize - 1u + borderSize - wrappedCoord.y;
+        wrappedCoord.x = finalProbeResolution - 1u - wrappedCoord.x;
+    }
+    if (wrappedCoord.y >= finalProbeResolution - borderSize)
+    {
+        wrappedCoord.y = (finalProbeResolution - borderSize) - (wrappedCoord.y - (finalProbeResolution - borderSize - 1u));
+        wrappedCoord.x = finalProbeResolution - 1u - wrappedCoord.x;
+    }
+
+    return min(wrappedCoord - borderSize, uint2(rawProbeResolution - 1u, rawProbeResolution - 1u));
+}
+
 uint2 BurtGIWrapFinalProbeTexelToRaw(uint2 finalProbeTexelCoord)
 {
     uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
     uint finalProbeResolution = max(radianceProbeResolution, _BurtGIRadianceCacheClipMapFinalProbeResolution);
-    uint borderSize = max(0u, (finalProbeResolution - radianceProbeResolution) / 2u);
-    int2 rawCoord = (int2)finalProbeTexelCoord - (int)borderSize;
-
-    if (rawCoord.x < 0)
-    {
-        rawCoord.x = (int)radianceProbeResolution - 1;
-    }
-    else if (rawCoord.x >= (int)radianceProbeResolution)
-    {
-        rawCoord.x = 0;
-    }
-
-    if (rawCoord.y < 0)
-    {
-        rawCoord.y = (int)radianceProbeResolution - 1;
-    }
-    else if (rawCoord.y >= (int)radianceProbeResolution)
-    {
-        rawCoord.y = 0;
-    }
-
-    return (uint2)rawCoord;
+    return BurtGIWrapProbeTexelToRaw(finalProbeTexelCoord, finalProbeResolution, radianceProbeResolution);
 }
 
 uint2 BurtGIWrapRawProbeTexel(int2 rawProbeTexelCoord)
@@ -760,10 +836,13 @@ uint2 BurtGIWrapRawProbeTexel(int2 rawProbeTexelCoord)
 
 float3 BurtGISampleRawScreenGI(uint probeIndex, float3 direction, float3 probeWorldCenter, out float hitDistance)
 {
+    float skyTraceEnabled = _BurtGIRadianceCacheClipMapSkyRadiance.w > 0.5 ? 1.0 : 0.0;
+    float3 skyRadiance = max(_BurtGIRadianceCacheClipMapSkyRadiance.rgb, 0.0);
+
     if (_BurtGIRadianceCacheClipMapUseIrradianceField != 0u)
     {
         hitDistance = max(_BurtGIScreenProbeTraceParams.w, 1.0);
-        return max(_BurtGIRadianceCacheClipMapSkyRadiance.rgb, 0.0);
+        return skyRadiance * skyTraceEnabled;
     }
 
     uint2 screenProbeGridSize = BurtGIScreenProbeGridSize();
@@ -783,7 +862,8 @@ float3 BurtGISampleRawScreenGI(uint probeIndex, float3 direction, float3 probeWo
     hitDistance = validSurface > 0.0 ? distance(probeWorldCenter, screenProbeWorldPosition.xyz) : maxTraceDistance;
 
     float upFactor = saturate(direction.y * 0.5 + 0.5);
-    float3 skyFallback = lerp(float3(0.015, 0.018, 0.022), float3(0.08, 0.09, 0.11), upFactor);
+    float3 analyticSkyFallback = lerp(float3(0.015, 0.018, 0.022), float3(0.08, 0.09, 0.11), upFactor);
+    float3 skyFallback = lerp(analyticSkyFallback, skyRadiance, skyTraceEnabled);
     float directionalEnergy = lerp(0.72, 1.18, saturate(direction.z * 0.5 + 0.5));
     float3 fallbackRadiance = max(lerp(skyFallback, rawGI.rgb, validSurface), 0.0) * directionalEnergy;
 
@@ -1404,6 +1484,216 @@ float3 BurtGISceneVoxelWorldToUVW(float3 worldPosition)
     return (worldPosition - centerExtent.xyz) / (extent * 2.0) + 0.5;
 }
 
+bool BurtGISceneVoxelOctreeMaskContains(uint lowMask, uint highMask, uint bitIndex)
+{
+    uint word = bitIndex < 32u ? lowMask : highMask;
+    return ((word >> (bitIndex & 31u)) & 1u) != 0u;
+}
+
+bool BurtGISceneVoxelOctreeContainsVoxel(uint3 voxelCoord)
+{
+    uint3 parentCoord = voxelCoord >> 4u;
+    uint3 leafCoord = voxelCoord >> 2u;
+    uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+    uint rootLow = _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)];
+    uint rootHigh = _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)];
+    if (!BurtGISceneVoxelOctreeMaskContains(rootLow, rootHigh, rootBit))
+    {
+        return false;
+    }
+
+    uint3 parentChild = leafCoord & 3u;
+    uint parentBit = parentChild.x + parentChild.y * 4u + parentChild.z * 16u;
+    uint parentLow = _BurtGISceneVoxelOctreeParentLowTexture[parentCoord];
+    uint parentHigh = _BurtGISceneVoxelOctreeParentHighTexture[parentCoord];
+    if (!BurtGISceneVoxelOctreeMaskContains(parentLow, parentHigh, parentBit))
+    {
+        return false;
+    }
+
+    uint3 leafChild = voxelCoord & 3u;
+    uint leafBit = leafChild.x + leafChild.y * 4u + leafChild.z * 16u;
+    uint leafLow = _BurtGISceneVoxelOctreeLeafLowTexture[leafCoord];
+    uint leafHigh = _BurtGISceneVoxelOctreeLeafHighTexture[leafCoord];
+    return BurtGISceneVoxelOctreeMaskContains(leafLow, leafHigh, leafBit);
+}
+
+bool BurtGISceneVoxelOctreeMayContain(float3 samplePosition)
+{
+    if (_BurtGISceneVoxelOctreeValid <= 0.5)
+    {
+        return true;
+    }
+
+    uint geometryWidth;
+    uint geometryHeight;
+    uint geometryDepth;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(geometryWidth, geometryHeight, geometryDepth);
+    uint3 geometrySize = max(uint3(geometryWidth, geometryHeight, geometryDepth), uint3(1u, 1u, 1u));
+    float3 uvw = BurtGISceneVoxelWorldToUVW(samplePosition);
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return false;
+    }
+
+    uint3 voxelCoord = min((uint3)(uvw * (float3)geometrySize), geometrySize - 1u);
+    return BurtGISceneVoxelOctreeContainsVoxel(voxelCoord);
+}
+
+bool BurtGIRayTraceSceneVoxelOctree(float3 originWS, float3 directionWS, float maxDistance, out float hitDistance)
+{
+    hitDistance = maxDistance;
+    if (_BurtGISceneVoxelOctreeValid <= 0.5 || maxDistance <= 0.0)
+    {
+        return false;
+    }
+
+    uint width;
+    uint height;
+    uint depth;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    float extent = max(centerExtent.w, 0.001);
+    float3 boxMin = centerExtent.xyz - extent;
+    float3 boxMax = centerExtent.xyz + extent;
+    float3 direction = normalize(directionWS);
+    float3 invDirection = rcp(max(abs(direction), 0.000001)) * sign(direction + 0.000001);
+    float3 t0 = (boxMin - originWS) * invDirection;
+    float3 t1 = (boxMax - originWS) * invDirection;
+    float entryDistance = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+    float exitDistance = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+    float voxelSizeWS = extent * 2.0 / max((float)volumeSize.x, 1.0);
+    float traceDistance = max(0.0, entryDistance) + voxelSizeWS * 0.001;
+    float traceEnd = min(maxDistance, exitDistance);
+    if (traceDistance >= traceEnd)
+    {
+        return false;
+    }
+
+    uint maxTraceSteps = min((uint)max(_BurtGISceneVoxelTraceControls.x, 1.0), 64u);
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < maxTraceSteps && traceDistance < traceEnd; ++stepIndex)
+    {
+        float3 positionWS = originWS + direction * traceDistance;
+        float3 localPosition = clamp(positionWS - boxMin, 0.0, extent * 2.0 - voxelSizeWS * 0.001);
+        uint3 voxelCoord = min((uint3)(localPosition / voxelSizeWS), volumeSize - 1u);
+        uint3 parentCoord = voxelCoord >> 4u;
+        uint3 leafCoord = voxelCoord >> 2u;
+        uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+        bool rootOccupied = BurtGISceneVoxelOctreeMaskContains(
+            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            rootBit);
+        uint levelScale = 16u;
+        bool occupied = rootOccupied;
+        if (occupied)
+        {
+            uint3 parentChild = leafCoord & 3u;
+            uint parentBit = parentChild.x + parentChild.y * 4u + parentChild.z * 16u;
+            occupied = BurtGISceneVoxelOctreeMaskContains(
+                _BurtGISceneVoxelOctreeParentLowTexture[parentCoord],
+                _BurtGISceneVoxelOctreeParentHighTexture[parentCoord],
+                parentBit);
+            levelScale = occupied ? 4u : 4u;
+        }
+        if (occupied)
+        {
+            uint3 leafChild = voxelCoord & 3u;
+            uint leafBit = leafChild.x + leafChild.y * 4u + leafChild.z * 16u;
+            occupied = BurtGISceneVoxelOctreeMaskContains(
+                _BurtGISceneVoxelOctreeLeafLowTexture[leafCoord],
+                _BurtGISceneVoxelOctreeLeafHighTexture[leafCoord],
+                leafBit);
+            levelScale = 1u;
+        }
+        if (occupied)
+        {
+            hitDistance = traceDistance;
+            return true;
+        }
+
+        float cellSizeWS = voxelSizeWS * (float)levelScale;
+        float3 cellIndex = floor(localPosition / cellSizeWS);
+        float3 cellMin = boxMin + cellIndex * cellSizeWS;
+        float3 cellMax = cellMin + cellSizeWS;
+        float3 boundary = lerp(cellMin, cellMax, step(0.0, direction));
+        float3 safeDirection = sign(direction + 0.000001) * max(abs(direction), 0.000001);
+        float3 distanceToBoundary = (boundary - positionWS) / safeDirection;
+        distanceToBoundary = max(distanceToBoundary, voxelSizeWS * 0.001);
+        traceDistance += min(min(distanceToBoundary.x, distanceToBoundary.y), distanceToBoundary.z);
+    }
+
+    return false;
+}
+
+uint BurtGIResolveSceneVoxelClipmap(float3 samplePosition)
+{
+    float4 baseCenterExtent = _BurtGISceneVoxelCenterExtent;
+    if (all(abs(samplePosition - baseCenterExtent.xyz) <= baseCenterExtent.www))
+    {
+        return 0u;
+    }
+
+    if ((_BurtGISceneVoxelClipmapValidMask & 2u) != 0u &&
+        all(abs(samplePosition - _BurtGISceneVoxelClipmapCenterExtent[1].xyz) <= _BurtGISceneVoxelClipmapCenterExtent[1].www))
+    {
+        return 1u;
+    }
+
+    if ((_BurtGISceneVoxelClipmapValidMask & 4u) != 0u &&
+        all(abs(samplePosition - _BurtGISceneVoxelClipmapCenterExtent[2].xyz) <= _BurtGISceneVoxelClipmapCenterExtent[2].www))
+    {
+        return 2u;
+    }
+
+    if ((_BurtGISceneVoxelClipmapValidMask & 8u) != 0u &&
+        all(abs(samplePosition - _BurtGISceneVoxelClipmapCenterExtent[3].xyz) <= _BurtGISceneVoxelClipmapCenterExtent[3].www))
+    {
+        return 3u;
+    }
+
+    return 0u;
+}
+
+bool BurtGITrySampleSceneVoxelGeometryResource(
+    Texture3D<float4> geometryTexture,
+    float4 centerExtent,
+    float3 samplePosition,
+    float3 traceDirection,
+    out float3 normalWS,
+    out float occupancy,
+    out float normalFacingWeight)
+{
+    normalWS = float3(0.0, 1.0, 0.0);
+    occupancy = 0.0;
+    normalFacingWeight = 0.0;
+    uint width;
+    uint height;
+    uint depth;
+    geometryTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float3 uvw = (samplePosition - centerExtent.xyz) / max(centerExtent.w * 2.0, 0.001) + 0.5;
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return false;
+    }
+
+    uint3 voxelCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
+    float4 geometry = geometryTexture.Load(int4((int3)voxelCoord, 0));
+    occupancy = saturate(geometry.a);
+    float3 decodedNormal = geometry.rgb * 2.0 - 1.0;
+    float normalLengthSq = dot(decodedNormal, decodedNormal);
+    if (occupancy <= 0.001 || normalLengthSq <= 0.0001)
+    {
+        return false;
+    }
+
+    normalWS = decodedNormal * rsqrt(normalLengthSq);
+    normalFacingWeight = saturate(dot(normalWS, -normalize(traceDirection)) * 0.85 + 0.15);
+    return normalFacingWeight > 0.001;
+}
+
 bool BurtGITrySampleSceneVoxelGeometry(
     float3 samplePosition,
     float3 traceDirection,
@@ -1411,6 +1701,22 @@ bool BurtGITrySampleSceneVoxelGeometry(
     out float occupancy,
     out float normalFacingWeight)
 {
+    uint clipmapLevel = BurtGIResolveSceneVoxelClipmap(samplePosition);
+    if (clipmapLevel == 1u)
+    {
+        return BurtGITrySampleSceneVoxelGeometryResource(_BurtGISceneVoxelClipmap1GeometryReadTexture, _BurtGISceneVoxelClipmapCenterExtent[1], samplePosition, traceDirection, normalWS, occupancy, normalFacingWeight);
+    }
+
+    if (clipmapLevel == 2u)
+    {
+        return BurtGITrySampleSceneVoxelGeometryResource(_BurtGISceneVoxelClipmap2GeometryReadTexture, _BurtGISceneVoxelClipmapCenterExtent[2], samplePosition, traceDirection, normalWS, occupancy, normalFacingWeight);
+    }
+
+    if (clipmapLevel == 3u)
+    {
+        return BurtGITrySampleSceneVoxelGeometryResource(_BurtGISceneVoxelClipmap3GeometryReadTexture, _BurtGISceneVoxelClipmapCenterExtent[3], samplePosition, traceDirection, normalWS, occupancy, normalFacingWeight);
+    }
+
     normalWS = float3(0.0, 1.0, 0.0);
     occupancy = 0.0;
     normalFacingWeight = 0.0;
@@ -1446,9 +1752,61 @@ bool BurtGITrySampleSceneVoxelGeometry(
     return normalFacingWeight > 0.001;
 }
 
+bool BurtGITrySampleSceneVoxelOccupancyMipResource(
+    Texture3D<float4> occupancyTexture,
+    float4 centerExtent,
+    float3 samplePosition,
+    float sampleRadius,
+    out float occupancy)
+{
+    occupancy = 0.0;
+    uint width;
+    uint height;
+    uint depth;
+    occupancyTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float3 uvw = (samplePosition - centerExtent.xyz) / max(centerExtent.w * 2.0, 0.001) + 0.5;
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return false;
+    }
+
+    float voxelSizeWS = max(centerExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
+    uint mipLevel = (uint)clamp(
+        floor(log2(max(sampleRadius, voxelSizeWS) / voxelSizeWS)),
+        0.0,
+        (float)(BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT - 1u));
+    uint3 mipSize = max(volumeSize >> mipLevel, uint3(1u, 1u, 1u));
+    uint3 mipCoord = min((uint3)(uvw * (float3)mipSize), mipSize - 1u);
+    float4 occupancyMip = occupancyTexture.Load(int4((int3)mipCoord, (int)mipLevel));
+    occupancy = saturate(max(occupancyMip.x, occupancyMip.y));
+    return occupancy > 0.001;
+}
+
 bool BurtGITrySampleSceneVoxelOccupancyMip(float3 samplePosition, float sampleRadius, out float occupancy)
 {
     occupancy = 0.0;
+
+    uint clipmapLevel = BurtGIResolveSceneVoxelClipmap(samplePosition);
+    if (clipmapLevel == 1u)
+    {
+        return BurtGITrySampleSceneVoxelOccupancyMipResource(_BurtGISceneVoxelClipmap1OccupancyMipReadTexture, _BurtGISceneVoxelClipmapCenterExtent[1], samplePosition, sampleRadius, occupancy);
+    }
+
+    if (clipmapLevel == 2u)
+    {
+        return BurtGITrySampleSceneVoxelOccupancyMipResource(_BurtGISceneVoxelClipmap2OccupancyMipReadTexture, _BurtGISceneVoxelClipmapCenterExtent[2], samplePosition, sampleRadius, occupancy);
+    }
+
+    if (clipmapLevel == 3u)
+    {
+        return BurtGITrySampleSceneVoxelOccupancyMipResource(_BurtGISceneVoxelClipmap3OccupancyMipReadTexture, _BurtGISceneVoxelClipmapCenterExtent[3], samplePosition, sampleRadius, occupancy);
+    }
+
+    if (!BurtGISceneVoxelOctreeMayContain(samplePosition))
+    {
+        return false;
+    }
 
     uint width;
     uint height;
@@ -1477,6 +1835,23 @@ bool BurtGITrySampleSceneVoxelOccupancyMip(float3 samplePosition, float sampleRa
 
 float BurtGITraceSceneVoxelDirectionalVisibility(float3 worldPosition, float3 direction, float maxDistance)
 {
+    float4 octreeCenterExtent = _BurtGISceneVoxelCenterExtent;
+    float octreeVoxelSizeWS = max(octreeCenterExtent.w / 32.0, 0.001);
+    float3 octreeDirection = normalize(direction);
+    float octreeHitDistance;
+    if (BurtGIRayTraceSceneVoxelOctree(
+            worldPosition + octreeDirection * (octreeVoxelSizeWS * 1.5),
+            octreeDirection,
+            max(maxDistance - octreeVoxelSizeWS * 1.5, 0.0),
+            octreeHitDistance))
+    {
+        return 0.0;
+    }
+    if (_BurtGISceneVoxelOctreeValid > 0.5)
+    {
+        return 1.0;
+    }
+
     uint width;
     uint height;
     uint depth;
@@ -1508,6 +1883,48 @@ float BurtGITraceSceneVoxelDirectionalVisibility(float3 worldPosition, float3 di
     return saturate(transmittance);
 }
 
+bool BurtGITrySampleSceneVoxelRadianceResource(
+    Texture3D<float4> radianceTexture,
+    Texture3D<float4> lightingTexture,
+    float4 centerExtent,
+    float3 samplePosition,
+    float sampleRadius,
+    out float3 radiance,
+    out float confidence)
+{
+    radiance = 0.0;
+    confidence = 0.0;
+    uint width;
+    uint height;
+    uint depth;
+    radianceTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float3 uvw = (samplePosition - centerExtent.xyz) / max(centerExtent.w * 2.0, 0.001) + 0.5;
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return false;
+    }
+
+    uint3 voxelCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
+    float4 voxelRadiance = radianceTexture.Load(int4((int3)voxelCoord, 0));
+    float4 voxelLighting = lightingTexture.Load(int4((int3)voxelCoord, 0));
+    if (voxelLighting.a > 0.001 && dot(voxelLighting.rgb, voxelLighting.rgb) > 0.0)
+    {
+        voxelRadiance = voxelLighting;
+    }
+
+    confidence = saturate(voxelRadiance.a);
+    if (confidence <= 0.001 || dot(voxelRadiance.rgb, voxelRadiance.rgb) <= 0.0)
+    {
+        return false;
+    }
+
+    float voxelSizeWS = max(centerExtent.w * 2.0 / (float)max(volumeSize.x, 1u), 0.001);
+    confidence *= lerp(0.5, 1.0, saturate(voxelSizeWS / max(voxelSizeWS, sampleRadius)));
+    radiance = max(voxelRadiance.rgb, 0.0);
+    return true;
+}
+
 bool BurtGITrySampleSceneVoxelRadiance(
     float3 samplePosition,
     float sampleRadius,
@@ -1516,6 +1933,22 @@ bool BurtGITrySampleSceneVoxelRadiance(
 {
     radiance = 0.0;
     confidence = 0.0;
+
+    uint clipmapLevel = BurtGIResolveSceneVoxelClipmap(samplePosition);
+    if (clipmapLevel == 1u)
+    {
+        return BurtGITrySampleSceneVoxelRadianceResource(_BurtGISceneVoxelClipmap1RadianceReadTexture, _BurtGISceneVoxelClipmap1LightingReadTexture, _BurtGISceneVoxelClipmapCenterExtent[1], samplePosition, sampleRadius, radiance, confidence);
+    }
+
+    if (clipmapLevel == 2u)
+    {
+        return BurtGITrySampleSceneVoxelRadianceResource(_BurtGISceneVoxelClipmap2RadianceReadTexture, _BurtGISceneVoxelClipmap2LightingReadTexture, _BurtGISceneVoxelClipmapCenterExtent[2], samplePosition, sampleRadius, radiance, confidence);
+    }
+
+    if (clipmapLevel == 3u)
+    {
+        return BurtGITrySampleSceneVoxelRadianceResource(_BurtGISceneVoxelClipmap3RadianceReadTexture, _BurtGISceneVoxelClipmap3LightingReadTexture, _BurtGISceneVoxelClipmapCenterExtent[3], samplePosition, sampleRadius, radiance, confidence);
+    }
 
     uint width;
     uint height;
@@ -1580,8 +2013,9 @@ bool BurtGITrySampleSceneVoxelConeTrace(
     float traceRange = max(maxTraceDistance - minTraceDistance, 0.001);
     float traceDistance = minTraceDistance;
 
+    uint maxTraceSteps = min((uint)max(_BurtGISceneVoxelTraceControls.x, 1.0), 64u);
     [loop]
-    for (uint stepIndex = 0u; stepIndex < 16u; ++stepIndex)
+    for (uint stepIndex = 0u; stepIndex < maxTraceSteps; ++stepIndex)
     {
         if (traceDistance >= maxTraceDistance)
         {
@@ -1589,7 +2023,7 @@ bool BurtGITrySampleSceneVoxelConeTrace(
         }
 
         float sampleRadius = max(minSampleRadius, traceDistance * tanConeHalfAngle);
-        float stepLength = max(voxelSizeWS, sampleRadius * max(stepFactor, 0.25));
+        float stepLength = max(voxelSizeWS, sampleRadius * max(stepFactor * max(_BurtGISceneVoxelTraceControls.y, 0.1), 0.25));
         float sampleDistance = min(traceDistance + stepLength * 0.5, maxTraceDistance);
         float stepFraction = saturate((sampleDistance - minTraceDistance) / traceRange);
         float3 samplePosition = probeWorldCenter + direction * sampleDistance;
@@ -1863,7 +2297,8 @@ void SceneVoxelVoxelizeTrianglesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float edgeLength20 = length(triangle.Position0 - triangle.Position2);
     uint sampleResolution = (uint)clamp(ceil(max(edgeLength01, max(edgeLength12, edgeLength20)) / voxelSizeWS), 1.0, 16.0);
     float3 normalWS = normalize(triangle.Normal);
-    float3 radiance = max(triangle.Radiance, 0.0);
+    float3 baseColorBoosted = min(saturate(pow(max(triangle.Albedo, 0.0), _BurtGISceneVoxelLightingParams.x)), 0.99);
+    float3 radiance = baseColorBoosted * 0.12 + max(triangle.Emission, 0.0);
 
     [loop]
     for (uint sampleY = 0u; sampleY <= sampleResolution; ++sampleY)
@@ -2038,6 +2473,82 @@ float3 BurtGISceneVoxelEvaluateAdditionalLights(float3 worldPosition, float3 nor
     return lighting;
 }
 
+uint BurtGISceneVoxelResolveXGILightGridLevel(float3 worldPosition)
+{
+    [unroll]
+    for (uint level = 0u; level < 4u; ++level)
+    {
+        if (all(worldPosition >= _BurtGIXGILightGridBoundMin[level].xyz) && all(worldPosition <= _BurtGIXGILightGridBoundMax[level].xyz))
+        {
+            return level;
+        }
+    }
+
+    return 0u;
+}
+
+uint BurtGISceneVoxelResolveXGILightGridCell(float3 worldPosition, uint level)
+{
+    uint resolution = max(1u, _BurtGIXGILightGridResolution);
+    float3 boundMin = _BurtGIXGILightGridBoundMin[level].xyz;
+    float3 boundSize = max(_BurtGIXGILightGridBoundMax[level].xyz - boundMin, 0.0001);
+    float3 normalizedPosition = saturate((worldPosition - boundMin) / boundSize);
+    uint axis = min((uint)max(_BurtGIXGILightGridAxis[level].x, 0.0), 2u);
+    uint2 coord = axis == 0u
+        ? min((uint2)floor(normalizedPosition.yz * resolution), resolution - 1u)
+        : axis == 1u
+            ? min((uint2)floor(normalizedPosition.xz * resolution), resolution - 1u)
+            : min((uint2)floor(normalizedPosition.xy * resolution), resolution - 1u);
+    return level * resolution * resolution + coord.x + coord.y * resolution;
+}
+
+float3 BurtGISceneVoxelEvaluateXGILightGrid(float3 worldPosition, float3 normalWS)
+{
+    if (_BurtGIXGILightGridValid == 0u)
+    {
+        return BurtGISceneVoxelEvaluateAdditionalLights(worldPosition, normalWS);
+    }
+
+    uint level = BurtGISceneVoxelResolveXGILightGridLevel(worldPosition);
+    uint cellIndex = BurtGISceneVoxelResolveXGILightGridCell(worldPosition, level);
+    uint lightCount = min(_BurtGIXGILightGridCount[cellIndex], _BurtGIXGILightGridMaxLights);
+    float3 lighting = 0.0;
+    [loop]
+    for (uint listIndex = 0u; listIndex < lightCount; ++listIndex)
+    {
+        uint lightIndex = _BurtGIXGILightGridList[cellIndex * _BurtGIXGILightGridMaxLights + listIndex];
+        uint lightDataIndex = lightIndex * 4u;
+        float4 positionAndRange = _BurtGIXGILightData[lightDataIndex];
+        float4 colorAndType = _BurtGIXGILightData[lightDataIndex + 1u];
+        float3 lightDirection = _BurtGIXGILightData[lightDataIndex + 2u].xyz;
+        float attenuation = 1.0;
+
+        if (colorAndType.w >= 0.5)
+        {
+            float3 toLight = positionAndRange.xyz - worldPosition;
+            float distanceToLight = length(toLight);
+            float lightRange = max(positionAndRange.w, 0.001);
+            if (distanceToLight >= lightRange)
+            {
+                continue;
+            }
+
+            lightDirection = toLight / max(distanceToLight, 0.0001);
+            float rangeAttenuation = saturate(1.0 - distanceToLight / lightRange);
+            attenuation = rangeAttenuation * rangeAttenuation;
+            if (colorAndType.w > 1.5)
+            {
+                float4 spotParams = _BurtGIXGILightData[lightDataIndex + 3u];
+                attenuation *= saturate((dot(normalize(_BurtGIXGILightData[lightDataIndex + 2u].xyz), -lightDirection) - spotParams.y) * spotParams.z);
+            }
+        }
+
+        lighting += max(colorAndType.rgb, 0.0) * (saturate(dot(normalWS, normalize(lightDirection))) * attenuation);
+    }
+
+    return lighting;
+}
+
 [numthreads(BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE)]
 void SceneVoxelBuildLightingLiteCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -2087,13 +2598,182 @@ void SceneVoxelBuildLightingLiteCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float mainLightNdotL = saturate(dot(normalWS, mainLightDirection));
     float mainLightVisibility = BurtGITraceSceneVoxelDirectionalVisibility(worldPosition, mainLightDirection, traceDistance);
     float3 mainLightRadiance = max(_BurtGIMainLightColor.rgb, 0.0) * (mainLightNdotL * mainLightVisibility);
-    float3 additionalLightRadiance = BurtGISceneVoxelEvaluateAdditionalLights(worldPosition, normalWS);
-    float3 lighting = max(radiance.rgb, 0.0) * (normalBoost + mainLightRadiance + additionalLightRadiance) + skyTint * radiance.a;
+    float3 additionalLightRadiance = BurtGISceneVoxelEvaluateXGILightGrid(worldPosition, normalWS);
+    float3 directLighting = (normalBoost.xxx + mainLightRadiance + additionalLightRadiance) *
+        (max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.z, 0.0));
+    float3 indirectLighting = skyTint * (max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.w, 0.0));
+    float3 lighting = max(radiance.rgb, 0.0) * directLighting + indirectLighting * radiance.a;
+
+    float grey = dot(lighting, float3(0.299, 0.587, 0.114));
+    float3 adjustedLighting = lerp(grey.xxx, lighting, saturate(_BurtGISceneVoxelLightingParams.y));
+    lighting = lighting.g > (lighting.b + lighting.r) * 0.6 ? adjustedLighting : lighting;
 
     float luminance = dot(lighting, float3(0.2126, 0.7152, 0.0722));
     lighting = lerp(lighting, luminance.xxx, saturate(coarseOccupancy * 0.18));
     lighting = max(lighting, 0.0);
     _BurtGISceneVoxelLightingTexture[dispatchThreadId] = float4(lighting, saturate(radiance.a * occupancy));
+}
+
+void BurtGISetOctreeMaskBit(uint bitIndex, inout uint lowMask, inout uint highMask)
+{
+    if (bitIndex < 32u)
+    {
+        lowMask |= 1u << bitIndex;
+    }
+    else
+    {
+        highMask |= 1u << (bitIndex - 32u);
+    }
+}
+
+bool BurtGIOctreeNodeOccupied(uint lowMask, uint highMask)
+{
+    return lowMask != 0u || highMask != 0u;
+}
+
+[numthreads(1, 1, 1)]
+void SceneVoxelBuildOctreeLeafCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint leafWidth;
+    uint leafHeight;
+    uint leafDepth;
+    _BurtGISceneVoxelOctreeLeafLowTexture.GetDimensions(leafWidth, leafHeight, leafDepth);
+    if (any(dispatchThreadId >= uint3(leafWidth, leafHeight, leafDepth)))
+    {
+        return;
+    }
+
+    uint geometryWidth;
+    uint geometryHeight;
+    uint geometryDepth;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(geometryWidth, geometryHeight, geometryDepth);
+    uint3 geometrySize = max(uint3(geometryWidth, geometryHeight, geometryDepth), uint3(1u, 1u, 1u));
+    uint3 baseCoord = dispatchThreadId * 4u;
+    uint lowMask = 0u;
+    uint highMask = 0u;
+    [unroll]
+    for (uint z = 0u; z < 4u; ++z)
+    {
+        [unroll]
+        for (uint y = 0u; y < 4u; ++y)
+        {
+            [unroll]
+            for (uint x = 0u; x < 4u; ++x)
+            {
+                uint3 voxelCoord = baseCoord + uint3(x, y, z);
+                if (any(voxelCoord >= geometrySize))
+                {
+                    continue;
+                }
+
+                float occupancy = saturate(_BurtGISceneVoxelGeometryReadTexture.Load(int4(voxelCoord, 0)).a);
+                if (occupancy > 0.001)
+                {
+                    BurtGISetOctreeMaskBit(x + y * 4u + z * 16u, lowMask, highMask);
+                }
+            }
+        }
+    }
+
+    _BurtGISceneVoxelOctreeLeafLowTexture[dispatchThreadId] = lowMask;
+    _BurtGISceneVoxelOctreeLeafHighTexture[dispatchThreadId] = highMask;
+}
+
+[numthreads(1, 1, 1)]
+void SceneVoxelBuildOctreeParentCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint parentWidth;
+    uint parentHeight;
+    uint parentDepth;
+    _BurtGISceneVoxelOctreeParentLowTexture.GetDimensions(parentWidth, parentHeight, parentDepth);
+    if (any(dispatchThreadId >= uint3(parentWidth, parentHeight, parentDepth)))
+    {
+        return;
+    }
+
+    uint leafWidth;
+    uint leafHeight;
+    uint leafDepth;
+    _BurtGISceneVoxelOctreeLeafLowTexture.GetDimensions(leafWidth, leafHeight, leafDepth);
+    uint3 leafSize = uint3(leafWidth, leafHeight, leafDepth);
+    uint3 baseCoord = dispatchThreadId * 4u;
+    uint lowMask = 0u;
+    uint highMask = 0u;
+    [unroll]
+    for (uint z = 0u; z < 4u; ++z)
+    {
+        [unroll]
+        for (uint y = 0u; y < 4u; ++y)
+        {
+            [unroll]
+            for (uint x = 0u; x < 4u; ++x)
+            {
+                uint3 childCoord = baseCoord + uint3(x, y, z);
+                if (any(childCoord >= leafSize))
+                {
+                    continue;
+                }
+
+                uint low = _BurtGISceneVoxelOctreeLeafLowTexture[childCoord];
+                uint high = _BurtGISceneVoxelOctreeLeafHighTexture[childCoord];
+                if (BurtGIOctreeNodeOccupied(low, high))
+                {
+                    BurtGISetOctreeMaskBit(x + y * 4u + z * 16u, lowMask, highMask);
+                }
+            }
+        }
+    }
+
+    _BurtGISceneVoxelOctreeParentLowTexture[dispatchThreadId] = lowMask;
+    _BurtGISceneVoxelOctreeParentHighTexture[dispatchThreadId] = highMask;
+}
+
+[numthreads(1, 1, 1)]
+void SceneVoxelBuildOctreeRootCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint rootWidth;
+    uint rootHeight;
+    uint rootDepth;
+    _BurtGISceneVoxelOctreeRootLowTexture.GetDimensions(rootWidth, rootHeight, rootDepth);
+    if (any(dispatchThreadId >= uint3(rootWidth, rootHeight, rootDepth)))
+    {
+        return;
+    }
+
+    uint parentWidth;
+    uint parentHeight;
+    uint parentDepth;
+    _BurtGISceneVoxelOctreeParentLowTexture.GetDimensions(parentWidth, parentHeight, parentDepth);
+    uint3 parentSize = uint3(parentWidth, parentHeight, parentDepth);
+    uint lowMask = 0u;
+    uint highMask = 0u;
+    [unroll]
+    for (uint z = 0u; z < 4u; ++z)
+    {
+        [unroll]
+        for (uint y = 0u; y < 4u; ++y)
+        {
+            [unroll]
+            for (uint x = 0u; x < 4u; ++x)
+            {
+                uint3 childCoord = uint3(x, y, z);
+                if (any(childCoord >= parentSize))
+                {
+                    continue;
+                }
+
+                uint low = _BurtGISceneVoxelOctreeParentLowTexture[childCoord];
+                uint high = _BurtGISceneVoxelOctreeParentHighTexture[childCoord];
+                if (BurtGIOctreeNodeOccupied(low, high))
+                {
+                    BurtGISetOctreeMaskBit(x + y * 4u + z * 16u, lowMask, highMask);
+                }
+            }
+        }
+    }
+
+    _BurtGISceneVoxelOctreeRootLowTexture[dispatchThreadId] = lowMask;
+    _BurtGISceneVoxelOctreeRootHighTexture[dispatchThreadId] = highMask;
 }
 
 [numthreads(BURT_GI_HASH_GRID_PREPARE_THREADGROUP_SIZE, 1, 1)]
@@ -2996,22 +3676,22 @@ void GenerateProbeTraceTilesCS(
     uint threadIndex = groupThreadId.y * BURT_GI_TRACE_TILE_THREADGROUP_SIZE + groupThreadId.x;
     float3 probeWorldCenter = BurtGIGetProbeTraceWorldCenter(probeTraceIndex);
     uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
-    uint baseTileResolution = max(1u, _BurtGIRadianceCacheClipMapFallbackTraceTileResolution / 2u);
+    uint baseTileResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution / (uint)BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2u);
     uint maxTileResolution = max(baseTileResolution, _BurtGIRadianceCacheClipMapFallbackTraceTileResolution * 2u);
     uint maxLevels = maxTileResolution >= baseTileResolution * 4u ? 3u : (maxTileResolution >= baseTileResolution * 2u ? 2u : 1u);
     uint traceCost = min(_BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer[0], _BurtGIRadianceCacheClipMapMaxProbeCount);
     uint traceBudget = max(1u, _BurtGIRadianceCacheClipMapNumProbesToTraceBudget);
     uint levelCount = BurtGIResolveTraceTileLevelCount(probeWorldCenter, maxLevels);
 
-    if (traceCost > traceBudget * 2u)
-    {
-        levelCount = 1u;
-    }
-
     if (_BurtGIRadianceCacheClipMapForcedUniformTraceTileLevel >= 0)
     {
         BurtGIQueueUniformProbeTraceTiles(threadIndex, baseTileResolution, levelCount - 1u, probeTraceIndex);
         return;
+    }
+
+    if (traceCost > traceBudget * 2u)
+    {
+        levelCount = 1u;
     }
 
     if (threadIndex == 0u)
@@ -3160,32 +3840,7 @@ void ComputeProbeWorldOffsetsLiteCS(
         return;
     }
 
-    uint clipmapIndex = min(BurtGIGetClipmapIndexFromTraceData(probeTraceIndex), BurtGIClipmapCount() - 1u);
-    uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
-    uint2 rawBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution);
-    float clipmapCellSize = max(_BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[clipmapIndex].w, 0.001);
-    float tooCloseThreshold = max(0.05 * clipmapCellSize, 0.01);
-
-    float nearestDepth = 1.0e20;
-    uint2 centerCoord = uint2(radianceProbeResolution >> 1u, radianceProbeResolution >> 1u);
-    uint2 nearestCoord = centerCoord;
-    BurtGISelectNearestValidProbeDepth(rawBaseCoord, centerCoord, nearestDepth, nearestCoord);
-    BurtGISelectNearestValidProbeDepth(rawBaseCoord, uint2(min(centerCoord.x + 1u, radianceProbeResolution - 1u), centerCoord.y), nearestDepth, nearestCoord);
-    BurtGISelectNearestValidProbeDepth(rawBaseCoord, uint2(centerCoord.x > 0u ? centerCoord.x - 1u : 0u, centerCoord.y), nearestDepth, nearestCoord);
-    BurtGISelectNearestValidProbeDepth(rawBaseCoord, uint2(centerCoord.x, min(centerCoord.y + 1u, radianceProbeResolution - 1u)), nearestDepth, nearestCoord);
-    BurtGISelectNearestValidProbeDepth(rawBaseCoord, uint2(centerCoord.x, centerCoord.y > 0u ? centerCoord.y - 1u : 0u), nearestDepth, nearestCoord);
-
-    float offsetStrength = saturate((tooCloseThreshold - nearestDepth) / max(tooCloseThreshold, 0.0001));
-    if (offsetStrength <= 0.0 || nearestDepth >= 1.0e19)
-    {
-        _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex] = float4(0.0, 0.0, 0.0, 0.0);
-        return;
-    }
-
-    float2 probeUV = (float2(nearestCoord) + 0.5) / (float)radianceProbeResolution;
-    float3 pushDirection = -BurtGIEquiAreaSphericalMapping(probeUV);
-    float maxOffset = 0.25 * clipmapCellSize;
-    _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex] = float4(pushDirection * maxOffset * offsetStrength, 1.0);
+    _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex] = float4(0.0, 0.0, 0.0, 0.0);
 }
 
 [numthreads(BURT_GI_SORT_TRACE_TILES_THREADGROUP_SIZE, 1, 1)]
@@ -3288,19 +3943,20 @@ void TraceFromProbesCS(
 
         float hitDistance;
         float3 radiance = BurtGISampleRawScreenGI(probeIndex, direction, probeWorldCenter, hitDistance);
-        float3 sceneCacheRadiance;
-        float sceneCacheHitDistance;
-        float sceneCacheConfidence;
         uint clipmapIndex = min(BurtGIGetClipmapIndexFromTraceData(probeTraceIndex), BurtGIClipmapCount() - 1u);
         float clipmapProbeSpacing = max(_BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[clipmapIndex].w, 0.001);
         float hashGridCellSize = max(0.001, _BurtGIRadianceCacheHashGridParams0.x);
         float coneHalfAngle = acos(1.0 - rcp(max(1.0, (float)(traceResolution * traceResolution))));
         float minSampleRadius = max(0.05, min(clipmapProbeSpacing * 0.5, hashGridCellSize * 0.5));
-        float minTraceDistance = max(0.05, clipmapProbeSpacing * 0.25);
+        float probeTMin = max(_BurtGIRadianceCacheClipMapClipmapParams[clipmapIndex].y, 0.001);
+        float minTraceDistance = max(0.0001, probeTMin);
         float maxTraceDistance = max(_BurtGIScreenProbeTraceParams.w, minTraceDistance + clipmapProbeSpacing);
-        float3 sceneVoxelRadiance;
-        float sceneVoxelHitDistance;
-        float sceneVoxelConfidence;
+        float3 sceneCacheRadiance = 0.0;
+        float sceneCacheHitDistance = maxTraceDistance;
+        float sceneCacheConfidence = 0.0;
+        float3 sceneVoxelRadiance = 0.0;
+        float sceneVoxelHitDistance = maxTraceDistance;
+        float sceneVoxelConfidence = 0.0;
         if (BurtGITrySampleSceneVoxelConeTrace(
                 probeWorldCenter,
                 direction,
@@ -3334,6 +3990,13 @@ void TraceFromProbesCS(
             radiance = lerp(radiance, sceneCacheRadiance, sceneCacheBlend);
             hitDistance = lerp(hitDistance, min(hitDistance, sceneCacheHitDistance), sceneCacheBlend);
         }
+
+        float skyTraceEnabled = _BurtGIRadianceCacheClipMapSkyRadiance.w > 0.5 ? 1.0 : 0.0;
+        float sceneTraceConfidence = saturate(max(sceneVoxelConfidence, sceneCacheConfidence));
+        float skyMissWeight = skyTraceEnabled * saturate(1.0 - sceneTraceConfidence);
+        float3 skyRadiance = max(_BurtGIRadianceCacheClipMapSkyRadiance.rgb, 0.0);
+        radiance = lerp(radiance, max(radiance, skyRadiance), skyMissWeight * 0.5);
+        hitDistance = lerp(hitDistance, maxTraceDistance, skyMissWeight);
 
         BurtGISharedTraceRadiance[groupThreadId.y][groupThreadId.x] = radiance;
         BurtGISharedTraceHitDistance[groupThreadId.y][groupThreadId.x] = min(hitDistance, 65504.0);
@@ -3423,32 +4086,9 @@ void FilterProbeRadianceCS(
     uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
     uint clipmapIndex = min(BurtGIGetClipmapIndexFromTraceData(probeTraceIndex), BurtGIClipmapCount() - 1u);
     uint2 rawBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution);
-    uint finalProbeResolution = max(radianceProbeResolution, _BurtGIRadianceCacheClipMapFinalProbeResolution);
-    uint borderSize = max(0u, (finalProbeResolution - radianceProbeResolution) / 2u);
-    uint2 finalBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, finalProbeResolution);
 
     float centerDepth = _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(rawBaseCoord + probeTexelCoord, 0));
-    float3 radianceSum = 0.0;
-    float weightSum = 0.0;
-
-    [unroll(3)]
-    for (uint y = 0u; y < 3u; ++y)
-    {
-        [unroll(3)]
-        for (uint x = 0u; x < 3u; ++x)
-        {
-            int2 offset = int2((int)x - 1, (int)y - 1);
-            uint2 sampleCoord = BurtGIWrapRawProbeTexel((int2)probeTexelCoord + offset);
-            float sampleDepth = _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(rawBaseCoord + sampleCoord, 0));
-            float depthWeight = 1.0 / (1.0 + abs(sampleDepth - centerDepth));
-            float kernelWeight = offset.x == 0 && offset.y == 0 ? 1.0 : 0.5;
-            float weight = depthWeight * kernelWeight;
-            radianceSum += _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(int3(rawBaseCoord + sampleCoord, 0)).rgb * weight;
-            weightSum += weight;
-        }
-    }
-
-    float3 lighting = radianceSum / max(weightSum, 0.0001);
+    float3 lighting = _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(int3(rawBaseCoord + probeTexelCoord, 0)).rgb;
     float totalWeight = 1.0;
     uint3 probeCoordUint;
     if (BurtGIWorldPositionToProbeCoordInClipmap(probeWorldCenter, clipmapIndex, probeCoordUint))
@@ -3466,9 +4106,8 @@ void FilterProbeRadianceCS(
 
         float2 probeUV = (float2(probeTexelCoord) + 0.5) / (float)radianceProbeResolution;
         float3 worldConeDirection = BurtGIEquiAreaSphericalMapping(probeUV);
-        float probeSpacing = max(_BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[clipmapIndex].w, 0.001);
-        float occlusionTestOffset = 0.5 * probeSpacing;
-        float spatialFilterMaxRadianceHitAngle = 0.35;
+        float occlusionTestOffset = 2.0 * max(_BurtGIRadianceCacheClipMapClipmapParams[clipmapIndex].y, 0.001);
+        float spatialFilterMaxRadianceHitAngle = 0.2;
 
         [unroll]
         for (uint neighborOffsetIndex = 0u; neighborOffsetIndex < 6u; ++neighborOffsetIndex)
@@ -3512,7 +4151,10 @@ void FilterProbeRadianceCS(
                 occlusionWeight = 0.0;
             }
 
-            neighborRadianceDepth = min(neighborRadianceDepth, centerDepth);
+            if (centerDepth >= 0.0)
+            {
+                neighborRadianceDepth = min(neighborRadianceDepth, centerDepth);
+            }
             float3 neighborHitPosition = neighborWorldPosition + worldConeDirection * neighborRadianceDepth;
             float3 toNeighborHit = neighborHitPosition - probeWorldCenter;
             float toNeighborHitLengthSq = max(dot(toNeighborHit, toNeighborHit), 0.0001);
@@ -3525,7 +4167,7 @@ void FilterProbeRadianceCS(
         }
     }
 
-    _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture[finalBaseCoord + probeTexelCoord + borderSize] =
+    _BurtGIRadianceCacheClipMapRadianceProbeAtlasTexture[rawBaseCoord + probeTexelCoord] =
         float4(lighting / max(totalWeight, 0.0001), 1.0);
 }
 
@@ -3539,23 +4181,30 @@ void CalculateProbeIrradianceCS(
         return;
     }
 
-    uint2 probeTexelCoord = dispatchThreadId.xy;
     uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
-    if (probeTexelCoord.x >= radianceProbeResolution || probeTexelCoord.y >= radianceProbeResolution)
+    uint finalIrradianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution);
+    uint2 finalProbeTexelCoord = dispatchThreadId.xy;
+    if (finalProbeTexelCoord.x >= finalIrradianceProbeResolution || finalProbeTexelCoord.y >= finalIrradianceProbeResolution)
     {
         return;
     }
 
     uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
     uint2 rawBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution);
-    uint finalProbeResolution = max(radianceProbeResolution, _BurtGIRadianceCacheClipMapFinalProbeResolution);
-    uint borderSize = max(0u, (finalProbeResolution - radianceProbeResolution) / 2u);
-    uint2 finalBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, finalProbeResolution);
-    uint2 finalCoord = finalBaseCoord + probeTexelCoord + borderSize;
+    uint2 finalBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, finalIrradianceProbeResolution);
+    uint2 finalCoord = finalBaseCoord + finalProbeTexelCoord;
+    uint borderSize = max(0u, (max(radianceProbeResolution, _BurtGIRadianceCacheClipMapFinalProbeResolution) - radianceProbeResolution) / 2u);
+    uint irradianceProbeResolution = max(1u, finalIrradianceProbeResolution > 2u * borderSize ? finalIrradianceProbeResolution - 2u * borderSize : 1u);
+    uint2 probeTexelCoord = BurtGIWrapProbeTexelToRaw(finalProbeTexelCoord, finalIrradianceProbeResolution, irradianceProbeResolution);
 
-    float3 irradianceDirection = BurtGIEquiAreaSphericalMapping((float2(probeTexelCoord) + 0.5) / (float)radianceProbeResolution);
+    float3 irradianceDirection = BurtGIEquiAreaSphericalMapping((float2(probeTexelCoord) + 0.5) / (float)irradianceProbeResolution);
     float3 irradiance = 0.0;
     float totalWeight = 0.0;
+    float skyVisibility = 0.0;
+    float skyVisibilityWeight = 0.0;
+    float maxTraceDistance = max(_BurtGIScreenProbeTraceParams.w, 1.0);
+    uint downsampledProbeResolution = min(8u, radianceProbeResolution);
+    uint downsampleFactor = max(1u, radianceProbeResolution / max(downsampledProbeResolution, 1u));
 
     [unroll(8)]
     for (uint y = 0u; y < 8u; ++y)
@@ -3563,16 +4212,44 @@ void CalculateProbeIrradianceCS(
         [unroll(8)]
         for (uint x = 0u; x < 8u; ++x)
         {
-            uint2 sourceCoord = min(uint2(x, y) * 2u + 1u, uint2(radianceProbeResolution - 1u, radianceProbeResolution - 1u));
-            float3 radianceDirection = BurtGIEquiAreaSphericalMapping((float2(sourceCoord) + 0.5) / (float)radianceProbeResolution);
+            if (x >= downsampledProbeResolution || y >= downsampledProbeResolution)
+            {
+                continue;
+            }
+
+            float3 sourceRadiance = 0.0;
+            float sourceSkyVisibility = 0.0;
+            [loop]
+            for (uint yOffset = 0u; yOffset < downsampleFactor; ++yOffset)
+            {
+                [loop]
+                for (uint xOffset = 0u; xOffset < downsampleFactor; ++xOffset)
+                {
+                    uint2 sourceCoord = min(
+                        uint2(x, y) * downsampleFactor + uint2(xOffset, yOffset),
+                        uint2(radianceProbeResolution - 1u, radianceProbeResolution - 1u));
+                    sourceRadiance += _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(int3(rawBaseCoord + sourceCoord, 0)).rgb;
+                    float depth = _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(rawBaseCoord + sourceCoord, 0));
+                    sourceSkyVisibility += depth < maxTraceDistance ? 0.0 : 1.0;
+                }
+            }
+
+            float normalization = 1.0 / max((float)(downsampleFactor * downsampleFactor), 1.0);
+            sourceRadiance *= normalization;
+            sourceSkyVisibility *= normalization;
+
+            float3 radianceDirection = BurtGIEquiAreaSphericalMapping((float2(x, y) + 0.5) / (float)downsampledProbeResolution);
             float ndotl = max(dot(irradianceDirection, radianceDirection), 0.0);
-            irradiance += _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(int3(rawBaseCoord + sourceCoord, 0)).rgb * ndotl;
+            irradiance += sourceRadiance * ndotl;
+            skyVisibility += sourceSkyVisibility * ndotl;
             totalWeight += ndotl;
+            skyVisibilityWeight += ndotl;
         }
     }
 
     float3 lowFrequencyIrradiance = irradiance / max(totalWeight, 0.0001);
-    _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture[finalCoord] = float4(lowFrequencyIrradiance, 1.0);
+    _BurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture[finalCoord] = float4(lowFrequencyIrradiance, 1.0);
+    _BurtGIRadianceCacheClipMapProbeSkyAOAtlasTexture[finalCoord] = skyVisibility / max(skyVisibilityWeight, 0.0001);
 }
 
 [numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
@@ -3595,28 +4272,11 @@ void PrepareProbeOcclusionCS(
     uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
     uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
     uint2 rawBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution);
-    uint occlusionProbeResolution = min(radianceProbeResolution, max(1u, finalProbeResolution - 8u));
-    uint borderSize = max(0u, (finalProbeResolution - occlusionProbeResolution) / 2u);
+    uint borderSize = 1u << min(_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip, 8u);
+    uint occlusionProbeResolution = min(radianceProbeResolution, max(1u, finalProbeResolution > 2u * borderSize ? finalProbeResolution - 2u * borderSize : 1u));
     uint downsampleFactor = max(1u, radianceProbeResolution / max(occlusionProbeResolution, 1u));
 
-    int2 occlusionTexelCoord = (int2)finalProbeTexelCoord - (int)borderSize;
-    if (occlusionTexelCoord.x < 0)
-    {
-        occlusionTexelCoord.x = (int)occlusionProbeResolution - 1;
-    }
-    else if (occlusionTexelCoord.x >= (int)occlusionProbeResolution)
-    {
-        occlusionTexelCoord.x = 0;
-    }
-
-    if (occlusionTexelCoord.y < 0)
-    {
-        occlusionTexelCoord.y = (int)occlusionProbeResolution - 1;
-    }
-    else if (occlusionTexelCoord.y >= (int)occlusionProbeResolution)
-    {
-        occlusionTexelCoord.y = 0;
-    }
+    uint2 occlusionTexelCoord = BurtGIWrapProbeTexelToRaw(finalProbeTexelCoord, finalProbeResolution, occlusionProbeResolution);
 
     float accumulatedDepth = 0.0;
     float accumulatedDepthSq = 0.0;
@@ -3627,7 +4287,7 @@ void PrepareProbeOcclusionCS(
         [loop]
         for (uint xOffset = 0u; xOffset < downsampleFactor; ++xOffset)
         {
-            uint2 rawProbeTexelCoord = (uint2)occlusionTexelCoord * downsampleFactor + uint2(xOffset, yOffset);
+            uint2 rawProbeTexelCoord = occlusionTexelCoord * downsampleFactor + uint2(xOffset, yOffset);
             rawProbeTexelCoord = rawProbeTexelCoord % radianceProbeResolution;
             float depth = _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(rawBaseCoord + rawProbeTexelCoord, 0));
             accumulatedDepth += depth;
@@ -3662,54 +4322,50 @@ void FixupBorderAndGenerateMipsCS(
         return;
     }
 
-    uint borderSize = max(0u, (finalProbeResolution - radianceProbeResolution) / 2u);
-    bool isBorder = finalProbeTexelCoord.x < borderSize ||
-        finalProbeTexelCoord.y < borderSize ||
-        finalProbeTexelCoord.x >= borderSize + radianceProbeResolution ||
-        finalProbeTexelCoord.y >= borderSize + radianceProbeResolution;
-
     uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
     uint2 finalBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, finalProbeResolution);
     uint2 finalAtlasCoord = finalBaseCoord + finalProbeTexelCoord;
-    float3 lighting = _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture[finalAtlasCoord].rgb;
-
-    if (isBorder)
-    {
-        uint2 rawProbeTexelCoord = BurtGIWrapFinalProbeTexelToRaw(finalProbeTexelCoord);
-        lighting = _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(int3(BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution) + rawProbeTexelCoord, 0)).rgb;
-        _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture[finalAtlasCoord] = float4(lighting, 1.0);
-    }
+    uint2 rawProbeTexelCoord = BurtGIWrapFinalProbeTexelToRaw(finalProbeTexelCoord);
+    float3 lighting = _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(
+        int3(BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution) + rawProbeTexelCoord, 0)).rgb;
+    _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture[finalAtlasCoord] = float4(lighting, 1.0);
 
     BurtGIFinalRadianceMip0LDS[groupThreadId.y][groupThreadId.x] = lighting;
-    GroupMemoryBarrierWithGroupSync();
-
-    uint atlasResolutionInProbes = BurtGIProbeAtlasResolutionInProbes();
-    uint2 probeCoord = uint2(probeIndex % atlasResolutionInProbes, probeIndex / atlasResolutionInProbes);
-    uint mip1Resolution = max(1u, finalProbeResolution >> 1u);
-    uint2 mip1ProbeTexelCoord = groupThreadId.xy + (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2u) * groupId.xy;
-    if (all(groupThreadId.xy < (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2u)) && all(mip1ProbeTexelCoord < mip1Resolution))
+    if (_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip > 0u)
     {
-        float3 mip1Lighting = 0.0;
-        mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 0u];
-        mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 1u];
-        mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 0u];
-        mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 1u];
-        mip1Lighting *= 0.25;
-        BurtGIFinalRadianceMip1LDS[groupThreadId.y][groupThreadId.x] = mip1Lighting;
-        _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip1Texture[mip1ProbeTexelCoord + mip1Resolution * probeCoord] = float4(mip1Lighting, 1.0);
-    }
+        GroupMemoryBarrierWithGroupSync();
 
-    GroupMemoryBarrierWithGroupSync();
+        uint atlasResolutionInProbes = BurtGIProbeAtlasResolutionInProbes();
+        uint2 probeCoord = uint2(probeIndex % atlasResolutionInProbes, probeIndex / atlasResolutionInProbes);
+        uint mip1Resolution = max(1u, finalProbeResolution >> 1u);
+        uint2 mip1ProbeTexelCoord = groupThreadId.xy + (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2u) * groupId.xy;
+        if (all(groupThreadId.xy < (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2u)) && all(mip1ProbeTexelCoord < mip1Resolution))
+        {
+            float3 mip1Lighting = 0.0;
+            mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 0u];
+            mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 1u];
+            mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 0u];
+            mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 1u];
+            mip1Lighting *= 0.25;
+            BurtGIFinalRadianceMip1LDS[groupThreadId.y][groupThreadId.x] = mip1Lighting;
+            _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip1Texture[mip1ProbeTexelCoord + mip1Resolution * probeCoord] = float4(mip1Lighting, 1.0);
+        }
 
-    uint mip2Resolution = max(1u, finalProbeResolution >> 2u);
-    uint2 mip2ProbeTexelCoord = groupThreadId.xy + (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 4u) * groupId.xy;
-    if (all(groupThreadId.xy < (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 4u)) && all(mip2ProbeTexelCoord < mip2Resolution))
-    {
-        float3 mip2Lighting = 0.0;
-        mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 0u];
-        mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 1u];
-        mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 0u];
-        mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 1u];
-        _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip2Texture[mip2ProbeTexelCoord + mip2Resolution * probeCoord] = float4(mip2Lighting * 0.25, 1.0);
+        if (_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip > 1u)
+        {
+            GroupMemoryBarrierWithGroupSync();
+
+            uint mip2Resolution = max(1u, finalProbeResolution >> 2u);
+            uint2 mip2ProbeTexelCoord = groupThreadId.xy + (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 4u) * groupId.xy;
+            if (all(groupThreadId.xy < (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 4u)) && all(mip2ProbeTexelCoord < mip2Resolution))
+            {
+                float3 mip2Lighting = 0.0;
+                mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 0u];
+                mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 1u];
+                mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 0u];
+                mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 1u];
+                _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip2Texture[mip2ProbeTexelCoord + mip2Resolution * probeCoord] = float4(mip2Lighting * 0.25, 1.0);
+            }
+        }
     }
 }

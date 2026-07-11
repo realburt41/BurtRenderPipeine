@@ -1335,5 +1335,7 @@ float BurtSampleAdditionalLightShadow(int lightIndex, float3 positionWS, float3 
 
 #define BURT_ADDITIONAL_LIGHT_SHADOWS_INCLUDED 1
 
+#if defined(BURT_INCLUDE_SHADOW_DEBUG)
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadowsDebug.hlsl"
+#endif
 #endif // BURT_SHADOWS_INCLUDED

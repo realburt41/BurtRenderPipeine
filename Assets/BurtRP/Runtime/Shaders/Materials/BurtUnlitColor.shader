@@ -114,17 +114,49 @@ Shader "BurtRP/UnlitColor"
 
             // 声明片元 shader 函数名是 Frag。
             #pragma fragment Frag
+            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION
+
+            #if (defined(BURT_SHADING_DEBUG) || (defined(BURT_COMPILE_SHADING_DEBUG) && BURT_COMPILE_SHADING_DEBUG)) && !defined(BURT_ENABLE_SHADING_DEBUG)
             #define BURT_ENABLE_SHADING_DEBUG 1
+            #endif
+
+            #if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
+            #if !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING) && !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF) && !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW) && !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION)
+            #define BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL 1
+            #endif
+            #ifndef BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL
+            #define BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL 0
+            #endif
+            #if defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING)
+            #define BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING 1
+            #else
+            #define BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL
+            #endif
+            #if defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW)
+            #define BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW 1
+            #else
+            #define BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL
+            #endif
+            #if !BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
+            #define BURT_SHADING_DEBUG_INCLUDE_SHADOW 0
+            #define BURT_SHADING_DEBUG_INCLUDE_ADDITIONAL_LIGHTS 0
+            #endif
+            #endif
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
-#if defined(BURT_ENABLE_SHADING_DEBUG)
+#if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
             #define BURT_FORWARD_SINGLE_SHADING_MODEL 1
             #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
+            #if BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING || BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
+            #endif
+            #if BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING || BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
+            #endif
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
 #endif
 
@@ -172,22 +204,30 @@ Shader "BurtRP/UnlitColor"
             // 定义片元 shader 函数，输入插值后的顶点输出，返回屏幕像素颜色。
             float4 Frag(Varyings input) : SV_Target
             {
-#if defined(BURT_ENABLE_SHADING_DEBUG)
+#if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
                 if (BurtIsShadingDebugEnabled())
                 {
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
                 float3 normalWS = BurtSafeNormalize(input.NormalWS);
                 float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.PositionWS);
+#if BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING
                 BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.PositionWS, normalWS, _BurtPerObjectShadowObjectIndex));
                 BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.PositionWS);
+#endif
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
+#if BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
                 debugData.ShadowAttenuation = BurtSampleMainLightShadowWithoutPerObject(input.PositionWS, normalWS);
+#endif
+#if BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING
                 debugData.AdditionalDiffuseColor = pbrComponents.AdditionalDiffuse;
                 debugData.AdditionalSpecularColor = pbrComponents.AdditionalSpecular;
                 debugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
                     ? pbrComponents.AdditionalDiffuse + pbrComponents.AdditionalSpecular
                     : float3(0.0f, 0.0f, 0.0f);
+                debugData.FinalLightingColor = _BaseColor.rgb;
+#endif
+#if BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
                 debugData.AdditionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
                     ? BurtEvaluateAdditionalShadowAttenuationDebug(input.PositionWS, normalWS)
                     : 1.0f;
@@ -201,7 +241,6 @@ Shader "BurtRP/UnlitColor"
                         debugData.AdditionalShadowDepthColor,
                         debugData.AdditionalShadowDepthDeltaColor);
                 }
-                debugData.FinalLightingColor = _BaseColor.rgb;
 
                 BurtFillMainLightShadowShadingDebugData(
                     input.PositionWS,
@@ -228,6 +267,7 @@ Shader "BurtRP/UnlitColor"
                     debugData.PerObjectShadowCompareColor,
                     debugData.PerObjectShadowTransmissionDepthColor,
                     debugData.PerObjectShadowTransmissionThicknessColor);
+#endif
 
                 float3 debugColor;
                 if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))
@@ -268,17 +308,49 @@ Shader "BurtRP/UnlitColor"
 
             // 声明片元 shader 函数名是 FragForwardOnly。
             #pragma fragment FragForwardOnly
+            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION
+
+            #if (defined(BURT_SHADING_DEBUG) || (defined(BURT_COMPILE_SHADING_DEBUG) && BURT_COMPILE_SHADING_DEBUG)) && !defined(BURT_ENABLE_SHADING_DEBUG)
             #define BURT_ENABLE_SHADING_DEBUG 1
+            #endif
+
+            #if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
+            #if !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING) && !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF) && !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW) && !defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION)
+            #define BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL 1
+            #endif
+            #ifndef BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL
+            #define BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL 0
+            #endif
+            #if defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING)
+            #define BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING 1
+            #else
+            #define BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL
+            #endif
+            #if defined(BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW)
+            #define BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW 1
+            #else
+            #define BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW BURT_UNLIT_SHADING_DEBUG_CATEGORY_FULL
+            #endif
+            #if !BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
+            #define BURT_SHADING_DEBUG_INCLUDE_SHADOW 0
+            #define BURT_SHADING_DEBUG_INCLUDE_ADDITIONAL_LIGHTS 0
+            #endif
+            #endif
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
-#if defined(BURT_ENABLE_SHADING_DEBUG)
+#if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
             #define BURT_FORWARD_SINGLE_SHADING_MODEL 1
             #define BURT_MATERIAL_SHADING_MODEL_DEFAULT_LIT 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
+            #if BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING || BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
+            #endif
+            #if BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING || BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
+            #endif
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
 #endif
 
@@ -326,22 +398,30 @@ Shader "BurtRP/UnlitColor"
             // 定义 Deferred ForwardOnly 片元 shader 函数，输入插值后的顶点输出，返回屏幕像素颜色。
             float4 FragForwardOnly(ForwardOnlyVaryings input) : SV_Target
             {
-#if defined(BURT_ENABLE_SHADING_DEBUG)
+#if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
                 if (BurtIsShadingDebugEnabled())
                 {
                 BurtSurfaceData surfaceData = BurtCreateSurfaceData(_BaseColor);
                 float3 normalWS = BurtSafeNormalize(input.NormalWS);
                 float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - input.PositionWS);
+#if BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING
                 BurtLight mainLight = BurtCreateMainLight(BurtSampleMainLightShadow(input.PositionWS, normalWS, _BurtPerObjectShadowObjectIndex));
                 BurtPBRShadingComponents pbrComponents = BurtEvaluatePBRShadingComponents(surfaceData, mainLight, normalWS, viewDirectionWS, input.PositionWS);
+#endif
 
                 BurtShadingDebugData debugData = BurtCreateDefaultShadingDebugData(normalWS);
+#if BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
                 debugData.ShadowAttenuation = BurtSampleMainLightShadowWithoutPerObject(input.PositionWS, normalWS);
+#endif
+#if BURT_UNLIT_SHADING_DEBUG_FILL_LIGHTING
                 debugData.AdditionalDiffuseColor = pbrComponents.AdditionalDiffuse;
                 debugData.AdditionalSpecularColor = pbrComponents.AdditionalSpecular;
                 debugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
                     ? pbrComponents.AdditionalDiffuse + pbrComponents.AdditionalSpecular
                     : float3(0.0f, 0.0f, 0.0f);
+                debugData.FinalLightingColor = _BaseColor.rgb;
+#endif
+#if BURT_UNLIT_SHADING_DEBUG_FILL_SHADOW
                 debugData.AdditionalShadowAttenuation = BurtNeedsAdditionalShadowAttenuationShadingDebug()
                     ? BurtEvaluateAdditionalShadowAttenuationDebug(input.PositionWS, normalWS)
                     : 1.0f;
@@ -355,7 +435,6 @@ Shader "BurtRP/UnlitColor"
                         debugData.AdditionalShadowDepthColor,
                         debugData.AdditionalShadowDepthDeltaColor);
                 }
-                debugData.FinalLightingColor = _BaseColor.rgb;
 
                 BurtFillMainLightShadowShadingDebugData(
                     input.PositionWS,
@@ -382,6 +461,7 @@ Shader "BurtRP/UnlitColor"
                     debugData.PerObjectShadowCompareColor,
                     debugData.PerObjectShadowTransmissionDepthColor,
                     debugData.PerObjectShadowTransmissionThicknessColor);
+#endif
 
                 float3 debugColor;
                 if (BurtTryEvaluateMaterialShadingDebug(surfaceData, debugData, debugColor))

@@ -55,12 +55,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
 
 
-        private static readonly ShaderTagId[] EditorPreviewShaderTagIds = new ShaderTagId[] // Preview 需要兼容 Unity 内部预览 shader，不能只匹配 BurtForward。
+        private static readonly ShaderTagId[] EditorPreviewShaderTagIds = new ShaderTagId[] // Preview 只允许选择能输出最终颜色的 shading pass；GBuffer/DepthNormals 必须留在完整 Deferred 管线内部。
         {
             BurtForward, // BurtRP 自己的材质预览仍优先走正式前向 Pass。
             BurtForwardOnly, // 允许只实现 ForwardOnly 的 BurtRP 特殊材质在 Preview 中可见。
-            BurtGBuffer, // Foliage/Grass 不再提供 Forward pass，Preview 退到 GBuffer 保持可见。
-            BurtDepthNormals, // 没有 GBuffer 的深度法线材质仍可在 Preview 中兜底显示。
             SRPDefaultUnlit, // Unity/SRP 默认未标记 Pass 会落到这里，Inspector 预览大量使用它。
             ForwardBase, // Built-in 预览 shader 常见的前向 Pass 名称。
             Always, // Unity 内部预览 shader 常用 Always Pass。
@@ -132,7 +130,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         public static DrawingSettings CreateEditorPreviewDrawingSettings(SortingSettings sortingSettings) // 创建 Unity Editor Preview 专用绘制设置。
         {
-            var drawingSettings = new DrawingSettings(EditorPreviewShaderTagIds[0], sortingSettings); // Preview 首选 BurtForward，同时继续注册 Unity 内部预览 Pass。
+            var drawingSettings = new DrawingSettings(EditorPreviewShaderTagIds[0], sortingSettings); // Preview 首选 BurtForward，同时继续注册只会输出最终颜色的兼容 Pass。
 
             for (var shaderTagIndex = 1; shaderTagIndex < EditorPreviewShaderTagIds.Length; shaderTagIndex++) // 把兼容 LightMode 全部注册进 DrawingSettings。
             {

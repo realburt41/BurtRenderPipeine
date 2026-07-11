@@ -37,6 +37,14 @@ SamplerComparisonState sampler_LinearClampCompare;
 #define SamplerPointClampCompare sampler_PointClampCompare
 #define SamplerLinearClampCompare sampler_LinearClampCompare
 
+#ifndef BURT_PI
+#define BURT_PI (3.14159265359f)
+#endif
+
+#ifndef BURT_INV_PI
+#define BURT_INV_PI (0.31830988618f)
+#endif
+
 #ifndef SAMPLE_TEXTURE2D
     #define SAMPLE_TEXTURE2D(textureName, samplerName, coord2) textureName.Sample(samplerName, coord2)
 #endif

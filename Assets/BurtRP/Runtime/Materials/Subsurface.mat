@@ -20,9 +20,8 @@ Material:
   stringTagMap:
     RenderType: Opaque
   disabledShaderPasses:
-  - BurtForward
-  - BurtDepthOnly
   - BurtRefractionDistortion
+  - BurtDepthOnly
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -71,7 +70,7 @@ Material:
     - _SubsurfaceDistortion: 0.369
     - _SubsurfacePower: 1.52
     - _SubsurfaceProfileIndex: 0
-    - _SubsurfaceScatteringMode: 1
+    - _SubsurfaceScatteringMode: 2
     - _SubsurfaceThickness: 1
     - _Surface: 0
     - _ZTest: 4

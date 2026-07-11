@@ -5,8 +5,12 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelMacros.hlsl"
 
 // 定义圆周率，PBR 漫反射和 GGX 分布项都会使用它
+#ifndef BURT_PI
 #define BURT_PI (3.14159265359f)
+#endif
+#ifndef BURT_INV_PI
 #define BURT_INV_PI (0.31830988618f)
+#endif
 #define BURT_MIN_PERCEPTUAL_ROUGHNESS (0.045f)
 #define BURT_SPECULAR_AA_SCREEN_SPACE_VARIANCE (0.1f)
 #define BURT_SPECULAR_AA_THRESHOLD (0.2f)

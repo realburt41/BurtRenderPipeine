@@ -107,7 +107,7 @@ BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtGBufferData GBufferData
     BurtPBRGeometryData GeometryData = BurtPreparePBRGeometryData(GBufferData, ViewDirectionWS);
 
     BurtPBRShadingCoreData CoreData = BurtPreparePBRShadingCoreData(MaterialData, GeometryData);
-#if BURT_ENABLE_CLEAR_COAT_SHADING
+#if BURT_ENABLE_CLEAR_COAT_SHADING && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT))
     CoreData.ClearCoatNormalWS = BurtGetClearCoatNormalWS(GBufferData);
     CoreData.ClearCoatGeometryData = BurtPreparePBRGeometryData(CoreData.ClearCoatNormalWS, GBufferData.TangentWS, ViewDirectionWS);
     CoreData = BurtApplyClearCoatTopLayerCoreData(CoreData);

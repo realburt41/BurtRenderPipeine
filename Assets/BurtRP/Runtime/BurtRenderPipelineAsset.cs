@@ -60,6 +60,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
     [CreateAssetMenu(menuName = "Rendering/Burt Render Pipeline Asset", fileName = "BurtRenderPipelineAsset")] // 让 Unity 可以通过 Create 菜单创建 BurtRenderPipelineAsset。
     public sealed class BurtRenderPipelineAsset : RenderPipelineAsset // 定义 BurtRP 的管线资产，Unity Graphics Settings 会引用它来创建管线实例。
     {
+        private const string DefaultMaterialAssetPath = "Assets/BurtRP/Runtime/Materials/MI_StandardLit.mat";
+        private const string DefaultMaterialFallbackShaderName = "BurtRP/Lit";
+        private static Material cachedDefaultMaterial;
+
         [TitleGroup("Pipeline - 管线")] // 使用 Odin 给管线级配置建立独立分组，方便后续继续放 Renderer Mode、MSAA 等核心开关。
         [SerializeField] private BurtRendererMode rendererMode = BurtRendererMode.Forward; // 定义当前管线使用的渲染路径，默认 Forward，避免新增 Deferred 代码后改变现有画面。
 
@@ -160,6 +164,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [SerializeField] private bool enableRenderFrameDebugLog = false; // 定义是否输出 Frame/Stack 分组日志，默认关闭，避免每帧打印相机栈诊断。
 
         public Color ClearColor => clearColor; // 暴露默认清屏颜色给渲染 Pass 使用。
+
+        public override Material defaultMaterial // Unity 创建默认 3D 物体时查询的 SRP 默认材质。
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (cachedDefaultMaterial == null)
+                {
+                    cachedDefaultMaterial = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>(DefaultMaterialAssetPath);
+                }
+#endif
+                if (cachedDefaultMaterial == null)
+                {
+                    Shader shader = Shader.Find(DefaultMaterialFallbackShaderName);
+                    if (shader != null)
+                    {
+                        cachedDefaultMaterial = new Material(shader)
+                        {
+                            name = "BurtRP Default Material",
+                            hideFlags = HideFlags.HideAndDontSave
+                        };
+                    }
+                }
+
+                return cachedDefaultMaterial;
+            }
+        }
 
         public BurtRendererMode RendererMode => rendererMode; // 暴露当前渲染路径给 BurtRenderPipeline 和 RenderGraph 资源注册逻辑使用。
 

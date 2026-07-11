@@ -906,6 +906,12 @@ MonoBehaviour:
   screenProbeFixupBorders:
     m_OverrideState: 0
     m_Value: 1
+  finalGather:
+    m_OverrideState: 0
+    m_Value: 0
+  irradianceFieldStrength:
+    m_OverrideState: 0
+    m_Value: 1
   shortRangeAO:
     m_OverrideState: 0
     m_Value: 0
@@ -1010,7 +1016,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4d5f6b7a8c914f02a36e4d1b90c2a7e5, type: 3}
   m_Name: BurtScreenSpaceShadowVolumeComponent
   m_EditorClassIdentifier: 
-  active: 1
+  active: 0
   enabled:
     m_OverrideState: 1
     m_Value: 1

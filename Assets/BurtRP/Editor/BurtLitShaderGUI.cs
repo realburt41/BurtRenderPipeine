@@ -671,7 +671,7 @@ namespace Burt.RenderPipeline.Editor
                 string enabledPasses = transparent
                     ? "BurtForward"
                     : IsSubsurfaceShader(material)
-                        ? "BurtDepthNormals, BurtGBuffer, BurtSubsurfaceForward, ShadowCaster"
+                        ? "BurtDepthNormals, BurtGBuffer, BurtSubsurfaceForward, ShadowCaster, BurtForward"
                         : deferredOnlyMaterial
                             ? "BurtDepthNormals, BurtGBuffer, ShadowCaster"
                             : "BurtDepthOnly, BurtDepthNormals, BurtGBuffer, ShadowCaster, BurtForward";
@@ -681,6 +681,11 @@ namespace Burt.RenderPipeline.Editor
 
         private void DrawBaseInputs(Material material)
         {
+            if (IsInteriorMappingShader(material))
+            {
+                return;
+            }
+
             if (!BurtShaderGUIUtility.BeginSection(BaseInputsLabel, ref showBaseInputs))
             {
                 return;
@@ -722,14 +727,18 @@ namespace Burt.RenderPipeline.Editor
 
         private void DrawPbrInputs(Material material)
         {
+            if (IsInteriorMappingShader(material))
+            {
+                return;
+            }
+
             if (!BurtShaderGUIUtility.BeginSection(PbrMaskLabel, ref showPbrMaskInputs))
             {
                 return;
             }
 
             bool usesTrunk = IsTrunkShader(material);
-            bool usesInteriorMapping = IsInteriorMappingShader(material);
-            bool usesRoughness = IsFabricShader(material) || IsSilkShader(material) || usesTrunk || usesInteriorMapping;
+            bool usesRoughness = IsFabricShader(material) || IsSilkShader(material) || usesTrunk;
             bool usesFoliage = IsFoliageShader(material);
             bool usesGrass = IsGrassShader(material);
             bool usesTreeFoliage = usesFoliage && !IsGrassShader(material);
@@ -752,8 +761,6 @@ namespace Burt.RenderPipeline.Editor
                         ? "Channels: G Occlusion. Grass roughness, SSS, specular, and screen-space shadow use Grass parameters."
                     : usesFoliage
                         ? "Channels: G Occlusion | B Thickness | A Roughness. R Metallic is ignored by Foliage."
-                    : usesInteriorMapping
-                        ? "Channels: R Metallic | G Occlusion | B Reserved | A Roughness. InteriorMapping output metallic is fixed to 1.0 to match XRender."
                     : usesRoughness
                         ? "Channels: R Metallic | G Occlusion | B Reserved | A Roughness"
                         : "Channels: R Metallic | G Occlusion | B Reserved | A Smoothness");
@@ -763,10 +770,7 @@ namespace Burt.RenderPipeline.Editor
             {
                 BurtShaderGUIUtility.DrawSubHeader("Lit");
                 DrawProperty(metallic);
-                if (!usesInteriorMapping)
-                {
-                    DrawProperty(anisotropy);
-                }
+                DrawProperty(anisotropy);
             }
 
             if (!usesTreeFoliage)
@@ -779,7 +783,7 @@ namespace Burt.RenderPipeline.Editor
 
                 if (!usesTrunk)
                 {
-                    DrawProperty(usesInteriorMapping ? occlusion : occlusionStrength);
+                    DrawProperty(occlusionStrength);
                 }
             }
             if (!IsSubsurfaceShader(material) && !usesFoliage && !usesTrunk)
@@ -1629,7 +1633,7 @@ namespace Burt.RenderPipeline.Editor
 
             if (IsInteriorMappingShader(material))
             {
-                return "PBR Interior Mapping / Deferred GBuffer";
+                return "Emissive Interior Mapping / Deferred GBuffer";
             }
 
             return IsTransparentMaterial(material) ? "PBR Transparent" : "PBR Lit / Deferred GBuffer";
@@ -1830,7 +1834,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             material.SetShaderPassEnabled("ShadowCaster", !transparent);
-            material.SetShaderPassEnabled("BurtForward", !IsSubsurfaceShader(material) && !IsFoliageShader(material) && !IsTrunkShader(material) && !IsInteriorMappingShader(material));
+            material.SetShaderPassEnabled("BurtForward", !IsFoliageShader(material) && !IsTrunkShader(material) && !IsInteriorMappingShader(material));
             bool refractionDistortion = transparent &&
                 material.shader != null &&
                 material.shader.name == "BurtRP/Lit" &&

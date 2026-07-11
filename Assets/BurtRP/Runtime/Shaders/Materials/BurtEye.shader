@@ -233,6 +233,8 @@ Shader "BurtRP/Eye"
             #pragma fragment Frag
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION
             #pragma multi_compile_instancing
             #pragma target 3.5
 

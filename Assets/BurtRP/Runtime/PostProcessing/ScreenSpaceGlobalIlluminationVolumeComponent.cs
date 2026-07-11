@@ -1,5 +1,6 @@
 using System;
 using Sirenix.OdinInspector;
+using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline
@@ -180,18 +181,68 @@ namespace Burt.RenderPipeline
         [InfoBox("XGI-style ScreenProbe path. It gathers a low-resolution probe grid, traces a compact octahedral atlas, and blends the resulting irradiance into BurtGI when Apply Strength is above zero.")]
         public BoolParameter screenProbeLite = new BoolParameter(false);
         public ClampedIntParameter screenProbeSpacingPixels = new ClampedIntParameter(16, 4, 64);
-        public ClampedFloatParameter screenProbeTraceDistance = new ClampedFloatParameter(12f, 0.5f, 80f);
+        public ClampedFloatParameter screenProbeAdaptiveAllocationFraction = new ClampedFloatParameter(0.5f, 0.01f, 1f);
+        public ClampedFloatParameter screenProbeTraceDistance = new ClampedFloatParameter(200f, 0.01f, 65504f);
+        public ClampedFloatParameter screenProbeTraceScreenDistance = new ClampedFloatParameter(5f, 0.001f, 5f);
+        public BoolParameter screenProbeTraceHierarchically = new BoolParameter(true);
+        public ClampedIntParameter screenProbeTraceHierarchicalMaxIterations = new ClampedIntParameter(50, 1, 50);
+        public ClampedFloatParameter screenProbeTraceRelativeDepthThickness = new ClampedFloatParameter(0.01f, 0.0001f, 1f);
+        public ClampedFloatParameter screenProbeTraceHistoryDepthTestRelativeThickness = new ClampedFloatParameter(0.01f, 0.0001f, 1f);
+        public ClampedFloatParameter screenProbeScreenTraceThicknessScaleWhenNoFallback = new ClampedFloatParameter(2f, 0.001f, 2f);
+        public ClampedFloatParameter screenProbeGatherMaxRayIntensity = new ClampedFloatParameter(1f, 0.01f, 40f);
         public ClampedIntParameter screenProbeSampleCount = new ClampedIntParameter(8, 1, 32);
         public ClampedFloatParameter screenProbeTemporalFeedback = new ClampedFloatParameter(0.9f, 0f, 0.98f);
+        public BoolParameter screenProbeTemporalFilter = new BoolParameter(true);
+        public BoolParameter screenProbeTemporalReprojection = new BoolParameter(true);
+        public ClampedIntParameter screenProbeReprojectionMaxFramesAccumulated = new ClampedIntParameter(20, 1, 50);
+        public ClampedFloatParameter screenProbeHistoryDistanceThreshold = new ClampedFloatParameter(0.02f, 0.02f, 1f);
+        public ClampedFloatParameter screenProbeReprojectionDepthRejectParamsA = new ClampedFloatParameter(4f, 1f, 50f);
+        public ClampedFloatParameter screenProbeReprojectionDepthRejectParamsB = new ClampedFloatParameter(2f, 1f, 50f);
         public ClampedFloatParameter screenProbeApplyStrength = new ClampedFloatParameter(0f, 0f, 1f);
+        public BoolParameter screenProbeTraceCompact = new BoolParameter(true);
+        public BoolParameter screenProbeTraceUseWorldRadianceClipMap = new BoolParameter(true);
+        public BoolParameter screenProbeImportanceSampling = new BoolParameter(true);
+        public BoolParameter screenProbeImportanceSampleLighting = new BoolParameter(true);
+        public BoolParameter screenProbeImportanceSampleProbeRadianceHistory = new BoolParameter(true);
+        public ClampedFloatParameter screenProbeImportanceSamplingHistoryDistanceThreshold = new ClampedFloatParameter(0.3f, 0.001f, 10f);
+        public ClampedIntParameter screenProbeFixedJitterIndex = new ClampedIntParameter(-1, -1, 16);
+        public BoolParameter screenProbeSpatialFilter = new BoolParameter(true);
         public ClampedIntParameter screenProbeSpatialFilterPasses = new ClampedIntParameter(3, 0, 4);
         public ClampedIntParameter screenProbeSpatialFilterHalfKernelSize = new ClampedIntParameter(1, 0, 2);
         public BoolParameter screenProbeFixupBorders = new BoolParameter(true);
+
+        [Title("Radiance Cache")]
+        public BoolParameter screenProbeRadianceCacheForceFullUpdate = new BoolParameter(false);
 
         [Title("XGI Final Gather")]
         [InfoBox("ScreenProbe gathers the filtered probe atlas. IrradianceField directly interpolates the Radiance Cache ClipMap onto the full-resolution GBuffer, matching XRender's alternate final-gather path.")]
         public ScreenSpaceGlobalIlluminationFinalGatherParameter finalGather = new ScreenSpaceGlobalIlluminationFinalGatherParameter(ScreenSpaceGlobalIlluminationFinalGather.ScreenProbe);
         public ClampedFloatParameter irradianceFieldStrength = new ClampedFloatParameter(1f, 0f, 2f);
+
+        [Title("XGI Indirect Channels")]
+        [InfoBox("Matches XRender's XGI light controls. These gates affect deferred application and invalidate the channel history when changed.")]
+        public BoolParameter enableBackfaceDiffuse = new BoolParameter(false);
+        public BoolParameter enableRoughSpecular = new BoolParameter(true);
+        public BoolParameter useTranslucencyVolume = new BoolParameter(true);
+        public ClampedIntParameter translucencyVolumeGridPixelSize = new ClampedIntParameter(64, 8, 128);
+        public ClampedFloatParameter translucencyVolumeEndDistanceFromCamera = new ClampedFloatParameter(80f, 10f, 1000f);
+        public ClampedFloatParameter translucencyVolumeGridDistributionZScale = new ClampedFloatParameter(4f, 1f, 6f);
+        public BoolParameter translucencyVolumeUseTemporalReprojection = new BoolParameter(true);
+        public ClampedFloatParameter translucencyVolumeHistoryWeight = new ClampedFloatParameter(0.95f, 0.9f, 0.99f);
+        public BoolParameter translucencyVolumeSpatialFilter = new BoolParameter(true);
+        public ClampedIntParameter translucencyVolumeSpatialFilterSampleCount = new ClampedIntParameter(3, 1, 5);
+        public ClampedFloatParameter sceneVoxelClipMapFirstWorldExtent = new ClampedFloatParameter(25f, 1f, 1000f);
+        public ClampedFloatParameter sceneVoxelDiffuseColorBoost = new ClampedFloatParameter(1f, 1f, 4f);
+        public ClampedFloatParameter sceneVoxelAvoidBleeding = new ClampedFloatParameter(0.5f, 0f, 1f);
+        public ClampedFloatParameter sceneVoxelDirectLightIntensity = new ClampedFloatParameter(1f, 0f, 5f);
+        public ColorParameter sceneVoxelDirectLightTint = new ColorParameter(Color.white, true, false, false);
+        public ClampedFloatParameter sceneVoxelIndirectLightIntensity = new ClampedFloatParameter(0.5f, 0f, 1f);
+        public ColorParameter sceneVoxelIndirectLightTint = new ColorParameter(Color.white, true, false, false);
+        public ClampedIntParameter sceneVoxelTraceMaxSteps = new ClampedIntParameter(64, 1, 64);
+        public ClampedFloatParameter sceneVoxelTraceStepFactor = new ClampedFloatParameter(1f, 0.1f, 10f);
+        public ClampedFloatParameter screenProbeSkylightLeaking = new ClampedFloatParameter(0f, 0f, 1f);
+        public ClampedFloatParameter screenProbeFullSkylightLeakingDistance = new ClampedFloatParameter(10f, 0.001f, 20f);
+        public BoolParameter screenProbeTraceSkyCubemap = new BoolParameter(true);
 
         [Title("Short Range AO")]
         [InfoBox("XGI-style near-field occlusion for indirect lighting, evaluated from the ScreenProbe trace-atlas bent-normal texture and its temporal history.")]
