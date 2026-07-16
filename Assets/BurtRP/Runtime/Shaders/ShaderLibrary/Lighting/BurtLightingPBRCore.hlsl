@@ -691,6 +691,11 @@ BurtPBRShadingComponents BurtEvaluatePBRShadingComponents(BurtPBRMaterialData Ma
     BurtDirectPBRComponents AdditionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(CoreData, PositionWS);
     BurtDirectPBRComponents DirectComponents = BurtAddPBRDirectComponents(MainDirectComponents, AdditionalDirectComponents);
     BurtIndirectPBRComponents IndirectComponents = BurtEvaluatePBRIndirectFromCore(CoreData, MainLight);
+    float3 ProbeVolumeDiffuse;
+    if (BurtTryEvaluateGIProbeVolumeIndirectDiffuse(CoreData.MaterialData, PositionWS, GeometryData.NormalWS, GeometryData.ViewDirectionWS, CoreData.EnergyTerms.EnergyPreservation, ProbeVolumeDiffuse))
+    {
+        IndirectComponents.Diffuse = ProbeVolumeDiffuse;
+    }
     return BurtComposePBRShadingComponentsWithAdditional(CoreData, DirectComponents, IndirectComponents, AdditionalDirectComponents);
 }
 
@@ -701,6 +706,11 @@ BurtPBRShadingComponents BurtEvaluatePBRShadingComponents(BurtPBRMaterialData Ma
     BurtDirectPBRComponents AdditionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(CoreData, PositionWS, ScreenUV);
     BurtDirectPBRComponents DirectComponents = BurtAddPBRDirectComponents(MainDirectComponents, AdditionalDirectComponents);
     BurtIndirectPBRComponents IndirectComponents = BurtEvaluatePBRIndirectFromCore(CoreData, MainLight);
+    float3 ProbeVolumeDiffuse;
+    if (BurtTryEvaluateGIProbeVolumeIndirectDiffuse(CoreData.MaterialData, PositionWS, GeometryData.NormalWS, GeometryData.ViewDirectionWS, CoreData.EnergyTerms.EnergyPreservation, ProbeVolumeDiffuse))
+    {
+        IndirectComponents.Diffuse = ProbeVolumeDiffuse;
+    }
     return BurtComposePBRShadingComponentsWithAdditional(CoreData, DirectComponents, IndirectComponents, AdditionalDirectComponents);
 }
 
@@ -783,6 +793,11 @@ BurtPBRShadingComponents BurtEvaluatePBRShadingComponents(BurtSurfaceData Surfac
     BurtDirectPBRComponents AdditionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(CoreData, PositionWS, ScreenUV);
     BurtDirectPBRComponents DirectComponents = BurtAddPBRDirectComponents(MainDirectComponents, AdditionalDirectComponents);
     BurtIndirectPBRComponents IndirectComponents = BurtEvaluatePBRIndirectFromCore(CoreData, MainLight);
+    float3 ProbeVolumeDiffuse;
+    if (BurtTryEvaluateGIProbeVolumeIndirectDiffuse(CoreData.MaterialData, PositionWS, NormalWS, ViewDirectionWS, CoreData.EnergyTerms.EnergyPreservation, ProbeVolumeDiffuse))
+    {
+        IndirectComponents.Diffuse = ProbeVolumeDiffuse;
+    }
     return BurtComposePBRShadingComponentsWithAdditional(CoreData, DirectComponents, IndirectComponents, AdditionalDirectComponents);
 }
 

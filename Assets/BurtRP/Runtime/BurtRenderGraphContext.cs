@@ -337,6 +337,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle ScreenSpaceGlobalIlluminationUpsampledTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationUpsampledName);
+                }
+
+                return ResourceRegistry.GetScreenSpaceGlobalIlluminationUpsampled();
+            }
+        }
+
         public BurtRenderTargetHandle BurtGITemporalDiagnosticsTarget
         {
             get
@@ -347,6 +360,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetBurtGITemporalDiagnostics();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIRadianceCacheStatsTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheStatsName);
+                }
+
+                return ResourceRegistry.GetBurtGIRadianceCacheStats();
             }
         }
 
@@ -363,6 +389,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle BurtGIBackfaceDiffuseIndirectUpsampledTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectUpsampledName);
+                }
+
+                return ResourceRegistry.GetBurtGIBackfaceDiffuseIndirectUpsampled();
+            }
+        }
+
         public BurtRenderTargetHandle BurtGIRoughSpecularIndirectTarget
         {
             get
@@ -373,6 +412,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetBurtGIRoughSpecularIndirect();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeIntegrateTileClassificationTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileClassificationName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeIntegrateTileClassification();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIRoughSpecularIndirectUpsampledTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectUpsampledName);
+                }
+
+                return ResourceRegistry.GetBurtGIRoughSpecularIndirectUpsampled();
             }
         }
 
@@ -425,6 +490,45 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetBurtGITranslucencyVolumeFilter1();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGITranslucencyVolumeTraceRadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceRadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGITranslucencyVolumeTraceRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGITranslucencyVolumeTraceFilteredRadianceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceFilteredRadianceName);
+                }
+
+                return ResourceRegistry.GetBurtGITranslucencyVolumeTraceFilteredRadiance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGITranslucencyVolumeTraceHitDistanceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceHitDistanceName);
+                }
+
+                return ResourceRegistry.GetBurtGITranslucencyVolumeTraceHitDistance();
             }
         }
 
@@ -1320,6 +1424,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
 
         public BurtRenderBufferHandle BurtGIScreenProbeIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIndirectArgsBufferName);
 
+        public BurtRenderBufferHandle BurtGIScreenProbeIntegrateTileIndirectArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileIndirectArgsBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeIntegrateTileDataDiffuseBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataDiffuseBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeIntegrateTileDataAllBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataAllBufferName);
+
         public BurtRenderBufferHandle BurtGIScreenProbeTraceCompactTexelCountBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelCountBufferName);
 
         public BurtRenderBufferHandle BurtGIScreenProbeTraceCompactTexelDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelDataBufferName);
@@ -1331,6 +1441,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
         public BurtRenderBufferHandle BurtGIScreenProbeAdaptiveProbeNumBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeNumBufferName);
 
         public BurtRenderBufferHandle BurtGIScreenProbeAdaptiveProbeDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeDataBufferName);
+
+        public BurtRenderBufferHandle BurtGIScreenProbeImportancePDFSHBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeImportancePDFSHBufferName);
 
         public BurtRenderBufferHandle BurtGIRadianceCacheClipMapProbeAllocatorBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName);
 

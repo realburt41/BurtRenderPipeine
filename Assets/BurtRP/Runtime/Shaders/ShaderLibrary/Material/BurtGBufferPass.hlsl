@@ -146,7 +146,9 @@ GBufferVaryings VertGBuffer(GBufferAttributes Input)
     Output.MaskMapUV = BurtTransformMaskMapUV(Input.UV0, _MaskMap_ST);
     Output.PositionWS = mul(unity_ObjectToWorld, PositionOS).xyz;
     #if BURT_MATERIAL_ENABLE_PRESKIN_POSITION
-        Output.PreSkinPositionOS = BurtDecodePreSkinPositionOS(Input.PreSkinPositionUV3);
+        Output.PreSkinPositionOS = _BurtSkinnedDecalUseMeshPosition > 0.5f
+            ? PositionOS.xyz
+            : BurtDecodePreSkinPositionOS(Input.PreSkinPositionUV3);
     #else
         #if defined(BURT_MATERIAL_SELECTED_INTERIOR_MAPPING)
             Output.UV0 = Input.UV0;
@@ -260,6 +262,9 @@ BurtGBufferData BurtCreateMaterialPassGBufferDataFromInput(GBufferVaryings Input
     #endif
     float3 ViewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - Input.PositionWS);
     float3 BaseNormalWS = BurtGetMaterialPassNormalWS(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, Facing);
+    #if BURT_MATERIAL_ENABLE_PRESKIN_POSITION && defined(BURT_SKINNED_DECAL)
+        BurtApplySkinnedDecals(BaseColor, MaskMap, BaseNormalWS, Input.NormalWS, Input.TangentWS, Input.PreSkinPositionOS);
+    #endif
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
         BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, BaseNormalWS, ViewDirectionWS, Input.PositionWS, Input.PositionOS, Input.VertexColor);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
@@ -292,12 +297,16 @@ GBufferFragmentOutput FragGBuffer(GBufferVaryings Input, fixed Facing : VFACE)
 SubsurfaceForwardFragmentOutput FragSubsurfaceForward(GBufferVaryings Input, fixed Facing : VFACE)
 {
     float4 BaseColor = BurtSampleBaseMap(Input.BaseMapUV) * _BaseColor;
-    BurtApplyMaterialPassAlphaClip(BaseColor.a, _AlphaClip, _Cutoff, Input.PositionCS);
+    float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
 #if BURT_MATERIAL_ENABLE_PRESKIN_POSITION
+    #if defined(BURT_SKINNED_DECAL)
+    float3 DecalNormalWS = BurtGetMaterialPassNormalWS(Input.BaseMapUV, Input.NormalWS, Input.TangentWS, Facing);
+    BurtApplySkinnedDecals(BaseColor, MaskMap, DecalNormalWS, Input.NormalWS, Input.TangentWS, Input.PreSkinPositionOS);
+    #endif
     BurtApplySubsurfacePreSkinPositionDebug(BaseColor, Input.PreSkinPositionOS);
 #endif
+    BurtApplyMaterialPassAlphaClip(BaseColor.a, _AlphaClip, _Cutoff, Input.PositionCS);
 
-    float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
     BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV);
     float3 EmissionColor = BurtEvaluateEmission(Input.EmissionMapUV, _EmissionColor.rgb);
 

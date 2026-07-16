@@ -1,0 +1,283 @@
+#pragma kernel MarkRadianceProbesUsedByGBufferCS
+#pragma kernel MarkUsedRadianceProbesFromGBufferCS
+#pragma kernel MarkUsedRadianceProbesByVoxelPassCS
+#pragma kernel MarkUsedRadianceProbesFromSceneVoxelCS
+
+#define BURT_GI_CLIPMAP_COUNT 6
+#define BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE 8
+#define BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE 4
+#define BURT_GI_USED_PROBE_INDEX 0xfffeu
+
+#ifndef UNITY_NEAR_CLIP_VALUE
+    #if defined(SHADER_API_GLCORE) || defined(SHADER_API_GLES) || defined(SHADER_API_GLES3)
+        #define UNITY_NEAR_CLIP_VALUE (-1.0)
+    #else
+        #define UNITY_NEAR_CLIP_VALUE 0.0
+    #endif
+#endif
+
+Texture2D<float> _BurtCameraDepthTexture;
+Texture3D<float4> _BurtGISceneVoxelGeometryReadTexture;
+RWTexture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
+
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapWorldParams;
+float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtDeferredCameraWorldPosition;
+uint _BurtGIRadianceCacheClipMapFrameIndex;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+
+uint BurtGIClipmapCount()
+{
+    return max(1u, min((uint)_BurtGIRadianceCacheClipMapParams.z, (uint)BURT_GI_CLIPMAP_COUNT));
+}
+
+uint BurtGIClipmapResolution()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.w);
+}
+
+uint2 BurtGIIndirectionSize()
+{
+    return max(uint2(1u, 1u), (uint2)_BurtGIRadianceCacheClipMapIndirectionSize.xy);
+}
+
+uint2 BurtGIPackIndirectionCoord(uint clipmapIndex, uint3 probeCoord)
+{
+    uint clipmapResolution = BurtGIClipmapResolution();
+    return uint2(clipmapIndex * clipmapResolution + probeCoord.x, probeCoord.y + probeCoord.z * clipmapResolution);
+}
+
+bool BurtGIWorldPositionToProbeCoordFloatDithered(float3 worldPosition, float clipmapDitherRandom, out uint clipmapIndex, out float3 probeCoordFloat)
+{
+    uint clipmapCount = BurtGIClipmapCount();
+    uint clipmapResolution = BurtGIClipmapResolution();
+    float invFadeSize = max(_BurtGIRadianceCacheClipMapWorldParams.z, 0.0001);
+
+    [unroll]
+    for (uint currentClipmapIndex = 0u; currentClipmapIndex < BURT_GI_CLIPMAP_COUNT; ++currentClipmapIndex)
+    {
+        if (currentClipmapIndex < clipmapCount)
+        {
+            float4 worldToProbeCoord = _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[currentClipmapIndex];
+            float3 currentProbeCoordFloat = worldPosition * worldToProbeCoord.w + worldToProbeCoord.xyz;
+            float3 bottomEdgeFade = saturate((currentProbeCoordFloat - 0.5) * invFadeSize);
+            float3 topEdgeFade = saturate(((float3)clipmapResolution - 0.5 - currentProbeCoordFloat) * invFadeSize);
+            float edgeFade = min(
+                min(bottomEdgeFade.x, min(bottomEdgeFade.y, bottomEdgeFade.z)),
+                min(topEdgeFade.x, min(topEdgeFade.y, topEdgeFade.z)));
+
+            if (edgeFade > clipmapDitherRandom)
+            {
+                clipmapIndex = currentClipmapIndex;
+                probeCoordFloat = currentProbeCoordFloat;
+                return true;
+            }
+        }
+    }
+
+    clipmapIndex = 0u;
+    probeCoordFloat = 0.0;
+    return false;
+}
+
+uint BurtGIRadianceCacheHashGridHash(uint3 value)
+{
+    uint h = value.x * 0x8da6b343u;
+    h ^= value.y * 0xd8163841u;
+    h ^= value.z * 0xcb1ab31fu;
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    h *= 0x846ca68bu;
+    h ^= h >> 16;
+    return h;
+}
+
+float BurtGIInterleavedGradientNoise(uint2 coord, uint temporalIndex)
+{
+    uint hash = BurtGIRadianceCacheHashGridHash(uint3(coord.x, coord.y, temporalIndex));
+    return (float)(hash & 0x00ffffffu) * (1.0 / 16777216.0);
+}
+
+void BurtGIMarkProbeIndirectionCoord(int3 probeCoord, uint clipmapIndex)
+{
+    int clipmapResolution = (int)BurtGIClipmapResolution();
+    if (clipmapIndex >= BurtGIClipmapCount() ||
+        probeCoord.x < 0 ||
+        probeCoord.y < 0 ||
+        probeCoord.z < 0 ||
+        probeCoord.x >= clipmapResolution ||
+        probeCoord.y >= clipmapResolution ||
+        probeCoord.z >= clipmapResolution)
+    {
+        return;
+    }
+
+    uint2 indirectionCoord = BurtGIPackIndirectionCoord(clipmapIndex, (uint3)probeCoord);
+    uint2 indirectionSize = BurtGIIndirectionSize();
+    if (indirectionCoord.x < indirectionSize.x && indirectionCoord.y < indirectionSize.y)
+    {
+        _BurtGIRadianceCacheClipMapIndirectionTexture[indirectionCoord] = BURT_GI_USED_PROBE_INDEX;
+    }
+}
+
+void BurtGIMarkPositionUsedInIndirectionTexture(float3 worldPosition, float clipmapDitherRandom)
+{
+    uint clipmapIndex;
+    float3 probeCoordFloat;
+    if (!BurtGIWorldPositionToProbeCoordFloatDithered(worldPosition, clipmapDitherRandom, clipmapIndex, probeCoordFloat))
+    {
+        return;
+    }
+
+    int3 bottomCornerProbeCoord = (int3)floor(probeCoordFloat - 0.5 + 0.0001);
+    [unroll]
+    for (int z = 0; z <= 1; ++z)
+    {
+        [unroll]
+        for (int y = 0; y <= 1; ++y)
+        {
+            [unroll]
+            for (int x = 0; x <= 1; ++x)
+            {
+                BurtGIMarkProbeIndirectionCoord(bottomCornerProbeCoord + int3(x, y, z), clipmapIndex);
+            }
+        }
+    }
+}
+
+void BurtGIMarkPositionUsedInIndirectionTextureForSceneVoxel(float3 worldPosition, float clipmapDitherRandom)
+{
+    uint clipmapIndex;
+    float3 probeCoordFloat;
+    if (!BurtGIWorldPositionToProbeCoordFloatDithered(worldPosition, clipmapDitherRandom, clipmapIndex, probeCoordFloat) ||
+        clipmapIndex >= 2u)
+    {
+        return;
+    }
+
+    int3 bottomCornerProbeCoord = (int3)floor(probeCoordFloat - 0.5 + 0.0001);
+    [unroll]
+    for (int z = 0; z <= 1; ++z)
+    {
+        [unroll]
+        for (int y = 0; y <= 1; ++y)
+        {
+            [unroll]
+            for (int x = 0; x <= 1; ++x)
+            {
+                BurtGIMarkProbeIndirectionCoord(bottomCornerProbeCoord + int3(x, y, z), clipmapIndex);
+            }
+        }
+    }
+}
+
+float4 BurtGIClipMapBuildDeferredClipPosition(float2 screenUV, float rawDepth)
+{
+    float2 clipXY = screenUV * 2.0 - 1.0;
+    #if UNITY_UV_STARTS_AT_TOP
+        clipXY.y = -clipXY.y;
+    #endif
+
+    #if defined(UNITY_REVERSED_Z)
+        float clipZ = rawDepth;
+    #else
+        float clipZ = lerp(UNITY_NEAR_CLIP_VALUE, 1.0, rawDepth);
+    #endif
+
+    return float4(clipXY, clipZ, 1.0);
+}
+
+float3 BurtGIClipMapReconstructGBufferPositionWS(float2 screenUV, float rawDepth)
+{
+    float4 positionWS = mul(_BurtDeferredInverseViewProjectionMatrix, BurtGIClipMapBuildDeferredClipPosition(screenUV, rawDepth));
+    float safeW = abs(positionWS.w) > 0.00001 ? positionWS.w : (positionWS.w < 0.0 ? -0.00001 : 0.00001);
+    return positionWS.xyz / safeW;
+}
+
+void BurtGIMarkRadianceProbesUsedByGBuffer(uint3 dispatchThreadId)
+{
+    uint width;
+    uint height;
+    _BurtCameraDepthTexture.GetDimensions(width, height);
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+    {
+        return;
+    }
+
+    float rawDepth = _BurtCameraDepthTexture.Load(int3(dispatchThreadId.xy, 0));
+    #if defined(UNITY_REVERSED_Z)
+        if (rawDepth <= 0.000001)
+        {
+            return;
+        }
+    #else
+        if (rawDepth >= 0.999999)
+        {
+            return;
+        }
+    #endif
+
+    float2 screenUV = (float2(dispatchThreadId.xy) + 0.5) / float2(max(width, 1u), max(height, 1u));
+    float3 worldPosition = BurtGIClipMapReconstructGBufferPositionWS(screenUV, rawDepth);
+    float clipmapDitherRandom = BurtGIInterleavedGradientNoise(dispatchThreadId.xy, _BurtGIRadianceCacheClipMapFrameIndex & 7u);
+    BurtGIMarkPositionUsedInIndirectionTexture(worldPosition, clipmapDitherRandom);
+}
+
+[numthreads(BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE, BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE, 1)]
+void MarkRadianceProbesUsedByGBufferCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIMarkRadianceProbesUsedByGBuffer(dispatchThreadId);
+}
+
+[numthreads(BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE, BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE, 1)]
+void MarkUsedRadianceProbesFromGBufferCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIMarkRadianceProbesUsedByGBuffer(dispatchThreadId);
+}
+
+void BurtGIMarkRadianceProbesUsedBySceneVoxel(uint3 dispatchThreadId)
+{
+    uint width;
+    uint height;
+    uint depth;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    if (any(dispatchThreadId >= volumeSize))
+    {
+        return;
+    }
+
+    float occupancy = _BurtGISceneVoxelGeometryReadTexture.Load(int4(dispatchThreadId, 0)).a;
+    if (occupancy <= 0.001)
+    {
+        return;
+    }
+
+    float3 uvw = (float3(dispatchThreadId) + 0.5) / (float3)volumeSize;
+    float3 worldPosition = (uvw * 2.0 - 1.0) * _BurtGISceneVoxelCenterExtent.www + _BurtGISceneVoxelCenterExtent.xyz;
+    float cameraDistance = distance(worldPosition, _BurtDeferredCameraWorldPosition.xyz);
+    if (cameraDistance >= 100.0)
+    {
+        return;
+    }
+
+    uint2 noiseCoord = uint2(dispatchThreadId.x ^ (dispatchThreadId.z * 73856093u), dispatchThreadId.y ^ (dispatchThreadId.z * 19349663u));
+    float clipmapDitherRandom = BurtGIInterleavedGradientNoise(noiseCoord, _BurtGIRadianceCacheClipMapFrameIndex & 7u);
+    BurtGIMarkPositionUsedInIndirectionTextureForSceneVoxel(worldPosition, clipmapDitherRandom);
+}
+
+[numthreads(BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE)]
+void MarkUsedRadianceProbesByVoxelPassCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIMarkRadianceProbesUsedBySceneVoxel(dispatchThreadId);
+}
+
+[numthreads(BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE)]
+void MarkUsedRadianceProbesFromSceneVoxelCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIMarkRadianceProbesUsedBySceneVoxel(dispatchThreadId);
+}

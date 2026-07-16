@@ -1,0 +1,744 @@
+#pragma kernel GenerateProbeTraceTilesCS
+
+#define BURT_GI_TRACE_TILE_THREADGROUP_SIZE 8
+#define BURT_GI_RADIANCE_PROBE_PDF_COEFFICIENT_COUNT 10u
+#define BURT_GI_RADIANCE_PROBE_PDF_ENCODE_SCALE 100000.0
+#define BURT_GI_SCREEN_PROBE_SPHERICAL_VISIBILITY_FLAG 0x10000u
+
+Texture2D<float4> _BurtScreenSpaceGlobalIlluminationRawTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldNormalTexture;
+Texture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
+Texture2D<float> _BurtGIScreenProbeTraceHitTexture;
+Texture2D<uint> _BurtGIScreenProbeImportanceRayInfoTexture;
+TextureCube<float4> _BurtSkyReflectionTexture;
+SamplerState sampler_BurtSkyReflectionTexture;
+
+RWStructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer;
+RWStructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer;
+RWStructuredBuffer<int> _BurtGIRadianceCacheClipMapRadianceProbePDFBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer;
+RWStructuredBuffer<uint2> _BurtGIRadianceCacheClipMapProbeTraceTileDataBuffer;
+
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGIScreenProbeTraceParams;
+float4 _BurtDeferredCameraWorldPosition;
+float4 _BurtGIRadianceCacheClipMapSkyRadiance;
+float4 _BurtSkyReflectionHDR;
+float4 _BurtSkyReflectionTint;
+float4 _BurtSkyReflectionRotation;
+float4 _BurtSkyLowerHemisphereDiffuseColor;
+float _BurtSkyReflectionIntensity;
+float _BurtSkyReflectionEnabled;
+float _BurtSkyReflectionMaxMip;
+float _BurtSkyLowerHemisphereEnabled;
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+uint _BurtGIRadianceCacheClipMapUseIrradianceField;
+uint _BurtGIRadianceCacheClipMapNumProbesToTraceBudget;
+uint _BurtGIRadianceCacheClipMapFallbackTraceTileResolution;
+float _BurtGIRadianceCacheClipMapSupersampleTileBRDFThreshold;
+float _BurtGIRadianceCacheClipMapSupersampleDistanceFromCameraSq;
+float _BurtGIRadianceCacheClipMapDownsampleDistanceFromCameraSq;
+int _BurtGIRadianceCacheClipMapForcedUniformTraceTileLevel;
+uint _BurtGIRadianceCacheClipMapRadianceProbePDFCoefficientCount;
+uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
+
+groupshared uint BurtGITraceTileGlobalOffset;
+groupshared uint BurtGITraceTilePendingCount;
+groupshared uint BurtGITraceTileCompletedCount;
+groupshared float4 BurtGITraceTileProbePDFV0;
+groupshared float4 BurtGITraceTileProbePDFV1;
+groupshared float BurtGITraceTileProbePDFV2;
+groupshared uint BurtGITraceTileProbePDFValid;
+groupshared uint2 BurtGITraceTilePendingList[BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE * 4];
+groupshared uint2 BurtGITraceTileCompletedList[BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE * 4];
+
+uint BurtGIMulClamp(uint a, uint b)
+{
+    uint result = a * b;
+    return b != 0u && result / b != a ? 0xffffffffu : result;
+}
+
+uint BurtGIPackTraceTileInfo(uint tileX, uint tileY, uint level)
+{
+    return (tileX & 0xffu) | ((tileY & 0xffu) << 8) | ((level & 0xffu) << 16);
+}
+
+void BurtGIUnpackTraceTileInfo(uint2 packedTraceTile, out uint2 tileCoord, out uint tileLevel, out uint probeTraceIndex)
+{
+    tileCoord = uint2(packedTraceTile.x & 0xffu, (packedTraceTile.x >> 8) & 0xffu);
+    tileLevel = (packedTraceTile.x >> 16) & 0xffu;
+    probeTraceIndex = packedTraceTile.y;
+}
+
+uint2 BurtGIScreenProbeGridSize()
+{
+    return max(uint2(1u, 1u), (uint2)_BurtGIScreenProbeGridParams.xy);
+}
+
+uint BurtGIGetProbeIndexFromTraceData(uint probeTraceIndex)
+{
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        return 0u;
+    }
+
+    return asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) & 0x00ffffffu;
+}
+
+float3 BurtGIGetProbeTraceWorldCenter(uint probeTraceIndex)
+{
+    float4 probeTraceData = _BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex];
+    uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
+    float3 probeWorldOffset = probeIndex < _BurtGIRadianceCacheClipMapMaxProbeCount
+        ? _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex].xyz
+        : 0.0;
+    return probeTraceData.xyz + probeWorldOffset;
+}
+
+float3 BurtGISafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+
+float3 BurtGIDecodeScreenProbeNormalWS(float4 encodedNormal)
+{
+    return BurtGISafeNormalize(encodedNormal.xyz * 2.0 - 1.0, float3(0.0, 1.0, 0.0));
+}
+
+bool BurtGIHasValidScreenProbePlacement(uint2 screenProbeCoord)
+{
+    float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3((int)screenProbeCoord.x, (int)screenProbeCoord.y, 0));
+    float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)screenProbeCoord.x, (int)screenProbeCoord.y, 0));
+    return encodedNormal.a > 0.5 && encodedPosition.a > 0.5;
+}
+
+bool BurtGIRadianceCacheScreenProbeHasSphericalVisibility(float encodedPlacementPayload)
+{
+    uint placementPayload = (uint)round(max(encodedPlacementPayload, 0.0));
+    return (placementPayload & BURT_GI_SCREEN_PROBE_SPHERICAL_VISIBILITY_FLAG) != 0u;
+}
+
+float3 BurtGIEquiAreaSphericalMapping(float2 uv)
+{
+    uv = 2.0 * uv - 1.0;
+    float d = 1.0 - (abs(uv.x) + abs(uv.y));
+    float r = 1.0 - abs(d);
+    float phi = r == 0.0 ? 0.0 : 0.7853981633974483 * ((abs(uv.y) - abs(uv.x)) / r + 1.0);
+    float f = r * sqrt(max(2.0 - r * r, 0.0));
+    return BurtGISafeNormalize(float3(
+        f * sign(uv.y) * abs(sin(phi)),
+        sign(d) * (1.0 - r * r),
+        f * sign(uv.x) * abs(cos(phi))),
+        float3(0.0, 1.0, 0.0));
+}
+
+struct BurtGIThreeBandSHVector
+{
+    float4 V0;
+    float4 V1;
+    float V2;
+};
+
+BurtGIThreeBandSHVector BurtGISHBasisFunction3(float3 inputVector)
+{
+    const float kSHBasis0 = 0.2820947918;
+    const float kSHBasis1 = 0.4886025119;
+    const float kSHBasis2 = 1.0925484306;
+    const float kSHBasis3 = 0.3153915653;
+    const float kSHBasis4 = 0.5462742153;
+
+    BurtGIThreeBandSHVector result;
+    result.V0 = float4(
+        kSHBasis0,
+        -kSHBasis1 * inputVector.y,
+        kSHBasis1 * inputVector.z,
+        -kSHBasis1 * inputVector.x);
+
+    float3 vectorSquared = inputVector * inputVector;
+    result.V1 = float4(
+        kSHBasis2 * inputVector.x * inputVector.y,
+        -kSHBasis2 * inputVector.y * inputVector.z,
+        kSHBasis3 * (3.0 * vectorSquared.z - 1.0),
+        -kSHBasis2 * inputVector.x * inputVector.z);
+    result.V2 = kSHBasis4 * (vectorSquared.x - vectorSquared.y);
+    return result;
+}
+
+float BurtGIDotSH3(BurtGIThreeBandSHVector a, BurtGIThreeBandSHVector b)
+{
+    return dot(a.V0, b.V0) + dot(a.V1, b.V1) + a.V2 * b.V2;
+}
+
+int BurtGIEncodeProbePDFCoefficient(float value)
+{
+    return (int)clamp(round(value * BURT_GI_RADIANCE_PROBE_PDF_ENCODE_SCALE), -2147483000.0, 2147483000.0);
+}
+
+float BurtGIDecodeProbePDFCoefficient(int value)
+{
+    return (float)value / BURT_GI_RADIANCE_PROBE_PDF_ENCODE_SCALE;
+}
+
+uint BurtGIProbePDFBaseIndex(uint probeIndex)
+{
+    return probeIndex * max(BURT_GI_RADIANCE_PROBE_PDF_COEFFICIENT_COUNT, _BurtGIRadianceCacheClipMapRadianceProbePDFCoefficientCount);
+}
+
+float BurtGIRadianceCacheTransferPDFNeighborhoodWeight(
+    uint2 sampleProbeCoord,
+    float3 sourcePositionWS,
+    float3 sourceNormalWS,
+    bool sourceHasSphericalVisibility,
+    out bool sampleHasSphericalVisibility,
+    out float3 sampleNormalWS)
+{
+    sampleNormalWS = sourceNormalWS;
+    sampleHasSphericalVisibility = false;
+    if (!BurtGIHasValidScreenProbePlacement(sampleProbeCoord))
+    {
+        return 0.0;
+    }
+
+    float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3((int)sampleProbeCoord.x, (int)sampleProbeCoord.y, 0));
+    float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)sampleProbeCoord.x, (int)sampleProbeCoord.y, 0));
+    sampleNormalWS = BurtGIDecodeScreenProbeNormalWS(encodedNormal);
+    sampleHasSphericalVisibility = BurtGIRadianceCacheScreenProbeHasSphericalVisibility(encodedPosition.a);
+    float3 samplePositionWS = encodedPosition.xyz;
+    float sampleDistance = max(distance(sourcePositionWS, samplePositionWS), 0.05);
+    float planeDistance = abs(dot(sourcePositionWS - samplePositionWS, sampleNormalWS));
+    float relativePlaneDistance = planeDistance / sampleDistance;
+    float planeWeight = exp2(-32.0 * relativePlaneDistance * relativePlaneDistance);
+    float normalWeight = (sourceHasSphericalVisibility || sampleHasSphericalVisibility)
+        ? 1.0
+        : saturate(dot(sourceNormalWS, sampleNormalWS) * 0.5 + 0.5);
+    return planeWeight * normalWeight;
+}
+
+float BurtGIRadianceCacheScreenProbeTransferPDF(uint probeIndex, float3 direction)
+{
+    uint2 screenProbeGridSize = BurtGIScreenProbeGridSize();
+    uint2 screenProbeCoord = uint2(probeIndex % screenProbeGridSize.x, (probeIndex / screenProbeGridSize.x) % screenProbeGridSize.y);
+    if (!BurtGIHasValidScreenProbePlacement(screenProbeCoord))
+    {
+        return saturate(direction.y * 0.5 + 0.5);
+    }
+
+    float3 sourceNormalWS = BurtGIDecodeScreenProbeNormalWS(_BurtGIScreenProbeWorldNormalTexture.Load(int3((int)screenProbeCoord.x, (int)screenProbeCoord.y, 0)));
+    float4 sourcePositionData = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)screenProbeCoord.x, (int)screenProbeCoord.y, 0));
+    float3 sourcePositionWS = sourcePositionData.xyz;
+    bool sourceHasSphericalVisibility = BurtGIRadianceCacheScreenProbeHasSphericalVisibility(sourcePositionData.a);
+    float transferPDF = -1.0;
+
+    [unroll]
+    for (int offsetY = -1; offsetY <= 1; ++offsetY)
+    {
+        [unroll]
+        for (int offsetX = -1; offsetX <= 1; ++offsetX)
+        {
+            int2 sampleProbeCoordInt = clamp(
+                (int2)screenProbeCoord + int2(offsetX, offsetY),
+                int2(0, 0),
+                int2((int)screenProbeGridSize.x - 1, (int)screenProbeGridSize.y - 1));
+            uint2 sampleProbeCoord = (uint2)sampleProbeCoordInt;
+            float3 sampleNormalWS;
+            bool sampleHasSphericalVisibility;
+            float sampleWeight = BurtGIRadianceCacheTransferPDFNeighborhoodWeight(
+                sampleProbeCoord,
+                sourcePositionWS,
+                sourceNormalWS,
+                sourceHasSphericalVisibility,
+                sampleHasSphericalVisibility,
+                sampleNormalWS);
+            bool centerSample = offsetX == 0 && offsetY == 0;
+            if (sampleWeight > 0.1 || centerSample)
+            {
+                float samplePDF = sampleHasSphericalVisibility ? 1.0 : saturate(dot(sampleNormalWS, direction));
+                transferPDF = max(transferPDF, samplePDF);
+            }
+        }
+    }
+
+    float centerPDF = sourceHasSphericalVisibility ? 1.0 : saturate(dot(sourceNormalWS, direction));
+    return transferPDF >= 0.0 ? saturate(transferPDF) : centerPDF;
+}
+
+bool BurtGIRadianceCacheTrySampleSkyRadiance(float3 directionWS, float roughness, out float3 skyRadiance)
+{
+    skyRadiance = 0.0;
+    if (_BurtSkyReflectionEnabled <= 0.5)
+    {
+        return false;
+    }
+
+    float3 safeDirectionWS = BurtGISafeNormalize(directionWS, float3(0.0, 1.0, 0.0));
+    float2 rotation = _BurtSkyReflectionRotation.xy;
+    float2 rotatedXZ = float2(
+        safeDirectionWS.x * rotation.x - safeDirectionWS.z * rotation.y,
+        safeDirectionWS.x * rotation.y + safeDirectionWS.z * rotation.x);
+    float3 sampleDirectionWS = BurtGISafeNormalize(
+        float3(rotatedXZ.x, safeDirectionWS.y, rotatedXZ.y),
+        safeDirectionWS);
+    float mipLevel = saturate(roughness) * max(_BurtSkyReflectionMaxMip, 0.0);
+    float4 encodedSky = _BurtSkyReflectionTexture.SampleLevel(sampler_BurtSkyReflectionTexture, sampleDirectionWS, mipLevel);
+    float hdrMultiplier = _BurtSkyReflectionHDR.x * pow(max(abs(encodedSky.a), 0.0001), _BurtSkyReflectionHDR.y);
+    skyRadiance = max(encodedSky.rgb * hdrMultiplier, 0.0) *
+        max(_BurtSkyReflectionTint.rgb, 0.0) *
+        max(_BurtSkyReflectionIntensity, 0.0);
+
+    if (_BurtSkyLowerHemisphereEnabled > 0.5 && safeDirectionWS.y < 0.0)
+    {
+        skyRadiance = lerp(skyRadiance, max(_BurtSkyLowerHemisphereDiffuseColor.rgb, 0.0), saturate(_BurtSkyLowerHemisphereDiffuseColor.a));
+    }
+
+    return dot(skyRadiance, skyRadiance) > 0.000001;
+}
+
+float3 BurtGIRadianceCacheResolveSkyRadiance(float3 directionWS, float roughness)
+{
+    float3 skyRadiance = max(_BurtGIRadianceCacheClipMapSkyRadiance.rgb, 0.0);
+    if (_BurtGIRadianceCacheClipMapSkyRadiance.w > 0.5)
+    {
+        float3 sampledSkyRadiance;
+        if (BurtGIRadianceCacheTrySampleSkyRadiance(directionWS, roughness, sampledSkyRadiance))
+        {
+            skyRadiance = sampledSkyRadiance;
+        }
+    }
+
+    return skyRadiance;
+}
+
+void BurtGIUnpackScreenProbeImportanceRayInfo(uint rayInfo, out uint2 texelCoord, out uint level)
+{
+    texelCoord.x = rayInfo & 0x3fu;
+    texelCoord.y = (rayInfo >> 6) & 0x3fu;
+    level = (rayInfo >> 12) & 0xfu;
+}
+
+void BurtGISampleScreenProbeImportanceTraceByDirection(
+    uint2 traceProbeCoord,
+    float3 direction,
+    uint traceResolution,
+    uint2 traceAtlasSize,
+    out float4 traceRadiance,
+    out float traceHit)
+{
+    uint maxImportanceTraceResolution = min(64u, max(traceResolution, traceResolution << 1u));
+    float bestDirectionDot = -2.0;
+    uint2 bestTraceAtlasCoord = min(traceProbeCoord * traceResolution, traceAtlasSize - 1u);
+
+    [loop]
+    for (uint y = 0u; y < traceResolution; ++y)
+    {
+        [loop]
+        for (uint x = 0u; x < traceResolution; ++x)
+        {
+            uint2 traceTexelCoord = uint2(x, y);
+            uint2 traceAtlasCoord = min(traceProbeCoord * traceResolution + traceTexelCoord, traceAtlasSize - 1u);
+            uint2 sourceTraceTexelCoord = traceTexelCoord;
+            uint sourceTraceLevel = 0u;
+            BurtGIUnpackScreenProbeImportanceRayInfo(
+                _BurtGIScreenProbeImportanceRayInfoTexture.Load(int3((int)traceAtlasCoord.x, (int)traceAtlasCoord.y, 0)),
+                sourceTraceTexelCoord,
+                sourceTraceLevel);
+
+            uint sourceMipSize = max(1u, maxImportanceTraceResolution >> min(sourceTraceLevel, 5u));
+            if (sourceTraceTexelCoord.x >= sourceMipSize || sourceTraceTexelCoord.y >= sourceMipSize)
+            {
+                sourceTraceTexelCoord = traceTexelCoord;
+                sourceMipSize = traceResolution;
+            }
+
+            float3 sourceDirection = BurtGIEquiAreaSphericalMapping((float2(sourceTraceTexelCoord) + 0.5) / (float)sourceMipSize);
+            float directionDot = dot(sourceDirection, direction);
+            if (directionDot > bestDirectionDot)
+            {
+                bestDirectionDot = directionDot;
+                bestTraceAtlasCoord = traceAtlasCoord;
+            }
+        }
+    }
+
+    traceRadiance = _BurtGIScreenProbeTraceRadianceTexture.Load(int3((int)bestTraceAtlasCoord.x, (int)bestTraceAtlasCoord.y, 0));
+    traceHit = _BurtGIScreenProbeTraceHitTexture.Load(int3((int)bestTraceAtlasCoord.x, (int)bestTraceAtlasCoord.y, 0));
+}
+
+float3 BurtGISampleRawScreenGI(uint probeIndex, float3 direction, float3 probeWorldCenter, out float hitDistance)
+{
+    float skyTraceEnabled = _BurtGIRadianceCacheClipMapSkyRadiance.w > 0.5 ? 1.0 : 0.0;
+    float3 skyRadiance = BurtGIRadianceCacheResolveSkyRadiance(direction, 0.18);
+
+    if (_BurtGIRadianceCacheClipMapUseIrradianceField != 0u)
+    {
+        hitDistance = max(_BurtGIScreenProbeTraceParams.w, 1.0);
+        return skyRadiance * skyTraceEnabled;
+    }
+
+    uint2 screenProbeGridSize = BurtGIScreenProbeGridSize();
+    uint2 screenProbeCoord = uint2(probeIndex % screenProbeGridSize.x, (probeIndex / screenProbeGridSize.x) % screenProbeGridSize.y);
+    float2 sourceUV = (float2(screenProbeCoord) + 0.5) / (float2)screenProbeGridSize;
+
+    uint rawWidth;
+    uint rawHeight;
+    _BurtScreenSpaceGlobalIlluminationRawTexture.GetDimensions(rawWidth, rawHeight);
+    uint2 rawSize = max(uint2(rawWidth, rawHeight), uint2(1u, 1u));
+    uint2 rawCoord = min((uint2)(saturate(sourceUV) * (float2)rawSize), rawSize - 1u);
+
+    float4 rawGI = _BurtScreenSpaceGlobalIlluminationRawTexture.Load(int3((int)rawCoord.x, (int)rawCoord.y, 0));
+    float4 screenProbeWorldPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)screenProbeCoord.x, (int)screenProbeCoord.y, 0));
+    float validSurface = screenProbeWorldPosition.w > 0.0 ? 1.0 : 0.0;
+    float maxTraceDistance = max(_BurtGIScreenProbeTraceParams.w, 1.0);
+    hitDistance = validSurface > 0.0 ? distance(probeWorldCenter, screenProbeWorldPosition.xyz) : maxTraceDistance;
+
+    float upFactor = saturate(direction.y * 0.5 + 0.5);
+    float3 analyticSkyFallback = lerp(float3(0.015, 0.018, 0.022), float3(0.08, 0.09, 0.11), upFactor);
+    float3 skyFallback = lerp(analyticSkyFallback, skyRadiance, skyTraceEnabled);
+    float directionalEnergy = lerp(0.72, 1.18, saturate(direction.z * 0.5 + 0.5));
+    float3 fallbackRadiance = max(lerp(skyFallback, rawGI.rgb, validSurface), 0.0) * directionalEnergy;
+
+    uint traceWidth;
+    uint traceHeight;
+    _BurtGIScreenProbeTraceRadianceTexture.GetDimensions(traceWidth, traceHeight);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 traceAtlasSize = max(uint2(traceWidth, traceHeight), uint2(1u, 1u));
+    uint2 traceProbeCapacity = max(traceAtlasSize / traceResolution, uint2(1u, 1u));
+    uint2 traceProbeCoord = min(screenProbeCoord, traceProbeCapacity - 1u);
+    float4 traceRadiance;
+    float traceHit;
+    BurtGISampleScreenProbeImportanceTraceByDirection(traceProbeCoord, direction, traceResolution, traceAtlasSize, traceRadiance, traceHit);
+    traceHit = saturate(traceHit);
+    float traceConfidence = saturate(max(traceRadiance.a, traceHit) * traceHit);
+    float traceDistance = maxTraceDistance * lerp(1.0, 0.35, traceConfidence);
+    hitDistance = min(hitDistance, traceDistance);
+
+    return lerp(fallbackRadiance, max(traceRadiance.rgb, 0.0), traceConfidence);
+}
+
+float BurtGIRadianceCacheDirectionImportance(uint probeIndex, float3 probeWorldCenter, float2 probeUV)
+{
+    float3 direction = BurtGIEquiAreaSphericalMapping(probeUV);
+
+    float hitDistance;
+    float3 radiance = BurtGISampleRawScreenGI(probeIndex, direction, probeWorldCenter, hitDistance);
+    float luminance = dot(radiance, float3(0.2126, 0.7152, 0.0722));
+    float distanceWeight = saturate(1.0 - hitDistance / max(_BurtGIScreenProbeTraceParams.w, 1.0));
+    float horizonWeight = saturate(abs(direction.y) * 0.35 + 0.65);
+    float transferPDF = BurtGIRadianceCacheScreenProbeTransferPDF(probeIndex, direction);
+    float screenGIFallbackPDF = luminance * (0.45 + 0.55 * distanceWeight) * horizonWeight;
+    return max(transferPDF, screenGIFallbackPDF * 0.25);
+}
+
+float BurtGIRadianceCacheProbePDFDirectionImportanceUV(float2 probeUV)
+{
+    if (BurtGITraceTileProbePDFValid == 0u)
+    {
+        return 0.0;
+    }
+
+    float3 direction = BurtGIEquiAreaSphericalMapping(probeUV);
+    BurtGIThreeBandSHVector directionSH = BurtGISHBasisFunction3(direction);
+
+    BurtGIThreeBandSHVector probePDF;
+    probePDF.V0 = BurtGITraceTileProbePDFV0;
+    probePDF.V1 = BurtGITraceTileProbePDFV1;
+    probePDF.V2 = BurtGITraceTileProbePDFV2;
+
+    return max(BurtGIDotSH3(probePDF, directionSH), 0.0);
+}
+
+void BurtGIStoreProbePDFCoefficient(uint baseIndex, uint coefficientIndex, float value)
+{
+    _BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + coefficientIndex] = BurtGIEncodeProbePDFCoefficient(value);
+}
+
+void BurtGILoadRadianceProbePDF(uint probeIndex)
+{
+    uint baseIndex = BurtGIProbePDFBaseIndex(probeIndex);
+    float totalWeight = max(BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 9u]), 0.0);
+    float normalizeWeight = totalWeight > 0.0001 ? rcp(totalWeight) : 0.0;
+    BurtGITraceTileProbePDFV0 = float4(
+        BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 0u]),
+        BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 1u]),
+        BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 2u]),
+        BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 3u])) * normalizeWeight;
+    BurtGITraceTileProbePDFV1 = float4(
+        BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 4u]),
+        BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 5u]),
+        BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 6u]),
+        BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 7u])) * normalizeWeight;
+    BurtGITraceTileProbePDFV2 = BurtGIDecodeProbePDFCoefficient(_BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 8u]) * normalizeWeight;
+    BurtGITraceTileProbePDFValid = totalWeight > 0.0001 ? 1u : 0u;
+}
+
+void BurtGIBuildRadianceProbePDF(uint probeIndex, float3 probeWorldCenter)
+{
+    BurtGIThreeBandSHVector accumulatedPDF;
+    accumulatedPDF.V0 = 0.0;
+    accumulatedPDF.V1 = 0.0;
+    accumulatedPDF.V2 = 0.0;
+    float totalWeight = 0.0;
+
+    [loop]
+    for (uint y = 0u; y < 8u; ++y)
+    {
+        [loop]
+        for (uint x = 0u; x < 8u; ++x)
+        {
+            float2 probeUV = (float2(x, y) + 0.5) * 0.125;
+            float3 direction = BurtGIEquiAreaSphericalMapping(probeUV);
+
+            float hitDistance;
+            float3 radiance = BurtGISampleRawScreenGI(probeIndex, direction, probeWorldCenter, hitDistance);
+            float luminance = dot(radiance, float3(0.2126, 0.7152, 0.0722));
+            float distanceWeight = saturate(1.0 - hitDistance / max(_BurtGIScreenProbeTraceParams.w, 1.0));
+            float horizonWeight = saturate(abs(direction.y) * 0.35 + 0.65);
+            float transferPDF = BurtGIRadianceCacheScreenProbeTransferPDF(probeIndex, direction);
+            float screenGIFallbackPDF = luminance * (0.45 + 0.55 * distanceWeight) * horizonWeight;
+            float sampleWeight = max(transferPDF, screenGIFallbackPDF * 0.25);
+
+            BurtGIThreeBandSHVector basis = BurtGISHBasisFunction3(direction);
+            accumulatedPDF.V0 += basis.V0 * sampleWeight;
+            accumulatedPDF.V1 += basis.V1 * sampleWeight;
+            accumulatedPDF.V2 += basis.V2 * sampleWeight;
+            totalWeight += sampleWeight;
+        }
+    }
+
+    uint baseIndex = BurtGIProbePDFBaseIndex(probeIndex);
+    BurtGIStoreProbePDFCoefficient(baseIndex, 0u, accumulatedPDF.V0.x);
+    BurtGIStoreProbePDFCoefficient(baseIndex, 1u, accumulatedPDF.V0.y);
+    BurtGIStoreProbePDFCoefficient(baseIndex, 2u, accumulatedPDF.V0.z);
+    BurtGIStoreProbePDFCoefficient(baseIndex, 3u, accumulatedPDF.V0.w);
+    BurtGIStoreProbePDFCoefficient(baseIndex, 4u, accumulatedPDF.V1.x);
+    BurtGIStoreProbePDFCoefficient(baseIndex, 5u, accumulatedPDF.V1.y);
+    BurtGIStoreProbePDFCoefficient(baseIndex, 6u, accumulatedPDF.V1.z);
+    BurtGIStoreProbePDFCoefficient(baseIndex, 7u, accumulatedPDF.V1.w);
+    BurtGIStoreProbePDFCoefficient(baseIndex, 8u, accumulatedPDF.V2);
+    _BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + 9u] = BurtGIEncodeProbePDFCoefficient(totalWeight);
+
+    BurtGILoadRadianceProbePDF(probeIndex);
+}
+
+bool BurtGIShouldRefineProbeTraceTile(uint probeIndex, float3 probeWorldCenter, uint2 tileCoord, uint traceTileResolution, float threshold)
+{
+    float invTraceTileResolution = rcp((float)max(traceTileResolution, 1u));
+    float2 tileMinUV = (float2)tileCoord * invTraceTileResolution;
+    float2 tileExtentUV = float2(invTraceTileResolution, invTraceTileResolution);
+    float2 centerUV = tileMinUV + tileExtentUV * 0.5;
+    float2 sampleUV0 = tileMinUV + tileExtentUV * 0.25;
+    float2 sampleUV1 = tileMinUV + tileExtentUV * float2(0.75, 0.25);
+    float2 sampleUV2 = tileMinUV + tileExtentUV * float2(0.25, 0.75);
+    float2 sampleUV3 = tileMinUV + tileExtentUV * 0.75;
+
+    float tileImportance = BurtGIRadianceCacheDirectionImportance(probeIndex, probeWorldCenter, centerUV);
+    tileImportance = max(tileImportance, BurtGIRadianceCacheProbePDFDirectionImportanceUV(centerUV) * 0.75);
+    tileImportance = max(tileImportance, BurtGIRadianceCacheDirectionImportance(probeIndex, probeWorldCenter, sampleUV0));
+    tileImportance = max(tileImportance, BurtGIRadianceCacheDirectionImportance(probeIndex, probeWorldCenter, sampleUV1));
+    tileImportance = max(tileImportance, BurtGIRadianceCacheDirectionImportance(probeIndex, probeWorldCenter, sampleUV2));
+    tileImportance = max(tileImportance, BurtGIRadianceCacheDirectionImportance(probeIndex, probeWorldCenter, sampleUV3));
+    tileImportance = max(tileImportance, max(
+        max(BurtGIRadianceCacheProbePDFDirectionImportanceUV(sampleUV0), BurtGIRadianceCacheProbePDFDirectionImportanceUV(sampleUV1)),
+        max(BurtGIRadianceCacheProbePDFDirectionImportanceUV(sampleUV2), BurtGIRadianceCacheProbePDFDirectionImportanceUV(sampleUV3))) * 0.75);
+
+    return tileImportance > threshold;
+}
+
+void BurtGIQueueCompletedProbeTraceTile(uint2 tileCoord, uint tileLevel, uint probeTraceIndex)
+{
+    uint tileIndex;
+    InterlockedAdd(BurtGITraceTileCompletedCount, 1u, tileIndex);
+    if (tileIndex < BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE * 4)
+    {
+        BurtGITraceTileCompletedList[tileIndex] = uint2(BurtGIPackTraceTileInfo(tileCoord.x, tileCoord.y, tileLevel), probeTraceIndex);
+    }
+}
+
+void BurtGIQueuePendingProbeTraceTile(uint2 tileCoord, uint tileLevel, uint probeTraceIndex)
+{
+    uint tileBaseIndex;
+    InterlockedAdd(BurtGITraceTilePendingCount, 4u, tileBaseIndex);
+    if (tileBaseIndex + 3u < BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE * 4)
+    {
+        BurtGITraceTilePendingList[tileBaseIndex + 0u] = uint2(BurtGIPackTraceTileInfo(tileCoord.x * 2u + 0u, tileCoord.y * 2u + 0u, tileLevel), probeTraceIndex);
+        BurtGITraceTilePendingList[tileBaseIndex + 1u] = uint2(BurtGIPackTraceTileInfo(tileCoord.x * 2u + 1u, tileCoord.y * 2u + 0u, tileLevel), probeTraceIndex);
+        BurtGITraceTilePendingList[tileBaseIndex + 2u] = uint2(BurtGIPackTraceTileInfo(tileCoord.x * 2u + 0u, tileCoord.y * 2u + 1u, tileLevel), probeTraceIndex);
+        BurtGITraceTilePendingList[tileBaseIndex + 3u] = uint2(BurtGIPackTraceTileInfo(tileCoord.x * 2u + 1u, tileCoord.y * 2u + 1u, tileLevel), probeTraceIndex);
+    }
+}
+
+uint BurtGIResolveTraceTileLevelCount(float3 probeWorldCenter, uint maxLevels)
+{
+    float3 cameraToProbe = probeWorldCenter - _BurtDeferredCameraWorldPosition.xyz;
+    float distanceFromCameraSq = dot(cameraToProbe, cameraToProbe);
+
+    if (_BurtGIRadianceCacheClipMapForcedUniformTraceTileLevel >= 0)
+    {
+        uint forcedUniformLevel = min((uint)_BurtGIRadianceCacheClipMapForcedUniformTraceTileLevel, maxLevels - 1u);
+        return distanceFromCameraSq >= _BurtGIRadianceCacheClipMapDownsampleDistanceFromCameraSq
+            ? 1u
+            : forcedUniformLevel + 1u;
+    }
+
+    if (distanceFromCameraSq >= _BurtGIRadianceCacheClipMapDownsampleDistanceFromCameraSq)
+    {
+        return 1u;
+    }
+
+    return min(maxLevels, distanceFromCameraSq < _BurtGIRadianceCacheClipMapSupersampleDistanceFromCameraSq ? 3u : 2u);
+}
+
+uint BurtGIResolveForcedTraceTileLevel(float3 probeWorldCenter, uint maxLevels)
+{
+    float3 cameraToProbe = probeWorldCenter - _BurtDeferredCameraWorldPosition.xyz;
+    float distanceFromCameraSq = dot(cameraToProbe, cameraToProbe);
+    if (distanceFromCameraSq >= _BurtGIRadianceCacheClipMapDownsampleDistanceFromCameraSq)
+    {
+        return 0u;
+    }
+
+    return min(maxLevels - 1u, (uint)max(_BurtGIRadianceCacheClipMapForcedUniformTraceTileLevel, 0));
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void GenerateProbeTraceTilesCS(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint probeTraceIndex = groupId.z;
+    bool validProbeTrace = true;
+
+    uint threadIndex = groupThreadId.y * BURT_GI_TRACE_TILE_THREADGROUP_SIZE + groupThreadId.x;
+    float3 probeWorldCenter = BurtGIGetProbeTraceWorldCenter(probeTraceIndex);
+    uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
+    uint baseTileResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution / (uint)BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2u);
+    uint maxTileResolution = max(baseTileResolution, _BurtGIRadianceCacheClipMapFallbackTraceTileResolution * 2u);
+    uint maxLevels = maxTileResolution >= baseTileResolution * 4u ? 3u : (maxTileResolution >= baseTileResolution * 2u ? 2u : 1u);
+    uint totalTraceCost = _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer[0];
+    uint traceCostBudget = max(1u, BurtGIMulClamp(_BurtGIRadianceCacheClipMapNumProbesToTraceBudget, 4u));
+    uint levelCount = BurtGIResolveTraceTileLevelCount(probeWorldCenter, maxLevels);
+
+    bool forceUniformTraceTiles = validProbeTrace && _BurtGIRadianceCacheClipMapForcedUniformTraceTileLevel >= 0;
+    uint forcedTileLevel = BurtGIResolveForcedTraceTileLevel(probeWorldCenter, maxLevels);
+    uint forcedTileResolution = baseTileResolution << forcedTileLevel;
+    uint forcedNumTraceTiles = forcedTileResolution * forcedTileResolution;
+    if (threadIndex == 0u && forceUniformTraceTiles)
+    {
+        InterlockedAdd(_BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer[0], forcedNumTraceTiles, BurtGITraceTileGlobalOffset);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (forceUniformTraceTiles)
+    {
+        [loop]
+        for (uint traceTileIndex = threadIndex; traceTileIndex < forcedNumTraceTiles; traceTileIndex += BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE)
+        {
+            uint2 tileCoord = uint2(traceTileIndex % forcedTileResolution, traceTileIndex / forcedTileResolution);
+            _BurtGIRadianceCacheClipMapProbeTraceTileDataBuffer[BurtGITraceTileGlobalOffset + traceTileIndex] =
+                uint2(BurtGIPackTraceTileInfo(tileCoord.x, tileCoord.y, forcedTileLevel), probeTraceIndex);
+        }
+    }
+
+    if (!forceUniformTraceTiles && totalTraceCost > BurtGIMulClamp(traceCostBudget, 2u))
+    {
+        levelCount = 1u;
+    }
+
+    if (threadIndex == 0u)
+    {
+        BurtGITraceTilePendingCount = 0u;
+        BurtGITraceTileCompletedCount = 0u;
+        if (!forceUniformTraceTiles)
+        {
+            BurtGIBuildRadianceProbePDF(probeIndex, probeWorldCenter);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (!forceUniformTraceTiles && groupThreadId.x < baseTileResolution && groupThreadId.y < baseTileResolution)
+    {
+        uint2 tileCoord = groupThreadId.xy;
+        bool refine = levelCount > 1u &&
+            BurtGIShouldRefineProbeTraceTile(probeIndex, probeWorldCenter, tileCoord, baseTileResolution, 0.0);
+
+        if (refine)
+        {
+            BurtGIQueuePendingProbeTraceTile(tileCoord, 1u, probeTraceIndex);
+        }
+        else
+        {
+            BurtGIQueueCompletedProbeTraceTile(tileCoord, 0u, probeTraceIndex);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint pendingStartIndex = 0u;
+
+    [unroll]
+    for (uint traceLevel = 1u; traceLevel < 3u; ++traceLevel)
+    {
+        uint pendingEndIndex = min(BurtGITraceTilePendingCount, (uint)(BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE * 4));
+        uint traceTileResolution = baseTileResolution << traceLevel;
+
+        if (!forceUniformTraceTiles && traceLevel >= levelCount - 1u)
+        {
+            for (uint pendingIndex = pendingStartIndex + threadIndex; pendingIndex < pendingEndIndex; pendingIndex += BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE)
+            {
+                uint2 tileCoord;
+                uint tileLevel;
+                uint packedProbeTraceIndex;
+                BurtGIUnpackTraceTileInfo(BurtGITraceTilePendingList[pendingIndex], tileCoord, tileLevel, packedProbeTraceIndex);
+                BurtGIQueueCompletedProbeTraceTile(tileCoord, tileLevel, packedProbeTraceIndex);
+            }
+        }
+        else if (!forceUniformTraceTiles)
+        {
+            for (uint pendingIndex = pendingStartIndex + threadIndex; pendingIndex < pendingEndIndex; pendingIndex += BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE)
+            {
+                uint2 tileCoord;
+                uint tileLevel;
+                uint packedProbeTraceIndex;
+                BurtGIUnpackTraceTileInfo(BurtGITraceTilePendingList[pendingIndex], tileCoord, tileLevel, packedProbeTraceIndex);
+
+                bool refine = BurtGIShouldRefineProbeTraceTile(
+                    probeIndex,
+                    probeWorldCenter,
+                    tileCoord,
+                    traceTileResolution,
+                    _BurtGIRadianceCacheClipMapSupersampleTileBRDFThreshold);
+
+                if (refine)
+                {
+                    BurtGIQueuePendingProbeTraceTile(tileCoord, traceLevel + 1u, packedProbeTraceIndex);
+                }
+                else
+                {
+                    BurtGIQueueCompletedProbeTraceTile(tileCoord, tileLevel, packedProbeTraceIndex);
+                }
+            }
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+        pendingStartIndex = pendingEndIndex;
+    }
+
+    uint numTraceTiles = min(BurtGITraceTileCompletedCount, (uint)(BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE * 4));
+
+    if (threadIndex == 0u)
+    {
+        InterlockedAdd(_BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer[0], numTraceTiles, BurtGITraceTileGlobalOffset);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    [loop]
+    for (uint traceTileIndex = threadIndex; traceTileIndex < numTraceTiles; traceTileIndex += BURT_GI_TRACE_TILE_THREADGROUP_SIZE * BURT_GI_TRACE_TILE_THREADGROUP_SIZE)
+    {
+        _BurtGIRadianceCacheClipMapProbeTraceTileDataBuffer[BurtGITraceTileGlobalOffset + traceTileIndex] =
+            BurtGITraceTileCompletedList[traceTileIndex];
+    }
+}

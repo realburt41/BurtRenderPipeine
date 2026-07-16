@@ -1,0 +1,104 @@
+#pragma kernel RadianceCacheUpdateStatsCS
+
+#define BURT_GI_RADIANCE_CACHE_STATS_THREADGROUP_SIZE 8
+#define BURT_GI_PRIORITY_HISTOGRAM_SIZE 16u
+
+RWTexture2D<float4> _BurtGIRadianceCacheStatsTexture;
+
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapPriorityHistogramBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeAllocatorBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer;
+
+float4 _BurtGIRadianceCacheStatsParams; // xy=target size, z=max probes, w=trace budget.
+
+float3 BurtGIStatsHeat(float value)
+{
+    value = saturate(value);
+    float3 cold = float3(0.02, 0.07, 0.18);
+    float3 mid = float3(0.0, 0.72, 0.48);
+    float3 hot = float3(1.0, 0.35, 0.06);
+    return value < 0.5 ? lerp(cold, mid, value * 2.0) : lerp(mid, hot, value * 2.0 - 1.0);
+}
+
+float BurtGIStatsBar(uint2 pixel, uint rowIndex, uint rowCount, float value)
+{
+    uint width = max(1u, (uint)_BurtGIRadianceCacheStatsParams.x);
+    uint height = max(1u, (uint)_BurtGIRadianceCacheStatsParams.y);
+    uint rowHeight = max(1u, height / max(1u, rowCount));
+    uint rowStart = rowIndex * rowHeight;
+    uint rowEnd = rowIndex == rowCount - 1u ? height : min(height, rowStart + rowHeight);
+    if (pixel.y < rowStart || pixel.y >= rowEnd)
+    {
+        return 0.0;
+    }
+
+    float horizontal = ((float)pixel.x + 0.5) / (float)width;
+    float inBar = horizontal <= saturate(value) ? 1.0 : 0.0;
+    float band = saturate(((float)(pixel.y - rowStart) + 0.5) / max(1.0, (float)(rowEnd - rowStart)));
+    float edge = step(0.05, band) * step(band, 0.95);
+    return inBar * edge;
+}
+
+[numthreads(BURT_GI_RADIANCE_CACHE_STATS_THREADGROUP_SIZE, BURT_GI_RADIANCE_CACHE_STATS_THREADGROUP_SIZE, 1)]
+void RadianceCacheUpdateStatsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width = max(1u, (uint)_BurtGIRadianceCacheStatsParams.x);
+    uint height = max(1u, (uint)_BurtGIRadianceCacheStatsParams.y);
+    uint2 pixel = dispatchThreadId.xy;
+    if (pixel.x >= width || pixel.y >= height)
+    {
+        return;
+    }
+
+    uint traceBudget = max(1u, (uint)_BurtGIRadianceCacheStatsParams.w);
+    uint maxProbeCount = max(1u, (uint)_BurtGIRadianceCacheStatsParams.z);
+    uint maxUpdateBucket = _BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer[0];
+    uint maxTracesFromBucket = _BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer[0];
+    uint traceAllocator = _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0];
+    uint probeAllocator = _BurtGIRadianceCacheClipMapProbeAllocatorBuffer[0];
+    uint probeFreeList = _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer[0];
+    uint activeProbes = probeAllocator > probeFreeList ? probeAllocator - probeFreeList : 0u;
+    uint totalTraceCost = _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer[0];
+    uint bucketTraceCost = _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer[1];
+
+    float3 color = float3(0.006, 0.008, 0.012);
+    float rowStripe = (pixel.y & 1u) ? 0.012 : 0.0;
+    color += float3(rowStripe, rowStripe, rowStripe);
+
+    const uint rowCount = BURT_GI_PRIORITY_HISTOGRAM_SIZE + 7u;
+    [loop]
+    for (uint i = 0u; i < BURT_GI_PRIORITY_HISTOGRAM_SIZE; ++i)
+    {
+        float bucketValue = (float)_BurtGIRadianceCacheClipMapPriorityHistogramBuffer[i] / (float)traceBudget;
+        float bar = BurtGIStatsBar(pixel, i, rowCount, bucketValue);
+        float bucketMarker = (i == maxUpdateBucket) ? 1.0 : 0.0;
+        color = lerp(color, BurtGIStatsHeat(bucketValue) + bucketMarker.xxx * float3(0.25, 0.25, 0.0), bar);
+    }
+
+    float maxBucketBar = BurtGIStatsBar(pixel, 16u, rowCount, (float)(maxUpdateBucket + 1u) / (float)BURT_GI_PRIORITY_HISTOGRAM_SIZE);
+    color = lerp(color, float3(0.9, 0.65, 0.05), maxBucketBar);
+
+    float maxTraceBar = BurtGIStatsBar(pixel, 17u, rowCount, (float)maxTracesFromBucket / (float)traceBudget);
+    color = lerp(color, float3(0.98, 0.42, 0.08), maxTraceBar);
+
+    float traceAllocatorBar = BurtGIStatsBar(pixel, 18u, rowCount, (float)traceAllocator / (float)maxProbeCount);
+    color = lerp(color, float3(0.0, 0.75, 0.95), traceAllocatorBar);
+
+    float totalTraceCostBar = BurtGIStatsBar(pixel, 19u, rowCount, (float)totalTraceCost / (float)traceBudget);
+    color = lerp(color, float3(0.55, 0.95, 0.35), totalTraceCostBar);
+
+    float bucketTraceCostBar = BurtGIStatsBar(pixel, 20u, rowCount, (float)bucketTraceCost / (float)traceBudget);
+    color = lerp(color, float3(0.85, 0.95, 0.25), bucketTraceCostBar);
+
+    float allocatedBar = BurtGIStatsBar(pixel, 21u, rowCount, (float)probeAllocator / (float)maxProbeCount);
+    color = lerp(color, float3(0.25, 0.48, 1.0), allocatedBar);
+
+    float activeBar = BurtGIStatsBar(pixel, 22u, rowCount, (float)activeProbes / (float)maxProbeCount);
+    color = lerp(color, float3(0.88, 0.32, 1.0), activeBar);
+
+    _BurtGIRadianceCacheStatsTexture[pixel] = float4(color, 1.0);
+}

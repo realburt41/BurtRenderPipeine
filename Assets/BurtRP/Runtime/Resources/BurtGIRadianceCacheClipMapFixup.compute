@@ -1,0 +1,170 @@
+#pragma kernel FixupBordersAndGenerateMipsCS
+#pragma kernel FixupBorderAndGenerateMipsCS
+
+#define BURT_GI_TRACE_TILE_THREADGROUP_SIZE 8
+
+Texture2D<float4> _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture;
+RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture;
+RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip1Texture;
+RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip2Texture;
+
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
+
+float4 _BurtGIRadianceCacheClipMapParams;
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
+uint _BurtGIRadianceCacheClipMapFinalProbeResolution;
+
+groupshared float3 BurtGIFinalRadianceMip0LDS[BURT_GI_TRACE_TILE_THREADGROUP_SIZE][BURT_GI_TRACE_TILE_THREADGROUP_SIZE];
+groupshared float3 BurtGIFinalRadianceMip1LDS[BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2][BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2];
+
+uint BurtGIProbeAtlasResolutionInProbes()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.x);
+}
+
+uint2 BurtGIProbeAtlasBaseCoord(uint probeIndex, uint probeResolution)
+{
+    uint atlasResolutionInProbes = BurtGIProbeAtlasResolutionInProbes();
+    uint2 probeCoord = uint2(probeIndex % atlasResolutionInProbes, probeIndex / atlasResolutionInProbes);
+    return probeCoord * probeResolution;
+}
+
+uint BurtGIGetProbeIndexFromTraceData(uint probeTraceIndex)
+{
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        return 0u;
+    }
+
+    return asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) & 0x00ffffffu;
+}
+
+uint2 BurtGIWrapProbeTexelToRaw(uint2 finalProbeTexelCoord, uint finalProbeResolution, uint rawProbeResolution)
+{
+    rawProbeResolution = max(1u, rawProbeResolution);
+    finalProbeResolution = max(rawProbeResolution, finalProbeResolution);
+    uint borderSize = max(0u, (finalProbeResolution - rawProbeResolution) / 2u);
+
+    if (borderSize == 0u)
+    {
+        return min(finalProbeTexelCoord, uint2(rawProbeResolution - 1u, rawProbeResolution - 1u));
+    }
+
+    uint2 wrappedCoord = min(finalProbeTexelCoord, uint2(finalProbeResolution - 1u, finalProbeResolution - 1u));
+    if (wrappedCoord.x < borderSize)
+    {
+        wrappedCoord.x = borderSize - 1u + borderSize - wrappedCoord.x;
+        wrappedCoord.y = finalProbeResolution - 1u - wrappedCoord.y;
+    }
+    if (wrappedCoord.x >= finalProbeResolution - borderSize)
+    {
+        wrappedCoord.x = (finalProbeResolution - borderSize) - (wrappedCoord.x - (finalProbeResolution - borderSize - 1u));
+        wrappedCoord.y = finalProbeResolution - 1u - wrappedCoord.y;
+    }
+    if (wrappedCoord.y < borderSize)
+    {
+        wrappedCoord.y = borderSize - 1u + borderSize - wrappedCoord.y;
+        wrappedCoord.x = finalProbeResolution - 1u - wrappedCoord.x;
+    }
+    if (wrappedCoord.y >= finalProbeResolution - borderSize)
+    {
+        wrappedCoord.y = (finalProbeResolution - borderSize) - (wrappedCoord.y - (finalProbeResolution - borderSize - 1u));
+        wrappedCoord.x = finalProbeResolution - 1u - wrappedCoord.x;
+    }
+
+    return min(wrappedCoord - borderSize, uint2(rawProbeResolution - 1u, rawProbeResolution - 1u));
+}
+
+uint2 BurtGIWrapFinalProbeTexelToRaw(uint2 finalProbeTexelCoord)
+{
+    uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
+    uint finalProbeResolution = max(radianceProbeResolution, _BurtGIRadianceCacheClipMapFinalProbeResolution);
+    return BurtGIWrapProbeTexelToRaw(finalProbeTexelCoord, finalProbeResolution, radianceProbeResolution);
+}
+
+void BurtGIFixupBordersAndGenerateMips(
+    uint3 groupId,
+    uint3 groupThreadId,
+    uint3 dispatchThreadId)
+{
+    uint probeTraceIndex = dispatchThreadId.z;
+    bool validProbeTrace = probeTraceIndex < _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0];
+
+    uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
+    uint finalProbeResolution = max(radianceProbeResolution, _BurtGIRadianceCacheClipMapFinalProbeResolution);
+    uint2 finalProbeTexelCoord = dispatchThreadId.xy;
+    bool validFinalTexel = validProbeTrace &&
+        finalProbeTexelCoord.x < finalProbeResolution &&
+        finalProbeTexelCoord.y < finalProbeResolution;
+
+    uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
+    uint2 finalBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, finalProbeResolution);
+    uint2 finalAtlasCoord = finalBaseCoord + finalProbeTexelCoord;
+    uint2 rawProbeTexelCoord = BurtGIWrapFinalProbeTexelToRaw(finalProbeTexelCoord);
+    float3 lighting = validFinalTexel
+        ? _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(
+            int3(BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution) + rawProbeTexelCoord, 0)).rgb
+        : 0.0;
+    if (validFinalTexel)
+    {
+        _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture[finalAtlasCoord] = float4(lighting, 1.0);
+    }
+
+    BurtGIFinalRadianceMip0LDS[groupThreadId.y][groupThreadId.x] = lighting;
+    GroupMemoryBarrierWithGroupSync();
+    uint atlasResolutionInProbes = BurtGIProbeAtlasResolutionInProbes();
+    uint2 probeCoord = uint2(probeIndex % atlasResolutionInProbes, probeIndex / atlasResolutionInProbes);
+    if (_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip > 0u)
+    {
+        uint mip1Resolution = max(1u, finalProbeResolution >> 1u);
+        uint2 mip1ProbeTexelCoord = groupThreadId.xy + (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2u) * groupId.xy;
+        if (validProbeTrace && all(groupThreadId.xy < (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2u)) && all(mip1ProbeTexelCoord < mip1Resolution))
+        {
+            float3 mip1Lighting = 0.0;
+            mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 0u];
+            mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 1u];
+            mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 0u];
+            mip1Lighting += BurtGIFinalRadianceMip0LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 1u];
+            mip1Lighting *= 0.25;
+            BurtGIFinalRadianceMip1LDS[groupThreadId.y][groupThreadId.x] = mip1Lighting;
+            _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip1Texture[mip1ProbeTexelCoord + mip1Resolution * probeCoord] = float4(mip1Lighting, 1.0);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    if (_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip > 1u)
+    {
+        uint mip2Resolution = max(1u, finalProbeResolution >> 2u);
+        uint2 mip2ProbeTexelCoord = groupThreadId.xy + (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 4u) * groupId.xy;
+        if (validProbeTrace && all(groupThreadId.xy < (BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 4u)) && all(mip2ProbeTexelCoord < mip2Resolution))
+        {
+            float3 mip2Lighting = 0.0;
+            mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 0u];
+            mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 0u][groupThreadId.x * 2u + 1u];
+            mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 0u];
+            mip2Lighting += BurtGIFinalRadianceMip1LDS[groupThreadId.y * 2u + 1u][groupThreadId.x * 2u + 1u];
+            _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip2Texture[mip2ProbeTexelCoord + mip2Resolution * probeCoord] = float4(mip2Lighting * 0.25, 1.0);
+        }
+    }
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void FixupBordersAndGenerateMipsCS(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIFixupBordersAndGenerateMips(groupId, groupThreadId, dispatchThreadId);
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void FixupBorderAndGenerateMipsCS(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIFixupBordersAndGenerateMips(groupId, groupThreadId, dispatchThreadId);
+}

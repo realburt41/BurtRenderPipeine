@@ -265,10 +265,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让诊断工具
                     var write = writes[writeIndex];
                     if (CanTrackResource(write, write.Name) && read.Name == write.Name)
                     {
+                        if (IsKnownIntentionalSamePassRenderTargetReadWrite(usage, read.Name))
+                        {
+                            continue;
+                        }
+
                         usage.AddValidationMessage("同一 Pass 同时 Read/Write RenderTarget: " + read.Name + "，请确认这是有意的 in-place 操作。");
                     }
                 }
             }
+        }
+
+        private static bool IsKnownIntentionalSamePassRenderTargetReadWrite(BurtRenderPassResourceUsage usage, string resourceName)
+        {
+            if (usage == null)
+            {
+                return false;
+            }
+
+            return usage.PassName == "Burt ScreenProbe Integrate SimpleSH Reprojection" &&
+                resourceName == BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName;
         }
 
         private static void ValidateSamePassBufferReadWrite(BurtRenderPassResourceUsage usage) // Checks same-pass logical buffer read/write declarations.

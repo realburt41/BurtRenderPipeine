@@ -1,0 +1,60 @@
+#pragma kernel SetupTraceFromProbesCS
+
+#define BURT_GI_WRITE_DISPATCH_ARGS(Buffer, TupleIndex, X, Y, Z) Buffer[TupleIndex] = uint3((uint)(X), (uint)(Y), (uint)(Z))
+
+uint _BurtGIRadianceCacheClipMapSortTraceTilesGroupSize;
+uint _BurtGIRadianceCacheClipMapTraceTileGroupStride;
+uint _BurtGIRadianceCacheClipMapTraceTileSize1D;
+
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBuffer;
+
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorReadBuffer;
+
+uint BurtGIMulClamp(uint a, uint b)
+{
+    return a > 0u && b > 0u ? min(a * b, 0x7fffffffu) : 0u;
+}
+
+uint BurtGIDivRoundUp(uint value, uint divisor)
+{
+    divisor = max(1u, divisor);
+    return (value + divisor - 1u) / divisor;
+}
+
+[numthreads(1, 1, 1)]
+void SetupTraceFromProbesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x != 0u || dispatchThreadId.y != 0u || dispatchThreadId.z != 0u)
+    {
+        return;
+    }
+
+    uint numProbeTraceTiles = _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorReadBuffer[0];
+
+    BURT_GI_WRITE_DISPATCH_ARGS(
+        _BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBuffer,
+        0,
+        _BurtGIRadianceCacheClipMapTraceTileGroupStride,
+        BurtGIDivRoundUp(numProbeTraceTiles, _BurtGIRadianceCacheClipMapTraceTileGroupStride),
+        1u);
+
+    BURT_GI_WRITE_DISPATCH_ARGS(
+        _BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBuffer,
+        0,
+        BurtGIDivRoundUp(numProbeTraceTiles, _BurtGIRadianceCacheClipMapSortTraceTilesGroupSize),
+        1u,
+        1u);
+
+    BURT_GI_WRITE_DISPATCH_ARGS(
+        _BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBuffer,
+        0,
+        _BurtGIRadianceCacheClipMapTraceTileSize1D,
+        numProbeTraceTiles,
+        1u);
+
+    _BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBuffer[0] =
+        BurtGIMulClamp(numProbeTraceTiles, _BurtGIRadianceCacheClipMapTraceTileSize1D);
+}

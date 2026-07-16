@@ -1,0 +1,84 @@
+#pragma kernel SortProbeTraceTilesCS
+
+#define BURT_GI_SORT_TRACE_TILES_THREADGROUP_SIZE 1024
+#define BURT_GI_TRACE_TILE_DIRECTION_BINS_2D 8
+#define BURT_GI_TRACE_TILE_DIRECTION_BINS_1D (BURT_GI_TRACE_TILE_DIRECTION_BINS_2D * BURT_GI_TRACE_TILE_DIRECTION_BINS_2D)
+#define BURT_GI_TRACE_TILE_THREADGROUP_SIZE 8
+
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorReadBuffer;
+StructuredBuffer<uint2> _BurtGIRadianceCacheClipMapProbeTraceTileDataBuffer;
+RWStructuredBuffer<uint2> _BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBuffer;
+
+uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
+
+groupshared uint BurtGITraceTileDirectionBinCount[BURT_GI_TRACE_TILE_DIRECTION_BINS_1D];
+groupshared uint BurtGITraceTileDirectionBinOffset[BURT_GI_TRACE_TILE_DIRECTION_BINS_1D];
+
+void BurtGIUnpackTraceTileInfo(uint2 packedTraceTile, out uint2 tileCoord, out uint tileLevel, out uint probeTraceIndex)
+{
+    tileCoord = uint2(packedTraceTile.x & 0xffu, (packedTraceTile.x >> 8) & 0xffu);
+    tileLevel = (packedTraceTile.x >> 16) & 0xffu;
+    probeTraceIndex = packedTraceTile.y;
+}
+
+uint BurtGIGetTraceTileDirectionBin(uint2 traceTileCoord, uint traceTileLevel)
+{
+    uint baseTileResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution / (uint)BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2u);
+    uint traceResolution = max(1u, baseTileResolution << traceTileLevel);
+    uint2 directionalBin = min(
+        traceTileCoord * (uint)BURT_GI_TRACE_TILE_DIRECTION_BINS_2D / traceResolution,
+        uint2(BURT_GI_TRACE_TILE_DIRECTION_BINS_2D - 1u, BURT_GI_TRACE_TILE_DIRECTION_BINS_2D - 1u));
+    return directionalBin.y * (uint)BURT_GI_TRACE_TILE_DIRECTION_BINS_2D + directionalBin.x;
+}
+
+[numthreads(BURT_GI_SORT_TRACE_TILES_THREADGROUP_SIZE, 1, 1)]
+void SortProbeTraceTilesCS(
+    uint groupId : SV_GroupID,
+    uint groupThreadId : SV_GroupThreadID)
+{
+    [loop]
+    for (uint binIndex = groupThreadId; binIndex < BURT_GI_TRACE_TILE_DIRECTION_BINS_1D; binIndex += BURT_GI_SORT_TRACE_TILES_THREADGROUP_SIZE)
+    {
+        BurtGITraceTileDirectionBinCount[binIndex] = 0u;
+        BurtGITraceTileDirectionBinOffset[binIndex] = 0u;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint traceTileIndex = groupId * BURT_GI_SORT_TRACE_TILES_THREADGROUP_SIZE + groupThreadId;
+    uint traceTileCount = _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorReadBuffer[0];
+    if (traceTileIndex < traceTileCount)
+    {
+        uint2 traceTileCoord;
+        uint traceTileLevel;
+        uint probeTraceIndex;
+        BurtGIUnpackTraceTileInfo(_BurtGIRadianceCacheClipMapProbeTraceTileDataBuffer[traceTileIndex], traceTileCoord, traceTileLevel, probeTraceIndex);
+
+        uint finalBinIndex = BurtGIGetTraceTileDirectionBin(traceTileCoord, traceTileLevel);
+        InterlockedAdd(BurtGITraceTileDirectionBinCount[finalBinIndex], 1u);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (traceTileIndex < traceTileCount)
+    {
+        uint2 traceTileData = _BurtGIRadianceCacheClipMapProbeTraceTileDataBuffer[traceTileIndex];
+        uint2 traceTileCoord;
+        uint traceTileLevel;
+        uint probeTraceIndex;
+        BurtGIUnpackTraceTileInfo(traceTileData, traceTileCoord, traceTileLevel, probeTraceIndex);
+
+        uint finalBinIndex = BurtGIGetTraceTileDirectionBin(traceTileCoord, traceTileLevel);
+
+        uint sortedTraceTileOffset;
+        InterlockedAdd(BurtGITraceTileDirectionBinOffset[finalBinIndex], 1u, sortedTraceTileOffset);
+
+        [loop]
+        for (uint binIndex = 0u; binIndex < finalBinIndex; ++binIndex)
+        {
+            sortedTraceTileOffset += BurtGITraceTileDirectionBinCount[binIndex];
+        }
+
+        _BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBuffer[groupId * BURT_GI_SORT_TRACE_TILES_THREADGROUP_SIZE + sortedTraceTileOffset] = traceTileData;
+    }
+}

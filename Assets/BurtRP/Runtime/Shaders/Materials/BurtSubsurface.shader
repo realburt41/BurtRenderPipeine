@@ -35,6 +35,39 @@ Shader "BurtRP/Subsurface"
         _SubsurfaceProfileIndex ("Subsurface Profile Index", Range(0, 7)) = 0
         _Subsurface3SCurvatureScale ("3S Curvature Scale", Range(0, 2)) = 0.5
         _Subsurface3SCurvatureBias ("3S Curvature Bias", Range(0, 1)) = 0
+        [Toggle(BURT_SKINNED_DECAL)] _SkinnedDecalEnabled ("Enable Skinned Decal", Float) = 0
+        [HideInInspector] _BurtSkinnedDecalProjectionDebug ("Skinned Decal Projection Debug", Float) = 0
+        [HideInInspector] _BurtSkinnedDecalEntryDebug ("Skinned Decal Entry Debug", Float) = 0
+        [HideInInspector] _BurtSkinnedDecalUseMeshPosition ("Skinned Decal Use Mesh Position", Float) = 0
+        [IntRange] _SkinnedDecalPluginModel_DecalCount ("Skinned Decal Count", Range(0, 5)) = 1
+        [NoScaleOffset] _SkinnedDecalPluginModel_DecalAlbedo ("Skinned Decal Albedo", 2D) = "black" {}
+        [NoScaleOffset] _SkinnedDecalPluginModel_DecalNormal ("Skinned Decal Normal", 2D) = "bump" {}
+        [NoScaleOffset] _SkinnedDecalPluginModel_DecalMOHR ("Skinned Decal MOHR", 2D) = "black" {}
+        _SkinnedDecalPluginModel_DecalArrayIndexSize1 ("Skinned Decal 1 (Unused, Size dm, Albedo Multiply, Normal Scale)", Vector) = (0, 1, 0, 1)
+        _SkinnedDecalPluginModel_DecalTint1 ("Skinned Decal Tint 1", Color) = (1, 1, 1, 1)
+        _SkinnedDecalPluginModel_DecalPosition1 ("Skinned Decal Position 1", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisX1 ("Skinned Decal Basis X 1", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisY1 ("Skinned Decal Basis Y 1", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalArraySizeIndex2 ("Skinned Decal 2 (Unused, Size dm, Albedo Multiply, Normal Scale)", Vector) = (0, 1, 0, 1)
+        _SkinnedDecalPluginModel_DecalTint2 ("Skinned Decal Tint 2", Color) = (1, 1, 1, 1)
+        _SkinnedDecalPluginModel_DecalPosition2 ("Skinned Decal Position 2", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisX2 ("Skinned Decal Basis X 2", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisY2 ("Skinned Decal Basis Y 2", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalArraySizeIndex3 ("Skinned Decal 3 (Unused, Size dm, Albedo Multiply, Normal Scale)", Vector) = (0, 1, 0, 1)
+        _SkinnedDecalPluginModel_DecalTint3 ("Skinned Decal Tint 3", Color) = (1, 1, 1, 1)
+        _SkinnedDecalPluginModel_DecalPosition3 ("Skinned Decal Position 3", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisX3 ("Skinned Decal Basis X 3", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisY3 ("Skinned Decal Basis Y 3", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalArraySizeIndex4 ("Skinned Decal 4 (Unused, Size dm, Albedo Multiply, Normal Scale)", Vector) = (0, 1, 0, 1)
+        _SkinnedDecalPluginModel_DecalTint4 ("Skinned Decal Tint 4", Color) = (1, 1, 1, 1)
+        _SkinnedDecalPluginModel_DecalPosition4 ("Skinned Decal Position 4", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisX4 ("Skinned Decal Basis X 4", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisY4 ("Skinned Decal Basis Y 4", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalArraySizeIndex5 ("Skinned Decal 5 (Unused, Size dm, Albedo Multiply, Normal Scale)", Vector) = (0, 1, 0, 1)
+        _SkinnedDecalPluginModel_DecalTint5 ("Skinned Decal Tint 5", Color) = (1, 1, 1, 1)
+        _SkinnedDecalPluginModel_DecalPosition5 ("Skinned Decal Position 5", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisX5 ("Skinned Decal Basis X 5", Vector) = (0, 0, 0, 0)
+        _SkinnedDecalPluginModel_DecalBasisY5 ("Skinned Decal Basis Y 5", Vector) = (0, 0, 0, 0)
         // 定义自发光贴图，Forward 光照会把它作为不受灯光影响的颜色叠加到最终结果。
         _EmissionMap ("Emission Map", 2D) = "white" {}
 
@@ -159,11 +192,15 @@ Shader "BurtRP/Subsurface"
             #pragma fragment FragDepthNormals
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
+            #pragma shader_feature_local _ BURT_SKINNED_DECAL
+            #pragma multi_compile _ XSKIN_MESH_COMPRESSED
             #pragma target 4.5
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_SUBSURFACE 1
+            #define BURT_USE_PRESKIN_POSITION 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDepthNormalsPass.hlsl"
             ENDHLSL
         }
@@ -209,6 +246,7 @@ Shader "BurtRP/Subsurface"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
+            #pragma shader_feature_local _ BURT_SKINNED_DECAL
             #pragma multi_compile _ XSKIN_MESH_COMPRESSED
 
             // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
@@ -240,6 +278,7 @@ Shader "BurtRP/Subsurface"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
+            #pragma shader_feature_local _ BURT_SKINNED_DECAL
             #pragma multi_compile _ XSKIN_MESH_COMPRESSED
             #pragma target 4.5
 
@@ -267,6 +306,7 @@ Shader "BurtRP/Subsurface"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
+            #pragma shader_feature_local _ BURT_SKINNED_DECAL
             #pragma multi_compile _ XSKIN_MESH_COMPRESSED
             #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
             #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION

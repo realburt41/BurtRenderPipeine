@@ -194,6 +194,19 @@ float4 BurtEvaluateDeferredLightingDebugOutput(
         : float3(0.0f, 0.0f, 0.0f);
     DebugData.IndirectDiffuseColor = DebugLightingComponents.IndirectDiffuse;
     DebugData.IndirectSpecularColor = DebugLightingComponents.IndirectSpecular;
+    float3 GIProbeIrradiance;
+    float GIProbeValidity;
+    float GIProbeSkyVisibility;
+    BurtTrySampleGIProbeVolumeDebugData(
+        PositionWS,
+        DeferredAONormalWS,
+        ViewDirectionWS,
+        GIProbeIrradiance,
+        GIProbeValidity,
+        GIProbeSkyVisibility);
+    DebugData.GIProbeIrradiance = GIProbeIrradiance;
+    DebugData.GIProbeValidity = GIProbeValidity;
+    DebugData.GIProbeSkyVisibility = GIProbeSkyVisibility;
     DebugData.AmbientOcclusion = ShadingGBufferData.Occlusion;
     DebugData.EmissionColor = GBufferData.Emission;
     DebugData.FinalLightingColor = FinalColor;

@@ -1,0 +1,136 @@
+#pragma kernel CopyTexture3DFloat4CS
+#pragma kernel CopyTexture3DUIntCS
+#pragma kernel CopyTexture3DCS
+#pragma kernel ClearTexture3D_Uint
+#pragma kernel ClearTexture3D_Uint_Test1
+#pragma kernel ClearTexture3D_Uint_Test2
+#pragma kernel CopyBuffer_Uint
+#pragma kernel ClearBuffer_Uint
+
+#define BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE 4
+#define BURT_GI_XGI_TOOLS_THREADGROUP_SIZE 8
+
+Texture3D<float4> _BurtGICopyTexture3DSrcFloat4;
+RWTexture3D<float4> _BurtGICopyTexture3DDstFloat4;
+Texture3D<uint> _BurtGICopyTexture3DSrcUInt;
+RWTexture3D<uint> _BurtGICopyTexture3DDstUInt;
+float4 _BurtGICopyTexture3DSize;
+
+float4 StartIndex;
+float4 RangeIndex;
+Texture3D<uint> OriginTexture;
+RWTexture3D<uint> RWClearTexture;
+int ClearValue;
+
+StructuredBuffer<uint> InputBuffer;
+RWStructuredBuffer<uint> RWOutputBuffer;
+int Size;
+int ThreadGroupNumX;
+
+RWStructuredBuffer<uint> RWClearBuffer;
+int ClearSize;
+int ClearThreadGroupNumX;
+int ClearStart;
+int ClearRange;
+
+[numthreads(BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE, BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE, BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE)]
+void CopyTexture3DFloat4CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 size = (uint3)_BurtGICopyTexture3DSize.xyz;
+    if (any(dispatchThreadId >= size))
+    {
+        return;
+    }
+
+    _BurtGICopyTexture3DDstFloat4[dispatchThreadId] = _BurtGICopyTexture3DSrcFloat4.Load(int4(dispatchThreadId, 0));
+}
+
+[numthreads(BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE, BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE, BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE)]
+void CopyTexture3DCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 size = (uint3)_BurtGICopyTexture3DSize.xyz;
+    if (any(dispatchThreadId >= size))
+    {
+        return;
+    }
+
+    _BurtGICopyTexture3DDstFloat4[dispatchThreadId] = _BurtGICopyTexture3DSrcFloat4.Load(int4(dispatchThreadId, 0));
+}
+
+[numthreads(BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE, BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE, BURT_GI_COPY_TEXTURE_3D_THREADGROUP_SIZE)]
+void CopyTexture3DUIntCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 size = (uint3)_BurtGICopyTexture3DSize.xyz;
+    if (any(dispatchThreadId >= size))
+    {
+        return;
+    }
+
+    _BurtGICopyTexture3DDstUInt[dispatchThreadId] = _BurtGICopyTexture3DSrcUInt.Load(int4(dispatchThreadId, 0));
+}
+
+[numthreads(BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, 1)]
+void ClearTexture3D_Uint(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (any(dispatchThreadId >= (uint3)RangeIndex.xyz))
+    {
+        return;
+    }
+
+    int3 index = (int3)StartIndex.xyz + (int3)dispatchThreadId;
+    RWClearTexture[index] = (uint)ClearValue;
+}
+
+[numthreads(BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, 1)]
+void ClearTexture3D_Uint_Test1(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (any(dispatchThreadId >= (uint3)RangeIndex.xyz))
+    {
+        return;
+    }
+
+    int3 index = (int3)StartIndex.xyz + (int3)dispatchThreadId;
+    RWClearTexture[index] = OriginTexture.Load(int4(index, 0)) + (uint)ClearValue;
+}
+
+[numthreads(BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, 1)]
+void ClearTexture3D_Uint_Test2(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (any(dispatchThreadId >= (uint3)RangeIndex.xyz))
+    {
+        return;
+    }
+
+    int3 index = (int3)StartIndex.xyz + (int3)dispatchThreadId;
+    RWClearTexture[index] = RWClearTexture[index] * (uint)ClearValue;
+}
+
+[numthreads(BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, 1)]
+void CopyBuffer_Uint(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint index = dispatchThreadId.x + dispatchThreadId.y * (uint)ThreadGroupNumX * BURT_GI_XGI_TOOLS_THREADGROUP_SIZE;
+    if (index >= (uint)Size)
+    {
+        return;
+    }
+
+    RWOutputBuffer[index] = InputBuffer[index];
+}
+
+[numthreads(BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, BURT_GI_XGI_TOOLS_THREADGROUP_SIZE, 1)]
+void ClearBuffer_Uint(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint localIndex = dispatchThreadId.x + dispatchThreadId.y * (uint)ClearThreadGroupNumX * BURT_GI_XGI_TOOLS_THREADGROUP_SIZE;
+    if (localIndex >= (uint)ClearRange)
+    {
+        return;
+    }
+
+    uint globalIndex = (uint)ClearStart + localIndex;
+    if (globalIndex >= (uint)ClearSize)
+    {
+        return;
+    }
+
+    RWClearBuffer[globalIndex] = (uint)ClearValue;
+}

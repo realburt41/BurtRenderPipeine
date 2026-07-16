@@ -18,6 +18,9 @@
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMaterialPassSubsurface.hlsl"
+    #if defined(BURT_SKINNED_DECAL)
+        #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSkinnedDecal.hlsl"
+    #endif
 #endif
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FABRIC)

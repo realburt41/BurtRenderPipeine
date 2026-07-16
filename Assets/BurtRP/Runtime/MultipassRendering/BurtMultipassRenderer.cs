@@ -565,11 +565,17 @@ namespace Burt.RenderPipeline
                 propertyBlock.SetFloat(FurPreviousSkinnedMeshValidId, previousSkinnedMeshValid ? 1f : 0f);
                 for (var passIndex = 0; passIndex < passList.Count; passIndex++)
                 {
+                    var materialPassIndex = passList[passIndex];
+                    if (materialPassIndex < 0 || materialPassIndex >= material.passCount)
+                    {
+                        continue;
+                    }
+
                     cmd.DrawMeshInstanced(
                         mesh,
                         submeshIndex,
                         material,
-                        passList[passIndex],
+                        materialPassIndex,
                         s_InstanceMatrices,
                         layerCount,
                         propertyBlock);

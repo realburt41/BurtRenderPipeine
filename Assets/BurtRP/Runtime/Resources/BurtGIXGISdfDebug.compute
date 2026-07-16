@@ -1,0 +1,103 @@
+#pragma kernel VisualizeSdfCS
+
+#define BURT_XGI_SDF_DEBUG_THREADGROUP_SIZE 8
+
+RWTexture2D<float4> _RW_XGISdfGenDebugPass_RenderTarget;
+Texture3D<float> _XGISdfApply_SdfTexture;
+float4 _XGISdfGenDebugPass_Params;
+float4 _XGISdfApply_TextureSize;
+
+float3 BurtXGIHSVToRGB(float3 hsv)
+{
+    float4 k = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    float3 p = abs(frac(hsv.xxx + k.xyz) * 6.0 - k.www);
+    return hsv.z * lerp(k.xxx, saturate(p - k.xxx), hsv.y);
+}
+
+float3 BurtXGIHeatmap(float value)
+{
+    float hue = 0.66 * (1.0 - saturate(value));
+    return BurtXGIHSVToRGB(float3(hue, 1.0, 1.0));
+}
+
+float3 BurtXGISampleSdfNormal(uint3 sdfCoord, uint3 textureSize)
+{
+    uint3 rightCoord = uint3(min(sdfCoord.x + 1u, textureSize.x - 1u), sdfCoord.y, sdfCoord.z);
+    uint3 leftCoord = uint3(sdfCoord.x > 0u ? sdfCoord.x - 1u : 0u, sdfCoord.y, sdfCoord.z);
+    uint3 frontCoord = uint3(sdfCoord.x, min(sdfCoord.y + 1u, textureSize.y - 1u), sdfCoord.z);
+    uint3 backCoord = uint3(sdfCoord.x, sdfCoord.y > 0u ? sdfCoord.y - 1u : 0u, sdfCoord.z);
+    uint3 upCoord = uint3(sdfCoord.x, sdfCoord.y, min(sdfCoord.z + 1u, textureSize.z - 1u));
+    uint3 downCoord = uint3(sdfCoord.x, sdfCoord.y, sdfCoord.z > 0u ? sdfCoord.z - 1u : 0u);
+
+    float dx = _XGISdfApply_SdfTexture.Load(int4(rightCoord, 0)) - _XGISdfApply_SdfTexture.Load(int4(leftCoord, 0));
+    float dy = _XGISdfApply_SdfTexture.Load(int4(frontCoord, 0)) - _XGISdfApply_SdfTexture.Load(int4(backCoord, 0));
+    float dz = _XGISdfApply_SdfTexture.Load(int4(upCoord, 0)) - _XGISdfApply_SdfTexture.Load(int4(downCoord, 0));
+    float3 normal = float3(dx, dy, dz);
+    float normalLength = length(normal);
+    return normalLength > 0.0001 ? normal / normalLength : float3(0.0, 0.0, 1.0);
+}
+
+[numthreads(BURT_XGI_SDF_DEBUG_THREADGROUP_SIZE, BURT_XGI_SDF_DEBUG_THREADGROUP_SIZE, 1)]
+void VisualizeSdfCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width = 1u;
+    uint height = 1u;
+    _RW_XGISdfGenDebugPass_RenderTarget.GetDimensions(width, height);
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (pixelCoord.x >= width || pixelCoord.y >= height)
+    {
+        return;
+    }
+
+    float2 uv = ((float2)pixelCoord + 0.5) / max(float2(width, height), 1.0);
+    int debugLayer = (int)_XGISdfGenDebugPass_Params.y;
+    float initMin = _XGISdfGenDebugPass_Params.x;
+    float slice01 = saturate(_XGISdfGenDebugPass_Params.z);
+    bool hasSdfTexture = _XGISdfGenDebugPass_Params.w > 0.5;
+    uint3 textureSize = max((uint3)_XGISdfApply_TextureSize.xyz, 1u);
+    uint sliceCoord = min((uint)round(slice01 * (textureSize.z - 1u)), textureSize.z - 1u);
+    uint3 sdfCoord = uint3(
+        min((uint)floor(uv.x * textureSize.x), textureSize.x - 1u),
+        min((uint)floor(uv.y * textureSize.y), textureSize.y - 1u),
+        sliceCoord);
+    float grid = max(step(0.985, frac(uv.x * 32.0)), step(0.985, frac(uv.y * 18.0))) * 0.08;
+    float3 color = 0.0;
+    float alpha = 1.0;
+
+    if (!hasSdfTexture)
+    {
+        float radial = length(uv - 0.5) * 2.0;
+        float visibility = saturate(1.0 - radial + initMin * 0.01);
+        color = lerp(float3(0.02, 0.025, 0.03), float3(0.34, 0.72, 1.0), visibility);
+    }
+    else if (debugLayer == 0)
+    {
+        float sdf = _XGISdfApply_SdfTexture.Load(int4(sdfCoord, 0));
+        float visibility = saturate(1.0 - sdf * max(initMin, 1.0));
+        float edge = 1.0 - smoothstep(0.001, 0.035, abs(sdf));
+        color = lerp(float3(0.02, 0.025, 0.03), float3(0.25, 0.75, 1.0), visibility);
+        color = lerp(color, float3(1.0, 0.88, 0.25), edge);
+    }
+    else if (debugLayer == 1)
+    {
+        color = BurtXGIHeatmap(slice01);
+    }
+    else if (debugLayer == 2)
+    {
+        float sdf = _XGISdfApply_SdfTexture.Load(int4(sdfCoord, 0));
+        color = BurtXGIHeatmap(saturate(sdf * max(initMin, 1.0)));
+    }
+    else if (debugLayer >= 3 && debugLayer <= 5)
+    {
+        float3 normal = BurtXGISampleSdfNormal(sdfCoord, textureSize);
+        color = debugLayer == 3 ? float3(uv.x, uv.y, slice01) : debugLayer == 4 ? normal * 0.5 + 0.5 : abs(normal);
+    }
+    else
+    {
+        float3 normal = BurtXGISampleSdfNormal(sdfCoord, textureSize);
+        float light = saturate(dot(normal, normalize(float3(0.4, 0.75, 0.5))));
+        color = float3(light, light * 0.82, light * 0.55);
+    }
+
+    _RW_XGISdfGenDebugPass_RenderTarget[pixelCoord] = float4(saturate(color + grid), alpha);
+}

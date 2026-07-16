@@ -168,17 +168,41 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceGlobalIlluminationTextureId = Shader.PropertyToID(ScreenSpaceGlobalIlluminationTextureShaderName);
 
+        public const string ScreenSpaceGlobalIlluminationUpsampledName = "ScreenSpaceGlobalIlluminationUpsampled";
+
+        public const string ScreenSpaceGlobalIlluminationUpsampledTextureShaderName = "_BurtScreenSpaceGlobalIlluminationUpsampledTexture";
+
+        public static readonly int ScreenSpaceGlobalIlluminationUpsampledTextureId = Shader.PropertyToID(ScreenSpaceGlobalIlluminationUpsampledTextureShaderName);
+
         public const string BurtGIBackfaceDiffuseIndirectName = "BurtGIBackfaceDiffuseIndirect";
 
         public const string BurtGIBackfaceDiffuseIndirectTextureShaderName = "_BurtGIBackfaceDiffuseIndirectTexture";
 
         public static readonly int BurtGIBackfaceDiffuseIndirectTextureId = Shader.PropertyToID(BurtGIBackfaceDiffuseIndirectTextureShaderName);
 
+        public const string BurtGIBackfaceDiffuseIndirectUpsampledName = "BurtGIBackfaceDiffuseIndirectUpsampled";
+
+        public const string BurtGIBackfaceDiffuseIndirectUpsampledTextureShaderName = "_BurtGIBackfaceDiffuseIndirectUpsampledTexture";
+
+        public static readonly int BurtGIBackfaceDiffuseIndirectUpsampledTextureId = Shader.PropertyToID(BurtGIBackfaceDiffuseIndirectUpsampledTextureShaderName);
+
         public const string BurtGIRoughSpecularIndirectName = "BurtGIRoughSpecularIndirect";
 
         public const string BurtGIRoughSpecularIndirectTextureShaderName = "_BurtGIRoughSpecularIndirectTexture";
 
         public static readonly int BurtGIRoughSpecularIndirectTextureId = Shader.PropertyToID(BurtGIRoughSpecularIndirectTextureShaderName);
+
+        public const string BurtGIRoughSpecularIndirectUpsampledName = "BurtGIRoughSpecularIndirectUpsampled";
+
+        public const string BurtGIRoughSpecularIndirectUpsampledTextureShaderName = "_BurtGIRoughSpecularIndirectUpsampledTexture";
+
+        public static readonly int BurtGIRoughSpecularIndirectUpsampledTextureId = Shader.PropertyToID(BurtGIRoughSpecularIndirectUpsampledTextureShaderName);
+
+        public const string BurtGIScreenProbeIntegrateTileClassificationName = "BurtGIScreenProbeIntegrateTileClassification";
+
+        public const string BurtGIScreenProbeIntegrateTileClassificationTextureShaderName = "_BurtGIScreenProbeIntegrateTileClassificationTexture";
+
+        public static readonly int BurtGIScreenProbeIntegrateTileClassificationTextureId = Shader.PropertyToID(BurtGIScreenProbeIntegrateTileClassificationTextureShaderName);
 
         public const string BurtGITranslucencyVolume0Name = "BurtGITranslucencyVolume0";
 
@@ -203,6 +227,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string BurtGITranslucencyVolumeFilter1TextureShaderName = "_BurtGITranslucencyVolumeFilter1";
 
         public static readonly int BurtGITranslucencyVolumeFilter1TextureId = Shader.PropertyToID(BurtGITranslucencyVolumeFilter1TextureShaderName);
+
+        public const string BurtGITranslucencyVolumeTraceRadianceName = "BurtGITranslucencyVolumeTraceRadiance";
+
+        public const string BurtGITranslucencyVolumeTraceRadianceTextureShaderName = "_BurtGITranslucencyVolumeTraceRadiance";
+
+        public static readonly int BurtGITranslucencyVolumeTraceRadianceTextureId = Shader.PropertyToID(BurtGITranslucencyVolumeTraceRadianceTextureShaderName);
+
+        public const string BurtGITranslucencyVolumeTraceFilteredRadianceName = "BurtGITranslucencyVolumeTraceFilteredRadiance";
+
+        public const string BurtGITranslucencyVolumeTraceFilteredRadianceTextureShaderName = "_BurtGITranslucencyVolumeTraceFilteredRadiance";
+
+        public static readonly int BurtGITranslucencyVolumeTraceFilteredRadianceTextureId = Shader.PropertyToID(BurtGITranslucencyVolumeTraceFilteredRadianceTextureShaderName);
+
+        public const string BurtGITranslucencyVolumeTraceHitDistanceName = "BurtGITranslucencyVolumeTraceHitDistance";
+
+        public const string BurtGITranslucencyVolumeTraceHitDistanceTextureShaderName = "_BurtGITranslucencyVolumeTraceHitDistance";
+
+        public static readonly int BurtGITranslucencyVolumeTraceHitDistanceTextureId = Shader.PropertyToID(BurtGITranslucencyVolumeTraceHitDistanceTextureShaderName);
 
         public const string BurtGISceneVoxelRadianceName = "BurtGISceneVoxelRadiance";
 
@@ -249,6 +291,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string BurtGITemporalDiagnosticsTextureShaderName = "_BurtGITemporalDiagnosticsTexture";
 
         public static readonly int BurtGITemporalDiagnosticsTextureId = Shader.PropertyToID(BurtGITemporalDiagnosticsTextureShaderName);
+
+        public const string BurtGIRadianceCacheStatsName = "BurtGIRadianceCacheStats";
+
+        public const string BurtGIRadianceCacheStatsTextureShaderName = "_BurtGIRadianceCacheStatsTexture";
+
+        public static readonly int BurtGIRadianceCacheStatsTextureId = Shader.PropertyToID(BurtGIRadianceCacheStatsTextureShaderName);
 
         public const string BurtGIScreenProbeRadianceName = "BurtGIScreenProbeRadiance";
 
@@ -460,6 +508,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int BurtGIScreenProbeImportancePDFTextureId = Shader.PropertyToID(BurtGIScreenProbeImportancePDFTextureShaderName);
 
+        public const string BurtGIScreenProbeImportancePDFSHBufferName = "BurtGIScreenProbeImportancePDFSHBuffer";
+
+        public const string BurtGIScreenProbeImportancePDFSHBufferShaderName = "_BurtGIScreenProbeImportancePDFSHBuffer";
+
+        public static readonly int BurtGIScreenProbeImportancePDFSHBufferId = Shader.PropertyToID(BurtGIScreenProbeImportancePDFSHBufferShaderName);
+
         public const string BurtGIScreenProbeImportanceLightPDFName = "BurtGIScreenProbeImportanceLightPDF";
 
         public const string BurtGIScreenProbeImportanceLightPDFTextureShaderName = "_BurtGIScreenProbeImportanceLightPDFTexture";
@@ -629,6 +683,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string ScreenSpaceSubsurfaceBurleyGroupBufferName = "ScreenSpaceSubsurfaceBurleyGroupBuffer";
 
         public const string BurtGIScreenProbeIndirectArgsBufferName = "BurtGIScreenProbeIndirectArgsBuffer";
+
+        public const string BurtGIScreenProbeIntegrateTileIndirectArgsBufferName = "BurtGIScreenProbeIntegrateTileIndirectArgsBuffer";
+
+        public const string BurtGIScreenProbeIntegrateTileIndirectArgsBufferShaderName = "_BurtGIScreenProbeIntegrateTileIndirectArgsBuffer";
+
+        public static readonly int BurtGIScreenProbeIntegrateTileIndirectArgsBufferId = Shader.PropertyToID(BurtGIScreenProbeIntegrateTileIndirectArgsBufferShaderName);
+
+        public const string BurtGIScreenProbeIntegrateTileDataDiffuseBufferName = "BurtGIScreenProbeIntegrateTileDataDiffuseBuffer";
+
+        public const string BurtGIScreenProbeIntegrateTileDataDiffuseBufferShaderName = "_BurtGIScreenProbeIntegrateTileDataDiffuseBuffer";
+
+        public static readonly int BurtGIScreenProbeIntegrateTileDataDiffuseBufferId = Shader.PropertyToID(BurtGIScreenProbeIntegrateTileDataDiffuseBufferShaderName);
+
+        public const string BurtGIScreenProbeIntegrateTileDataAllBufferName = "BurtGIScreenProbeIntegrateTileDataAllBuffer";
+
+        public const string BurtGIScreenProbeIntegrateTileDataAllBufferShaderName = "_BurtGIScreenProbeIntegrateTileDataAllBuffer";
+
+        public static readonly int BurtGIScreenProbeIntegrateTileDataAllBufferId = Shader.PropertyToID(BurtGIScreenProbeIntegrateTileDataAllBufferShaderName);
 
         public const string BurtGIScreenProbeTraceCompactTexelCountBufferName = "BurtGIScreenProbeTraceCompactTexelCountBuffer";
 
@@ -1482,6 +1554,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(ScreenSpaceGlobalIlluminationName);
         }
 
+        public BurtRenderTargetHandle RegisterScreenSpaceGlobalIlluminationUpsampledTexture()
+        {
+            return RegisterScreenSpaceGlobalIlluminationUpsampled(new RenderTargetIdentifier(ScreenSpaceGlobalIlluminationUpsampledTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterScreenSpaceGlobalIlluminationUpsampled(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(ScreenSpaceGlobalIlluminationUpsampledName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetScreenSpaceGlobalIlluminationUpsampled()
+        {
+            return GetRenderTarget(ScreenSpaceGlobalIlluminationUpsampledName);
+        }
+
         public BurtRenderTargetHandle RegisterBurtGIBackfaceDiffuseIndirectTexture()
         {
             return RegisterBurtGIBackfaceDiffuseIndirect(new RenderTargetIdentifier(BurtGIBackfaceDiffuseIndirectTextureId));
@@ -1497,6 +1584,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(BurtGIBackfaceDiffuseIndirectName);
         }
 
+        public BurtRenderTargetHandle RegisterBurtGIBackfaceDiffuseIndirectUpsampledTexture()
+        {
+            return RegisterBurtGIBackfaceDiffuseIndirectUpsampled(new RenderTargetIdentifier(BurtGIBackfaceDiffuseIndirectUpsampledTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIBackfaceDiffuseIndirectUpsampled(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIBackfaceDiffuseIndirectUpsampledName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIBackfaceDiffuseIndirectUpsampled()
+        {
+            return GetRenderTarget(BurtGIBackfaceDiffuseIndirectUpsampledName);
+        }
+
         public BurtRenderTargetHandle RegisterBurtGIRoughSpecularIndirectTexture()
         {
             return RegisterBurtGIRoughSpecularIndirect(new RenderTargetIdentifier(BurtGIRoughSpecularIndirectTextureId));
@@ -1510,6 +1612,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetBurtGIRoughSpecularIndirect()
         {
             return GetRenderTarget(BurtGIRoughSpecularIndirectName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeIntegrateTileClassificationTexture()
+        {
+            return RegisterBurtGIScreenProbeIntegrateTileClassification(new RenderTargetIdentifier(BurtGIScreenProbeIntegrateTileClassificationTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeIntegrateTileClassification(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeIntegrateTileClassificationName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeIntegrateTileClassification()
+        {
+            return GetRenderTarget(BurtGIScreenProbeIntegrateTileClassificationName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRoughSpecularIndirectUpsampledTexture()
+        {
+            return RegisterBurtGIRoughSpecularIndirectUpsampled(new RenderTargetIdentifier(BurtGIRoughSpecularIndirectUpsampledTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRoughSpecularIndirectUpsampled(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRoughSpecularIndirectUpsampledName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRoughSpecularIndirectUpsampled()
+        {
+            return GetRenderTarget(BurtGIRoughSpecularIndirectUpsampledName);
         }
 
         public BurtRenderTargetHandle RegisterBurtGITranslucencyVolume0Texture()
@@ -1570,6 +1702,51 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetBurtGITranslucencyVolumeFilter1()
         {
             return GetRenderTarget(BurtGITranslucencyVolumeFilter1Name);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeTraceRadianceTexture()
+        {
+            return RegisterBurtGITranslucencyVolumeTraceRadiance(new RenderTargetIdentifier(BurtGITranslucencyVolumeTraceRadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeTraceRadiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGITranslucencyVolumeTraceRadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGITranslucencyVolumeTraceRadiance()
+        {
+            return GetRenderTarget(BurtGITranslucencyVolumeTraceRadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeTraceFilteredRadianceTexture()
+        {
+            return RegisterBurtGITranslucencyVolumeTraceFilteredRadiance(new RenderTargetIdentifier(BurtGITranslucencyVolumeTraceFilteredRadianceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeTraceFilteredRadiance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGITranslucencyVolumeTraceFilteredRadianceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGITranslucencyVolumeTraceFilteredRadiance()
+        {
+            return GetRenderTarget(BurtGITranslucencyVolumeTraceFilteredRadianceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeTraceHitDistanceTexture()
+        {
+            return RegisterBurtGITranslucencyVolumeTraceHitDistance(new RenderTargetIdentifier(BurtGITranslucencyVolumeTraceHitDistanceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGITranslucencyVolumeTraceHitDistance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGITranslucencyVolumeTraceHitDistanceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGITranslucencyVolumeTraceHitDistance()
+        {
+            return GetRenderTarget(BurtGITranslucencyVolumeTraceHitDistanceName);
         }
 
         public BurtRenderTargetHandle RegisterBurtGISceneVoxelRadianceTexture()
@@ -1645,6 +1822,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetBurtGITemporalDiagnostics()
         {
             return GetRenderTarget(BurtGITemporalDiagnosticsName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheStatsTexture()
+        {
+            return RegisterBurtGIRadianceCacheStats(new RenderTargetIdentifier(BurtGIRadianceCacheStatsTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIRadianceCacheStats(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIRadianceCacheStatsName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIRadianceCacheStats()
+        {
+            return GetRenderTarget(BurtGIRadianceCacheStatsName);
         }
 
         public BurtRenderTargetHandle RegisterBurtGIScreenProbeScreenDepthTexture()

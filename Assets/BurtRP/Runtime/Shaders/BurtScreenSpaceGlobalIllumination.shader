@@ -25,6 +25,7 @@ Shader "Hidden/BurtRP/BurtGI"
             Texture2D _BurtGICameraColorCopyTexture;
             Texture2D _BurtGIDebugCameraColorTexture;
             Texture2D _BurtGITemporalDiagnosticsTexture;
+            Texture2D _BurtGIRadianceCacheStatsTexture;
             Texture2D _BurtGIScreenProbeScreenDepthTexture;
             Texture2D _BurtGIScreenProbeWorldNormalTexture;
             Texture2D _BurtGIScreenProbeWorldPositionTexture;
@@ -67,11 +68,13 @@ Shader "Hidden/BurtRP/BurtGI"
             Texture2D _BurtGIScreenProbeHistoryBentNormalTexture;
             Texture2D _BurtGIScreenProbeHistoryTraceHitTexture;
             Texture2D _BurtGIScreenProbeSceneVelocityTexture;
+            Texture2D<float> _BurtHiZDepthTexture;
             #define tex2D(textureName, textureCoord) textureName.Sample(sampler_LinearClamp, textureCoord)
             Texture2D<uint> _BurtGIScreenProbeImportanceRayInfoTexture;
             Texture2D<uint> _BurtGIScreenProbeUseCountTexture;
             Texture2D<uint> _BurtGIScreenProbeAdaptiveProbeHeaderTexture;
             Texture2D<uint> _BurtGIScreenProbeAdaptiveProbeIndicesTexture;
+            Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
             StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
             StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
             Texture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
@@ -85,6 +88,7 @@ Shader "Hidden/BurtRP/BurtGI"
             StructuredBuffer<uint4> _BurtGIRadianceCacheHashGridValueBuffer;
             StructuredBuffer<uint4> _BurtGIRadianceCacheHashGridTileBuffer;
             StructuredBuffer<float4> _BurtGIRadianceCacheHashGridDebugCellBuffer;
+            StructuredBuffer<float4> _XGIScreenProbeTraceVisualize_TracesData;
             StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer;
             StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer;
             StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer;
@@ -116,31 +120,42 @@ Shader "Hidden/BurtRP/BurtGI"
             float4 _BurtGIParams3; // x=spatial radius, y=spatial strength, z=temporal variance clamp, w=hit rejection.
             float4 _BurtGIParams4; // x=leak guard, y=edge fade, z=normal cone tightness, w=sky edge suppression.
             float4 _BurtGIIrradianceFieldParams; // x=strength.
+            float4 _BurtGIHistoryParams; // x=history exposure correction.
             float4 _BurtGITemporalParams; // x=feedback, y=history valid, z=depth rejection, w=normal rejection.
             float4 _BurtGITemporalParams1; // x=history clamp scale, y=variance clamp, z=hit rejection, w=spatial strength.
             float4 _BurtGIScreenProbeParams; // x=spacing pixels, y=trace distance, z=sample count, w=apply strength.
             float4 _BurtGIShortRangeAOParams; // x=enabled, y=weight, z=slope tolerance scale, w=reserved.
-            float4 _BurtGIIndirectChannelParams; // x=backface diffuse enabled, y=rough specular enabled.
+            float4 _BurtGIIndirectChannelParams; // x=backface diffuse enabled, y=rough specular enabled, z=history exposure correction, w=max roughness to evaluate rough specular.
             float4 _BurtGIScreenProbeGridParams; // xy=probe grid size, zw=probe grid texel size.
-            float4 _BurtGIScreenProbeFilterParams; // x=spatial passes, y=half kernel, z=fixup borders, w=reserved.
+            float4 _BurtGIScreenProbeFilterParams; // x=spatial passes, y=half kernel, z=fixup borders, w=placement jitter index (negative encodes fixed).
+            float4 _BurtGIScreenProbeSpatialFilterParams; // x=max radiance hit angle radians, y=position weight scale.
+            float4 _BurtGIScreenProbePlacementParams; // x=HiZ valid.
             float4 _BurtGIScreenProbeTraceParams; // x=octahedral resolution, yz=trace atlas size, w=trace distance.
             float4 _BurtGIScreenProbeAdaptiveParams; // xy=probe grid size, z=tile capacity, w=max adaptive probes.
             float4 _BurtGIScreenProbeSHParams; // x=0 ambient/1 directional, y=base width, z=base height, w=directional tile count.
             float4 _BurtGIScreenProbeTemporalParams; // x=feedback, y=history valid, z=history distance threshold, w=temporal filter enabled.
             float4 _BurtGIScreenProbeReprojectionParams; // xy=XRender depth reject A/B, z=max frames accumulated, w=history normal cos threshold.
+            float4 _BurtGIScreenProbeHistoryParams; // x=history exposure correction.
             float4 _BurtGIScreenProbeUseCountParams; // xy=use count texture size, z=inv width, w=valid.
             float4 _BurtGIRadianceCacheClipMapIndirectionSize; // xy=size, zw=texel size.
             float4 _BurtGIRadianceCacheClipMapParams; // x=atlas probes, y=probe resolution, z=clipmap count, w=clipmap resolution.
+            float4 _BurtGIRadianceCacheClipMapApplyParams; // x=enabled, y=reprojection radius scale, z=debug visualize clipmap index (-1=auto), w=visualize radius scale.
             float4 _BurtGIRadianceCacheClipMapWorldParams; // x=base extent, y=distribution base, z=inv fade size, w=final probe resolution.
+            uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
             uint _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution;
             uint _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution;
             float4 _BurtGIRadianceCacheClipMapStageParams; // x=stage, y=clear counters, z=frame index, w=reserved.
-            float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[5]; // xyz=bias, w=scale.
-            float4 _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[5]; // xyz=bias, w=scale.
-            float4 _BurtGIRadianceCacheClipMapClipmapCenterExtent[5]; // xyz=center, w=extent.
-            float4 _BurtGIRadianceCacheClipMapClipmapParams[5]; // x=cell size, y=probe t min, z=volume uv offset x, w=index.
+            float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[6]; // xyz=bias, w=scale.
+            float4 _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[6]; // xyz=bias, w=scale.
+            float4 _BurtGIRadianceCacheClipMapClipmapCenterExtent[6]; // xyz=center, w=extent.
+            float4 _BurtGIRadianceCacheClipMapClipmapParams[6]; // x=cell size, y=probe t min, z=volume uv offset x, w=index.
+            float4 _BurtGIRadianceCacheClipMapVisualizeDrawParams; // x=clipmap index, y=radius scale, z=status mode, w=reserved.
             float4 _BurtGIRadianceCacheHashGridParams0; // x=cell size, y=tile cell ratio, z=bucket count, w=tiles per bucket.
             float4 _BurtGIRadianceCacheHashGridParams1; // x=tile count, y=cell count, z=cells per tile, w=reserved.
+            float4 _BurtGISceneVoxelCenterExtent; // xyz=center, w=half extent of the active SceneVoxel volume.
+            float4 _BurtGISceneVoxelDebugParams; // x=voxel resolution, y=clipmap count, z=debug occupancy mip, w=resource valid.
+            int _BurtGISceneVoxelDebugLayer;
+            float4 _BurtGISceneVoxelDebugProbeParams; // x=draw probe overlay, y=probe size in world units.
             float _BurtGIDebugMode;
 
             float3 BurtSampleIndirectDiffuseIrradiance(float3 normalWS)
@@ -174,6 +189,7 @@ Shader "Hidden/BurtRP/BurtGI"
             struct Attributes
             {
                 uint VertexID : SV_VertexID;
+                uint InstanceID : SV_InstanceID;
             };
 
             struct Varyings
@@ -769,6 +785,13 @@ Shader "Hidden/BurtRP/BurtGI"
                 float4 WorldPosition : SV_Target2;
             };
 
+            #define BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_BITS 6u
+            #define BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_MASK 0x3fu
+            #define BURT_GI_SCREEN_PROBE_VALID_FLAG 0x2000u
+            #define BURT_GI_SCREEN_PROBE_SKIP_SCREEN_TRACE_FLAG 0x4000u
+            #define BURT_GI_SCREEN_PROBE_SKIP_ADAPTIVE_FLAG 0x8000u
+            #define BURT_GI_SCREEN_PROBE_SPHERICAL_VISIBILITY_FLAG 0x10000u
+
             float2 BurtGIScreenProbeDirection(int index)
             {
                 float2 direction = 0.0f;
@@ -783,13 +806,191 @@ Shader "Hidden/BurtRP/BurtGI"
                 return direction * rsqrt(max(dot(direction, direction), 0.0001f));
             }
 
-            float2 BurtGIScreenProbeSourceUV(float2 probeUV)
+            float BurtGIScreenProbeHammersley8Y(uint index)
+            {
+                if (index == 1u) return 0.5f;
+                if (index == 2u) return 0.25f;
+                if (index == 3u) return 0.75f;
+                if (index == 4u) return 0.125f;
+                if (index == 5u) return 0.625f;
+                if (index == 6u) return 0.375f;
+                if (index == 7u) return 0.875f;
+                return 0.0f;
+            }
+
+            uint BurtGIScreenProbeCurrentJitterIndex()
+            {
+                float encodedJitterIndex = _BurtGIScreenProbeFilterParams.w;
+                if (encodedJitterIndex < 0.0f)
+                {
+                    return (uint)floor(max(-encodedJitterIndex - 1.0f, 0.0f)) & 7u;
+                }
+
+                return (uint)floor(encodedJitterIndex) & 7u;
+            }
+
+            uint BurtGIScreenProbePreviousJitterIndex()
+            {
+                float encodedJitterIndex = _BurtGIScreenProbeFilterParams.w;
+                uint currentJitterIndex = BurtGIScreenProbeCurrentJitterIndex();
+                return encodedJitterIndex < 0.0f ? currentJitterIndex : ((currentJitterIndex + 7u) & 7u);
+            }
+
+            float2 BurtGIScreenProbeTileJitterPixelsForIndex(uint jitterIndex, float spacingPixels)
+            {
+                jitterIndex &= 7u;
+                float2 hammersley = float2((float)jitterIndex * 0.125f, BurtGIScreenProbeHammersley8Y(jitterIndex));
+                return min(floor(hammersley * spacingPixels), spacingPixels - 1.0f);
+            }
+
+            float2 BurtGIScreenProbeTileJitterPixels(float spacingPixels)
+            {
+                return BurtGIScreenProbeTileJitterPixelsForIndex(BurtGIScreenProbeCurrentJitterIndex(), spacingPixels);
+            }
+
+            float2 BurtGIScreenProbeTileCoordFromScreenUV(float2 screenUV, uint jitterIndex)
+            {
+                float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
+                float2 jitterPixels = BurtGIScreenProbeTileJitterPixelsForIndex(jitterIndex, spacingPixels);
+                float2 screenPixel = screenUV * max(_BurtGISourceTexelSize.zw, 1.0f);
+                return (screenPixel - (jitterPixels + 0.5f)) / spacingPixels;
+            }
+
+            float2 BurtGIScreenProbeUpsampleFullResCoord(float2 screenUV, float spacingPixels)
+            {
+                float2 viewSize = max(_BurtGISourceTexelSize.zw, 1.0f);
+                float2 jitterPixels = BurtGIScreenProbeTileJitterPixels(spacingPixels);
+                return clamp(screenUV * viewSize - jitterPixels, 0.0f, viewSize - 1.0f);
+            }
+
+            float2 BurtGIScreenProbeFallbackCoord(float2 screenUV, float2 gridSize)
+            {
+                float2 probeCoord = floor(BurtGIScreenProbeTileCoordFromScreenUV(screenUV, BurtGIScreenProbeCurrentJitterIndex()));
+                return clamp(probeCoord, 0.0f, gridSize - 1.0f);
+            }
+
+            uint BurtGIHashScreenProbeTile(uint2 screenProbeCoord)
+            {
+                uint hash = screenProbeCoord.x * 1664525u + screenProbeCoord.y * 1013904223u + 374761393u;
+                hash ^= hash >> 13;
+                hash *= 1274126177u;
+                return hash ^ (hash >> 16);
+            }
+
+            uint2 BurtGIHiZMipSize(uint2 fullSize, uint mipLevel)
+            {
+                uint divisor = 1u << min(mipLevel, 15u);
+                return max((fullSize + divisor - 1u) / divisor, uint2(1u, 1u));
+            }
+
+            bool BurtGIHiZHasSurface(uint2 coord, uint mipLevel, uint2 fullSize)
+            {
+                uint2 mipSize = BurtGIHiZMipSize(fullSize, mipLevel);
+                float rawDepth = _BurtHiZDepthTexture.Load(int3(min(coord, mipSize - 1u), mipLevel));
+                return !BurtGIIsSkyDepth(rawDepth);
+            }
+
+            bool BurtGIScreenProbeLocateValidPixelViaHiZ(uint2 screenProbeCoord, uint2 tileStart, uint spacingPixels, out uint2 validPixel)
+            {
+                validPixel = tileStart;
+                if (_BurtGIScreenProbePlacementParams.x <= 0.5f)
+                {
+                    return false;
+                }
+
+                uint2 viewSize = max((uint2)_BurtGISourceTexelSize.zw, uint2(1u, 1u));
+                uint startMip = min(12u, (uint)floor(log2((float)max(spacingPixels, 1u))));
+                uint2 current = min(tileStart >> startMip, BurtGIHiZMipSize(viewSize, startMip) - 1u);
+                if (!BurtGIHiZHasSurface(current, startMip, viewSize))
+                {
+                    return false;
+                }
+
+                uint hash = BurtGIHashScreenProbeTile(screenProbeCoord);
+                for (int childMip = (int)startMip - 1; childMip >= 0; --childMip)
+                {
+                    uint2 childBase = current << 1u;
+                    uint2 mipSize = BurtGIHiZMipSize(viewSize, (uint)childMip);
+                    uint childSelector = (hash + (uint)childMip) & 3u;
+                    bool foundChild = false;
+
+                    [unroll]
+                    for (uint childIndex = 0u; childIndex < 4u; ++childIndex)
+                    {
+                        uint selectedChild = (childIndex + childSelector) & 3u;
+                        uint2 childCoord = min(childBase + uint2(selectedChild & 1u, (selectedChild >> 1u) & 1u), mipSize - 1u);
+                        if (BurtGIHiZHasSurface(childCoord, (uint)childMip, viewSize))
+                        {
+                            current = childCoord;
+                            foundChild = true;
+                            break;
+                        }
+                    }
+
+                    if (!foundChild)
+                    {
+                        break;
+                    }
+                }
+
+                uint2 tileEnd = min(tileStart + spacingPixels, viewSize);
+                validPixel = clamp(current, tileStart, max(tileEnd, tileStart + 1u) - 1u);
+                return !BurtGIIsSkyDepth(BurtSampleDeferredRawDepth(((float2)validPixel + 0.5f) * _BurtGISourceTexelSize.xy));
+            }
+
+            float BurtGIEncodeScreenProbePlacementPayload(
+                float2 inTileOffset,
+                bool screenTraceSkipMaterial,
+                bool adaptiveSkipMaterial,
+                bool sphericalVisibilityMaterial)
+            {
+                uint2 clampedInTileOffset = min((uint2)floor(max(inTileOffset, 0.0f)), uint2(BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_MASK, BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_MASK));
+                uint placementPayload = clampedInTileOffset.x |
+                    (clampedInTileOffset.y << BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_BITS) |
+                    BURT_GI_SCREEN_PROBE_VALID_FLAG;
+                placementPayload |= screenTraceSkipMaterial ? BURT_GI_SCREEN_PROBE_SKIP_SCREEN_TRACE_FLAG : 0u;
+                placementPayload |= adaptiveSkipMaterial ? BURT_GI_SCREEN_PROBE_SKIP_ADAPTIVE_FLAG : 0u;
+                placementPayload |= sphericalVisibilityMaterial ? BURT_GI_SCREEN_PROBE_SPHERICAL_VISIBILITY_FLAG : 0u;
+                return (float)placementPayload;
+            }
+
+            float2 BurtGIDecodeScreenProbePlacementOffset(float encodedPlacementPayload, float spacingPixels)
+            {
+                uint placementPayload = (uint)round(max(encodedPlacementPayload, 0.0f));
+                float2 decodedOffset = BurtGIScreenProbeTileJitterPixels(spacingPixels);
+                if ((placementPayload & BURT_GI_SCREEN_PROBE_VALID_FLAG) != 0u)
+                {
+                    uint inTileOffsetX = placementPayload & BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_MASK;
+                    uint inTileOffsetY = (placementPayload >> BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_BITS) & BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_MASK;
+                    decodedOffset = min(float2(inTileOffsetX, inTileOffsetY), spacingPixels - 1.0f);
+                }
+
+                return decodedOffset;
+            }
+
+            float2 BurtGIScreenProbeSourceUVFromOffset(float2 probeUV, float2 inTileOffset)
             {
                 float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
                 float2 probePixel = min(floor(saturate(probeUV) * gridSize), gridSize - 1.0f);
                 float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
-                float2 sourcePixel = (probePixel + 0.5f) * spacingPixels;
+                float2 sourcePixel = probePixel * spacingPixels + min(max(inTileOffset, 0.0f), spacingPixels - 1.0f);
                 return saturate((sourcePixel + 0.5f) * _BurtGISourceTexelSize.xy);
+            }
+
+            float2 BurtGIScreenProbeJitteredSourceUV(float2 probeUV)
+            {
+                float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
+                return BurtGIScreenProbeSourceUVFromOffset(probeUV, BurtGIScreenProbeTileJitterPixels(spacingPixels));
+            }
+
+            float2 BurtGIScreenProbeSourceUV(float2 probeUV)
+            {
+                float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
+                float2 probePixel = min(floor(saturate(probeUV) * gridSize), gridSize - 1.0f);
+                float2 probeCenterUV = (probePixel + 0.5f) * _BurtGIScreenProbeGridParams.zw;
+                float4 encodedPosition = tex2D(_BurtGIScreenProbeWorldPositionTexture, probeCenterUV);
+                float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
+                return BurtGIScreenProbeSourceUVFromOffset(probeUV, BurtGIDecodeScreenProbePlacementOffset(encodedPosition.a, spacingPixels));
             }
 
             float BurtGIEncodeScreenProbeHitDistanceForFiltering(float hitDistance)
@@ -811,8 +1012,15 @@ Shader "Hidden/BurtRP/BurtGI"
 
             BurtGIScreenProbePlacementOutput FragScreenProbeLitePlacementUniform(Varyings input)
             {
-                float2 sourceUV = BurtGIScreenProbeSourceUV(input.ScreenUV);
+                float2 sourceUV = BurtGIScreenProbeJitteredSourceUV(input.ScreenUV);
                 float rawDepth = BurtSampleDeferredRawDepth(sourceUV);
+                float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
+                uint2 screenProbeCoord = (uint2)min(floor(saturate(input.ScreenUV) * gridSize), gridSize - 1.0f);
+                float spacingPixelsFloat = max(_BurtGIScreenProbeParams.x, 1.0f);
+                uint spacingPixels = max(1u, (uint)ceil(spacingPixelsFloat));
+                uint2 viewSize = max((uint2)_BurtGISourceTexelSize.zw, uint2(1u, 1u));
+                uint2 tileStart = min((uint2)floor((float2)screenProbeCoord * spacingPixelsFloat), viewSize - 1u);
+                float2 inTileOffset = BurtGIScreenProbeTileJitterPixels(spacingPixelsFloat);
 
                 BurtGIScreenProbePlacementOutput output;
                 output.ScreenDepth = float4(rawDepth, 0.0f, 0.0f, 0.0f);
@@ -821,13 +1029,37 @@ Shader "Hidden/BurtRP/BurtGI"
 
                 if (BurtGIIsSkyDepth(rawDepth))
                 {
-                    return output;
+                    uint2 fallbackPixel;
+                    if (!BurtGIScreenProbeLocateValidPixelViaHiZ(screenProbeCoord, tileStart, spacingPixels, fallbackPixel))
+                    {
+                        return output;
+                    }
+
+                    inTileOffset = (float2)(fallbackPixel - tileStart);
+                    sourceUV = ((float2)fallbackPixel + 0.5f) * _BurtGISourceTexelSize.xy;
+                    rawDepth = BurtSampleDeferredRawDepth(sourceUV);
+                    output.ScreenDepth = float4(rawDepth, 0.0f, 0.0f, 0.0f);
                 }
 
                 float3 normalWS = normalize(BurtGISampleNormalWS(sourceUV));
                 float3 positionWS = BurtReconstructDeferredPositionWS(sourceUV, rawDepth);
+                BurtGBufferData gbufferData = BurtDecodeDeferredGBuffer(BurtSampleEncodedGBuffer(sourceUV), sourceUV);
+                bool isFoliageMaterial = BurtIsActiveFoliageShadingModel(gbufferData.ShadingModelID);
+                bool screenTraceSkipMaterial = BurtIsActiveSubsurfaceShadingModel(gbufferData.ShadingModelID) ||
+                    isFoliageMaterial ||
+                    BurtIsActiveFurShadingModel(gbufferData.ShadingModelID);
+                bool adaptiveSkipMaterial = isFoliageMaterial ||
+                    BurtIsActiveHairShadingModel(gbufferData.ShadingModelID);
+                bool sphericalVisibilityMaterial = BurtIsActiveSubsurfaceShadingModel(gbufferData.ShadingModelID) ||
+                    isFoliageMaterial ||
+                    BurtIsActiveHairShadingModel(gbufferData.ShadingModelID);
+                float placementPayload = BurtGIEncodeScreenProbePlacementPayload(
+                    inTileOffset,
+                    screenTraceSkipMaterial,
+                    adaptiveSkipMaterial,
+                    sphericalVisibilityMaterial);
                 output.WorldNormal = float4(normalWS * 0.5f + 0.5f, 1.0f);
-                output.WorldPosition = float4(positionWS, 1.0f);
+                output.WorldPosition = float4(positionWS, placementPayload);
                 return output;
             }
 
@@ -1080,7 +1312,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     float neighborSceneDepth = LinearEyeDepth(neighborRawDepth);
                     float relativeDepthDifference = abs(neighborSceneDepth - centerSceneDepth) / max(centerSceneDepth, 0.0001f);
                     float positionWeight = (!BurtGIIsSkyDepth(neighborRawDepth) && centerWorldPositionData.a > 0.5f)
-                        ? exp2(-1000.0f * relativeDepthDifference * relativeDepthDifference)
+                        ? exp2(-max(_BurtGIScreenProbeSpatialFilterParams.y, 0.001f) * relativeDepthDifference * relativeDepthDifference)
                         : 0.0f;
                     float neighborHitDistanceForFiltering = BurtGIDecodeScreenProbeHitDistanceForFiltering(neighborHitDistance.r, neighborHitDistance.z);
                     float angleWeight = 1.0f;
@@ -1098,7 +1330,7 @@ Shader "Hidden/BurtRP/BurtGI"
                         float neighborAngle = toNeighborHitLength > 0.0001f
                             ? acos(saturate(dot(toNeighborHit / toNeighborHitLength, centerNormalWS)))
                             : 0.0f;
-                        angleWeight = 1.0f - saturate(neighborAngle / 0.17453293f);
+                        angleWeight = 1.0f - saturate(neighborAngle / max(_BurtGIScreenProbeSpatialFilterParams.x, 0.001f));
                     }
 
                     float neighborTraceHit = BurtGISampleScreenProbeTraceHitAverage(neighborUV);
@@ -1442,6 +1674,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 normalWS,
                 float currentConfidence,
                 float edgeConfidence,
+                float receiverFoliageWeight,
                 out float3 adaptiveIrradiance,
                 out float adaptiveConfidence,
                 out float2 adaptiveAtlasProbeCoord)
@@ -1504,9 +1737,10 @@ Shader "Hidden/BurtRP/BurtGI"
                         }
 
                         float planeDistance = abs(dot(float4(sourcePosition.xyz, -1.0f), scenePlane));
-                        float planeWeight = exp2(-120.0f * planeDistance / max(sceneDepth, 0.001f));
+                        float receiverPlaneWeightScale = lerp(1.0f, 0.25f, saturate(receiverFoliageWeight));
+                        float planeWeight = exp2(-120.0f * receiverPlaneWeightScale * planeDistance / max(sceneDepth, 0.001f));
                         float3 sourceNormalWS = normalize(sourceNormal.xyz * 2.0f - 1.0f);
-                        float normalWeight = pow(saturate(dot(normalWS, sourceNormalWS)), 6.0f);
+                        float normalWeight = lerp(pow(saturate(dot(normalWS, sourceNormalWS)), 6.0f), 1.0f, saturate(receiverFoliageWeight));
                         float2 pixelDistance = abs(adaptiveProbeUV - screenUV) * max(_BurtGISourceTexelSize.zw, 1.0f);
                         float distanceWeight = 1.0f - saturate(min(pixelDistance.x, pixelDistance.y) / max(_BurtGIScreenProbeParams.x, 1.0f));
                         float levelWeight = rcp(1.0f + (float)adaptiveLevel * 0.12f);
@@ -1780,36 +2014,50 @@ Shader "Hidden/BurtRP/BurtGI"
                 return BurtGIEvaluateScreenProbeSH3Irradiance(screenUV, normalWS, 0.0f);
             }
 
-            float2 BurtGIScreenProbeIrradianceOctWrapBorderCoord(float2 localCoord)
+            #define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION 6.0f
+            #define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER 8.0f
+            #define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION 8.0f
+            #define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER 10.0f
+
+            float2 BurtGIScreenProbeOctWrapBorderCoord(float2 localCoord, float resolutionWithBorder)
             {
                 float2 wrappedCoord = localCoord;
-                const float resolution = 8.0f;
 
                 if (wrappedCoord.x < 0.5f)
                 {
                     wrappedCoord.x = 1.0f - wrappedCoord.x;
-                    wrappedCoord.y = resolution - wrappedCoord.y;
+                    wrappedCoord.y = resolutionWithBorder - wrappedCoord.y;
                 }
 
-                if (wrappedCoord.x > 7.5f)
+                if (wrappedCoord.x > resolutionWithBorder - 0.5f)
                 {
-                    wrappedCoord.x = 15.0f - wrappedCoord.x;
-                    wrappedCoord.y = resolution - wrappedCoord.y;
+                    wrappedCoord.x = (2.0f * resolutionWithBorder - 1.0f) - wrappedCoord.x;
+                    wrappedCoord.y = resolutionWithBorder - wrappedCoord.y;
                 }
 
                 if (wrappedCoord.y < 0.5f)
                 {
                     wrappedCoord.y = 1.0f - wrappedCoord.y;
-                    wrappedCoord.x = resolution - wrappedCoord.x;
+                    wrappedCoord.x = resolutionWithBorder - wrappedCoord.x;
                 }
 
-                if (wrappedCoord.y > 7.5f)
+                if (wrappedCoord.y > resolutionWithBorder - 0.5f)
                 {
-                    wrappedCoord.y = 15.0f - wrappedCoord.y;
-                    wrappedCoord.x = resolution - wrappedCoord.x;
+                    wrappedCoord.y = (2.0f * resolutionWithBorder - 1.0f) - wrappedCoord.y;
+                    wrappedCoord.x = resolutionWithBorder - wrappedCoord.x;
                 }
 
-                return clamp(wrappedCoord, 0.5f, 7.5f);
+                return clamp(wrappedCoord, 0.5f, resolutionWithBorder - 0.5f);
+            }
+
+            float2 BurtGIScreenProbeIrradianceOctWrapBorderCoord(float2 localCoord)
+            {
+                return BurtGIScreenProbeOctWrapBorderCoord(localCoord, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER);
+            }
+
+            float2 BurtGIScreenProbeRadianceOctWrapBorderCoord(float2 localCoord)
+            {
+                return BurtGIScreenProbeOctWrapBorderCoord(localCoord, BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER);
             }
 
             float4 BurtGISampleScreenProbeIrradianceOctAtlasMip(float2 probeCoord, float2 localCoord, float2 atlasSize, float mipLevel);
@@ -1821,7 +2069,7 @@ Shader "Hidden/BurtRP/BurtGI"
 
             float4 BurtGISampleScreenProbeIrradianceOctAtlasMip(float2 probeCoord, float2 localCoord, float2 atlasSize, float mipLevel)
             {
-                float2 tileBase = probeCoord * 8.0f;
+                float2 tileBase = probeCoord * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER;
                 float2 atlasTexelCoord = tileBase + BurtGIScreenProbeIrradianceOctWrapBorderCoord(localCoord);
                 return _BurtGIScreenProbeIrradianceOctTexture.SampleLevel(
                     sampler_LinearClamp,
@@ -1964,69 +2212,80 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 positionWS,
                 float sceneDepth,
                 float3 normalWS,
-                float requestedMipLevel)
+                float requestedMipLevel,
+                float receiverFoliageWeight)
             {
                 float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
                 float2 atlasSize = float2(
-                    gridSize.x * 8.0f,
-                    max(gridSize.y * 8.0f, _BurtGIScreenProbeTraceParams.z));
+                    gridSize.x * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER,
+                    max(gridSize.y * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER, _BurtGIScreenProbeTraceParams.z));
                 float2 octUV = BurtGIInverseEquiAreaSphericalMapping(normalWS);
-                float2 localCoord = octUV * 6.0f + 1.0f;
+                float2 localCoord = octUV * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION + 1.0f;
+                float2 fallbackProbeCoord = BurtGIScreenProbeFallbackCoord(screenUV, gridSize);
+                float4 result = BurtGISampleScreenProbeIrradianceOctAtlasMipChain(fallbackProbeCoord, localCoord, atlasSize, requestedMipLevel);
 
-                if (gridSize.x < 2.0f || gridSize.y < 2.0f)
+                if (gridSize.x >= 2.0f && gridSize.y >= 2.0f)
                 {
-                    float2 fallbackProbeCoord = min(floor(saturate(screenUV) * gridSize), gridSize - 1.0f);
-                    return BurtGISampleScreenProbeIrradianceOctAtlasMipChain(fallbackProbeCoord, localCoord, atlasSize, requestedMipLevel);
+                    float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
+                    float2 screenCoord = BurtGIScreenProbeUpsampleFullResCoord(screenUV, spacingPixels);
+                    float2 tile00 = min(floor(screenCoord / spacingPixels), gridSize - 2.0f);
+                    float2 bilinearWeights = saturate((screenCoord - tile00 * spacingPixels + 1.0f) / (spacingPixels + 2.0f));
+                    float4 interpolationWeights = float4(
+                        (1.0f - bilinearWeights.y) * (1.0f - bilinearWeights.x),
+                        (1.0f - bilinearWeights.y) * bilinearWeights.x,
+                        bilinearWeights.y * (1.0f - bilinearWeights.x),
+                        bilinearWeights.y * bilinearWeights.x);
+                    float3 normalizedNormalWS = normalize(normalWS);
+                    float4 scenePlane = float4(normalizedNormalWS, dot(positionWS, normalizedNormalWS));
+                    float4 irradianceSum = 0.0f;
+                    float weightSum = 0.0f;
+
+                    [unroll]
+                    for (int cornerIndex = 0; cornerIndex < 4; ++cornerIndex)
+                    {
+                        float2 cornerOffset = float2((float)(cornerIndex & 1), (float)(cornerIndex >> 1));
+                        float2 probeCoord = min(tile00 + cornerOffset, gridSize - 1.0f);
+                        float2 probeUV = (probeCoord + 0.5f) * _BurtGIScreenProbeGridParams.zw;
+                        float4 probePosition = tex2D(_BurtGIScreenProbeWorldPositionTexture, probeUV);
+                        float4 probeNormal = tex2D(_BurtGIScreenProbeWorldNormalTexture, probeUV);
+                        float validProbe = (probePosition.a > 0.5f && probeNormal.a > 0.5f) ? 1.0f : 0.0f;
+                        float planeDistance = abs(dot(float4(probePosition.xyz, -1.0f), scenePlane));
+                        float receiverPlaneWeightScale = lerp(1.0f, 0.25f, saturate(receiverFoliageWeight));
+                        float planeWeight = exp2(-200.0f * receiverPlaneWeightScale * planeDistance / max(sceneDepth, 0.001f));
+                        float3 probeNormalWS = normalize(probeNormal.xyz * 2.0f - 1.0f);
+                        float normalWeight = lerp(
+                            lerp(0.35f, 1.0f, pow(saturate(dot(normalizedNormalWS, probeNormalWS)), 4.0f)),
+                            1.0f,
+                            saturate(receiverFoliageWeight));
+                        float4 octSample = BurtGISampleScreenProbeIrradianceOctAtlasMipChain(probeCoord, localCoord, atlasSize, requestedMipLevel);
+                        float4 probeHitDistance = tex2D(_BurtGIScreenProbeHitDistanceTexture, probeUV);
+                        float probeTraceConfidence = saturate(max(probeHitDistance.b, probeHitDistance.a));
+                        octSample.a = saturate(max(octSample.a, probeTraceConfidence * 0.65f));
+                        float octSampleConfidence = saturate(octSample.a);
+                        float weight = interpolationWeights[cornerIndex] * planeWeight * normalWeight * validProbe * lerp(0.18f, 1.0f, octSampleConfidence);
+                        irradianceSum += octSample * weight;
+                        weightSum += weight;
+                    }
+
+                    if (weightSum > 0.0001f)
+                    {
+                        result = irradianceSum / weightSum;
+                    }
                 }
 
-                float2 viewSize = max(_BurtGISourceTexelSize.zw, 1.0f);
-                float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
-                float2 screenCoord = clamp(screenUV * viewSize, 0.0f, viewSize - 1.0f);
-                float2 tile00 = min(floor(screenCoord / spacingPixels), gridSize - 2.0f);
-                float2 bilinearWeights = saturate((screenCoord - tile00 * spacingPixels + 1.0f) / (spacingPixels + 2.0f));
-                float4 interpolationWeights = float4(
-                    (1.0f - bilinearWeights.y) * (1.0f - bilinearWeights.x),
-                    (1.0f - bilinearWeights.y) * bilinearWeights.x,
-                    bilinearWeights.y * (1.0f - bilinearWeights.x),
-                    bilinearWeights.y * bilinearWeights.x);
-                float3 normalizedNormalWS = normalize(normalWS);
-                float4 scenePlane = float4(normalizedNormalWS, dot(positionWS, normalizedNormalWS));
-                float4 irradianceSum = 0.0f;
-                float weightSum = 0.0f;
+                result.rgb = max(result.rgb, 0.0f);
+                result.a = saturate(result.a);
+                return result;
+            }
 
-                [unroll]
-                for (int cornerIndex = 0; cornerIndex < 4; ++cornerIndex)
-                {
-                    float2 cornerOffset = float2((float)(cornerIndex & 1), (float)(cornerIndex >> 1));
-                    float2 probeCoord = min(tile00 + cornerOffset, gridSize - 1.0f);
-                    float2 probeUV = (probeCoord + 0.5f) * _BurtGIScreenProbeGridParams.zw;
-                    float4 probePosition = tex2D(_BurtGIScreenProbeWorldPositionTexture, probeUV);
-                    float4 probeNormal = tex2D(_BurtGIScreenProbeWorldNormalTexture, probeUV);
-                    float validProbe = (probePosition.a > 0.5f && probeNormal.a > 0.5f) ? 1.0f : 0.0f;
-                    float planeDistance = abs(dot(float4(probePosition.xyz, -1.0f), scenePlane));
-                    float planeWeight = exp2(-200.0f * planeDistance / max(sceneDepth, 0.001f));
-                    float3 probeNormalWS = normalize(probeNormal.xyz * 2.0f - 1.0f);
-                    float normalWeight = lerp(0.35f, 1.0f, pow(saturate(dot(normalizedNormalWS, probeNormalWS)), 4.0f));
-                    float4 octSample = BurtGISampleScreenProbeIrradianceOctAtlasMipChain(probeCoord, localCoord, atlasSize, requestedMipLevel);
-                    float4 probeHitDistance = tex2D(_BurtGIScreenProbeHitDistanceTexture, probeUV);
-                    float probeTraceConfidence = saturate(max(probeHitDistance.b, probeHitDistance.a));
-                    octSample.a = saturate(max(octSample.a, probeTraceConfidence * 0.65f));
-                    float octSampleConfidence = saturate(octSample.a);
-                    float weight = interpolationWeights[cornerIndex] * planeWeight * normalWeight * validProbe * lerp(0.18f, 1.0f, octSampleConfidence);
-                    irradianceSum += octSample * weight;
-                    weightSum += weight;
-                }
-
-                if (weightSum <= 0.0001f)
-                {
-                    float2 fallbackProbeCoord = min(floor(saturate(screenUV) * gridSize), gridSize - 1.0f);
-                    return BurtGISampleScreenProbeIrradianceOctAtlasMipChain(fallbackProbeCoord, localCoord, atlasSize, requestedMipLevel);
-                }
-
-                float4 irradiance = irradianceSum / weightSum;
-                irradiance.rgb = max(irradiance.rgb, 0.0f);
-                irradiance.a = saturate(irradiance.a);
-                return irradiance;
+            float4 BurtGISampleScreenProbeIrradianceOct(
+                float2 screenUV,
+                float3 positionWS,
+                float sceneDepth,
+                float3 normalWS,
+                float requestedMipLevel)
+            {
+                return BurtGISampleScreenProbeIrradianceOct(screenUV, positionWS, sceneDepth, normalWS, requestedMipLevel, 0.0f);
             }
 
             float4 BurtGISampleScreenProbeIrradianceOct(
@@ -2035,13 +2294,13 @@ Shader "Hidden/BurtRP/BurtGI"
                 float sceneDepth,
                 float3 normalWS)
             {
-                return BurtGISampleScreenProbeIrradianceOct(screenUV, positionWS, sceneDepth, normalWS, 0.0f);
+                return BurtGISampleScreenProbeIrradianceOct(screenUV, positionWS, sceneDepth, normalWS, 0.0f, 0.0f);
             }
 
             float4 BurtGISampleScreenProbeRadianceOctAtlasMip(float2 probeCoord, float2 localCoord, float2 atlasSize, float mipLevel)
             {
-                float2 tileBase = probeCoord * 8.0f;
-                float2 atlasTexelCoord = tileBase + BurtGIScreenProbeIrradianceOctWrapBorderCoord(localCoord);
+                float2 tileBase = probeCoord * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER;
+                float2 atlasTexelCoord = tileBase + BurtGIScreenProbeRadianceOctWrapBorderCoord(localCoord);
                 return _BurtGIScreenProbeRadianceOctTexture.SampleLevel(
                     sampler_LinearClamp,
                     atlasTexelCoord / max(atlasSize, 1.0f),
@@ -2054,24 +2313,28 @@ Shader "Hidden/BurtRP/BurtGI"
                 float sceneDepth,
                 float3 planeNormalWS,
                 float3 directionWS,
-                float requestedMipLevel)
+                float requestedMipLevel,
+                float receiverFoliageWeight)
             {
                 float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
+                float traceResolution = max(_BurtGIScreenProbeTraceParams.x, 1.0f);
+                float atlasProbeHeight = max(
+                    gridSize.y,
+                    ceil(max(_BurtGIScreenProbeTraceParams.z, traceResolution) / traceResolution));
                 float2 atlasSize = float2(
-                    gridSize.x * 8.0f,
-                    max(gridSize.y * 8.0f, _BurtGIScreenProbeTraceParams.z));
-                float2 localCoord = BurtGIInverseEquiAreaSphericalMapping(directionWS) * 6.0f + 1.0f;
+                    gridSize.x * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER,
+                    atlasProbeHeight * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER);
+                float2 localCoord = BurtGIInverseEquiAreaSphericalMapping(directionWS) * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION + 1.0f;
                 float clampedMipLevel = clamp(requestedMipLevel, 0.0f, 3.0f);
 
                 if (gridSize.x < 2.0f || gridSize.y < 2.0f)
                 {
-                    float2 fallbackProbeCoord = min(floor(saturate(screenUV) * gridSize), gridSize - 1.0f);
+                    float2 fallbackProbeCoord = BurtGIScreenProbeFallbackCoord(screenUV, gridSize);
                     return BurtGISampleScreenProbeRadianceOctAtlasMip(fallbackProbeCoord, localCoord, atlasSize, clampedMipLevel);
                 }
 
-                float2 viewSize = max(_BurtGISourceTexelSize.zw, 1.0f);
                 float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
-                float2 screenCoord = clamp(screenUV * viewSize, 0.0f, viewSize - 1.0f);
+                float2 screenCoord = BurtGIScreenProbeUpsampleFullResCoord(screenUV, spacingPixels);
                 float2 tile00 = min(floor(screenCoord / spacingPixels), gridSize - 2.0f);
                 float2 bilinearWeights = saturate((screenCoord - tile00 * spacingPixels + 1.0f) / (spacingPixels + 2.0f));
                 float4 interpolationWeights = float4(
@@ -2094,7 +2357,8 @@ Shader "Hidden/BurtRP/BurtGI"
                     float4 probeNormal = tex2D(_BurtGIScreenProbeWorldNormalTexture, probeUV);
                     float validProbe = (probePosition.a > 0.5f && probeNormal.a > 0.5f) ? 1.0f : 0.0f;
                     float planeDistance = abs(dot(float4(probePosition.xyz, -1.0f), scenePlane));
-                    float planeWeight = exp2(-160.0f * planeDistance / max(sceneDepth, 0.001f));
+                    float receiverPlaneWeightScale = lerp(1.0f, 0.25f, saturate(receiverFoliageWeight));
+                    float planeWeight = exp2(-160.0f * receiverPlaneWeightScale * planeDistance / max(sceneDepth, 0.001f));
                     float4 radianceSample = BurtGISampleScreenProbeRadianceOctAtlasMip(probeCoord, localCoord, atlasSize, clampedMipLevel);
                     float sampleConfidence = saturate(radianceSample.a);
                     float weight = interpolationWeights[cornerIndex] * planeWeight * validProbe * lerp(0.12f, 1.0f, sampleConfidence);
@@ -2104,7 +2368,7 @@ Shader "Hidden/BurtRP/BurtGI"
 
                 if (weightSum <= 0.0001f)
                 {
-                    float2 fallbackProbeCoord = min(floor(saturate(screenUV) * gridSize), gridSize - 1.0f);
+                    float2 fallbackProbeCoord = BurtGIScreenProbeFallbackCoord(screenUV, gridSize);
                     return BurtGISampleScreenProbeRadianceOctAtlasMip(fallbackProbeCoord, localCoord, atlasSize, clampedMipLevel);
                 }
 
@@ -2112,6 +2376,17 @@ Shader "Hidden/BurtRP/BurtGI"
                 radiance.rgb = max(BurtGIInverseTonemapLighting(radiance.rgb), 0.0f);
                 radiance.a = saturate(radiance.a);
                 return radiance;
+            }
+
+            float4 BurtGISampleScreenProbeRadianceOct(
+                float2 screenUV,
+                float3 positionWS,
+                float sceneDepth,
+                float3 planeNormalWS,
+                float3 directionWS,
+                float requestedMipLevel)
+            {
+                return BurtGISampleScreenProbeRadianceOct(screenUV, positionWS, sceneDepth, planeNormalWS, directionWS, requestedMipLevel, 0.0f);
             }
 
             bool BurtGISampleAdaptiveScreenProbeRadianceOct(
@@ -2123,6 +2398,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float requestedMipLevel,
                 float currentConfidence,
                 float edgeConfidence,
+                float receiverFoliageWeight,
                 out float3 adaptiveRadiance,
                 out float adaptiveConfidence)
             {
@@ -2138,6 +2414,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     planeNormalWS,
                     currentConfidence,
                     edgeConfidence,
+                    receiverFoliageWeight,
                     ignoredIrradiance,
                     selectedAdaptiveConfidence,
                     atlasProbeCoord))
@@ -2146,11 +2423,12 @@ Shader "Hidden/BurtRP/BurtGI"
                 }
 
                 float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
+                float traceResolution = max(_BurtGIScreenProbeTraceParams.x, 1.0f);
                 float atlasProbeHeight = max(
                     gridSize.y,
-                    floor(max(_BurtGIScreenProbeTraceParams.z, _BurtGIScreenProbeTraceParams.x) / max(_BurtGIScreenProbeTraceParams.x, 1.0f)));
-                float2 atlasSize = float2(gridSize.x, atlasProbeHeight) * 8.0f;
-                float2 localCoord = BurtGIInverseEquiAreaSphericalMapping(directionWS) * 6.0f + 1.0f;
+                    ceil(max(_BurtGIScreenProbeTraceParams.z, traceResolution) / traceResolution));
+                float2 atlasSize = float2(gridSize.x, atlasProbeHeight) * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER;
+                float2 localCoord = BurtGIInverseEquiAreaSphericalMapping(directionWS) * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION + 1.0f;
                 float4 radianceSample = BurtGISampleScreenProbeRadianceOctAtlasMip(
                     atlasProbeCoord,
                     localCoord,
@@ -2161,11 +2439,44 @@ Shader "Hidden/BurtRP/BurtGI"
                 return adaptiveConfidence > 0.0001f;
             }
 
+            void BurtGISampleUniformScreenProbeCorner(
+                float2 tile00,
+                int cornerIndex,
+                float4 interpolationWeights,
+                float4 scenePlane,
+                float sceneDepth,
+                float3 normalWS,
+                float receiverFoliageWeight,
+                float2 gridSize,
+                out float4 cornerIrradiance,
+                out float4 cornerConfidence,
+                out float cornerWeight)
+            {
+                float2 cornerOffset = float2((float)(cornerIndex & 1), (float)(cornerIndex >> 1));
+                float2 probeCoord = min(tile00 + cornerOffset, gridSize - 1.0f);
+                float2 probeUV = (probeCoord + 0.5f) * _BurtGIScreenProbeGridParams.zw;
+                float4 probePosition = tex2D(_BurtGIScreenProbeWorldPositionTexture, probeUV);
+                float4 probeNormal = tex2D(_BurtGIScreenProbeWorldNormalTexture, probeUV);
+                float validProbe = probePosition.a > 0.5f && probeNormal.a > 0.5f ? 1.0f : 0.0f;
+                float planeDistance = abs(dot(float4(probePosition.xyz, -1.0f), scenePlane));
+                float receiverPlaneWeightScale = lerp(1.0f, 0.25f, saturate(receiverFoliageWeight));
+                float planeWeight = exp2(-200.0f * receiverPlaneWeightScale * planeDistance / max(sceneDepth, 0.001f));
+                float3 probeNormalWS = normalize(probeNormal.xyz * 2.0f - 1.0f);
+                float normalWeight = lerp(
+                    lerp(0.35f, 1.0f, pow(saturate(dot(normalWS, probeNormalWS)), 4.0f)),
+                    1.0f,
+                    saturate(receiverFoliageWeight));
+                cornerWeight = interpolationWeights[cornerIndex] * planeWeight * normalWeight * validProbe;
+                cornerIrradiance = tex2D(_BurtGIScreenProbeFixupIrradianceTexture, probeUV);
+                cornerConfidence = tex2D(_BurtGIScreenProbeFixupConfidenceTexture, probeUV);
+            }
+
             void BurtGISampleUniformScreenProbePlaneWeighted(
                 float2 screenUV,
                 float3 positionWS,
                 float sceneDepth,
                 float3 normalWS,
+                float receiverFoliageWeight,
                 out float4 probeIrradiance,
                 out float4 probeConfidence,
                 out float sampleValidity)
@@ -2179,9 +2490,8 @@ Shader "Hidden/BurtRP/BurtGI"
                     return;
                 }
 
-                float2 viewSize = max(_BurtGISourceTexelSize.zw, 1.0f);
                 float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
-                float2 screenCoord = clamp(screenUV * viewSize, 0.0f, viewSize - 1.0f);
+                float2 screenCoord = BurtGIScreenProbeUpsampleFullResCoord(screenUV, spacingPixels);
                 float2 tile00 = min(floor(screenCoord / spacingPixels), gridSize - 2.0f);
                 float2 bilinearWeights = saturate((screenCoord - tile00 * spacingPixels + 1.0f) / (spacingPixels + 2.0f));
                 float4 interpolationWeights = float4(
@@ -2189,48 +2499,95 @@ Shader "Hidden/BurtRP/BurtGI"
                     (1.0f - bilinearWeights.y) * bilinearWeights.x,
                     bilinearWeights.y * (1.0f - bilinearWeights.x),
                     bilinearWeights.y * bilinearWeights.x);
-                float4 scenePlane = float4(normalize(normalWS), dot(positionWS, normalize(normalWS)));
-                float4 irradianceSum = 0.0f;
-                float4 confidenceSum = 0.0f;
-                float weightSum = 0.0f;
+                float3 unitNormalWS = normalize(normalWS);
+                float4 scenePlane = float4(unitNormalWS, dot(positionWS, unitNormalWS));
+                float4 cornerIrradiance0;
+                float4 cornerIrradiance1;
+                float4 cornerIrradiance2;
+                float4 cornerIrradiance3;
+                float4 cornerConfidence0;
+                float4 cornerConfidence1;
+                float4 cornerConfidence2;
+                float4 cornerConfidence3;
+                float cornerWeight0;
+                float cornerWeight1;
+                float cornerWeight2;
+                float cornerWeight3;
 
-                [unroll]
-                for (int cornerIndex = 0; cornerIndex < 4; ++cornerIndex)
-                {
-                    float2 cornerOffset = float2((float)(cornerIndex & 1), (float)(cornerIndex >> 1));
-                    float2 probeCoord = min(tile00 + cornerOffset, gridSize - 1.0f);
-                    float2 probeUV = (probeCoord + 0.5f) * _BurtGIScreenProbeGridParams.zw;
-                    float4 probePosition = tex2D(_BurtGIScreenProbeWorldPositionTexture, probeUV);
-                    float4 probeNormal = tex2D(_BurtGIScreenProbeWorldNormalTexture, probeUV);
-                    float validProbe = probePosition.a > 0.5f && probeNormal.a > 0.5f ? 1.0f : 0.0f;
-                    float planeDistance = abs(dot(float4(probePosition.xyz, -1.0f), scenePlane));
-                    float planeWeight = exp2(-200.0f * planeDistance / max(sceneDepth, 0.001f));
-                    float3 probeNormalWS = normalize(probeNormal.xyz * 2.0f - 1.0f);
-                    float normalWeight = lerp(0.35f, 1.0f, pow(saturate(dot(normalWS, probeNormalWS)), 4.0f));
-                    float weight = interpolationWeights[cornerIndex] * planeWeight * normalWeight * validProbe;
-                    float4 cornerIrradiance = tex2D(_BurtGIScreenProbeFixupIrradianceTexture, probeUV);
-                    float4 cornerConfidence = tex2D(_BurtGIScreenProbeFixupConfidenceTexture, probeUV);
-                    irradianceSum += cornerIrradiance * weight;
-                    confidenceSum += cornerConfidence * weight;
-                    weightSum += weight;
-                }
+                BurtGISampleUniformScreenProbeCorner(tile00, 0, interpolationWeights, scenePlane, sceneDepth, unitNormalWS, receiverFoliageWeight, gridSize, cornerIrradiance0, cornerConfidence0, cornerWeight0);
+                BurtGISampleUniformScreenProbeCorner(tile00, 1, interpolationWeights, scenePlane, sceneDepth, unitNormalWS, receiverFoliageWeight, gridSize, cornerIrradiance1, cornerConfidence1, cornerWeight1);
+                BurtGISampleUniformScreenProbeCorner(tile00, 2, interpolationWeights, scenePlane, sceneDepth, unitNormalWS, receiverFoliageWeight, gridSize, cornerIrradiance2, cornerConfidence2, cornerWeight2);
+                BurtGISampleUniformScreenProbeCorner(tile00, 3, interpolationWeights, scenePlane, sceneDepth, unitNormalWS, receiverFoliageWeight, gridSize, cornerIrradiance3, cornerConfidence3, cornerWeight3);
+
+                float weightSum = cornerWeight0 + cornerWeight1 + cornerWeight2 + cornerWeight3;
 
                 if (weightSum <= 0.0001f)
                 {
                     return;
                 }
 
-                probeIrradiance = irradianceSum / weightSum;
-                probeConfidence = confidenceSum / weightSum;
+                float4 weightedIrradiance =
+                    (cornerIrradiance0 * cornerWeight0 +
+                     cornerIrradiance1 * cornerWeight1 +
+                     cornerIrradiance2 * cornerWeight2 +
+                     cornerIrradiance3 * cornerWeight3) / weightSum;
+                float4 weightedConfidence =
+                    (cornerConfidence0 * cornerWeight0 +
+                     cornerConfidence1 * cornerWeight1 +
+                     cornerConfidence2 * cornerWeight2 +
+                     cornerConfidence3 * cornerWeight3) / weightSum;
+
+                float randomValue = min(BurtGIHash12(screenCoord + 31.7f, _BurtGIParams2.x + 19.0f), 0.99f) * weightSum;
+                float4 stochasticIrradiance = cornerIrradiance0;
+                float4 stochasticConfidence = cornerConfidence0;
+                if (randomValue >= cornerWeight0 + cornerWeight1 + cornerWeight2)
+                {
+                    stochasticIrradiance = cornerIrradiance3;
+                    stochasticConfidence = cornerConfidence3;
+                }
+                else if (randomValue >= cornerWeight0 + cornerWeight1)
+                {
+                    stochasticIrradiance = cornerIrradiance2;
+                    stochasticConfidence = cornerConfidence2;
+                }
+                else if (randomValue >= cornerWeight0)
+                {
+                    stochasticIrradiance = cornerIrradiance1;
+                    stochasticConfidence = cornerConfidence1;
+                }
+
+                float stochasticProbeInterpolation = _BurtGIScreenProbeTemporalParams.w > 0.5f ? 1.0f : 0.0f;
+                probeIrradiance = lerp(weightedIrradiance, stochasticIrradiance, stochasticProbeInterpolation);
+                probeConfidence = lerp(weightedConfidence, stochasticConfidence, stochasticProbeInterpolation);
                 probeIrradiance.rgb = max(probeIrradiance.rgb, 0.0f);
                 probeIrradiance.a = saturate(probeIrradiance.a);
                 probeConfidence.rgb = saturate(probeConfidence.rgb);
                 sampleValidity = 1.0f;
             }
 
+            void BurtGISampleUniformScreenProbePlaneWeighted(
+                float2 screenUV,
+                float3 positionWS,
+                float sceneDepth,
+                float3 normalWS,
+                out float4 probeIrradiance,
+                out float4 probeConfidence,
+                out float sampleValidity)
+            {
+                BurtGISampleUniformScreenProbePlaneWeighted(
+                    screenUV,
+                    positionWS,
+                    sceneDepth,
+                    normalWS,
+                    0.0f,
+                    probeIrradiance,
+                    probeConfidence,
+                    sampleValidity);
+            }
+
             #define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffu
             #define BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX 0xfffeu
-            #define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 5u
+            #define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6u
 
             uint BurtGIRadianceCacheClipmapCount()
             {
@@ -2264,14 +2621,13 @@ Shader "Hidden/BurtRP/BurtGI"
 
             uint BurtGIRadianceCacheFinalAtlasBorderSize()
             {
-                uint radianceProbeResolution = BurtGIRadianceCacheProbeResolution();
-                uint finalProbeResolution = BurtGIRadianceCacheFinalProbeResolution();
-                return max(0u, (finalProbeResolution - radianceProbeResolution) / 2u);
+                return 1u << min(_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip, 8u);
             }
 
             bool BurtGIRadianceCacheIsAvailable()
             {
-                return _BurtGIRadianceCacheClipMapParams.x > 0.5f &&
+                return _BurtGIRadianceCacheClipMapApplyParams.x > 0.5f &&
+                    _BurtGIRadianceCacheClipMapParams.x > 0.5f &&
                     _BurtGIRadianceCacheClipMapParams.y > 0.5f &&
                     _BurtGIRadianceCacheClipMapParams.z > 0.5f &&
                     _BurtGIRadianceCacheClipMapParams.w > 0.5f &&
@@ -2281,6 +2637,8 @@ Shader "Hidden/BurtRP/BurtGI"
 
             bool BurtGIRadianceCacheWorldPositionToProbeCoordDithered(float3 worldPosition, float clipmapDitherRandom, out uint clipmapIndex, out float3 probeCoordFloat)
             {
+                clipmapIndex = 0u;
+                probeCoordFloat = 0.0f;
                 uint clipmapCount = BurtGIRadianceCacheClipmapCount();
                 float clipmapResolution = max(_BurtGIRadianceCacheClipMapParams.w, 1.0f);
                 float invFadeSize = max(_BurtGIRadianceCacheClipMapWorldParams.z, 0.0001f);
@@ -2309,8 +2667,6 @@ Shader "Hidden/BurtRP/BurtGI"
                     }
                 }
 
-                clipmapIndex = 0u;
-                probeCoordFloat = 0.0f;
                 return false;
             }
 
@@ -2367,10 +2723,7 @@ Shader "Hidden/BurtRP/BurtGI"
 
             float BurtGIRadianceCacheFinalAtlasMaxMip()
             {
-                uint radianceProbeResolution = BurtGIRadianceCacheProbeResolution();
-                uint finalProbeResolution = BurtGIRadianceCacheFinalProbeResolution();
-                uint borderSize = max(1u, (finalProbeResolution - radianceProbeResolution) / 2u);
-                return log2((float)borderSize);
+                return (float)_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
             }
 
             float BurtGISampleRadianceCacheProbeOcclusion(uint probeIndex, float3 probeToSampleWS, float sampleDistance)
@@ -2404,6 +2757,18 @@ Shader "Hidden/BurtRP/BurtGI"
                 float distanceDelta = sampleDistance - meanDepth;
                 float visibility = variance / (variance + distanceDelta * distanceDelta);
                 return saturate(visibility * visibility * visibility);
+            }
+
+            float BurtGIRadianceCacheApplyProbeOcclusionWeightThreshold(float weight)
+            {
+                const float weightThreshold = 0.2f;
+                weight = max(weight, 0.0f);
+                if (weight < weightThreshold)
+                {
+                    return weight * weight * weight / (weightThreshold * weightThreshold);
+                }
+
+                return weight;
             }
 
             float3 BurtGISampleRadianceCacheProbe(uint probeIndex, float3 sampleDirectionWS, float mipLevel)
@@ -2476,7 +2841,8 @@ Shader "Hidden/BurtRP/BurtGI"
             {
                 float3 unitSampleDirectionWS = BurtSafeNormalize(sampleDirectionWS);
                 float probeTMin = max(_BurtGIRadianceCacheClipMapClipmapParams[clipmapIndex].y, 0.001f);
-                float reprojectionRadius = 1.5f * probeTMin;
+                float reprojectionRadiusScale = _BurtGIRadianceCacheClipMapApplyParams.y > 0.0f ? _BurtGIRadianceCacheClipMapApplyParams.y : 1.5f;
+                float reprojectionRadius = reprojectionRadiusScale * probeTMin;
                 float3 probeWorldPosition = BurtGIRadianceCacheProbeWorldPosition(clipmapIndex, probeCoord, probeIndex);
                 float2 intersections = BurtGIRayIntersectSphere(worldPosition, unitSampleDirectionWS, float4(probeWorldPosition, reprojectionRadius));
 
@@ -2544,12 +2910,8 @@ Shader "Hidden/BurtRP/BurtGI"
                                 continue;
                             }
 
-                            float3 probeWorldPosition = BurtGIRadianceCacheProbeWorldPosition(clipmapIndex, (uint3)sampleProbeCoordSigned, probeIndex);
-                            float3 probeToSampleWS = worldPosition - probeWorldPosition;
-                            float sampleDistance = length(probeToSampleWS);
-                            float occlusionVisibility = BurtGISampleRadianceCacheProbeOcclusion(probeIndex, probeToSampleWS, sampleDistance);
                             float3 cornerWeight = lerp(1.0f - lerpAlphas, lerpAlphas, float3((float)x, (float)y, (float)z));
-                            float weight = cornerWeight.x * cornerWeight.y * cornerWeight.z * occlusionVisibility;
+                            float weight = cornerWeight.x * cornerWeight.y * cornerWeight.z;
                             radiance += BurtGISampleRadianceCacheProbeWithParallaxCorrection((uint3)sampleProbeCoordSigned, clipmapIndex, probeIndex, worldPosition, sampleDirectionWS, mipLevel) * weight;
                             confidence += weight;
                         }
@@ -2561,13 +2923,61 @@ Shader "Hidden/BurtRP/BurtGI"
                     return false;
                 }
 
-                radiance /= confidence;
                 confidence = saturate(confidence);
                 return true;
             }
 
+            void BurtGIAccumulateRadianceCacheIrradianceSample(
+                uint probeIndex,
+                float weight,
+                uint clipmapIndex,
+                uint3 probeCoord,
+                float3 occlusionPositionWS,
+                float3 normalWS,
+                inout float3 irradianceSum,
+                inout float weightSum)
+            {
+                if (probeIndex >= BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX || weight <= 0.0001f)
+                {
+                    return;
+                }
+
+                float3 probeWorldPosition = BurtGIRadianceCacheProbeWorldPosition(clipmapIndex, probeCoord, probeIndex);
+                float3 probeToSampleWS = occlusionPositionWS - probeWorldPosition;
+                float sampleDistance = length(probeToSampleWS);
+                float visibility = BurtGISampleRadianceCacheProbeOcclusion(probeIndex, probeToSampleWS, sampleDistance);
+                float finalWeight = BurtGIRadianceCacheApplyProbeOcclusionWeightThreshold(weight * visibility);
+                irradianceSum += BurtGISampleRadianceCacheProbeIrradiance(probeIndex, normalWS) * finalWeight;
+                weightSum += finalWeight;
+            }
+
+            void BurtGIAccumulateRadianceCacheSkyAOSample(
+                uint probeIndex,
+                float weight,
+                uint clipmapIndex,
+                uint3 probeCoord,
+                float3 occlusionPositionWS,
+                float3 normalWS,
+                inout float skyAOSum,
+                inout float weightSum)
+            {
+                if (probeIndex >= BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX || weight <= 0.0001f)
+                {
+                    return;
+                }
+
+                float3 probeWorldPosition = BurtGIRadianceCacheProbeWorldPosition(clipmapIndex, probeCoord, probeIndex);
+                float3 probeToSampleWS = occlusionPositionWS - probeWorldPosition;
+                float sampleDistance = length(probeToSampleWS);
+                float visibility = BurtGISampleRadianceCacheProbeOcclusion(probeIndex, probeToSampleWS, sampleDistance);
+                float finalWeight = BurtGIRadianceCacheApplyProbeOcclusionWeightThreshold(weight * visibility);
+                skyAOSum += BurtGISampleRadianceCacheProbeSkyAO(probeIndex, normalWS) * finalWeight;
+                weightSum += finalWeight;
+            }
+
             bool BurtGISampleRadianceCacheClipMapIrradianceInterpolated(
                 float3 worldPosition,
+                float3 occlusionPositionWS,
                 float3 normalWS,
                 float clipmapDitherRandom,
                 out float3 irradiance,
@@ -2612,38 +3022,40 @@ Shader "Hidden/BurtRP/BurtGI"
                 uint probeIndex110 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord110);
                 uint probeIndex111 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord111);
 
-                float3 lighting000 = BurtGISampleRadianceCacheProbeIrradiance(probeIndex000, normalWS);
-                float3 lighting001 = BurtGISampleRadianceCacheProbeIrradiance(probeIndex001, normalWS);
-                float3 lighting010 = BurtGISampleRadianceCacheProbeIrradiance(probeIndex010, normalWS);
-                float3 lighting011 = BurtGISampleRadianceCacheProbeIrradiance(probeIndex011, normalWS);
-                float3 lighting100 = BurtGISampleRadianceCacheProbeIrradiance(probeIndex100, normalWS);
-                float3 lighting101 = BurtGISampleRadianceCacheProbeIrradiance(probeIndex101, normalWS);
-                float3 lighting110 = BurtGISampleRadianceCacheProbeIrradiance(probeIndex110, normalWS);
-                float3 lighting111 = BurtGISampleRadianceCacheProbeIrradiance(probeIndex111, normalWS);
+                float3 invAlphas = 1.0f - lerpAlphas;
+                float weight000 = invAlphas.x * invAlphas.y * invAlphas.z;
+                float weight001 = invAlphas.x * invAlphas.y * lerpAlphas.z;
+                float weight010 = invAlphas.x * lerpAlphas.y * invAlphas.z;
+                float weight011 = invAlphas.x * lerpAlphas.y * lerpAlphas.z;
+                float weight100 = lerpAlphas.x * invAlphas.y * invAlphas.z;
+                float weight101 = lerpAlphas.x * invAlphas.y * lerpAlphas.z;
+                float weight110 = lerpAlphas.x * lerpAlphas.y * invAlphas.z;
+                float weight111 = lerpAlphas.x * lerpAlphas.y * lerpAlphas.z;
 
-                float3 zLerp00 = lerp(lighting000, lighting001, lerpAlphas.z);
-                float3 zLerp01 = lerp(lighting010, lighting011, lerpAlphas.z);
-                float3 zLerp10 = lerp(lighting100, lighting101, lerpAlphas.z);
-                float3 zLerp11 = lerp(lighting110, lighting111, lerpAlphas.z);
-                float3 yLerp0 = lerp(zLerp00, zLerp01, lerpAlphas.y);
-                float3 yLerp1 = lerp(zLerp10, zLerp11, lerpAlphas.y);
-                irradiance = lerp(yLerp0, yLerp1, lerpAlphas.x);
+                float3 irradianceSum = 0.0f;
+                float weightSum = 0.0f;
+                BurtGIAccumulateRadianceCacheIrradianceSample(probeIndex000, weight000, clipmapIndex, probeCoord000, occlusionPositionWS, normalWS, irradianceSum, weightSum);
+                BurtGIAccumulateRadianceCacheIrradianceSample(probeIndex001, weight001, clipmapIndex, probeCoord001, occlusionPositionWS, normalWS, irradianceSum, weightSum);
+                BurtGIAccumulateRadianceCacheIrradianceSample(probeIndex010, weight010, clipmapIndex, probeCoord010, occlusionPositionWS, normalWS, irradianceSum, weightSum);
+                BurtGIAccumulateRadianceCacheIrradianceSample(probeIndex011, weight011, clipmapIndex, probeCoord011, occlusionPositionWS, normalWS, irradianceSum, weightSum);
+                BurtGIAccumulateRadianceCacheIrradianceSample(probeIndex100, weight100, clipmapIndex, probeCoord100, occlusionPositionWS, normalWS, irradianceSum, weightSum);
+                BurtGIAccumulateRadianceCacheIrradianceSample(probeIndex101, weight101, clipmapIndex, probeCoord101, occlusionPositionWS, normalWS, irradianceSum, weightSum);
+                BurtGIAccumulateRadianceCacheIrradianceSample(probeIndex110, weight110, clipmapIndex, probeCoord110, occlusionPositionWS, normalWS, irradianceSum, weightSum);
+                BurtGIAccumulateRadianceCacheIrradianceSample(probeIndex111, weight111, clipmapIndex, probeCoord111, occlusionPositionWS, normalWS, irradianceSum, weightSum);
 
-                float validProbeCount =
-                    (probeIndex000 < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX ? 1.0f : 0.0f) +
-                    (probeIndex001 < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX ? 1.0f : 0.0f) +
-                    (probeIndex010 < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX ? 1.0f : 0.0f) +
-                    (probeIndex011 < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX ? 1.0f : 0.0f) +
-                    (probeIndex100 < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX ? 1.0f : 0.0f) +
-                    (probeIndex101 < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX ? 1.0f : 0.0f) +
-                    (probeIndex110 < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX ? 1.0f : 0.0f) +
-                    (probeIndex111 < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX ? 1.0f : 0.0f);
-                confidence = validProbeCount > 0.0f ? 1.0f : 0.0f;
+                if (weightSum <= 0.0001f)
+                {
+                    return false;
+                }
+
+                irradiance = irradianceSum;
+                confidence = saturate(weightSum);
                 return confidence > 0.0001f;
             }
 
             bool BurtGISampleRadianceCacheClipMapSkyAOInterpolated(
                 float3 worldPosition,
+                float3 occlusionPositionWS,
                 float3 normalWS,
                 float clipmapDitherRandom,
                 out float skyAO)
@@ -2668,31 +3080,42 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 lerpAlphas = saturate(frac(cornerProbeCoordFloat));
                 int3 maxProbeCoord = int3((int)clipmapResolution - 1, (int)clipmapResolution - 1, (int)clipmapResolution - 1);
 
-                uint probeIndex000 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, (uint3)clamp(cornerProbeCoord + int3(0, 0, 0), int3(0, 0, 0), maxProbeCoord));
-                uint probeIndex001 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, (uint3)clamp(cornerProbeCoord + int3(0, 0, 1), int3(0, 0, 0), maxProbeCoord));
-                uint probeIndex010 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, (uint3)clamp(cornerProbeCoord + int3(0, 1, 0), int3(0, 0, 0), maxProbeCoord));
-                uint probeIndex011 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, (uint3)clamp(cornerProbeCoord + int3(0, 1, 1), int3(0, 0, 0), maxProbeCoord));
-                uint probeIndex100 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, (uint3)clamp(cornerProbeCoord + int3(1, 0, 0), int3(0, 0, 0), maxProbeCoord));
-                uint probeIndex101 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, (uint3)clamp(cornerProbeCoord + int3(1, 0, 1), int3(0, 0, 0), maxProbeCoord));
-                uint probeIndex110 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, (uint3)clamp(cornerProbeCoord + int3(1, 1, 0), int3(0, 0, 0), maxProbeCoord));
-                uint probeIndex111 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, (uint3)clamp(cornerProbeCoord + int3(1, 1, 1), int3(0, 0, 0), maxProbeCoord));
+                uint3 probeCoord000 = (uint3)clamp(cornerProbeCoord + int3(0, 0, 0), int3(0, 0, 0), maxProbeCoord);
+                uint3 probeCoord001 = (uint3)clamp(cornerProbeCoord + int3(0, 0, 1), int3(0, 0, 0), maxProbeCoord);
+                uint3 probeCoord010 = (uint3)clamp(cornerProbeCoord + int3(0, 1, 0), int3(0, 0, 0), maxProbeCoord);
+                uint3 probeCoord011 = (uint3)clamp(cornerProbeCoord + int3(0, 1, 1), int3(0, 0, 0), maxProbeCoord);
+                uint3 probeCoord100 = (uint3)clamp(cornerProbeCoord + int3(1, 0, 0), int3(0, 0, 0), maxProbeCoord);
+                uint3 probeCoord101 = (uint3)clamp(cornerProbeCoord + int3(1, 0, 1), int3(0, 0, 0), maxProbeCoord);
+                uint3 probeCoord110 = (uint3)clamp(cornerProbeCoord + int3(1, 1, 0), int3(0, 0, 0), maxProbeCoord);
+                uint3 probeCoord111 = (uint3)clamp(cornerProbeCoord + int3(1, 1, 1), int3(0, 0, 0), maxProbeCoord);
 
-                float lighting000 = BurtGISampleRadianceCacheProbeSkyAO(probeIndex000, normalWS);
-                float lighting001 = BurtGISampleRadianceCacheProbeSkyAO(probeIndex001, normalWS);
-                float lighting010 = BurtGISampleRadianceCacheProbeSkyAO(probeIndex010, normalWS);
-                float lighting011 = BurtGISampleRadianceCacheProbeSkyAO(probeIndex011, normalWS);
-                float lighting100 = BurtGISampleRadianceCacheProbeSkyAO(probeIndex100, normalWS);
-                float lighting101 = BurtGISampleRadianceCacheProbeSkyAO(probeIndex101, normalWS);
-                float lighting110 = BurtGISampleRadianceCacheProbeSkyAO(probeIndex110, normalWS);
-                float lighting111 = BurtGISampleRadianceCacheProbeSkyAO(probeIndex111, normalWS);
+                uint probeIndex000 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord000);
+                uint probeIndex001 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord001);
+                uint probeIndex010 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord010);
+                uint probeIndex011 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord011);
+                uint probeIndex100 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord100);
+                uint probeIndex101 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord101);
+                uint probeIndex110 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord110);
+                uint probeIndex111 = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord111);
 
-                float zLerp00 = lerp(lighting000, lighting001, lerpAlphas.z);
-                float zLerp01 = lerp(lighting010, lighting011, lerpAlphas.z);
-                float zLerp10 = lerp(lighting100, lighting101, lerpAlphas.z);
-                float zLerp11 = lerp(lighting110, lighting111, lerpAlphas.z);
-                float yLerp0 = lerp(zLerp00, zLerp01, lerpAlphas.y);
-                float yLerp1 = lerp(zLerp10, zLerp11, lerpAlphas.y);
-                skyAO = saturate(lerp(yLerp0, yLerp1, lerpAlphas.x));
+                float3 invAlphas = 1.0f - lerpAlphas;
+                float skyAOSum = 0.0f;
+                float weightSum = 0.0f;
+                BurtGIAccumulateRadianceCacheSkyAOSample(probeIndex000, invAlphas.x * invAlphas.y * invAlphas.z, clipmapIndex, probeCoord000, occlusionPositionWS, normalWS, skyAOSum, weightSum);
+                BurtGIAccumulateRadianceCacheSkyAOSample(probeIndex001, invAlphas.x * invAlphas.y * lerpAlphas.z, clipmapIndex, probeCoord001, occlusionPositionWS, normalWS, skyAOSum, weightSum);
+                BurtGIAccumulateRadianceCacheSkyAOSample(probeIndex010, invAlphas.x * lerpAlphas.y * invAlphas.z, clipmapIndex, probeCoord010, occlusionPositionWS, normalWS, skyAOSum, weightSum);
+                BurtGIAccumulateRadianceCacheSkyAOSample(probeIndex011, invAlphas.x * lerpAlphas.y * lerpAlphas.z, clipmapIndex, probeCoord011, occlusionPositionWS, normalWS, skyAOSum, weightSum);
+                BurtGIAccumulateRadianceCacheSkyAOSample(probeIndex100, lerpAlphas.x * invAlphas.y * invAlphas.z, clipmapIndex, probeCoord100, occlusionPositionWS, normalWS, skyAOSum, weightSum);
+                BurtGIAccumulateRadianceCacheSkyAOSample(probeIndex101, lerpAlphas.x * invAlphas.y * lerpAlphas.z, clipmapIndex, probeCoord101, occlusionPositionWS, normalWS, skyAOSum, weightSum);
+                BurtGIAccumulateRadianceCacheSkyAOSample(probeIndex110, lerpAlphas.x * lerpAlphas.y * invAlphas.z, clipmapIndex, probeCoord110, occlusionPositionWS, normalWS, skyAOSum, weightSum);
+                BurtGIAccumulateRadianceCacheSkyAOSample(probeIndex111, lerpAlphas.x * lerpAlphas.y * lerpAlphas.z, clipmapIndex, probeCoord111, occlusionPositionWS, normalWS, skyAOSum, weightSum);
+
+                if (weightSum <= 0.0001f)
+                {
+                    return false;
+                }
+
+                skyAO = saturate(skyAOSum / max(weightSum, 0.0001f));
                 return true;
             }
 
@@ -2755,6 +3178,9 @@ Shader "Hidden/BurtRP/BurtGI"
                 BurtGISampleScreenProbeBentNormalAO(screenUV, centerNormalWS, unitBentNormalWS, bentAO, bentNormalValid);
                 float3 probeLightingNormalWS = BurtGIApplyShortRangeAOBentNormal(centerNormalWS, unitBentNormalWS, bentAO, bentNormalValid);
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
+                BurtGBufferData gbufferData = BurtDecodeDeferredGBuffer(encodedGBuffer, screenUV);
+                float receiverFoliageWeight = BurtIsActiveFoliageShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
                 float4 probeIrradiance;
                 float4 probeConfidence;
                 float screenProbeSampleValidity;
@@ -2763,6 +3189,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     positionWS,
                     LinearEyeDepth(rawDepth),
                     probeLightingNormalWS,
+                    receiverFoliageWeight,
                     probeIrradiance,
                     probeConfidence,
                     screenProbeSampleValidity);
@@ -2776,7 +3203,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 adaptiveIrradiance;
                 float adaptiveConfidence;
                 float2 ignoredAdaptiveAtlasProbeCoord;
-                if (BurtGISampleAdaptiveScreenProbeTraceAtlas(screenUV, positionWS, LinearEyeDepth(rawDepth), probeLightingNormalWS, confidence, probeConfidence.b, adaptiveIrradiance, adaptiveConfidence, ignoredAdaptiveAtlasProbeCoord))
+                if (BurtGISampleAdaptiveScreenProbeTraceAtlas(screenUV, positionWS, LinearEyeDepth(rawDepth), probeLightingNormalWS, confidence, probeConfidence.b, receiverFoliageWeight, adaptiveIrradiance, adaptiveConfidence, ignoredAdaptiveAtlasProbeCoord))
                 {
                     float adaptiveFill = saturate((0.74f - confidence) * 1.3513514f + probeConfidence.b * 0.24f) * adaptiveConfidence;
                     probeIrradiance.rgb = lerp(probeIrradiance.rgb, adaptiveIrradiance, adaptiveFill * 0.55f);
@@ -2807,7 +3234,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 confidence = saturate(max(confidence, shConfidence * shFill * 0.65f));
                 float3 shDirectionalMagnitude = BurtGISampleScreenProbeSHDirectionalMagnitude(screenUV);
                 probeIrradiance.rgb += shDirectionalMagnitude * (applyStrength * confidence * 0.012f);
-                float4 probeOctIrradiance = BurtGISampleScreenProbeIrradianceOct(screenUV, positionWS, LinearEyeDepth(rawDepth), probeLightingNormalWS);
+                float4 probeOctIrradiance = BurtGISampleScreenProbeIrradianceOct(screenUV, positionWS, LinearEyeDepth(rawDepth), probeLightingNormalWS, 0.0f, receiverFoliageWeight);
                 float octConfidence = saturate(probeOctIrradiance.a);
                 float octFill = saturate((0.72f - confidence) * 1.3888888f) * octConfidence;
                 float octDirectionalRefine = saturate(octConfidence * confidence) * 0.18f;
@@ -2817,7 +3244,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 radianceCacheIrradiance;
                 float radianceCacheConfidence;
                 float radianceCacheClipmapDither = BurtGIHash12(screenUV * _BurtGISourceTexelSize.zw, _BurtGIParams2.x);
-                if (BurtGISampleRadianceCacheClipMapIrradianceInterpolated(positionWS, centerNormalWS, radianceCacheClipmapDither, radianceCacheIrradiance, radianceCacheConfidence))
+                if (BurtGISampleRadianceCacheClipMapIrradianceInterpolated(positionWS, positionWS, centerNormalWS, radianceCacheClipmapDither, radianceCacheIrradiance, radianceCacheConfidence))
                 {
                     float radianceCacheFill = applyStrength * radianceCacheConfidence * saturate(0.25f + (1.0f - confidence) * 0.75f) * lerp(1.0f, 0.45f, hitRatio);
                     probeIrradiance.rgb = lerp(probeIrradiance.rgb, radianceCacheIrradiance, saturate(radianceCacheFill * 0.65f));
@@ -2846,7 +3273,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 }
 
                 float3 unitLightingDirectionWS = BurtSafeNormalize(lightingDirectionWS);
-                float2 probeCoord = min(floor(saturate(screenUV) * gridSize), gridSize - 1.0f);
+                float2 probeCoord = BurtGIScreenProbeFallbackCoord(screenUV, gridSize);
                 float2 centerOctUV = BurtGIInverseEquiAreaSphericalMapping(unitLightingDirectionWS);
                 float2 centerOctCoord = centerOctUV * octResolution - 0.5f;
                 float radiusFloat = lerp(1.0f, 3.0f, saturate((roughness - 0.28f) * 1.3888888f));
@@ -2906,6 +3333,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 planeNormalWS,
                 float3 lightingDirectionWS,
                 float roughness,
+                float receiverFoliageWeight,
                 out float confidence)
             {
                 confidence = 0.0f;
@@ -2925,6 +3353,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     positionWS,
                     sceneDepth,
                     unitPlaneNormalWS,
+                    receiverFoliageWeight,
                     probeIrradiance,
                     probeConfidence,
                     screenProbeSampleValidity);
@@ -2978,7 +3407,8 @@ Shader "Hidden/BurtRP/BurtGI"
                     positionWS,
                     sceneDepth,
                     unitLightingDirectionWS,
-                    roughSpecularOctMipLevel);
+                    roughSpecularOctMipLevel,
+                    receiverFoliageWeight);
                 float octConfidence = saturate(octLighting.a);
                 float octFill = saturate((0.76f - confidence) * 1.3157895f) * octConfidence;
                 float octDirectionalRefine = saturate(octConfidence * confidence) * lerp(0.14f, 0.28f, roughMipBias);
@@ -2991,7 +3421,8 @@ Shader "Hidden/BurtRP/BurtGI"
                     sceneDepth,
                     unitPlaneNormalWS,
                     unitLightingDirectionWS,
-                    roughSpecularOctMipLevel);
+                    roughSpecularOctMipLevel,
+                    receiverFoliageWeight);
                 float octRadianceConfidence = saturate(octRadiance.a);
                 float octRadianceFill = saturate((0.82f - confidence) * 1.2195122f) * octRadianceConfidence;
                 directionalLighting = lerp(
@@ -3011,6 +3442,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     roughSpecularOctMipLevel,
                     confidence,
                     probeConfidence.b,
+                    receiverFoliageWeight,
                     adaptiveRadiance,
                     adaptiveRadianceConfidence))
                 {
@@ -3128,12 +3560,13 @@ Shader "Hidden/BurtRP/BurtGI"
                 float historyNormalCosThreshold = clamp(_BurtGIScreenProbeReprojectionParams.w, -1.0f, 1.0f);
                 float4 scenePlane = float4(normalWS, dot(positionWS, normalWS));
                 float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
-                float2 historyProbeCoord = saturate(historyUV) * gridSize - 0.5f;
+                float2 historyProbeCoord = BurtGIScreenProbeTileCoordFromScreenUV(historyUV, BurtGIScreenProbePreviousJitterIndex());
                 float2 historyBaseCoord = floor(historyProbeCoord);
                 float4 totalHistoryRadiance = 0.0f;
                 float4 totalHistoryIrradiance = 0.0f;
                 float3 totalHistoryConfidence = 0.0f;
                 float totalHistoryWeight = 0.0f;
+                float historyExposureCorrection = max(_BurtGIScreenProbeHistoryParams.x, 0.0f);
 
                 [unroll]
                 for (int y = 0; y < 2; ++y)
@@ -3165,8 +3598,12 @@ Shader "Hidden/BurtRP/BurtGI"
                         float3 neighborNormalWS = normalize(neighborNormalData.xyz * 2.0f - 1.0f);
                         float normalWeight = neighborNormalData.a > 0.5f && dot(normalWS, neighborNormalWS) >= historyNormalCosThreshold ? 1.0f : 0.0f;
                         float neighborWeight = planeWeight * neighborDepthValidity * normalWeight * saturate(neighborConfidence.r * 2.0f);
-                        totalHistoryRadiance += tex2D(_BurtGIScreenProbeHistoryRadianceTexture, neighborUV) * neighborWeight;
-                        totalHistoryIrradiance += tex2D(_BurtGIScreenProbeHistoryIrradianceTexture, neighborUV) * neighborWeight;
+                        float4 neighborHistoryRadiance = tex2D(_BurtGIScreenProbeHistoryRadianceTexture, neighborUV);
+                        float4 neighborHistoryIrradiance = tex2D(_BurtGIScreenProbeHistoryIrradianceTexture, neighborUV);
+                        neighborHistoryRadiance.rgb = max(neighborHistoryRadiance.rgb * historyExposureCorrection, 0.0f);
+                        neighborHistoryIrradiance.rgb = max(neighborHistoryIrradiance.rgb * historyExposureCorrection, 0.0f);
+                        totalHistoryRadiance += neighborHistoryRadiance * neighborWeight;
+                        totalHistoryIrradiance += neighborHistoryIrradiance * neighborWeight;
                         totalHistoryConfidence += neighborConfidence.rgb * neighborWeight;
                         totalHistoryWeight += neighborWeight;
                     }
@@ -3204,7 +3641,6 @@ Shader "Hidden/BurtRP/BurtGI"
                 current.Irradiance = tex2D(_BurtGIScreenProbeIrradianceTexture, input.ScreenUV);
                 current.Confidence = tex2D(_BurtGIScreenProbeConfidenceTexture, input.ScreenUV);
                 current.HitDistance = 0.0f;
-                BurtGICompositeScreenProbeTraceAtlasIntoCurrent(input.ScreenUV, current);
                 float numFramesAccumulatedNormalized = 0.0f;
 
                 float rawDepth = current.Confidence.a;
@@ -3376,6 +3812,10 @@ Shader "Hidden/BurtRP/BurtGI"
                 return BurtGIApplyScreenProbeLite(screenUV, filtered);
             }
 
+            float3 BurtGIRoughSpecularMaterialScale(BurtPBRMaterialData materialData, BurtPBRGeometryData geometryData, float roughness);
+            float BurtGIRoughSpecularDiffuseLerp(float roughness, bool hasBackfaceDiffuse);
+            float BurtGICombineRoughSpecularReflectionsAlpha(float roughness, bool hasBackfaceDiffuse);
+
             struct BurtGIIrradianceFieldOutput
             {
                 float4 Diffuse : SV_Target0;
@@ -3404,22 +3844,24 @@ Shader "Hidden/BurtRP/BurtGI"
 
                 BurtEncodedGBuffer encodedGBuffer = BurtSampleEncodedGBuffer(screenUV);
                 BurtGBufferData gbufferData = BurtDecodeDeferredGBuffer(encodedGBuffer, screenUV);
-                BurtPBRMaterialData materialData = BurtPreparePBRMaterialData(gbufferData);
                 float3 normalWS = BurtGetDeferredSurfaceNormalWS(gbufferData);
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                float3 viewDirectionWS = BurtSafeNormalize(_WorldSpaceCameraPos.xyz - positionWS);
+                float3 occlusionPositionWS = positionWS +
+                    normalWS * max(_BurtGIIrradianceFieldParams.y, 0.0f) +
+                    viewDirectionWS * max(_BurtGIIrradianceFieldParams.z, 0.0f);
                 float radianceCacheDither = BurtGIHash12(screenUV * _BurtGISourceTexelSize.zw + 41.0f, _BurtGIParams2.x + 29.0f);
                 float3 irradiance;
                 float confidence;
-                if (!BurtGISampleRadianceCacheClipMapIrradianceInterpolated(positionWS, normalWS, radianceCacheDither, irradiance, confidence))
+                if (!BurtGISampleRadianceCacheClipMapIrradianceInterpolated(positionWS, occlusionPositionWS, normalWS, radianceCacheDither, irradiance, confidence))
                 {
                     return output;
                 }
 
-                float linearDepth = LinearEyeDepth(rawDepth);
-                float distanceFade = 1.0f - saturate(linearDepth / max(_BurtGIParams2.z, 1.0f));
-                float3 diffuseOcclusion = BurtGTAOMultiBounce(materialData.Occlusion, materialData.BaseColor);
-                float3 indirectDiffuse = materialData.DiffuseColor * max(irradiance, 0.0f) * diffuseOcclusion * distanceFade;
-                output.Diffuse = float4(max(indirectDiffuse * max(_BurtGIIrradianceFieldParams.x, 0.0f), 0.0f), saturate(confidence));
+                float outputStrength = max(_BurtGIIrradianceFieldParams.x, 0.0f);
+                float3 indirectDiffuse = max(irradiance, 0.0f) * outputStrength;
+                output.Diffuse = float4(max(indirectDiffuse, 0.0f), 0.0f);
+
                 return output;
             }
 
@@ -3473,7 +3915,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     return centerBurtGI;
                 }
 
-                float3 historyBurtGI = max(tex2D(_BurtGIHistoryTexture, historyUV).rgb, 0.0f);
+                float3 historyBurtGI = max(tex2D(_BurtGIHistoryTexture, historyUV).rgb * max(_BurtGIHistoryParams.x, 0.0f), 0.0f);
                 float3 localRange = max(maxBurtGI - minBurtGI, 0.001f);
                 float clampPadScale = max(_BurtGITemporalParams1.x, 0.0f);
                 float varianceClampScale = max(_BurtGITemporalParams1.y, 0.0f);
@@ -3555,7 +3997,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float normalThreshold = saturate(_BurtGITemporalParams.w);
                 float normalValidity = saturate((saturate(dot(currentNormalWS, historyNormalWS)) - normalThreshold) / max(1.0f - normalThreshold, 0.0001f));
 
-                float3 historyBurtGI = max(tex2D(_BurtGIHistoryTexture, historyUV).rgb, 0.0f);
+                float3 historyBurtGI = max(tex2D(_BurtGIHistoryTexture, historyUV).rgb * max(_BurtGIHistoryParams.x, 0.0f), 0.0f);
                 float historyHitRatio = saturate(tex2D(_BurtGIHistoryTexture, historyUV).a);
                 float3 localRange = max(maxBurtGI - minBurtGI, 0.001f);
                 float3 historyDelta = abs(historyBurtGI - centerBurtGI.rgb);
@@ -3607,11 +4049,12 @@ Shader "Hidden/BurtRP/BurtGI"
                 float subsurfaceWeight = BurtIsActiveSubsurfaceShadingModel(gbufferData.ShadingModelID)
                     ? saturate(max(BurtGetSubsurfaceStrength(gbufferData), max(BurtGetSubsurfaceThickness(gbufferData), BurtGetSubsurfaceAmbient(gbufferData))))
                     : 0.0f;
-                float foliageWeight = BurtIsActiveFoliageShadingModel(gbufferData.ShadingModelID)
+                bool isFoliageMaterial = BurtIsActiveFoliageShadingModel(gbufferData.ShadingModelID);
+                bool isGrassMaterial = isFoliageMaterial && BurtGetFoliageIsGrass(gbufferData) > 0.5f;
+                float foliageWeight = isFoliageMaterial && !isGrassMaterial
                     ? saturate(max(BurtGetFoliageTransmissionWeight(gbufferData), max(BurtGetFoliageThickness(gbufferData), BurtGetFoliageBackLight(gbufferData))))
                     : 0.0f;
-                float hairWeight = BurtIsActiveHairShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
-                return saturate(max(max(subsurfaceWeight, foliageWeight), hairWeight));
+                return saturate(max(subsurfaceWeight, foliageWeight));
             }
 
             float3 BurtGIRoughSpecularMaterialScale(BurtPBRMaterialData materialData, BurtPBRGeometryData geometryData, float roughness)
@@ -3625,7 +4068,7 @@ Shader "Hidden/BurtRP/BurtGI"
 
             float BurtGIRoughSpecularDiffuseLerp(float roughness, bool hasBackfaceDiffuse)
             {
-                const float maxRoughnessToEvaluate = 0.4f;
+                float maxRoughnessToEvaluate = saturate(_BurtGIIndirectChannelParams.w);
                 const float maxRoughnessToEvaluateFoliage = 0.4f;
                 const float fadeLength = 0.2f;
                 float maxRoughness = hasBackfaceDiffuse ? maxRoughnessToEvaluateFoliage : maxRoughnessToEvaluate;
@@ -3634,7 +4077,7 @@ Shader "Hidden/BurtRP/BurtGI"
 
             float BurtGICombineRoughSpecularReflectionsAlpha(float roughness, bool hasBackfaceDiffuse)
             {
-                const float maxRoughnessToTrace = 0.4f;
+                const float maxRoughnessToTrace = -0.1f;
                 const float maxRoughnessToTraceFoliage = 0.4f;
                 const float invRoughnessFadeLength = 10.0f;
                 float maxRoughness = hasBackfaceDiffuse ? maxRoughnessToTraceFoliage : maxRoughnessToTrace;
@@ -3650,7 +4093,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     return 0.0f;
                 }
 
-                float2 probeCoord = min(floor(saturate(screenUV) * gridSize), gridSize - 1.0f);
+                float2 probeCoord = BurtGIScreenProbeFallbackCoord(screenUV, gridSize);
                 float2 centerOctUV = BurtGIInverseEquiAreaSphericalMapping(BurtSafeNormalize(lightingDirectionWS));
                 float2 centerOctCoord = centerOctUV * octResolution - 0.5f;
                 float radiusFloat = lerp(1.0f, 2.0f, saturate((roughness - 0.25f) * 2.0f));
@@ -3743,7 +4186,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float hitDelta = abs(saturate(historyValue.a) - saturate(currentValue.a));
                 float hitValidity = lerp(0.65f, 1.0f, saturate(1.0f - hitDelta / max(_BurtGITemporalParams1.z, 0.001f)));
                 float3 currentColor = max(currentValue.rgb, 0.0f);
-                float3 historyColor = max(historyValue.rgb, 0.0f);
+                float3 historyColor = max(historyValue.rgb * max(_BurtGIIndirectChannelParams.z, 0.0f), 0.0f);
                 float3 currentTonemapped = BurtGITonemapLighting(currentColor);
                 float3 historyTonemapped = BurtGITonemapLighting(historyColor);
                 float currentLightingValid = (saturate(currentValue.a) > 0.0001f || any(currentColor > 0.0001f)) ? 1.0f : 0.0f;
@@ -3793,6 +4236,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 float sceneDepth = LinearEyeDepth(rawDepth);
                 float3 viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
                 float4 screenProbeHitDistanceConfidence = BurtGISampleScreenProbeHitDistanceConfidence(screenUV);
+                float receiverFoliageWeight = BurtIsActiveFoliageShadingModel(gbufferData.ShadingModelID) ? 1.0f : 0.0f;
 
                 float backfaceWeight = BurtGIBackfaceMaterialWeight(gbufferData);
                 if (backfaceChannelEnabled && backfaceWeight > 0.0001f)
@@ -3807,6 +4251,7 @@ Shader "Hidden/BurtRP/BurtGI"
                         normalWS,
                         backfaceLightingNormalWS,
                         0.0f,
+                        receiverFoliageWeight,
                         screenProbeBackfaceConfidence);
                     float3 backfaceIrradiance = max(screenProbeBackfaceIrradiance, 0.0f);
                     float3 environmentBackfaceIrradiance = BurtSampleIndirectDiffuseIrradiance(backfaceLightingNormalWS);
@@ -3819,16 +4264,18 @@ Shader "Hidden/BurtRP/BurtGI"
                         ? lerp(1.0f, saturate(0.5f + backfaceBentVisibility * 0.5f) * saturate(0.4f + bentAO * 0.6f), saturate(1.0f - bentAO))
                         : 1.0f;
                     float backfaceBentOcclusion = BurtGIApplyShortRangeAOWeight(unweightedBackfaceBentOcclusion);
-                    output.BackfaceDiffuse = float4(max(twoSidedDiffuseLighting, 0.0f) * backfaceWeight * backfaceBentOcclusion * saturate(0.35f + xgiBackfaceTraceConfidence * 0.65f), max(hitRatio, xgiBackfaceTraceConfidence));
+                    output.BackfaceDiffuse = float4(max(twoSidedDiffuseLighting, 0.0f) * backfaceBentOcclusion * saturate(0.35f + xgiBackfaceTraceConfidence * 0.65f), max(hitRatio, xgiBackfaceTraceConfidence));
                 }
 
                 float roughness = saturate(gbufferData.PerceptualRoughness);
                 BurtPBRGeometryData geometryData = BurtPreparePBRGeometryData(gbufferData, viewDirectionWS);
                 float3 roughSpecularMaterialScale = BurtGIRoughSpecularMaterialScale(materialData, geometryData, roughness);
                 float roughSpecularMaterialWeight = max(max(roughSpecularMaterialScale.r, roughSpecularMaterialScale.g), roughSpecularMaterialScale.b);
-                bool hasBackfaceDiffuse = backfaceWeight > 0.0001f || BurtIsActiveFoliageShadingModel(gbufferData.ShadingModelID);
-                float roughSpecularDiffuseLerp = BurtGIRoughSpecularDiffuseLerp(roughness, hasBackfaceDiffuse);
-                float roughSpecularTraceAlpha = BurtGICombineRoughSpecularReflectionsAlpha(roughness, hasBackfaceDiffuse);
+                bool foliageRoughSpecularMaterial = BurtIsActiveSubsurfaceShadingModel(gbufferData.ShadingModelID) ||
+                    BurtIsActiveFoliageShadingModel(gbufferData.ShadingModelID) ||
+                    BurtIsActiveHairShadingModel(gbufferData.ShadingModelID);
+                float roughSpecularDiffuseLerp = BurtGIRoughSpecularDiffuseLerp(roughness, foliageRoughSpecularMaterial);
+                float roughSpecularTraceAlpha = BurtGICombineRoughSpecularReflectionsAlpha(roughness, foliageRoughSpecularMaterial);
                 float clearCoatMask = saturate(BurtGetClearCoatMask(gbufferData));
                 if (roughSpecularChannelEnabled && roughSpecularMaterialWeight > 0.0001f)
                 {
@@ -3855,6 +4302,7 @@ Shader "Hidden/BurtRP/BurtGI"
                             roughSpecularNormalWS,
                             screenProbeSpecularDirectionWS,
                             roughSpecularRoughness,
+                            receiverFoliageWeight,
                             screenProbeRoughSpecularConfidence) * BURT_INV_PI;
                         screenProbeRoughSpecularLighting = BurtGIInverseTonemapLighting(BurtGITonemapLighting(max(screenProbeRoughSpecularLighting, 0.0f)));
                         float3 environmentSpecularRadiance = SampleIndirectSpecularRadiance(reflectionDirectionWS, roughSpecularRoughness);
@@ -3974,12 +4422,303 @@ Shader "Hidden/BurtRP/BurtGI"
                 float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
                 float dither = BurtGIHash12(screenUV * _BurtGISourceTexelSize.zw + 67.0f, _BurtGIParams2.x + 13.0f);
                 float skyAO;
-                if (!BurtGISampleRadianceCacheClipMapSkyAOInterpolated(positionWS, normalWS, dither, skyAO))
+                if (!BurtGISampleRadianceCacheClipMapSkyAOInterpolated(positionWS, positionWS, normalWS, dither, skyAO))
                 {
                     return float4(1.0f, 0.0f, 1.0f, 1.0f);
                 }
 
                 return float4(skyAO.xxx, 1.0f);
+            }
+
+            bool BurtGIDebugResolveRadianceCacheProbe(
+                float2 screenUV,
+                out uint clipmapIndex,
+                out uint3 probeCoord,
+                out uint probeIndex,
+                out float3 positionWS,
+                out float3 normalWS)
+            {
+                clipmapIndex = 0u;
+                probeCoord = uint3(0u, 0u, 0u);
+                probeIndex = BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX;
+                positionWS = float3(0.0f, 0.0f, 0.0f);
+                normalWS = float3(0.0f, 1.0f, 0.0f);
+
+                float rawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (BurtGIIsSkyDepth(rawDepth))
+                {
+                    return false;
+                }
+
+                normalWS = BurtGISampleNormalWS(screenUV);
+                positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                float dither = BurtGIHash12(screenUV * _BurtGISourceTexelSize.zw + 113.0f, _BurtGIParams2.x + 31.0f);
+                float3 probeCoordFloat = 0.0f;
+                int debugClipmapIndex = (int)floor(_BurtGIRadianceCacheClipMapApplyParams.z + 0.5f);
+                uint clipmapResolution = BurtGIRadianceCacheClipmapResolution();
+                if (debugClipmapIndex >= 0)
+                {
+                    if (debugClipmapIndex >= (int)BurtGIRadianceCacheClipmapCount())
+                    {
+                        return false;
+                    }
+
+                    clipmapIndex = (uint)debugClipmapIndex;
+                    float4 worldPositionToProbeCoord = _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[clipmapIndex];
+                    probeCoordFloat = positionWS * worldPositionToProbeCoord.w + worldPositionToProbeCoord.xyz;
+                    if (any(probeCoordFloat < 0.5f) || any(probeCoordFloat > ((float)clipmapResolution - 0.5f)))
+                    {
+                        return false;
+                    }
+                }
+                else if (!BurtGIRadianceCacheWorldPositionToProbeCoordDithered(positionWS, dither, clipmapIndex, probeCoordFloat))
+                {
+                    return false;
+                }
+
+                int maxProbeCoord = (int)max(clipmapResolution, 1u) - 1;
+                probeCoord = (uint3)clamp((int3)floor(probeCoordFloat + 0.5f), int3(0, 0, 0), int3(maxProbeCoord, maxProbeCoord, maxProbeCoord));
+                probeIndex = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord);
+                return probeIndex < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX;
+            }
+
+            float4 BurtGIDebugRadianceCacheVisualize(float2 screenUV)
+            {
+                float rawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (BurtGIIsSkyDepth(rawDepth))
+                {
+                    return float4(0.0f, 0.0f, 0.0f, 1.0f);
+                }
+
+                uint clipmapIndex;
+                uint3 probeCoord;
+                uint probeIndex;
+                float3 positionWS;
+                float3 normalWS;
+                if (!BurtGIDebugResolveRadianceCacheProbe(screenUV, clipmapIndex, probeCoord, probeIndex, positionWS, normalWS))
+                {
+                    return float4(1.0f, 0.0f, 1.0f, 1.0f);
+                }
+
+                float dither = BurtGIHash12(screenUV * _BurtGISourceTexelSize.zw + 149.0f, _BurtGIParams2.x + 47.0f);
+                float3 irradiance = 0.0f;
+                float confidence = 0.0f;
+                float skyAO = 0.0f;
+                int debugClipmapIndex = (int)floor(_BurtGIRadianceCacheClipMapApplyParams.z + 0.5f);
+                if (debugClipmapIndex >= 0)
+                {
+                    irradiance = BurtGISampleRadianceCacheProbeIrradiance(probeIndex, normalWS);
+                    skyAO = BurtGISampleRadianceCacheProbeSkyAO(probeIndex, normalWS);
+                    confidence = probeIndex < BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX ? 1.0f : 0.0f;
+                }
+                else
+                {
+                    if (!BurtGISampleRadianceCacheClipMapIrradianceInterpolated(positionWS, positionWS, normalWS, dither, irradiance, confidence))
+                    {
+                        return float4(1.0f, 0.0f, 1.0f, 1.0f);
+                    }
+
+                    bool hasSkyAO = BurtGISampleRadianceCacheClipMapSkyAOInterpolated(positionWS, positionWS, normalWS, dither, skyAO);
+                    skyAO = hasSkyAO ? skyAO : 0.0f;
+                }
+
+                float clipmapCount = max((float)BurtGIRadianceCacheClipmapCount() - 1.0f, 1.0f);
+                float clipmapT = saturate((float)clipmapIndex / clipmapCount);
+                float3 clipmapTint = lerp(float3(0.02f, 0.22f, 0.85f), float3(1.0f, 0.42f, 0.04f), clipmapT);
+                irradiance = max(irradiance, 0.0f);
+                float3 displayIrradiance = irradiance / (irradiance + 1.0f);
+                float3 color = displayIrradiance * lerp(0.45f, 1.0f, confidence) + clipmapTint * 0.18f + skyAO.xxx * 0.12f;
+                float4 probeCoordToWorld = _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[clipmapIndex];
+                float4 worldPositionToProbeCoord = _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[clipmapIndex];
+                float3 probeCenterWS = (float3)probeCoord * probeCoordToWorld.w + probeCoordToWorld.xyz;
+                float visualizeRadiusScale = max(_BurtGIRadianceCacheClipMapApplyParams.w, 0.001f);
+                float visualizeRadius = visualizeRadiusScale / max(abs(worldPositionToProbeCoord.w), 0.00001f);
+                float probeSphere = 1.0f - smoothstep(0.75f, 1.0f, distance(positionWS, probeCenterWS) / max(visualizeRadius, 0.0001f));
+                color = lerp(color, float3(1.0f, 0.95f, 0.18f), probeSphere * 0.55f);
+                return float4(saturate(color), 1.0f);
+            }
+
+            uint BurtGIRadianceCacheDebugFrameDelta(uint frameIndex, uint lastFrame)
+            {
+                return frameIndex >= lastFrame
+                    ? frameIndex - lastFrame
+                    : (0xffffffffu - lastFrame) + frameIndex + 1u;
+            }
+
+            float4 BurtGIDebugRadianceCacheStatus(float2 screenUV)
+            {
+                float rawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (BurtGIIsSkyDepth(rawDepth))
+                {
+                    return float4(0.0f, 0.0f, 0.0f, 1.0f);
+                }
+
+                uint clipmapIndex;
+                uint3 probeCoord;
+                uint probeIndex;
+                float3 positionWS;
+                float3 normalWS;
+                if (!BurtGIDebugResolveRadianceCacheProbe(screenUV, clipmapIndex, probeCoord, probeIndex, positionWS, normalWS))
+                {
+                    return float4(1.0f, 0.0f, 1.0f, 1.0f);
+                }
+
+                uint frameIndex = (uint)max(0.0f, _BurtGIRadianceCacheClipMapStageParams.z);
+                uint lastUsedFrame = _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer[probeIndex];
+                uint lastTracedFrame = _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer[probeIndex];
+                bool markedThisFrame = lastUsedFrame == frameIndex && frameIndex > 0u;
+                bool neverUsed = lastUsedFrame == 0u;
+                bool neverTraced = lastTracedFrame == 0u;
+
+                if (neverTraced)
+                {
+                    return float4(1.0f, 0.0f, 1.0f, 1.0f);
+                }
+
+                if (markedThisFrame)
+                {
+                    return float4(1.0f, 0.82f, 0.0f, 1.0f);
+                }
+
+                uint usedAgeFrames = BurtGIRadianceCacheDebugFrameDelta(frameIndex, lastUsedFrame);
+                uint tracedAgeFrames = BurtGIRadianceCacheDebugFrameDelta(frameIndex, lastTracedFrame);
+                float usedFreshness = neverUsed ? 0.0f : 1.0f - saturate((float)usedAgeFrames / 120.0f);
+                float tracedFreshness = 1.0f - saturate((float)tracedAgeFrames / 120.0f);
+                float3 staleColor = float3(0.82f, 0.06f, 0.02f);
+                float3 usedColor = float3(0.0f, 0.35f, 1.0f);
+                float3 color = lerp(staleColor, usedColor, usedFreshness);
+                color.g = max(color.g, tracedFreshness * 0.45f);
+                color += frac(float3(probeCoord) * float3(0.071f, 0.113f, 0.173f)) * 0.12f;
+                return float4(saturate(color), 1.0f);
+            }
+
+            float BurtGIDebugGridLine(float2 uv, float2 gridSize, float width)
+            {
+                float2 cell = frac(saturate(uv) * max(gridSize, 1.0f));
+                float edge = min(min(cell.x, cell.y), min(1.0f - cell.x, 1.0f - cell.y));
+                return 1.0f - smoothstep(width, width * 2.0f, edge);
+            }
+
+            float4 BurtGIDebugScreenProbePlacement(float2 screenUV)
+            {
+                float2 probeUV = saturate(screenUV);
+                float rawDepth = _BurtGIScreenProbeScreenDepthTexture.SampleLevel(sampler_PointClamp, probeUV, 0.0f).r;
+                float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.SampleLevel(sampler_PointClamp, probeUV, 0.0f);
+                float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.SampleLevel(sampler_PointClamp, probeUV, 0.0f);
+                float valid = saturate(min(encodedNormal.a, encodedPosition.a));
+                if (valid <= 0.0001f || BurtGIIsSkyDepth(rawDepth))
+                {
+                    float gridLine = BurtGIDebugGridLine(probeUV, _BurtGIScreenProbeGridParams.xy, 0.025f);
+                    return float4(0.32f + gridLine * 0.35f, 0.0f, 0.18f + gridLine * 0.25f, 1.0f);
+                }
+
+                float3 normalColor = encodedNormal.rgb;
+                float depthFade = saturate(1.0f - LinearEyeDepth(rawDepth) / max(_BurtGIScreenProbeParams.y, 0.001f));
+                float placementOffset = saturate(abs(encodedPosition.a - 1.0f));
+                float grid = BurtGIDebugGridLine(probeUV, _BurtGIScreenProbeGridParams.xy, 0.02f);
+                float3 color = lerp(normalColor, float3(depthFade, placementOffset, 1.0f - depthFade), 0.35f);
+                color = lerp(color, float3(1.0f, 1.0f, 1.0f), grid * 0.45f);
+                return float4(saturate(color), 1.0f);
+            }
+
+            float4 BurtGIDebugScreenProbeTraceVisualize(float2 screenUV)
+            {
+                float2 atlasUV = saturate(screenUV);
+                float4 traceRadiance = _BurtGIScreenProbeTraceRadianceTexture.SampleLevel(sampler_LinearClamp, atlasUV, 0.0f);
+                float traceHit = saturate(_BurtGIScreenProbeTraceHitTexture.SampleLevel(sampler_LinearClamp, atlasUV, 0.0f).r);
+                float3 radiance = max(traceRadiance.rgb, 0.0f);
+                float3 color = radiance / (radiance + 1.0f);
+                color = lerp(color * 0.25f, color, max(traceHit, saturate(traceRadiance.a)));
+                color.g = max(color.g, traceHit);
+
+                float2 atlasSize = max(_BurtGIScreenProbeTraceParams.yz, 1.0f);
+                float traceResolution = max(_BurtGIScreenProbeTraceParams.x, 1.0f);
+                float fineGrid = BurtGIDebugGridLine(atlasUV, atlasSize, 0.015f);
+                float probeTileGrid = BurtGIDebugGridLine(atlasUV, atlasSize / traceResolution, 0.025f);
+                color = lerp(color, float3(0.0f, 0.0f, 0.0f), fineGrid * 0.25f);
+                color = lerp(color, float3(1.0f, 1.0f, 1.0f), probeTileGrid * 0.35f);
+                return float4(saturate(color), 1.0f);
+            }
+
+            float3 BurtGISceneVoxelDebugHeat(float value)
+            {
+                value = saturate(value);
+                return value < 0.5f
+                    ? lerp(float3(0.02f, 0.08f, 0.22f), float3(0.0f, 0.72f, 0.52f), value * 2.0f)
+                    : lerp(float3(0.0f, 0.72f, 0.52f), float3(1.0f, 0.42f, 0.08f), value * 2.0f - 1.0f);
+            }
+
+            float4 BurtGIDebugSceneVoxelOccupancy(float2 screenUV)
+            {
+                if (_BurtGISceneVoxelDebugParams.w <= 0.5f)
+                {
+                    return float4(0.4f, 0.0f, 0.0f, 1.0f);
+                }
+
+                float rawDepth = BurtSampleDeferredRawDepth(screenUV);
+                if (BurtGIIsSkyDepth(rawDepth))
+                {
+                    return float4(0.0f, 0.0f, 0.0f, 1.0f);
+                }
+
+                float3 positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
+                float extent = max(_BurtGISceneVoxelCenterExtent.w, 0.001f);
+                float3 uvw = (positionWS - _BurtGISceneVoxelCenterExtent.xyz) / (extent * 2.0f) + 0.5f;
+                if (any(uvw < 0.0f) || any(uvw > 1.0f))
+                {
+                    return float4(1.0f, 0.0f, 1.0f, 1.0f);
+                }
+
+                float resolution = max(_BurtGISceneVoxelDebugParams.x, 1.0f);
+                float maxMip = clamp(floor(log2(resolution)), 0.0f, 8.0f);
+                float mipLevel = clamp(round(_BurtGISceneVoxelDebugParams.z), 0.0f, maxMip);
+                float4 occupancy = _BurtGISceneVoxelOccupancyMipReadTexture.SampleLevel(sampler_LinearClamp, uvw, mipLevel);
+                float maxOccupancy = saturate(occupancy.x);
+                float meanOccupancy = saturate(occupancy.y);
+                float mipTint = maxMip > 0.0f ? mipLevel / maxMip : 0.0f;
+                float3 color = float3(maxOccupancy, meanOccupancy, mipTint);
+                if (_BurtGISceneVoxelDebugLayer == 1)
+                {
+                    color = float3(uvw.xy, mipTint);
+                }
+                else if (_BurtGISceneVoxelDebugLayer == 2)
+                {
+                    color = BurtGISceneVoxelDebugHeat(maxOccupancy);
+                }
+                else if (_BurtGISceneVoxelDebugLayer == 3)
+                {
+                    color = float3(maxOccupancy, maxOccupancy * meanOccupancy, meanOccupancy);
+                }
+                else if (_BurtGISceneVoxelDebugLayer == 4)
+                {
+                    color = normalize(uvw - 0.5f) * 0.5f + 0.5f;
+                }
+                else if (_BurtGISceneVoxelDebugLayer == 5)
+                {
+                    color = float3(meanOccupancy, meanOccupancy * 0.35f, 0.0f);
+                }
+                else if (_BurtGISceneVoxelDebugLayer >= 6)
+                {
+                    color = lerp(float3(0.02f, 0.05f, 0.12f), float3(1.0f, 0.72f, 0.18f), saturate(max(maxOccupancy, meanOccupancy)));
+                }
+                float gridResolution = max(resolution / exp2(mipLevel), 1.0f);
+                float edgeGrid = max(
+                    BurtGIDebugGridLine(uvw.xy, float2(gridResolution, gridResolution), 0.018f),
+                    max(
+                        BurtGIDebugGridLine(uvw.xz, float2(gridResolution, gridResolution), 0.018f),
+                        BurtGIDebugGridLine(uvw.yz, float2(gridResolution, gridResolution), 0.018f)));
+                color = lerp(color, float3(1.0f, 1.0f, 1.0f), edgeGrid * 0.18f);
+                if (_BurtGISceneVoxelDebugProbeParams.x > 0.5f)
+                {
+                    float extentWS = max(_BurtGISceneVoxelCenterExtent.w * 2.0f, 0.001f);
+                    float probeSizeWS = clamp(_BurtGISceneVoxelDebugProbeParams.y, 0.01f, 2.0f);
+                    float probeGridResolution = clamp(extentWS / probeSizeWS, 4.0f, 128.0f);
+                    float3 probeCell = abs(frac(uvw * probeGridResolution) - 0.5f);
+                    float marker = 1.0f - smoothstep(0.11f, 0.22f, length(probeCell));
+                    marker *= step(0.001f, max(maxOccupancy, meanOccupancy));
+                    color = lerp(color, float3(1.0f, 0.18f, 0.48f), marker * 0.85f);
+                }
+                return float4(saturate(color), 1.0f);
             }
 
             float3 BurtGIHashGridDebugHeat(float value)
@@ -4026,7 +4765,13 @@ Shader "Hidden/BurtRP/BurtGI"
 
                 uint frameIndex = (uint)max(0.0f, _BurtGIRadianceCacheClipMapStageParams.z);
                 uint frameDelta = BurtGIHashGridDebugFrameDelta(frameIndex, _BurtGIRadianceCacheHashGridValueBuffer[cellIndex].z);
-                return 1.0f - saturate((float)frameDelta / 500.0f);
+                float maxCellDecay = max(0.0f, _BurtGIRadianceCacheHashGridParams1.w);
+                if (maxCellDecay <= 0.0f)
+                {
+                    return frameDelta == 0u ? 1.0f : 0.0f;
+                }
+
+                return 1.0f - saturate((float)frameDelta / maxCellDecay);
             }
 
             float3 BurtGIHashGridDebugApplyAgeTint(float3 color, float ageScale)
@@ -4184,6 +4929,141 @@ Shader "Hidden/BurtRP/BurtGI"
                 return input.Color;
             }
 
+            struct RadianceCacheVisualizeGeometryVaryings
+            {
+                float4 PositionCS : SV_POSITION;
+                float3 NormalWS : TEXCOORD0;
+                nointerpolation uint ProbeIndex : TEXCOORD1;
+                nointerpolation uint ClipmapIndex : TEXCOORD2;
+            };
+
+            uint BurtGIRadianceCacheVisualizeCubeCornerIndex(uint vertexIndex)
+            {
+                static const uint indices[36] =
+                {
+                    0u, 2u, 3u, 0u, 3u, 1u,
+                    4u, 5u, 7u, 4u, 7u, 6u,
+                    0u, 1u, 5u, 0u, 5u, 4u,
+                    2u, 6u, 7u, 2u, 7u, 3u,
+                    0u, 4u, 6u, 0u, 6u, 2u,
+                    1u, 3u, 7u, 1u, 7u, 5u
+                };
+                return indices[vertexIndex % 36u];
+            }
+
+            float3 BurtGIRadianceCacheVisualizeCubeCorner(uint vertexIndex)
+            {
+                uint cornerIndex = BurtGIRadianceCacheVisualizeCubeCornerIndex(vertexIndex);
+                return float3(
+                    (cornerIndex & 1u) != 0u ? 1.0f : -1.0f,
+                    (cornerIndex & 2u) != 0u ? 1.0f : -1.0f,
+                    (cornerIndex & 4u) != 0u ? 1.0f : -1.0f);
+            }
+
+            RadianceCacheVisualizeGeometryVaryings VertRadianceCacheVisualizeGeometry(Attributes input)
+            {
+                RadianceCacheVisualizeGeometryVaryings output;
+                output.PositionCS = float4(2.0f, 2.0f, 0.0f, 1.0f);
+                output.NormalWS = float3(0.0f, 1.0f, 0.0f);
+                output.ProbeIndex = BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX;
+                output.ClipmapIndex = 0u;
+
+                uint clipmapCount = max(BurtGIRadianceCacheClipmapCount(), 1u);
+                uint clipmapIndex = min((uint)max(0.0f, _BurtGIRadianceCacheClipMapVisualizeDrawParams.x), clipmapCount - 1u);
+                uint clipmapResolution = BurtGIRadianceCacheClipmapResolution();
+                uint instanceId = input.InstanceID;
+                uint3 probeCoord;
+                probeCoord.x = instanceId % clipmapResolution;
+                probeCoord.y = (instanceId / clipmapResolution) % clipmapResolution;
+                probeCoord.z = instanceId / max(clipmapResolution * clipmapResolution, 1u);
+                if (probeCoord.z >= clipmapResolution)
+                {
+                    return output;
+                }
+
+                uint probeIndex = BurtGIRadianceCacheProbeIndexFromIndirection(clipmapIndex, probeCoord);
+                if (probeIndex >= BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX)
+                {
+                    return output;
+                }
+
+                float4 probeCoordToWorld = _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[clipmapIndex];
+                float4 worldPositionToProbeCoord = _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[clipmapIndex];
+                float3 probeCenterWS = (float3)probeCoord * probeCoordToWorld.w + probeCoordToWorld.xyz;
+                probeCenterWS += _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex].xyz;
+
+                float visualizeRadiusScale = max(_BurtGIRadianceCacheClipMapVisualizeDrawParams.y, 0.001f);
+                float visualizeRadius = visualizeRadiusScale / max(abs(worldPositionToProbeCoord.w), 0.00001f);
+                float3 localCorner = BurtGIRadianceCacheVisualizeCubeCorner(input.VertexID);
+                float3 positionWS = probeCenterWS + localCorner * visualizeRadius;
+                output.PositionCS = mul(_BurtGIViewProjectionMatrix, float4(positionWS, 1.0f));
+                output.NormalWS = BurtSafeNormalize(localCorner);
+                output.ProbeIndex = probeIndex;
+                output.ClipmapIndex = clipmapIndex;
+                return output;
+            }
+
+            float4 FragRadianceCacheVisualizeGeometry(RadianceCacheVisualizeGeometryVaryings input) : SV_Target
+            {
+                if (input.ProbeIndex >= BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX)
+                {
+                    discard;
+                    return 0.0f;
+                }
+
+                float statusMode = _BurtGIRadianceCacheClipMapVisualizeDrawParams.z;
+                if (statusMode > 0.5f)
+                {
+                    uint frameIndex = (uint)max(0.0f, _BurtGIRadianceCacheClipMapStageParams.z);
+                    uint lastUsedFrame = _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer[input.ProbeIndex];
+                    uint lastTracedFrame = _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer[input.ProbeIndex];
+                    bool markedThisFrame = lastUsedFrame == frameIndex && frameIndex > 0u;
+                    bool neverTraced = lastTracedFrame == 0u;
+                    float3 stateColor = markedThisFrame ? float3(1.0f, 0.82f, 0.0f) : float3(0.0f, 0.35f, 1.0f);
+                    stateColor = neverTraced ? float3(1.0f, 0.0f, 1.0f) : stateColor;
+                    return float4(stateColor, 0.82f);
+                }
+
+                float3 normalWS = BurtSafeNormalize(input.NormalWS);
+                float3 irradiance = max(BurtGISampleRadianceCacheProbeIrradiance(input.ProbeIndex, normalWS), 0.0f);
+                float3 displayIrradiance = irradiance / (irradiance + 1.0f);
+                float clipmapCount = max((float)BurtGIRadianceCacheClipmapCount() - 1.0f, 1.0f);
+                float clipmapT = saturate((float)input.ClipmapIndex / clipmapCount);
+                float3 clipmapTint = lerp(float3(0.02f, 0.22f, 0.85f), float3(1.0f, 0.42f, 0.04f), clipmapT);
+                return float4(saturate(displayIrradiance + clipmapTint * 0.18f), 0.82f);
+            }
+
+            struct ScreenProbeTraceVisualizeGeometryVaryings
+            {
+                float4 PositionCS : SV_POSITION;
+                float4 Color : COLOR0;
+            };
+
+            ScreenProbeTraceVisualizeGeometryVaryings VertScreenProbeTraceVisualizeGeometry(Attributes input)
+            {
+                ScreenProbeTraceVisualizeGeometryVaryings output;
+                output.PositionCS = float4(2.0f, 2.0f, 0.0f, 1.0f);
+                output.Color = 0.0f;
+
+                uint traceIndex = input.VertexID / 2u;
+                uint endpointIndex = input.VertexID - traceIndex * 2u;
+                uint bufferIndex = traceIndex * 3u;
+                float3 originWS = _XGIScreenProbeTraceVisualize_TracesData[bufferIndex + 0u].xyz;
+                float3 traceVectorWS = _XGIScreenProbeTraceVisualize_TracesData[bufferIndex + 1u].xyz;
+                float3 radiance = max(_XGIScreenProbeTraceVisualize_TracesData[bufferIndex + 2u].xyz, 0.0f);
+                float3 positionWS = originWS + traceVectorWS * (float)endpointIndex;
+                float3 displayColor = saturate(radiance);
+                float lineAlpha = endpointIndex == 0u ? 0.35f : 0.85f;
+                output.PositionCS = mul(_BurtGIViewProjectionMatrix, float4(positionWS, 1.0f));
+                output.Color = float4(displayColor, lineAlpha);
+                return output;
+            }
+
+            float4 FragScreenProbeTraceVisualizeGeometry(ScreenProbeTraceVisualizeGeometryVaryings input) : SV_Target
+            {
+                return input.Color;
+            }
+
             float4 FragDebug(Varyings input) : SV_Target
             {
                 float2 screenUV = input.ScreenUV;
@@ -4265,6 +5145,36 @@ Shader "Hidden/BurtRP/BurtGI"
                 if (debugMode > 13.5f && debugMode < 14.5f)
                 {
                     return BurtGIDebugRadianceCacheSkyAO(screenUV);
+                }
+
+                if (debugMode > 14.5f && debugMode < 15.5f)
+                {
+                    return tex2D(_BurtGIRadianceCacheStatsTexture, screenUV);
+                }
+
+                if (debugMode > 15.5f && debugMode < 16.5f)
+                {
+                    return BurtGIDebugRadianceCacheVisualize(screenUV);
+                }
+
+                if (debugMode > 16.5f && debugMode < 17.5f)
+                {
+                    return BurtGIDebugRadianceCacheStatus(screenUV);
+                }
+
+                if (debugMode > 17.5f && debugMode < 18.5f)
+                {
+                    return BurtGIDebugScreenProbePlacement(screenUV);
+                }
+
+                if (debugMode > 18.5f && debugMode < 19.5f)
+                {
+                    return BurtGIDebugScreenProbeTraceVisualize(screenUV);
+                }
+
+                if (debugMode > 19.5f && debugMode < 20.5f)
+                {
+                    return BurtGIDebugSceneVoxelOccupancy(screenUV);
                 }
 
                 float2 quadrantUV = frac(screenUV * 2.0f);
@@ -4546,6 +5456,36 @@ Shader "Hidden/BurtRP/BurtGI"
             #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragIrradianceFieldIntegrate
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Radiance Cache Visualize Geometry"
+            Cull Back
+            ZWrite Off
+            ZTest Always
+            Blend SrcAlpha OneMinusSrcAlpha
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex VertRadianceCacheVisualizeGeometry
+            #pragma fragment FragRadianceCacheVisualizeGeometry
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt ScreenProbe Trace Visualize Geometry"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+            Blend SrcAlpha OneMinusSrcAlpha
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex VertScreenProbeTraceVisualizeGeometry
+            #pragma fragment FragScreenProbeTraceVisualizeGeometry
             ENDHLSL
         }
     }

@@ -1,0 +1,198 @@
+#pragma kernel ScreenProbeIntegrateClassificationMarkCS
+#pragma kernel ScreenProbeIntegrateClassificationVisualizeDiffuseCS
+#pragma kernel ScreenProbeIntegrateClassificationVisualizeAllCS
+
+#define BURT_GI_INTEGRATE_TILE_SIZE 8u
+#define BURT_GI_TILE_CLASSIFICATION_SIMPLE_DIFFUSE 0u
+#define BURT_GI_TILE_CLASSIFICATION_SUPPORT_ALL 1u
+#define BURT_GI_TILE_CLASSIFICATION_NUM 2u
+#define BURT_GI_DISPATCH_INDIRECT_UINT_COUNT 3u
+#define BURT_GI_TILE_LIGHTING_TYPE_NONE 0x00u
+#define BURT_GI_TILE_LIGHTING_TYPE_DIFFUSE 0x40u
+#define BURT_GI_TILE_LIGHTING_TYPE_ALL 0x80u
+#define BURT_GI_SHADING_MODEL_CLEAR_COAT 2.0f
+#define BURT_GI_SHADING_MODEL_SUBSURFACE 3.0f
+#define BURT_GI_SHADING_MODEL_FOLIAGE 5.0f
+#define BURT_GI_SHADING_MODEL_HAIR 1.0f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT 8.0f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_BIAS 0.02f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_SCALE (1.0f - 2.0f * BURT_GI_GBUFFER_SHADING_MODEL_PACK_BIAS)
+
+Texture2D<float> _BurtCameraDepthTexture;
+Texture2D<float4> _BurtGBuffer0;
+Texture2D<float4> _BurtGBuffer2;
+Texture2D<float4> _BurtGBuffer3;
+
+RWStructuredBuffer<uint3> _BurtGIScreenProbeIntegrateTileIndirectArgsBuffer;
+RWStructuredBuffer<uint> _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer;
+RWStructuredBuffer<uint> _BurtGIScreenProbeIntegrateTileDataAllBuffer;
+RWTexture2D<float4> _BurtGIScreenProbeIntegrateTileClassificationTexture;
+
+float4 _BurtGIScreenProbeIntegrateTileParams; // x=width, y=height, z=rough specular enabled, w=max roughness to evaluate rough specular.
+
+groupshared uint BurtGIGroupLightingType;
+
+bool BurtGIIntegrateTileIsSkyDepth(float rawDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return rawDepth <= 0.00001f;
+#else
+    return rawDepth >= 0.99999f;
+#endif
+}
+
+float BurtGIDecodeMetallicAndShadingModelFromGBuffer(float packedValue, out float shadingModelID)
+{
+    float scaled = saturate(packedValue) * BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT;
+    shadingModelID = floor(min(scaled, BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT - 0.000001f));
+    return saturate((scaled - shadingModelID - BURT_GI_GBUFFER_SHADING_MODEL_PACK_BIAS) / BURT_GI_GBUFFER_SHADING_MODEL_PACK_SCALE);
+}
+
+bool BurtGIIsShadingModel(float shadingModelID, float expected)
+{
+    return abs(shadingModelID - expected) < 0.5f;
+}
+
+bool BurtGIIntegrateTileIsGrassFoliage(float shadingModelID, float materialChannel)
+{
+    return BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_FOLIAGE) &&
+        saturate(materialChannel) < 0.5f;
+}
+
+float BurtGIIntegrateTileDiffuseLerp(float roughness, bool hasBackfaceDiffuse)
+{
+    float maxRoughnessToEvaluate = saturate(_BurtGIScreenProbeIntegrateTileParams.w);
+    const float maxRoughnessToEvaluateFoliage = 0.4f;
+    const float fadeLength = 0.2f;
+    float maxRoughness = hasBackfaceDiffuse ? maxRoughnessToEvaluateFoliage : maxRoughnessToEvaluate;
+    return saturate((roughness - maxRoughness + fadeLength) / fadeLength);
+}
+
+float BurtGIIntegrateTileReflectionsAlpha(float roughness, bool hasBackfaceDiffuse)
+{
+    const float maxRoughnessToTrace = -0.1f;
+    const float maxRoughnessToTraceFoliage = 0.4f;
+    const float invRoughnessFadeLength = 10.0f;
+    float maxRoughness = hasBackfaceDiffuse ? maxRoughnessToTraceFoliage : maxRoughnessToTrace;
+    return saturate((maxRoughness - roughness) * invRoughnessFadeLength);
+}
+
+uint BurtGIClassifyIntegrateTilePixel(uint2 pixelCoord, uint2 outputSize)
+{
+    if (any(pixelCoord >= outputSize))
+    {
+        return BURT_GI_TILE_LIGHTING_TYPE_NONE;
+    }
+
+    float rawDepth = _BurtCameraDepthTexture.Load(int3(pixelCoord, 0));
+    if (BurtGIIntegrateTileIsSkyDepth(rawDepth))
+    {
+        return BURT_GI_TILE_LIGHTING_TYPE_NONE;
+    }
+
+    uint tileType = BURT_GI_TILE_LIGHTING_TYPE_DIFFUSE;
+    if (_BurtGIScreenProbeIntegrateTileParams.z > 0.5f)
+    {
+        float4 gbuffer0 = _BurtGBuffer0.Load(int3(pixelCoord, 0));
+        float4 gbuffer2 = _BurtGBuffer2.Load(int3(pixelCoord, 0));
+        float4 gbuffer3 = _BurtGBuffer3.Load(int3(pixelCoord, 0));
+        float shadingModelID = 0.0f;
+        float materialChannel = BurtGIDecodeMetallicAndShadingModelFromGBuffer(gbuffer2.r, shadingModelID);
+
+        float roughness = saturate(gbuffer0.a);
+        bool isHair = BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_HAIR);
+        bool isGrass = BurtGIIntegrateTileIsGrassFoliage(shadingModelID, materialChannel);
+        bool backfaceDiffuseMaterial = BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_SUBSURFACE) ||
+            (BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_FOLIAGE) && !isGrass);
+        bool foliageRoughSpecularMaterial = backfaceDiffuseMaterial || isHair || isGrass;
+        float diffuseLerp = BurtGIIntegrateTileDiffuseLerp(roughness, foliageRoughSpecularMaterial);
+        float specularRayAlpha = BurtGIIntegrateTileReflectionsAlpha(max(roughness, 0.01f), foliageRoughSpecularMaterial);
+        float clearCoatMask = BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_CLEAR_COAT) ? saturate(gbuffer3.b) : 0.0f;
+        if ((diffuseLerp < 1.0f && specularRayAlpha < 1.0f) || clearCoatMask > 0.0001f)
+        {
+            tileType = BURT_GI_TILE_LIGHTING_TYPE_ALL;
+        }
+    }
+
+    return tileType;
+}
+
+void BurtGIAddIntegrateTileGroup(uint groupIndex, uint2 groupId, uint tileType)
+{
+    if (groupIndex == 0u)
+    {
+        BurtGIGroupLightingType = BURT_GI_TILE_LIGHTING_TYPE_NONE;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    InterlockedOr(BurtGIGroupLightingType, tileType);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex == 0u && (BurtGIGroupLightingType & BURT_GI_TILE_LIGHTING_TYPE_ALL) != 0u)
+    {
+        uint indexToStore = 0u;
+        InterlockedAdd(_BurtGIScreenProbeIntegrateTileIndirectArgsBuffer[BURT_GI_TILE_CLASSIFICATION_SUPPORT_ALL].x, 1u, indexToStore);
+        _BurtGIScreenProbeIntegrateTileDataAllBuffer[2u * indexToStore + 0u] = groupId.x;
+        _BurtGIScreenProbeIntegrateTileDataAllBuffer[2u * indexToStore + 1u] = groupId.y;
+    }
+    else if (groupIndex == 0u && (BurtGIGroupLightingType & BURT_GI_TILE_LIGHTING_TYPE_DIFFUSE) != 0u)
+    {
+        uint indexToStore = 0u;
+        InterlockedAdd(_BurtGIScreenProbeIntegrateTileIndirectArgsBuffer[BURT_GI_TILE_CLASSIFICATION_SIMPLE_DIFFUSE].x, 1u, indexToStore);
+        _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer[2u * indexToStore + 0u] = groupId.x;
+        _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer[2u * indexToStore + 1u] = groupId.y;
+    }
+}
+
+[numthreads(BURT_GI_INTEGRATE_TILE_SIZE, BURT_GI_INTEGRATE_TILE_SIZE, 1)]
+void ScreenProbeIntegrateClassificationMarkCS(
+    uint groupIndex : SV_GroupIndex,
+    uint2 groupId : SV_GroupID,
+    uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint outputWidth = max(1u, (uint)_BurtGIScreenProbeIntegrateTileParams.x);
+    uint outputHeight = max(1u, (uint)_BurtGIScreenProbeIntegrateTileParams.y);
+    uint2 outputSize = uint2(outputWidth, outputHeight);
+
+    uint tileType = BurtGIClassifyIntegrateTilePixel(dispatchThreadId, outputSize);
+    BurtGIAddIntegrateTileGroup(groupIndex, groupId, tileType);
+}
+
+void BurtGIWriteIntegrateTileClassificationPixel(uint2 tileCoord, uint2 localPixelCoord, uint2 outputSize, float4 color)
+{
+    uint2 pixelCoord = tileCoord * BURT_GI_INTEGRATE_TILE_SIZE + localPixelCoord;
+    if (all(pixelCoord < outputSize))
+    {
+        _BurtGIScreenProbeIntegrateTileClassificationTexture[pixelCoord] = color;
+    }
+}
+
+[numthreads(BURT_GI_INTEGRATE_TILE_SIZE, BURT_GI_INTEGRATE_TILE_SIZE, 1)]
+void ScreenProbeIntegrateClassificationVisualizeDiffuseCS(
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+    uint outputWidth = max(1u, (uint)_BurtGIScreenProbeIntegrateTileParams.x);
+    uint outputHeight = max(1u, (uint)_BurtGIScreenProbeIntegrateTileParams.y);
+    uint2 outputSize = uint2(outputWidth, outputHeight);
+    uint tileDataIndex = 2u * groupId.x;
+    uint2 tileCoord = uint2(
+        _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer[tileDataIndex + 0u],
+        _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer[tileDataIndex + 1u]);
+    BurtGIWriteIntegrateTileClassificationPixel(tileCoord, groupThreadId, outputSize, float4(0.0f, 0.35f, 1.0f, 1.0f));
+}
+
+[numthreads(BURT_GI_INTEGRATE_TILE_SIZE, BURT_GI_INTEGRATE_TILE_SIZE, 1)]
+void ScreenProbeIntegrateClassificationVisualizeAllCS(
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+    uint outputWidth = max(1u, (uint)_BurtGIScreenProbeIntegrateTileParams.x);
+    uint outputHeight = max(1u, (uint)_BurtGIScreenProbeIntegrateTileParams.y);
+    uint2 outputSize = uint2(outputWidth, outputHeight);
+    uint tileDataIndex = 2u * groupId.x;
+    uint2 tileCoord = uint2(
+        _BurtGIScreenProbeIntegrateTileDataAllBuffer[tileDataIndex + 0u],
+        _BurtGIScreenProbeIntegrateTileDataAllBuffer[tileDataIndex + 1u]);
+    BurtGIWriteIntegrateTileClassificationPixel(tileCoord, groupThreadId, outputSize, float4(1.0f, 0.15f, 0.0f, 1.0f));
+}

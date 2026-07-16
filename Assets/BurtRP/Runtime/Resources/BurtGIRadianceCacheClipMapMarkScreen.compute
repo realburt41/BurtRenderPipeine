@@ -1,0 +1,254 @@
+#pragma kernel MarkRadianceProbesUsedByScreenProbesCS
+#pragma kernel MarkUsedRadianceProbesFromScreenProbesCS
+
+#define BURT_GI_CLIPMAP_COUNT 6
+#define BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE 8
+#define BURT_GI_INVALID_PROBE_INDEX 0xffffu
+#define BURT_GI_USED_PROBE_INDEX 0xfffeu
+
+Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
+RWTexture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
+
+StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
+StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapWorldParams;
+float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGIScreenProbeAdaptiveParams;
+uint _BurtGIRadianceCacheClipMapFrameIndex;
+
+uint BurtGIClipmapCount()
+{
+    return max(1u, min((uint)_BurtGIRadianceCacheClipMapParams.z, (uint)BURT_GI_CLIPMAP_COUNT));
+}
+
+uint BurtGIClipmapResolution()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.w);
+}
+
+uint2 BurtGIIndirectionSize()
+{
+    return max(uint2(1u, 1u), (uint2)_BurtGIRadianceCacheClipMapIndirectionSize.xy);
+}
+
+uint2 BurtGIScreenProbeGridSize()
+{
+    return max(uint2(1u, 1u), (uint2)_BurtGIScreenProbeGridParams.xy);
+}
+
+uint2 BurtGIPackIndirectionCoord(uint clipmapIndex, uint3 probeCoord)
+{
+    uint clipmapResolution = BurtGIClipmapResolution();
+    return uint2(clipmapIndex * clipmapResolution + probeCoord.x, probeCoord.y + probeCoord.z * clipmapResolution);
+}
+
+bool BurtGIWorldPositionToProbeCoordFloatDithered(float3 worldPosition, float clipmapDitherRandom, out uint clipmapIndex, out float3 probeCoordFloat)
+{
+    uint clipmapCount = BurtGIClipmapCount();
+    uint clipmapResolution = BurtGIClipmapResolution();
+    float invFadeSize = max(_BurtGIRadianceCacheClipMapWorldParams.z, 0.0001);
+
+    [unroll]
+    for (uint currentClipmapIndex = 0u; currentClipmapIndex < BURT_GI_CLIPMAP_COUNT; ++currentClipmapIndex)
+    {
+        if (currentClipmapIndex < clipmapCount)
+        {
+            float4 worldToProbeCoord = _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[currentClipmapIndex];
+            float3 currentProbeCoordFloat = worldPosition * worldToProbeCoord.w + worldToProbeCoord.xyz;
+            float3 bottomEdgeFade = saturate((currentProbeCoordFloat - 0.5) * invFadeSize);
+            float3 topEdgeFade = saturate(((float3)clipmapResolution - 0.5 - currentProbeCoordFloat) * invFadeSize);
+            float edgeFade = min(
+                min(bottomEdgeFade.x, min(bottomEdgeFade.y, bottomEdgeFade.z)),
+                min(topEdgeFade.x, min(topEdgeFade.y, topEdgeFade.z)));
+
+            if (edgeFade > clipmapDitherRandom)
+            {
+                clipmapIndex = currentClipmapIndex;
+                probeCoordFloat = currentProbeCoordFloat;
+                return true;
+            }
+        }
+    }
+
+    clipmapIndex = 0u;
+    probeCoordFloat = 0.0;
+    return false;
+}
+
+uint BurtGIRadianceCacheHashGridHash(uint3 value)
+{
+    uint h = value.x * 0x8da6b343u;
+    h ^= value.y * 0xd8163841u;
+    h ^= value.z * 0xcb1ab31fu;
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    h *= 0x846ca68bu;
+    h ^= h >> 16;
+    return h;
+}
+
+float BurtGIInterleavedGradientNoise(uint2 coord, uint temporalIndex)
+{
+    uint hash = BurtGIRadianceCacheHashGridHash(uint3(coord.x, coord.y, temporalIndex));
+    return (float)(hash & 0x00ffffffu) * (1.0 / 16777216.0);
+}
+
+void BurtGIMarkProbeIndirectionCoord(int3 probeCoord, uint clipmapIndex)
+{
+    int clipmapResolution = (int)BurtGIClipmapResolution();
+    if (clipmapIndex >= BurtGIClipmapCount() ||
+        probeCoord.x < 0 ||
+        probeCoord.y < 0 ||
+        probeCoord.z < 0 ||
+        probeCoord.x >= clipmapResolution ||
+        probeCoord.y >= clipmapResolution ||
+        probeCoord.z >= clipmapResolution)
+    {
+        return;
+    }
+
+    uint2 indirectionCoord = BurtGIPackIndirectionCoord(clipmapIndex, (uint3)probeCoord);
+    uint2 indirectionSize = BurtGIIndirectionSize();
+    if (indirectionCoord.x < indirectionSize.x && indirectionCoord.y < indirectionSize.y)
+    {
+        _BurtGIRadianceCacheClipMapIndirectionTexture[indirectionCoord] = BURT_GI_USED_PROBE_INDEX;
+    }
+}
+
+void BurtGIMarkPositionUsedInIndirectionTexture(float3 worldPosition, float clipmapDitherRandom)
+{
+    uint clipmapIndex;
+    float3 probeCoordFloat;
+    if (!BurtGIWorldPositionToProbeCoordFloatDithered(worldPosition, clipmapDitherRandom, clipmapIndex, probeCoordFloat))
+    {
+        return;
+    }
+
+    int3 bottomCornerProbeCoord = (int3)floor(probeCoordFloat - 0.5 + 0.0001);
+    [unroll]
+    for (int z = 0; z <= 1; ++z)
+    {
+        [unroll]
+        for (int y = 0; y <= 1; ++y)
+        {
+            [unroll]
+            for (int x = 0; x <= 1; ++x)
+            {
+                BurtGIMarkProbeIndirectionCoord(bottomCornerProbeCoord + int3(x, y, z), clipmapIndex);
+            }
+        }
+    }
+}
+
+uint BurtGIGetScreenProbeAdaptiveCount()
+{
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    return min(_BurtGIScreenProbeAdaptiveProbeNumBuffer[0], maxAdaptiveProbeCount);
+}
+
+void BurtGIUnpackScreenProbeAdaptiveProbeData(uint packedProbeData, out uint2 adaptiveFineProbeCoord, out uint adaptiveLevel)
+{
+    adaptiveFineProbeCoord.x = packedProbeData & 0x3fffu;
+    adaptiveFineProbeCoord.y = (packedProbeData >> 14) & 0x3fffu;
+    adaptiveLevel = (packedProbeData >> 28) & 0xfu;
+}
+
+bool BurtGIResolveAdaptiveScreenProbeWorldPosition(uint adaptiveProbeIndex, out float3 worldPosition)
+{
+    worldPosition = 0.0;
+    if (adaptiveProbeIndex >= BurtGIGetScreenProbeAdaptiveCount())
+    {
+        return false;
+    }
+
+    uint adaptiveLevel;
+    uint2 adaptiveFineProbeCoord;
+    BurtGIUnpackScreenProbeAdaptiveProbeData(
+        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex],
+        adaptiveFineProbeCoord,
+        adaptiveLevel);
+
+    uint2 screenProbeGridSize = BurtGIScreenProbeGridSize();
+    uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
+    uint2 baseProbeCoord = min(adaptiveFineProbeCoord / max(1u, adaptiveSubGridSize), screenProbeGridSize - 1u);
+    uint2 adaptiveCellCoord = adaptiveFineProbeCoord - baseProbeCoord * adaptiveSubGridSize;
+    float2 adaptiveCellUV = (float2(adaptiveCellCoord) + 0.5f) / (float)max(1u, adaptiveSubGridSize);
+    float2 bilinearUV = saturate(adaptiveCellUV);
+    float4 bilinearWeights = float4(
+        (1.0 - bilinearUV.x) * (1.0 - bilinearUV.y),
+        bilinearUV.x * (1.0 - bilinearUV.y),
+        (1.0 - bilinearUV.x) * bilinearUV.y,
+        bilinearUV.x * bilinearUV.y);
+
+    uint2 rightProbeCoord = uint2(min(baseProbeCoord.x + 1u, screenProbeGridSize.x - 1u), baseProbeCoord.y);
+    uint2 downProbeCoord = uint2(baseProbeCoord.x, min(baseProbeCoord.y + 1u, screenProbeGridSize.y - 1u));
+    uint2 rightDownProbeCoord = uint2(rightProbeCoord.x, downProbeCoord.y);
+    float4 position00 = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)baseProbeCoord.x, (int)baseProbeCoord.y, 0));
+    float4 position10 = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)rightProbeCoord.x, (int)rightProbeCoord.y, 0));
+    float4 position01 = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)downProbeCoord.x, (int)downProbeCoord.y, 0));
+    float4 position11 = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)rightDownProbeCoord.x, (int)rightDownProbeCoord.y, 0));
+    float4 validWeights = bilinearWeights * float4(
+        position00.a > 0.5 ? 1.0 : 0.0,
+        position10.a > 0.5 ? 1.0 : 0.0,
+        position01.a > 0.5 ? 1.0 : 0.0,
+        position11.a > 0.5 ? 1.0 : 0.0);
+    float validWeightSum = dot(validWeights, float4(1.0, 1.0, 1.0, 1.0));
+    if (validWeightSum <= 0.0001)
+    {
+        return false;
+    }
+
+    worldPosition =
+        (position00.xyz * validWeights.x +
+            position10.xyz * validWeights.y +
+            position01.xyz * validWeights.z +
+            position11.xyz * validWeights.w) / validWeightSum;
+    return true;
+}
+
+void BurtGIMarkRadianceProbesUsedByScreenProbes(uint3 dispatchThreadId)
+{
+    uint2 screenProbeGridSize = BurtGIScreenProbeGridSize();
+    uint2 screenProbeCoord = dispatchThreadId.xy;
+    if (screenProbeCoord.x < screenProbeGridSize.x && screenProbeCoord.y < screenProbeGridSize.y)
+    {
+        float4 screenProbeWorldPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)screenProbeCoord.x, (int)screenProbeCoord.y, 0));
+        if (screenProbeWorldPosition.w > 0.0)
+        {
+            float clipmapDitherRandom = BurtGIInterleavedGradientNoise(screenProbeCoord, _BurtGIRadianceCacheClipMapFrameIndex & 7u);
+            BurtGIMarkPositionUsedInIndirectionTexture(screenProbeWorldPosition.xyz, clipmapDitherRandom);
+        }
+    }
+
+    if (dispatchThreadId.y != 0u)
+    {
+        return;
+    }
+
+    uint adaptiveProbeIndex = dispatchThreadId.x;
+    float3 adaptiveWorldPosition;
+    if (BurtGIResolveAdaptiveScreenProbeWorldPosition(adaptiveProbeIndex, adaptiveWorldPosition))
+    {
+        float clipmapDitherRandom = BurtGIInterleavedGradientNoise(
+            uint2(adaptiveProbeIndex & 1023u, adaptiveProbeIndex >> 10),
+            _BurtGIRadianceCacheClipMapFrameIndex & 7u);
+        BurtGIMarkPositionUsedInIndirectionTexture(adaptiveWorldPosition, clipmapDitherRandom);
+    }
+}
+
+[numthreads(BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE, BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE, 1)]
+void MarkRadianceProbesUsedByScreenProbesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIMarkRadianceProbesUsedByScreenProbes(dispatchThreadId);
+}
+
+[numthreads(BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE, BURT_GI_MARK_SCREEN_PROBE_THREADGROUP_SIZE, 1)]
+void MarkUsedRadianceProbesFromScreenProbesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIMarkRadianceProbesUsedByScreenProbes(dispatchThreadId);
+}

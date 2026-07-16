@@ -1,0 +1,744 @@
+#pragma max_recursion_depth 1
+
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingShared.hlsl"
+
+RaytracingAccelerationStructure _BurtGIXGIProbeBakingAccelerationStructure;
+RWStructuredBuffer<float4> _RW_XGISkyVisibilityGen_Output;
+RWStructuredBuffer<float3> _RW_XGISkyVisibilityGen_DirectionOutput;
+RWStructuredBuffer<uint> _RW_XGISkyVisibilityGen_DirectionEncodedOutput;
+StructuredBuffer<float3> _XGISkyVisibilityGen_ProbePositions;
+StructuredBuffer<float4> _XGISkyVisibilityGen_ParamtersBuffer;
+StructuredBuffer<float3> _XGISkyVisibilityGen_PrecomputedDirections;
+
+struct XGITimeSliceLightData
+{
+    float4 positionType;
+    float4 directionRange;
+    float4 colorOuterCos;
+    float4 spotInnerCos;
+};
+
+RWStructuredBuffer<float> _RW_XGITimeSliceGen_Output;
+StructuredBuffer<float3> _XGITimeSliceGen_ProbePositions;
+StructuredBuffer<float> _XGITimeSliceGen_SkyVisibility;
+StructuredBuffer<XGITimeSliceLightData> _XGITimeSliceGen_Lights;
+
+struct XGIVirtualOffsetProbeData
+{
+    float3 position;
+    int probeIndex;
+    float tMax;
+    float originBias;
+    float geometryBias;
+    float validityThreshold;
+};
+
+RWStructuredBuffer<float3> _RW_XGIVirtualOffsetGen_Output;
+StructuredBuffer<XGIVirtualOffsetProbeData> _XGIVirtualOffsetGen_ProbeData;
+
+float _XGISkyVisibilityGen_OffsetRay;
+float _XGISkyVisibilityGen_MaxBounces;
+float _XGISkyVisibilityGen_SampleCount;
+float _XGISkyVisibilityGen_SampleIndex;
+float4 _XGISkyVisibilityGen_Params;
+float4 _XGISkyVisibilityGen_Params1;
+float4 _XGITimeSliceGen_Params;
+float4 _XGITimeSliceGen_Params1;
+float4 _XGITimeSliceGen_Params2;
+float4 _XGITimeSliceGen_Params3;
+float4 _XGIVirtualOffsetGen_Params;
+float4 _XGIVirtualOffsetGen_Params1;
+
+struct BurtXGIProbeBakingPayload
+{
+    float Hit;
+};
+
+#define BURT_XGI_BAKING_MISS_TYPE_A 0
+#define BURT_XGI_BAKING_MISS_TYPE_B 1
+#define BURT_XGI_BAKING_MISS_TYPE_C 2
+#define BURT_XGI_BAKING_TRACE_MASK 0xffu
+#define BURT_XGI_BAKING_MAX_RAY_DISTANCE 1000.0
+#define BURT_XGI_BAKING_VIRTUAL_OFFSET_SAMPLE_COUNT 26u
+
+static const float BurtXGISHBasis0 = 0.28209479177387814;
+static const float BurtXGISHBasis1 = 0.4886025119029199;
+static const float BurtXGISHBasis2 = 1.092548430592079;
+static const float BurtXGISHBasis3 = 0.31539156525252;
+static const float BurtXGISHBasis4 = 0.5462742152960395;
+
+static const float BurtXGIVirtualOffsetK0 = 0.0;
+static const float BurtXGIVirtualOffsetK1 = 1.0;
+static const float BurtXGIVirtualOffsetK2 = 0.7071067811865475;
+static const float BurtXGIVirtualOffsetK3 = 0.5773502691896258;
+static const float3 BurtXGIVirtualOffsetRayDirections[BURT_XGI_BAKING_VIRTUAL_OFFSET_SAMPLE_COUNT] =
+{
+    float3(-BurtXGIVirtualOffsetK3, +BurtXGIVirtualOffsetK3, -BurtXGIVirtualOffsetK3),
+    float3( BurtXGIVirtualOffsetK0, +BurtXGIVirtualOffsetK2, -BurtXGIVirtualOffsetK2),
+    float3(+BurtXGIVirtualOffsetK3, +BurtXGIVirtualOffsetK3, -BurtXGIVirtualOffsetK3),
+    float3(-BurtXGIVirtualOffsetK2, +BurtXGIVirtualOffsetK2,  BurtXGIVirtualOffsetK0),
+    float3( BurtXGIVirtualOffsetK0, +BurtXGIVirtualOffsetK1,  BurtXGIVirtualOffsetK0),
+    float3(+BurtXGIVirtualOffsetK2, +BurtXGIVirtualOffsetK2,  BurtXGIVirtualOffsetK0),
+    float3(-BurtXGIVirtualOffsetK3, +BurtXGIVirtualOffsetK3, +BurtXGIVirtualOffsetK3),
+    float3( BurtXGIVirtualOffsetK0, +BurtXGIVirtualOffsetK2, +BurtXGIVirtualOffsetK2),
+    float3(+BurtXGIVirtualOffsetK3, +BurtXGIVirtualOffsetK3, +BurtXGIVirtualOffsetK3),
+    float3(-BurtXGIVirtualOffsetK2,  BurtXGIVirtualOffsetK0, -BurtXGIVirtualOffsetK2),
+    float3( BurtXGIVirtualOffsetK0,  BurtXGIVirtualOffsetK0, -BurtXGIVirtualOffsetK1),
+    float3(+BurtXGIVirtualOffsetK2,  BurtXGIVirtualOffsetK0, -BurtXGIVirtualOffsetK2),
+    float3(-BurtXGIVirtualOffsetK1,  BurtXGIVirtualOffsetK0,  BurtXGIVirtualOffsetK0),
+    float3(+BurtXGIVirtualOffsetK1,  BurtXGIVirtualOffsetK0,  BurtXGIVirtualOffsetK0),
+    float3(-BurtXGIVirtualOffsetK2,  BurtXGIVirtualOffsetK0, +BurtXGIVirtualOffsetK2),
+    float3( BurtXGIVirtualOffsetK0,  BurtXGIVirtualOffsetK0, +BurtXGIVirtualOffsetK1),
+    float3(+BurtXGIVirtualOffsetK2,  BurtXGIVirtualOffsetK0, +BurtXGIVirtualOffsetK2),
+    float3(-BurtXGIVirtualOffsetK3, -BurtXGIVirtualOffsetK3, -BurtXGIVirtualOffsetK3),
+    float3( BurtXGIVirtualOffsetK0, -BurtXGIVirtualOffsetK2, -BurtXGIVirtualOffsetK2),
+    float3(+BurtXGIVirtualOffsetK3, -BurtXGIVirtualOffsetK3, -BurtXGIVirtualOffsetK3),
+    float3(-BurtXGIVirtualOffsetK2, -BurtXGIVirtualOffsetK2,  BurtXGIVirtualOffsetK0),
+    float3( BurtXGIVirtualOffsetK0, -BurtXGIVirtualOffsetK1,  BurtXGIVirtualOffsetK0),
+    float3(+BurtXGIVirtualOffsetK2, -BurtXGIVirtualOffsetK2,  BurtXGIVirtualOffsetK0),
+    float3(-BurtXGIVirtualOffsetK3, -BurtXGIVirtualOffsetK3, +BurtXGIVirtualOffsetK3),
+    float3( BurtXGIVirtualOffsetK0, -BurtXGIVirtualOffsetK2, +BurtXGIVirtualOffsetK2),
+    float3(+BurtXGIVirtualOffsetK3, -BurtXGIVirtualOffsetK3, +BurtXGIVirtualOffsetK3)
+};
+
+float3 BurtXGIProbeBakingDirection(uint seed)
+{
+    float u = frac(sin((float)seed * 12.9898 + 78.233) * 43758.5453);
+    float v = frac(sin((float)seed * 39.3467 + 11.135) * 24634.6345);
+    float z = u * 2.0 - 1.0;
+    float r = sqrt(saturate(1.0 - z * z));
+    float phi = v * 6.28318530718;
+    return float3(cos(phi) * r, abs(z), sin(phi) * r);
+}
+
+float3 BurtXGIProbeBakingSphereDirection(uint seed)
+{
+    float u = frac(sin((float)seed * 12.9898 + 78.233) * 43758.5453);
+    float v = frac(sin((float)seed * 39.3467 + 11.135) * 24634.6345);
+    float z = u * 2.0 - 1.0;
+    float r = sqrt(saturate(1.0 - z * z));
+    float phi = v * 6.28318530718;
+    return float3(cos(phi) * r, z, sin(phi) * r);
+}
+
+float BurtXGIProbeBakingHash01(uint seed)
+{
+    return frac(sin((float)seed * 12.9898 + 78.233) * 43758.5453);
+}
+
+float2 BurtXGIProbeBakingHammersley(uint sampleIndex, uint sampleCount, uint seed)
+{
+    float invCount = rcp(max((float)sampleCount, 1.0));
+    float u = frac(((float)sampleIndex + 0.5) * invCount + BurtXGIProbeBakingHash01(seed));
+    float v = frac((float)reversebits(sampleIndex ^ (seed * 1664525u + 1013904223u)) * 2.3283064365386963e-10 + BurtXGIProbeBakingHash01(seed + 17u));
+    return float2(u, v);
+}
+
+float3 BurtXGIProbeBakingHammersleySphereDirection(uint sampleIndex, uint sampleCount, uint seed)
+{
+    float2 xi = BurtXGIProbeBakingHammersley(sampleIndex, sampleCount, seed);
+    float cosTheta = 1.0 - 2.0 * xi.y;
+    float sinTheta = sqrt(saturate(1.0 - cosTheta * cosTheta));
+    float phi = xi.x * 6.28318530718;
+    return float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
+}
+
+float3 BurtXGIProbeBakingHammersleyCosineHemisphereDirection(uint sampleIndex, uint sampleCount, uint seed)
+{
+    float2 xi = BurtXGIProbeBakingHammersley(sampleIndex, sampleCount, seed);
+    float phi = xi.x * 6.28318530718;
+    float cosTheta = sqrt(saturate(xi.y));
+    float sinTheta = sqrt(saturate(1.0 - cosTheta * cosTheta));
+    return float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
+}
+
+float3 BurtXGIProbeBakingSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+
+BurtGIRayPayload BurtXGIProbeBakingInitPayload()
+{
+    BurtGIRayPayload payload;
+    payload.Radiance = 0.0;
+    payload.HitDistance = BURT_XGI_BAKING_MAX_RAY_DISTANCE;
+    payload.Albedo = 0.0;
+    payload.Hit = 0.0;
+    payload.Emission = 0.0;
+    payload.Padding = 0.0;
+    payload.NormalWS = 0.0;
+    return payload;
+}
+
+BurtGIRayPayload BurtXGIProbeBakingTraceWithFlags(float3 origin, float3 direction, float tMin, float tMax, uint rayFlags)
+{
+    BurtGIRayPayload payload = BurtXGIProbeBakingInitPayload();
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = BurtXGIProbeBakingSafeNormalize(direction, float3(0.0, 1.0, 0.0));
+    ray.TMin = max(tMin, 0.0);
+    ray.TMax = max(tMax, ray.TMin + 0.001);
+    TraceRay(
+        _BurtGIXGIProbeBakingAccelerationStructure,
+        rayFlags,
+        BURT_XGI_BAKING_TRACE_MASK,
+        0,
+        1,
+        BURT_XGI_BAKING_MISS_TYPE_A,
+        ray,
+        payload);
+    return payload;
+}
+
+BurtGIRayPayload BurtXGIProbeBakingTrace(float3 origin, float3 direction, float tMin, float tMax)
+{
+    return BurtXGIProbeBakingTraceWithFlags(origin, direction, tMin, tMax, RAY_FLAG_NONE);
+}
+
+uint BurtXGIProbeBakingLinearSearchClosestPrecomputedDirection(float3 direction)
+{
+    float bestDot = -10.0;
+    uint bestIndex = 0u;
+    for (uint index = 0u; index < 255u; index++)
+    {
+        float currentDot = dot(direction, _XGISkyVisibilityGen_PrecomputedDirections[index]);
+        if (currentDot > bestDot)
+        {
+            bestDot = currentDot;
+            bestIndex = index;
+        }
+    }
+
+    return bestIndex;
+}
+
+uint BurtXGIProbeBakingEncodePrecomputedDirection(float3 direction)
+{
+    uint bestDirectionIndex = 255u;
+    float norm = length(direction);
+    if (norm > 0.0001)
+    {
+        bestDirectionIndex = BurtXGIProbeBakingLinearSearchClosestPrecomputedDirection(direction / norm);
+    }
+
+    return bestDirectionIndex;
+}
+
+void BurtXGITimeSliceClearSH(uint outputIndex)
+{
+    uint baseIndex = outputIndex * 27u;
+    for (uint i = 0u; i < 27u; i++)
+    {
+        _RW_XGITimeSliceGen_Output[baseIndex + i] = 0.0;
+    }
+}
+
+void BurtXGITimeSliceAddSH(uint outputIndex, float3 lightColor, float3 direction, float weight)
+{
+    float3 safeDirection = BurtXGIProbeBakingSafeNormalize(direction, float3(0.0, 1.0, 0.0));
+    float3 halfEnergy = max(lightColor, 0.0) * (0.5 * weight);
+    float3 l0 = halfEnergy / BurtXGISHBasis0;
+    float3 l1 = halfEnergy / BurtXGISHBasis1;
+    float3 xrenderDirectionL1 = float3(-safeDirection.x, safeDirection.y, -safeDirection.z);
+    float3 xgiAxis = float3(safeDirection.z, safeDirection.x, safeDirection.y);
+    float3 xgiAxisSquared = xgiAxis * xgiAxis;
+    float4 basisL2 = float4(
+        BurtXGISHBasis2 * xgiAxis.x * xgiAxis.y,
+        -BurtXGISHBasis2 * xgiAxis.y * xgiAxis.z,
+        BurtXGISHBasis3 * (3.0 * xgiAxisSquared.z - 1.0),
+        -BurtXGISHBasis2 * xgiAxis.x * xgiAxis.z);
+    float basisL2C = BurtXGISHBasis4 * (xgiAxisSquared.x - xgiAxisSquared.y);
+    float3 l2Scale = halfEnergy * 0.5;
+
+    uint baseIndex = outputIndex * 27u;
+    _RW_XGITimeSliceGen_Output[baseIndex + 0u] += l0.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 9u] += l0.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 18u] += l0.z;
+
+    _RW_XGITimeSliceGen_Output[baseIndex + 1u] += xrenderDirectionL1.x * l1.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 2u] += xrenderDirectionL1.y * l1.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 3u] += xrenderDirectionL1.z * l1.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 10u] += xrenderDirectionL1.x * l1.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 11u] += xrenderDirectionL1.y * l1.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 12u] += xrenderDirectionL1.z * l1.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 19u] += xrenderDirectionL1.x * l1.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 20u] += xrenderDirectionL1.y * l1.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 21u] += xrenderDirectionL1.z * l1.z;
+
+    _RW_XGITimeSliceGen_Output[baseIndex + 4u] += basisL2.x * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 5u] += basisL2.y * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 6u] += basisL2.z * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 7u] += basisL2.w * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 8u] += basisL2C * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 13u] += basisL2.x * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 14u] += basisL2.y * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 15u] += basisL2.z * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 16u] += basisL2.w * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 17u] += basisL2C * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 22u] += basisL2.x * l2Scale.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 23u] += basisL2.y * l2Scale.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 24u] += basisL2.z * l2Scale.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 25u] += basisL2.w * l2Scale.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 26u] += basisL2C * l2Scale.z;
+}
+
+bool BurtXGITimeSliceEvaluateLight(
+    XGITimeSliceLightData light,
+    float3 probePosition,
+    out float3 lightColor,
+    out float3 lightDirection,
+    out float rayDistance)
+{
+    lightColor = 0.0;
+    lightDirection = float3(0.0, 1.0, 0.0);
+    rayDistance = _XGITimeSliceGen_Params.w;
+    uint lightType = (uint)round(light.positionType.w);
+    if (lightType == 0u)
+    {
+        lightDirection = BurtXGIProbeBakingSafeNormalize(-light.directionRange.xyz, float3(0.0, 1.0, 0.0));
+        lightColor = max(light.colorOuterCos.xyz, 0.0);
+        return dot(lightColor, lightColor) > 0.0000001;
+    }
+
+    float3 toLight = light.positionType.xyz - probePosition;
+    float distanceToLight = length(toLight);
+    float lightRange = max(light.directionRange.w, 0.001);
+    if (distanceToLight <= 0.0001 || distanceToLight >= lightRange)
+    {
+        return false;
+    }
+
+    lightDirection = toLight / distanceToLight;
+    rayDistance = distanceToLight;
+    float normalizedDistance = saturate(distanceToLight / lightRange);
+    float attenuation = pow(1.0 - normalizedDistance * normalizedDistance, 2.0);
+    if (lightType == 2u)
+    {
+        float3 lightForward = BurtXGIProbeBakingSafeNormalize(light.directionRange.xyz, float3(0.0, 0.0, 1.0));
+        float spotCos = dot(-lightDirection, lightForward);
+        float outerCos = light.colorOuterCos.w;
+        if (spotCos <= outerCos)
+        {
+            return false;
+        }
+
+        float innerCos = light.spotInnerCos.x;
+        float spotAttenuation = innerCos <= outerCos ? 1.0 : saturate((spotCos - outerCos) / (innerCos - outerCos));
+        attenuation *= spotAttenuation * spotAttenuation;
+    }
+
+    lightColor = max(light.colorOuterCos.xyz, 0.0) * attenuation;
+    return dot(lightColor, lightColor) > 0.0000001;
+}
+
+bool BurtXGITimeSliceIsOccluded(float3 position, float3 direction, float offset, float maxRayDistance)
+{
+    float tMax = max(maxRayDistance - offset, 0.001);
+    BurtGIRayPayload payload = BurtXGIProbeBakingTrace(
+        position + direction * max(offset, 0.0),
+        direction,
+        0.0,
+        tMax);
+    return payload.Hit > 0.0;
+}
+
+float3 BurtXGITimeSliceEvaluateDirectLighting(float3 position, float3 normalWS, float offset, float maxRayDistance, uint lightCount)
+{
+    float3 radiance = 0.0;
+    for (uint lightIndex = 0u; lightIndex < lightCount; lightIndex++)
+    {
+        float3 lightColor;
+        float3 lightDirection;
+        float rayDistance;
+        if (!BurtXGITimeSliceEvaluateLight(_XGITimeSliceGen_Lights[lightIndex], position, lightColor, lightDirection, rayDistance))
+        {
+            continue;
+        }
+
+        float directWeight = saturate(dot(normalWS, lightDirection));
+        if (directWeight <= 0.0)
+        {
+            continue;
+        }
+
+        float occlusionDistance = min(max(rayDistance - offset, 0.001), max(maxRayDistance, 0.001));
+        if (BurtXGITimeSliceIsOccluded(position, lightDirection, offset, occlusionDistance))
+        {
+            continue;
+        }
+
+        radiance += lightColor * directWeight;
+    }
+
+    return radiance;
+}
+
+float3 BurtXGITimeSliceCosineSampleHemisphere(float3 normalWS, float2 sampleUV)
+{
+    float radius = sqrt(saturate(sampleUV.x));
+    float phi = 6.28318530718 * sampleUV.y;
+    float3 localDirection = float3(radius * cos(phi), radius * sin(phi), sqrt(saturate(1.0 - sampleUV.x)));
+    float3 tangent = abs(normalWS.z) < 0.999
+        ? BurtXGIProbeBakingSafeNormalize(cross(float3(0.0, 0.0, 1.0), normalWS), float3(1.0, 0.0, 0.0))
+        : float3(1.0, 0.0, 0.0);
+    float3 bitangent = cross(normalWS, tangent);
+    return BurtXGIProbeBakingSafeNormalize(tangent * localDirection.x + bitangent * localDirection.y + normalWS * localDirection.z, normalWS);
+}
+
+float BurtXGITimeSliceHash(float3 value)
+{
+    return frac(sin(dot(value, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+
+float3 BurtXGITimeSliceEvaluatePathRadiance(
+    float3 origin,
+    float3 direction,
+    float offset,
+    float maxRayDistance,
+    uint maxBounces,
+    uint lightCount,
+    float3 ambientRadiance)
+{
+    float3 pathOrigin = origin;
+    float3 pathDirection = BurtXGIProbeBakingSafeNormalize(direction, float3(0.0, 1.0, 0.0));
+    float3 throughput = 1.0;
+    float3 radiance = 0.0;
+    [loop]
+    for (uint bounceIndex = 0u; bounceIndex < maxBounces; bounceIndex++)
+    {
+        BurtGIRayPayload payload = BurtXGIProbeBakingTrace(
+            pathOrigin,
+            pathDirection,
+            bounceIndex == 0u ? offset : max(offset, 0.001),
+            maxRayDistance);
+        if (payload.Hit <= 0.0)
+        {
+            float3 missRadiance = max(payload.Radiance, 0.0);
+            radiance += throughput * (dot(missRadiance, missRadiance) > 0.000001 ? missRadiance : max(ambientRadiance, 0.0));
+            break;
+        }
+
+        float3 normalWS = BurtXGIProbeBakingSafeNormalize(payload.NormalWS, -pathDirection);
+        bool backfaceHit = dot(normalWS, pathDirection) > 0.0;
+        if (_XGITimeSliceGen_Params2.w > 0.5 && backfaceHit)
+        {
+            radiance += throughput * max(ambientRadiance, 0.0);
+            break;
+        }
+
+        if (backfaceHit)
+        {
+            normalWS *= -1.0;
+        }
+
+        float3 hitPositionWS = pathOrigin + pathDirection * max(payload.HitDistance, 0.0);
+        float3 directRadiance = BurtXGITimeSliceEvaluateDirectLighting(hitPositionWS, normalWS, offset, maxRayDistance, lightCount);
+        float3 diffuseIrradiance = max(ambientRadiance, 0.0) + max(directRadiance, 0.0);
+        radiance += throughput * (max(payload.Emission, 0.0) + max(payload.Albedo, 0.0) * (diffuseIrradiance * 0.31830988618));
+        throughput *= saturate(payload.Albedo);
+        if (max(throughput.r, max(throughput.g, throughput.b)) <= 0.001)
+        {
+            break;
+        }
+
+        float seed0 = BurtXGITimeSliceHash(hitPositionWS + pathDirection * (float)(bounceIndex + 1u));
+        float seed1 = BurtXGITimeSliceHash(hitPositionWS.zxy + normalWS * (float)(bounceIndex + 7u));
+        pathOrigin = hitPositionWS + normalWS * max(offset, 0.001);
+        pathDirection = BurtXGITimeSliceCosineSampleHemisphere(normalWS, float2(seed0, seed1));
+    }
+
+    return max(radiance, 0.0);
+}
+
+void BurtXGITimeSliceConvolveRadianceToIrradiance(uint outputIndex)
+{
+    uint baseIndex = outputIndex * 27u;
+    [unroll]
+    for (uint channel = 0u; channel < 3u; channel++)
+    {
+        uint channelBase = baseIndex + channel * 9u;
+        _RW_XGITimeSliceGen_Output[channelBase + 1u] *= 0.6666666667;
+        _RW_XGITimeSliceGen_Output[channelBase + 2u] *= 0.6666666667;
+        _RW_XGITimeSliceGen_Output[channelBase + 3u] *= 0.6666666667;
+        _RW_XGITimeSliceGen_Output[channelBase + 4u] *= 0.25;
+        _RW_XGITimeSliceGen_Output[channelBase + 5u] *= 0.25;
+        _RW_XGITimeSliceGen_Output[channelBase + 6u] *= 0.25;
+        _RW_XGITimeSliceGen_Output[channelBase + 7u] *= 0.25;
+        _RW_XGITimeSliceGen_Output[channelBase + 8u] *= 0.25;
+    }
+}
+
+[shader("raygeneration")]
+void GenSkyVisibilityRGS()
+{
+    uint2 dispatchThreadId = DispatchRaysIndex().xy;
+    uint threadGroupNumX = max((uint)_XGISkyVisibilityGen_Params.z, 1u);
+    uint posIndex = dispatchThreadId.x + dispatchThreadId.y * threadGroupNumX;
+    uint probeCount = (uint)max(_XGISkyVisibilityGen_Params.x, 0.0);
+    if (posIndex >= probeCount)
+    {
+        return;
+    }
+
+    uint probeStartOffset = (uint)max(_XGISkyVisibilityGen_Params1.y, 0.0);
+    uint globalProbeIndex = probeStartOffset + posIndex;
+    uint outputIndex = posIndex;
+    uint sampleIndex = (uint)max(_XGISkyVisibilityGen_ParamtersBuffer[0].x, _XGISkyVisibilityGen_SampleIndex);
+    float sampleCount = max(_XGISkyVisibilityGen_ParamtersBuffer[0].y, max(_XGISkyVisibilityGen_SampleCount, 1.0));
+    float3 probePosition = _XGISkyVisibilityGen_ProbePositions[posIndex];
+    if (sampleIndex == 0u)
+    {
+        _RW_XGISkyVisibilityGen_Output[outputIndex] = 0.0;
+        if (_XGISkyVisibilityGen_Params.w > 0.5)
+        {
+            _RW_XGISkyVisibilityGen_DirectionOutput[outputIndex] = 0.0;
+            _RW_XGISkyVisibilityGen_DirectionEncodedOutput[outputIndex] = 0u;
+        }
+    }
+
+    float averageAlbedo = saturate(_XGISkyVisibilityGen_Params.y);
+    uint maxBounces = max(1u, (uint)max(_XGISkyVisibilityGen_MaxBounces, 1.0));
+    float maxRayDistance = max(_XGISkyVisibilityGen_Params1.w, 0.001);
+    uint sampleCountUint = max(1u, (uint)sampleCount);
+    float3 firstDirection = BurtXGIProbeBakingHammersleySphereDirection(sampleIndex, sampleCountUint, globalProbeIndex + 31u);
+    float3 rayOrigin = probePosition;
+    float3 rayDirection = firstDirection;
+    float pathWeight = 12.56637061436;
+    bool reachedSky = false;
+    uint rayFlags = RAY_FLAG_NONE;
+    if (_XGISkyVisibilityGen_Params1.z > 0.0)
+    {
+        rayFlags |= RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
+    }
+
+    for (uint bounce = 0u; bounce < maxBounces; bounce++)
+    {
+        BurtGIRayPayload payload = BurtXGIProbeBakingTraceWithFlags(
+            rayOrigin,
+            rayDirection,
+            max(_XGISkyVisibilityGen_OffsetRay, 0.0),
+            maxRayDistance,
+            rayFlags);
+        if (payload.Hit <= 0.0)
+        {
+            reachedSky = true;
+            break;
+        }
+
+        float3 normalWS = BurtXGIProbeBakingSafeNormalize(payload.NormalWS, float3(0.0, 1.0, 0.0));
+        if (dot(normalWS, rayDirection) > 0.0)
+        {
+            normalWS *= -1.0;
+        }
+
+        float3 hitPointWS = rayOrigin + rayDirection * payload.HitDistance;
+        float3 bounceDirection = BurtXGIProbeBakingHammersleyCosineHemisphereDirection(sampleIndex, sampleCountUint, globalProbeIndex + bounce * 97u + 59u);
+        float3 tangent = BurtXGIProbeBakingSafeNormalize(
+            abs(normalWS.y) < 0.999 ? cross(float3(0.0, 1.0, 0.0), normalWS) : cross(float3(1.0, 0.0, 0.0), normalWS),
+            float3(1.0, 0.0, 0.0));
+        float3 bitangent = cross(normalWS, tangent);
+        rayDirection = BurtXGIProbeBakingSafeNormalize(
+            tangent * bounceDirection.x + normalWS * abs(bounceDirection.y) + bitangent * bounceDirection.z,
+            normalWS);
+        rayOrigin = hitPointWS + rayDirection * max(_XGISkyVisibilityGen_OffsetRay, 0.001);
+        pathWeight *= averageAlbedo;
+    }
+
+    if (reachedSky)
+    {
+        float norm = pathWeight / sampleCount;
+        float4 skySH = float4(
+            norm * BurtXGISHBasis0,
+            firstDirection.x * norm * BurtXGISHBasis1,
+            firstDirection.y * norm * BurtXGISHBasis1,
+            firstDirection.z * norm * BurtXGISHBasis1);
+        _RW_XGISkyVisibilityGen_Output[outputIndex] += skySH;
+        if (_XGISkyVisibilityGen_Params.w > 0.5)
+        {
+            _RW_XGISkyVisibilityGen_DirectionOutput[outputIndex] += rayDirection / sampleCount;
+        }
+    }
+
+    if (sampleIndex + 1u >= (uint)sampleCount)
+    {
+        float4 shData = _RW_XGISkyVisibilityGen_Output[outputIndex];
+        float3 mainDir = BurtXGIProbeBakingSafeNormalize(shData.yzw, float3(0.0, 1.0, 0.0));
+        float4 oppositeSH = float4(BurtXGISHBasis0, -mainDir.x * BurtXGISHBasis1, -mainDir.y * BurtXGISHBasis1, -mainDir.z * BurtXGISHBasis1);
+        float oppositeValue = dot(oppositeSH, shData);
+        float windowL1 = 1.0;
+        if (oppositeValue < 0.0)
+        {
+            windowL1 = saturate(-(oppositeSH.x * shData.x) / max(abs(dot(oppositeSH.yzw, shData.yzw)), 0.000001));
+        }
+
+        _RW_XGISkyVisibilityGen_Output[outputIndex].yzw *= windowL1 * lerp(1.0, 0.6666666667, pow(windowL1, 1.125));
+        if (_XGISkyVisibilityGen_Params.w > 0.5)
+        {
+            _RW_XGISkyVisibilityGen_DirectionEncodedOutput[outputIndex] =
+                BurtXGIProbeBakingEncodePrecomputedDirection(_RW_XGISkyVisibilityGen_DirectionOutput[outputIndex]);
+        }
+    }
+}
+
+[shader("raygeneration")]
+void GenTimeSliceRGS()
+{
+    uint2 dispatchThreadId = DispatchRaysIndex().xy;
+    uint rayGenNumberX = max((uint)_XGITimeSliceGen_Params.z, 1u);
+    uint posIndex = dispatchThreadId.x + dispatchThreadId.y * rayGenNumberX;
+    uint probeCount = (uint)max(_XGITimeSliceGen_Params.x, 0.0);
+    if (posIndex >= probeCount)
+    {
+        return;
+    }
+
+    uint sampleStartIndex = (uint)max(_XGITimeSliceGen_Params2.x, 0.0);
+    uint sampleCount = max(1u, (uint)max(_XGITimeSliceGen_Params2.y, 1.0));
+    uint maxBounces = max(1u, (uint)max(_XGITimeSliceGen_Params2.z, 1.0));
+    uint sampleCountThisDispatch = max(1u, (uint)max(_XGITimeSliceGen_Params3.x, 1.0));
+    uint probeStartOffset = (uint)max(_XGITimeSliceGen_Params3.y, 0.0);
+    if (sampleStartIndex >= sampleCount)
+    {
+        return;
+    }
+
+    uint globalProbeIndex = posIndex + probeStartOffset;
+    float3 probePosition = _XGITimeSliceGen_ProbePositions[posIndex];
+    float skyVisibility = saturate(_XGITimeSliceGen_SkyVisibility[posIndex]);
+    float3 ambientColor = max(_XGITimeSliceGen_Params1.xyz, 0.0) * skyVisibility;
+    float offset = max(_XGITimeSliceGen_Params1.w, 0.0);
+    uint lightCount = (uint)max(_XGITimeSliceGen_Params.y, 0.0);
+    float maxRayDistance = max(_XGITimeSliceGen_Params.w, 0.001);
+    if (sampleStartIndex == 0u)
+    {
+        BurtXGITimeSliceClearSH(posIndex);
+    }
+
+    for (uint localSampleIndex = 0u; localSampleIndex < sampleCountThisDispatch; localSampleIndex++)
+    {
+        uint sampleIndex = sampleStartIndex + localSampleIndex;
+        if (sampleIndex >= sampleCount)
+        {
+            break;
+        }
+
+        float3 sampleDirection = BurtXGIProbeBakingHammersleySphereDirection(sampleIndex, sampleCount, globalProbeIndex + 53u);
+        float3 radiance = BurtXGITimeSliceEvaluatePathRadiance(
+            probePosition,
+            sampleDirection,
+            offset,
+            maxRayDistance,
+            maxBounces,
+            lightCount,
+            ambientColor);
+        float norm = 12.56637061436 / (float)sampleCount;
+        BurtXGITimeSliceAddSH(posIndex, radiance, sampleDirection, norm);
+    }
+
+    if (sampleStartIndex + sampleCountThisDispatch >= sampleCount)
+    {
+        BurtXGITimeSliceConvolveRadianceToIrradiance(posIndex);
+    }
+}
+
+[shader("raygeneration")]
+void GenVirtualOffsetRGS()
+{
+    uint2 dispatchThreadId = DispatchRaysIndex().xy;
+    uint rayGenNumberX = max((uint)_XGIVirtualOffsetGen_Params.z, 1u);
+    uint posIndex = dispatchThreadId.x + dispatchThreadId.y * rayGenNumberX;
+    uint probeCount = (uint)max(_XGIVirtualOffsetGen_Params.x, 0.0);
+    if (posIndex >= probeCount)
+    {
+        return;
+    }
+
+    XGIVirtualOffsetProbeData probe = _XGIVirtualOffsetGen_ProbeData[posIndex];
+    if (probe.tMax <= 0.000001)
+    {
+        return;
+    }
+
+    uint backfaceHitCount = 0u;
+    float minDistance = 3.402823466e+38;
+    float3 outDirection = 0.0;
+    float maxDotSurface = -1.0;
+    for (uint i = 0u; i < BURT_XGI_BAKING_VIRTUAL_OFFSET_SAMPLE_COUNT; i++)
+    {
+        float3 rayDirection = BurtXGIVirtualOffsetRayDirections[i];
+        BurtGIRayPayload payload = BurtXGIProbeBakingTrace(
+            probe.position + probe.originBias * rayDirection,
+            rayDirection,
+            0.0,
+            probe.tMax);
+        if (payload.Hit <= 0.0)
+        {
+            continue;
+        }
+
+        float3 hitNormalWS = BurtXGIProbeBakingSafeNormalize(payload.NormalWS, -rayDirection);
+        if (dot(rayDirection, hitNormalWS) <= 0.0)
+        {
+            continue;
+        }
+
+        backfaceHitCount++;
+        float distanceDiff = payload.HitDistance - minDistance;
+        if (distanceDiff < 0.00005)
+        {
+            float dotSurface = dot(rayDirection, hitNormalWS);
+            if (distanceDiff < -0.00005 || dotSurface - maxDotSurface > 0.01)
+            {
+                minDistance = payload.HitDistance;
+                outDirection = rayDirection;
+                maxDotSurface = dotSurface;
+            }
+        }
+    }
+
+    float percentageOfBackface = backfaceHitCount / 25.0;
+    if (percentageOfBackface <= probe.validityThreshold || minDistance >= 3.402823466e+37)
+    {
+        outDirection = 0.0;
+        minDistance = 0.0;
+    }
+
+    _RW_XGIVirtualOffsetGen_Output[posIndex] = (minDistance * 1.05 + max(probe.geometryBias, 0.0)) * outDirection;
+}
+
+[shader("miss")]
+void MissShaderA(inout BurtGIRayPayload payload : SV_RayPayload)
+{
+    payload.Radiance = 0.0;
+    payload.HitDistance = BURT_XGI_BAKING_MAX_RAY_DISTANCE;
+    payload.Albedo = 0.0;
+    payload.Emission = 0.0;
+    payload.NormalWS = 0.0;
+    payload.Hit = 0.0;
+    payload.Padding = 0.0;
+}
+
+[shader("miss")]
+void MissShaderB(inout BurtGIRayPayload payload : SV_RayPayload)
+{
+    payload.Radiance = 0.0;
+    payload.HitDistance = BURT_XGI_BAKING_MAX_RAY_DISTANCE;
+    payload.Albedo = 0.0;
+    payload.Emission = 0.0;
+    payload.NormalWS = 0.0;
+    payload.Hit = 0.0;
+    payload.Padding = 0.0;
+}
+
+[shader("miss")]
+void MissShaderC_Shadow(inout BurtGIRayPayload payload : SV_RayPayload)
+{
+    payload.Radiance = 0.0;
+    payload.HitDistance = BURT_XGI_BAKING_MAX_RAY_DISTANCE;
+    payload.Albedo = 0.0;
+    payload.Emission = 0.0;
+    payload.NormalWS = 0.0;
+    payload.Hit = 0.0;
+    payload.Padding = 0.0;
+}

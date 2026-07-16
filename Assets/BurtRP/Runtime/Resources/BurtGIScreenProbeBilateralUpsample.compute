@@ -1,0 +1,222 @@
+#pragma kernel MainCS_Diffuse
+#pragma kernel MainCS_DiffuseBackface
+#pragma kernel MainCS_DiffuseSpecular
+#pragma kernel MainCS_All
+
+#define BURT_GI_BILATERAL_UPSAMPLE_THREADGROUP_SIZE 8
+#define BURT_GI_BILATERAL_UPSAMPLE_NORMAL_WEIGHT_SCALE 1024.0
+
+Texture2D<float> _BurtCameraDepthTexture;
+Texture2D<float4> _BurtGBuffer0;
+Texture2D<float> _BurtGIScreenProbeScreenDepthTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldNormalTexture;
+
+Texture2D<float4> _BurtGIDiffuseIndirectTexture;
+Texture2D<float4> _BurtGIBackfaceDiffuseIndirectTexture;
+Texture2D<float4> _BurtGIRoughSpecularIndirectTexture;
+
+RWTexture2D<float4> _BurtGIDiffuseIndirectUpsampledTexture;
+RWTexture2D<float4> _BurtGIBackfaceDiffuseIndirectUpsampledTexture;
+RWTexture2D<float4> _BurtGIRoughSpecularIndirectUpsampledTexture;
+
+float4 _BurtGIScreenProbeBilateralUpsampleFullSizeAndInvSize;
+float4 _BurtGIScreenProbeBilateralUpsampleHalfSizeAndInvSize;
+float _BurtGIScreenProbeBilateralUpsampleDepthWeightScale;
+
+uint2 BurtGIClampHalfCoord(int2 coord, uint2 halfSize)
+{
+    return (uint2)clamp(coord, int2(0, 0), (int2)halfSize - 1);
+}
+
+float2 BurtGIUnpack888UIntToFloat2(uint3 value)
+{
+    uint hi = value.z >> 4;
+    uint lo = value.z & 15u;
+    uint2 packed = value.xy | uint2(lo << 8, hi << 8);
+    return (float2)packed / 4095.0;
+}
+
+float2 BurtGIUnpack888ToFloat2(float3 value)
+{
+    uint3 quantized = (uint3)(saturate(value) * 255.5);
+    return BurtGIUnpack888UIntToFloat2(quantized);
+}
+
+float3 BurtGISafeNormalize(float3 value)
+{
+    return value * rsqrt(max(dot(value, value), 0.000001));
+}
+
+float3 BurtGIDecodeNormalWSFromGBuffer(float3 packedNormal)
+{
+    float2 encodedNormal = BurtGIUnpack888ToFloat2(packedNormal);
+    float2 f = encodedNormal * 2.0 - 1.0;
+    float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    float t = saturate(-n.z);
+    n.x += n.x >= 0.0 ? -t : t;
+    n.y += n.y >= 0.0 ? -t : t;
+    return BurtGISafeNormalize(n);
+}
+
+float3 BurtGILoadNormalWS(uint2 fullCoord, uint2 fullSize)
+{
+    fullCoord = min(fullCoord, fullSize - 1);
+    return BurtGIDecodeNormalWSFromGBuffer(_BurtGBuffer0.Load(int3(fullCoord, 0)).rgb);
+}
+
+float BurtGILoadDepth(uint2 fullCoord, uint2 fullSize)
+{
+    fullCoord = min(fullCoord, fullSize - 1);
+    return _BurtCameraDepthTexture.Load(int3(fullCoord, 0));
+}
+
+float3 BurtGILoadHalfNormalWS(uint2 halfCoord, uint2 halfSize)
+{
+    halfCoord = min(halfCoord, halfSize - 1);
+    return BurtGISafeNormalize(_BurtGIScreenProbeWorldNormalTexture.Load(int3(halfCoord, 0)).xyz * 2.0 - 1.0);
+}
+
+float BurtGILoadHalfDepth(uint2 halfCoord, uint2 halfSize)
+{
+    halfCoord = min(halfCoord, halfSize - 1);
+    return _BurtGIScreenProbeScreenDepthTexture.Load(int3(halfCoord, 0));
+}
+
+float BurtGIGetSampleWeight(float2 halfTexelCoord, float fullDepth, float3 fullNormalWS, uint2 halfCoord, uint2 halfSize)
+{
+    float halfDepth = BurtGILoadHalfDepth(halfCoord, halfSize);
+    float3 halfNormalWS = BurtGILoadHalfNormalWS(halfCoord, halfSize);
+    float2 delta = abs((float2)halfCoord - halfTexelCoord);
+    float spatialWeight = saturate(1.5 - delta.x) * saturate(1.5 - delta.y);
+    float depthWeight = rcp(abs(halfDepth - fullDepth) * _BurtGIScreenProbeBilateralUpsampleDepthWeightScale + 0.0001);
+    float normalSimilarity = saturate(dot(fullNormalWS, halfNormalWS));
+    float normalWeight = rcp(1.0 + (1.0 - normalSimilarity) * BURT_GI_BILATERAL_UPSAMPLE_NORMAL_WEIGHT_SCALE);
+    return spatialWeight * depthWeight * normalWeight;
+}
+
+struct BurtGIUpsampleContext
+{
+    float Weight0;
+    float Weight1;
+    float Weight2;
+    float Weight3;
+    float Weight4;
+    float Weight5;
+    float Weight6;
+    float Weight7;
+    float Weight8;
+    uint2 Coord0;
+    uint2 Coord1;
+    uint2 Coord2;
+    uint2 Coord3;
+    uint2 Coord4;
+    uint2 Coord5;
+    uint2 Coord6;
+    uint2 Coord7;
+    uint2 Coord8;
+};
+
+BurtGIUpsampleContext BurtGIGetUpsampleContext(uint2 outputCoord, uint2 fullSize, uint2 halfSize)
+{
+    BurtGIUpsampleContext context;
+    float2 halfTexelCoord = ((float2)outputCoord + 0.5) * 0.5 - 0.5;
+    int2 centerCoord = (int2)floor(halfTexelCoord + 0.5);
+
+    context.Coord0 = BurtGIClampHalfCoord(centerCoord + int2(-1, -1), halfSize);
+    context.Coord1 = BurtGIClampHalfCoord(centerCoord + int2( 0, -1), halfSize);
+    context.Coord2 = BurtGIClampHalfCoord(centerCoord + int2( 1, -1), halfSize);
+    context.Coord3 = BurtGIClampHalfCoord(centerCoord + int2(-1,  0), halfSize);
+    context.Coord4 = BurtGIClampHalfCoord(centerCoord + int2( 0,  0), halfSize);
+    context.Coord5 = BurtGIClampHalfCoord(centerCoord + int2( 1,  0), halfSize);
+    context.Coord6 = BurtGIClampHalfCoord(centerCoord + int2(-1,  1), halfSize);
+    context.Coord7 = BurtGIClampHalfCoord(centerCoord + int2( 0,  1), halfSize);
+    context.Coord8 = BurtGIClampHalfCoord(centerCoord + int2( 1,  1), halfSize);
+
+    float fullDepth = BurtGILoadDepth(outputCoord, fullSize);
+    float3 fullNormalWS = BurtGILoadNormalWS(outputCoord, fullSize);
+    context.Weight0 = BurtGIGetSampleWeight(halfTexelCoord, fullDepth, fullNormalWS, context.Coord0, halfSize);
+    context.Weight1 = BurtGIGetSampleWeight(halfTexelCoord, fullDepth, fullNormalWS, context.Coord1, halfSize);
+    context.Weight2 = BurtGIGetSampleWeight(halfTexelCoord, fullDepth, fullNormalWS, context.Coord2, halfSize);
+    context.Weight3 = BurtGIGetSampleWeight(halfTexelCoord, fullDepth, fullNormalWS, context.Coord3, halfSize);
+    context.Weight4 = BurtGIGetSampleWeight(halfTexelCoord, fullDepth, fullNormalWS, context.Coord4, halfSize);
+    context.Weight5 = BurtGIGetSampleWeight(halfTexelCoord, fullDepth, fullNormalWS, context.Coord5, halfSize);
+    context.Weight6 = BurtGIGetSampleWeight(halfTexelCoord, fullDepth, fullNormalWS, context.Coord6, halfSize);
+    context.Weight7 = BurtGIGetSampleWeight(halfTexelCoord, fullDepth, fullNormalWS, context.Coord7, halfSize);
+    context.Weight8 = BurtGIGetSampleWeight(halfTexelCoord, fullDepth, fullNormalWS, context.Coord8, halfSize);
+
+    float invWeightSum = rcp(max(
+        context.Weight0 + context.Weight1 + context.Weight2 +
+        context.Weight3 + context.Weight4 + context.Weight5 +
+        context.Weight6 + context.Weight7 + context.Weight8,
+        0.0001));
+
+    context.Weight0 *= invWeightSum;
+    context.Weight1 *= invWeightSum;
+    context.Weight2 *= invWeightSum;
+    context.Weight3 *= invWeightSum;
+    context.Weight4 *= invWeightSum;
+    context.Weight5 *= invWeightSum;
+    context.Weight6 *= invWeightSum;
+    context.Weight7 *= invWeightSum;
+    context.Weight8 *= invWeightSum;
+    return context;
+}
+
+#define BURT_GI_UPSAMPLE_LIGHTING(TextureName, Context) \
+    (TextureName.Load(int3((int2)Context.Coord0, 0)) * Context.Weight0 \
+    + TextureName.Load(int3((int2)Context.Coord1, 0)) * Context.Weight1 \
+    + TextureName.Load(int3((int2)Context.Coord2, 0)) * Context.Weight2 \
+    + TextureName.Load(int3((int2)Context.Coord3, 0)) * Context.Weight3 \
+    + TextureName.Load(int3((int2)Context.Coord4, 0)) * Context.Weight4 \
+    + TextureName.Load(int3((int2)Context.Coord5, 0)) * Context.Weight5 \
+    + TextureName.Load(int3((int2)Context.Coord6, 0)) * Context.Weight6 \
+    + TextureName.Load(int3((int2)Context.Coord7, 0)) * Context.Weight7 \
+    + TextureName.Load(int3((int2)Context.Coord8, 0)) * Context.Weight8)
+
+void BurtGIScreenProbeBilateralUpsample(uint2 dispatchThreadId, bool writeBackface, bool writeSpecular)
+{
+    uint2 fullSize = max(uint2(1u, 1u), (uint2)_BurtGIScreenProbeBilateralUpsampleFullSizeAndInvSize.xy);
+    uint2 halfSize = max(uint2(1u, 1u), (uint2)_BurtGIScreenProbeBilateralUpsampleHalfSizeAndInvSize.xy);
+    if (any(dispatchThreadId >= fullSize))
+    {
+        return;
+    }
+
+    BurtGIUpsampleContext context = BurtGIGetUpsampleContext(dispatchThreadId, fullSize, halfSize);
+    _BurtGIDiffuseIndirectUpsampledTexture[dispatchThreadId] = max(BURT_GI_UPSAMPLE_LIGHTING(_BurtGIDiffuseIndirectTexture, context), 0.0);
+    if (writeBackface)
+    {
+        _BurtGIBackfaceDiffuseIndirectUpsampledTexture[dispatchThreadId] = max(BURT_GI_UPSAMPLE_LIGHTING(_BurtGIBackfaceDiffuseIndirectTexture, context), 0.0);
+    }
+
+    if (writeSpecular)
+    {
+        _BurtGIRoughSpecularIndirectUpsampledTexture[dispatchThreadId] = max(BURT_GI_UPSAMPLE_LIGHTING(_BurtGIRoughSpecularIndirectTexture, context), 0.0);
+    }
+}
+
+[numthreads(BURT_GI_BILATERAL_UPSAMPLE_THREADGROUP_SIZE, BURT_GI_BILATERAL_UPSAMPLE_THREADGROUP_SIZE, 1)]
+void MainCS_Diffuse(uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIScreenProbeBilateralUpsample(dispatchThreadId, false, false);
+}
+
+[numthreads(BURT_GI_BILATERAL_UPSAMPLE_THREADGROUP_SIZE, BURT_GI_BILATERAL_UPSAMPLE_THREADGROUP_SIZE, 1)]
+void MainCS_DiffuseBackface(uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIScreenProbeBilateralUpsample(dispatchThreadId, true, false);
+}
+
+[numthreads(BURT_GI_BILATERAL_UPSAMPLE_THREADGROUP_SIZE, BURT_GI_BILATERAL_UPSAMPLE_THREADGROUP_SIZE, 1)]
+void MainCS_DiffuseSpecular(uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIScreenProbeBilateralUpsample(dispatchThreadId, false, true);
+}
+
+[numthreads(BURT_GI_BILATERAL_UPSAMPLE_THREADGROUP_SIZE, BURT_GI_BILATERAL_UPSAMPLE_THREADGROUP_SIZE, 1)]
+void MainCS_All(uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIScreenProbeBilateralUpsample(dispatchThreadId, true, true);
+}
+
+#undef BURT_GI_UPSAMPLE_LIGHTING

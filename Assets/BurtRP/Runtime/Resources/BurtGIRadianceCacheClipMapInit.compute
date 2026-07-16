@@ -1,0 +1,178 @@
+#pragma kernel InitClipMapCS
+#pragma kernel InitClipMapFrameCountersCS
+#pragma kernel InitClipMapIndirectArgsCS
+#pragma kernel InitClipMapProbeStateCS
+#pragma kernel ClearProbeIndirectionCS
+#pragma kernel ClearProbeFreeListCS
+#pragma kernel ClearRadianceCacheUpdateResourcesCS
+
+#define BURT_GI_INIT_THREADGROUP_SIZE 8
+#define BURT_GI_CLEAR_THREADGROUP_SIZE 64
+#define BURT_GI_PRIORITY_HISTOGRAM_SIZE 16
+#define BURT_GI_INVALID_PROBE_INDEX 0xffffu
+#define BURT_GI_WRITE_DISPATCH_ARGS(Buffer, TupleIndex, X, Y, Z) Buffer[TupleIndex] = uint3((uint)(X), (uint)(Y), (uint)(Z))
+
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtGIRadianceCacheClipMapHistoryParams;
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+
+RWTexture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
+
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeFreeListBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer;
+RWStructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer;
+RWStructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapPriorityHistogramBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBuffer;
+
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBuffer;
+
+uint2 BurtGIIndirectionSize()
+{
+    return max(uint2(1u, 1u), (uint2)_BurtGIRadianceCacheClipMapIndirectionSize.xy);
+}
+
+[numthreads(BURT_GI_INIT_THREADGROUP_SIZE, BURT_GI_INIT_THREADGROUP_SIZE, 1)]
+void InitClipMapCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 indirectionSize = BurtGIIndirectionSize();
+    uint2 coord = dispatchThreadId.xy;
+
+    if (coord.x < indirectionSize.x && coord.y < indirectionSize.y)
+    {
+        _BurtGIRadianceCacheClipMapIndirectionTexture[coord] = BURT_GI_INVALID_PROBE_INDEX;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void InitClipMapFrameCountersCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    bool resetPersistentProbeState = _BurtGIRadianceCacheClipMapHistoryParams.x <= 0.5;
+
+    if (resetPersistentProbeState)
+    {
+        _BurtGIRadianceCacheClipMapProbeAllocatorBuffer[0] = 0u;
+        _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer[0] = 0u;
+    }
+
+    _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0] = 0u;
+    _BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer[0] = 0u;
+    _BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer[0] = 0u;
+    _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer[0] = 0u;
+    _BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBuffer[0] = 0u;
+    _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer[0] = 0u;
+    _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer[1] = 0u;
+}
+
+[numthreads(1, 1, 1)]
+void InitClipMapIndirectArgsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBuffer, 0, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBuffer, 1, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer, 0, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer, 1, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer, 2, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBuffer, 0, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBuffer, 0, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBuffer, 0, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBuffer, 0, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBuffer, 0, 0u, 1u, 1u);
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBuffer, 0, 0u, 1u, 1u);
+}
+
+[numthreads(BURT_GI_INIT_THREADGROUP_SIZE, BURT_GI_INIT_THREADGROUP_SIZE, 1)]
+void InitClipMapProbeStateCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 indirectionSize = BurtGIIndirectionSize();
+    uint2 coord = dispatchThreadId.xy;
+    uint linearIndex = coord.y * indirectionSize.x + coord.x;
+    bool resetPersistentProbeState = _BurtGIRadianceCacheClipMapHistoryParams.x <= 0.5;
+
+    if (linearIndex < _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        if (resetPersistentProbeState)
+        {
+            _BurtGIRadianceCacheClipMapProbeFreeListBuffer[linearIndex] = 0u;
+            _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer[linearIndex] = 0u;
+            _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer[linearIndex] = 0u;
+            _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[linearIndex] = float4(0.0, 0.0, 0.0, 0.0);
+        }
+
+        _BurtGIRadianceCacheClipMapProbeTraceDataBuffer[linearIndex] = float4(0.0, 0.0, 0.0, 0.0);
+    }
+
+    if (linearIndex < BURT_GI_PRIORITY_HISTOGRAM_SIZE)
+    {
+        _BurtGIRadianceCacheClipMapPriorityHistogramBuffer[linearIndex] = 0u;
+    }
+}
+
+[numthreads(BURT_GI_INIT_THREADGROUP_SIZE, BURT_GI_INIT_THREADGROUP_SIZE, 1)]
+void ClearProbeIndirectionCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 indirectionSize = BurtGIIndirectionSize();
+    uint2 coord = dispatchThreadId.xy;
+    if (coord.x < indirectionSize.x && coord.y < indirectionSize.y)
+    {
+        _BurtGIRadianceCacheClipMapIndirectionTexture[coord] = BURT_GI_INVALID_PROBE_INDEX;
+    }
+}
+
+[numthreads(BURT_GI_CLEAR_THREADGROUP_SIZE, 1, 1)]
+void ClearProbeFreeListCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint index = dispatchThreadId.x;
+    bool resetPersistentProbeState = _BurtGIRadianceCacheClipMapHistoryParams.x <= 0.5;
+
+    if (index == 0u && resetPersistentProbeState)
+    {
+        _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer[0] = 0u;
+    }
+
+    if (resetPersistentProbeState && index < _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        _BurtGIRadianceCacheClipMapProbeFreeListBuffer[index] = 0u;
+        _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer[index] = 0u;
+        _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[index] = float4(0.0, 0.0, 0.0, 0.0);
+    }
+}
+
+[numthreads(BURT_GI_CLEAR_THREADGROUP_SIZE, 1, 1)]
+void ClearRadianceCacheUpdateResourcesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint index = dispatchThreadId.x;
+
+    if (index == 0u)
+    {
+        _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0] = 0u;
+        _BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer[0] = 0u;
+        _BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer[0] = 0u;
+        _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer[0] = 0u;
+        _BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBuffer[0] = 0u;
+    }
+
+    if (index < 2u)
+    {
+        _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer[index] = 0u;
+    }
+
+    if (index < BURT_GI_PRIORITY_HISTOGRAM_SIZE)
+    {
+        _BurtGIRadianceCacheClipMapPriorityHistogramBuffer[index] = 0u;
+    }
+}

@@ -1,0 +1,251 @@
+#pragma kernel SelectMaxPriorityBucketCS
+#pragma kernel ClearProbePDFsCS
+#pragma kernel ComputeProbeWorldOffsets
+#pragma kernel ComputeProbeWorldOffsetsLiteCS
+
+#define BURT_GI_PRIORITY_HISTOGRAM_SIZE 16
+#define BURT_GI_RADIANCE_PROBE_PDF_COEFFICIENT_COUNT 10u
+#define BURT_GI_COMPUTE_PROBE_WORLD_OFFSET_THREADGROUP_SIZE 64
+#define BURT_GI_CLIPMAP_COUNT 6
+
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapPriorityHistogramBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
+Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
+SamplerState sampler_BurtGISceneVoxelOccupancyMipReadTexture;
+
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer;
+RWStructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer;
+RWStructuredBuffer<int> _BurtGIRadianceCacheClipMapRadianceProbePDFBuffer;
+
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+uint _BurtGIRadianceCacheClipMapNumProbesToTraceBudget;
+uint _BurtGIRadianceCacheClipMapRadianceProbePDFCoefficientCount;
+float4 _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtDeferredCameraWorldPosition;
+float4 _BurtGISceneVoxelCenterExtent;
+
+groupshared float4 BurtGISharedBestProbeWorldOffset[BURT_GI_COMPUTE_PROBE_WORLD_OFFSET_THREADGROUP_SIZE];
+groupshared float4 BurtGISharedBestProbeWorldOffsetReduction[8];
+
+uint BurtGIGetProbeIndexFromTraceData(uint probeTraceIndex)
+{
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        return 0u;
+    }
+
+    return asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) & 0x00ffffffu;
+}
+
+uint BurtGIGetClipmapIndexFromTraceData(uint probeTraceIndex)
+{
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        return 0u;
+    }
+
+    return (asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) >> 24) & 0xffu;
+}
+
+float BurtGIGetRadianceProbeClipmapCellSize(uint clipmapIndex)
+{
+    return _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[min(clipmapIndex, (uint)BURT_GI_CLIPMAP_COUNT - 1u)].w;
+}
+
+float BurtGIGetDistanceToNearestSurfaceGlobal(float3 translatedWorldPosition)
+{
+    uint width;
+    uint height;
+    uint depth;
+    _BurtGISceneVoxelOccupancyMipReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = uint3(width, height, depth);
+    if (any(volumeSize == 0u) || _BurtGISceneVoxelCenterExtent.w <= 0.0001)
+    {
+        return 1000.0;
+    }
+
+    float3 worldPosition = translatedWorldPosition + _BurtDeferredCameraWorldPosition.xyz;
+    float3 uvw = (worldPosition - _BurtGISceneVoxelCenterExtent.xyz) / (_BurtGISceneVoxelCenterExtent.www * 2.0) + 0.5;
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return 1000.0;
+    }
+
+    uint3 centerCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
+    float voxelSizeWS = max(_BurtGISceneVoxelCenterExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
+    float3 voxelExtent = voxelSizeWS * 0.5;
+    float bestDistance = 1000.0;
+
+    [unroll]
+    for (int z = -2; z <= 2; z++)
+    {
+        [unroll]
+        for (int y = -2; y <= 2; y++)
+        {
+            [unroll]
+            for (int x = -2; x <= 2; x++)
+            {
+                int3 sampleCoordSigned = (int3)centerCoord + int3(x, y, z);
+                if (any(sampleCoordSigned < 0) || any(sampleCoordSigned >= (int3)volumeSize))
+                {
+                    continue;
+                }
+
+                float4 occupancyMip = _BurtGISceneVoxelOccupancyMipReadTexture.Load(int4(sampleCoordSigned, 0));
+                float occupancy = saturate(max(max(occupancyMip.x, occupancyMip.y), occupancyMip.z));
+                if (occupancy <= 0.001)
+                {
+                    continue;
+                }
+
+                float3 sampleUVW = ((float3)sampleCoordSigned + 0.5) / (float3)volumeSize;
+                float3 sampleWorldCenter = (sampleUVW * 2.0 - 1.0) * _BurtGISceneVoxelCenterExtent.www + _BurtGISceneVoxelCenterExtent.xyz;
+                float3 outside = max(abs(worldPosition - sampleWorldCenter) - voxelExtent, 0.0);
+                bestDistance = min(bestDistance, length(outside));
+            }
+        }
+    }
+
+    return bestDistance;
+}
+
+uint BurtGIProbePDFBaseIndex(uint probeIndex)
+{
+    return probeIndex * max(BURT_GI_RADIANCE_PROBE_PDF_COEFFICIENT_COUNT, _BurtGIRadianceCacheClipMapRadianceProbePDFCoefficientCount);
+}
+
+[numthreads(1, 1, 1)]
+void SelectMaxPriorityBucketCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x != 0u || dispatchThreadId.y != 0u || dispatchThreadId.z != 0u)
+    {
+        return;
+    }
+
+    uint traceBudget = _BurtGIRadianceCacheClipMapNumProbesToTraceBudget * 4u;
+    uint traceSum = 0u;
+    uint priorityBucketIndex = 0u;
+    uint tracesFromPriorityBucket = traceBudget;
+
+    [loop]
+    for (; priorityBucketIndex < BURT_GI_PRIORITY_HISTOGRAM_SIZE; ++priorityBucketIndex)
+    {
+        uint bucketTraceCost = _BurtGIRadianceCacheClipMapPriorityHistogramBuffer[priorityBucketIndex];
+        if (traceSum + bucketTraceCost >= traceBudget)
+        {
+            tracesFromPriorityBucket = traceBudget - traceSum;
+            break;
+        }
+
+        traceSum += bucketTraceCost;
+    }
+
+    _BurtGIRadianceCacheClipMapMaxUpdateBucketBuffer[0] = priorityBucketIndex;
+    _BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBuffer[0] = tracesFromPriorityBucket;
+}
+
+[numthreads(64, 1, 1)]
+void ClearProbePDFsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint coefficientCount = max(BURT_GI_RADIANCE_PROBE_PDF_COEFFICIENT_COUNT, _BurtGIRadianceCacheClipMapRadianceProbePDFCoefficientCount);
+    uint coefficientLinearIndex = dispatchThreadId.x;
+    uint probeTraceIndex = coefficientLinearIndex / coefficientCount;
+    uint coefficientIndex = coefficientLinearIndex - probeTraceIndex * coefficientCount;
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0] || coefficientIndex >= BURT_GI_RADIANCE_PROBE_PDF_COEFFICIENT_COUNT)
+    {
+        return;
+    }
+
+    uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
+    uint baseIndex = BurtGIProbePDFBaseIndex(probeIndex);
+    _BurtGIRadianceCacheClipMapRadianceProbePDFBuffer[baseIndex + coefficientIndex] = 0;
+}
+
+void BurtGIComputeProbeWorldOffsets(uint3 groupId, uint groupThreadId)
+{
+    uint probeTraceIndex = groupId.z;
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0])
+    {
+        return;
+    }
+
+    uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
+    if (probeIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        return;
+    }
+
+    uint clipmapIndex = BurtGIGetClipmapIndexFromTraceData(probeTraceIndex);
+    float cellSize = BurtGIGetRadianceProbeClipmapCellSize(clipmapIndex);
+    float3 probeWorldCenter = _BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].xyz;
+    float3 probeTranslatedWorldCenter = probeWorldCenter - _BurtDeferredCameraWorldPosition.xyz;
+
+    float distanceToSurface = BurtGIGetDistanceToNearestSurfaceGlobal(probeTranslatedWorldCenter);
+    float tooCloseThreshold = 0.05 * cellSize;
+
+    if (distanceToSurface < tooCloseThreshold)
+    {
+        const float maxVoxelOffset = 0.25;
+        uint x = groupThreadId % 4u;
+        uint y = (groupThreadId % 16u) / 4u;
+        uint z = groupThreadId / 16u;
+        float3 offset = ((float3(x, y, z) * (2.0 / 3.0)) - 1.0) * maxVoxelOffset * cellSize;
+        float sampleDistanceToSurface = BurtGIGetDistanceToNearestSurfaceGlobal(probeTranslatedWorldCenter + offset);
+        BurtGISharedBestProbeWorldOffset[groupThreadId] = float4(offset, sampleDistanceToSurface);
+
+        GroupMemoryBarrierWithGroupSync();
+
+        if (groupThreadId < 8u)
+        {
+            float4 bestOffset = BurtGISharedBestProbeWorldOffset[groupThreadId * 8u];
+            [unroll]
+            for (uint i = 1u; i < 8u; ++i)
+            {
+                float4 candidate = BurtGISharedBestProbeWorldOffset[groupThreadId * 8u + i];
+                if (candidate.w > bestOffset.w)
+                {
+                    bestOffset = candidate;
+                }
+            }
+
+            BurtGISharedBestProbeWorldOffsetReduction[groupThreadId] = bestOffset;
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+
+        if (groupThreadId == 0u)
+        {
+            float4 bestOffset = BurtGISharedBestProbeWorldOffsetReduction[0];
+            [unroll]
+            for (uint i = 1u; i < 8u; ++i)
+            {
+                float4 candidate = BurtGISharedBestProbeWorldOffsetReduction[i];
+                if (candidate.w > bestOffset.w)
+                {
+                    bestOffset = candidate;
+                }
+            }
+
+            _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex] =
+                bestOffset.w >= tooCloseThreshold ? float4(bestOffset.xyz, 1.0) : float4(0.0, 0.0, 0.0, 0.0);
+        }
+    }
+    else if (groupThreadId == 0u)
+    {
+        _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex] = float4(0.0, 0.0, 0.0, 0.0);
+    }
+}
+
+[numthreads(BURT_GI_COMPUTE_PROBE_WORLD_OFFSET_THREADGROUP_SIZE, 1, 1)]
+void ComputeProbeWorldOffsets(uint3 groupId : SV_GroupID, uint groupThreadId : SV_GroupIndex)
+{
+    BurtGIComputeProbeWorldOffsets(groupId, groupThreadId);
+}
+
+[numthreads(BURT_GI_COMPUTE_PROBE_WORLD_OFFSET_THREADGROUP_SIZE, 1, 1)]
+void ComputeProbeWorldOffsetsLiteCS(uint3 groupId : SV_GroupID, uint groupThreadId : SV_GroupIndex)
+{
+    BurtGIComputeProbeWorldOffsets(groupId, groupThreadId);
+}

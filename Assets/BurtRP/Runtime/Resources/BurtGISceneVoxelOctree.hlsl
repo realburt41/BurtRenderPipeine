@@ -293,6 +293,48 @@ bool BurtGIVoxelOctreeRayTraceClipmaps(
         hitClipmapLevel = 3u;
     }
 
+    if ((_BurtGISceneVoxelClipmapValidMask & 16u) != 0u &&
+        BurtGIVoxelOctreeRayTraceResource(
+            _BurtGISceneVoxelClipmap4GeometryReadTexture,
+            _BurtGISceneVoxelClipmap4OctreeLeafLowTexture,
+            _BurtGISceneVoxelClipmap4OctreeLeafHighTexture,
+            _BurtGISceneVoxelClipmap4OctreeParentLowTexture,
+            _BurtGISceneVoxelClipmap4OctreeParentHighTexture,
+            _BurtGISceneVoxelClipmap4OctreeRootLowTexture,
+            _BurtGISceneVoxelClipmap4OctreeRootHighTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[4],
+            1.0,
+            originWS,
+            directionWS,
+            hitDistance,
+            candidateDistance) && candidateDistance < hitDistance)
+    {
+        hit = true;
+        hitDistance = candidateDistance;
+        hitClipmapLevel = 4u;
+    }
+
+    if ((_BurtGISceneVoxelClipmapValidMask & 32u) != 0u &&
+        BurtGIVoxelOctreeRayTraceResource(
+            _BurtGISceneVoxelClipmap5GeometryReadTexture,
+            _BurtGISceneVoxelClipmap5OctreeLeafLowTexture,
+            _BurtGISceneVoxelClipmap5OctreeLeafHighTexture,
+            _BurtGISceneVoxelClipmap5OctreeParentLowTexture,
+            _BurtGISceneVoxelClipmap5OctreeParentHighTexture,
+            _BurtGISceneVoxelClipmap5OctreeRootLowTexture,
+            _BurtGISceneVoxelClipmap5OctreeRootHighTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[5],
+            1.0,
+            originWS,
+            directionWS,
+            hitDistance,
+            candidateDistance) && candidateDistance < hitDistance)
+    {
+        hit = true;
+        hitDistance = candidateDistance;
+        hitClipmapLevel = 5u;
+    }
+
     return hit;
 }
 

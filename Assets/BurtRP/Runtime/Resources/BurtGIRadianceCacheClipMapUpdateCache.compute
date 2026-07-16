@@ -1,0 +1,302 @@
+#pragma kernel UpdateCacheForUsedProbesCS
+#pragma kernel UpdateCacheForUsedProbesLiteCS
+#pragma kernel AllocateUsedProbesCS
+
+#define BURT_GI_CLIPMAP_COUNT 6
+#define BURT_GI_ALLOCATE_USED_PROBE_THREADGROUP_SIZE 8
+#define BURT_GI_PRIORITY_HISTOGRAM_SIZE 16
+#define BURT_GI_INVALID_PROBE_INDEX 0xffffu
+#define BURT_GI_USED_PROBE_INDEX 0xfffeu
+
+RWTexture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
+Texture2D<uint> _BurtGIRadianceCacheClipMapLastFrameIndirectionTexture;
+
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeFreeListBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer;
+RWStructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapPriorityHistogramBuffer;
+
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapLastFrameProbeCoordToWorldCenter[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtGIRadianceCacheClipMapHistoryParams;
+float4 _BurtDeferredCameraWorldPosition;
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+uint _BurtGIRadianceCacheClipMapFrameIndex;
+uint _BurtGIRadianceCacheClipMapNumProbesToTraceBudget;
+float _BurtGIRadianceCacheClipMapSupersampleDistanceFromCameraSq;
+float _BurtGIRadianceCacheClipMapDownsampleDistanceFromCameraSq;
+
+uint BurtGIClipmapCount()
+{
+    return max(1u, min((uint)_BurtGIRadianceCacheClipMapParams.z, (uint)BURT_GI_CLIPMAP_COUNT));
+}
+
+uint BurtGIClipmapResolution()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.w);
+}
+
+uint2 BurtGIIndirectionSize()
+{
+    return max(uint2(1u, 1u), (uint2)_BurtGIRadianceCacheClipMapIndirectionSize.xy);
+}
+
+uint2 BurtGIPackIndirectionCoord(uint clipmapIndex, uint3 probeCoord)
+{
+    uint clipmapResolution = BurtGIClipmapResolution();
+    return uint2(clipmapIndex * clipmapResolution + probeCoord.x, probeCoord.y + probeCoord.z * clipmapResolution);
+}
+
+bool BurtGIDecodeIndirectionCoord(uint2 indirectionCoord, out uint clipmapIndex, out uint3 probeCoord)
+{
+    uint clipmapResolution = BurtGIClipmapResolution();
+    clipmapIndex = indirectionCoord.x / clipmapResolution;
+    probeCoord = uint3(indirectionCoord.x - clipmapIndex * clipmapResolution, indirectionCoord.y % clipmapResolution, indirectionCoord.y / clipmapResolution);
+    return clipmapIndex < BurtGIClipmapCount() &&
+        probeCoord.x < clipmapResolution &&
+        probeCoord.y < clipmapResolution &&
+        probeCoord.z < clipmapResolution;
+}
+
+bool BurtGIWorldPositionToProbeCoordInClipmap(float3 worldPosition, uint clipmapIndex, out uint3 probeCoord)
+{
+    uint clipmapResolution = BurtGIClipmapResolution();
+    if (clipmapIndex >= BurtGIClipmapCount())
+    {
+        probeCoord = uint3(0u, 0u, 0u);
+        return false;
+    }
+
+    float4 worldToProbeCoord = _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[clipmapIndex];
+    int3 signedProbeCoord = (int3)floor(worldPosition * worldToProbeCoord.w + worldToProbeCoord.xyz);
+    if (signedProbeCoord.x >= 0 &&
+        signedProbeCoord.y >= 0 &&
+        signedProbeCoord.z >= 0 &&
+        signedProbeCoord.x < (int)clipmapResolution &&
+        signedProbeCoord.y < (int)clipmapResolution &&
+        signedProbeCoord.z < (int)clipmapResolution)
+    {
+        probeCoord = (uint3)signedProbeCoord;
+        return true;
+    }
+
+    probeCoord = uint3(0u, 0u, 0u);
+    return false;
+}
+
+uint BurtGIGetProbeTraceCost(float3 probeWorldCenter)
+{
+    float3 cameraToProbe = _BurtDeferredCameraWorldPosition.xyz - probeWorldCenter;
+    float distanceFromCameraSq = dot(cameraToProbe, cameraToProbe);
+    uint traceCost = 1u;
+
+    if (distanceFromCameraSq < _BurtGIRadianceCacheClipMapSupersampleDistanceFromCameraSq)
+    {
+        traceCost = 16u;
+    }
+
+    if (distanceFromCameraSq < _BurtGIRadianceCacheClipMapDownsampleDistanceFromCameraSq)
+    {
+        traceCost = 4u;
+    }
+
+    return traceCost;
+}
+
+uint BurtGIGetPriorityBucketIndex(uint lastTracedFrameIndex, uint lastUsedFrameIndex, uint clipmapIndex)
+{
+    if (lastTracedFrameIndex == 0u)
+    {
+        return 0u;
+    }
+
+    uint framesBetweenTracedAndUsed = lastUsedFrameIndex > lastTracedFrameIndex
+        ? lastUsedFrameIndex - lastTracedFrameIndex
+        : 1u;
+    float updateImportance = (float)framesBetweenTracedAndUsed / ((float)clipmapIndex + 1.0);
+    uint logBucket = (uint)clamp(log2(updateImportance), 0.0, (float)(BURT_GI_PRIORITY_HISTOGRAM_SIZE - 2u));
+    return BURT_GI_PRIORITY_HISTOGRAM_SIZE - 1u - logBucket;
+}
+
+void BurtGIUpdateCacheForUsedProbes(uint3 dispatchThreadId)
+{
+    if (_BurtGIRadianceCacheClipMapHistoryParams.x <= 0.5)
+    {
+        return;
+    }
+
+    uint2 indirectionSize = BurtGIIndirectionSize();
+    uint2 lastFrameIndirectionCoord = dispatchThreadId.xy;
+    if (lastFrameIndirectionCoord.x >= indirectionSize.x || lastFrameIndirectionCoord.y >= indirectionSize.y)
+    {
+        return;
+    }
+
+    uint clipmapIndex;
+    uint3 lastFrameProbeCoord;
+    if (!BurtGIDecodeIndirectionCoord(lastFrameIndirectionCoord, clipmapIndex, lastFrameProbeCoord))
+    {
+        return;
+    }
+
+    uint lastFrameProbeIndex = _BurtGIRadianceCacheClipMapLastFrameIndirectionTexture.Load(int3(lastFrameIndirectionCoord, 0));
+    if (lastFrameProbeIndex == BURT_GI_INVALID_PROBE_INDEX || lastFrameProbeIndex == BURT_GI_USED_PROBE_INDEX)
+    {
+        return;
+    }
+
+    float4 lastFrameCoordToWorld = _BurtGIRadianceCacheClipMapLastFrameProbeCoordToWorldCenter[clipmapIndex];
+    float3 probeWorldCenter = lastFrameCoordToWorld.xyz + (float3)lastFrameProbeCoord * lastFrameCoordToWorld.w;
+
+    uint3 currentProbeCoord;
+    bool reused = false;
+    if (BurtGIWorldPositionToProbeCoordInClipmap(probeWorldCenter, clipmapIndex, currentProbeCoord))
+    {
+        uint2 currentIndirectionCoord = BurtGIPackIndirectionCoord(clipmapIndex, currentProbeCoord);
+        if (currentIndirectionCoord.x < indirectionSize.x && currentIndirectionCoord.y < indirectionSize.y)
+        {
+            uint currentMarker = _BurtGIRadianceCacheClipMapIndirectionTexture[currentIndirectionCoord];
+            uint lastUsedFrame = _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer[lastFrameProbeIndex];
+            uint frameDelta = _BurtGIRadianceCacheClipMapFrameIndex >= lastUsedFrame ? _BurtGIRadianceCacheClipMapFrameIndex - lastUsedFrame : 0u;
+            uint keepFrameCount = (uint)max(1.0, _BurtGIRadianceCacheClipMapHistoryParams.y);
+            uint keepFrameCountHeuristic = keepFrameCount;
+            uint allocatedProbeCount = min(_BurtGIRadianceCacheClipMapProbeAllocatorBuffer[0], _BurtGIRadianceCacheClipMapMaxProbeCount);
+            uint freeProbeCount = (_BurtGIRadianceCacheClipMapMaxProbeCount - allocatedProbeCount) + _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer[0];
+            if (freeProbeCount < _BurtGIRadianceCacheClipMapNumProbesToTraceBudget)
+            {
+                keepFrameCountHeuristic = min(2u, keepFrameCount);
+            }
+            if (currentMarker == BURT_GI_USED_PROBE_INDEX || frameDelta < keepFrameCountHeuristic)
+            {
+                reused = true;
+                if (currentMarker == BURT_GI_USED_PROBE_INDEX)
+                {
+                    _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer[lastFrameProbeIndex] = _BurtGIRadianceCacheClipMapFrameIndex;
+                }
+
+                _BurtGIRadianceCacheClipMapIndirectionTexture[currentIndirectionCoord] = lastFrameProbeIndex;
+                InterlockedMax(_BurtGIRadianceCacheClipMapProbeAllocatorBuffer[0], lastFrameProbeIndex + 1u);
+            }
+        }
+    }
+
+    if (!reused)
+    {
+        uint freeListIndex;
+        InterlockedAdd(_BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer[0], 1u, freeListIndex);
+        if (freeListIndex < _BurtGIRadianceCacheClipMapMaxProbeCount)
+        {
+            _BurtGIRadianceCacheClipMapProbeFreeListBuffer[freeListIndex] = lastFrameProbeIndex;
+        }
+    }
+}
+
+[numthreads(BURT_GI_ALLOCATE_USED_PROBE_THREADGROUP_SIZE, BURT_GI_ALLOCATE_USED_PROBE_THREADGROUP_SIZE, 1)]
+void UpdateCacheForUsedProbesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIUpdateCacheForUsedProbes(dispatchThreadId);
+}
+
+[numthreads(BURT_GI_ALLOCATE_USED_PROBE_THREADGROUP_SIZE, BURT_GI_ALLOCATE_USED_PROBE_THREADGROUP_SIZE, 1)]
+void UpdateCacheForUsedProbesLiteCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIUpdateCacheForUsedProbes(dispatchThreadId);
+}
+
+[numthreads(BURT_GI_ALLOCATE_USED_PROBE_THREADGROUP_SIZE, BURT_GI_ALLOCATE_USED_PROBE_THREADGROUP_SIZE, 1)]
+void AllocateUsedProbesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 indirectionSize = BurtGIIndirectionSize();
+    uint2 indirectionCoord = dispatchThreadId.xy;
+    if (indirectionCoord.x >= indirectionSize.x || indirectionCoord.y >= indirectionSize.y)
+    {
+        return;
+    }
+
+    uint marker = _BurtGIRadianceCacheClipMapIndirectionTexture[indirectionCoord];
+    if (marker == BURT_GI_INVALID_PROBE_INDEX)
+    {
+        return;
+    }
+
+    uint clipmapIndex;
+    uint3 probeCoord;
+    if (!BurtGIDecodeIndirectionCoord(indirectionCoord, clipmapIndex, probeCoord))
+    {
+        _BurtGIRadianceCacheClipMapIndirectionTexture[indirectionCoord] = BURT_GI_INVALID_PROBE_INDEX;
+        return;
+    }
+
+    uint probeIndex = marker;
+    uint lastTracedFrame = 0u;
+    uint lastUsedFrame = 0u;
+    if (marker == BURT_GI_USED_PROBE_INDEX)
+    {
+        bool poppedFreeProbe = false;
+        [loop]
+        for (uint popAttempt = 0u; popAttempt < 8u; ++popAttempt)
+        {
+            uint freeListCount = _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer[0];
+            if (freeListCount == 0u)
+            {
+                break;
+            }
+
+            uint previousFreeListCount;
+            InterlockedCompareExchange(
+                _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer[0],
+                freeListCount,
+                freeListCount - 1u,
+                previousFreeListCount);
+            if (previousFreeListCount == freeListCount)
+            {
+                probeIndex = _BurtGIRadianceCacheClipMapProbeFreeListBuffer[min(freeListCount - 1u, _BurtGIRadianceCacheClipMapMaxProbeCount - 1u)];
+                poppedFreeProbe = true;
+                break;
+            }
+        }
+
+        if (!poppedFreeProbe)
+        {
+            InterlockedAdd(_BurtGIRadianceCacheClipMapProbeAllocatorBuffer[0], 1u, probeIndex);
+        }
+
+        lastTracedFrame = 0u;
+        lastUsedFrame = _BurtGIRadianceCacheClipMapFrameIndex;
+    }
+    else if (probeIndex < _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        lastTracedFrame = _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer[probeIndex];
+        lastUsedFrame = _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer[probeIndex];
+    }
+
+    if (probeIndex < _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        float4 coordToWorld = _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[clipmapIndex];
+        float3 probeWorldCenter = coordToWorld.xyz + (float3)probeCoord * coordToWorld.w;
+        uint packedClipmapAndProbe = (clipmapIndex << 24) | (probeIndex & 0x00ffffffu);
+
+        _BurtGIRadianceCacheClipMapIndirectionTexture[indirectionCoord] = probeIndex;
+        if (marker == BURT_GI_USED_PROBE_INDEX)
+        {
+            _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer[probeIndex] = 0u;
+        }
+
+        _BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer[probeIndex] = _BurtGIRadianceCacheClipMapFrameIndex;
+        _BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeIndex] = float4(probeWorldCenter, asfloat(packedClipmapAndProbe));
+
+        uint priorityBucketIndex = BurtGIGetPriorityBucketIndex(lastTracedFrame, lastUsedFrame, clipmapIndex);
+        uint traceCost = BurtGIGetProbeTraceCost(probeWorldCenter);
+        InterlockedAdd(_BurtGIRadianceCacheClipMapPriorityHistogramBuffer[priorityBucketIndex], traceCost);
+    }
+    else
+    {
+        _BurtGIRadianceCacheClipMapIndirectionTexture[indirectionCoord] = BURT_GI_INVALID_PROBE_INDEX;
+    }
+}

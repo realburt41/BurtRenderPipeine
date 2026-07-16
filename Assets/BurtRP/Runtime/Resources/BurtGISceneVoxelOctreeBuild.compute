@@ -1,0 +1,174 @@
+#pragma kernel SceneVoxelBuildOctreeLeafCS
+#pragma kernel SceneVoxelBuildOctreeParentCS
+#pragma kernel SceneVoxelBuildOctreeRootCS
+
+Texture3D<float4> _BurtGISceneVoxelGeometryReadTexture;
+
+RWTexture3D<uint> _BurtGISceneVoxelOctreeLeafLowTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeLeafHighTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeParentLowTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeParentHighTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeRootLowTexture;
+RWTexture3D<uint> _BurtGISceneVoxelOctreeRootHighTexture;
+
+void BurtGISetOctreeMaskBit(uint bitIndex, inout uint lowMask, inout uint highMask)
+{
+    if (bitIndex < 32u)
+    {
+        lowMask |= 1u << bitIndex;
+    }
+    else
+    {
+        highMask |= 1u << (bitIndex - 32u);
+    }
+}
+
+bool BurtGIOctreeNodeOccupied(uint lowMask, uint highMask)
+{
+    return lowMask != 0u || highMask != 0u;
+}
+
+[numthreads(1, 1, 1)]
+void SceneVoxelBuildOctreeLeafCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint leafWidth;
+    uint leafHeight;
+    uint leafDepth;
+    _BurtGISceneVoxelOctreeLeafLowTexture.GetDimensions(leafWidth, leafHeight, leafDepth);
+    if (any(dispatchThreadId >= uint3(leafWidth, leafHeight, leafDepth)))
+    {
+        return;
+    }
+
+    uint geometryWidth;
+    uint geometryHeight;
+    uint geometryDepth;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(geometryWidth, geometryHeight, geometryDepth);
+    uint3 geometrySize = max(uint3(geometryWidth, geometryHeight, geometryDepth), uint3(1u, 1u, 1u));
+    uint3 baseCoord = dispatchThreadId * 4u;
+    uint lowMask = 0u;
+    uint highMask = 0u;
+    [unroll]
+    for (uint z = 0u; z < 4u; ++z)
+    {
+        [unroll]
+        for (uint y = 0u; y < 4u; ++y)
+        {
+            [unroll]
+            for (uint x = 0u; x < 4u; ++x)
+            {
+                uint3 voxelCoord = baseCoord + uint3(x, y, z);
+                if (any(voxelCoord >= geometrySize))
+                {
+                    continue;
+                }
+
+                float occupancy = saturate(_BurtGISceneVoxelGeometryReadTexture.Load(int4(voxelCoord, 0)).a);
+                if (occupancy > 0.001)
+                {
+                    BurtGISetOctreeMaskBit(x + y * 4u + z * 16u, lowMask, highMask);
+                }
+            }
+        }
+    }
+
+    _BurtGISceneVoxelOctreeLeafLowTexture[dispatchThreadId] = lowMask;
+    _BurtGISceneVoxelOctreeLeafHighTexture[dispatchThreadId] = highMask;
+}
+
+[numthreads(1, 1, 1)]
+void SceneVoxelBuildOctreeParentCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint parentWidth;
+    uint parentHeight;
+    uint parentDepth;
+    _BurtGISceneVoxelOctreeParentLowTexture.GetDimensions(parentWidth, parentHeight, parentDepth);
+    if (any(dispatchThreadId >= uint3(parentWidth, parentHeight, parentDepth)))
+    {
+        return;
+    }
+
+    uint leafWidth;
+    uint leafHeight;
+    uint leafDepth;
+    _BurtGISceneVoxelOctreeLeafLowTexture.GetDimensions(leafWidth, leafHeight, leafDepth);
+    uint3 leafSize = uint3(leafWidth, leafHeight, leafDepth);
+    uint3 baseCoord = dispatchThreadId * 4u;
+    uint lowMask = 0u;
+    uint highMask = 0u;
+    [unroll]
+    for (uint z = 0u; z < 4u; ++z)
+    {
+        [unroll]
+        for (uint y = 0u; y < 4u; ++y)
+        {
+            [unroll]
+            for (uint x = 0u; x < 4u; ++x)
+            {
+                uint3 childCoord = baseCoord + uint3(x, y, z);
+                if (any(childCoord >= leafSize))
+                {
+                    continue;
+                }
+
+                uint low = _BurtGISceneVoxelOctreeLeafLowTexture[childCoord];
+                uint high = _BurtGISceneVoxelOctreeLeafHighTexture[childCoord];
+                if (BurtGIOctreeNodeOccupied(low, high))
+                {
+                    BurtGISetOctreeMaskBit(x + y * 4u + z * 16u, lowMask, highMask);
+                }
+            }
+        }
+    }
+
+    _BurtGISceneVoxelOctreeParentLowTexture[dispatchThreadId] = lowMask;
+    _BurtGISceneVoxelOctreeParentHighTexture[dispatchThreadId] = highMask;
+}
+
+[numthreads(1, 1, 1)]
+void SceneVoxelBuildOctreeRootCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint rootWidth;
+    uint rootHeight;
+    uint rootDepth;
+    _BurtGISceneVoxelOctreeRootLowTexture.GetDimensions(rootWidth, rootHeight, rootDepth);
+    if (any(dispatchThreadId >= uint3(rootWidth, rootHeight, rootDepth)))
+    {
+        return;
+    }
+
+    uint parentWidth;
+    uint parentHeight;
+    uint parentDepth;
+    _BurtGISceneVoxelOctreeParentLowTexture.GetDimensions(parentWidth, parentHeight, parentDepth);
+    uint3 parentSize = uint3(parentWidth, parentHeight, parentDepth);
+    uint lowMask = 0u;
+    uint highMask = 0u;
+    [unroll]
+    for (uint z = 0u; z < 4u; ++z)
+    {
+        [unroll]
+        for (uint y = 0u; y < 4u; ++y)
+        {
+            [unroll]
+            for (uint x = 0u; x < 4u; ++x)
+            {
+                uint3 childCoord = uint3(x, y, z);
+                if (any(childCoord >= parentSize))
+                {
+                    continue;
+                }
+
+                uint low = _BurtGISceneVoxelOctreeParentLowTexture[childCoord];
+                uint high = _BurtGISceneVoxelOctreeParentHighTexture[childCoord];
+                if (BurtGIOctreeNodeOccupied(low, high))
+                {
+                    BurtGISetOctreeMaskBit(x + y * 4u + z * 16u, lowMask, highMask);
+                }
+            }
+        }
+    }
+
+    _BurtGISceneVoxelOctreeRootLowTexture[dispatchThreadId] = lowMask;
+    _BurtGISceneVoxelOctreeRootHighTexture[dispatchThreadId] = highMask;
+}

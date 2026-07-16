@@ -12,7 +12,7 @@ namespace Burt.RenderPipeline
     [DisallowMultipleComponent]
     public sealed class BurtLocalSkyProbe : MonoBehaviour
     {
-        private const float CameraSelectionForwardOffset = 2f;
+        internal const float DefaultCameraSelectionForwardDistance = 2f;
 
         [Tooltip("XRender ambient probe shape used when selecting the best local sky probe.")]
         public BurtLocalSkyProbeShape shape = BurtLocalSkyProbeShape.Sphere;
@@ -35,9 +35,25 @@ namespace Burt.RenderPipeline
         [Tooltip("Higher-priority probes win before distance is considered.")]
         public int priority;
 
+        [Tooltip("Show the XRender-style local sky probe debug volume in the Scene view.")]
+        public bool showDebugSphere = true;
+
         private static readonly List<BurtLocalSkyProbe> ActiveProbes = new List<BurtLocalSkyProbe>();
+        private static bool globalShowDebugSphere = true;
+        private static float cameraSelectionForwardDistance = DefaultCameraSelectionForwardDistance;
 
         internal bool IsTraceReady => isActiveAndEnabled && colorCubemap != null && depthCubemap != null && probeOffsetDistanceMax > 0.01f && probeSampleLerpDistanceMax > 0.01f && intensity > 0f;
+        internal static float CameraSelectionForwardDistance => cameraSelectionForwardDistance;
+
+        internal static void SetGlobalDebugVisibility(bool visible)
+        {
+            globalShowDebugSphere = visible;
+        }
+
+        internal static void SetCameraSelectionForwardDistance(float distance)
+        {
+            cameraSelectionForwardDistance = Mathf.Max(0f, distance);
+        }
 
         private void OnEnable()
         {
@@ -61,7 +77,7 @@ namespace Burt.RenderPipeline
             }
 
             var cameraTransform = camera.transform;
-            var cameraPosition = cameraTransform.position + cameraTransform.forward * CameraSelectionForwardOffset;
+            var cameraPosition = cameraTransform.position + cameraTransform.forward * cameraSelectionForwardDistance;
             if (TryChooseBestForCameraPosition(cameraPosition, BurtLocalSkyProbeShape.Box, out probe))
             {
                 return true;
@@ -116,8 +132,29 @@ namespace Burt.RenderPipeline
             return distanceSq <= maxDistance * maxDistance;
         }
 
+        private void OnDrawGizmos()
+        {
+            if (globalShowDebugSphere && showDebugSphere)
+            {
+                DrawDebugVolume(false);
+            }
+        }
+
         private void OnDrawGizmosSelected()
         {
+            if (!showDebugSphere)
+            {
+                DrawDebugVolume(true);
+            }
+        }
+
+        private void DrawDebugVolume(bool selected)
+        {
+            var ready = colorCubemap != null && depthCubemap != null && intensity > 0f;
+            Gizmos.color = ready
+                ? new Color(0.42f, 0.58f, 1f, selected ? 0.95f : 0.55f)
+                : new Color(1f, 0.45f, 0.22f, selected ? 0.95f : 0.55f);
+
             if (shape == BurtLocalSkyProbeShape.Box)
             {
                 var probeTransform = transform;

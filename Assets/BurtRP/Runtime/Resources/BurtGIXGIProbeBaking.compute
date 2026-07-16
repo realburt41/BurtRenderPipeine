@@ -1,0 +1,670 @@
+#pragma kernel GenSkyVisibilityCS
+#pragma kernel GenTimeSliceCS
+#pragma kernel VoxelizePlacementTriangles
+#pragma kernel ProbeVolumeCull
+#pragma kernel GenBrick
+
+#define BURT_XGI_BAKING_THREADGROUP_SIZE 8
+
+Texture3D<float> _XGISdfApply_SdfTexture;
+Texture3D<float2> _XGIGenBrickPass_ProbeVolumeCullData;
+RWTexture3D<float4> _RW_XGIPlacementVoxelizeTriangles_Occupancy;
+RWStructuredBuffer<float4> _RW_XGISkyVisibilityGen_Output;
+RWStructuredBuffer<float3> _RW_XGISkyVisibilityGen_DirectionOutput;
+RWStructuredBuffer<uint> _RW_XGISkyVisibilityGen_DirectionEncodedOutput;
+StructuredBuffer<float3> _XGISkyVisibilityGen_ProbePositions;
+StructuredBuffer<float4> _XGISkyVisibilityGen_ParamtersBuffer;
+StructuredBuffer<float3> _XGISkyVisibilityGen_PrecomputedDirections;
+
+RWStructuredBuffer<float> _RW_XGITimeSliceGen_Output;
+StructuredBuffer<float3> _XGITimeSliceGen_ProbePositions;
+StructuredBuffer<float4> _XGITimeSliceGen_ParamtersBuffer;
+StructuredBuffer<float> _XGITimeSliceGen_SkyVisibility;
+RWTexture3D<float2> _RW_XGIPlacementProbeVolumeCullPass_Result;
+RWStructuredBuffer<uint> _RW_XGIGenBrickPass_BrickCount;
+RWStructuredBuffer<float4> _RW_XGIGenBrickPass_Bricks;
+
+struct XGIPlacementVoxelizeTriangle
+{
+    float4 a;
+    float4 b;
+    float4 c;
+};
+
+struct XGIPlacementVoxelizeBounds
+{
+    float4 center;
+    float4 extents;
+};
+
+StructuredBuffer<XGIPlacementVoxelizeTriangle> _XGIPlacementVoxelizeTriangles_Triangles;
+StructuredBuffer<XGIPlacementVoxelizeBounds> _XGIPlacementVoxelizeTriangles_Bounds;
+
+struct XGITimeSliceLightData
+{
+    float4 positionType;
+    float4 directionRange;
+    float4 colorOuterCos;
+    float4 spotInnerCos;
+};
+
+StructuredBuffer<XGITimeSliceLightData> _XGITimeSliceGen_Lights;
+
+struct XGIProbeVolumeGpuOBB
+{
+    float3 corner;
+    float3 X;
+    float3 Y;
+    float3 Z;
+    int minControllerSubdivLevel;
+    int maxControllerSubdivLevel;
+    int fillEmptySpaces;
+    int maxSubdivLevelInsideVolume;
+};
+
+StructuredBuffer<XGIProbeVolumeGpuOBB> _XGIPlacementProbeVolumeCullPass_ProbeVolumes;
+
+float _XGISkyVisibilityGen_OffsetRay;
+float _XGISkyVisibilityGen_MaxBounces;
+float _XGISkyVisibilityGen_SampleCount;
+float _XGISkyVisibilityGen_SampleIndex;
+float4 _XGISkyVisibilityGen_Params;
+float4 _XGISkyVisibilityGen_Params1;
+
+float _XGITimeSliceGen_OffsetRay;
+float _XGITimeSliceGen_MaxBounces;
+float _XGITimeSliceGen_SampleCount;
+float _XGITimeSliceGen_SampleIndex;
+float4 _XGITimeSliceGen_Params;
+float4 _XGITimeSliceGen_Params1;
+float4 _XGITimeSliceGen_Params2;
+float4 _XGISdfApply_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeSizeWS;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeOffsetWS;
+float4 _XGIPlacementProbeVolumeCullPass_MaxBrickCount;
+float4 _XGIPlacementVoxelizeTriangles_CellMinWS;
+float4 _XGIPlacementVoxelizeTriangles_CellSizeWS;
+float4 _XGIPlacementVoxelizeTriangles_Params;
+float _XGIPlacementProbeVolumeCullPass_ProbeVolumeCount;
+float _XGIPlacementProbeVolumeCullPass_SubdivLevel;
+float _XGIPlacementProbeVolumeCullPass_BrickSize;
+float _XGIPlacementProbeVolumeCullPass_Padding0;
+float4 _XGIGenBrickPass_VolumeSizeInBricks;
+float4 _XGIGenBrickPass_VolumeOffsetInBricks;
+float4 _XGIGenBrickPass_MaxBrickCount;
+float _XGIGenBrickPass_SubdivLevel;
+float _XGIGenBrickPass_Padding0;
+float _XGIGenBrickPass_Padding1;
+float _XGIGenBrickPass_Padding2;
+
+#define BURT_XGI_SH_BASIS0 0.28209479177387814
+#define BURT_XGI_SH_BASIS1 0.4886025119029199
+#define BURT_XGI_SH_BASIS2 1.092548430592079
+#define BURT_XGI_SH_BASIS3 0.31539156525252
+#define BURT_XGI_SH_BASIS4 0.5462742152960395
+
+float3 BurtXGIHashDirection(uint seed)
+{
+    float u = frac(sin((float)seed * 12.9898 + 78.233) * 43758.5453);
+    float v = frac(sin((float)seed * 39.3467 + 11.135) * 24634.6345);
+    float z = u * 2.0 - 1.0;
+    float r = sqrt(saturate(1.0 - z * z));
+    float phi = v * 6.28318530718;
+    return float3(cos(phi) * r, abs(z), sin(phi) * r);
+}
+
+float3 BurtXGIHashSphereDirection(uint seed)
+{
+    float u = frac(sin((float)seed * 12.9898 + 78.233) * 43758.5453);
+    float v = frac(sin((float)seed * 39.3467 + 11.135) * 24634.6345);
+    float z = u * 2.0 - 1.0;
+    float r = sqrt(saturate(1.0 - z * z));
+    float phi = v * 6.28318530718;
+    return float3(cos(phi) * r, z, sin(phi) * r);
+}
+
+float BurtXGIHash01(uint seed)
+{
+    return frac(sin((float)seed * 12.9898 + 78.233) * 43758.5453);
+}
+
+float2 BurtXGIHammersley(uint sampleIndex, uint sampleCount, uint seed)
+{
+    float invCount = rcp(max((float)sampleCount, 1.0));
+    float u = frac(((float)sampleIndex + 0.5) * invCount + BurtXGIHash01(seed));
+    float v = frac((float)reversebits(sampleIndex ^ (seed * 1664525u + 1013904223u)) * 2.3283064365386963e-10 + BurtXGIHash01(seed + 17u));
+    return float2(u, v);
+}
+
+float3 BurtXGIHammersleySphereDirection(uint sampleIndex, uint sampleCount, uint seed)
+{
+    float2 xi = BurtXGIHammersley(sampleIndex, sampleCount, seed);
+    float cosTheta = 1.0 - 2.0 * xi.y;
+    float sinTheta = sqrt(saturate(1.0 - cosTheta * cosTheta));
+    float phi = xi.x * 6.28318530718;
+    return float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
+}
+
+float3 BurtXGISafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSquared = dot(value, value);
+    return lengthSquared > 0.00000001 ? value * rsqrt(lengthSquared) : fallback;
+}
+
+float2 BurtXGIProbeBakingProjectOBB(XGIProbeVolumeGpuOBB obb, float3 axis)
+{
+    float pMin = dot(axis, obb.corner);
+    float pMax = pMin;
+    [unroll]
+    for (int z = 0; z < 2; ++z)
+    {
+        [unroll]
+        for (int y = 0; y < 2; ++y)
+        {
+            [unroll]
+            for (int x = 0; x < 2; ++x)
+            {
+                float3 vertex = obb.corner + obb.X * x + obb.Y * y + obb.Z * z;
+                float projection = dot(axis, vertex);
+                pMin = min(pMin, projection);
+                pMax = max(pMax, projection);
+            }
+        }
+    }
+
+    return float2(pMin, pMax);
+}
+
+bool BurtXGIProbeBakingOBBAxisOverlaps(XGIProbeVolumeGpuOBB obbA, XGIProbeVolumeGpuOBB obbB, float3 axis)
+{
+    float axisLengthSq = dot(axis, axis);
+    if (axisLengthSq <= 1.0e-8)
+    {
+        return true;
+    }
+
+    float3 normalizedAxis = axis * rsqrt(axisLengthSq);
+    float2 projectionA = BurtXGIProbeBakingProjectOBB(obbA, normalizedAxis);
+    float2 projectionB = BurtXGIProbeBakingProjectOBB(obbB, normalizedAxis);
+    return !(projectionA.y < projectionB.x || projectionB.y < projectionA.x);
+}
+
+bool BurtXGIProbeBakingOBBIntersects(XGIProbeVolumeGpuOBB obbA, XGIProbeVolumeGpuOBB obbB)
+{
+    return BurtXGIProbeBakingOBBAxisOverlaps(obbA, obbB, obbA.X) &&
+        BurtXGIProbeBakingOBBAxisOverlaps(obbA, obbB, obbA.Y) &&
+        BurtXGIProbeBakingOBBAxisOverlaps(obbA, obbB, obbA.Z) &&
+        BurtXGIProbeBakingOBBAxisOverlaps(obbA, obbB, obbB.X) &&
+        BurtXGIProbeBakingOBBAxisOverlaps(obbA, obbB, obbB.Y) &&
+        BurtXGIProbeBakingOBBAxisOverlaps(obbA, obbB, obbB.Z);
+}
+
+float BurtXGIProbeBakingSampleSdfByUVWithClipmap(float3 position01, uint clipmapIndex)
+{
+    uint3 textureSize = max((uint3)_XGISdfApply_TextureSize.xyz, uint3(1u, 1u, 1u));
+    uint border = (uint)max((int)_XGISdfApply_TextureSize.w, 0);
+    uint3 coord = min((uint3)(saturate(position01) * (float3)textureSize), textureSize - 1u);
+    coord.z += clipmapIndex * (textureSize.z + border);
+    return _XGISdfApply_SdfTexture.Load(int4((int)coord.x, (int)coord.y, (int)coord.z, 0));
+}
+
+uint BurtXGILinearSearchClosestPrecomputedDirection(float3 direction)
+{
+    float bestDot = -10.0;
+    uint bestIndex = 0u;
+    for (uint index = 0u; index < 255u; index++)
+    {
+        float currentDot = dot(direction, _XGISkyVisibilityGen_PrecomputedDirections[index]);
+        if (currentDot > bestDot)
+        {
+            bestDot = currentDot;
+            bestIndex = index;
+        }
+    }
+
+    return bestIndex;
+}
+
+uint BurtXGIEncodePrecomputedDirection(float3 direction)
+{
+    uint bestDirectionIndex = 255u;
+    float norm = length(direction);
+    if (norm > 0.0001)
+    {
+        bestDirectionIndex = BurtXGILinearSearchClosestPrecomputedDirection(direction / norm);
+    }
+
+    return bestDirectionIndex;
+}
+
+float BurtXGISkyVisibilityFallback(float3 probePosition, uint sampleIndex, float averageAlbedo)
+{
+    float3 direction = BurtXGIHashDirection(sampleIndex + 1u);
+    float horizon = saturate(direction.y * 0.85 + 0.15);
+    float heightFade = saturate(probePosition.y * 0.025 + 0.5);
+    return saturate(lerp(horizon, 1.0, heightFade * 0.35) * (1.0 - saturate(averageAlbedo) * 0.25));
+}
+
+void BurtXGIAddTimeSliceSH(uint probeIndex, float3 lightColor, float3 direction, float weight)
+{
+    float3 safeDirection = normalize(direction + 0.000001);
+    float3 halfEnergy = max(lightColor, 0.0) * (0.5 * weight);
+    float3 l0 = halfEnergy / BURT_XGI_SH_BASIS0;
+    float3 l1 = halfEnergy / BURT_XGI_SH_BASIS1;
+    float3 xrenderDirectionL1 = float3(-safeDirection.x, safeDirection.y, -safeDirection.z);
+    float3 xgiAxis = float3(safeDirection.z, safeDirection.x, safeDirection.y);
+    float3 xgiAxisSquared = xgiAxis * xgiAxis;
+    float4 basisL2 = float4(
+        BURT_XGI_SH_BASIS2 * xgiAxis.x * xgiAxis.y,
+        -BURT_XGI_SH_BASIS2 * xgiAxis.y * xgiAxis.z,
+        BURT_XGI_SH_BASIS3 * (3.0 * xgiAxisSquared.z - 1.0),
+        -BURT_XGI_SH_BASIS2 * xgiAxis.x * xgiAxis.z);
+    float basisL2C = BURT_XGI_SH_BASIS4 * (xgiAxisSquared.x - xgiAxisSquared.y);
+    float3 l2Scale = halfEnergy * 0.5;
+
+    uint baseIndex = probeIndex * 27u;
+    _RW_XGITimeSliceGen_Output[baseIndex + 0u] += l0.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 9u] += l0.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 18u] += l0.z;
+
+    _RW_XGITimeSliceGen_Output[baseIndex + 1u] += xrenderDirectionL1.x * l1.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 2u] += xrenderDirectionL1.y * l1.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 3u] += xrenderDirectionL1.z * l1.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 10u] += xrenderDirectionL1.x * l1.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 11u] += xrenderDirectionL1.y * l1.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 12u] += xrenderDirectionL1.z * l1.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 19u] += xrenderDirectionL1.x * l1.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 20u] += xrenderDirectionL1.y * l1.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 21u] += xrenderDirectionL1.z * l1.z;
+
+    _RW_XGITimeSliceGen_Output[baseIndex + 4u] += basisL2.x * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 5u] += basisL2.y * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 6u] += basisL2.z * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 7u] += basisL2.w * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 8u] += basisL2C * l2Scale.x;
+    _RW_XGITimeSliceGen_Output[baseIndex + 13u] += basisL2.x * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 14u] += basisL2.y * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 15u] += basisL2.z * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 16u] += basisL2.w * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 17u] += basisL2C * l2Scale.y;
+    _RW_XGITimeSliceGen_Output[baseIndex + 22u] += basisL2.x * l2Scale.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 23u] += basisL2.y * l2Scale.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 24u] += basisL2.z * l2Scale.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 25u] += basisL2.w * l2Scale.z;
+    _RW_XGITimeSliceGen_Output[baseIndex + 26u] += basisL2C * l2Scale.z;
+}
+
+void BurtXGITimeSliceConvolveRadianceToIrradiance(uint probeIndex)
+{
+    [unroll]
+    for (uint channel = 0u; channel < 3u; channel++)
+    {
+        uint channelBase = probeIndex * 27u + channel * 9u;
+        _RW_XGITimeSliceGen_Output[channelBase + 1u] *= 0.6666666667;
+        _RW_XGITimeSliceGen_Output[channelBase + 2u] *= 0.6666666667;
+        _RW_XGITimeSliceGen_Output[channelBase + 3u] *= 0.6666666667;
+        _RW_XGITimeSliceGen_Output[channelBase + 4u] *= 0.25;
+        _RW_XGITimeSliceGen_Output[channelBase + 5u] *= 0.25;
+        _RW_XGITimeSliceGen_Output[channelBase + 6u] *= 0.25;
+        _RW_XGITimeSliceGen_Output[channelBase + 7u] *= 0.25;
+        _RW_XGITimeSliceGen_Output[channelBase + 8u] *= 0.25;
+    }
+}
+
+bool BurtXGITimeSliceEvaluateLight(
+    XGITimeSliceLightData light,
+    float3 probePosition,
+    out float3 lightColor,
+    out float3 lightDirection)
+{
+    lightColor = 0.0;
+    lightDirection = float3(0.0, 1.0, 0.0);
+    uint lightType = (uint)round(light.positionType.w);
+    if (lightType == 0u)
+    {
+        lightDirection = BurtXGISafeNormalize(-light.directionRange.xyz, float3(0.0, 1.0, 0.0));
+        lightColor = max(light.colorOuterCos.xyz, 0.0);
+        return dot(lightColor, lightColor) > 0.0000001;
+    }
+
+    float3 toLight = light.positionType.xyz - probePosition;
+    float distanceToLight = length(toLight);
+    float lightRange = max(light.directionRange.w, 0.001);
+    if (distanceToLight <= 0.0001 || distanceToLight >= lightRange)
+    {
+        return false;
+    }
+
+    lightDirection = toLight / distanceToLight;
+    float normalizedDistance = saturate(distanceToLight / lightRange);
+    float attenuation = pow(1.0 - normalizedDistance * normalizedDistance, 2.0);
+    if (lightType == 2u)
+    {
+        float3 lightForward = BurtXGISafeNormalize(light.directionRange.xyz, float3(0.0, 0.0, 1.0));
+        float spotCos = dot(-lightDirection, lightForward);
+        float outerCos = light.colorOuterCos.w;
+        if (spotCos <= outerCos)
+        {
+            return false;
+        }
+
+        float innerCos = light.spotInnerCos.x;
+        float spotAttenuation = innerCos <= outerCos ? 1.0 : saturate((spotCos - outerCos) / (innerCos - outerCos));
+        attenuation *= spotAttenuation * spotAttenuation;
+    }
+
+    lightColor = max(light.colorOuterCos.xyz, 0.0) * attenuation;
+    return dot(lightColor, lightColor) > 0.0000001;
+}
+
+float3 BurtXGITimeSliceEvaluateDirectLighting(float3 probePosition, float3 normalWS, uint lightCount)
+{
+    float3 radiance = 0.0;
+    for (uint lightIndex = 0u; lightIndex < lightCount; lightIndex++)
+    {
+        float3 lightColor;
+        float3 lightDirection;
+        if (!BurtXGITimeSliceEvaluateLight(_XGITimeSliceGen_Lights[lightIndex], probePosition, lightColor, lightDirection))
+        {
+            continue;
+        }
+
+        radiance += lightColor * saturate(dot(normalWS, lightDirection));
+    }
+
+    return radiance;
+}
+
+float3 BurtXGIProbeBakingClosestPointOnTriangle(float3 queryPoint, float3 a, float3 b, float3 c)
+{
+    float3 ab = b - a;
+    float3 ac = c - a;
+    float3 ap = queryPoint - a;
+    float d1 = dot(ab, ap);
+    float d2 = dot(ac, ap);
+    if (d1 <= 0.0 && d2 <= 0.0)
+    {
+        return a;
+    }
+
+    float3 bp = queryPoint - b;
+    float d3 = dot(ab, bp);
+    float d4 = dot(ac, bp);
+    if (d3 >= 0.0 && d4 <= d3)
+    {
+        return b;
+    }
+
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0)
+    {
+        float v = d1 / max(d1 - d3, 1.0e-8);
+        return a + ab * v;
+    }
+
+    float3 cp = queryPoint - c;
+    float d5 = dot(ab, cp);
+    float d6 = dot(ac, cp);
+    if (d6 >= 0.0 && d5 <= d6)
+    {
+        return c;
+    }
+
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0)
+    {
+        float w = d2 / max(d2 - d6, 1.0e-8);
+        return a + ac * w;
+    }
+
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0)
+    {
+        float w = (d4 - d3) / max((d4 - d3) + (d5 - d6), 1.0e-8);
+        return b + (c - b) * w;
+    }
+
+    float denom = rcp(max(va + vb + vc, 1.0e-8));
+    float baryB = vb * denom;
+    float baryC = vc * denom;
+    return a + ab * baryB + ac * baryC;
+}
+
+float BurtXGIProbeBakingDistanceToAABB(float3 positionWS, float3 centerWS, float3 extentsWS)
+{
+    float3 outside = max(abs(positionWS - centerWS) - max(extentsWS, 0.0), 0.0);
+    return length(outside);
+}
+
+[numthreads(BURT_XGI_BAKING_THREADGROUP_SIZE, BURT_XGI_BAKING_THREADGROUP_SIZE, 1)]
+void VoxelizePlacementTriangles(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint textureSize = max((uint)_XGIPlacementVoxelizeTriangles_Params.x, 1u);
+    uint triangleCount = max((uint)_XGIPlacementVoxelizeTriangles_Params.y, 0u);
+    uint boundsCount = max((uint)_XGIPlacementVoxelizeTriangles_Params.w, 0u);
+    if (any(dispatchThreadId >= uint3(textureSize, textureSize, textureSize)))
+    {
+        return;
+    }
+
+    if (triangleCount == 0u && boundsCount == 0u)
+    {
+        _RW_XGIPlacementVoxelizeTriangles_Occupancy[dispatchThreadId] = 0.0;
+        return;
+    }
+
+    float3 position01 = ((float3)dispatchThreadId + 0.5) / (float)textureSize;
+    float3 positionWS = _XGIPlacementVoxelizeTriangles_CellMinWS.xyz + position01 * _XGIPlacementVoxelizeTriangles_CellSizeWS.xyz;
+    float bestDistanceSq = 3.402823466e+38;
+    [loop]
+    for (uint triangleIndex = 0u; triangleIndex < triangleCount; triangleIndex++)
+    {
+        XGIPlacementVoxelizeTriangle voxelTriangle = _XGIPlacementVoxelizeTriangles_Triangles[triangleIndex];
+        float3 closestPoint = BurtXGIProbeBakingClosestPointOnTriangle(positionWS, voxelTriangle.a.xyz, voxelTriangle.b.xyz, voxelTriangle.c.xyz);
+        float3 delta = positionWS - closestPoint;
+        bestDistanceSq = min(bestDistanceSq, dot(delta, delta));
+    }
+
+    [loop]
+    for (uint boundsIndex = 0u; boundsIndex < boundsCount; boundsIndex++)
+    {
+        XGIPlacementVoxelizeBounds boundsData = _XGIPlacementVoxelizeTriangles_Bounds[boundsIndex];
+        float distanceToBounds = BurtXGIProbeBakingDistanceToAABB(positionWS, boundsData.center.xyz, boundsData.extents.xyz);
+        bestDistanceSq = min(bestDistanceSq, distanceToBounds * distanceToBounds);
+    }
+
+    float detectionDistance = max(_XGIPlacementVoxelizeTriangles_Params.z, 0.0);
+    bool occupied = bestDistanceSq <= detectionDistance * detectionDistance;
+    _RW_XGIPlacementVoxelizeTriangles_Occupancy[dispatchThreadId] = occupied ? float4(1.0, 1.0, 1.0, 1.0) : 0.0;
+}
+
+[numthreads(BURT_XGI_BAKING_THREADGROUP_SIZE, BURT_XGI_BAKING_THREADGROUP_SIZE, 1)]
+void ProbeVolumeCull(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 totalIndex = dispatchThreadId;
+    uint3 maxBrickCount = max((uint3)_XGIPlacementProbeVolumeCullPass_MaxBrickCount.xyz, uint3(1u, 1u, 1u));
+    if (any(totalIndex >= maxBrickCount))
+    {
+        _RW_XGIPlacementProbeVolumeCullPass_Result[totalIndex] = float2(0.0, 0.0);
+        return;
+    }
+
+    float brickSize = max(_XGIPlacementProbeVolumeCullPass_BrickSize, 0.0001);
+    XGIProbeVolumeGpuOBB brickOBB;
+    brickOBB.corner = (float3)totalIndex * brickSize + _XGIPlacementProbeVolumeCullPass_VolumeOffsetWS.xyz;
+    brickOBB.X = float3(brickSize, 0.0, 0.0);
+    brickOBB.Y = float3(0.0, brickSize, 0.0);
+    brickOBB.Z = float3(0.0, 0.0, brickSize);
+    brickOBB.minControllerSubdivLevel = 0;
+    brickOBB.maxControllerSubdivLevel = 0;
+    brickOBB.fillEmptySpaces = 0;
+    brickOBB.maxSubdivLevelInsideVolume = 0;
+
+    bool generate = false;
+    int ignoreSdf = 2147483647;
+    int probeVolumeCount = max((int)_XGIPlacementProbeVolumeCullPass_ProbeVolumeCount, 0);
+    int subdivLevel = (int)_XGIPlacementProbeVolumeCullPass_SubdivLevel;
+    [loop]
+    for (int i = 0; i < probeVolumeCount; ++i)
+    {
+        XGIProbeVolumeGpuOBB volumeOBB = _XGIPlacementProbeVolumeCullPass_ProbeVolumes[i];
+        if (subdivLevel < volumeOBB.minControllerSubdivLevel || subdivLevel > volumeOBB.maxControllerSubdivLevel)
+        {
+            continue;
+        }
+
+        if (!BurtXGIProbeBakingOBBIntersects(volumeOBB, brickOBB))
+        {
+            continue;
+        }
+
+        generate = true;
+        if (volumeOBB.fillEmptySpaces != 0)
+        {
+            ignoreSdf = min(ignoreSdf, volumeOBB.maxControllerSubdivLevel);
+        }
+    }
+
+    _RW_XGIPlacementProbeVolumeCullPass_Result[totalIndex] = float2(generate ? 1.0 : 0.0, (float)ignoreSdf);
+}
+
+[numthreads(BURT_XGI_BAKING_THREADGROUP_SIZE, BURT_XGI_BAKING_THREADGROUP_SIZE, 1)]
+void GenBrick(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 totalIndex = dispatchThreadId;
+    uint3 maxBrickCount = max((uint3)_XGIGenBrickPass_MaxBrickCount.xyz, uint3(1u, 1u, 1u));
+    if (any(totalIndex >= maxBrickCount))
+    {
+        return;
+    }
+
+    uint subdivLevel = (uint)max((int)_XGIGenBrickPass_SubdivLevel, 0);
+    float2 subdivisionLevelData = _XGIGenBrickPass_ProbeVolumeCullData.Load(int4((int)totalIndex.x, (int)totalIndex.y, (int)totalIndex.z, (int)subdivLevel));
+    if (subdivisionLevelData.x == 0.0)
+    {
+        return;
+    }
+
+    bool generateBrick = subdivLevel == (uint)subdivisionLevelData.y;
+    if (!generateBrick)
+    {
+        float3 position01 = ((float3)totalIndex + 0.5) / (float3)maxBrickCount;
+        float sdfDistance = BurtXGIProbeBakingSampleSdfByUVWithClipmap(position01, 0u);
+        float voxelDetectionDistance = rcp((float)maxBrickCount.x);
+        voxelDetectionDistance = sqrt(voxelDetectionDistance * voxelDetectionDistance * 3.0) * 0.5;
+        generateBrick = sdfDistance <= voxelDetectionDistance;
+    }
+
+    if (!generateBrick)
+    {
+        return;
+    }
+
+    float3 positionInCell = _XGIGenBrickPass_VolumeOffsetInBricks.xyz + ((float3)totalIndex / (float3)maxBrickCount) * _XGIGenBrickPass_VolumeSizeInBricks.xyz;
+    uint brickIndex;
+    InterlockedAdd(_RW_XGIGenBrickPass_BrickCount[subdivLevel], 1u, brickIndex);
+    _RW_XGIGenBrickPass_Bricks[brickIndex] = float4(positionInCell, 0.0);
+}
+
+[numthreads(BURT_XGI_BAKING_THREADGROUP_SIZE, BURT_XGI_BAKING_THREADGROUP_SIZE, 1)]
+void GenSkyVisibilityCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint threadGroupNumX = max((uint)_XGISkyVisibilityGen_Params.z, 1u);
+    uint posIndex = dispatchThreadId.x + dispatchThreadId.y * threadGroupNumX * BURT_XGI_BAKING_THREADGROUP_SIZE;
+    uint probeCount = (uint)max(_XGISkyVisibilityGen_Params.x, 0.0);
+    if (posIndex >= probeCount)
+    {
+        return;
+    }
+
+    uint probeStartOffset = (uint)max(_XGISkyVisibilityGen_Params1.y, 0.0);
+    uint globalProbeIndex = probeStartOffset + posIndex;
+    uint outputIndex = posIndex;
+    uint sampleIndex = (uint)max(_XGISkyVisibilityGen_SampleIndex, 0.0);
+    float averageAlbedo = _XGISkyVisibilityGen_Params.y;
+    float3 probePosition = _XGISkyVisibilityGen_ProbePositions[posIndex];
+    float sampleCount = max(_XGISkyVisibilityGen_SampleCount, 1.0);
+    uint sampleCountUint = max(1u, (uint)sampleCount);
+    if (sampleIndex == 0u)
+    {
+        _RW_XGISkyVisibilityGen_Output[outputIndex] = 0.0;
+        if (_XGISkyVisibilityGen_Params.w > 0.5)
+        {
+            _RW_XGISkyVisibilityGen_DirectionOutput[outputIndex] = 0.0;
+            _RW_XGISkyVisibilityGen_DirectionEncodedOutput[outputIndex] = 0u;
+        }
+    }
+
+    float visibility = BurtXGISkyVisibilityFallback(probePosition, sampleIndex, averageAlbedo);
+    float3 direction = BurtXGIHammersleySphereDirection(sampleIndex, sampleCountUint, globalProbeIndex + 31u);
+    float norm = visibility * 12.56637061436 / sampleCount;
+    _RW_XGISkyVisibilityGen_Output[outputIndex] += float4(
+        norm * BURT_XGI_SH_BASIS0,
+        direction.x * norm * BURT_XGI_SH_BASIS1,
+        direction.y * norm * BURT_XGI_SH_BASIS1,
+        direction.z * norm * BURT_XGI_SH_BASIS1);
+    if (_XGISkyVisibilityGen_Params.w > 0.5)
+    {
+        _RW_XGISkyVisibilityGen_DirectionOutput[outputIndex] += direction / sampleCount;
+    }
+
+    if (sampleIndex + 1u >= (uint)sampleCount)
+    {
+        float4 shData = _RW_XGISkyVisibilityGen_Output[outputIndex];
+        float3 mainDir = BurtXGISafeNormalize(shData.yzw, float3(0.0, 1.0, 0.0));
+        float4 oppositeSH = float4(BURT_XGI_SH_BASIS0, -mainDir.x * BURT_XGI_SH_BASIS1, -mainDir.y * BURT_XGI_SH_BASIS1, -mainDir.z * BURT_XGI_SH_BASIS1);
+        float oppositeValue = dot(oppositeSH, shData);
+        float windowL1 = 1.0;
+        if (oppositeValue < 0.0)
+        {
+            windowL1 = saturate(-(oppositeSH.x * shData.x) / max(abs(dot(oppositeSH.yzw, shData.yzw)), 0.000001));
+        }
+
+        _RW_XGISkyVisibilityGen_Output[outputIndex].yzw *= windowL1 * lerp(1.0, 0.6666666667, pow(windowL1, 1.125));
+        if (_XGISkyVisibilityGen_Params.w > 0.5)
+        {
+            _RW_XGISkyVisibilityGen_DirectionEncodedOutput[outputIndex] =
+                BurtXGIEncodePrecomputedDirection(_RW_XGISkyVisibilityGen_DirectionOutput[outputIndex]);
+        }
+    }
+}
+
+[numthreads(BURT_XGI_BAKING_THREADGROUP_SIZE, BURT_XGI_BAKING_THREADGROUP_SIZE, 1)]
+void GenTimeSliceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint threadGroupNumX = max((uint)_XGITimeSliceGen_Params.z, 1u);
+    uint posIndex = dispatchThreadId.x + dispatchThreadId.y * threadGroupNumX * BURT_XGI_BAKING_THREADGROUP_SIZE;
+    uint probeCount = (uint)max(_XGITimeSliceGen_Params.x, 0.0);
+    if (posIndex >= probeCount)
+    {
+        return;
+    }
+
+    uint sampleIndex = (uint)max(_XGITimeSliceGen_SampleIndex, 0.0);
+    uint probeStartOffset = (uint)max(_XGITimeSliceGen_Params1.y, 0.0);
+    uint globalProbeIndex = probeStartOffset + posIndex;
+    uint outputIndex = posIndex;
+    float3 probePosition = _XGITimeSliceGen_ProbePositions[posIndex];
+    float sampleCount = max(_XGITimeSliceGen_SampleCount, 1.0);
+    float3 sampleDirection = BurtXGIHammersleySphereDirection(sampleIndex, (uint)sampleCount, globalProbeIndex + 53u);
+    uint lightCount = (uint)max(_XGITimeSliceGen_Params.y, 0.0);
+    float skyVisibility = saturate(_XGITimeSliceGen_SkyVisibility[posIndex]);
+    float3 ambientColor = max(_XGITimeSliceGen_Params2.xyz, 0.0) * skyVisibility;
+    if (sampleIndex == 0u)
+    {
+        uint baseIndex = outputIndex * 27u;
+        [unroll]
+        for (uint coefficientIndex = 0u; coefficientIndex < 27u; coefficientIndex++)
+        {
+            _RW_XGITimeSliceGen_Output[baseIndex + coefficientIndex] = 0.0;
+        }
+    }
+
+    float3 lightColor = ambientColor * 0.25 + BurtXGITimeSliceEvaluateDirectLighting(probePosition, sampleDirection, lightCount);
+    BurtXGIAddTimeSliceSH(outputIndex, lightColor, sampleDirection, 12.56637061436 / sampleCount);
+    if (sampleIndex + 1u >= (uint)sampleCount)
+    {
+        BurtXGITimeSliceConvolveRadianceToIrradiance(outputIndex);
+    }
+}

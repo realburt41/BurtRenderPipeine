@@ -330,7 +330,7 @@ namespace Burt.RenderPipeline
             }
 
             var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(request, asset);
-            return settings.Enabled && settings.ShortRangeAO && settings.ShortRangeAOWeight > 0.0001f;
+            return settings.Enabled;
         }
     }
 }

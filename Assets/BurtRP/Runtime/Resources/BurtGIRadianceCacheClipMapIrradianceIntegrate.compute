@@ -1,0 +1,488 @@
+#pragma kernel IrradianceIntegrateCS
+
+#define BURT_GI_IRRADIANCE_INTEGRATE_THREADGROUP_SIZE 8
+#define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6u
+#define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffu
+#define BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX 0xfffeu
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT 8.0f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_BIAS 0.02f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_SCALE (1.0f - 2.0f * BURT_GI_GBUFFER_SHADING_MODEL_PACK_BIAS)
+#define BURT_GI_SHADING_MODEL_HAIR 1.0f
+#define BURT_GI_SHADING_MODEL_CLEAR_COAT 2.0f
+#define BURT_GI_SHADING_MODEL_SUBSURFACE 3.0f
+#define BURT_GI_SHADING_MODEL_FOLIAGE 5.0f
+
+Texture2D<float> _BurtCameraDepthTexture;
+Texture2D<float4> _BurtGBuffer0;
+Texture2D<float4> _BurtGBuffer1;
+Texture2D<float4> _BurtGBuffer2;
+Texture2D<float4> _BurtGBuffer3;
+Texture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
+Texture2D<float4> _BurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture;
+Texture2D<float2> _BurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture;
+SamplerState sampler_LinearClamp;
+StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer;
+
+RWTexture2D<float4> _RW_XGIIrradianceIntegratePass_DiffuseIndirect;
+RWTexture2D<float4> _RW_XGIIrradianceIntegratePass_BackfaceDiffuseIndirect;
+RWTexture2D<float4> _RW_XGIIrradianceIntegratePass_RoughSpecularIndirect;
+
+float4 _BurtGISourceTexelSize;
+float4 _BurtGIIrradianceFieldParams;
+float4 _BurtGIIndirectChannelParams; // x=backface diffuse enabled, y=rough specular enabled, z=history exposure correction, w=max roughness.
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapWorldParams;
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS];
+float4 _BurtGIRadianceCacheClipMapApplyParams;
+float4 _BurtDeferredCameraWorldPosition;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+uint _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
+uint _BurtGIRadianceCacheClipMapFrameIndex;
+
+float BurtGIIrradianceIntegrateHash12(float2 value)
+{
+    float3 p3 = frac(float3(value.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.x + p3.y) * p3.z);
+}
+
+bool BurtGIIrradianceIntegrateIsSkyDepth(float rawDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return rawDepth <= 0.000001;
+#else
+    return rawDepth >= 0.999999;
+#endif
+}
+
+float3 BurtGIIrradianceIntegrateSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+
+bool BurtGIIrradianceIntegrateIsShadingModel(float shadingModelID, float expected)
+{
+    return abs(shadingModelID - expected) < 0.5;
+}
+
+float BurtGIIrradianceIntegrateDecodeShadingModel(float packedValue)
+{
+    float scaled = saturate(packedValue) * BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT;
+    return floor(min(scaled, BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT - 0.000001));
+}
+
+float BurtGIIrradianceIntegrateDiffuseLerp(float roughness, bool hasBackfaceDiffuse)
+{
+    float maxRoughnessToEvaluate = saturate(_BurtGIIndirectChannelParams.w);
+    const float maxRoughnessToEvaluateFoliage = 0.4;
+    const float fadeLength = 0.2;
+    float maxRoughness = hasBackfaceDiffuse ? maxRoughnessToEvaluateFoliage : maxRoughnessToEvaluate;
+    return saturate((roughness - maxRoughness + fadeLength) / fadeLength);
+}
+
+float BurtGIIrradianceIntegrateResolveMetallic(float shadingModelID, float encodedMetallic)
+{
+    return (BurtGIIrradianceIntegrateIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_HAIR) ||
+        BurtGIIrradianceIntegrateIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_SUBSURFACE) ||
+        BurtGIIrradianceIntegrateIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_FOLIAGE))
+            ? 0.0
+            : saturate(encodedMetallic);
+}
+
+float2 BurtGIIrradianceIntegratePrefilteredDFGApprox(float roughness, float noV)
+{
+    float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
+    float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
+    float4 r = saturate(roughness) * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28 * saturate(noV))) * r.x + r.y;
+    return float2(-1.04, 1.04) * a004 + r.zw;
+}
+
+float3 BurtGIIrradianceIntegrateSpecularMaterialScale(float3 f0, float roughness, float noV, float occlusion)
+{
+    float2 dfg = BurtGIIrradianceIntegratePrefilteredDFGApprox(roughness, noV);
+    float3 envBRDF = f0 * dfg.x + dfg.y;
+    float energy = clamp(dfg.x + dfg.y, 0.001, 1.0);
+    float3 energyCompensation = 1.0 + f0 * (rcp(energy) - 1.0);
+    float linearRoughness = max(roughness * roughness, 1.0e-6);
+    float specularOcclusion = saturate(pow(max(saturate(noV) + saturate(occlusion), 1.0e-6), abs(linearRoughness)) - 1.0 + saturate(occlusion));
+    return max(envBRDF * energyCompensation * specularOcclusion, 0.0);
+}
+
+float BurtGIIrradianceIntegrateSquare(float value)
+{
+    return value * value;
+}
+
+float4 BurtGIIrradianceIntegrateBuildClipPosition(float2 screenUV, float rawDepth)
+{
+    float2 clipXY = screenUV * 2.0 - 1.0;
+#if UNITY_UV_STARTS_AT_TOP
+    clipXY.y = -clipXY.y;
+#endif
+    return float4(clipXY, rawDepth, 1.0);
+}
+
+float3 BurtGIIrradianceIntegrateReconstructPositionWS(float2 screenUV, float rawDepth)
+{
+    float4 clipPosition = BurtGIIrradianceIntegrateBuildClipPosition(screenUV, rawDepth);
+    float4 positionWS = mul(_BurtDeferredInverseViewProjectionMatrix, clipPosition);
+    float safeW = abs(positionWS.w) > 1.0e-6 ? positionWS.w : (positionWS.w < 0.0 ? -1.0e-6 : 1.0e-6);
+    return positionWS.xyz / safeW;
+}
+
+float2 BurtGIIrradianceIntegrateUnpack888ToFloat2(float3 value)
+{
+    uint3 quantized = (uint3)(saturate(value) * 255.5);
+    uint hi = quantized.z >> 4;
+    uint lo = quantized.z & 15u;
+    uint2 packed = quantized.xy | uint2(lo << 8, hi << 8);
+    return (float2)packed / 4095.0;
+}
+
+float3 BurtGIIrradianceIntegrateDecodeNormalWS(float3 encodedNormal)
+{
+    float2 encoded = BurtGIIrradianceIntegrateUnpack888ToFloat2(encodedNormal);
+    float2 f = encoded * 2.0 - 1.0;
+    float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    float t = saturate(-n.z);
+    n.x += n.x >= 0.0 ? -t : t;
+    n.y += n.y >= 0.0 ? -t : t;
+    return BurtGIIrradianceIntegrateSafeNormalize(n, float3(0.0, 1.0, 0.0));
+}
+
+float2 BurtGIIrradianceIntegrateInverseEquiAreaSphericalMapping(float3 direction)
+{
+    direction = BurtGIIrradianceIntegrateSafeNormalize(float3(direction.z, direction.x, direction.y), float3(0.0, 1.0, 0.0));
+    float3 absDirection = abs(direction);
+    float r = sqrt(max(1.0 - absDirection.z, 0.0));
+    float x = min(absDirection.x, absDirection.y) / (max(absDirection.x, absDirection.y) + 1.0e-8);
+    const float t1 = 0.4067585662467885e-5;
+    const float t2 = 0.6362265452740161;
+    const float t3 = 0.6157201789828021e-2;
+    const float t4 = -0.24733373328126894;
+    const float t5 = 0.8817706647753163e-1;
+    const float t6 = 0.4190388180291657e-1;
+    const float t7 = -0.2513909723434835e-1;
+    float phi = t6 + t7 * x;
+    phi = t5 + phi * x;
+    phi = t4 + phi * x;
+    phi = t3 + phi * x;
+    phi = t2 + phi * x;
+    phi = t1 + phi * x;
+    phi *= x;
+    float2 uv = float2(r - phi * r, phi * r);
+    if (absDirection.x < absDirection.y)
+    {
+        uv = uv.yx;
+    }
+
+    uv *= sign(direction.xy);
+    uv = direction.z < 0.0 ? (float2(1.0, 1.0) - abs(uv.yx)) * sign(uv.xy) : uv;
+    return uv * 0.5 + 0.5;
+}
+
+uint BurtGIIrradianceIntegrateClipmapCount()
+{
+    return max(1u, min((uint)_BurtGIRadianceCacheClipMapParams.z, BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS));
+}
+
+uint BurtGIIrradianceIntegrateClipmapResolution()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.w);
+}
+
+uint BurtGIIrradianceIntegrateAtlasResolutionInProbes()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.x);
+}
+
+bool BurtGIIrradianceIntegrateRadianceCacheAvailable()
+{
+    return _BurtGIRadianceCacheClipMapApplyParams.x > 0.5 &&
+        _BurtGIRadianceCacheClipMapParams.x > 0.5 &&
+        _BurtGIRadianceCacheClipMapParams.z > 0.5 &&
+        _BurtGIRadianceCacheClipMapParams.w > 0.5 &&
+        _BurtGIRadianceCacheClipMapIndirectionSize.x > 0.5 &&
+        _BurtGIRadianceCacheClipMapIndirectionSize.y > 0.5;
+}
+
+bool BurtGIIrradianceIntegrateWorldToProbeCoord(float3 worldPosition, float dither, out uint clipmapIndex, out float3 probeCoordFloat)
+{
+    uint clipmapCount = BurtGIIrradianceIntegrateClipmapCount();
+    uint clipmapResolution = BurtGIIrradianceIntegrateClipmapResolution();
+    float invFadeSize = max(_BurtGIRadianceCacheClipMapWorldParams.z, 0.0001);
+    uint startIndex = min((uint)floor(saturate(dither) * (float)clipmapCount), clipmapCount - 1u);
+
+    [unroll]
+    for (uint i = 0u; i < BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS; ++i)
+    {
+        if (i >= clipmapCount)
+        {
+            continue;
+        }
+
+        uint currentClipmapIndex = (startIndex + i) % clipmapCount;
+        float4 worldToProbeCoord = _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[currentClipmapIndex];
+        float3 currentProbeCoordFloat = worldPosition * worldToProbeCoord.w + worldToProbeCoord.xyz;
+        float3 bottomEdgeFade = saturate((currentProbeCoordFloat - 0.5) * invFadeSize);
+        float3 topEdgeFade = saturate(((float3)clipmapResolution - 0.5 - currentProbeCoordFloat) * invFadeSize);
+        float edgeFade = min(
+            min(bottomEdgeFade.x, min(bottomEdgeFade.y, bottomEdgeFade.z)),
+            min(topEdgeFade.x, min(topEdgeFade.y, topEdgeFade.z)));
+        if (edgeFade > 0.0001)
+        {
+            clipmapIndex = currentClipmapIndex;
+            probeCoordFloat = currentProbeCoordFloat;
+            return true;
+        }
+    }
+
+    clipmapIndex = 0u;
+    probeCoordFloat = 0.0;
+    return false;
+}
+
+uint BurtGIIrradianceIntegrateProbeIndexFromIndirection(uint clipmapIndex, uint3 probeCoord)
+{
+    uint clipmapResolution = BurtGIIrradianceIntegrateClipmapResolution();
+    uint2 indirectionSize = max((uint2)_BurtGIRadianceCacheClipMapIndirectionSize.xy, uint2(1u, 1u));
+    uint2 indirectionCoord = uint2(
+        clipmapIndex * clipmapResolution + probeCoord.x,
+        probeCoord.y + probeCoord.z * clipmapResolution);
+    if (any(indirectionCoord >= indirectionSize))
+    {
+        return BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX;
+    }
+
+    return _BurtGIRadianceCacheClipMapIndirectionTexture.Load(int3((int2)indirectionCoord, 0));
+}
+
+float3 BurtGIIrradianceIntegrateSampleProbeIrradiance(uint probeIndex, float3 normalWS)
+{
+    uint atlasResolutionInProbes = BurtGIIrradianceIntegrateAtlasResolutionInProbes();
+    uint maxProbeCount = atlasResolutionInProbes * atlasResolutionInProbes;
+    if (probeIndex >= maxProbeCount)
+    {
+        return 0.0;
+    }
+
+    uint finalProbeResolution = max(1u, _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution);
+    uint borderSize = 1u << min(_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip, 8u);
+    uint probeResolution = max(1u, finalProbeResolution > 2u * borderSize ? finalProbeResolution - 2u * borderSize : 1u);
+    float2 probeUV = BurtGIIrradianceIntegrateInverseEquiAreaSphericalMapping(normalWS);
+    float2 probeTexelCoord = probeUV * (float)probeResolution + (float)borderSize;
+    float2 probeAtlasBaseCoord = (float2)(uint2(probeIndex % atlasResolutionInProbes, probeIndex / atlasResolutionInProbes) * finalProbeResolution);
+    float2 finalAtlasResolution = (float)(atlasResolutionInProbes * finalProbeResolution);
+    float2 atlasUV = (probeAtlasBaseCoord + probeTexelCoord) / max(finalAtlasResolution, float2(1.0, 1.0));
+    return max(_BurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture.SampleLevel(sampler_LinearClamp, atlasUV, 0.0).rgb, 0.0);
+}
+
+float3 BurtGIIrradianceIntegrateProbeWorldPosition(uint clipmapIndex, uint3 probeCoord, uint probeIndex)
+{
+    float4 worldToProbeCoord = _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[min(clipmapIndex, BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS - 1u)];
+    float invScale = rcp(max(abs(worldToProbeCoord.w), 1.0e-6));
+    float3 probeWorldPosition = ((float3)probeCoord - worldToProbeCoord.xyz) * invScale;
+    uint atlasResolutionInProbes = BurtGIIrradianceIntegrateAtlasResolutionInProbes();
+    uint maxProbeCount = atlasResolutionInProbes * atlasResolutionInProbes;
+    if (probeIndex < maxProbeCount)
+    {
+        probeWorldPosition += _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex].xyz;
+    }
+
+    return probeWorldPosition;
+}
+
+float BurtGIIrradianceIntegrateSampleProbeOcclusion(uint probeIndex, float3 probeToSampleWS, float sampleDistance)
+{
+    uint atlasResolutionInProbes = BurtGIIrradianceIntegrateAtlasResolutionInProbes();
+    uint maxProbeCount = atlasResolutionInProbes * atlasResolutionInProbes;
+    if (probeIndex >= maxProbeCount)
+    {
+        return 1.0;
+    }
+
+    uint finalProbeResolution = max(1u, _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution);
+    uint borderSize = 1u << min(_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip, 8u);
+    uint probeResolution = max(1u, finalProbeResolution > 2u * borderSize ? finalProbeResolution - 2u * borderSize : 1u);
+    float2 probeUV = BurtGIIrradianceIntegrateInverseEquiAreaSphericalMapping(probeToSampleWS);
+    float2 probeTexelCoord = probeUV * (float)probeResolution + (float)borderSize;
+    float2 probeAtlasBaseCoord = (float2)(uint2(probeIndex % atlasResolutionInProbes, probeIndex / atlasResolutionInProbes) * finalProbeResolution);
+    float2 atlasResolution = (float)(atlasResolutionInProbes * finalProbeResolution);
+    float2 moments = _BurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture.SampleLevel(
+        sampler_LinearClamp,
+        (probeAtlasBaseCoord + probeTexelCoord) / max(atlasResolution, float2(1.0, 1.0)),
+        0.0);
+
+    float meanDepth = max(moments.x, 0.0);
+    if (meanDepth <= 0.0001 || sampleDistance <= meanDepth)
+    {
+        return 1.0;
+    }
+
+    float variance = max(abs(moments.y - meanDepth * meanDepth), 0.0001);
+    float distanceDelta = sampleDistance - meanDepth;
+    float visibility = variance / (variance + distanceDelta * distanceDelta);
+    return saturate(visibility * visibility * visibility);
+}
+
+float BurtGIIrradianceIntegrateApplyProbeOcclusionWeightThreshold(float weight)
+{
+    const float weightThreshold = 0.2;
+    weight = max(weight, 0.0);
+    return weight < weightThreshold
+        ? weight * weight * weight / (weightThreshold * weightThreshold)
+        : weight;
+}
+
+bool BurtGIIrradianceIntegrateSampleInterpolated(float3 worldPosition, float3 occlusionPositionWS, float3 normalWS, float dither, out float3 irradiance, out float confidence)
+{
+    irradiance = 0.0;
+    confidence = 0.0;
+    if (!BurtGIIrradianceIntegrateRadianceCacheAvailable())
+    {
+        return false;
+    }
+
+    uint clipmapIndex;
+    float3 probeCoordFloat;
+    if (!BurtGIIrradianceIntegrateWorldToProbeCoord(worldPosition, dither, clipmapIndex, probeCoordFloat))
+    {
+        return false;
+    }
+
+    uint clipmapResolution = BurtGIIrradianceIntegrateClipmapResolution();
+    float3 cornerProbeCoordFloat = probeCoordFloat - 0.5 + 0.0001;
+    int3 cornerProbeCoord = (int3)floor(cornerProbeCoordFloat);
+    float3 lerpAlphas = saturate(frac(cornerProbeCoordFloat));
+    int3 maxProbeCoord = int3((int)clipmapResolution - 1, (int)clipmapResolution - 1, (int)clipmapResolution - 1);
+    float weightSum = 0.0;
+
+    [unroll]
+    for (int z = 0; z < 2; ++z)
+    {
+        [unroll]
+        for (int y = 0; y < 2; ++y)
+        {
+            [unroll]
+            for (int x = 0; x < 2; ++x)
+            {
+                uint3 sampleProbeCoord = (uint3)clamp(cornerProbeCoord + int3(x, y, z), int3(0, 0, 0), maxProbeCoord);
+                uint probeIndex = BurtGIIrradianceIntegrateProbeIndexFromIndirection(clipmapIndex, sampleProbeCoord);
+                if (probeIndex >= BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX)
+                {
+                    continue;
+                }
+
+                float3 cornerWeight = lerp(1.0 - lerpAlphas, lerpAlphas, float3((float)x, (float)y, (float)z));
+                float weight = cornerWeight.x * cornerWeight.y * cornerWeight.z;
+                float3 probeWorldPosition = BurtGIIrradianceIntegrateProbeWorldPosition(clipmapIndex, sampleProbeCoord, probeIndex);
+                float3 probeToSampleWS = occlusionPositionWS - probeWorldPosition;
+                float sampleDistance = length(probeToSampleWS);
+                float visibility = BurtGIIrradianceIntegrateSampleProbeOcclusion(probeIndex, probeToSampleWS, sampleDistance);
+                float finalWeight = BurtGIIrradianceIntegrateApplyProbeOcclusionWeightThreshold(weight * visibility);
+                irradiance += BurtGIIrradianceIntegrateSampleProbeIrradiance(probeIndex, normalWS) * finalWeight;
+                weightSum += finalWeight;
+            }
+        }
+    }
+
+    confidence = saturate(weightSum);
+    return weightSum > 0.0001;
+}
+
+[numthreads(BURT_GI_IRRADIANCE_INTEGRATE_THREADGROUP_SIZE, BURT_GI_IRRADIANCE_INTEGRATE_THREADGROUP_SIZE, 1)]
+void IrradianceIntegrateCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _RW_XGIIrradianceIntegratePass_DiffuseIndirect.GetDimensions(width, height);
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (pixelCoord.x >= width || pixelCoord.y >= height)
+    {
+        return;
+    }
+
+    float2 screenUV = ((float2)pixelCoord + 0.5) / max(float2(width, height), 1.0);
+    float rawDepth = _BurtCameraDepthTexture.Load(int3(pixelCoord, 0));
+    if (BurtGIIrradianceIntegrateIsSkyDepth(rawDepth))
+    {
+        _RW_XGIIrradianceIntegratePass_DiffuseIndirect[pixelCoord] = 0.0;
+        _RW_XGIIrradianceIntegratePass_BackfaceDiffuseIndirect[pixelCoord] = 0.0;
+        _RW_XGIIrradianceIntegratePass_RoughSpecularIndirect[pixelCoord] = 0.0;
+        return;
+    }
+
+    float4 gbuffer0 = _BurtGBuffer0.Load(int3(pixelCoord, 0));
+    float4 gbuffer1 = _BurtGBuffer1.Load(int3(pixelCoord, 0));
+    float4 gbuffer2 = _BurtGBuffer2.Load(int3(pixelCoord, 0));
+    float4 gbuffer3 = _BurtGBuffer3.Load(int3(pixelCoord, 0));
+    float3 normalWS = BurtGIIrradianceIntegrateDecodeNormalWS(gbuffer0.rgb);
+    float3 positionWS = BurtGIIrradianceIntegrateReconstructPositionWS(screenUV, rawDepth);
+    float3 viewDirectionWS = BurtGIIrradianceIntegrateSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS, normalWS);
+    float3 occlusionPositionWS = positionWS +
+        normalWS * max(_BurtGIIrradianceFieldParams.y, 0.0) +
+        viewDirectionWS * max(_BurtGIIrradianceFieldParams.z, 0.0);
+    float dither = BurtGIIrradianceIntegrateHash12((float2)pixelCoord + (float)(_BurtGIRadianceCacheClipMapFrameIndex & 7u));
+    float3 irradiance;
+    float confidence;
+    if (!BurtGIIrradianceIntegrateSampleInterpolated(positionWS, occlusionPositionWS, normalWS, dither, irradiance, confidence))
+    {
+        _RW_XGIIrradianceIntegratePass_DiffuseIndirect[pixelCoord] = 0.0;
+        _RW_XGIIrradianceIntegratePass_BackfaceDiffuseIndirect[pixelCoord] = 0.0;
+        _RW_XGIIrradianceIntegratePass_RoughSpecularIndirect[pixelCoord] = 0.0;
+        return;
+    }
+
+    float outputStrength = max(_BurtGIIrradianceFieldParams.x, 0.0);
+    float shadingModelID = BurtGIIrradianceIntegrateDecodeShadingModel(gbuffer2.r);
+    bool hasBackfaceDiffuseMaterial = BurtGIIrradianceIntegrateIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_SUBSURFACE) ||
+        BurtGIIrradianceIntegrateIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_FOLIAGE);
+    float roughness = saturate(gbuffer0.a);
+    float metallic = BurtGIIrradianceIntegrateResolveMetallic(shadingModelID, gbuffer2.g);
+    float3 baseColor = max(gbuffer1.rgb, 0.0);
+    float occlusion = saturate(gbuffer1.a);
+    float diffuseConfidence = saturate(confidence);
+    _RW_XGIIrradianceIntegratePass_DiffuseIndirect[pixelCoord] = float4(max(irradiance * outputStrength, 0.0), diffuseConfidence);
+
+    float4 backfaceDiffuse = 0.0;
+    if (_BurtGIIndirectChannelParams.x > 0.5 && hasBackfaceDiffuseMaterial)
+    {
+        float3 backfaceIrradiance;
+        float backfaceConfidence;
+        if (BurtGIIrradianceIntegrateSampleInterpolated(positionWS, occlusionPositionWS, -normalWS, dither, backfaceIrradiance, backfaceConfidence))
+        {
+            float blendWeight = saturate(backfaceConfidence * 0.85);
+            float3 backfaceLighting = lerp(irradiance, max(backfaceIrradiance, 0.0), blendWeight);
+            backfaceDiffuse = float4(max(backfaceLighting * outputStrength, 0.0), saturate(max(diffuseConfidence, backfaceConfidence)));
+        }
+    }
+
+    float4 roughSpecular = 0.0;
+    if (_BurtGIIndirectChannelParams.y > 0.5)
+    {
+        float roughnessDiffuseLerp = BurtGIIrradianceIntegrateDiffuseLerp(roughness, hasBackfaceDiffuseMaterial);
+        float clearCoatMask = BurtGIIrradianceIntegrateIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_CLEAR_COAT) ? saturate(gbuffer3.b) : 0.0;
+        float3 reflectionDirectionWS = BurtGIIrradianceIntegrateSafeNormalize(reflect(-viewDirectionWS, normalWS), normalWS);
+        float3 roughSpecularIrradiance;
+        float roughSpecularConfidence;
+        if (BurtGIIrradianceIntegrateSampleInterpolated(positionWS, occlusionPositionWS, reflectionDirectionWS, dither, roughSpecularIrradiance, roughSpecularConfidence))
+        {
+            float3 dielectricF0 = float3(0.04, 0.04, 0.04);
+            float3 f0 = lerp(dielectricF0, baseColor, metallic);
+            float noV = saturate(dot(normalWS, viewDirectionWS));
+            float3 materialScale = BurtGIIrradianceIntegrateSpecularMaterialScale(f0, roughness, noV, occlusion);
+            float roughSpecularWeight = saturate(1.0 - roughnessDiffuseLerp * 0.55 + clearCoatMask);
+            float3 diffuseFallback = irradiance * 0.31830988618;
+            float3 roughSpecularLighting = lerp(diffuseFallback, max(roughSpecularIrradiance, 0.0), saturate(roughSpecularConfidence * 0.65));
+            roughSpecular = float4(max(roughSpecularLighting * materialScale * outputStrength * roughSpecularWeight, 0.0), saturate(max(diffuseConfidence, roughSpecularConfidence)));
+        }
+    }
+
+    _RW_XGIIrradianceIntegratePass_BackfaceDiffuseIndirect[pixelCoord] = backfaceDiffuse;
+    _RW_XGIIrradianceIntegratePass_RoughSpecularIndirect[pixelCoord] = roughSpecular;
+}

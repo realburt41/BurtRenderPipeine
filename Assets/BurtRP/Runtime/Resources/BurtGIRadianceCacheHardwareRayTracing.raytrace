@@ -1,7 +1,7 @@
 #pragma max_recursion_depth 1
 
 #define BURT_GI_HARDWARE_RAY_MAX_BOUNCES 4
-#define BURT_GI_HARDWARE_RAY_CLIPMAP_COUNT 5
+#define BURT_GI_HARDWARE_RAY_CLIPMAP_COUNT 6
 #define BURT_GI_SCREEN_PROBE_HARDWARE_RAY_SURFACE_BIAS 0.1
 #define BURT_GI_SCREEN_PROBE_HARDWARE_RAY_MIN_TRACE_DISTANCE 0.0001
 
@@ -48,9 +48,9 @@ uint _BurtGIHardwareRayAdditionalLightCount;
 StructuredBuffer<float4> _BurtGIXGILightData;
 StructuredBuffer<uint> _BurtGIXGILightGridCount;
 StructuredBuffer<uint> _BurtGIXGILightGridList;
-float4 _BurtGIXGILightGridBoundMin[4];
-float4 _BurtGIXGILightGridBoundMax[4];
-float4 _BurtGIXGILightGridAxis[4];
+float4 _BurtGIXGILightGridBoundMin[6];
+float4 _BurtGIXGILightGridBoundMax[6];
+float4 _BurtGIXGILightGridAxis[6];
 uint _BurtGIXGILightGridResolution;
 uint _BurtGIXGILightGridMaxLights;
 uint _BurtGIXGILightGridValid;
@@ -59,6 +59,7 @@ float4 _BurtGIScreenProbeTraceParams;
 float4 _BurtGIScreenProbeAdaptiveParams;
 float4 _BurtGIScreenProbeSkyLeakParams;
 float4 _BurtGIScreenProbeTraceModeParams;
+float4 _BurtGIScreenProbeTraceIntensityParams;
 float4 _BurtSkyReflectionHDR;
 float4 _BurtSkyReflectionTint;
 float4 _BurtSkyReflectionRotation;
@@ -260,18 +261,20 @@ float3 BurtGIHardwareRayEvaluateAdditionalLightSample(float3 origin, float3 norm
     return max(colorAndType.rgb, 0.0) * (directWeight * attenuation * visibility * (float)lightCount);
 }
 
-uint BurtGIHardwareRayResolveXGILightGridLevel(float3 positionWS)
+bool BurtGIHardwareRayResolveXGILightGridLevel(float3 positionWS, out uint resolvedLevel)
 {
+    resolvedLevel = 0u;
     [unroll]
-    for (uint level = 0u; level < 4u; ++level)
+    for (uint level = 0u; level < 6u; ++level)
     {
         if (all(positionWS >= _BurtGIXGILightGridBoundMin[level].xyz) && all(positionWS <= _BurtGIXGILightGridBoundMax[level].xyz))
         {
-            return level;
+            resolvedLevel = level;
+            return true;
         }
     }
 
-    return 0u;
+    return false;
 }
 
 uint BurtGIHardwareRayXGILightGridCell(float3 positionWS, uint level)
@@ -340,7 +343,13 @@ float3 BurtGIHardwareRayEvaluateXGILightGrid(float3 origin, float3 normalWS, flo
         return BurtGIHardwareRayEvaluateAdditionalLightSample(origin, normalWS, randomValue);
     }
 
-    uint cellIndex = BurtGIHardwareRayXGILightGridCell(origin, BurtGIHardwareRayResolveXGILightGridLevel(origin));
+    uint level = 0u;
+    if (!BurtGIHardwareRayResolveXGILightGridLevel(origin, level))
+    {
+        return BurtGIHardwareRayEvaluateAdditionalLightSample(origin, normalWS, randomValue);
+    }
+
+    uint cellIndex = BurtGIHardwareRayXGILightGridCell(origin, level);
     uint lightCount = min(_BurtGIXGILightGridCount[cellIndex], _BurtGIXGILightGridMaxLights);
     float3 radiance = 0.0;
     [loop]
@@ -525,6 +534,18 @@ void BurtGIRadianceCacheTraceRGS()
         _BurtGIRadianceCacheClipMapRadianceProbeAtlasTexture[atlasBaseCoord + atlasTexelCoord] = float4(radianceSum * invSampleCount, 1.0);
         _BurtGIRadianceCacheClipMapDepthProbeAtlasTexture[atlasBaseCoord + atlasTexelCoord] = hitDistanceMin;
     }
+}
+
+[shader("raygeneration")]
+void RadianceCacheClipMapTraceHardwareRayRGS()
+{
+    BurtGIRadianceCacheTraceRGS();
+}
+
+[shader("raygeneration")]
+void RayTracingTestDispatchRGS()
+{
+    BurtGIRadianceCacheTraceRGS();
 }
 
 uint BurtGIHardwareRayScreenProbeUniformCount(uint screenProbeWidth, uint screenProbeHeight)
@@ -748,14 +769,21 @@ void BurtGIScreenProbeTraceRGS()
             radiance += skyLeakRadiance * skyLeakAmount;
         }
     }
+    radiance = max(radiance, 0.0) * max(_BurtGIScreenProbeTraceIntensityParams.x, 0.0);
     float maxRayIntensity = max(_BurtGIScreenProbeTraceModeParams.z, 0.01f);
     float maxTraceRadiance = max(radiance.r, max(radiance.g, radiance.b));
     if (maxTraceRadiance > maxRayIntensity)
     {
         radiance *= maxRayIntensity / maxTraceRadiance;
     }
-    _BurtGIScreenProbeTraceRadianceTexture[atlasCoord] = float4(max(radiance, 0.0), saturate(hit));
+    _BurtGIScreenProbeTraceRadianceTexture[atlasCoord] = float4(radiance, saturate(hit));
     _BurtGIScreenProbeTraceHitTexture[atlasCoord] = saturate(hit);
+}
+
+[shader("raygeneration")]
+void ScreenProbeTraceHardwareRayRGS()
+{
+    BurtGIScreenProbeTraceRGS();
 }
 
 [shader("miss")]

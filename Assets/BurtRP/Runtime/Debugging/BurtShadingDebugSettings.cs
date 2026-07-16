@@ -316,7 +316,17 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         PerObjectShadowTransmissionThickness = 493, // Per-object shadow debug: transmission object index, resolved thickness, and validity state.
         ScreenSpaceShadowFinalMultiplier = 494, // SS Shadow debug: final deferred main-light multiplier after material-specific weighting.
         ScreenSpaceGlobalIlluminationHashGridDebug = 496, // BurtGI debug: Radiance Cache HashGrid debug buffer heatmap.
-        ScreenSpaceGlobalIlluminationRadianceCacheSkyAO = 497 // BurtGI debug: Radiance Cache ProbeSkyAO atlas sampled through the active clipmap.
+        ScreenSpaceGlobalIlluminationRadianceCacheSkyAO = 497, // BurtGI debug: Radiance Cache ProbeSkyAO atlas sampled through the active clipmap.
+        ScreenSpaceGlobalIlluminationRadianceCacheStats = 498, // BurtGI debug: Radiance Cache priority/update/probe allocation stats texture.
+        ScreenSpaceGlobalIlluminationRadianceCacheVisualize = 499, // BurtGI debug: Radiance Cache probe irradiance/sky AO visualization for the surface probe selected by the active clipmap.
+        ScreenSpaceGlobalIlluminationRadianceCacheStatus = 500, // BurtGI debug: Radiance Cache probe last-used/last-traced state for the surface probe selected by the active clipmap.
+        ScreenSpaceGlobalIlluminationScreenProbePlacement = 501, // BurtGI debug: XGI ScreenProbe placement depth/normal/position validity.
+        ScreenSpaceGlobalIlluminationScreenProbeTraceVisualize = 502, // BurtGI debug: XGI ScreenProbe trace atlas radiance and hit visualization.
+        ScreenSpaceGlobalIlluminationSceneVoxelOccupancy = 506, // BurtGI debug: XGI SceneVoxel occupancy mip sampled at the current surface position.
+        GIProbeIrradiance = 503, // XGIProbe debug: per-pixel probe volume irradiance after virtual/direct probe sampling.
+        GIProbeValidity = 504, // XGIProbe debug: baked virtual validity, or the direct volume sample mask for non-virtual probe data.
+        GIProbeSkyVisibility = 505, // XGIProbe debug: baked sky visibility evaluated from the active virtual probe, or white for direct probe data.
+        GIProbeRuntimeInfo = 507 // XGIProbe debug: runtime virtual probe streaming and memory overlay.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -492,6 +502,16 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHashGridDebug:
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStats:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheVisualize:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStatus:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbePlacement:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbeTraceVisualize:
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationSceneVoxelOccupancy:
+                case BurtShadingDebugMode.GIProbeIrradiance:
+                case BurtShadingDebugMode.GIProbeValidity:
+                case BurtShadingDebugMode.GIProbeSkyVisibility:
+                case BurtShadingDebugMode.GIProbeRuntimeInfo:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:

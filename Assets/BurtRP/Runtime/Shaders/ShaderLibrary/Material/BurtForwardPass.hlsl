@@ -169,7 +169,9 @@ Varyings Vert(Attributes Input)
     Output.MaskMapUV = BurtTransformMaskMapUV(Input.UV0, _MaskMap_ST);
 #endif
 #if BURT_FORWARD_ENABLE_PRESKIN_POSITION
-    Output.PreSkinPositionOS = BurtDecodePreSkinPositionOS(Input.PreSkinPositionUV3);
+    Output.PreSkinPositionOS = _BurtSkinnedDecalUseMeshPosition > 0.5f
+        ? PositionOS.xyz
+        : BurtDecodePreSkinPositionOS(Input.PreSkinPositionUV3);
 #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
     Output.UV0 = Input.UV0;
     Output.UV1 = Input.UV1;
@@ -568,6 +570,10 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
     BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.UV0, Input.UV1, Input.PositionOS, Input.NormalWS, Input.TangentWS, ViewDirectionWS);
 #else
     float4 MaskMap = BurtSampleMaskMap(Input.MaskMapUV);
+    #if BURT_FORWARD_ENABLE_PRESKIN_POSITION && defined(BURT_SKINNED_DECAL)
+        BurtApplySkinnedDecals(BaseColor, MaskMap, NormalWS, Input.NormalWS, Input.TangentWS, Input.PreSkinPositionOS);
+        ShadingDirectionWS = BurtGetForwardShadingDirectionWS(Input, NormalWS, Facing);
+    #endif
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
         BurtSurfaceData SurfaceData = BurtCreateMaterialShadingModelSurfaceData(BaseColor, MaskMap, Input.BaseMapUV, NormalWS, ViewDirectionWS, Input.PositionWS, Input.PositionOS, Input.VertexColor);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)

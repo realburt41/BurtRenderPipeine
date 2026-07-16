@@ -62,6 +62,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
     {
         private const string DefaultMaterialAssetPath = "Assets/BurtRP/Runtime/Materials/MI_StandardLit.mat";
         private const string DefaultMaterialFallbackShaderName = "BurtRP/Lit";
+        private const string XGIRadianceCacheHardwareRayTracingResourcePath = "BurtGIRadianceCacheHardwareRayTracing";
         private static Material cachedDefaultMaterial;
 
         [TitleGroup("Pipeline - 管线")] // 使用 Odin 给管线级配置建立独立分组，方便后续继续放 Renderer Mode、MSAA 等核心开关。
@@ -102,6 +103,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [TitleGroup("XGI - Hardware Ray Tracing")]
         [ShowIf(nameof(enableXGIHardwareRayTracing))]
         [SerializeField] private RayTracingShader xgiRadianceCacheHardwareRayTracingShader;
+        private RayTracingShader cachedXGIRadianceCacheHardwareRayTracingShader;
 
         [TitleGroup("Deferred - 屏幕空间次表面 5S")]
         [ShowIf(nameof(IsDeferredRendererMode))]
@@ -211,8 +213,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public float HiZDebugScale => Mathf.Max(0.0001f, hiZDebugScale);
 
         public Texture2D PreintegratedFGLut => preintegratedFGLut; // 暴露预积分 FG LUT，RenderPipeline 会把它绑定成全局 shader 纹理。
-        public bool EnableXGIHardwareRayTracing => enableXGIHardwareRayTracing && SystemInfo.supportsRayTracing && xgiRadianceCacheHardwareRayTracingShader != null;
-        public RayTracingShader XGIRadianceCacheHardwareRayTracingShader => xgiRadianceCacheHardwareRayTracingShader;
+        public bool XGIHardwareRayTracingEnabledInAsset => enableXGIHardwareRayTracing;
+        public bool EnableXGIHardwareRayTracing => enableXGIHardwareRayTracing && SystemInfo.supportsRayTracing && XGIRadianceCacheHardwareRayTracingShader != null;
+        public RayTracingShader XGIRadianceCacheHardwareRayTracingShader => ResolveXGIRadianceCacheHardwareRayTracingShader();
 
         public bool EnableScreenSpaceSubsurface => enableScreenSpaceSubsurface;
 
@@ -295,6 +298,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public void ClearLatestRenderGraphDebugDump() // 清空最近一次 RenderGraph Debug 缓存。
         {
             BurtRenderGraphDebugClipboardUtility.ClearLatestDump(); // 复用剪切板工具清空完整文本、摘要和一次性请求。
+        }
+
+        private RayTracingShader ResolveXGIRadianceCacheHardwareRayTracingShader()
+        {
+            if (xgiRadianceCacheHardwareRayTracingShader != null)
+            {
+                return xgiRadianceCacheHardwareRayTracingShader;
+            }
+
+            if (cachedXGIRadianceCacheHardwareRayTracingShader == null)
+            {
+                cachedXGIRadianceCacheHardwareRayTracingShader = Resources.Load<RayTracingShader>(XGIRadianceCacheHardwareRayTracingResourcePath);
+            }
+
+            return cachedXGIRadianceCacheHardwareRayTracingShader;
         }
 
         public string GetScreenSpaceSubsurfaceProfileName(int index)

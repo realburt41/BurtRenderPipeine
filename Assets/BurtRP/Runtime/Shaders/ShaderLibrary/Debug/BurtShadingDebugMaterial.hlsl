@@ -480,6 +480,24 @@ bool BurtTryEvaluateMaterialShadingDebug(BurtSurfaceData surfaceData, BurtShadin
         return true; // 返回 true，告诉调用方使用 debugColor 作为最终输出。
     }
 
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GI_PROBE_IRRADIANCE))
+    {
+        debugColor = max(data.GIProbeIrradiance, float3(0.0f, 0.0f, 0.0f));
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GI_PROBE_VALIDITY))
+    {
+        debugColor = data.GIProbeValidity.xxx;
+        return true;
+    }
+
+    if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GI_PROBE_SKY_VISIBILITY))
+    {
+        debugColor = data.GIProbeSkyVisibility.xxx;
+        return true;
+    }
+
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_INDIRECT_SPECULAR)) // IndirectSpecular 模式只显示间接高光。
     {
         debugColor = max(data.IndirectSpecularColor, float3(0.0f, 0.0f, 0.0f)); // 显示 Reflection Probe 镜面项，方便检查探针和 DFG 是否生效。

@@ -153,10 +153,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
 
         public static void UploadGlobalIndirectLighting(CommandBuffer cmd, BurtRenderRequest request) // 上传当前 request 使用的全局间接光数据；带 request 时可解析 Burt fullscreen 天空反射源。
         {
-            UploadGlobalIndirectLighting(cmd, request, request != null ? request.Camera : null);
+            UploadGlobalIndirectLighting(cmd, request, null, request != null ? request.Camera : null);
+        }
+
+        public static void UploadGlobalIndirectLighting(CommandBuffer cmd, BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            UploadGlobalIndirectLighting(cmd, request, asset, request != null ? request.Camera : null);
         }
 
         private static void UploadGlobalIndirectLighting(CommandBuffer cmd, BurtRenderRequest request, Camera camera)
+        {
+            UploadGlobalIndirectLighting(cmd, request, null, camera);
+        }
+
+        private static void UploadGlobalIndirectLighting(CommandBuffer cmd, BurtRenderRequest request, BurtRenderPipelineAsset asset, Camera camera)
         {
             if (cmd == null) // 如果命令缓冲为空，就没有可写入的 GPU 状态。
             {
@@ -201,7 +211,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 runtimeSkyReflectionRotation);
             BurtLocalSkyProbeUtility.Upload(cmd, camera);
             BurtGIVirtualProbeCellStreamer.UpdateForCamera(camera);
-            BurtGIProbeVolumeUtility.Upload(cmd, camera);
+            BurtGIProbeVolumeUtility.Upload(cmd, request, asset);
+            BurtGISceneVoxelClipmapStateUtility.UploadProbeApplyGlobals(cmd, camera);
         }
 
         public static void UploadSkyReflectionForTracing(CommandBuffer cmd, BurtRenderRequest request)
@@ -295,11 +306,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             builder.Append(" Name=").Append(localSkyProbeActive ? localSkyProbe.name : "<none>");
             builder.Append(" Shape=").Append(localSkyProbeActive ? localSkyProbe.shape.ToString() : "<none>");
             builder.Append(" Priority=").Append(localSkyProbeActive ? localSkyProbe.priority.ToString() : "<none>");
+            builder.Append(" CameraDistance=").Append(BurtLocalSkyProbe.CameraSelectionForwardDistance.ToString("0.###"));
+            builder.Append(" ShowDebug=").Append(localSkyProbeActive ? localSkyProbe.showDebugSphere.ToString() : "<none>");
             builder.Append(" OffsetMax=").Append(localSkyProbeActive ? localSkyProbe.probeOffsetDistanceMax.ToString("0.###") : "<none>");
             builder.Append(" SampleLerpMax=").Append(localSkyProbeActive ? localSkyProbe.probeSampleLerpDistanceMax.ToString("0.###") : "<none>");
             builder.Append(" Intensity=").Append(localSkyProbeActive ? localSkyProbe.intensity.ToString("0.###") : "<none>");
             builder.Append(" ColorCube=").Append(localSkyProbeActive ? FormatTextureName(localSkyProbe.colorCubemap) : "<none>");
             builder.Append(" DepthCube=").Append(localSkyProbeActive ? FormatTextureName(localSkyProbe.depthCubemap) : "<none>");
+            builder.AppendLine();
+
+            builder.Append("  XRenderPivot=").Append(BurtXRenderPivot.GetDebugStatus());
             builder.AppendLine();
 
             builder.Append("  IndirectDiffuseSource=").Append(snapshot.EffectiveDiffuseSource);
@@ -1134,6 +1150,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
         private static readonly int DepthTextureId = Shader.PropertyToID("_BurtGILocalSkyProbeDepthTexture");
         private static readonly int Params0Id = Shader.PropertyToID("_BurtGILocalSkyProbeParams0");
         private static readonly int Params1Id = Shader.PropertyToID("_BurtGILocalSkyProbeParams1");
+        private static Cubemap fallbackBlackCubemap;
+
+#if UNITY_EDITOR
+        [UnityEditor.InitializeOnLoadMethod]
+        private static void RegisterFallbackCleanup()
+        {
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= ReleaseFallbackBlackCubemap;
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += ReleaseFallbackBlackCubemap;
+        }
+#endif
 
         public static void Upload(CommandBuffer cmd, Camera camera)
         {
@@ -1142,8 +1168,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 return;
             }
 
-            if (!BurtLocalSkyProbe.TryGetBestForCamera(camera, out var probe))
+            if (!BurtLocalSkyProbe.TryGetBestForCamera(camera, out var probe) ||
+                probe.colorCubemap == null ||
+                probe.depthCubemap == null)
             {
+                cmd.SetGlobalTexture(ColorTextureId, FallbackBlackCubemap);
+                cmd.SetGlobalTexture(DepthTextureId, FallbackBlackCubemap);
                 cmd.SetGlobalVector(Params0Id, Vector4.zero);
                 cmd.SetGlobalVector(Params1Id, Vector4.zero);
                 return;
@@ -1158,6 +1188,79 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 Mathf.Max(0f, probe.intensity),
                 Mathf.Max(0.01f, probe.probeSampleLerpDistanceMax),
                 0f));
+        }
+
+        public static void BindCompute(CommandBuffer cmd, ComputeShader shader, int kernel, Camera camera)
+        {
+            if (cmd == null || shader == null)
+            {
+                return;
+            }
+
+            if (!BurtLocalSkyProbe.TryGetBestForCamera(camera, out var probe) ||
+                probe.colorCubemap == null ||
+                probe.depthCubemap == null)
+            {
+                cmd.SetComputeTextureParam(shader, kernel, ColorTextureId, FallbackBlackCubemap);
+                cmd.SetComputeTextureParam(shader, kernel, DepthTextureId, FallbackBlackCubemap);
+                cmd.SetComputeVectorParam(shader, Params0Id, Vector4.zero);
+                cmd.SetComputeVectorParam(shader, Params1Id, Vector4.zero);
+                return;
+            }
+
+            var origin = probe.transform.position;
+            cmd.SetComputeTextureParam(shader, kernel, ColorTextureId, probe.colorCubemap);
+            cmd.SetComputeTextureParam(shader, kernel, DepthTextureId, probe.depthCubemap);
+            cmd.SetComputeVectorParam(shader, Params0Id, new Vector4(origin.x, origin.y, origin.z, 1f));
+            cmd.SetComputeVectorParam(shader, Params1Id, new Vector4(
+                Mathf.Max(0.01f, probe.probeOffsetDistanceMax),
+                Mathf.Max(0f, probe.intensity),
+                Mathf.Max(0.01f, probe.probeSampleLerpDistanceMax),
+                0f));
+        }
+
+        private static Cubemap FallbackBlackCubemap
+        {
+            get
+            {
+                if (fallbackBlackCubemap != null)
+                {
+                    return fallbackBlackCubemap;
+                }
+
+                fallbackBlackCubemap = new Cubemap(1, TextureFormat.RGBA32, false, true)
+                {
+                    name = "Burt LocalSkyProbe Fallback Black Cubemap",
+                    hideFlags = HideFlags.HideAndDontSave
+                };
+                var black = new[] { Color.black };
+                fallbackBlackCubemap.SetPixels(black, CubemapFace.PositiveX);
+                fallbackBlackCubemap.SetPixels(black, CubemapFace.NegativeX);
+                fallbackBlackCubemap.SetPixels(black, CubemapFace.PositiveY);
+                fallbackBlackCubemap.SetPixels(black, CubemapFace.NegativeY);
+                fallbackBlackCubemap.SetPixels(black, CubemapFace.PositiveZ);
+                fallbackBlackCubemap.SetPixels(black, CubemapFace.NegativeZ);
+                fallbackBlackCubemap.Apply(false, true);
+                return fallbackBlackCubemap;
+            }
+        }
+
+        private static void ReleaseFallbackBlackCubemap()
+        {
+            if (fallbackBlackCubemap == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                UnityEngine.Object.Destroy(fallbackBlackCubemap);
+            }
+            else
+            {
+                UnityEngine.Object.DestroyImmediate(fallbackBlackCubemap);
+            }
+            fallbackBlackCubemap = null;
         }
     }
 }

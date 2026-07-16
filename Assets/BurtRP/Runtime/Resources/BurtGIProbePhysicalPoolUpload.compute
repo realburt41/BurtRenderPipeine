@@ -2,14 +2,64 @@
 #pragma kernel UploadRGBA8
 #pragma kernel UploadR8
 #pragma kernel ClearRGBA
+#pragma kernel ClearRGBA8Neutral
 #pragma kernel ClearR8
+#pragma kernel ClearR8One
+#pragma kernel UploadData
+#pragma kernel UploadDataL2
+#pragma kernel ProbeDebugRuntimeInfoCS
 
 ByteAddressBuffer _BurtGIProbeUploadSource;
 RWTexture3D<float4> _BurtGIProbeUploadRgbaTexture;
 RWTexture3D<float> _BurtGIProbeUploadR8Texture;
+Texture2D<float4> ProbeInfoSourceTexture;
+RWTexture2D<float4> RWProbeInfoTexture;
+
+float ProbeInfoPhysicalUsagePercent;
+float ProbeInfoPhysicalUsed;
+float ProbeInfoPhysicalTotal;
+float ProbeInfoPhysicalEstimatedMemCost;
+float ProbeInfoVirtualUsagePercent;
+float ProbeInfoVirtualUsed;
+float ProbeInfoVirtualTotal;
+float ProbeInfoVirtualEstimatedMemCost;
+float ProbeInfoVirtualFragmentationRate;
+float4 ProbeInfoIndirectionEntriesSize;
+float ProbeInfoIndirectionUsagePercent;
+float ProbeInfoIndirectionUsed;
+float ProbeInfoIndirectionTotal;
+float ProbeInfoIndirectionEstimatedMemCost;
 
 float3 _BurtGIProbeUploadOrigin;
 float3 _BurtGIProbeUploadPoolDimensions;
+
+float BurtGIProbeDebugHash(float2 p)
+{
+    return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+float4 BurtGIProbeDebugBar(uint2 pixelCoord, uint2 size, float row, float percent, float3 color)
+{
+    float2 uv = ((float2)pixelCoord + 0.5) / max((float2)size, 1.0);
+    float y = uv.y * 12.0;
+    float rowMask = 1.0 - smoothstep(0.38, 0.48, abs(y - row));
+    float x0 = 0.08;
+    float x1 = 0.92;
+    float barUV = saturate((uv.x - x0) / max(x1 - x0, 0.0001));
+    float inBar = step(x0, uv.x) * step(uv.x, x1);
+    float filled = step(barUV, saturate(percent * 0.01));
+    float3 grid = lerp(float3(0.035, 0.04, 0.045), float3(0.09, 0.1, 0.11), inBar);
+    float stripe = step(0.96, frac(barUV * 10.0));
+    float3 barColor = lerp(grid, color, filled * inBar);
+    barColor += stripe * inBar * 0.035;
+    return float4(barColor * rowMask, rowMask);
+}
+
+void BurtGIProbeDebugComposite(inout float4 dst, float4 src)
+{
+    dst.rgb = lerp(dst.rgb, src.rgb, saturate(src.a));
+    dst.a = max(dst.a, src.a);
+}
 
 uint BurtGIProbeUploadSourceIndex(uint3 localCoord)
 {
@@ -49,7 +99,31 @@ void UploadRGBAHalf(uint3 dispatchThreadId : SV_DispatchThreadID)
 }
 
 [numthreads(8, 4, 4)]
+void UploadData(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 poolCoord;
+    if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
+
+    uint byteOffset = BurtGIProbeUploadSourceIndex(dispatchThreadId) * 8u;
+    uint packed01 = _BurtGIProbeUploadSource.Load(byteOffset);
+    uint packed23 = _BurtGIProbeUploadSource.Load(byteOffset + 4u);
+    _BurtGIProbeUploadRgbaTexture[poolCoord] = float4(
+        f16tof32(packed01 & 0xffffu),
+        f16tof32(packed01 >> 16u),
+        f16tof32(packed23 & 0xffffu),
+        f16tof32(packed23 >> 16u));
+}
+
+[numthreads(8, 4, 4)]
 void UploadRGBA8(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 poolCoord;
+    if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
+    _BurtGIProbeUploadRgbaTexture[poolCoord] = BurtGIProbeUploadDecodeRGBA8(BurtGIProbeUploadSourceIndex(dispatchThreadId) * 4u);
+}
+
+[numthreads(8, 4, 4)]
+void UploadDataL2(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint3 poolCoord;
     if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
@@ -76,9 +150,67 @@ void ClearRGBA(uint3 dispatchThreadId : SV_DispatchThreadID)
 }
 
 [numthreads(8, 4, 4)]
+void ClearRGBA8Neutral(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 poolCoord;
+    if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
+    _BurtGIProbeUploadRgbaTexture[poolCoord] = 0.5;
+}
+
+[numthreads(8, 4, 4)]
 void ClearR8(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint3 poolCoord;
     if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
     _BurtGIProbeUploadR8Texture[poolCoord] = 0.0;
+}
+
+[numthreads(8, 4, 4)]
+void ClearR8One(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 poolCoord;
+    if (!BurtGIProbeUploadIsInPool(dispatchThreadId, poolCoord)) return;
+    _BurtGIProbeUploadR8Texture[poolCoord] = 1.0;
+}
+
+[numthreads(8, 8, 1)]
+void ProbeDebugRuntimeInfoCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    RWProbeInfoTexture.GetDimensions(width, height);
+    uint2 size = uint2(width, height);
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (any(pixelCoord >= size))
+    {
+        return;
+    }
+
+    float4 source = ProbeInfoSourceTexture.Load(int3(pixelCoord, 0));
+    float2 uv = ((float2)pixelCoord + 0.5) / max((float2)size, 1.0);
+    float4 output = float4(0.0, 0.0, 0.0, 0.0);
+    float panel = step(0.55, uv.x) * step(uv.y, 0.78) * step(0.08, uv.y);
+    if (panel <= 0.0)
+    {
+        RWProbeInfoTexture[pixelCoord] = source;
+        return;
+    }
+
+    float noise = BurtGIProbeDebugHash((float2)pixelCoord) * 0.015;
+    output = float4(float3(0.015, 0.018, 0.022) + noise, 0.86);
+    BurtGIProbeDebugComposite(output, BurtGIProbeDebugBar(pixelCoord, size, 2.0, ProbeInfoPhysicalUsagePercent, float3(0.12, 0.72, 1.0)));
+    BurtGIProbeDebugComposite(output, BurtGIProbeDebugBar(pixelCoord, size, 4.0, ProbeInfoVirtualUsagePercent, float3(0.25, 1.0, 0.45)));
+    BurtGIProbeDebugComposite(output, BurtGIProbeDebugBar(pixelCoord, size, 6.0, ProbeInfoIndirectionUsagePercent, float3(1.0, 0.78, 0.18)));
+    BurtGIProbeDebugComposite(output, BurtGIProbeDebugBar(pixelCoord, size, 8.0, ProbeInfoVirtualFragmentationRate, float3(1.0, 0.25, 0.18)));
+
+    float physicalRatio = saturate(ProbeInfoPhysicalUsed / max(ProbeInfoPhysicalTotal, 1.0));
+    float virtualRatio = saturate(ProbeInfoVirtualUsed / max(ProbeInfoVirtualTotal, 1.0));
+    float indirectionRatio = saturate(ProbeInfoIndirectionUsed / max(ProbeInfoIndirectionTotal, 1.0));
+    float memoryMB = max(ProbeInfoPhysicalEstimatedMemCost + ProbeInfoVirtualEstimatedMemCost + ProbeInfoIndirectionEstimatedMemCost, 0.0);
+    float memoryPulse = saturate(memoryMB / 512.0);
+    float summaryBand = step(0.82, uv.y) * step(uv.y, 0.9) * panel;
+    float3 summaryColor = float3(physicalRatio, virtualRatio, indirectionRatio) + memoryPulse * float3(0.08, 0.05, 0.02);
+    output.rgb = lerp(output.rgb, summaryColor, summaryBand);
+    output.a = max(output.a, panel);
+    RWProbeInfoTexture[pixelCoord] = float4(lerp(source.rgb, output.rgb, saturate(output.a)), source.a);
 }

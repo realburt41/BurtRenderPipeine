@@ -28,6 +28,9 @@ namespace Burt.RenderPipeline
         [Tooltip("Number of XGI physical chunks reserved in each dimension.")]
         public Vector3Int chunkDimensions = Vector3Int.one;
 
+        [Tooltip("Allocate XRender-compatible optional R8 probe validity data.")]
+        public bool allocateValidity = true;
+
         [Tooltip("Allocate optional sky-visibility and sky-shading-direction textures.")]
         public bool allocateSkyVisibility = true;
         public bool allocateSkyShadingDirection = true;
@@ -41,6 +44,7 @@ namespace Burt.RenderPipeline
         private RenderTexture l21;
         private RenderTexture l22;
         private RenderTexture l23;
+        private RenderTexture validity;
         private RenderTexture skyVisibilityL0L1;
         private RenderTexture skyShadingDirectionIndices;
         private GraphicsBuffer uploadBuffer;
@@ -50,7 +54,10 @@ namespace Burt.RenderPipeline
         private int uploadRgba8Kernel = -1;
         private int uploadR8Kernel = -1;
         private int clearRgbaKernel = -1;
+        private int clearRgba8NeutralKernel = -1;
         private int clearR8Kernel = -1;
+        private int clearR8OneKernel = -1;
+        private readonly HashSet<int> l1LoadedChunks = new HashSet<int>();
         private readonly HashSet<int> l2LoadedChunks = new HashSet<int>();
 
         private static readonly int UploadSourceId = Shader.PropertyToID("_BurtGIProbeUploadSource");
@@ -67,6 +74,49 @@ namespace Burt.RenderPipeline
         public int ChunkCapacity => chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
 
         public bool IsInitialized => l0L1Rx != null && l1GL1Ry != null && l1BL1Rz != null;
+
+        public string LastUploadStatus { get; private set; } = "Idle";
+
+        public bool CanAddressChunk(int chunkIndex) => IsValidChunkIndex(chunkIndex);
+
+        public static string ResolveUploadComputeStatusLabel()
+        {
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                return "Unsupported(SystemInfo.supportsComputeShaders=false)";
+            }
+
+            var shader = Resources.Load<ComputeShader>(UploadComputeResourcePath);
+            if (shader == null)
+            {
+                return "Missing(" + UploadComputeResourcePath + ")";
+            }
+
+            const string kernels = "UploadRGBAHalf,UploadRGBA8,UploadR8,ClearRGBA,ClearRGBA8Neutral,ClearR8,ClearR8One,UploadData,UploadDataL2,ProbeDebugRuntimeInfoCS";
+            var missing = string.Empty;
+            var missingCount = 0;
+            var kernelNames = kernels.Split(',');
+            for (var i = 0; i < kernelNames.Length; i++)
+            {
+                var kernelName = kernelNames[i];
+                if (shader.HasKernel(kernelName))
+                {
+                    continue;
+                }
+
+                if (missingCount > 0)
+                {
+                    missing += ",";
+                }
+
+                missing += kernelName;
+                missingCount++;
+            }
+
+            return missingCount == 0
+                ? "Ready(Kernels=" + kernelNames.Length + ",L0L1+L2+Validity+SkyVisibilityUpload+XRenderAlias)"
+                : "MissingKernel(" + missing + ")";
+        }
 
         private void OnDisable() => ReleasePool();
 
@@ -97,6 +147,11 @@ namespace Burt.RenderPipeline
                 l22 = CreateTexture(dimensions, GraphicsFormat.R8G8B8A8_UNorm, "BurtGI XGI Physical L2 2");
                 l23 = CreateTexture(dimensions, GraphicsFormat.R8G8B8A8_UNorm, "BurtGI XGI Physical L2 3");
             }
+            if (allocateValidity)
+            {
+                validity = CreateTexture(dimensions, GraphicsFormat.R8_UNorm, "BurtGI XGI Physical Validity");
+            }
+
             if (allocateSkyVisibility)
             {
                 skyVisibilityL0L1 = CreateTexture(dimensions, GraphicsFormat.R16G16B16A16_SFloat, "BurtGI XGI Physical Sky Visibility");
@@ -111,9 +166,9 @@ namespace Burt.RenderPipeline
             probeVolume.useVirtualProbeData = true;
             probeVolume.virtualPhysicalPoolDimensions = dimensions;
             probeVolume.virtualL0L1Rx = l0L1Rx;
-            probeVolume.virtualL1GL1Ry = l1GL1Ry;
-            probeVolume.virtualL1BL1Rz = l1BL1Rz;
+            UpdateProbeVolumeL1Textures();
             UpdateProbeVolumeL2Textures();
+            probeVolume.virtualValidity = validity;
             probeVolume.virtualSkyVisibilityL0L1 = skyVisibilityL0L1;
             probeVolume.virtualSkyShadingDirectionIndices = skyShadingDirectionIndices;
             return true;
@@ -129,24 +184,48 @@ namespace Burt.RenderPipeline
             byte[] sourceL22 = null,
             byte[] sourceL23 = null,
             byte[] sourceSkyVisibilityL0L1 = null,
-            byte[] sourceSkyShadingDirectionIndices = null)
+            byte[] sourceSkyShadingDirectionIndices = null,
+            byte[] sourceValidity = null,
+            int sharedChunkIndex = -1,
+            bool updateSharedData = true)
         {
+            var resolvedSharedChunkIndex = sharedChunkIndex >= 0 ? sharedChunkIndex : chunkIndex;
+            var hasL0Data = sourceL0L1Rx != null;
+            var hasL1Data = sourceL1GL1Ry != null || sourceL1BL1Rz != null;
             var hasL2Data = sourceL20 != null || sourceL21 != null || sourceL22 != null || sourceL23 != null;
-            if (!IsInitialized || !IsValidChunkIndex(chunkIndex) ||
-                !HasChunkSize(sourceL0L1Rx, 8) || !HasChunkSize(sourceL1GL1Ry, 4) || !HasChunkSize(sourceL1BL1Rz, 4) ||
-                (hasL2Data && (sourceL20 == null || sourceL21 == null || sourceL22 == null || sourceL23 == null)) ||
-                !HasOptionalL2ChunkSize(sourceL20, l20) || !HasOptionalL2ChunkSize(sourceL21, l21) ||
-                !HasOptionalL2ChunkSize(sourceL22, l22) || !HasOptionalL2ChunkSize(sourceL23, l23) ||
-                (sourceSkyVisibilityL0L1 != null && (skyVisibilityL0L1 == null || !HasChunkSize(sourceSkyVisibilityL0L1, 8))) ||
-                (sourceSkyShadingDirectionIndices != null && (skyShadingDirectionIndices == null || !HasChunkSize(sourceSkyShadingDirectionIndices, 1))))
-            {
-                return false;
-            }
+            if (!IsInitialized) return FailUpload("NotInitialized");
+            if (!IsValidChunkIndex(chunkIndex)) return FailUpload("InvalidChunkIndex(" + chunkIndex + "/" + ChunkCapacity + ")");
+            if (!IsValidChunkIndex(resolvedSharedChunkIndex)) return FailUpload("InvalidSharedChunkIndex(" + resolvedSharedChunkIndex + "/" + ChunkCapacity + ")");
+            if (hasL0Data && !HasChunkSize(sourceL0L1Rx, 8)) return FailUpload("InvalidL0L1RxBytes(" + ByteLength(sourceL0L1Rx) + ")");
+            if (hasL1Data && (sourceL1GL1Ry == null || sourceL1BL1Rz == null)) return FailUpload("IncompleteL1Bytes(G=" + ByteLength(sourceL1GL1Ry) + ",B=" + ByteLength(sourceL1BL1Rz) + ")");
+            if (sourceL1GL1Ry != null && !HasChunkSize(sourceL1GL1Ry, 4)) return FailUpload("InvalidL1GL1RyBytes(" + ByteLength(sourceL1GL1Ry) + ")");
+            if (sourceL1BL1Rz != null && !HasChunkSize(sourceL1BL1Rz, 4)) return FailUpload("InvalidL1BL1RzBytes(" + ByteLength(sourceL1BL1Rz) + ")");
+            if (hasL2Data && !hasL1Data) return FailUpload("L2WithoutL1");
+            if (hasL2Data && (sourceL20 == null || sourceL21 == null || sourceL22 == null || sourceL23 == null)) return FailUpload("IncompleteL2Bytes");
+            if (!HasOptionalL2ChunkSize(sourceL20, l20)) return FailUpload("InvalidL20Bytes(" + ByteLength(sourceL20) + ",Texture=" + (l20 != null) + ")");
+            if (!HasOptionalL2ChunkSize(sourceL21, l21)) return FailUpload("InvalidL21Bytes(" + ByteLength(sourceL21) + ",Texture=" + (l21 != null) + ")");
+            if (!HasOptionalL2ChunkSize(sourceL22, l22)) return FailUpload("InvalidL22Bytes(" + ByteLength(sourceL22) + ",Texture=" + (l22 != null) + ")");
+            if (!HasOptionalL2ChunkSize(sourceL23, l23)) return FailUpload("InvalidL23Bytes(" + ByteLength(sourceL23) + ",Texture=" + (l23 != null) + ")");
+            if (updateSharedData && sourceSkyVisibilityL0L1 != null && (skyVisibilityL0L1 == null || !HasChunkSize(sourceSkyVisibilityL0L1, 8))) return FailUpload("InvalidSkyVisibilityBytes(" + ByteLength(sourceSkyVisibilityL0L1) + ",Texture=" + (skyVisibilityL0L1 != null) + ")");
+            if (updateSharedData && sourceSkyShadingDirectionIndices != null && (skyShadingDirectionIndices == null || !HasChunkSize(sourceSkyShadingDirectionIndices, 1))) return FailUpload("InvalidSkyDirectionBytes(" + ByteLength(sourceSkyShadingDirectionIndices) + ",Texture=" + (skyShadingDirectionIndices != null) + ")");
+            if (updateSharedData && sourceValidity != null && (validity == null || !HasChunkSize(sourceValidity, 1))) return FailUpload("InvalidValidityBytes(" + ByteLength(sourceValidity) + ",Texture=" + (validity != null) + ")");
 
             var origin = GetChunkOrigin(chunkIndex);
-            UploadChunk(uploadHalfKernel, sourceL0L1Rx, l0L1Rx, origin);
-            UploadChunk(uploadRgba8Kernel, sourceL1GL1Ry, l1GL1Ry, origin);
-            UploadChunk(uploadRgba8Kernel, sourceL1BL1Rz, l1BL1Rz, origin);
+            var sharedOrigin = GetChunkOrigin(resolvedSharedChunkIndex);
+            if (hasL0Data) UploadChunk(uploadHalfKernel, sourceL0L1Rx, l0L1Rx, origin);
+            else ClearChunkTexture(clearRgbaKernel, l0L1Rx, origin);
+            if (hasL1Data)
+            {
+                UploadChunk(uploadRgba8Kernel, sourceL1GL1Ry, l1GL1Ry, origin);
+                UploadChunk(uploadRgba8Kernel, sourceL1BL1Rz, l1BL1Rz, origin);
+                l1LoadedChunks.Add(chunkIndex);
+            }
+            else
+            {
+                ClearL1Chunk(origin);
+                l1LoadedChunks.Remove(chunkIndex);
+            }
+            UpdateProbeVolumeL1Textures();
             if (hasL2Data)
             {
                 UploadChunk(uploadRgba8Kernel, sourceL20, l20, origin);
@@ -162,49 +241,92 @@ namespace Burt.RenderPipeline
             }
             UpdateProbeVolumeL2Textures();
 
-            if (skyVisibilityL0L1 != null)
+            if (updateSharedData && validity != null)
             {
-                if (sourceSkyVisibilityL0L1 != null) UploadChunk(uploadHalfKernel, sourceSkyVisibilityL0L1, skyVisibilityL0L1, origin);
-                else ClearChunkTexture(clearRgbaKernel, skyVisibilityL0L1, origin);
+                if (sourceValidity != null) UploadChunk(uploadR8Kernel, sourceValidity, validity, sharedOrigin, true);
+                else ClearChunkTexture(clearR8Kernel, validity, sharedOrigin);
             }
 
-            if (skyShadingDirectionIndices != null)
+            if (updateSharedData && skyVisibilityL0L1 != null)
             {
-                if (sourceSkyShadingDirectionIndices != null) UploadChunk(uploadR8Kernel, sourceSkyShadingDirectionIndices, skyShadingDirectionIndices, origin, true);
-                else ClearChunkTexture(clearR8Kernel, skyShadingDirectionIndices, origin);
+                if (sourceSkyVisibilityL0L1 != null) UploadChunk(uploadHalfKernel, sourceSkyVisibilityL0L1, skyVisibilityL0L1, sharedOrigin);
+                else ClearChunkTexture(clearRgbaKernel, skyVisibilityL0L1, sharedOrigin);
             }
 
+            if (updateSharedData && skyShadingDirectionIndices != null)
+            {
+                if (sourceSkyShadingDirectionIndices != null) UploadChunk(uploadR8Kernel, sourceSkyShadingDirectionIndices, skyShadingDirectionIndices, sharedOrigin, true);
+                else ClearChunkTexture(clearR8OneKernel, skyShadingDirectionIndices, sharedOrigin);
+            }
+
+            LastUploadStatus = "Uploaded(Chunk=" + chunkIndex + ",Shared=" + resolvedSharedChunkIndex + ",L0=" + hasL0Data + ",L1=" + hasL1Data + ",L2=" + hasL2Data + ")";
             return true;
         }
 
-        public bool TryClearChunk(int chunkIndex)
+        private bool FailUpload(string reason)
         {
-            if (!IsInitialized || !IsValidChunkIndex(chunkIndex))
+            LastUploadStatus = reason;
+            return false;
+        }
+
+        private static int ByteLength(byte[] bytes)
+        {
+            return bytes != null ? bytes.Length : -1;
+        }
+
+        public bool TryClearChunk(int chunkIndex) => TryClearChunk(chunkIndex, -1);
+
+        public bool TryClearChunk(int chunkIndex, int sharedChunkIndex)
+        {
+            var resolvedSharedChunkIndex = sharedChunkIndex >= 0 ? sharedChunkIndex : chunkIndex;
+            if (!IsInitialized || !IsValidChunkIndex(chunkIndex) || !IsValidChunkIndex(resolvedSharedChunkIndex))
             {
                 return false;
             }
 
             var origin = GetChunkOrigin(chunkIndex);
+            var sharedOrigin = GetChunkOrigin(resolvedSharedChunkIndex);
             ClearChunkTexture(clearRgbaKernel, l0L1Rx, origin);
-            ClearChunkTexture(clearRgbaKernel, l1GL1Ry, origin);
-            ClearChunkTexture(clearRgbaKernel, l1BL1Rz, origin);
-            if (l20 != null) ClearChunkTexture(clearRgbaKernel, l20, origin);
-            if (l21 != null) ClearChunkTexture(clearRgbaKernel, l21, origin);
-            if (l22 != null) ClearChunkTexture(clearRgbaKernel, l22, origin);
-            if (l23 != null) ClearChunkTexture(clearRgbaKernel, l23, origin);
+            ClearChunkTexture(clearRgba8NeutralKernel, l1GL1Ry, origin);
+            ClearChunkTexture(clearRgba8NeutralKernel, l1BL1Rz, origin);
+            l1LoadedChunks.Remove(chunkIndex);
+            UpdateProbeVolumeL1Textures();
+            if (l20 != null) ClearChunkTexture(clearRgba8NeutralKernel, l20, origin);
+            if (l21 != null) ClearChunkTexture(clearRgba8NeutralKernel, l21, origin);
+            if (l22 != null) ClearChunkTexture(clearRgba8NeutralKernel, l22, origin);
+            if (l23 != null) ClearChunkTexture(clearRgba8NeutralKernel, l23, origin);
             l2LoadedChunks.Remove(chunkIndex);
             UpdateProbeVolumeL2Textures();
-            if (skyVisibilityL0L1 != null) ClearChunkTexture(clearRgbaKernel, skyVisibilityL0L1, origin);
-            if (skyShadingDirectionIndices != null) ClearChunkTexture(clearR8Kernel, skyShadingDirectionIndices, origin);
+            ClearSharedChunk(sharedOrigin);
             return true;
         }
 
         public Vector3Int GetChunkOrigin(int chunkIndex)
         {
-            var x = chunkIndex % chunkDimensions.x;
-            var y = (chunkIndex / chunkDimensions.x) % chunkDimensions.y;
-            var z = chunkIndex / (chunkDimensions.x * chunkDimensions.y);
+            return GetChunkOrigin(chunkIndex, chunkDimensions);
+        }
+
+        public static Vector3Int GetChunkOrigin(int chunkIndex, Vector3Int chunkDimensions)
+        {
+            var safeDimensions = Vector3Int.Max(Vector3Int.one, chunkDimensions);
+            var x = chunkIndex % safeDimensions.x;
+            var y = (chunkIndex / safeDimensions.x) % safeDimensions.y;
+            var z = chunkIndex / (safeDimensions.x * safeDimensions.y);
             return new Vector3Int(x * ChunkWidth, y * ChunkHeight, z * ChunkDepth);
+        }
+
+        public static uint GetChunkBrickPhysicalLocation(int chunkIndex, int brickIndexInChunk, Vector3Int chunkDimensions)
+        {
+            var safeDimensions = Vector3Int.Max(Vector3Int.one, chunkDimensions);
+            var origin = GetChunkOrigin(chunkIndex, safeDimensions);
+            var poolWidth = safeDimensions.x * ChunkWidth;
+            var poolHeight = safeDimensions.y * ChunkHeight;
+            var brickOffset = Mathf.Clamp(brickIndexInChunk, 0, BricksPerChunk - 1) * BrickProbeCountPerDimension;
+            var physicalLocation =
+                origin.x + brickOffset +
+                origin.y * poolWidth +
+                origin.z * poolWidth * poolHeight;
+            return (uint)Mathf.Max(0, physicalLocation);
         }
 
         public void ReleasePool()
@@ -217,11 +339,13 @@ namespace Burt.RenderPipeline
             DestroyTexture(ref l21);
             DestroyTexture(ref l22);
             DestroyTexture(ref l23);
+            DestroyTexture(ref validity);
             DestroyTexture(ref skyVisibilityL0L1);
             DestroyTexture(ref skyShadingDirectionIndices);
             uploadBuffer?.Release();
             uploadBuffer = null;
             uploadWords = null;
+            l1LoadedChunks.Clear();
             l2LoadedChunks.Clear();
         }
 
@@ -239,6 +363,7 @@ namespace Burt.RenderPipeline
             if (probeVolume.virtualL21 == l21) probeVolume.virtualL21 = null;
             if (probeVolume.virtualL22 == l22) probeVolume.virtualL22 = null;
             if (probeVolume.virtualL23 == l23) probeVolume.virtualL23 = null;
+            if (probeVolume.virtualValidity == validity) probeVolume.virtualValidity = null;
             if (probeVolume.virtualSkyVisibilityL0L1 == skyVisibilityL0L1) probeVolume.virtualSkyVisibilityL0L1 = null;
             if (probeVolume.virtualSkyShadingDirectionIndices == skyShadingDirectionIndices) probeVolume.virtualSkyShadingDirectionIndices = null;
         }
@@ -253,7 +378,14 @@ namespace Burt.RenderPipeline
         {
             if (uploadCompute != null)
             {
-                return uploadHalfKernel >= 0 && uploadRgba8Kernel >= 0 && uploadR8Kernel >= 0 && clearRgbaKernel >= 0 && clearR8Kernel >= 0;
+                if (uploadHalfKernel >= 0 && uploadRgba8Kernel >= 0 && uploadR8Kernel >= 0 &&
+                    clearRgbaKernel >= 0 && clearRgba8NeutralKernel >= 0 && clearR8Kernel >= 0 && clearR8OneKernel >= 0)
+                {
+                    return true;
+                }
+
+                uploadCompute = null;
+                uploadHalfKernel = uploadRgba8Kernel = uploadR8Kernel = clearRgbaKernel = clearRgba8NeutralKernel = clearR8Kernel = clearR8OneKernel = -1;
             }
 
             uploadCompute = Resources.Load<ComputeShader>(UploadComputeResourcePath);
@@ -269,14 +401,16 @@ namespace Burt.RenderPipeline
                 uploadRgba8Kernel = uploadCompute.FindKernel("UploadRGBA8");
                 uploadR8Kernel = uploadCompute.FindKernel("UploadR8");
                 clearRgbaKernel = uploadCompute.FindKernel("ClearRGBA");
+                clearRgba8NeutralKernel = uploadCompute.FindKernel("ClearRGBA8Neutral");
                 clearR8Kernel = uploadCompute.FindKernel("ClearR8");
+                clearR8OneKernel = uploadCompute.FindKernel("ClearR8One");
                 return true;
             }
             catch (Exception exception)
             {
                 Debug.LogError("BurtRP could not initialize XGI physical-pool upload kernels: " + exception.Message);
                 uploadCompute = null;
-                uploadHalfKernel = uploadRgba8Kernel = uploadR8Kernel = clearRgbaKernel = clearR8Kernel = -1;
+                uploadHalfKernel = uploadRgba8Kernel = uploadR8Kernel = clearRgbaKernel = clearRgba8NeutralKernel = clearR8Kernel = clearR8OneKernel = -1;
                 return false;
             }
         }
@@ -307,14 +441,15 @@ namespace Burt.RenderPipeline
         {
             var dimensions = PhysicalPoolDimensions;
             ClearTexture(clearRgbaKernel, l0L1Rx, dimensions);
-            ClearTexture(clearRgbaKernel, l1GL1Ry, dimensions);
-            ClearTexture(clearRgbaKernel, l1BL1Rz, dimensions);
-            if (l20 != null) ClearTexture(clearRgbaKernel, l20, dimensions);
-            if (l21 != null) ClearTexture(clearRgbaKernel, l21, dimensions);
-            if (l22 != null) ClearTexture(clearRgbaKernel, l22, dimensions);
-            if (l23 != null) ClearTexture(clearRgbaKernel, l23, dimensions);
+            ClearTexture(clearRgba8NeutralKernel, l1GL1Ry, dimensions);
+            ClearTexture(clearRgba8NeutralKernel, l1BL1Rz, dimensions);
+            if (l20 != null) ClearTexture(clearRgba8NeutralKernel, l20, dimensions);
+            if (l21 != null) ClearTexture(clearRgba8NeutralKernel, l21, dimensions);
+            if (l22 != null) ClearTexture(clearRgba8NeutralKernel, l22, dimensions);
+            if (l23 != null) ClearTexture(clearRgba8NeutralKernel, l23, dimensions);
+            if (validity != null) ClearTexture(clearR8Kernel, validity, dimensions);
             if (skyVisibilityL0L1 != null) ClearTexture(clearRgbaKernel, skyVisibilityL0L1, dimensions);
-            if (skyShadingDirectionIndices != null) ClearTexture(clearR8Kernel, skyShadingDirectionIndices, dimensions);
+            if (skyShadingDirectionIndices != null) ClearTexture(clearR8OneKernel, skyShadingDirectionIndices, dimensions);
         }
 
         private void UploadChunk(int kernel, byte[] source, RenderTexture destination, Vector3Int origin)
@@ -339,10 +474,23 @@ namespace Burt.RenderPipeline
 
         private void ClearL2Chunk(Vector3Int origin)
         {
-            if (l20 != null) ClearChunkTexture(clearRgbaKernel, l20, origin);
-            if (l21 != null) ClearChunkTexture(clearRgbaKernel, l21, origin);
-            if (l22 != null) ClearChunkTexture(clearRgbaKernel, l22, origin);
-            if (l23 != null) ClearChunkTexture(clearRgbaKernel, l23, origin);
+            if (l20 != null) ClearChunkTexture(clearRgba8NeutralKernel, l20, origin);
+            if (l21 != null) ClearChunkTexture(clearRgba8NeutralKernel, l21, origin);
+            if (l22 != null) ClearChunkTexture(clearRgba8NeutralKernel, l22, origin);
+            if (l23 != null) ClearChunkTexture(clearRgba8NeutralKernel, l23, origin);
+        }
+
+        private void ClearL1Chunk(Vector3Int origin)
+        {
+            ClearChunkTexture(clearRgba8NeutralKernel, l1GL1Ry, origin);
+            ClearChunkTexture(clearRgba8NeutralKernel, l1BL1Rz, origin);
+        }
+
+        private void ClearSharedChunk(Vector3Int origin)
+        {
+            if (validity != null) ClearChunkTexture(clearR8Kernel, validity, origin);
+            if (skyVisibilityL0L1 != null) ClearChunkTexture(clearRgbaKernel, skyVisibilityL0L1, origin);
+            if (skyShadingDirectionIndices != null) ClearChunkTexture(clearR8OneKernel, skyShadingDirectionIndices, origin);
         }
 
         private void UpdateProbeVolumeL2Textures()
@@ -359,9 +507,21 @@ namespace Burt.RenderPipeline
             probeVolume.virtualL23 = hasL2Data ? l23 : null;
         }
 
+        private void UpdateProbeVolumeL1Textures()
+        {
+            if (probeVolume == null)
+            {
+                return;
+            }
+
+            var hasL1Data = l1LoadedChunks.Count > 0;
+            probeVolume.virtualL1GL1Ry = hasL1Data ? l1GL1Ry : null;
+            probeVolume.virtualL1BL1Rz = hasL1Data ? l1BL1Rz : null;
+        }
+
         private void ClearChunkTexture(int kernel, RenderTexture destination, Vector3Int origin)
         {
-            uploadCompute.SetTexture(kernel, kernel == clearR8Kernel ? UploadR8TextureId : UploadRgbaTextureId, destination);
+            uploadCompute.SetTexture(kernel, kernel == clearR8Kernel || kernel == clearR8OneKernel ? UploadR8TextureId : UploadRgbaTextureId, destination);
             uploadCompute.SetVector(UploadOriginId, new Vector4(origin.x, origin.y, origin.z, 0f));
             uploadCompute.SetVector(UploadPoolDimensionsId, new Vector4(PhysicalPoolDimensions.x, PhysicalPoolDimensions.y, PhysicalPoolDimensions.z, 0f));
             uploadCompute.Dispatch(kernel, ChunkWidth / UploadThreadCountX, ChunkHeight / UploadThreadCountY, ChunkDepth / UploadThreadCountZ);
@@ -369,7 +529,7 @@ namespace Burt.RenderPipeline
 
         private void ClearTexture(int kernel, RenderTexture destination, Vector3Int dimensions)
         {
-            uploadCompute.SetTexture(kernel, kernel == clearR8Kernel ? UploadR8TextureId : UploadRgbaTextureId, destination);
+            uploadCompute.SetTexture(kernel, kernel == clearR8Kernel || kernel == clearR8OneKernel ? UploadR8TextureId : UploadRgbaTextureId, destination);
             uploadCompute.SetVector(UploadOriginId, Vector4.zero);
             uploadCompute.SetVector(UploadPoolDimensionsId, new Vector4(dimensions.x, dimensions.y, dimensions.z, 0f));
             uploadCompute.Dispatch(

@@ -1,0 +1,94 @@
+#pragma kernel SetupProbeIndirectArgsCS
+#pragma kernel SetupProbeFilterIndirectArgsCS
+
+#define BURT_GI_WRITE_DISPATCH_ARGS(Buffer, TupleIndex, X, Y, Z) Buffer[TupleIndex] = uint3((uint)(X), (uint)(Y), (uint)(Z))
+#define BURT_GI_RADIANCE_PROBE_PDF_COEFFICIENT_COUNT 10u
+
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+uint _BurtGIRadianceCacheClipMapRadianceProbePDFCoefficientCount;
+uint _BurtGIRadianceCacheClipMapClearProbePDFGroupSize;
+uint _BurtGIRadianceCacheClipMapTraceFromProbesGroupSize;
+uint _BurtGIRadianceCacheClipMapFilterProbesGroupSize;
+uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution;
+
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBuffer;
+RWStructuredBuffer<uint3> _BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBuffer;
+
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorReadBuffer;
+
+uint BurtGIMulClamp(uint a, uint b)
+{
+    return a > 0u && b > 0u ? min(a * b, 0x7fffffffu) : 0u;
+}
+
+uint BurtGIDivRoundUp(uint value, uint divisor)
+{
+    divisor = max(1u, divisor);
+    return (value + divisor - 1u) / divisor;
+}
+
+[numthreads(1, 1, 1)]
+void SetupProbeIndirectArgsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x != 0u || dispatchThreadId.y != 0u || dispatchThreadId.z != 0u)
+    {
+        return;
+    }
+
+    uint maxProbeCount = max(1u, _BurtGIRadianceCacheClipMapMaxProbeCount);
+    _BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer[0] = min(_BurtGIRadianceCacheClipMapProbeFreeListAllocatorBuffer[0], maxProbeCount);
+    _BurtGIRadianceCacheClipMapProbeAllocatorBuffer[0] = min(_BurtGIRadianceCacheClipMapProbeAllocatorBuffer[0], maxProbeCount);
+    uint numProbesToTrace = min(_BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0], maxProbeCount);
+    _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0] = numProbesToTrace;
+
+    BURT_GI_WRITE_DISPATCH_ARGS(
+        _BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBuffer,
+        0,
+        BurtGIDivRoundUp(BurtGIMulClamp(numProbesToTrace, _BurtGIRadianceCacheClipMapRadianceProbePDFCoefficientCount), _BurtGIRadianceCacheClipMapClearProbePDFGroupSize),
+        1u,
+        1u);
+
+    BURT_GI_WRITE_DISPATCH_ARGS(_BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer, 0, 1u, 1u, numProbesToTrace);
+    _BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBuffer[0] = 0u;
+}
+
+[numthreads(1, 1, 1)]
+void SetupProbeFilterIndirectArgsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x != 0u || dispatchThreadId.y != 0u || dispatchThreadId.z != 0u)
+    {
+        return;
+    }
+
+    uint maxProbeCount = max(1u, _BurtGIRadianceCacheClipMapMaxProbeCount);
+    uint numProbesToTrace = min(_BurtGIRadianceCacheClipMapProbeTraceAllocatorReadBuffer[0], maxProbeCount);
+    BURT_GI_WRITE_DISPATCH_ARGS(
+        _BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBuffer,
+        0,
+        BurtGIDivRoundUp(_BurtGIRadianceCacheClipMapRadianceProbeResolution, _BurtGIRadianceCacheClipMapFilterProbesGroupSize),
+        BurtGIDivRoundUp(_BurtGIRadianceCacheClipMapRadianceProbeResolution, _BurtGIRadianceCacheClipMapFilterProbesGroupSize),
+        numProbesToTrace);
+
+    BURT_GI_WRITE_DISPATCH_ARGS(
+        _BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBuffer,
+        0,
+        BurtGIDivRoundUp(_BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution, _BurtGIRadianceCacheClipMapTraceFromProbesGroupSize),
+        BurtGIDivRoundUp(_BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution, _BurtGIRadianceCacheClipMapTraceFromProbesGroupSize),
+        numProbesToTrace);
+
+    BURT_GI_WRITE_DISPATCH_ARGS(
+        _BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBuffer,
+        0,
+        BurtGIDivRoundUp(_BurtGIRadianceCacheClipMapFinalProbeResolution, _BurtGIRadianceCacheClipMapTraceFromProbesGroupSize),
+        BurtGIDivRoundUp(_BurtGIRadianceCacheClipMapFinalProbeResolution, _BurtGIRadianceCacheClipMapTraceFromProbesGroupSize),
+        numProbesToTrace);
+}

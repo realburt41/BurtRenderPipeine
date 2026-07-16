@@ -1,0 +1,919 @@
+#pragma kernel ScreenProbeIntegrateSimpleSHDiffuseCS
+#pragma kernel ScreenProbeIntegrateSimpleSHAllCS
+#pragma kernel ScreenProbeIntegrateSimpleSHCS
+#pragma kernel ScreenProbeIntegrateSimpleNICS
+#pragma kernel ScreenProbeIntegrateSimpleISCS
+
+#define BURT_GI_INTEGRATE_TILE_SIZE 8u
+#define BURT_INV_PI 0.31830988618f
+#define BURT_GI_SHADING_MODEL_HAIR 1.0f
+#define BURT_GI_SHADING_MODEL_CLEAR_COAT 2.0f
+#define BURT_GI_SHADING_MODEL_SUBSURFACE 3.0f
+#define BURT_GI_SHADING_MODEL_FOLIAGE 5.0f
+#define BURT_GI_SHADING_MODEL_EYE 7.0f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT 8.0f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_BIAS 0.02f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_SCALE (1.0f - 2.0f * BURT_GI_GBUFFER_SHADING_MODEL_PACK_BIAS)
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION 6.0f
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER 8.0f
+#define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION 8.0f
+#define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER 10.0f
+
+Texture2D<float> _BurtCameraDepthTexture;
+Texture2D<float4> _BurtGBuffer0;
+Texture2D<float4> _BurtGBuffer1;
+Texture2D<float4> _BurtGBuffer2;
+Texture2D<float4> _BurtGBuffer3;
+RWTexture2D<float4> _BurtScreenSpaceGlobalIlluminationTexture;
+Texture2D<float4> _BurtGIScreenProbeHitDistanceTexture;
+Texture2D<float4> _BurtGIScreenProbeBentNormalTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldNormalTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
+Texture2D<float4> _BurtGIScreenProbeIrradianceOctTexture;
+Texture2D<float4> _BurtGIScreenProbeRadianceOctTexture;
+Texture2D<float4> _BurtGIScreenProbeRadianceSHAmbientTexture;
+Texture2D<float4> _BurtGIScreenProbeRadianceSHDirectionalTexture;
+SamplerState sampler_BurtGIScreenProbeIrradianceOctTexture;
+SamplerState sampler_BurtGIScreenProbeRadianceOctTexture;
+StructuredBuffer<uint> _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer;
+StructuredBuffer<uint> _BurtGIScreenProbeIntegrateTileDataAllBuffer;
+
+RWTexture2D<float4> _BurtGIBackfaceDiffuseIndirectTexture;
+RWTexture2D<float4> _BurtGIRoughSpecularIndirectTexture;
+
+float4 _BurtGIScreenProbeIntegrateSimpleSHParams; // x=width, y=height, z=rough specular enabled, w=max roughness to evaluate rough specular.
+float4 _BurtGIScreenProbeIntegrateSimpleSHParams1; // x=backface diffuse enabled, y=trace distance, z=short-range AO weight, w=use oct irradiance.
+float4 _BurtGISourceTexelSize; // xy=inv source size, zw=source size.
+float4 _BurtGIScreenProbeParams; // x=spacing pixels, y=trace distance, z=sample count, w=apply strength.
+float4 _BurtGIScreenProbeGridParams; // xy=probe grid size, zw=probe grid texel size.
+float4 _BurtGIScreenProbeTraceParams; // x=oct resolution, yz=trace atlas size, w=trace distance.
+float4 _BurtDeferredCameraWorldPosition;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+
+float3 BurtGIIntegrateSimpleSHSafeNormalize(float3 value)
+{
+    float lengthSq = max(dot(value, value), 1.0e-8f);
+    return value * rsqrt(lengthSq);
+}
+
+void BurtGIIntegrateSimpleSHBuildTangentBasis(float3 normalWS, out float3 tangentWS, out float3 bitangentWS)
+{
+    float3 upWS = abs(normalWS.y) < 0.99f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
+    tangentWS = BurtGIIntegrateSimpleSHSafeNormalize(cross(upWS, normalWS));
+    bitangentWS = BurtGIIntegrateSimpleSHSafeNormalize(cross(normalWS, tangentWS));
+}
+
+float3 BurtGIIntegrateSimpleSHWorldToTangent(float3 directionWS, float3 tangentWS, float3 bitangentWS, float3 normalWS)
+{
+    return float3(dot(directionWS, tangentWS), dot(directionWS, bitangentWS), dot(directionWS, normalWS));
+}
+
+float3 BurtGIIntegrateSimpleSHTangentToWorld(float3 directionTS, float3 tangentWS, float3 bitangentWS, float3 normalWS)
+{
+    return BurtGIIntegrateSimpleSHSafeNormalize(tangentWS * directionTS.x + bitangentWS * directionTS.y + normalWS * directionTS.z);
+}
+
+float3 BurtGIIntegrateSimpleSHImportanceSampleVisibleGGXHalfVectorTS(float2 diskSample, float roughnessSq, float3 viewDirectionTS)
+{
+    float a = sqrt(max(roughnessSq, 0.000001f));
+    float3 stretchedView = BurtGIIntegrateSimpleSHSafeNormalize(float3(a * viewDirectionTS.xy, max(viewDirectionTS.z, 0.0001f)));
+
+    float tangentLengthSq = dot(stretchedView.xy, stretchedView.xy);
+    float3 tangent0 = tangentLengthSq > 0.0f
+        ? float3(-stretchedView.y, stretchedView.x, 0.0f) * rsqrt(tangentLengthSq)
+        : float3(1.0f, 0.0f, 0.0f);
+    float3 tangent1 = cross(stretchedView, tangent0);
+
+    float2 projectedDisk = diskSample;
+    float viewBlend = 0.5f + 0.5f * stretchedView.z;
+    projectedDisk.y = (1.0f - viewBlend) * sqrt(saturate(1.0f - projectedDisk.x * projectedDisk.x)) + viewBlend * projectedDisk.y;
+
+    float3 halfVectorTS = projectedDisk.x * tangent0;
+    halfVectorTS += projectedDisk.y * tangent1;
+    halfVectorTS += sqrt(saturate(1.0f - dot(projectedDisk, projectedDisk))) * stretchedView;
+    return BurtGIIntegrateSimpleSHSafeNormalize(float3(a * halfVectorTS.xy, max(0.0f, halfVectorTS.z)));
+}
+
+float3 BurtGIIntegrateSimpleSHAnchoredVisibleGGXSpecularDirection(float3 normalWS, float3 viewDirectionWS, float roughness)
+{
+    float3 tangentWS;
+    float3 bitangentWS;
+    float3 safeNormalWS = BurtGIIntegrateSimpleSHSafeNormalize(normalWS);
+    float3 safeViewDirectionWS = BurtGIIntegrateSimpleSHSafeNormalize(viewDirectionWS);
+    BurtGIIntegrateSimpleSHBuildTangentBasis(safeNormalWS, tangentWS, bitangentWS);
+
+    float3 viewDirectionTS = BurtGIIntegrateSimpleSHSafeNormalize(BurtGIIntegrateSimpleSHWorldToTangent(safeViewDirectionWS, tangentWS, bitangentWS, safeNormalWS));
+    float2 anchoredSample = float2(0.0f, 0.0f);
+    anchoredSample.y = (anchoredSample.y - 0.5f) * 0.9f + 0.5f;
+
+    float3 halfVectorTS = BurtGIIntegrateSimpleSHImportanceSampleVisibleGGXHalfVectorTS(anchoredSample, roughness * roughness, viewDirectionTS);
+    float3 halfVectorWS = BurtGIIntegrateSimpleSHTangentToWorld(halfVectorTS, tangentWS, bitangentWS, safeNormalWS);
+    float3 sampleDirectionWS = BurtGIIntegrateSimpleSHSafeNormalize(2.0f * dot(safeViewDirectionWS, halfVectorWS) * halfVectorWS - safeViewDirectionWS);
+    float3 fallbackReflectionWS = BurtGIIntegrateSimpleSHSafeNormalize(reflect(-safeViewDirectionWS, safeNormalWS));
+    return dot(sampleDirectionWS, safeNormalWS) > 0.0f ? sampleDirectionWS : fallbackReflectionWS;
+}
+
+float BurtGIIntegrateSimpleSHLuma(float3 color)
+{
+    return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+float BurtGIIntegrateSimpleSHPerceptualRoughnessToLinearRoughness(float perceptualRoughness)
+{
+    return max(perceptualRoughness * perceptualRoughness, 1.0e-6f);
+}
+
+float2 BurtGIIntegrateSimpleSHPrefilteredDFGApprox(float roughness, float noV)
+{
+    float4 c0 = float4(-1.0f, -0.0275f, -0.572f, 0.022f);
+    float4 c1 = float4(1.0f, 0.0425f, 1.04f, -0.04f);
+    float4 r = saturate(roughness) * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28f * saturate(noV))) * r.x + r.y;
+    return float2(-1.04f, 1.04f) * a004 + r.zw;
+}
+
+float3 BurtGIIntegrateSimpleSHPreIntegratedFGApprox(float roughness, float noV)
+{
+    float2 dfg = BurtGIIntegrateSimpleSHPrefilteredDFGApprox(roughness, noV);
+    float energy = clamp(dfg.x + dfg.y, 0.001f, 1.0f);
+    return float3(dfg, energy);
+}
+
+float3 BurtGIIntegrateSimpleSHSpecularMaterialScale(float3 f0, float roughness, float noV, float occlusion)
+{
+    float3 preIntegratedFG = BurtGIIntegrateSimpleSHPreIntegratedFGApprox(roughness, noV);
+    float3 f90 = float3(1.0f, 1.0f, 1.0f);
+    float3 envBRDF = f0 * preIntegratedFG.x + f90 * preIntegratedFG.y;
+    float3 energyCompensation = 1.0f + f0 * (rcp(max(preIntegratedFG.z, 0.001f)) - 1.0f);
+    float linearRoughness = BurtGIIntegrateSimpleSHPerceptualRoughnessToLinearRoughness(roughness);
+    float specularOcclusion = saturate(pow(max(saturate(noV) + saturate(occlusion), 1.0e-6f), abs(linearRoughness)) - 1.0f + saturate(occlusion));
+    return max(envBRDF * energyCompensation * specularOcclusion, float3(0.0f, 0.0f, 0.0f));
+}
+
+float3 BurtGIIntegrateSimpleSHTonemapLighting(float3 lighting)
+{
+    return lighting / (1.0f + BurtGIIntegrateSimpleSHLuma(lighting));
+}
+
+float3 BurtGIIntegrateSimpleSHInverseTonemapLighting(float3 tonemappedLighting)
+{
+    return tonemappedLighting / max(1.0f - BurtGIIntegrateSimpleSHLuma(tonemappedLighting), 0.0001f);
+}
+
+float4 BurtGIIntegrateSimpleSHBuildClipPosition(float2 screenUV, float rawDepth)
+{
+    float2 clipXY = screenUV * 2.0f - 1.0f;
+#if UNITY_UV_STARTS_AT_TOP
+    clipXY.y = -clipXY.y;
+#endif
+    return float4(clipXY, rawDepth, 1.0f);
+}
+
+float3 BurtGIIntegrateSimpleSHReconstructPositionWS(float2 screenUV, float rawDepth)
+{
+    float4 clipPosition = BurtGIIntegrateSimpleSHBuildClipPosition(screenUV, rawDepth);
+    float4 positionWS = mul(_BurtDeferredInverseViewProjectionMatrix, clipPosition);
+    float safeW = abs(positionWS.w) > 1.0e-6f ? positionWS.w : (positionWS.w < 0.0f ? -1.0e-6f : 1.0e-6f);
+    return positionWS.xyz / safeW;
+}
+
+float2 BurtGIIntegrateSimpleSHUnpack888ToFloat2(float3 value)
+{
+    uint3 quantized = (uint3)(saturate(value) * 255.5f);
+    uint hi = quantized.z >> 4;
+    uint lo = quantized.z & 15u;
+    uint2 packed = quantized.xy | uint2(lo << 8, hi << 8);
+    return (float2)packed / 4095.0f;
+}
+
+float3 BurtGIIntegrateSimpleSHDecodeNormalWS(float3 encodedNormal)
+{
+    float2 encoded = BurtGIIntegrateSimpleSHUnpack888ToFloat2(encodedNormal);
+    float2 f = encoded * 2.0f - 1.0f;
+    float3 n = float3(f.x, f.y, 1.0f - abs(f.x) - abs(f.y));
+    float t = saturate(-n.z);
+    n.x += n.x >= 0.0f ? -t : t;
+    n.y += n.y >= 0.0f ? -t : t;
+    return BurtGIIntegrateSimpleSHSafeNormalize(n);
+}
+
+uint2 BurtGIIntegrateSimpleSHMapPixelToHitDistanceCoord(uint2 pixelCoord)
+{
+    uint width;
+    uint height;
+    _BurtGIScreenProbeHitDistanceTexture.GetDimensions(width, height);
+    uint2 textureSize = max(uint2(width, height), uint2(1u, 1u));
+    uint2 outputSize = max(uint2((uint)_BurtGIScreenProbeIntegrateSimpleSHParams.x, (uint)_BurtGIScreenProbeIntegrateSimpleSHParams.y), uint2(1u, 1u));
+    return min((pixelCoord * textureSize) / outputSize, textureSize - 1u);
+}
+
+uint2 BurtGIIntegrateSimpleSHMapPixelToBentNormalCoord(uint2 pixelCoord)
+{
+    uint width;
+    uint height;
+    _BurtGIScreenProbeBentNormalTexture.GetDimensions(width, height);
+    uint2 textureSize = max(uint2(width, height), uint2(1u, 1u));
+    uint2 outputSize = max(uint2((uint)_BurtGIScreenProbeIntegrateSimpleSHParams.x, (uint)_BurtGIScreenProbeIntegrateSimpleSHParams.y), uint2(1u, 1u));
+    return min((pixelCoord * textureSize) / outputSize, textureSize - 1u);
+}
+
+float4 BurtGIIntegrateSimpleSHSampleHitDistanceConfidence(uint2 pixelCoord)
+{
+    float4 hitDistance = _BurtGIScreenProbeHitDistanceTexture.Load(int3(BurtGIIntegrateSimpleSHMapPixelToHitDistanceCoord(pixelCoord), 0));
+    float encodedDistanceConfidence = 1.0f - smoothstep(0.55f, 0.98f, saturate(hitDistance.r));
+    float linearDistanceConfidence = 1.0f - saturate(hitDistance.g / max(_BurtGIScreenProbeIntegrateSimpleSHParams1.y, 0.001f));
+    float hitConfidence = saturate(max(hitDistance.b, hitDistance.a) * lerp(encodedDistanceConfidence, linearDistanceConfidence, 0.35f));
+    return float4(saturate(hitDistance.r), max(hitDistance.g, 0.0f), saturate(hitDistance.b), hitConfidence);
+}
+
+void BurtGIIntegrateSimpleSHSampleBentNormalAO(
+    uint2 pixelCoord,
+    float3 fallbackNormalWS,
+    out float3 unitBentNormalWS,
+    out float bentAO,
+    out float valid)
+{
+    float4 encodedBentNormal = _BurtGIScreenProbeBentNormalTexture.Load(int3(BurtGIIntegrateSimpleSHMapPixelToBentNormalCoord(pixelCoord), 0));
+    float3 bentNormal = encodedBentNormal.xyz * 2.0f - 1.0f;
+    float bentNormalLength = length(bentNormal);
+    valid = encodedBentNormal.a > 0.0001f ? 1.0f : 0.0f;
+    bentAO = saturate(encodedBentNormal.a);
+    unitBentNormalWS = bentNormalLength > 0.0001f ? bentNormal / bentNormalLength : fallbackNormalWS;
+    unitBentNormalWS = valid > 0.5f ? unitBentNormalWS : fallbackNormalWS;
+}
+
+float BurtGIIntegrateSimpleSHApplyShortRangeAOWeight(float occlusion)
+{
+    return lerp(1.0f, saturate(occlusion), saturate(_BurtGIScreenProbeIntegrateSimpleSHParams1.z));
+}
+
+float2 BurtGIIntegrateSimpleSHInverseEquiAreaSphericalMapping(float3 direction)
+{
+    direction = BurtGIIntegrateSimpleSHSafeNormalize(float3(direction.z, direction.x, direction.y));
+    float3 absDirection = abs(direction);
+    float r = sqrt(max(1.0f - absDirection.z, 0.0f));
+    float x = min(absDirection.x, absDirection.y) / (max(absDirection.x, absDirection.y) + 1.0e-8f);
+    const float t1 = 0.406758566246788489601959989e-5f;
+    const float t2 = 0.636226545274016134946890922156f;
+    const float t3 = 0.61572017898280213493197203466e-2f;
+    const float t4 = -0.247333733281268944196501420480f;
+    const float t5 = 0.881770664775316294736387951347e-1f;
+    const float t6 = 0.419038818029165735901852432784e-1f;
+    const float t7 = -0.251390972343483509333252996350e-1f;
+    float phi = t6 + t7 * x;
+    phi = t5 + phi * x;
+    phi = t4 + phi * x;
+    phi = t3 + phi * x;
+    phi = t2 + phi * x;
+    phi = t1 + phi * x;
+    phi = absDirection.x < absDirection.y ? 1.0f - phi : phi;
+    float2 uv = float2(r - phi * r, phi * r);
+    uv = direction.z < 0.0f ? 1.0f - uv.yx : uv;
+    uv.x = direction.x < 0.0f ? -uv.x : uv.x;
+    uv.y = direction.y < 0.0f ? -uv.y : uv.y;
+    return saturate(uv * 0.5f + 0.5f);
+}
+
+float2 BurtGIIntegrateSimpleSHScreenProbeOctWrapBorderCoord(float2 localCoord, float resolutionWithBorder)
+{
+    float2 wrappedCoord = localCoord;
+    if (wrappedCoord.x < 0.5f)
+    {
+        wrappedCoord.x = 1.0f - wrappedCoord.x;
+        wrappedCoord.y = resolutionWithBorder - wrappedCoord.y;
+    }
+    if (wrappedCoord.x > resolutionWithBorder - 0.5f)
+    {
+        wrappedCoord.x = (2.0f * resolutionWithBorder - 1.0f) - wrappedCoord.x;
+        wrappedCoord.y = resolutionWithBorder - wrappedCoord.y;
+    }
+    if (wrappedCoord.y < 0.5f)
+    {
+        wrappedCoord.y = 1.0f - wrappedCoord.y;
+        wrappedCoord.x = resolutionWithBorder - wrappedCoord.x;
+    }
+    if (wrappedCoord.y > resolutionWithBorder - 0.5f)
+    {
+        wrappedCoord.y = (2.0f * resolutionWithBorder - 1.0f) - wrappedCoord.y;
+        wrappedCoord.x = resolutionWithBorder - wrappedCoord.x;
+    }
+    return clamp(wrappedCoord, 0.5f, resolutionWithBorder - 0.5f);
+}
+
+float2 BurtGIIntegrateSimpleSHScreenProbeUpsampleFullResCoord(float2 screenUV, float spacingPixels)
+{
+    float2 viewSize = max(_BurtGISourceTexelSize.zw, 1.0f);
+    return clamp(screenUV * viewSize, 0.0f, viewSize - 1.0f);
+}
+
+float2 BurtGIIntegrateSimpleSHFallbackProbeCoord(float2 screenUV, float2 gridSize)
+{
+    float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
+    float2 screenPixel = screenUV * max(_BurtGISourceTexelSize.zw, 1.0f);
+    return clamp(floor(screenPixel / spacingPixels), 0.0f, gridSize - 1.0f);
+}
+
+float4 BurtGIIntegrateSimpleSHBasis3V0(float3 direction)
+{
+    return float4(
+        0.28209479f,
+        -0.48860251f * direction.y,
+        0.48860251f * direction.z,
+        -0.48860251f * direction.x);
+}
+
+float4 BurtGIIntegrateSimpleSHBasis3V1(float3 direction)
+{
+    return float4(
+        1.09254843f * direction.x * direction.y,
+        -1.09254843f * direction.y * direction.z,
+        0.31539157f * (3.0f * direction.z * direction.z - 1.0f),
+        -1.09254843f * direction.x * direction.z);
+}
+
+float BurtGIIntegrateSimpleSHBasis3V2(float3 direction)
+{
+    return 0.54627422f * (direction.x * direction.x - direction.y * direction.y);
+}
+
+float4 BurtGIIntegrateSimpleSHLoadDirectionalTile(uint2 probePixel, uint tileIndex, uint screenProbeWidth)
+{
+    return _BurtGIScreenProbeRadianceSHDirectionalTexture.Load(int3(uint2(probePixel.x + tileIndex * screenProbeWidth, probePixel.y), 0));
+}
+
+float4 BurtGIIntegrateSimpleSHEvaluateSH3Probe(uint2 probePixel, float3 normalWS, uint screenProbeWidth, float cosThetaAO)
+{
+    float4 ambient = _BurtGIScreenProbeRadianceSHAmbientTexture.Load(int3(probePixel, 0));
+    float4 red0 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 0u, screenProbeWidth);
+    float4 red1 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 1u, screenProbeWidth);
+    float4 green0 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 2u, screenProbeWidth);
+    float4 green1 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 3u, screenProbeWidth);
+    float4 blue0 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 4u, screenProbeWidth);
+    float4 blue1 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 5u, screenProbeWidth);
+    float3 shDirection = BurtGIIntegrateSimpleSHSafeNormalize(normalWS).zxy;
+    float4 basis0 = BurtGIIntegrateSimpleSHBasis3V0(shDirection);
+    float4 basis1 = BurtGIIntegrateSimpleSHBasis3V1(shDirection);
+    float basis2 = BurtGIIntegrateSimpleSHBasis3V2(shDirection);
+    float coneCos = saturate(cosThetaAO);
+    float coneCos2 = coneCos * coneCos;
+    float coneCos3 = coneCos2 * coneCos;
+    float coneCos4 = coneCos2 * coneCos2;
+    float l0Scale = saturate(1.0f - coneCos2);
+    float l1Scale = saturate(1.0f - coneCos3);
+    float l2Scale = max(3.0f * (1.0f - coneCos4) - 2.0f * (1.0f - coneCos2), 0.0f);
+    basis0 *= float4(l0Scale, l1Scale, l1Scale, l1Scale);
+    basis1 *= l2Scale;
+    basis2 *= l2Scale;
+    float3 radiance;
+    radiance.r = dot(float4(ambient.r, red0.xyz), basis0) + dot(float4(red0.w, red1.xyz), basis1) + red1.w * basis2;
+    radiance.g = dot(float4(ambient.g, green0.xyz), basis0) + dot(float4(green0.w, green1.xyz), basis1) + green1.w * basis2;
+    radiance.b = dot(float4(ambient.b, blue0.xyz), basis0) + dot(float4(blue0.w, blue1.xyz), basis1) + blue1.w * basis2;
+    return float4(max(radiance * 12.5663706f, 0.0f), saturate(ambient.a));
+}
+
+float4 BurtGIIntegrateSimpleSHSampleIrradianceOctAtlasMip(float2 probeCoord, float2 localCoord, float2 atlasSize, float mipLevel)
+{
+    float2 tileBase = probeCoord * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER;
+    float2 atlasTexelCoord = tileBase + BurtGIIntegrateSimpleSHScreenProbeOctWrapBorderCoord(localCoord, BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER);
+    return _BurtGIScreenProbeIrradianceOctTexture.SampleLevel(
+        sampler_BurtGIScreenProbeIrradianceOctTexture,
+        atlasTexelCoord / max(atlasSize, 1.0f),
+        clamp(mipLevel, 0.0f, 3.0f));
+}
+
+float4 BurtGIIntegrateSimpleSHSampleRadianceOctAtlasMip(float2 probeCoord, float2 localCoord, float2 atlasSize, float mipLevel)
+{
+    float2 tileBase = probeCoord * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER;
+    float2 atlasTexelCoord = tileBase + BurtGIIntegrateSimpleSHScreenProbeOctWrapBorderCoord(localCoord, BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER);
+    return _BurtGIScreenProbeRadianceOctTexture.SampleLevel(
+        sampler_BurtGIScreenProbeRadianceOctTexture,
+        atlasTexelCoord / max(atlasSize, 1.0f),
+        clamp(mipLevel, 0.0f, 3.0f));
+}
+
+float4 BurtGIIntegrateSimpleSHSampleIrradianceOct(
+    float2 screenUV,
+    float3 positionWS,
+    float sceneDepth,
+    float3 normalWS,
+    float requestedMipLevel,
+    float receiverFoliageWeight)
+{
+    float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
+    float2 atlasSize = float2(
+        gridSize.x * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER,
+        max(gridSize.y * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER, _BurtGIScreenProbeTraceParams.z));
+    float2 octUV = BurtGIIntegrateSimpleSHInverseEquiAreaSphericalMapping(normalWS);
+    float2 localCoord = octUV * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION + 1.0f;
+    if (gridSize.x < 2.0f || gridSize.y < 2.0f)
+    {
+        return BurtGIIntegrateSimpleSHSampleIrradianceOctAtlasMip(BurtGIIntegrateSimpleSHFallbackProbeCoord(screenUV, gridSize), localCoord, atlasSize, requestedMipLevel);
+    }
+
+    float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
+    float2 screenCoord = BurtGIIntegrateSimpleSHScreenProbeUpsampleFullResCoord(screenUV, spacingPixels);
+    float2 tile00 = min(floor(screenCoord / spacingPixels), gridSize - 2.0f);
+    float2 bilinearWeights = saturate((screenCoord - tile00 * spacingPixels + 1.0f) / (spacingPixels + 2.0f));
+    float4 interpolationWeights = float4(
+        (1.0f - bilinearWeights.y) * (1.0f - bilinearWeights.x),
+        (1.0f - bilinearWeights.y) * bilinearWeights.x,
+        bilinearWeights.y * (1.0f - bilinearWeights.x),
+        bilinearWeights.y * bilinearWeights.x);
+    float3 unitNormalWS = BurtGIIntegrateSimpleSHSafeNormalize(normalWS);
+    float4 scenePlane = float4(unitNormalWS, dot(positionWS, unitNormalWS));
+    float4 irradianceSum = 0.0f;
+    float weightSum = 0.0f;
+
+    [unroll]
+    for (int cornerIndex = 0; cornerIndex < 4; ++cornerIndex)
+    {
+        float2 cornerOffset = float2((float)(cornerIndex & 1), (float)(cornerIndex >> 1));
+        float2 probeCoord = min(tile00 + cornerOffset, gridSize - 1.0f);
+        uint2 probePixel = (uint2)probeCoord;
+        float4 probePosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(probePixel, 0));
+        float4 probeNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(probePixel, 0));
+        float validProbe = (probePosition.a > 0.5f && probeNormal.a > 0.5f) ? 1.0f : 0.0f;
+        float planeDistance = abs(dot(float4(probePosition.xyz, -1.0f), scenePlane));
+        float receiverPlaneWeightScale = lerp(1.0f, 0.25f, saturate(receiverFoliageWeight));
+        float planeWeight = exp2(-200.0f * receiverPlaneWeightScale * planeDistance / max(sceneDepth, 0.001f));
+        float3 probeNormalWS = BurtGIIntegrateSimpleSHSafeNormalize(probeNormal.xyz * 2.0f - 1.0f);
+        float normalWeight = lerp(
+            lerp(0.35f, 1.0f, pow(saturate(dot(unitNormalWS, probeNormalWS)), 4.0f)),
+            1.0f,
+            saturate(receiverFoliageWeight));
+        float4 octSample = BurtGIIntegrateSimpleSHSampleIrradianceOctAtlasMip(probeCoord, localCoord, atlasSize, requestedMipLevel);
+        float4 probeHitDistance = _BurtGIScreenProbeHitDistanceTexture.Load(int3(probePixel, 0));
+        float probeTraceConfidence = saturate(max(probeHitDistance.b, probeHitDistance.a));
+        octSample.a = saturate(max(octSample.a, probeTraceConfidence * 0.65f));
+        float weight = interpolationWeights[cornerIndex] * planeWeight * normalWeight * validProbe * lerp(0.18f, 1.0f, saturate(octSample.a));
+        irradianceSum += octSample * weight;
+        weightSum += weight;
+    }
+
+    if (weightSum <= 0.0001f)
+    {
+        return BurtGIIntegrateSimpleSHSampleIrradianceOctAtlasMip(BurtGIIntegrateSimpleSHFallbackProbeCoord(screenUV, gridSize), localCoord, atlasSize, requestedMipLevel);
+    }
+
+    float4 irradiance = irradianceSum / weightSum;
+    return float4(max(irradiance.rgb, 0.0f), saturate(irradiance.a));
+}
+
+float4 BurtGIIntegrateSimpleSHSampleIrradianceSH3(
+    float2 screenUV,
+    float3 positionWS,
+    float sceneDepth,
+    float3 normalWS,
+    float cosThetaAO,
+    float receiverFoliageWeight)
+{
+    float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
+    uint2 gridSizeUInt = max((uint2)gridSize, uint2(1u, 1u));
+    uint screenProbeWidth = max(1u, gridSizeUInt.x);
+    if (gridSize.x < 2.0f || gridSize.y < 2.0f)
+    {
+        uint2 fallbackPixel = min((uint2)BurtGIIntegrateSimpleSHFallbackProbeCoord(screenUV, gridSize), gridSizeUInt - 1u);
+        return BurtGIIntegrateSimpleSHEvaluateSH3Probe(fallbackPixel, normalWS, screenProbeWidth, cosThetaAO);
+    }
+
+    float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
+    float2 screenCoord = BurtGIIntegrateSimpleSHScreenProbeUpsampleFullResCoord(screenUV, spacingPixels);
+    float2 tile00 = min(floor(screenCoord / spacingPixels), gridSize - 2.0f);
+    float2 bilinearWeights = saturate((screenCoord - tile00 * spacingPixels + 1.0f) / (spacingPixels + 2.0f));
+    float4 interpolationWeights = float4(
+        (1.0f - bilinearWeights.y) * (1.0f - bilinearWeights.x),
+        (1.0f - bilinearWeights.y) * bilinearWeights.x,
+        bilinearWeights.y * (1.0f - bilinearWeights.x),
+        bilinearWeights.y * bilinearWeights.x);
+    float3 unitNormalWS = BurtGIIntegrateSimpleSHSafeNormalize(normalWS);
+    float4 scenePlane = float4(unitNormalWS, dot(positionWS, unitNormalWS));
+    float4 irradianceSum = 0.0f;
+    float weightSum = 0.0f;
+
+    [unroll]
+    for (int cornerIndex = 0; cornerIndex < 4; ++cornerIndex)
+    {
+        float2 cornerOffset = float2((float)(cornerIndex & 1), (float)(cornerIndex >> 1));
+        float2 probeCoord = min(tile00 + cornerOffset, gridSize - 1.0f);
+        uint2 probePixel = (uint2)probeCoord;
+        float4 probePosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(probePixel, 0));
+        float4 probeNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(probePixel, 0));
+        float validProbe = (probePosition.a > 0.5f && probeNormal.a > 0.5f) ? 1.0f : 0.0f;
+        float planeDistance = abs(dot(float4(probePosition.xyz, -1.0f), scenePlane));
+        float receiverPlaneWeightScale = lerp(1.0f, 0.25f, saturate(receiverFoliageWeight));
+        float planeWeight = exp2(-200.0f * receiverPlaneWeightScale * planeDistance / max(sceneDepth, 0.001f));
+        float3 probeNormalWS = BurtGIIntegrateSimpleSHSafeNormalize(probeNormal.xyz * 2.0f - 1.0f);
+        float normalWeight = lerp(
+            lerp(0.35f, 1.0f, pow(saturate(dot(unitNormalWS, probeNormalWS)), 4.0f)),
+            1.0f,
+            saturate(receiverFoliageWeight));
+        float4 shSample = BurtGIIntegrateSimpleSHEvaluateSH3Probe(probePixel, normalWS, screenProbeWidth, cosThetaAO);
+        float4 probeHitDistance = _BurtGIScreenProbeHitDistanceTexture.Load(int3(probePixel, 0));
+        float probeTraceConfidence = saturate(max(probeHitDistance.b, probeHitDistance.a));
+        shSample.a = saturate(max(shSample.a, probeTraceConfidence * 0.65f));
+        float weight = interpolationWeights[cornerIndex] * planeWeight * normalWeight * validProbe * lerp(0.18f, 1.0f, saturate(shSample.a));
+        irradianceSum += shSample * weight;
+        weightSum += weight;
+    }
+
+    if (weightSum <= 0.0001f)
+    {
+        uint2 fallbackPixel = min((uint2)BurtGIIntegrateSimpleSHFallbackProbeCoord(screenUV, gridSize), gridSizeUInt - 1u);
+        return BurtGIIntegrateSimpleSHEvaluateSH3Probe(fallbackPixel, normalWS, screenProbeWidth, cosThetaAO);
+    }
+
+    float4 irradiance = irradianceSum / weightSum;
+    return float4(max(irradiance.rgb, 0.0f), saturate(irradiance.a));
+}
+
+float4 BurtGIIntegrateSimpleSHSampleRadianceOct(
+    float2 screenUV,
+    float3 positionWS,
+    float sceneDepth,
+    float3 planeNormalWS,
+    float3 directionWS,
+    float requestedMipLevel,
+    float receiverFoliageWeight)
+{
+    float2 gridSize = max(_BurtGIScreenProbeGridParams.xy, 1.0f);
+    float traceResolution = max(_BurtGIScreenProbeTraceParams.x, 1.0f);
+    float atlasProbeHeight = max(gridSize.y, ceil(max(_BurtGIScreenProbeTraceParams.z, traceResolution) / traceResolution));
+    float2 atlasSize = float2(
+        gridSize.x * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER,
+        atlasProbeHeight * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER);
+    float2 localCoord = BurtGIIntegrateSimpleSHInverseEquiAreaSphericalMapping(directionWS) * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION + 1.0f;
+    float clampedMipLevel = clamp(requestedMipLevel, 0.0f, 3.0f);
+    if (gridSize.x < 2.0f || gridSize.y < 2.0f)
+    {
+        return BurtGIIntegrateSimpleSHSampleRadianceOctAtlasMip(BurtGIIntegrateSimpleSHFallbackProbeCoord(screenUV, gridSize), localCoord, atlasSize, clampedMipLevel);
+    }
+
+    float spacingPixels = max(_BurtGIScreenProbeParams.x, 1.0f);
+    float2 screenCoord = BurtGIIntegrateSimpleSHScreenProbeUpsampleFullResCoord(screenUV, spacingPixels);
+    float2 tile00 = min(floor(screenCoord / spacingPixels), gridSize - 2.0f);
+    float2 bilinearWeights = saturate((screenCoord - tile00 * spacingPixels + 1.0f) / (spacingPixels + 2.0f));
+    float4 interpolationWeights = float4(
+        (1.0f - bilinearWeights.y) * (1.0f - bilinearWeights.x),
+        (1.0f - bilinearWeights.y) * bilinearWeights.x,
+        bilinearWeights.y * (1.0f - bilinearWeights.x),
+        bilinearWeights.y * bilinearWeights.x);
+    float3 unitPlaneNormalWS = BurtGIIntegrateSimpleSHSafeNormalize(planeNormalWS);
+    float4 scenePlane = float4(unitPlaneNormalWS, dot(positionWS, unitPlaneNormalWS));
+    float4 radianceSum = 0.0f;
+    float weightSum = 0.0f;
+
+    [unroll]
+    for (int cornerIndex = 0; cornerIndex < 4; ++cornerIndex)
+    {
+        float2 cornerOffset = float2((float)(cornerIndex & 1), (float)(cornerIndex >> 1));
+        float2 probeCoord = min(tile00 + cornerOffset, gridSize - 1.0f);
+        uint2 probePixel = (uint2)probeCoord;
+        float4 probePosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(probePixel, 0));
+        float4 probeNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(probePixel, 0));
+        float validProbe = (probePosition.a > 0.5f && probeNormal.a > 0.5f) ? 1.0f : 0.0f;
+        float planeDistance = abs(dot(float4(probePosition.xyz, -1.0f), scenePlane));
+        float receiverPlaneWeightScale = lerp(1.0f, 0.25f, saturate(receiverFoliageWeight));
+        float planeWeight = exp2(-160.0f * receiverPlaneWeightScale * planeDistance / max(sceneDepth, 0.001f));
+        float4 radianceSample = BurtGIIntegrateSimpleSHSampleRadianceOctAtlasMip(probeCoord, localCoord, atlasSize, clampedMipLevel);
+        float sampleConfidence = saturate(radianceSample.a);
+        float weight = interpolationWeights[cornerIndex] * planeWeight * validProbe * lerp(0.12f, 1.0f, sampleConfidence);
+        radianceSum += float4(BurtGIIntegrateSimpleSHTonemapLighting(max(radianceSample.rgb, 0.0f)), sampleConfidence) * weight;
+        weightSum += weight;
+    }
+
+    if (weightSum <= 0.0001f)
+    {
+        return BurtGIIntegrateSimpleSHSampleRadianceOctAtlasMip(BurtGIIntegrateSimpleSHFallbackProbeCoord(screenUV, gridSize), localCoord, atlasSize, clampedMipLevel);
+    }
+
+    float4 radiance = radianceSum / weightSum;
+    return float4(max(BurtGIIntegrateSimpleSHInverseTonemapLighting(radiance.rgb), 0.0f), saturate(radiance.a));
+}
+
+bool BurtGIIntegrateSimpleSHIsSkyDepth(float rawDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return rawDepth <= 0.00001f;
+#else
+    return rawDepth >= 0.99999f;
+#endif
+}
+
+float BurtGIDecodeMetallicAndShadingModelFromGBuffer(float packedValue, out float shadingModelID)
+{
+    float scaled = saturate(packedValue) * BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT;
+    shadingModelID = floor(min(scaled, BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT - 0.000001f));
+    return saturate((scaled - shadingModelID - BURT_GI_GBUFFER_SHADING_MODEL_PACK_BIAS) / BURT_GI_GBUFFER_SHADING_MODEL_PACK_SCALE);
+}
+
+bool BurtGIIsShadingModel(float shadingModelID, float expected)
+{
+    return abs(shadingModelID - expected) < 0.5f;
+}
+
+bool BurtGIIntegrateSimpleSHIsGrassFoliage(float shadingModelID, float materialChannel)
+{
+    return BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_FOLIAGE) &&
+        saturate(materialChannel) < 0.5f;
+}
+
+float BurtGIIntegrateSimpleSHResolveMetallic(float shadingModelID, float encodedMetallic)
+{
+    return (BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_HAIR) ||
+        BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_SUBSURFACE) ||
+        BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_FOLIAGE) ||
+        BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_EYE))
+            ? 0.0f
+            : saturate(encodedMetallic);
+}
+
+float BurtGIIntegrateSimpleSHDiffuseLerp(float roughness, bool hasBackfaceDiffuse)
+{
+    float maxRoughnessToEvaluate = saturate(_BurtGIScreenProbeIntegrateSimpleSHParams.w);
+    const float maxRoughnessToEvaluateFoliage = 0.4f;
+    const float fadeLength = 0.2f;
+    float maxRoughness = hasBackfaceDiffuse ? maxRoughnessToEvaluateFoliage : maxRoughnessToEvaluate;
+    return saturate((roughness - maxRoughness + fadeLength) / fadeLength);
+}
+
+float BurtGIIntegrateSimpleSHReflectionsAlpha(float roughness, bool hasBackfaceDiffuse)
+{
+    const float maxRoughnessToTrace = -0.1f;
+    const float maxRoughnessToTraceFoliage = 0.4f;
+    const float invRoughnessFadeLength = 10.0f;
+    float maxRoughness = hasBackfaceDiffuse ? maxRoughnessToTraceFoliage : maxRoughnessToTrace;
+    return saturate((maxRoughness - roughness) * invRoughnessFadeLength);
+}
+
+void BurtGIIntegrateSimpleSHEvaluatePixel(
+    uint2 pixelCoord,
+    bool allowRoughSpecular,
+    out float4 diffuseIndirect,
+    out float4 backfaceDiffuse,
+    out float4 roughSpecular)
+{
+    diffuseIndirect = 0.0f;
+    backfaceDiffuse = 0.0f;
+    roughSpecular = 0.0f;
+
+    float rawDepth = _BurtCameraDepthTexture.Load(int3(pixelCoord, 0));
+    if (BurtGIIntegrateSimpleSHIsSkyDepth(rawDepth))
+    {
+        return;
+    }
+
+    float2 outputSize = max(_BurtGIScreenProbeIntegrateSimpleSHParams.xy, 1.0f);
+    float2 screenUV = ((float2)pixelCoord + 0.5f) / outputSize;
+    float3 positionWS = BurtGIIntegrateSimpleSHReconstructPositionWS(screenUV, rawDepth);
+    float3 viewDirectionWS = BurtGIIntegrateSimpleSHSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
+    float sceneDepth = max(length(_BurtDeferredCameraWorldPosition.xyz - positionWS), 0.001f);
+    float4 gbuffer0 = _BurtGBuffer0.Load(int3(pixelCoord, 0));
+    float4 gbuffer1 = _BurtGBuffer1.Load(int3(pixelCoord, 0));
+    float4 gbuffer2 = _BurtGBuffer2.Load(int3(pixelCoord, 0));
+    float4 gbuffer3 = _BurtGBuffer3.Load(int3(pixelCoord, 0));
+    float4 screenProbeHitDistanceConfidence = BurtGIIntegrateSimpleSHSampleHitDistanceConfidence(pixelCoord);
+
+    float shadingModelID = 0.0f;
+    float materialChannel = BurtGIDecodeMetallicAndShadingModelFromGBuffer(gbuffer2.r, shadingModelID);
+    float metallic = BurtGIIntegrateSimpleSHResolveMetallic(shadingModelID, gbuffer2.g);
+    float roughness = saturate(gbuffer0.a);
+    float3 baseColor = max(gbuffer1.rgb, 0.0f);
+    float occlusion = saturate(gbuffer1.a);
+    float3 normalWS = BurtGIIntegrateSimpleSHDecodeNormalWS(gbuffer0.rgb);
+    float3 unitBentNormalWS = normalWS;
+    float bentAO = 1.0f;
+    float bentNormalValid = 0.0f;
+    BurtGIIntegrateSimpleSHSampleBentNormalAO(pixelCoord, normalWS, unitBentNormalWS, bentAO, bentNormalValid);
+    bool isGrass = BurtGIIntegrateSimpleSHIsGrassFoliage(shadingModelID, materialChannel);
+    bool isHair = BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_HAIR);
+    bool backfaceDiffuseMaterial = BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_SUBSURFACE) ||
+        (BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_FOLIAGE) && !isGrass);
+    bool foliageRoughSpecularMaterial = backfaceDiffuseMaterial || isHair || isGrass;
+    float receiverFoliageWeight = BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_FOLIAGE) ? 1.0f : 0.0f;
+    float3 diffuseProbeNormalWS = normalWS;
+    float diffuseConeCosAO = 0.0f;
+    if (bentNormalValid > 0.5f)
+    {
+        diffuseProbeNormalWS = BurtGIIntegrateSimpleSHSafeNormalize(lerp(unitBentNormalWS, normalWS, bentAO));
+        diffuseConeCosAO = saturate(1.0f - bentAO);
+    }
+
+    bool useOctIrradiance = _BurtGIScreenProbeIntegrateSimpleSHParams1.w > 0.5f;
+    float4 screenProbeDiffuseIrradiance = useOctIrradiance
+        ? BurtGIIntegrateSimpleSHSampleIrradianceOct(
+            screenUV,
+            positionWS,
+            sceneDepth,
+            diffuseProbeNormalWS,
+            0.0f,
+            receiverFoliageWeight)
+        : BurtGIIntegrateSimpleSHSampleIrradianceSH3(
+            screenUV,
+            positionWS,
+            sceneDepth,
+            diffuseProbeNormalWS,
+            diffuseConeCosAO,
+            receiverFoliageWeight);
+    float diffuseProbeConfidence = saturate(screenProbeDiffuseIrradiance.a);
+    float hitRatio = saturate(max(diffuseProbeConfidence, screenProbeHitDistanceConfidence.w));
+    float3 diffuseLighting = max(screenProbeDiffuseIrradiance.rgb, 0.0f);
+    float diffuseBentOcclusion = 1.0f;
+    if (bentNormalValid > 0.5f)
+    {
+        float diffuseBentVisibility = saturate(dot(normalWS, unitBentNormalWS) * 0.5f + 0.5f);
+        float unweightedDiffuseBentOcclusion = lerp(
+            1.0f,
+            diffuseBentVisibility * saturate(0.35f + bentAO * 0.65f),
+            saturate(1.0f - bentAO));
+        diffuseBentOcclusion = BurtGIIntegrateSimpleSHApplyShortRangeAOWeight(unweightedDiffuseBentOcclusion);
+    }
+
+    diffuseIndirect = float4(max(diffuseLighting * BURT_INV_PI, 0.0f) * diffuseBentOcclusion * saturate(0.35f + hitRatio * 0.65f), hitRatio);
+
+    if (_BurtGIScreenProbeIntegrateSimpleSHParams1.x > 0.5f && backfaceDiffuseMaterial)
+    {
+        float4 screenProbeBackfaceIrradiance = useOctIrradiance
+            ? BurtGIIntegrateSimpleSHSampleIrradianceOct(
+                screenUV,
+                positionWS,
+                sceneDepth,
+                -normalWS,
+                0.0f,
+                receiverFoliageWeight)
+            : BurtGIIntegrateSimpleSHSampleIrradianceSH3(
+                screenUV,
+                positionWS,
+                sceneDepth,
+                -normalWS,
+                0.0f,
+                receiverFoliageWeight);
+        float backfaceProbeConfidence = saturate(screenProbeBackfaceIrradiance.a);
+        float3 backfaceLighting = lerp(diffuseLighting, max(screenProbeBackfaceIrradiance.rgb, 0.0f), saturate(backfaceProbeConfidence * 0.85f));
+        float backfaceHitRatio = saturate(max(hitRatio, backfaceProbeConfidence));
+        float backfaceBentVisibility = saturate(dot(-normalWS, unitBentNormalWS) * 0.5f + 0.5f);
+        float unweightedBackfaceBentOcclusion = bentNormalValid > 0.5f
+            ? lerp(1.0f, saturate(0.5f + backfaceBentVisibility * 0.5f) * saturate(0.4f + bentAO * 0.6f), saturate(1.0f - bentAO))
+            : 1.0f;
+        float backfaceBentOcclusion = BurtGIIntegrateSimpleSHApplyShortRangeAOWeight(unweightedBackfaceBentOcclusion);
+        float sh3BackfaceCompatibilityScale = useOctIrradiance ? 1.0f : BURT_INV_PI;
+        float3 twoSidedDiffuseLighting = backfaceLighting * BURT_INV_PI * sh3BackfaceCompatibilityScale;
+        backfaceDiffuse = float4(max(twoSidedDiffuseLighting, 0.0f) * backfaceBentOcclusion * saturate(0.35f + backfaceHitRatio * 0.65f), backfaceHitRatio);
+    }
+
+    if (_BurtGIScreenProbeIntegrateSimpleSHParams.z > 0.5f)
+    {
+        float diffuseLerp = BurtGIIntegrateSimpleSHDiffuseLerp(roughness, foliageRoughSpecularMaterial);
+        float traceAlpha = BurtGIIntegrateSimpleSHReflectionsAlpha(max(roughness, 0.01f), foliageRoughSpecularMaterial);
+        float clearCoatMask = BurtGIIsShadingModel(shadingModelID, BURT_GI_SHADING_MODEL_CLEAR_COAT) ? saturate(gbuffer3.b) : 0.0f;
+        float3 dielectricF0 = float3(0.04f, 0.04f, 0.04f);
+        float3 f0 = lerp(dielectricF0, baseColor, metallic);
+        float noV = saturate(dot(normalWS, viewDirectionWS));
+        float3 materialScale = BurtGIIntegrateSimpleSHSpecularMaterialScale(f0, roughness, noV, occlusion);
+        float roughHitConfidence = hitRatio;
+        float roughBentOcclusion = 1.0f;
+        float3 diffuseFallbackSpecular = diffuseLighting * BURT_INV_PI;
+        float roughWeight = saturate(1.0f - diffuseLerp * 0.55f + clearCoatMask);
+
+        if (bentNormalValid > 0.5f)
+        {
+            float3 reflectionDirectionForOcclusionWS = reflect(-viewDirectionWS, normalWS);
+            float roughBentVisibility = saturate(dot(reflectionDirectionForOcclusionWS, unitBentNormalWS) * 0.5f + 0.5f);
+            float unweightedRoughBentOcclusion = lerp(
+                1.0f,
+                roughBentVisibility * saturate(0.25f + bentAO * 0.75f),
+                saturate((1.0f - bentAO) * (1.0f - max(roughness, 0.2f) * 0.35f)));
+            roughBentOcclusion = BurtGIIntegrateSimpleSHApplyShortRangeAOWeight(unweightedRoughBentOcclusion);
+        }
+
+        roughSpecular = float4(max(diffuseFallbackSpecular * materialScale * roughWeight, 0.0f) * roughBentOcclusion * saturate(0.45f + roughHitConfidence * 0.55f), roughHitConfidence);
+        if (!allowRoughSpecular)
+        {
+            return;
+        }
+
+        if (!((diffuseLerp < 1.0f && traceAlpha < 1.0f) || clearCoatMask > 0.0001f))
+        {
+            return;
+        }
+
+        float roughSpecularRoughness = max(roughness, 0.2f);
+        float3 reflectionDirectionWS = BurtGIIntegrateSimpleSHAnchoredVisibleGGXSpecularDirection(normalWS, viewDirectionWS, roughSpecularRoughness);
+        float roughSpecularSampleCount = 1.0f;
+        float roughSpecularSolidAngle = rcp(max(roughSpecularSampleCount, 1.0f));
+        float roughSpecularCosConeHalfAngle = 1.0f - roughSpecularSolidAngle / (2.0f * 3.14159265359f);
+        float roughSpecularFootprintTexels = sqrt(max(0.0f, 1.0f - roughSpecularCosConeHalfAngle)) * BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION;
+        float roughSpecularOctMipLevel = clamp(log2(max(roughSpecularFootprintTexels, 1.0f)), 0.0f, 3.0f);
+        float4 screenProbeRoughSpecular = BurtGIIntegrateSimpleSHSampleRadianceOct(
+            screenUV,
+            positionWS,
+            sceneDepth,
+            normalWS,
+            reflectionDirectionWS,
+            roughSpecularOctMipLevel,
+            receiverFoliageWeight);
+        float roughSpecularProbeConfidence = saturate(screenProbeRoughSpecular.a);
+        float3 roughSpecularLighting = lerp(diffuseFallbackSpecular, max(screenProbeRoughSpecular.rgb, 0.0f) * BURT_INV_PI, saturate(roughSpecularProbeConfidence * lerp(0.45f, 0.9f, roughSpecularRoughness)));
+        roughHitConfidence = saturate(max(hitRatio, max(traceAlpha, clearCoatMask)));
+        roughHitConfidence = saturate(max(roughHitConfidence, roughSpecularProbeConfidence));
+
+        roughSpecular = float4(max(roughSpecularLighting * materialScale * roughWeight, 0.0f) * roughBentOcclusion * saturate(0.45f + roughHitConfidence * 0.55f), roughHitConfidence);
+    }
+}
+
+bool BurtGIResolveIntegratePixel(uint2 tileCoord, uint2 localPixelCoord, out uint2 pixelCoord)
+{
+    uint outputWidth = max(1u, (uint)_BurtGIScreenProbeIntegrateSimpleSHParams.x);
+    uint outputHeight = max(1u, (uint)_BurtGIScreenProbeIntegrateSimpleSHParams.y);
+    pixelCoord = tileCoord * BURT_GI_INTEGRATE_TILE_SIZE + localPixelCoord;
+    return all(pixelCoord < uint2(outputWidth, outputHeight));
+}
+
+uint2 BurtGIReadDiffuseTileCoord(uint tileIndex)
+{
+    uint tileDataIndex = 2u * tileIndex;
+    return uint2(
+        _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer[tileDataIndex + 0u],
+        _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer[tileDataIndex + 1u]);
+}
+
+uint2 BurtGIReadAllTileCoord(uint tileIndex)
+{
+    uint tileDataIndex = 2u * tileIndex;
+    return uint2(
+        _BurtGIScreenProbeIntegrateTileDataAllBuffer[tileDataIndex + 0u],
+        _BurtGIScreenProbeIntegrateTileDataAllBuffer[tileDataIndex + 1u]);
+}
+
+[numthreads(BURT_GI_INTEGRATE_TILE_SIZE, BURT_GI_INTEGRATE_TILE_SIZE, 1)]
+void ScreenProbeIntegrateSimpleSHDiffuseCS(
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+    uint2 pixelCoord = uint2(0u, 0u);
+    if (!BurtGIResolveIntegratePixel(BurtGIReadDiffuseTileCoord(groupId.x), groupThreadId, pixelCoord))
+    {
+        return;
+    }
+
+    float4 diffuseIndirect = 0.0f;
+    float4 backfaceDiffuse = 0.0f;
+    float4 roughSpecular = 0.0f;
+    BurtGIIntegrateSimpleSHEvaluatePixel(pixelCoord, false, diffuseIndirect, backfaceDiffuse, roughSpecular);
+    _BurtScreenSpaceGlobalIlluminationTexture[pixelCoord] = diffuseIndirect;
+    _BurtGIBackfaceDiffuseIndirectTexture[pixelCoord] = backfaceDiffuse;
+    _BurtGIRoughSpecularIndirectTexture[pixelCoord] = roughSpecular;
+}
+
+[numthreads(BURT_GI_INTEGRATE_TILE_SIZE, BURT_GI_INTEGRATE_TILE_SIZE, 1)]
+void ScreenProbeIntegrateSimpleSHAllCS(
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+    uint2 pixelCoord = uint2(0u, 0u);
+    if (!BurtGIResolveIntegratePixel(BurtGIReadAllTileCoord(groupId.x), groupThreadId, pixelCoord))
+    {
+        return;
+    }
+
+    float4 diffuseIndirect = 0.0f;
+    float4 backfaceDiffuse = 0.0f;
+    float4 roughSpecular = 0.0f;
+    BurtGIIntegrateSimpleSHEvaluatePixel(pixelCoord, true, diffuseIndirect, backfaceDiffuse, roughSpecular);
+    _BurtScreenSpaceGlobalIlluminationTexture[pixelCoord] = diffuseIndirect;
+    _BurtGIBackfaceDiffuseIndirectTexture[pixelCoord] = backfaceDiffuse;
+    _BurtGIRoughSpecularIndirectTexture[pixelCoord] = roughSpecular;
+}
+
+[numthreads(BURT_GI_INTEGRATE_TILE_SIZE, BURT_GI_INTEGRATE_TILE_SIZE, 1)]
+void ScreenProbeIntegrateSimpleSHCS(
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+    uint2 pixelCoord = uint2(0u, 0u);
+    if (!BurtGIResolveIntegratePixel(BurtGIReadAllTileCoord(groupId.x), groupThreadId, pixelCoord))
+    {
+        return;
+    }
+
+    float4 diffuseIndirect = 0.0f;
+    float4 backfaceDiffuse = 0.0f;
+    float4 roughSpecular = 0.0f;
+    BurtGIIntegrateSimpleSHEvaluatePixel(pixelCoord, true, diffuseIndirect, backfaceDiffuse, roughSpecular);
+    _BurtScreenSpaceGlobalIlluminationTexture[pixelCoord] = diffuseIndirect;
+    _BurtGIBackfaceDiffuseIndirectTexture[pixelCoord] = backfaceDiffuse;
+    _BurtGIRoughSpecularIndirectTexture[pixelCoord] = roughSpecular;
+}
+
+[numthreads(BURT_GI_INTEGRATE_TILE_SIZE, BURT_GI_INTEGRATE_TILE_SIZE, 1)]
+void ScreenProbeIntegrateSimpleNICS(
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+}
+
+[numthreads(BURT_GI_INTEGRATE_TILE_SIZE, BURT_GI_INTEGRATE_TILE_SIZE, 1)]
+void ScreenProbeIntegrateSimpleISCS(
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+}

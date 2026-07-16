@@ -1,0 +1,148 @@
+#pragma kernel AllocateProbeTracesCS
+
+#define BURT_GI_CLIPMAP_COUNT 6
+#define BURT_GI_PRIORITY_HISTOGRAM_SIZE 16
+#define BURT_GI_ALLOCATE_PROBE_TRACES_THREADGROUP_SIZE 8
+
+Texture2D<uint> _BurtGIRadianceCacheClipMapIndirectionReadTexture;
+
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer;
+RWStructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+RWStructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer;
+RWStructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer;
+
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeAllocatorReadBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapMaxUpdateBucketReadBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketReadBuffer;
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeLastUsedFrameReadBuffer;
+
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtDeferredCameraWorldPosition;
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+uint _BurtGIRadianceCacheClipMapFrameIndex;
+uint _BurtGIRadianceCacheClipMapNumProbesToTraceBudget;
+float _BurtGIRadianceCacheClipMapSupersampleDistanceFromCameraSq;
+float _BurtGIRadianceCacheClipMapDownsampleDistanceFromCameraSq;
+
+uint BurtGIClipmapCount()
+{
+    return max(1u, min((uint)_BurtGIRadianceCacheClipMapParams.z, (uint)BURT_GI_CLIPMAP_COUNT));
+}
+
+uint BurtGIClipmapResolution()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.w);
+}
+
+uint2 BurtGIIndirectionSize()
+{
+    return max(uint2(1u, 1u), (uint2)_BurtGIRadianceCacheClipMapIndirectionSize.xy);
+}
+
+bool BurtGIDecodeIndirectionCoord(uint2 indirectionCoord, out uint clipmapIndex, out uint3 probeCoord)
+{
+    uint clipmapResolution = BurtGIClipmapResolution();
+    clipmapIndex = indirectionCoord.x / clipmapResolution;
+    probeCoord = uint3(indirectionCoord.x - clipmapIndex * clipmapResolution, indirectionCoord.y % clipmapResolution, indirectionCoord.y / clipmapResolution);
+    return clipmapIndex < BurtGIClipmapCount() &&
+        probeCoord.x < clipmapResolution &&
+        probeCoord.y < clipmapResolution &&
+        probeCoord.z < clipmapResolution;
+}
+
+uint BurtGIGetProbeTraceCost(float3 probeWorldCenter)
+{
+    float3 cameraToProbe = _BurtDeferredCameraWorldPosition.xyz - probeWorldCenter;
+    float distanceFromCameraSq = dot(cameraToProbe, cameraToProbe);
+    uint traceCost = 1u;
+
+    if (distanceFromCameraSq < _BurtGIRadianceCacheClipMapSupersampleDistanceFromCameraSq)
+    {
+        traceCost = 16u;
+    }
+
+    if (distanceFromCameraSq < _BurtGIRadianceCacheClipMapDownsampleDistanceFromCameraSq)
+    {
+        traceCost = 4u;
+    }
+
+    return traceCost;
+}
+
+uint BurtGIGetPriorityBucketIndex(uint lastTracedFrameIndex, uint lastUsedFrameIndex, uint clipmapIndex)
+{
+    if (lastTracedFrameIndex == 0u)
+    {
+        return 0u;
+    }
+
+    uint framesBetweenTracedAndUsed = lastUsedFrameIndex > lastTracedFrameIndex
+        ? lastUsedFrameIndex - lastTracedFrameIndex
+        : 1u;
+    float updateImportance = (float)framesBetweenTracedAndUsed / ((float)clipmapIndex + 1.0);
+    uint logBucket = (uint)clamp(log2(updateImportance), 0.0, (float)(BURT_GI_PRIORITY_HISTOGRAM_SIZE - 2u));
+    return BURT_GI_PRIORITY_HISTOGRAM_SIZE - 1u - logBucket;
+}
+
+[numthreads(BURT_GI_ALLOCATE_PROBE_TRACES_THREADGROUP_SIZE, BURT_GI_ALLOCATE_PROBE_TRACES_THREADGROUP_SIZE, 1)]
+void AllocateProbeTracesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 indirectionSize = BurtGIIndirectionSize();
+    uint2 indirectionCoord = dispatchThreadId.xy;
+    if (indirectionCoord.x >= indirectionSize.x || indirectionCoord.y >= indirectionSize.y)
+    {
+        return;
+    }
+
+    uint maxProbeCount = max(1u, _BurtGIRadianceCacheClipMapMaxProbeCount);
+    uint maxUpdateBucket = min(_BurtGIRadianceCacheClipMapMaxUpdateBucketReadBuffer[0], (uint)(BURT_GI_PRIORITY_HISTOGRAM_SIZE - 1u));
+    uint maxTracesFromBucket = _BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketReadBuffer[0];
+    uint probeIndex = _BurtGIRadianceCacheClipMapIndirectionReadTexture[indirectionCoord];
+    if (probeIndex >= maxProbeCount)
+    {
+        return;
+    }
+
+    uint clipmapIndex;
+    uint3 probeCoord;
+    if (!BurtGIDecodeIndirectionCoord(indirectionCoord, clipmapIndex, probeCoord))
+    {
+        return;
+    }
+
+    uint lastTracedFrame = _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer[probeIndex];
+    uint lastUsedFrame = _BurtGIRadianceCacheClipMapProbeLastUsedFrameReadBuffer[probeIndex];
+    uint priorityBucketIndex = BurtGIGetPriorityBucketIndex(lastTracedFrame, lastUsedFrame, clipmapIndex);
+    if (priorityBucketIndex > maxUpdateBucket)
+    {
+        return;
+    }
+
+    float4 coordToWorld = _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[clipmapIndex];
+    float3 probeWorldCenter = coordToWorld.xyz + (float3)probeCoord * coordToWorld.w;
+    uint traceCost = BurtGIGetProbeTraceCost(probeWorldCenter);
+    if (priorityBucketIndex == maxUpdateBucket && maxUpdateBucket > 0u)
+    {
+        uint allocatedFromMaxBucket = 0u;
+        InterlockedAdd(_BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer[1], traceCost, allocatedFromMaxBucket);
+        if (allocatedFromMaxBucket + traceCost > maxTracesFromBucket)
+        {
+            return;
+        }
+    }
+
+    uint traceIndex = 0u;
+    InterlockedAdd(_BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0], 1u, traceIndex);
+    if (traceIndex >= maxProbeCount)
+    {
+        return;
+    }
+
+    uint packedClipmapAndProbe = (clipmapIndex << 24) | (probeIndex & 0x00ffffffu);
+    _BurtGIRadianceCacheClipMapProbeTraceDataBuffer[traceIndex] = float4(probeWorldCenter, asfloat(packedClipmapAndProbe));
+    _BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer[probeIndex] = _BurtGIRadianceCacheClipMapFrameIndex;
+    InterlockedAdd(_BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBuffer[0], traceCost);
+}

@@ -2337,7 +2337,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             cmd.SetGlobalVectorArray(AdditionalLightDirectionAndSpotId, lightingData.AdditionalLightDirectionAndSpot);
             cmd.SetGlobalVectorArray(AdditionalLightSpotParamsId, lightingData.AdditionalLightSpotParams);
             UploadAdditionalLightBuffer(cmd, context, lightingData);
-            BurtIndirectLightingUtility.UploadGlobalIndirectLighting(cmd, request);
+            BurtIndirectLightingUtility.UploadGlobalIndirectLighting(cmd, request, asset);
 
             if (hasMainLightShadow)
             {

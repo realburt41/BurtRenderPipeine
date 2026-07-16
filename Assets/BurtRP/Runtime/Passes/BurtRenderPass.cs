@@ -122,12 +122,21 @@
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
+            if (builder == null ||
+                builder.ResourceRegistry == null ||
+                !builder.ResourceRegistry.ContainsBuffer(bufferName))
+            {
+                return;
+            }
+
             builder.WriteBuffer(bufferName);
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (context == null || context.ResourceRegistry == null)
+            if (context == null ||
+                context.ResourceRegistry == null ||
+                !context.ResourceRegistry.ContainsBuffer(bufferName))
             {
                 return;
             }
@@ -151,12 +160,21 @@
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
+            if (builder == null ||
+                builder.ResourceRegistry == null ||
+                !builder.ResourceRegistry.ContainsBuffer(bufferName))
+            {
+                return;
+            }
+
             builder.ReadBuffer(bufferName);
         }
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (context == null || context.ResourceRegistry == null)
+            if (context == null ||
+                context.ResourceRegistry == null ||
+                !context.ResourceRegistry.ContainsBuffer(bufferName))
             {
                 return;
             }

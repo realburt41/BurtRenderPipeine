@@ -27,6 +27,35 @@ CBUFFER_START(UnityPerMaterial)
     float _Subsurface3SCurvatureBias;
     float4 _EmissionColor;
     float4 _EmissionMap_ST;
+    float _BurtSkinnedDecalProjectionDebug;
+    float _BurtSkinnedDecalEntryDebug;
+    float _BurtSkinnedDecalUseMeshPosition;
+    float _SkinnedDecalPluginModel_DecalCount;
+    float4 _SkinnedDecalPluginModel_DecalArrayIndexSize1;
+    float4 _SkinnedDecalPluginModel_DecalTint1;
+    float4 _SkinnedDecalPluginModel_DecalPosition1;
+    float4 _SkinnedDecalPluginModel_DecalBasisX1;
+    float4 _SkinnedDecalPluginModel_DecalBasisY1;
+    float4 _SkinnedDecalPluginModel_DecalArraySizeIndex2;
+    float4 _SkinnedDecalPluginModel_DecalTint2;
+    float4 _SkinnedDecalPluginModel_DecalPosition2;
+    float4 _SkinnedDecalPluginModel_DecalBasisX2;
+    float4 _SkinnedDecalPluginModel_DecalBasisY2;
+    float4 _SkinnedDecalPluginModel_DecalArraySizeIndex3;
+    float4 _SkinnedDecalPluginModel_DecalTint3;
+    float4 _SkinnedDecalPluginModel_DecalPosition3;
+    float4 _SkinnedDecalPluginModel_DecalBasisX3;
+    float4 _SkinnedDecalPluginModel_DecalBasisY3;
+    float4 _SkinnedDecalPluginModel_DecalArraySizeIndex4;
+    float4 _SkinnedDecalPluginModel_DecalTint4;
+    float4 _SkinnedDecalPluginModel_DecalPosition4;
+    float4 _SkinnedDecalPluginModel_DecalBasisX4;
+    float4 _SkinnedDecalPluginModel_DecalBasisY4;
+    float4 _SkinnedDecalPluginModel_DecalArraySizeIndex5;
+    float4 _SkinnedDecalPluginModel_DecalTint5;
+    float4 _SkinnedDecalPluginModel_DecalPosition5;
+    float4 _SkinnedDecalPluginModel_DecalBasisX5;
+    float4 _SkinnedDecalPluginModel_DecalBasisY5;
 CBUFFER_END
 
 #endif // BURT_SUBSURFACE_PROPERTIES_INCLUDED

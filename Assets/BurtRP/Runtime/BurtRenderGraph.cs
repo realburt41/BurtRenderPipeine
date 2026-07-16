@@ -119,8 +119,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 {
                     resources.RegisterScreenSpaceGlobalIlluminationRawTexture();
                     resources.RegisterScreenSpaceGlobalIlluminationTexture();
+                    resources.RegisterScreenSpaceGlobalIlluminationUpsampledTexture();
                     resources.RegisterBurtGIBackfaceDiffuseIndirectTexture();
+                    resources.RegisterBurtGIBackfaceDiffuseIndirectUpsampledTexture();
                     resources.RegisterBurtGIRoughSpecularIndirectTexture();
+                    resources.RegisterBurtGIRoughSpecularIndirectUpsampledTexture();
                     if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(request, asset))
                     {
                         resources.RegisterBurtGITemporalDiagnosticsTexture();
@@ -129,93 +132,125 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(request, asset))
                     {
                         var screenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(request, asset);
+                        var useScreenProbeTraceCompact = screenProbeSettings.TraceCompact &&
+                            BurtScreenSpaceGlobalIlluminationPassUtility.SupportsScreenProbeTraceCompactCompute();
+                        var useRadianceCacheClipMap = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationRadianceCacheClipMapContract(request, asset);
+                        var useRadianceCacheHashGrid = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationRadianceCacheHashGrid(request, asset);
+                        var useTranslucencyVolume = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTranslucencyVolume(request, asset);
+                        var useSceneVoxel = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(request, asset);
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelCountBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferDescriptor(request.Camera, screenProbeSettings));
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactThreadCountXBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferDescriptor());
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileIndirectArgsBufferDescriptor());
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataDiffuseBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileDataDiffuseBufferDescriptor(request.Camera, screenProbeSettings));
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataAllBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileDataAllBufferDescriptor(request.Camera, screenProbeSettings));
+                        resources.RegisterBurtGIScreenProbeIntegrateTileClassificationTexture();
+                        if (useScreenProbeTraceCompact)
+                        {
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelCountBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferDescriptor(request.Camera, screenProbeSettings));
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactThreadCountXBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferDescriptor());
+                        }
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeNumBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferDescriptor());
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferDescriptor(request.Camera, screenProbeSettings));
-                        var radianceCacheClipMapPersistentBuffers = BurtRadianceCacheClipMapPersistentBufferUtility.EnsureBuffers(request, screenProbeSettings);
-                        if (radianceCacheClipMapPersistentBuffers.IsValid)
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeImportancePDFSHBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeImportancePDFSHBufferDescriptor(request.Camera, screenProbeSettings));
+                        if (useRadianceCacheClipMap)
                         {
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName, radianceCacheClipMapPersistentBuffers.ProbeAllocator);
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName, radianceCacheClipMapPersistentBuffers.ProbeFreeListAllocator);
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListBufferName, radianceCacheClipMapPersistentBuffers.ProbeFreeList);
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferName, radianceCacheClipMapPersistentBuffers.ProbeLastUsedFrame);
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferName, radianceCacheClipMapPersistentBuffers.ProbeLastTracedFrame);
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeWorldOffsetBufferName, radianceCacheClipMapPersistentBuffers.ProbeWorldOffset);
+                            var radianceCacheClipMapPersistentBuffers = BurtRadianceCacheClipMapPersistentBufferUtility.EnsureBuffers(request, screenProbeSettings);
+                            if (radianceCacheClipMapPersistentBuffers.IsValid)
+                            {
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName, radianceCacheClipMapPersistentBuffers.ProbeAllocator);
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName, radianceCacheClipMapPersistentBuffers.ProbeFreeListAllocator);
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListBufferName, radianceCacheClipMapPersistentBuffers.ProbeFreeList);
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferName, radianceCacheClipMapPersistentBuffers.ProbeLastUsedFrame);
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferName, radianceCacheClipMapPersistentBuffers.ProbeLastTracedFrame);
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeWorldOffsetBufferName, radianceCacheClipMapPersistentBuffers.ProbeWorldOffset);
+                            }
+                            else
+                            {
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferDescriptor());
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferDescriptor());
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferDescriptor(request.Camera, screenProbeSettings));
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastUsedFrameBufferDescriptor(request.Camera, screenProbeSettings));
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastTracedFrameBufferDescriptor(request.Camera, screenProbeSettings));
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeWorldOffsetBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeWorldOffsetBufferDescriptor(request.Camera, screenProbeSettings));
+                            }
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceDataBufferDescriptor(request.Camera, screenProbeSettings));
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceAllocatorBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPriorityHistogramBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapPriorityHistogramBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxUpdateBucketBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxUpdateBucketBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbesToUpdateTraceCostBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceProbePDFBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbePDFBufferDescriptor(request.Camera, screenProbeSettings));
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapClearProbePDFsIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileAllocatorBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterProbesIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceProbesIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileDataBufferDescriptor(request.Camera, screenProbeSettings));
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapSortedProbeTraceTileDataBufferDescriptor(request.Camera, screenProbeSettings));
                         }
-                        else
+                        if (useRadianceCacheHashGrid)
                         {
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferDescriptor());
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferDescriptor());
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferDescriptor(request.Camera, screenProbeSettings));
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastUsedFrameBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastUsedFrameBufferDescriptor(request.Camera, screenProbeSettings));
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeLastTracedFrameBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeLastTracedFrameBufferDescriptor(request.Camera, screenProbeSettings));
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeWorldOffsetBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeWorldOffsetBufferDescriptor(request.Camera, screenProbeSettings));
+                            var radianceCacheHashGridHistoryBuffers = BurtRadianceCacheHashGridHistoryUtility.EnsureHistoryBuffers(request, screenProbeSettings, out _);
+                            if (radianceCacheHashGridHistoryBuffers.IsValid)
+                            {
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridValueBufferName, radianceCacheHashGridHistoryBuffers.Value);
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridTileBufferName, radianceCacheHashGridHistoryBuffers.Tile);
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridCountBufferName, radianceCacheHashGridHistoryBuffers.Count);
+                                resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateCellValueBufferName, radianceCacheHashGridHistoryBuffers.UpdateCellValue);
+                            }
+                            else
+                            {
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridValueBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridValueBufferDescriptor());
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridTileBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridTileBufferDescriptor());
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridCountBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridCountBufferDescriptor());
+                                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateCellValueBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateCellValueBufferDescriptor());
+                            }
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridVisibilityCellQueryBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridVisibilityCellQueryBufferDescriptor(request.Camera, screenProbeSettings));
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTileBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTileBufferDescriptor(request.Camera, screenProbeSettings));
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesGroupCountXBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridDebugCellBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugCellBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridDebugDrawArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugDrawArgsBufferDescriptor());
                         }
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceDataBufferDescriptor(request.Camera, screenProbeSettings));
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceAllocatorBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPriorityHistogramBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapPriorityHistogramBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxUpdateBucketBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxUpdateBucketBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapMaxTracesFromMaxUpdateBucketBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbesToUpdateTraceCostBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbesToUpdateTraceCostBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceProbePDFBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbePDFBufferDescriptor(request.Camera, screenProbeSettings));
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapClearProbePDFsIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapClearProbePDFsIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileAllocatorBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFilterProbesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapFilterProbesIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapFixupProbeBordersIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapTraceProbesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapTraceProbesIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceCacheHardwareRayTracingIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapHardwareRayTracingRayAllocatorBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeTraceTileDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeTraceTileDataBufferDescriptor(request.Camera, screenProbeSettings));
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapSortedProbeTraceTileDataBufferDescriptor(request.Camera, screenProbeSettings));
-                        var radianceCacheHashGridHistoryBuffers = BurtRadianceCacheHashGridHistoryUtility.EnsureHistoryBuffers(request, screenProbeSettings, out _);
-                        if (radianceCacheHashGridHistoryBuffers.IsValid)
-                        {
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridValueBufferName, radianceCacheHashGridHistoryBuffers.Value);
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridTileBufferName, radianceCacheHashGridHistoryBuffers.Tile);
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridCountBufferName, radianceCacheHashGridHistoryBuffers.Count);
-                            resources.RegisterExternalBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateCellValueBufferName, radianceCacheHashGridHistoryBuffers.UpdateCellValue);
-                        }
-                        else
-                        {
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridValueBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridValueBufferDescriptor());
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridTileBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridTileBufferDescriptor());
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridCountBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridCountBufferDescriptor());
-                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateCellValueBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateCellValueBufferDescriptor());
-                        }
-
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridVisibilityCellQueryBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridVisibilityCellQueryBufferDescriptor(request.Camera, screenProbeSettings));
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTileBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTileBufferDescriptor(request.Camera, screenProbeSettings));
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTilesGroupCountXBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridDebugCellBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugCellBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridDebugDrawArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridDebugDrawArgsBufferDescriptor());
                         resources.RegisterBurtGIScreenProbeScreenDepthTexture();
                         resources.RegisterBurtGIScreenProbeWorldNormalTexture();
                         resources.RegisterBurtGIScreenProbeWorldPositionTexture();
                         resources.RegisterBurtGIScreenProbeAdaptiveProbeHeaderTexture();
                         resources.RegisterBurtGIScreenProbeAdaptiveProbeIndicesTexture();
-                        resources.RegisterBurtGIRadianceCacheClipMapIndirectionTexture();
-                        resources.RegisterBurtGIRadianceCacheClipMapDepthProbeAtlasTexture();
-                        resources.RegisterBurtGIRadianceCacheClipMapRadianceProbeAtlasTexture();
-                        resources.RegisterBurtGIRadianceCacheClipMapFinalRadianceAtlasTexture();
-                        resources.RegisterBurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture();
-                        resources.RegisterBurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture();
-                        resources.RegisterBurtGIRadianceCacheClipMapProbeSkyAOAtlasTexture();
-                        resources.RegisterBurtGITranslucencyVolume0Texture();
-                        resources.RegisterBurtGITranslucencyVolume1Texture();
-                        resources.RegisterBurtGITranslucencyVolumeFilter0Texture();
-                        resources.RegisterBurtGITranslucencyVolumeFilter1Texture();
-                        resources.RegisterBurtGISceneVoxelRadianceTexture();
-                        resources.RegisterBurtGISceneVoxelGeometryTexture();
-                        resources.RegisterBurtGISceneVoxelOccupancyMipTexture();
-                        resources.RegisterBurtGISceneVoxelLightingTexture();
+                        if (useRadianceCacheClipMap)
+                        {
+                            resources.RegisterBurtGIRadianceCacheClipMapIndirectionTexture();
+                            resources.RegisterBurtGIRadianceCacheClipMapDepthProbeAtlasTexture();
+                            resources.RegisterBurtGIRadianceCacheClipMapRadianceProbeAtlasTexture();
+                            resources.RegisterBurtGIRadianceCacheClipMapFinalRadianceAtlasTexture();
+                            resources.RegisterBurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture();
+                            resources.RegisterBurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture();
+                            resources.RegisterBurtGIRadianceCacheClipMapProbeSkyAOAtlasTexture();
+                            resources.RegisterBurtGIRadianceCacheStatsTexture();
+                        }
+                        if (useTranslucencyVolume)
+                        {
+                            resources.RegisterBurtGITranslucencyVolume0Texture();
+                            resources.RegisterBurtGITranslucencyVolume1Texture();
+                            resources.RegisterBurtGITranslucencyVolumeFilter0Texture();
+                            resources.RegisterBurtGITranslucencyVolumeFilter1Texture();
+                            resources.RegisterBurtGITranslucencyVolumeTraceRadianceTexture();
+                            resources.RegisterBurtGITranslucencyVolumeTraceFilteredRadianceTexture();
+                            resources.RegisterBurtGITranslucencyVolumeTraceHitDistanceTexture();
+                        }
+                        if (useSceneVoxel)
+                        {
+                            resources.RegisterBurtGISceneVoxelRadianceTexture();
+                            resources.RegisterBurtGISceneVoxelGeometryTexture();
+                            resources.RegisterBurtGISceneVoxelOccupancyMipTexture();
+                            resources.RegisterBurtGISceneVoxelLightingTexture();
+                        }
                         resources.RegisterBurtGIScreenProbeRadianceTexture();
                         resources.RegisterBurtGIScreenProbeIrradianceTexture();
                         resources.RegisterBurtGIScreenProbeConfidenceTexture();

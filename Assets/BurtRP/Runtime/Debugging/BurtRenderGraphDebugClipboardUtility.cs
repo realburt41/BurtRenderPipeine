@@ -34,6 +34,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让渲染
 
         public static bool HasLatestDump => !string.IsNullOrEmpty(latestDump); // 暴露当前是否已经缓存过有效 dump。
 
+        public static string LatestDump => latestDump;
+
         public static bool ShouldCaptureNextDump => copyNextDumpToClipboard; // 暴露是否有一次性复制请求，渲染器用它决定即使关闭常驻 Debug 也要生成一帧 dump。
 
         public static string LatestDumpSummary // 暴露最近一次 dump 摘要，Inspector 用它显示当前缓存状态。
@@ -62,6 +64,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让渲染
             }
 
             return requestType + ": " + record.Summary; // 返回带 request 类型前缀的摘要，方便横向比较 SceneView/Preview/Reflection。
+        }
+
+        public static string GetLatestDump(BurtRenderRequestType requestType)
+        {
+            return latestDumpsByType.TryGetValue(requestType, out var record) && record.IsValid
+                ? record.Dump
+                : null;
         }
 
         public static bool ShouldCaptureNextDumpForRequest(BurtRenderRequest request) // 判断当前 request 是否命中一次性复制请求。

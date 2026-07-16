@@ -1,0 +1,133 @@
+#pragma kernel PrepareProbeOcclusion
+#pragma kernel PrepareProbeOcclusionCS
+
+#define BURT_GI_TRACE_TILE_THREADGROUP_SIZE 8
+
+Texture2D<float> _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture;
+RWTexture2D<float2> _BurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture;
+
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
+
+float4 _BurtGIRadianceCacheClipMapParams;
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
+uint _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution;
+
+uint BurtGIProbeAtlasResolutionInProbes()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.x);
+}
+
+uint2 BurtGIProbeAtlasBaseCoord(uint probeIndex, uint probeResolution)
+{
+    uint atlasResolutionInProbes = BurtGIProbeAtlasResolutionInProbes();
+    uint2 probeCoord = uint2(probeIndex % atlasResolutionInProbes, probeIndex / atlasResolutionInProbes);
+    return probeCoord * probeResolution;
+}
+
+uint BurtGIGetProbeIndexFromTraceData(uint probeTraceIndex)
+{
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        return 0u;
+    }
+
+    return asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) & 0x00ffffffu;
+}
+
+uint2 BurtGIWrapProbeTexelToRaw(uint2 finalProbeTexelCoord, uint finalProbeResolution, uint rawProbeResolution)
+{
+    rawProbeResolution = max(1u, rawProbeResolution);
+    finalProbeResolution = max(rawProbeResolution, finalProbeResolution);
+    uint borderSize = max(0u, (finalProbeResolution - rawProbeResolution) / 2u);
+
+    if (borderSize == 0u)
+    {
+        return min(finalProbeTexelCoord, uint2(rawProbeResolution - 1u, rawProbeResolution - 1u));
+    }
+
+    uint2 wrappedCoord = min(finalProbeTexelCoord, uint2(finalProbeResolution - 1u, finalProbeResolution - 1u));
+    if (wrappedCoord.x < borderSize)
+    {
+        wrappedCoord.x = borderSize - 1u + borderSize - wrappedCoord.x;
+        wrappedCoord.y = finalProbeResolution - 1u - wrappedCoord.y;
+    }
+    if (wrappedCoord.x >= finalProbeResolution - borderSize)
+    {
+        wrappedCoord.x = (finalProbeResolution - borderSize) - (wrappedCoord.x - (finalProbeResolution - borderSize - 1u));
+        wrappedCoord.y = finalProbeResolution - 1u - wrappedCoord.y;
+    }
+    if (wrappedCoord.y < borderSize)
+    {
+        wrappedCoord.y = borderSize - 1u + borderSize - wrappedCoord.y;
+        wrappedCoord.x = finalProbeResolution - 1u - wrappedCoord.x;
+    }
+    if (wrappedCoord.y >= finalProbeResolution - borderSize)
+    {
+        wrappedCoord.y = (finalProbeResolution - borderSize) - (wrappedCoord.y - (finalProbeResolution - borderSize - 1u));
+        wrappedCoord.x = finalProbeResolution - 1u - wrappedCoord.x;
+    }
+
+    return min(wrappedCoord - borderSize, uint2(rawProbeResolution - 1u, rawProbeResolution - 1u));
+}
+
+void BurtGIPrepareProbeOcclusion(uint3 dispatchThreadId)
+{
+    uint probeTraceIndex = dispatchThreadId.z;
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0])
+    {
+        return;
+    }
+
+    uint finalProbeResolution = max(1u, _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution);
+    uint2 finalProbeTexelCoord = dispatchThreadId.xy;
+    if (finalProbeTexelCoord.x >= finalProbeResolution || finalProbeTexelCoord.y >= finalProbeResolution)
+    {
+        return;
+    }
+
+    uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
+    uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
+    uint2 rawBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution);
+    uint borderSize = 1u << min(_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip, 8u);
+    uint occlusionProbeResolution = min(radianceProbeResolution, max(1u, finalProbeResolution > 2u * borderSize ? finalProbeResolution - 2u * borderSize : 1u));
+    uint downsampleFactor = max(1u, radianceProbeResolution / max(occlusionProbeResolution, 1u));
+
+    uint2 occlusionTexelCoord = BurtGIWrapProbeTexelToRaw(finalProbeTexelCoord, finalProbeResolution, occlusionProbeResolution);
+
+    float accumulatedDepth = 0.0;
+    float accumulatedDepthSq = 0.0;
+
+    [loop]
+    for (uint yOffset = 0u; yOffset < downsampleFactor; ++yOffset)
+    {
+        [loop]
+        for (uint xOffset = 0u; xOffset < downsampleFactor; ++xOffset)
+        {
+            uint2 rawProbeTexelCoord = occlusionTexelCoord * downsampleFactor + uint2(xOffset, yOffset);
+            rawProbeTexelCoord = rawProbeTexelCoord % radianceProbeResolution;
+            float depth = _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(rawBaseCoord + rawProbeTexelCoord, 0));
+            accumulatedDepth += depth;
+            accumulatedDepthSq += depth * depth;
+        }
+    }
+
+    float normalization = 1.0 / max((float)(downsampleFactor * downsampleFactor), 1.0);
+    uint2 finalBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, finalProbeResolution);
+    _BurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture[finalBaseCoord + finalProbeTexelCoord] =
+        float2(accumulatedDepth * normalization, accumulatedDepthSq * normalization);
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void PrepareProbeOcclusion(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIPrepareProbeOcclusion(dispatchThreadId);
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void PrepareProbeOcclusionCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIPrepareProbeOcclusion(dispatchThreadId);
+}

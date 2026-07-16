@@ -30,6 +30,8 @@ UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
 // 主 Agent 在 Deferred Lighting Pass 上传的逆 ViewProjection；C# 侧使用 GL.GetGPUProjectionMatrix(..., true) 对齐渲染到 RT 的投影。
 float4x4 _BurtDeferredInverseViewProjectionMatrix;
 
+float4x4 _BurtDeferredCurrentNonJitteredViewProjectionMatrix;
+
 float4x4 _BurtDeferredInverseNonJitteredViewProjectionMatrix;
 
 // 主 Agent 上传的相机世界坐标；Deferred 用它和重建 positionWS 计算 viewDirectionWS。

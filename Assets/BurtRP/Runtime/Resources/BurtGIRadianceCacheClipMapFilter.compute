@@ -1,0 +1,455 @@
+#pragma kernel FilterProbeRadianceWithGatherCS
+#pragma kernel FilterProbeRadianceCS
+#pragma kernel CalculateProbeIrradiance
+#pragma kernel CalculateProbeIrradianceCS
+
+#define BURT_GI_CLIPMAP_COUNT 6
+#define BURT_GI_INVALID_PROBE_INDEX 0xffffu
+#define BURT_GI_TRACE_TILE_THREADGROUP_SIZE 8
+#define BURT_GI_DOWNSAMPLED_RADIANCE_SIZE 8
+
+Texture2D<float> _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture;
+Texture2D<float4> _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture;
+Texture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
+RWTexture2D<float4> _BurtGIRadianceCacheClipMapRadianceProbeAtlasTexture;
+RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture;
+RWTexture2D<float> _BurtGIRadianceCacheClipMapProbeSkyAOAtlasTexture;
+
+StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
+StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
+StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer;
+
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapClipmapParams[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIScreenProbeTraceParams;
+uint _BurtGIRadianceCacheClipMapMaxProbeCount;
+uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
+uint _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution;
+float _BurtGIRadianceCacheClipMapFilterMaxRadianceHitAngle;
+
+groupshared float3 BurtGIDownsampledProbeRadiance[BURT_GI_DOWNSAMPLED_RADIANCE_SIZE][BURT_GI_DOWNSAMPLED_RADIANCE_SIZE];
+groupshared float BurtGIDownsampledProbeSkyVisibility[BURT_GI_DOWNSAMPLED_RADIANCE_SIZE][BURT_GI_DOWNSAMPLED_RADIANCE_SIZE];
+
+uint BurtGIClipmapCount()
+{
+    return max(1u, min((uint)_BurtGIRadianceCacheClipMapParams.z, (uint)BURT_GI_CLIPMAP_COUNT));
+}
+
+uint BurtGIClipmapResolution()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.w);
+}
+
+uint2 BurtGIPackIndirectionCoord(uint clipmapIndex, uint3 probeCoord)
+{
+    uint clipmapResolution = BurtGIClipmapResolution();
+    return uint2(clipmapIndex * clipmapResolution + probeCoord.x, probeCoord.y + probeCoord.z * clipmapResolution);
+}
+
+bool BurtGIWorldPositionToProbeCoordInClipmap(float3 worldPosition, uint clipmapIndex, out uint3 probeCoord)
+{
+    uint clipmapResolution = BurtGIClipmapResolution();
+    if (clipmapIndex >= BurtGIClipmapCount())
+    {
+        probeCoord = uint3(0u, 0u, 0u);
+        return false;
+    }
+
+    float4 worldToProbeCoord = _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[clipmapIndex];
+    int3 signedProbeCoord = (int3)floor(worldPosition * worldToProbeCoord.w + worldToProbeCoord.xyz);
+    if (signedProbeCoord.x >= 0 &&
+        signedProbeCoord.y >= 0 &&
+        signedProbeCoord.z >= 0 &&
+        signedProbeCoord.x < (int)clipmapResolution &&
+        signedProbeCoord.y < (int)clipmapResolution &&
+        signedProbeCoord.z < (int)clipmapResolution)
+    {
+        probeCoord = (uint3)signedProbeCoord;
+        return true;
+    }
+
+    probeCoord = uint3(0u, 0u, 0u);
+    return false;
+}
+
+float3 BurtGIProbeCoordToWorldPosition(uint clipmapIndex, uint3 probeCoord)
+{
+    float4 probeCoordToWorld = _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[clipmapIndex];
+    return probeCoordToWorld.xyz + (float3)probeCoord * probeCoordToWorld.w;
+}
+
+uint BurtGIProbeAtlasResolutionInProbes()
+{
+    return max(1u, (uint)_BurtGIRadianceCacheClipMapParams.x);
+}
+
+uint2 BurtGIProbeAtlasBaseCoord(uint probeIndex, uint probeResolution)
+{
+    uint atlasResolutionInProbes = BurtGIProbeAtlasResolutionInProbes();
+    uint2 probeCoord = uint2(probeIndex % atlasResolutionInProbes, probeIndex / atlasResolutionInProbes);
+    return probeCoord * probeResolution;
+}
+
+uint BurtGIGetProbeIndexFromTraceData(uint probeTraceIndex)
+{
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        return 0u;
+    }
+
+    return asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) & 0x00ffffffu;
+}
+
+uint BurtGIGetClipmapIndexFromTraceData(uint probeTraceIndex)
+{
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapMaxProbeCount)
+    {
+        return 0u;
+    }
+
+    return (asuint(_BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex].w) >> 24) & 0xffu;
+}
+
+float3 BurtGIGetProbeTraceWorldCenter(uint probeTraceIndex)
+{
+    float4 probeTraceData = _BurtGIRadianceCacheClipMapProbeTraceDataBuffer[probeTraceIndex];
+    uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
+    float3 probeWorldOffset = probeIndex < _BurtGIRadianceCacheClipMapMaxProbeCount
+        ? _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[probeIndex].xyz
+        : 0.0;
+    return probeTraceData.xyz + probeWorldOffset;
+}
+
+uint BurtGIGetProbeIndexFromIndirectionCoord(int3 probeCoord, uint clipmapIndex)
+{
+    int clipmapResolution = (int)BurtGIClipmapResolution();
+    if (clipmapIndex >= BurtGIClipmapCount() ||
+        probeCoord.x < 0 ||
+        probeCoord.y < 0 ||
+        probeCoord.z < 0 ||
+        probeCoord.x >= clipmapResolution ||
+        probeCoord.y >= clipmapResolution ||
+        probeCoord.z >= clipmapResolution)
+    {
+        return BURT_GI_INVALID_PROBE_INDEX;
+    }
+
+    uint2 indirectionCoord = BurtGIPackIndirectionCoord(clipmapIndex, (uint3)probeCoord);
+    uint probeIndex = _BurtGIRadianceCacheClipMapIndirectionTexture[indirectionCoord];
+    return probeIndex < _BurtGIRadianceCacheClipMapMaxProbeCount ? probeIndex : BURT_GI_INVALID_PROBE_INDEX;
+}
+
+float3 BurtGIRadianceCacheClipMapFilterSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+
+float3 BurtGIEquiAreaSphericalMapping(float2 uv)
+{
+    uv = 2.0 * uv - 1.0;
+    float d = 1.0 - (abs(uv.x) + abs(uv.y));
+    float r = 1.0 - abs(d);
+    float phi = r == 0.0 ? 0.0 : 0.7853981633974483 * ((abs(uv.y) - abs(uv.x)) / r + 1.0);
+    float f = r * sqrt(max(2.0 - r * r, 0.0));
+    return BurtGIRadianceCacheClipMapFilterSafeNormalize(float3(
+        f * sign(uv.y) * abs(sin(phi)),
+        sign(d) * (1.0 - r * r),
+        f * sign(uv.x) * abs(cos(phi))),
+        float3(0.0, 1.0, 0.0));
+}
+
+float2 BurtGIInverseEquiAreaSphericalMapping(float3 direction)
+{
+    direction = BurtGIRadianceCacheClipMapFilterSafeNormalize(
+        float3(direction.z, direction.x, direction.y),
+        float3(0.0, 1.0, 0.0));
+    float3 absDirection = abs(direction);
+    float r = sqrt(max(1.0 - absDirection.z, 0.0));
+    float x = min(absDirection.x, absDirection.y) / (max(absDirection.x, absDirection.y) + 1e-8);
+    const float t1 = 0.406758566246788489601959989e-5;
+    const float t2 = 0.636226545274016134946890922156;
+    const float t3 = 0.61572017898280213493197203466e-2;
+    const float t4 = -0.247333733281268944196501420480;
+    const float t5 = 0.881770664775316294736387951347e-1;
+    const float t6 = 0.419038818029165735901852432784e-1;
+    const float t7 = -0.251390972343483509333252996350e-1;
+    float phi = t6 + t7 * x;
+    phi = t5 + phi * x;
+    phi = t4 + phi * x;
+    phi = t3 + phi * x;
+    phi = t2 + phi * x;
+    phi = t1 + phi * x;
+    phi = absDirection.x < absDirection.y ? 1.0 - phi : phi;
+    float2 uv = float2(r - phi * r, phi * r);
+    uv = direction.z < 0.0 ? 1.0 - uv.yx : uv;
+    uv.x = direction.x < 0.0 ? -uv.x : uv.x;
+    uv.y = direction.y < 0.0 ? -uv.y : uv.y;
+    return saturate(uv * 0.5 + 0.5);
+}
+
+uint2 BurtGIWrapProbeTexelToRaw(uint2 finalProbeTexelCoord, uint finalProbeResolution, uint rawProbeResolution)
+{
+    rawProbeResolution = max(1u, rawProbeResolution);
+    finalProbeResolution = max(rawProbeResolution, finalProbeResolution);
+    uint borderSize = max(0u, (finalProbeResolution - rawProbeResolution) / 2u);
+
+    if (borderSize == 0u)
+    {
+        return min(finalProbeTexelCoord, uint2(rawProbeResolution - 1u, rawProbeResolution - 1u));
+    }
+
+    uint2 wrappedCoord = min(finalProbeTexelCoord, uint2(finalProbeResolution - 1u, finalProbeResolution - 1u));
+    if (wrappedCoord.x < borderSize)
+    {
+        wrappedCoord.x = borderSize - 1u + borderSize - wrappedCoord.x;
+        wrappedCoord.y = finalProbeResolution - 1u - wrappedCoord.y;
+    }
+    if (wrappedCoord.x >= finalProbeResolution - borderSize)
+    {
+        wrappedCoord.x = (finalProbeResolution - borderSize) - (wrappedCoord.x - (finalProbeResolution - borderSize - 1u));
+        wrappedCoord.y = finalProbeResolution - 1u - wrappedCoord.y;
+    }
+    if (wrappedCoord.y < borderSize)
+    {
+        wrappedCoord.y = borderSize - 1u + borderSize - wrappedCoord.y;
+        wrappedCoord.x = finalProbeResolution - 1u - wrappedCoord.x;
+    }
+    if (wrappedCoord.y >= finalProbeResolution - borderSize)
+    {
+        wrappedCoord.y = (finalProbeResolution - borderSize) - (wrappedCoord.y - (finalProbeResolution - borderSize - 1u));
+        wrappedCoord.x = finalProbeResolution - 1u - wrappedCoord.x;
+    }
+
+    return min(wrappedCoord - borderSize, uint2(rawProbeResolution - 1u, rawProbeResolution - 1u));
+}
+
+void BurtGIFilterProbeRadiance(uint3 dispatchThreadId)
+{
+    uint probeTraceIndex = dispatchThreadId.z;
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0])
+    {
+        return;
+    }
+
+    uint2 probeTexelCoord = dispatchThreadId.xy;
+    uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
+    if (probeTexelCoord.x >= radianceProbeResolution || probeTexelCoord.y >= radianceProbeResolution)
+    {
+        return;
+    }
+
+    float3 probeWorldCenter = BurtGIGetProbeTraceWorldCenter(probeTraceIndex);
+    uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
+    uint clipmapIndex = min(BurtGIGetClipmapIndexFromTraceData(probeTraceIndex), BurtGIClipmapCount() - 1u);
+    uint2 rawBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution);
+
+    float centerDepth = _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(rawBaseCoord + probeTexelCoord, 0));
+    float3 lighting = _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(int3(rawBaseCoord + probeTexelCoord, 0)).rgb;
+    float totalWeight = 1.0;
+    uint3 probeCoordUint;
+    if (BurtGIWorldPositionToProbeCoordInClipmap(probeWorldCenter, clipmapIndex, probeCoordUint))
+    {
+        int3 probeCoord = (int3)probeCoordUint;
+        int3 neighborOffsets[6] =
+        {
+            int3(-1, 0, 0),
+            int3(1, 0, 0),
+            int3(0, -1, 0),
+            int3(0, 1, 0),
+            int3(0, 0, -1),
+            int3(0, 0, 1)
+        };
+
+        float2 probeUV = (float2(probeTexelCoord) + 0.5) / (float)radianceProbeResolution;
+        float3 worldConeDirection = BurtGIEquiAreaSphericalMapping(probeUV);
+        float occlusionTestOffset = 2.0 * max(_BurtGIRadianceCacheClipMapClipmapParams[clipmapIndex].y, 0.001);
+        float spatialFilterMaxRadianceHitAngle = max(_BurtGIRadianceCacheClipMapFilterMaxRadianceHitAngle, 0.001);
+
+        [unroll]
+        for (uint neighborOffsetIndex = 0u; neighborOffsetIndex < 6u; ++neighborOffsetIndex)
+        {
+            int3 neighborCoord = probeCoord + neighborOffsets[neighborOffsetIndex];
+            uint neighborProbeIndex = BurtGIGetProbeIndexFromIndirectionCoord(neighborCoord, clipmapIndex);
+            if (neighborProbeIndex == BURT_GI_INVALID_PROBE_INDEX || neighborProbeIndex == probeIndex)
+            {
+                continue;
+            }
+
+            uint2 neighborRawBaseCoord = BurtGIProbeAtlasBaseCoord(neighborProbeIndex, radianceProbeResolution);
+            float neighborRadianceDepth = _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(neighborRawBaseCoord + probeTexelCoord, 0));
+            float3 neighborWorldPosition = BurtGIProbeCoordToWorldPosition(clipmapIndex, (uint3)neighborCoord) +
+                _BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer[neighborProbeIndex].xyz;
+            float occlusionWeight = 1.0;
+
+            float3 neighborOcclusionTestPosition = neighborWorldPosition + occlusionTestOffset * worldConeDirection;
+            float3 toNeighborOcclusionPosition = neighborOcclusionTestPosition - probeWorldCenter;
+            uint2 probeTexelCoordForNeighborOcclusionPosition = min(
+                (uint2)(BurtGIInverseEquiAreaSphericalMapping(toNeighborOcclusionPosition) * (float)radianceProbeResolution),
+                uint2(radianceProbeResolution - 1u, radianceProbeResolution - 1u));
+            float probeDepthForNeighborOcclusionPosition =
+                _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(rawBaseCoord + probeTexelCoordForNeighborOcclusionPosition, 0));
+            if (probeDepthForNeighborOcclusionPosition * probeDepthForNeighborOcclusionPosition <
+                dot(toNeighborOcclusionPosition, toNeighborOcclusionPosition))
+            {
+                occlusionWeight = 0.0;
+            }
+
+            float3 occlusionTestPosition = probeWorldCenter + occlusionTestOffset * worldConeDirection;
+            float3 toOcclusionPosition = occlusionTestPosition - neighborWorldPosition;
+            uint2 neighborProbeTexelCoordForOcclusionPosition = min(
+                (uint2)(BurtGIInverseEquiAreaSphericalMapping(toOcclusionPosition) * (float)radianceProbeResolution),
+                uint2(radianceProbeResolution - 1u, radianceProbeResolution - 1u));
+            float neighborDepthForOcclusionPosition =
+                _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(neighborRawBaseCoord + neighborProbeTexelCoordForOcclusionPosition, 0));
+            if (neighborDepthForOcclusionPosition * neighborDepthForOcclusionPosition <
+                dot(toOcclusionPosition, toOcclusionPosition))
+            {
+                occlusionWeight = 0.0;
+            }
+
+            if (centerDepth >= 0.0)
+            {
+                neighborRadianceDepth = min(neighborRadianceDepth, centerDepth);
+            }
+            float3 neighborHitPosition = neighborWorldPosition + worldConeDirection * neighborRadianceDepth;
+            float3 toNeighborHit = neighborHitPosition - probeWorldCenter;
+            float toNeighborHitLengthSq = max(dot(toNeighborHit, toNeighborHit), 0.0001);
+            float neighborAngle = acos(clamp(dot(toNeighborHit, worldConeDirection) * rsqrt(toNeighborHitLengthSq), -1.0, 1.0));
+            float angleWeight = 1.0 - saturate(neighborAngle / spatialFilterMaxRadianceHitAngle);
+            float neighborWeight = angleWeight * occlusionWeight;
+
+            lighting += _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(int3(neighborRawBaseCoord + probeTexelCoord, 0)).rgb * neighborWeight;
+            totalWeight += neighborWeight;
+        }
+    }
+
+    _BurtGIRadianceCacheClipMapRadianceProbeAtlasTexture[rawBaseCoord + probeTexelCoord] =
+        float4(lighting / max(totalWeight, 0.0001), 1.0);
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void FilterProbeRadianceWithGatherCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIFilterProbeRadiance(dispatchThreadId);
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void FilterProbeRadianceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIFilterProbeRadiance(dispatchThreadId);
+}
+
+void BurtGICalculateProbeIrradiance(uint3 dispatchThreadId, uint3 groupThreadId)
+{
+    uint probeTraceIndex = dispatchThreadId.z;
+    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0])
+    {
+        return;
+    }
+
+    uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
+    uint finalIrradianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution);
+    uint probeIndex = BurtGIGetProbeIndexFromTraceData(probeTraceIndex);
+    uint2 rawBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, radianceProbeResolution);
+    uint downsampledProbeResolution = min((uint)BURT_GI_DOWNSAMPLED_RADIANCE_SIZE, radianceProbeResolution);
+    uint downsampleFactor = max(1u, radianceProbeResolution / max(downsampledProbeResolution, 1u));
+    float maxTraceDistance = max(_BurtGIScreenProbeTraceParams.w, 1.0);
+
+    for (uint destY = groupThreadId.y; destY < BURT_GI_DOWNSAMPLED_RADIANCE_SIZE; destY += BURT_GI_TRACE_TILE_THREADGROUP_SIZE)
+    {
+        for (uint destX = groupThreadId.x; destX < BURT_GI_DOWNSAMPLED_RADIANCE_SIZE; destX += BURT_GI_TRACE_TILE_THREADGROUP_SIZE)
+        {
+            float3 sourceRadiance = 0.0;
+            float sourceSkyVisibility = 0.0;
+
+            if (destX < downsampledProbeResolution && destY < downsampledProbeResolution)
+            {
+                [loop]
+                for (uint yOffset = 0u; yOffset < downsampleFactor; ++yOffset)
+                {
+                    [loop]
+                    for (uint xOffset = 0u; xOffset < downsampleFactor; ++xOffset)
+                    {
+                        uint2 sourceCoord = min(
+                            uint2(destX, destY) * downsampleFactor + uint2(xOffset, yOffset),
+                            uint2(radianceProbeResolution - 1u, radianceProbeResolution - 1u));
+                        sourceRadiance += _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture.Load(int3(rawBaseCoord + sourceCoord, 0)).rgb;
+                        float depth = _BurtGIRadianceCacheClipMapDepthProbeAtlasReadTexture.Load(int3(rawBaseCoord + sourceCoord, 0));
+                        sourceSkyVisibility += depth < maxTraceDistance ? 0.0 : 1.0;
+                    }
+                }
+
+                float normalization = 1.0 / max((float)(downsampleFactor * downsampleFactor), 1.0);
+                sourceRadiance *= normalization;
+                sourceSkyVisibility *= normalization;
+            }
+
+            BurtGIDownsampledProbeRadiance[destY][destX] = sourceRadiance;
+            BurtGIDownsampledProbeSkyVisibility[destY][destX] = sourceSkyVisibility;
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint2 finalProbeTexelCoord = dispatchThreadId.xy;
+    if (finalProbeTexelCoord.x >= finalIrradianceProbeResolution || finalProbeTexelCoord.y >= finalIrradianceProbeResolution)
+    {
+        return;
+    }
+
+    uint2 finalBaseCoord = BurtGIProbeAtlasBaseCoord(probeIndex, finalIrradianceProbeResolution);
+    uint2 finalCoord = finalBaseCoord + finalProbeTexelCoord;
+    uint borderSize = 1u << min(_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip, 8u);
+    uint irradianceProbeResolution = max(1u, finalIrradianceProbeResolution > 2u * borderSize ? finalIrradianceProbeResolution - 2u * borderSize : 1u);
+    uint2 probeTexelCoord = BurtGIWrapProbeTexelToRaw(finalProbeTexelCoord, finalIrradianceProbeResolution, irradianceProbeResolution);
+
+    float3 irradianceDirection = BurtGIEquiAreaSphericalMapping((float2(probeTexelCoord) + 0.5) / (float)irradianceProbeResolution);
+    float3 irradiance = 0.0;
+    float totalWeight = 0.0;
+    float skyVisibility = 0.0;
+    float skyVisibilityWeight = 0.0;
+
+    [unroll(BURT_GI_DOWNSAMPLED_RADIANCE_SIZE)]
+    for (uint y = 0u; y < BURT_GI_DOWNSAMPLED_RADIANCE_SIZE; ++y)
+    {
+        [unroll(BURT_GI_DOWNSAMPLED_RADIANCE_SIZE)]
+        for (uint x = 0u; x < BURT_GI_DOWNSAMPLED_RADIANCE_SIZE; ++x)
+        {
+            if (x >= downsampledProbeResolution || y >= downsampledProbeResolution)
+            {
+                continue;
+            }
+
+            float3 radianceDirection = BurtGIEquiAreaSphericalMapping((float2(x, y) + 0.5) / (float)downsampledProbeResolution);
+            float ndotl = max(dot(irradianceDirection, radianceDirection), 0.0);
+            irradiance += BurtGIDownsampledProbeRadiance[y][x] * ndotl;
+            skyVisibility += BurtGIDownsampledProbeSkyVisibility[y][x] * ndotl;
+            totalWeight += ndotl;
+            skyVisibilityWeight += ndotl;
+        }
+    }
+
+    float3 lowFrequencyIrradiance = irradiance / max(totalWeight, 0.0001);
+    _BurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture[finalCoord] = float4(lowFrequencyIrradiance, 1.0);
+    _BurtGIRadianceCacheClipMapProbeSkyAOAtlasTexture[finalCoord] = skyVisibility / max(skyVisibilityWeight, 0.0001);
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void CalculateProbeIrradiance(
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGICalculateProbeIrradiance(dispatchThreadId, groupThreadId);
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void CalculateProbeIrradianceCS(
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGICalculateProbeIrradiance(dispatchThreadId, groupThreadId);
+}

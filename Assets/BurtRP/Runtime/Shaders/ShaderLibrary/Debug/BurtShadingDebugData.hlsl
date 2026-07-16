@@ -34,6 +34,12 @@ struct BurtShadingDebugData
     // 保存间接镜面贡献，主要来自 Unity Reflection Probe / Sky Reflection。
     float3 IndirectSpecularColor;
 
+    float3 GIProbeIrradiance;
+
+    float GIProbeValidity;
+
+    float GIProbeSkyVisibility;
+
     // 保存追加光直接漫反射，不包含主光、间接光和自发光。
     float3 AdditionalDiffuseColor;
 
@@ -306,6 +312,9 @@ BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS) // 为�
     data.DirectSpecularColor = float3(0.0f, 0.0f, 0.0f);
     data.IndirectDiffuseColor = float3(0.0f, 0.0f, 0.0f);
     data.IndirectSpecularColor = float3(0.0f, 0.0f, 0.0f);
+    data.GIProbeIrradiance = float3(0.0f, 0.0f, 0.0f);
+    data.GIProbeValidity = 0.0f;
+    data.GIProbeSkyVisibility = 0.0f;
     data.AdditionalDiffuseColor = float3(0.0f, 0.0f, 0.0f);
     data.AdditionalSpecularColor = float3(0.0f, 0.0f, 0.0f);
     data.AdditionalUnshadowedColor = float3(0.0f, 0.0f, 0.0f);
