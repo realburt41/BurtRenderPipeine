@@ -1278,6 +1278,10 @@ PrefabInstance:
         type: 3}
       insertIndex: -1
       addedObject: {fileID: 694810779}
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 90a6df37d194067498e876e6899e80be,
+        type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 694810782}
   m_SourcePrefab: {fileID: 100100000, guid: 90a6df37d194067498e876e6899e80be, type: 3}
 --- !u!4 &694810777 stripped
 Transform:
@@ -1298,7 +1302,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 694810778}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 1b4d505e2cf2493389eb61a0de536c91, type: 3}
   m_Name: 
@@ -1319,6 +1323,42 @@ Transform:
     type: 3}
   m_PrefabInstance: {fileID: 694810776}
   m_PrefabAsset: {fileID: 0}
+--- !u!4 &694810781 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 7696200768387677094, guid: 90a6df37d194067498e876e6899e80be,
+    type: 3}
+  m_PrefabInstance: {fileID: 694810776}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &694810782
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 694810778}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f14f3a31a3b4cfb9565c2a894dbd4e0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  targetRenderer: {fileID: 289462451}
+  targetMaterialSlot: 0
+  coordinateRenderer: {fileID: 0}
+  targetBone: {fileID: 694810781}
+  decalTransform: {fileID: 865170189}
+  debugLayerIndex: 0
+  decalSizeDecimeters: 10
+  albedoMultiply: 0
+  normalScale: 1
+  decalTint: {r: 1, g: 1, b: 1, a: 1}
+  showProjectionMask: 0
+  showShaderEntryMarker: 0
+  showTargetRendererOverride: 0
+  useMeshPositionFallback: 0
+  useRendererLocalCoordinates: 0
+  decalAlbedo: {fileID: 2800000, guid: 96f715e7c0b78db4e88d81c192379030, type: 3}
+  decalNormal: {fileID: 0}
+  decalMohr: {fileID: 0}
 --- !u!1 &785301922
 GameObject:
   m_ObjectHideFlags: 0
@@ -1557,8 +1597,8 @@ Transform:
   m_GameObject: {fileID: 865170186}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 1, z: 0, w: 0}
-  m_LocalPosition: {x: 0.7245, y: -0.6135, z: -0.4063}
-  m_LocalScale: {x: 0.052477, y: 0.052477, z: 0.052477}
+  m_LocalPosition: {x: 0.7245, y: -0.6545, z: -0.4068}
+  m_LocalScale: {x: 0.08141806, y: 0.08141806, z: 0.08141806}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}

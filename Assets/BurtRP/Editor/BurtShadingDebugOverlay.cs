@@ -311,6 +311,26 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "BurtGI HashGrid Debug";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO:
                     return "BurtGI RadianceCache SkyAO";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStats:
+                    return "BurtGI RadianceCache Stats";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheVisualize:
+                    return "BurtGI RadianceCache Visualize";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStatus:
+                    return "BurtGI RadianceCache Status";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbePlacement:
+                    return "BurtGI ScreenProbe Placement";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbeTraceVisualize:
+                    return "BurtGI ScreenProbe Trace Visualize";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationSceneVoxelOccupancy:
+                    return "BurtGI SceneVoxel Occupancy";
+                case BurtShadingDebugMode.GIProbeIrradiance:
+                    return "XGIProbe Irradiance";
+                case BurtShadingDebugMode.GIProbeValidity:
+                    return "XGIProbe Validity";
+                case BurtShadingDebugMode.GIProbeSkyVisibility:
+                    return "XGIProbe Sky Visibility";
+                case BurtShadingDebugMode.GIProbeRuntimeInfo:
+                    return "XGIProbe Runtime Info";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
                     return "SSS Setup";
                 case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
@@ -829,6 +849,16 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStats,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheVisualize,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStatus,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbePlacement,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbeTraceVisualize,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationSceneVoxelOccupancy,
+            BurtShadingDebugMode.GIProbeIrradiance,
+            BurtShadingDebugMode.GIProbeValidity,
+            BurtShadingDebugMode.GIProbeSkyVisibility,
+            BurtShadingDebugMode.GIProbeRuntimeInfo,
             BurtShadingDebugMode.BloomPrefilter,
             BurtShadingDebugMode.BloomFinalBloom,
             BurtShadingDebugMode.BloomMip1,
@@ -947,6 +977,16 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStats,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheVisualize,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStatus,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbePlacement,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbeTraceVisualize,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationSceneVoxelOccupancy,
+            BurtShadingDebugMode.GIProbeIrradiance,
+            BurtShadingDebugMode.GIProbeValidity,
+            BurtShadingDebugMode.GIProbeSkyVisibility,
+            BurtShadingDebugMode.GIProbeRuntimeInfo,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHashGridDebug
         });
 

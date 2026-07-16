@@ -12,6 +12,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent PbrMaskLabel = new GUIContent("PBR / Mask Inputs");
         private static readonly GUIContent ClearCoatLabel = new GUIContent("Clear Coat");
         private static readonly GUIContent SubsurfaceLabel = new GUIContent("Subsurface");
+        private static readonly GUIContent SkinnedDecalLabel = new GUIContent("Skinned Decal");
         private static readonly GUIContent FabricLabel = new GUIContent("Fabric");
         private static readonly GUIContent SilkLabel = new GUIContent("Silk");
         private static readonly GUIContent FoliageLabel = new GUIContent("Foliage");
@@ -68,6 +69,7 @@ namespace Burt.RenderPipeline.Editor
         private static bool showPbrMaskInputs = true;
         private static bool showClearCoatInputs = true;
         private static bool showSubsurfaceInputs = true;
+        private static bool showSkinnedDecalInputs = true;
         private static bool showFabricInputs = true;
         private static bool showSilkInputs = true;
         private static bool showFoliageInputs = true;
@@ -222,6 +224,7 @@ namespace Burt.RenderPipeline.Editor
             DrawNormalInputs(material);
             DrawClearCoatInputs(material);
             DrawSubsurfaceInputs(material);
+            DrawSkinnedDecalInputs(material);
             DrawFabricInputs(material);
             DrawSilkInputs(material);
             DrawFoliageInputs(material);
@@ -248,6 +251,7 @@ namespace Burt.RenderPipeline.Editor
             ApplyInteriorMappingKeywords(material);
             ApplyEmissionState(material);
             ClampSubsurfaceScatteringMode(material);
+            ApplySkinnedDecalKeyword(material);
             ApplySurfaceOptions(material);
         }
 
@@ -1120,6 +1124,50 @@ namespace Burt.RenderPipeline.Editor
             BurtShaderGUIUtility.EndSection();
         }
 
+        private void DrawSkinnedDecalInputs(Material material)
+        {
+            if (!IsSubsurfaceShader(material))
+            {
+                return;
+            }
+
+            var enabled = Find("_SkinnedDecalEnabled");
+            var count = Find("_SkinnedDecalPluginModel_DecalCount");
+            if (enabled == null || count == null || !BurtShaderGUIUtility.BeginSection(SkinnedDecalLabel, ref showSkinnedDecalInputs))
+            {
+                return;
+            }
+
+            DrawProperty(enabled);
+            if (enabled.floatValue < 0.5f)
+            {
+                BurtShaderGUIUtility.EndSection();
+                return;
+            }
+
+            DrawProperty(count);
+            DrawTextureNoScaleOffset(new GUIContent("Decal Albedo"), Find("_SkinnedDecalPluginModel_DecalAlbedo"));
+            DrawTextureNoScaleOffset(new GUIContent("Decal Normal"), Find("_SkinnedDecalPluginModel_DecalNormal"));
+            DrawTextureNoScaleOffset(new GUIContent("Decal MOHR"), Find("_SkinnedDecalPluginModel_DecalMOHR"));
+
+            var layerCount = Mathf.Clamp(Mathf.RoundToInt(count.floatValue), 0, 5);
+            for (var layer = 1; layer <= layerCount; layer++)
+            {
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Decal Layer " + layer, EditorStyles.boldLabel);
+                DrawProperty(Find(layer == 1
+                    ? "_SkinnedDecalPluginModel_DecalArrayIndexSize1"
+                    : "_SkinnedDecalPluginModel_DecalArraySizeIndex" + layer));
+                DrawProperty(Find("_SkinnedDecalPluginModel_DecalTint" + layer));
+                DrawProperty(Find("_SkinnedDecalPluginModel_DecalPosition" + layer));
+                DrawProperty(Find("_SkinnedDecalPluginModel_DecalBasisX" + layer));
+                DrawProperty(Find("_SkinnedDecalPluginModel_DecalBasisY" + layer));
+            }
+
+            EditorGUILayout.HelpBox("Projection uses PreSkinPositionOS. All active layers currently share these ordinary Texture2D inputs; size is in decimeters, and MOHR A is converted from perceptual roughness to Burt smoothness.", MessageType.None);
+            BurtShaderGUIUtility.EndSection();
+        }
+
         private void DrawSubsurfaceScatteringMode()
         {
             if (subsurfaceScatteringMode == null)
@@ -1157,6 +1205,16 @@ namespace Burt.RenderPipeline.Editor
             }
 
             material.SetFloat("_SubsurfaceScatteringMode", Mathf.Clamp(Mathf.RoundToInt(material.GetFloat("_SubsurfaceScatteringMode")), 0, SubsurfaceScatteringModeNames.Length - 1));
+        }
+
+        private static void ApplySkinnedDecalKeyword(Material material)
+        {
+            if (material == null || !IsSubsurfaceShader(material) || !material.HasProperty("_SkinnedDecalEnabled"))
+            {
+                return;
+            }
+
+            SetKeyword(material, "BURT_SKINNED_DECAL", material.GetFloat("_SkinnedDecalEnabled") >= 0.5f);
         }
 
         private void DrawSubsurfaceProfilePicker()
