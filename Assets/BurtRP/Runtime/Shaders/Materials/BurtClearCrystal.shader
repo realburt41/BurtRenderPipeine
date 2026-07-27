@@ -60,6 +60,7 @@ Shader "BurtRP/Clear Crystal"
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
         [Toggle] _Refraction ("Refraction", Float) = 1
         [Toggle] _ZWrite ("Transparent ZWrite", Float) = 1
+        [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 1
         [Enum(Off,0,Front,1,Back,2)] _Cull ("Cull", Float) = 0
         [Enum(None,0,Flip,1,Mirror,2)] _DoubleSidedNormalMode ("Double Sided Normal Mode", Float) = 1
         [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (-1, -1, -1, 0)
@@ -124,6 +125,42 @@ Shader "BurtRP/Clear Crystal"
             HLSLPROGRAM
             #pragma vertex VertClearCrystal
             #pragma fragment FragClearCrystal
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtClearCrystalPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Clear Crystal Transparent Motion Vectors"
+            Tags { "LightMode" = "BurtTransparentMotionVectors" }
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertClearCrystalMotionVector
+            #pragma fragment FragClearCrystalMotionVector
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtClearCrystalPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Clear Crystal Responsive AA Mask"
+            Tags { "LightMode" = "BurtResponsiveAAMask" }
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertClearCrystalMotionVector
+            #pragma fragment FragClearCrystalResponsiveAAMask
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma multi_compile_instancing
             #pragma target 3.5

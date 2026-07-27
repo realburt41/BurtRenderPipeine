@@ -230,6 +230,7 @@ bool BurtGIVoxelOctreeRayTraceClipmaps(
         hitDistance = candidateDistance;
     }
 
+#if !defined(BURT_GI_SCENE_VOXEL_OCTREE_DISABLE_CLIPMAP_TRACE)
     if ((_BurtGISceneVoxelClipmapValidMask & 2u) != 0u &&
         BurtGIVoxelOctreeRayTraceResource(
             _BurtGISceneVoxelClipmap1GeometryReadTexture,
@@ -334,6 +335,7 @@ bool BurtGIVoxelOctreeRayTraceClipmaps(
         hitDistance = candidateDistance;
         hitClipmapLevel = 5u;
     }
+#endif
 
     return hit;
 }

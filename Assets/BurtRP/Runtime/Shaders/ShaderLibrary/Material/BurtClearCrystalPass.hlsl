@@ -13,11 +13,17 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtNormal.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtTransparentAtmosphereFog.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtClearCrystalProperties.hlsl"
 
 sampler2D _BurtOpaqueCameraColorTexture;
 UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
 float _BurtOpaqueCameraColorAvailable;
+float4x4 _BurtTAACurrentViewProjection;
+float4x4 _BurtTAACurrentNonJitteredViewProjection;
+float4x4 _BurtTAAPreviousNonJitteredViewProjection;
+float4x4 unity_MatrixPreviousM;
+float4 _BurtTAATexelSize;
 
 struct BurtClearCrystalAttributes
 {
@@ -50,6 +56,15 @@ struct BurtClearCrystalMaterialData
     float Roughness;
 };
 
+struct BurtClearCrystalMotionVectorVaryings
+{
+    float4 PositionCS : SV_POSITION;
+    float4 CurrentClipNoJitter : TEXCOORD0;
+    float4 PreviousClipNoJitter : TEXCOORD1;
+    float2 UV0 : TEXCOORD2;
+    float SourceConfidence : TEXCOORD3;
+};
+
 BurtClearCrystalVaryings VertClearCrystal(BurtClearCrystalAttributes input)
 {
     UNITY_SETUP_INSTANCE_ID(input);
@@ -62,6 +77,62 @@ BurtClearCrystalVaryings VertClearCrystal(BurtClearCrystalAttributes input)
     output.TangentWS = BurtObjectToWorldTangent(input.TangentOS);
     output.UV0 = input.UV0;
     return output;
+}
+
+BurtClearCrystalMotionVectorVaryings VertClearCrystalMotionVector(BurtClearCrystalAttributes input)
+{
+    UNITY_SETUP_INSTANCE_ID(input);
+
+    float4 currentWorld = mul(unity_ObjectToWorld, input.PositionOS);
+    float4 previousWorld = mul(unity_MatrixPreviousM, input.PositionOS);
+    float3 objectDelta = previousWorld.xyz - currentWorld.xyz;
+
+    BurtClearCrystalMotionVectorVaryings output;
+    output.PositionCS = mul(_BurtTAACurrentViewProjection, currentWorld);
+    output.CurrentClipNoJitter = mul(_BurtTAACurrentNonJitteredViewProjection, currentWorld);
+    output.PreviousClipNoJitter = mul(_BurtTAAPreviousNonJitteredViewProjection, previousWorld);
+    output.UV0 = input.UV0;
+    output.SourceConfidence = step(1e-8f, dot(objectDelta, objectDelta));
+    return output;
+}
+
+float BurtClearCrystalMotionVectorAlpha(float2 uv0)
+{
+    float2 baseUV = uv0 * _BaseMap_ST.xy + _BaseMap_ST.zw + _BaseColorFlowSpeed.xy * (_Time.y * 20.0f);
+    return SAMPLE_TEXTURE2D(_BaseMap, sampler_LinearRepeat, baseUV).a * _BaseColor.a;
+}
+
+float2 BurtClearCrystalClipToUv(float4 clipPosition)
+{
+    float2 uv = clipPosition.xy / max(abs(clipPosition.w), 1.0e-6f) * 0.5f + 0.5f;
+    #if UNITY_UV_STARTS_AT_TOP
+        uv.y = 1.0f - uv.y;
+    #endif
+    return uv;
+}
+
+float4 FragClearCrystalMotionVector(BurtClearCrystalMotionVectorVaryings input) : SV_Target
+{
+    BurtApplyAlphaClip(BurtClearCrystalMotionVectorAlpha(input.UV0), _AlphaClip, _Cutoff);
+    clip(input.SourceConfidence - 0.5f);
+
+    float2 currentUv = BurtClearCrystalClipToUv(input.CurrentClipNoJitter);
+    float2 previousUv = BurtClearCrystalClipToUv(input.PreviousClipNoJitter);
+    float valid = step(1.0e-5f, input.PreviousClipNoJitter.w);
+    valid *= step(0.0f, currentUv.x) * step(currentUv.x, 1.0f) * step(0.0f, currentUv.y) * step(currentUv.y, 1.0f);
+    valid *= step(0.0f, previousUv.x) * step(previousUv.x, 1.0f) * step(0.0f, previousUv.y) * step(previousUv.y, 1.0f);
+
+    float2 velocity = currentUv - previousUv;
+    float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
+    clip(max(velocityPixels.x, velocityPixels.y) - 0.02f);
+    return float4(velocity * valid, 1.0f, 1.0f);
+}
+
+float4 FragClearCrystalResponsiveAAMask(BurtClearCrystalMotionVectorVaryings input) : SV_Target
+{
+    BurtApplyAlphaClip(BurtClearCrystalMotionVectorAlpha(input.UV0), _AlphaClip, _Cutoff);
+    clip(_ResponsiveAA - 0.5f);
+    return float4(1.0f, 0.0f, 0.0f, 0.0f);
 }
 
 float2 BurtClearCrystalRotateUV(float2 uv, float2 pivot, float angle)
@@ -400,6 +471,10 @@ float4 FragClearCrystal(BurtClearCrystalVaryings input, fixed facing : VFACE) : 
     float3 finalColor = pbr.Lighting + materialData.EmissionColor + transmission;
     float outputAlpha = surfaceData.Alpha;
     BurtClearCrystalApplyRefraction(input, materialData, finalColor, outputAlpha);
+    finalColor = BurtApplyTransparentFog(
+        finalColor,
+        BurtClearCrystalScreenUV(input),
+        input.PositionWS);
     return float4(BurtApplyPreExposure(finalColor), outputAlpha);
 }
 

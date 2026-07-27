@@ -6,6 +6,7 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 
 #define BURT_FORWARD_ENABLE_REFRACTION 0
+#define BURT_MATERIAL_SUPPORTS_TRANSPARENT_FOG 1
 
 CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;
@@ -26,6 +27,7 @@ CBUFFER_START(UnityPerMaterial)
     float _OcclusionStrength;
     float4 _EmissionColor;
     float4 _EmissionMap_ST;
+    float _ResponsiveAA;
 CBUFFER_END
 
 #endif // BURT_DEFAULT_LIT_PROPERTIES_INCLUDED

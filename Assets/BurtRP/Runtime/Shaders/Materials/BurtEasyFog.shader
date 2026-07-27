@@ -28,6 +28,7 @@ Shader "BurtRP/Easy Fog"
         [HideInInspector] _ZWrite ("ZWrite", Float) = 0
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [HideInInspector] _Cull ("Cull", Float) = 0
+        [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 1
     }
 
     SubShader
@@ -78,6 +79,23 @@ Shader "BurtRP/Easy Fog"
             #pragma multi_compile_instancing
             #pragma target 3.5
 
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEasyFogPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Easy Fog Responsive AA Mask"
+            Tags { "LightMode" = "BurtResponsiveAAMask" }
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex BurtEasyFogMotionVectorVert
+            #pragma fragment BurtEasyFogResponsiveAAMaskFrag
+            #pragma multi_compile_instancing
+            #pragma target 3.5
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEasyFogPass.hlsl"
             ENDHLSL
         }

@@ -19,6 +19,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent DoubleSidedNormalModeLabel = new GUIContent("Double Sided Normal Mode");
         private static readonly GUIContent RenderQueueLabel = new GUIContent("Render Queue");
         private static readonly GUIContent CullLabel = new GUIContent("Cull");
+        private static readonly GUIContent ResponsiveAALabel = new GUIContent("Responsive AA", "Reduces Temporal AA history on the eye's thin, refractive detail.");
         private static readonly GUIContent EnabledPassesLabel = new GUIContent("Enabled Passes");
         private static readonly GUIContent IrisColorMapLabel = new GUIContent("Iris Color Map");
         private static readonly GUIContent ScleraMapLabel = new GUIContent("Sclera Map");
@@ -40,6 +41,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty doubleSidedEnable;
         private MaterialProperty doubleSidedNormalMode;
         private MaterialProperty cull;
+        private MaterialProperty responsiveAA;
         private MaterialProperty scaleByCenter;
         private MaterialProperty pupilScale;
         private MaterialProperty limbusScale;
@@ -106,6 +108,7 @@ namespace Burt.RenderPipeline.Editor
             doubleSidedEnable = Find("_DoubleSidedEnable");
             doubleSidedNormalMode = Find("_DoubleSidedNormalMode");
             cull = Find("_Cull");
+            responsiveAA = Find("_ResponsiveAA");
             scaleByCenter = Find("_ScalebyCenter");
             pupilScale = Find("_PupilScale");
             limbusScale = Find("_LimbusScale");
@@ -157,6 +160,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawDoubleSidedOptions();
+            DrawProperty(responsiveAA);
 
             if (material != null)
             {
@@ -341,6 +345,7 @@ namespace Burt.RenderPipeline.Editor
             material.renderQueue = (int)RenderQueue.Geometry;
             material.SetShaderPassEnabled("BurtDepthOnly", true);
             material.SetShaderPassEnabled("BurtMotionVectors", true);
+            material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
             material.SetShaderPassEnabled("BurtDepthNormals", true);
             material.SetShaderPassEnabled("BurtGBuffer", true);
             material.SetShaderPassEnabled("ShadowCaster", true);

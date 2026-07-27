@@ -898,6 +898,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
         {
             builder.ReadCameraColor(); // 声明这个 Pass 会读取中间 CameraColor。
 
+            if (PostProcessPass.ShouldUseTemporalAAUpscale(builder.Request, builder.Asset))
+            {
+                builder.ReadTemporalAAOutput();
+            }
+
             builder.WriteFinalCameraTarget(); // 声明这个 Pass 会写入 request.TargetIdentifier 对应的最终输出目标。
         }
 
@@ -907,9 +912,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var cameraColorTarget = context.CameraColorTarget; // 从 GraphContext 中取出中间 CameraColor 资源句柄。
 
+            var temporalAAOutputTarget = context.TemporalAAOutputTarget;
+
             var finalCameraTarget = context.FinalCameraTarget; // 从 GraphContext 中取出最终相机输出目标句柄。
 
-            if (!cameraColorTarget.IsValid) // 如果 CameraColor 无效，说明当前图没有可读取的中间颜色 RT。
+            var useTemporalAAUpscale = PostProcessPass.ShouldUseTemporalAAUpscale(context.Request, context.Asset);
+
+            var sourceTarget = useTemporalAAUpscale ? temporalAAOutputTarget : cameraColorTarget;
+
+            if (!sourceTarget.IsValid) // 如果最终源无效，说明当前图没有可读取的中间颜色 RT。
             {
                 return; // 直接结束这个 Pass，避免 shader 采样无效纹理。
             }
@@ -929,9 +940,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
             cmd.SetRenderTarget(finalCameraTarget.Identifier); // 绑定最终输出目标，后续全屏三角形会写到 request.TargetIdentifier。
-            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
+            BurtRenderTargetDescriptorUtility.SetOutputTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
 
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraColorTextureId, cameraColorTarget.Identifier); // 确保 _BurtCameraColorTexture 指向当前 request 的中间 CameraColor。
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraColorTextureId, sourceTarget.Identifier); // 确保 _BurtCameraColorTexture 指向当前 request 的最终颜色源。
 
             var finalBlitYFlip = BurtFinalBlitUtility.ResolveFinalBlitYFlip(context.Request); // 调用 RenderTarget 工具类计算 Y 翻转开关，保持 FinalBlit Pass 只负责上传参数和绘制。
 

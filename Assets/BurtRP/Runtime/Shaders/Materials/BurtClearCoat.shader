@@ -146,6 +146,26 @@ Shader "BurtRP/Clear Coat"
             ENDHLSL
         }
 
+        Pass
+        {
+            Name "Burt Clear Coat Responsive AA Mask"
+            Tags { "LightMode" = "BurtResponsiveAAMask" }
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+            HLSLPROGRAM
+            #pragma vertex VertMotionVector
+            #pragma fragment FragResponsiveAAMask
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #define BURT_MOTION_VECTOR_RESPONSIVE_AA_MASK 1
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtClearCoatProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
+            ENDHLSL
+        }
+
         // Defines the shadow-caster pass used by Burt Draw Main Light Shadow Caster.
         Pass
         {
@@ -299,8 +319,7 @@ Shader "BurtRP/Clear Coat"
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
 
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
-            #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION
+            #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_LIGHTING BURT_FORWARD_SHADING_DEBUG_BRDF BURT_FORWARD_SHADING_DEBUG_SHADOW BURT_FORWARD_SHADING_DEBUG_TRANSMISSION
 
             // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
             #pragma target 3.0

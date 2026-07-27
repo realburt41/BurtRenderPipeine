@@ -427,6 +427,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass fastApproximateAAPass = new PostProcessPass.FastApproximateAAPass();
         private readonly BurtRenderPass rcasPass = new PostProcessPass.RCASPass();
         private readonly BurtRenderPass releasePostProcessColorPass = new ReleasePostProcessColorPass(); // 创建后处理中间 RT 释放 Pass，避免后处理临时资源泄漏。
+        private readonly BurtRenderPass releaseTemporalAAOutputPass = new ReleaseTemporalAAOutputPass();
         private readonly BurtRenderPass debugCameraDepthPass = new BurtDebugCameraDepthPass(); // 创建深度调试 Pass，让 Deferred 实验模式仍能显示 CameraDepth。
         private readonly BurtRenderPass debugMainLightShadowMapPass = new BurtDebugMainLightShadowMapPass(); // 创建主光阴影图调试 Pass，让 Deferred 实验模式仍能查看 shadow map。
         private readonly BurtRenderPass debugPerObjectShadowAtlasPass = new BurtDebugPerObjectShadowAtlasPass();
@@ -502,6 +503,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             var useAdditionalLightShadow = BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(request);
             var usePerObjectShadow = BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(request, asset);
             var preserveShadingDebugOutputBeforeSceneEffects = ShouldPreserveShadingDebugOutputBeforeSceneEffects();
+            var retainTranslucencyVolumeForVolumetricFog =
+                !preserveShadingDebugOutputBeforeSceneEffects &&
+                useLocalGBufferTargets &&
+                BurtVolumetricFogUtility.ShouldUseVolumetricFog(request) &&
+                BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTranslucencyVolume(request, asset);
             AddCameraAllocationPasses(graph, safeRenderOptions); // 先申请 CameraColor 和 CameraDepth，确保 GBuffer MRT 可以使用独立深度。
             AddGBufferAllocationPasses(graph, useLocalGBufferTargets); // 再申请全部 GBuffer，给后面的 MRT 绑定和清理阶段准备真实 RT。
             AddDeferredLightingDepthAllocationPass(graph, useLocalGBufferTargets);
@@ -536,17 +542,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             AddDeferredLightingDepthCopyPass(graph, useLocalGBufferTargets);
             AddDeferredLightingPass(graph, request, asset, useLocalGBufferTargets); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
             AddDeferredLightingDepthReleasePass(graph, useLocalGBufferTargets);
-            AddScreenSpaceGlobalIlluminationFinalReleaseAfterLighting(graph, request, asset, useLocalGBufferTargets, safeRenderOptions);
+            AddScreenSpaceGlobalIlluminationFinalReleaseAfterLighting(
+                graph,
+                request,
+                asset,
+                useLocalGBufferTargets,
+                safeRenderOptions,
+                retainTranslucencyVolumeForVolumetricFog);
             AddFurBlurPasses(graph, request, asset, useLocalGBufferTargets);
             AddDeferredForwardOnlyOpaqueFallback(graph, asset); // 根据资产开关决定是否绘制不能写入 GBuffer 的前向专用不透明物体。
             AddHiZBuildPass(graph, useHiZDepth);
             AddScreenSpaceSubsurfacePasses(graph, request, asset, useLocalGBufferTargets);
+            var applyAerialPerspectiveAfterSkyBeforeSsr = !preserveShadingDebugOutputBeforeSceneEffects &&
+                BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(request);
+            var applyAerialPerspectiveBeforeTransparent = !preserveShadingDebugOutputBeforeSceneEffects &&
+                BurtAtmosphereUtility.ShouldApplyAerialPerspectiveBeforeTransparent(request);
+            var delayFogUntilAerialPerspective = applyAerialPerspectiveAfterSkyBeforeSsr || applyAerialPerspectiveBeforeTransparent;
+
             if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterOpaqueBeforeSky(request))
             {
                 graph.AddPass(applyAtmosphereAerialPerspectivePass);
             }
 
-            if (!preserveShadingDebugOutputBeforeSceneEffects && BurtFogUtility.ShouldUseFog(request))
+            // XRender accumulates fog from near to far as VF -> HF -> AF. BurtRP
+            // composites separate full-screen passes, so execute them as AF -> HF -> VF.
+            if (!delayFogUntilAerialPerspective &&
+                !preserveShadingDebugOutputBeforeSceneEffects &&
+                BurtFogUtility.ShouldUseFog(request))
             {
                 graph.AddPass(applyFogPass);
             }
@@ -560,19 +582,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             {
                 graph.AddPass(drawAtmospherePass);
             }
-            if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(request))
+            if (applyAerialPerspectiveAfterSkyBeforeSsr)
             {
                 graph.AddPass(applyAtmosphereAerialPerspectivePass);
             }
+            if (applyAerialPerspectiveAfterSkyBeforeSsr && BurtFogUtility.ShouldUseFog(request))
+            {
+                graph.AddPass(applyFogPass);
+            }
             AddScreenSpaceReflectionPasses(graph, request, asset, useLocalGBufferTargets);
-            if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldApplyAerialPerspectiveBeforeTransparent(request))
+            if (applyAerialPerspectiveBeforeTransparent)
             {
                 graph.AddPass(applyAtmosphereAerialPerspectivePass);
+            }
+            if (applyAerialPerspectiveBeforeTransparent && BurtFogUtility.ShouldUseFog(request))
+            {
+                graph.AddPass(applyFogPass);
             }
             if (!preserveShadingDebugOutputBeforeSceneEffects && BurtVolumetricFogUtility.ShouldUseVolumetricFog(request))
             {
                 graph.AddPass(applyVolumetricFogPass);
             }
+            AddScreenSpaceGlobalIlluminationTranslucencyVolumeReleaseAfterVolumetricFog(
+                graph,
+                request,
+                asset,
+                safeRenderOptions,
+                retainTranslucencyVolumeForVolumetricFog);
 
             if (!preserveShadingDebugOutputBeforeSceneEffects)
             {
@@ -602,6 +638,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             if (safeRenderOptions.ShouldFinalBlit) // 只有当前 request 是最终输出点时才执行 FinalBlit。
             {
                 graph.AddPass(finalBlitPass); // 把 CameraColor 拷贝到 request.TargetIdentifier。
+                graph.AddPass(releaseTemporalAAOutputPass);
             }
 
             AddTileLightBufferReleasePasses(graph, request, asset, useLocalGBufferTargets);
@@ -1269,7 +1306,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             BurtRenderRequest request,
             BurtRenderPipelineAsset asset,
             bool useLocalGBufferTargets,
-            BurtRequestRenderOptions renderOptions)
+            BurtRequestRenderOptions renderOptions,
+            bool retainTranslucencyVolumeForVolumetricFog)
         {
             if (!useLocalGBufferTargets ||
                 !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset) ||
@@ -1288,8 +1326,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return;
             }
 
-            graph.AddPass(releaseBurtGITranslucencyVolumeFilter1Pass);
-            graph.AddPass(releaseBurtGITranslucencyVolumeFilter0Pass);
+            if (!retainTranslucencyVolumeForVolumetricFog)
+            {
+                graph.AddPass(releaseBurtGITranslucencyVolumeFilter1Pass);
+                graph.AddPass(releaseBurtGITranslucencyVolumeFilter0Pass);
+            }
             graph.AddPass(releaseBurtGITranslucencyVolumeTraceHitDistancePass);
             graph.AddPass(releaseBurtGITranslucencyVolumeTraceFilteredRadiancePass);
             graph.AddPass(releaseBurtGITranslucencyVolumeTraceRadiancePass);
@@ -1305,6 +1346,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.AddPass(releaseBurtGIRoughSpecularIndirectPass);
             graph.AddPass(releaseBurtGIBackfaceDiffuseIndirectPass);
             graph.AddPass(releaseScreenSpaceGlobalIlluminationPass);
+        }
+
+        private void AddScreenSpaceGlobalIlluminationTranslucencyVolumeReleaseAfterVolumetricFog(
+            BurtRenderGraph graph,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            BurtRequestRenderOptions renderOptions,
+            bool retainedForVolumetricFog)
+        {
+            if (!retainedForVolumetricFog ||
+                BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationDebugView(request, asset) ||
+                BurtScreenSpaceGlobalIlluminationPassUtility.ShouldExposeScreenSpaceGlobalIlluminationToTemporalAA(request, asset, renderOptions) ||
+                BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationFirstFrameSkip(request))
+            {
+                return;
+            }
+
+            graph.AddPass(releaseBurtGITranslucencyVolumeFilter1Pass);
+            graph.AddPass(releaseBurtGITranslucencyVolumeFilter0Pass);
         }
 
         private void AddScreenSpaceSubsurfacePasses(
@@ -1551,8 +1611,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return; // 直接返回，避免无意义的 PostProcessColor 分配。
             }
 
+            var useTemporalAAUpscale = PostProcessPass.ShouldUseTemporalAAUpscale(request, asset);
+            var useTemporalAA = PostProcessPass.ShouldUseTemporalAAPass(request, asset);
             graph.AddPass(allocatePostProcessColorPass); // 添加后处理中间颜色 RT 分配 Pass。
-            if (PostProcessPass.ShouldUseTemporalAAPass(request, asset))
+            if (useTemporalAA && !useTemporalAAUpscale)
             {
                 graph.AddPass(temporalAAPass);
                 graph.AddPass(temporalAAFinalCopyPass);
@@ -1590,6 +1652,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(releasePostProcessColorPass); // 添加后处理中间颜色 RT 释放 Pass。
+
+            if (useTemporalAA && useTemporalAAUpscale)
+            {
+                graph.AddPass(temporalAAPass);
+            }
         }
 
         private void AddDebugViewPasses( // 根据资产开关添加调试视图 Pass。
@@ -2214,12 +2281,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
         private static bool ShouldUseDepthDebugView(BurtRenderPipelineAsset asset) // 判断是否启用 CameraDepth 调试视图。
         {
-            if (asset == null) // asset 为空时没有 Inspector 配置来源。
-            {
-                return false; // 默认关闭调试视图，避免覆盖正常画面。
-            }
-
-            return asset.EnableDepthDebugView; // 使用资产上的深度调试开关。
+            return (asset != null && asset.EnableDepthDebugView)
+                || BurtShadingDebugSettings.Mode == BurtShadingDebugMode.CameraDepth;
         }
 
         private static bool ShouldUseMainLightShadowDebugView( // 判断是否启用主光 shadow map 调试视图。

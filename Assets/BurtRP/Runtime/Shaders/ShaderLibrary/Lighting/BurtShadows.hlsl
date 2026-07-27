@@ -1012,6 +1012,45 @@ float BurtSampleMainLightShadowWithoutPerObject(float3 PositionWS, float3 Normal
     return MainVisibility;
 }
 
+float BurtSampleMainLightVolumetricShadowRaw(float3 PositionWS, int CascadeIndex)
+{
+    float4 ShadowCoord = BurtTransformWorldToMainLightShadowCascade(float4(PositionWS, 1.0f), CascadeIndex);
+    float SafeW = abs(ShadowCoord.w) > 0.00001f ? ShadowCoord.w : (ShadowCoord.w < 0.0f ? -0.00001f : 0.00001f);
+    float3 ProjectedShadowCoord = ShadowCoord.xyz / SafeW;
+    if (!BurtIsInsideMainLightShadowMap(ProjectedShadowCoord, CascadeIndex))
+    {
+        return 1.0f;
+    }
+
+    // Participating media has no surface normal. Use the receiver depth bias,
+    // but skip the surface normal offset and expensive PCSS/13-tap PCF path.
+    // The hardware comparison sample remains bilinearly filtered and temporal
+    // raymarch jitter integrates it over the volume.
+    ProjectedShadowCoord.z = BurtApplyMainLightReceiverBias(ProjectedShadowCoord.z);
+    return BurtSampleMainLightShadowCompare(ProjectedShadowCoord, CascadeIndex);
+}
+
+float BurtSampleMainLightVolumetricShadow(float3 PositionWS)
+{
+    int CascadeIndex = _BurtMainLightShadowStrength > 0.0001f ? BurtSelectMainLightShadowCascade(PositionWS) : -1;
+    if (CascadeIndex < 0)
+    {
+        return 1.0f;
+    }
+
+    float RawShadow = BurtSampleMainLightVolumetricShadowRaw(PositionWS, CascadeIndex);
+    float BlendWeight = BurtCalculateMainLightCascadeBlendWeight(PositionWS, CascadeIndex);
+    if (BlendWeight > 0.0f)
+    {
+        int NextCascadeIndex = min(CascadeIndex + 1, BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES - 1);
+        float NextRawShadow = BurtSampleMainLightVolumetricShadowRaw(PositionWS, NextCascadeIndex);
+        RawShadow = lerp(RawShadow, NextRawShadow, BlendWeight);
+    }
+
+    RawShadow = lerp(RawShadow, 1.0f, BurtCalculateMainLightShadowFade(PositionWS, CascadeIndex));
+    return BurtApplyShadowStrength(RawShadow, _BurtMainLightShadowStrength);
+}
+
 float BurtSampleMainLightShadowWithoutPerObject(float3 positionWS)
 {
     return BurtSampleMainLightShadowWithoutPerObject(positionWS, _BurtMainLightDirection.xyz);

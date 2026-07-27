@@ -90,6 +90,7 @@ namespace Burt.RenderPipeline
         [SerializeField] private Color clearColor = new(0.02f, 0.02f, 0.025f, 1f);
 
         [SerializeField] private BurtCameraAntialiasingMode antialiasingMode = BurtCameraAntialiasingMode.None;
+        [Range(0.5f, 1f)] [SerializeField] private float renderScale = 1f;
 
         // 控制是否把 BurtRP 的清屏模式和清屏颜色反向同步到 Unity 原生 Camera 组件，方便 SceneView、Camera Preview 和第三方工具看到一致配置。
         [SerializeField] private bool syncClearSettingsToUnityCamera = true;
@@ -131,6 +132,7 @@ namespace Burt.RenderPipeline
         public Color ClearColor => clearColor;
 
         public BurtCameraAntialiasingMode AntialiasingMode => antialiasingMode;
+        public float RenderScale => Mathf.Clamp(renderScale, 0.5f, 1f);
 
         // Unity 在组件启用时调用这个函数，适合初始化缓存和同步相机深度。
         private void OnEnable()

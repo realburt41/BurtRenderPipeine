@@ -186,4 +186,20 @@ float4 FragMotionVector(MotionVectorVaryings input) : SV_Target
     return float4(velocity, 1.0, 1.0);
 }
 
+// Responsive AA is an independent history-control signal.  It must survive
+// platforms where the native depth-stencil buffer cannot be sampled, so the
+// dedicated material pass writes a separate binary mask which TAA merges with
+// its object-motion bit.  Keeping this binary avoids corrupting bit values on
+// overlapping transparent geometry or multipass shells.
+#if defined(BURT_MOTION_VECTOR_RESPONSIVE_AA_MASK)
+float4 FragResponsiveAAMask(MotionVectorVaryings input) : SV_Target
+{
+    float4 baseColor = BurtMotionVectorSampleBaseMap(input.BaseMapUV) * _BaseColor;
+    float alpha = BurtMotionVectorEvaluateOpacity(baseColor.a, input.BaseMapUV, input.PositionWS);
+    BurtMotionVectorApplyAlphaClip(alpha);
+    clip(_ResponsiveAA - 0.5);
+    return float4(1.0, 0.0, 0.0, 0.0);
+}
+#endif
+
 #endif // BURT_MOTION_VECTOR_PASS_INCLUDED

@@ -1893,7 +1893,7 @@ namespace Burt.RenderPipeline
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbePlacementUniformPass : BurtScreenSpaceGlobalIlluminationPass
     {
         private const int ScreenProbePlacementUniformPassIndex = 16;
-        private const string ScreenProbePlacementComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbePlacementComputeShaderResourcePath = "BurtGIScreenProbePlacement";
         private const string ScreenProbePlacementUniformComputeKernelName = "ScreenProbePlacementUniformCS";
         private const int ScreenProbePlacementUniformThreadGroupSize = 8;
         private static readonly int BurtHiZDepthTextureId = BurtRenderGraphResourceRegistry.HiZDepthTextureId;
@@ -2149,7 +2149,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeAdaptivePlacementSetupPass : BurtRenderPass
     {
-        private const string ScreenProbeAdaptivePlacementComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeAdaptivePlacementComputeShaderResourcePath = "BurtGIScreenProbeAdaptivePlacement";
         private const string ScreenProbeAdaptivePlacementKernelName = "ScreenProbePlacementAdaptiveCS";
         private const string ScreenProbeAdaptivePlacementFallbackKernelName = "ScreenProbeAdaptivePlacementLiteCS";
         private const int ScreenProbeAdaptivePlacementThreadGroupSize = 8;
@@ -2379,7 +2379,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeIndirectArgsSetupPass : BurtRenderPass
     {
-        private const string ScreenProbeIndirectArgsComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeIndirectArgsComputeShaderResourcePath = "BurtGIScreenProbeIndirectArgs";
         private const string ScreenProbeIndirectArgsKernelName = "ScreenProbeIndirectArgsSetupCS";
         private const int DispatchThreadGroupSize = 64;
         private static readonly int BurtGIScreenProbeGridParamsId = Shader.PropertyToID("_BurtGIScreenProbeGridParams");
@@ -3538,7 +3538,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeTraceCompactSetupPass : BurtRenderPass
     {
-        private const string ScreenProbeTraceCompactComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeTraceCompactComputeShaderResourcePath = "BurtGIScreenProbeTraceCompactSetup";
         private const string ScreenProbeTraceCompactKernelName = "ScreenProbeTraceCompactCS";
         private const string ScreenProbeTraceGenArgsKernelName = "ScreenProbeTraceGenArgsCS";
         private const int ScreenProbeTraceCompactThreadGroupSize = 64;
@@ -3835,6 +3835,16 @@ namespace Burt.RenderPipeline
         private const string RadianceCacheUpdateStatsComputeShaderResourcePath = "BurtGIRadianceCacheUpdateStats";
         private const string SceneVoxelBuildComputeShaderResourcePath = "BurtGISceneVoxelBuild";
         private const string SceneVoxelLightingComputeShaderResourcePath = "BurtGISceneVoxelLighting";
+        private const string SceneVoxelLightingProbeSetupComputeShaderResourcePath = "BurtGISceneVoxelLightingProbeSetup";
+        private const string SceneVoxelLightingProbeTraceComputeShaderResourcePath = "BurtGISceneVoxelLightingProbeTrace";
+        private const string SceneVoxelSdfComputeShaderResourcePath = "BurtGIXGISdfGen";
+        private const string SceneRepresentVoxelOccupyBuildComputeShaderResourcePath = "BurtGISceneRepresentVoxelOccupyBuild";
+        private const string SceneRepresentVoxelGenMipComputeShaderResourcePath = "BurtGISceneRepresentVoxelGenMip";
+        private const string SceneRepresentLightingVoxelComputeShaderResourcePath = "BurtGISceneRepresentLightingVoxel";
+        private const string XGIToolsVoxelDebugComputeShaderResourcePath = "BurtGIXGIToolsVoxelDebug";
+        private const string XGIToolsVoxelOccupyComputeShaderResourcePath = "BurtGIXGIToolsVoxelOccupy";
+        private const string XGIToolsVoxelMaterialComputeShaderResourcePath = "BurtGIXGIToolsVoxelMaterial";
+        private const string XGIToolsVoxelLightingComputeShaderResourcePath = "BurtGIXGIToolsVoxelLighting";
         private const string SceneVoxelOctreeBuildComputeShaderResourcePath = "BurtGISceneVoxelOctreeBuild";
         private const string XGIProbeBakingComputeShaderResourcePath = "BurtGIXGIProbeBaking";
         private const string XGISdfDebugComputeShaderResourcePath = "BurtGIXGISdfDebug";
@@ -4002,6 +4012,9 @@ namespace Burt.RenderPipeline
         private static ComputeShader radianceCacheUpdateStatsComputeShader;
         private static ComputeShader sceneVoxelBuildComputeShader;
         private static ComputeShader sceneVoxelLightingComputeShader;
+        private static ComputeShader sceneVoxelLightingProbeSetupComputeShader;
+        private static ComputeShader sceneVoxelLightingProbeTraceComputeShader;
+        private static ComputeShader sceneVoxelSdfComputeShader;
         private static ComputeShader sceneVoxelOctreeBuildComputeShader;
         private static ComputeShader xgiProbeBakingComputeShader;
         private static ComputeShader xgiSdfDebugComputeShader;
@@ -4022,6 +4035,9 @@ namespace Burt.RenderPipeline
         private static bool hasLoggedMissingRadianceCacheHashGridComputeShader;
         private static bool hasLoggedMissingSceneVoxelBuildComputeShader;
         private static bool hasLoggedMissingSceneVoxelLightingComputeShader;
+        private static bool hasLoggedMissingSceneVoxelLightingProbeSetupComputeShader;
+        private static bool hasLoggedMissingSceneVoxelLightingProbeTraceComputeShader;
+        private static bool hasLoggedMissingSceneVoxelSdfComputeShader;
         private static bool hasLoggedMissingSceneVoxelOctreeBuildComputeShader;
         private static bool hasLoggedMissingRadianceCacheClipMapKernel;
 
@@ -4382,7 +4398,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var shader = GetSceneVoxelBuildComputeShader();
+            var shader = GetSceneVoxelSdfComputeShader();
             if (!BurtXGISdfGenDispatchUtility.HasRequiredKernels(shader))
             {
                 resources.SdfStatus = "MissingKernels(FillUV,JFA,Finalize)";
@@ -4530,12 +4546,13 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var shader = GetSceneVoxelLightingComputeShader();
-            if (!TryFindRadianceCacheClipMapComputeKernel(shader, "ProbePlacement", out var placementKernel) ||
-                !TryFindRadianceCacheClipMapComputeKernel(shader, "ProbeMark", out var markKernel) ||
-                !TryFindRadianceCacheClipMapComputeKernel(shader, "ProbeCompact", out var compactKernel) ||
-                !TryFindRadianceCacheClipMapComputeKernel(shader, "ProbeGenArgs", out var genArgsKernel) ||
-                !TryFindRadianceCacheClipMapComputeKernel(shader, "ProbeTraceRadiance", out var traceKernel))
+            var setupShader = GetSceneVoxelLightingProbeSetupComputeShader();
+            var traceShader = GetSceneVoxelLightingProbeTraceComputeShader();
+            if (!TryFindRadianceCacheClipMapComputeKernel(setupShader, "ProbePlacement", out var placementKernel) ||
+                !TryFindRadianceCacheClipMapComputeKernel(setupShader, "ProbeMark", out var markKernel) ||
+                !TryFindRadianceCacheClipMapComputeKernel(setupShader, "ProbeCompact", out var compactKernel) ||
+                !TryFindRadianceCacheClipMapComputeKernel(setupShader, "ProbeGenArgs", out var genArgsKernel) ||
+                !TryFindRadianceCacheClipMapComputeKernel(traceShader, "ProbeTraceRadiance", out var traceKernel))
             {
                 return false;
             }
@@ -4548,50 +4565,51 @@ namespace Burt.RenderPipeline
 
             var cmd = CommandBufferPool.Get(passName + " Build Scene Voxel Clipmap Probe Trace " + resources.Level);
 
-            BindPersistentSceneVoxelProbeCommon(cmd, shader, placementKernel, context, resources, centerExtent, probeIndexOffset);
-            cmd.SetComputeTextureParam(shader, placementKernel, ProbePlaceProbePageTableId, resources.ProbePageTable);
+            BindPersistentSceneVoxelProbeCommon(cmd, setupShader, placementKernel, context, resources, centerExtent, probeIndexOffset);
+            cmd.SetComputeTextureParam(setupShader, placementKernel, ProbePlaceProbePageTableId, resources.ProbePageTable);
             cmd.DispatchCompute(
-                shader,
+                setupShader,
                 placementKernel,
                 DivRoundUpSceneVoxelResolution(probeNodeSize, BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize),
                 DivRoundUpSceneVoxelResolution(probeNodeSize, BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize),
                 DivRoundUpSceneVoxelResolution(probeNodeSize, BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize));
 
-            BindPersistentSceneVoxelProbeCommon(cmd, shader, markKernel, context, resources, centerExtent, probeIndexOffset);
-            cmd.SetComputeTextureParam(shader, markKernel, ProbePlaceProbePageTableId, resources.ProbePageTable);
+            BindPersistentSceneVoxelProbeCommon(cmd, setupShader, markKernel, context, resources, centerExtent, probeIndexOffset);
+            cmd.SetComputeTextureParam(setupShader, markKernel, ProbePlaceProbePageTableId, resources.ProbePageTable);
             cmd.DispatchCompute(
-                shader,
+                setupShader,
                 markKernel,
                 DivRoundUpSceneVoxelResolution(resources.RadianceResolution, BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize),
                 DivRoundUpSceneVoxelResolution(resources.RadianceResolution, BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize),
                 DivRoundUpSceneVoxelResolution(resources.RadianceResolution, BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize));
 
-            BindPersistentSceneVoxelProbeCommon(cmd, shader, compactKernel, context, resources, centerExtent, probeIndexOffset);
-            cmd.SetComputeTextureParam(shader, compactKernel, ProbePlaceProbePageTableId, resources.ProbePageTable);
-            cmd.SetComputeBufferParam(shader, compactKernel, RWProbePlaceProbeIndexId, resources.ProbeIndexBuffer);
+            BindPersistentSceneVoxelProbeCommon(cmd, setupShader, compactKernel, context, resources, centerExtent, probeIndexOffset);
+            cmd.SetComputeTextureParam(setupShader, compactKernel, ProbePlaceProbePageTableId, resources.ProbePageTable);
+            cmd.SetComputeBufferParam(setupShader, compactKernel, RWProbePlaceProbeIndexId, resources.ProbeIndexBuffer);
             cmd.DispatchCompute(
-                shader,
+                setupShader,
                 compactKernel,
                 DivRoundUpSceneVoxelResolution(probeNodeSize, BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize),
                 DivRoundUpSceneVoxelResolution(probeNodeSize, BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize),
                 DivRoundUpSceneVoxelResolution(probeNodeSize, BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize));
 
-            BindPersistentSceneVoxelProbeCommon(cmd, shader, genArgsKernel, context, resources, centerExtent, probeIndexOffset);
-            cmd.SetComputeBufferParam(shader, genArgsKernel, RWVoxelProbeArgsBufferId, resources.ProbeArgsBuffer);
-            cmd.SetComputeBufferParam(shader, genArgsKernel, RWVoxelProbeArgsBufferParamsId, resources.ProbeArgsParamsBuffer);
-            cmd.SetComputeBufferParam(shader, genArgsKernel, VoxelProbeArgsProbeIndexId, resources.ProbeIndexBuffer);
-            cmd.SetComputeIntParam(shader, VoxelProbeArgsMaxProbeCountId, probeIndexOffset);
-            cmd.SetComputeIntParam(shader, VoxelProbeArgsClipmapCountId, 1);
-            cmd.DispatchCompute(shader, genArgsKernel, 1, 1, 1);
+            BindPersistentSceneVoxelProbeCommon(cmd, setupShader, genArgsKernel, context, resources, centerExtent, probeIndexOffset);
+            cmd.SetComputeBufferParam(setupShader, genArgsKernel, RWVoxelProbeArgsBufferId, resources.ProbeArgsBuffer);
+            cmd.SetComputeBufferParam(setupShader, genArgsKernel, RWVoxelProbeArgsBufferParamsId, resources.ProbeArgsParamsBuffer);
+            cmd.SetComputeBufferParam(setupShader, genArgsKernel, VoxelProbeArgsProbeIndexId, resources.ProbeIndexBuffer);
+            cmd.SetComputeIntParam(setupShader, VoxelProbeArgsMaxProbeCountId, probeIndexOffset);
+            cmd.SetComputeIntParam(setupShader, VoxelProbeArgsClipmapCountId, 1);
+            cmd.DispatchCompute(setupShader, genArgsKernel, 1, 1, 1);
 
-            BindPersistentSceneVoxelProbeCommon(cmd, shader, traceKernel, context, resources, centerExtent, probeIndexOffset);
-            BurtGIXGILightGridUtility.BindCompute(cmd, shader, traceKernel, context.Request != null ? context.Request.Camera : null);
-            cmd.SetComputeTextureParam(shader, traceKernel, RWVoxelProbeIrradianceSHAmbientId, resources.ProbeIrradianceSHAmbient);
-            cmd.SetComputeTextureParam(shader, traceKernel, RWVoxelProbeIrradianceSHDirectionalId, resources.ProbeIrradianceSHDirectional);
-            cmd.SetComputeTextureParam(shader, traceKernel, VoxelProbePageTableId, resources.ProbePageTable);
-            cmd.SetComputeBufferParam(shader, traceKernel, VoxelProbeIndexBufferId, resources.ProbeIndexBuffer);
-            cmd.SetComputeBufferParam(shader, traceKernel, VoxelProbeArgsBufferParamsId, resources.ProbeArgsParamsBuffer);
-            cmd.DispatchCompute(shader, traceKernel, resources.ProbeArgsBuffer, 0u);
+            BindPersistentSceneVoxelProbeCommon(cmd, traceShader, traceKernel, context, resources, centerExtent, probeIndexOffset);
+            BurtGIXGILightGridUtility.BindCompute(cmd, traceShader, traceKernel, context.Request != null ? context.Request.Camera : null);
+            BurtGISceneVoxelOctreeUtility.BindCompute(cmd, traceShader, traceKernel, resources.Octree);
+            cmd.SetComputeTextureParam(traceShader, traceKernel, RWVoxelProbeIrradianceSHAmbientId, resources.ProbeIrradianceSHAmbient);
+            cmd.SetComputeTextureParam(traceShader, traceKernel, RWVoxelProbeIrradianceSHDirectionalId, resources.ProbeIrradianceSHDirectional);
+            cmd.SetComputeTextureParam(traceShader, traceKernel, VoxelProbePageTableId, resources.ProbePageTable);
+            cmd.SetComputeBufferParam(traceShader, traceKernel, VoxelProbeIndexBufferId, resources.ProbeIndexBuffer);
+            cmd.SetComputeBufferParam(traceShader, traceKernel, VoxelProbeArgsBufferParamsId, resources.ProbeArgsParamsBuffer);
+            cmd.DispatchCompute(traceShader, traceKernel, resources.ProbeArgsBuffer, 0u);
 
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
@@ -4607,17 +4625,6 @@ namespace Burt.RenderPipeline
             Vector4 centerExtent,
             int probeIndexOffset)
         {
-            var camera = context.Request != null ? context.Request.Camera : null;
-            BurtGISceneVoxelClipmapStateUtility.BindRadianceCacheTraceCompute(
-                cmd,
-                shader,
-                kernel,
-                camera,
-                centerExtent,
-                resources.Radiance,
-                resources.Geometry,
-                resources.OccupancyMip,
-                resources.Lighting);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelRadianceReadTextureId, resources.Radiance);
             cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelGeometryReadTextureId, resources.Geometry);
@@ -4807,14 +4814,31 @@ namespace Burt.RenderPipeline
             AppendMissingComputeResourceKernels(ref radianceCacheClipMapIrradianceIntegrateComputeShader, RadianceCacheClipMapIrradianceIntegrateComputeShaderResourcePath, "IrradianceIntegrateCS", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref radianceCacheHashGridComputeShader, RadianceCacheHashGridComputeShaderResourcePath, "HashGridClearCountCS,RadianceCacheHashGridPrepareLiteCS,HashGridPopulateCellsGenIndirectArgsCS,HashGridPopulateCellsCS,RadianceCacheHashGridPopulateScreenProbesLiteCS,HashGridUpdateTilesGenIndirectArgsCS,RadianceCacheHashGridUpdateTilesGenIndirectArgsLiteCS,HashGridUpdateTilesCS,RadianceCacheHashGridUpdateTilesLiteCS,HashGridResolveCellsCS,RadianceCacheHashGridResolveTraceRadianceLiteCS,HashGridPurgeTilesGenIndirectArgsCS,HashGridPurgeTilesCS,RadianceCacheHashGridPurgeTilesLiteCS,HashGridDebugGenIndirectArgsCS", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref radianceCacheUpdateStatsComputeShader, RadianceCacheUpdateStatsComputeShaderResourcePath, "RadianceCacheUpdateStatsCS", ref missing, ref missingCount, ref kernelCount);
-            AppendMissingComputeResourceKernels(ref sceneVoxelBuildComputeShader, SceneVoxelBuildComputeShaderResourcePath, "SceneVoxelClearLiteCS,SceneVoxelReprojectHistoryCS,SceneVoxelPopulateScreenProbesLiteCS,SceneVoxelVoxelizeTrianglesCS,SceneVoxelBuildOccupancyMipLiteCS,SceneRepresentVoxelOccupyBuild,SceneVoxelDownsampleOccupancyMipCS,SceneRepresentVoxelGenMipCS,VoxelGenMip,SceneRepresentVoxelOccupyDebug,VoxelDebugTraceCS,DebugGenArgs,DebugProbeCompactFromOccupancy,DebugProbeGenArgs,DebugCulling,FillUV,JFA,Finalize,ProbeVolumeCull,GenBrick,PopulateGenArgs,Populate,FillPageTable,FillGenArgs,Fill,AllocateChunk,ClearChunkFreeList,ClearChunkData,GenMaterialArgs,GenMaterialFillPrepare,GenMaterialFillChunk,GenMaterialFillArgs,GenMaterialFillClear,GenMaterialFill,GenMaterialPopulate", ref missing, ref missingCount, ref kernelCount);
-            AppendMissingComputeResourceKernels(ref sceneVoxelLightingComputeShader, SceneVoxelLightingComputeShaderResourcePath, "SceneVoxelBuildLightingLiteCS,SceneRepresentLightingVoxelCS,SceneRepresentLightingVoxelGenArgsCS,GenArgsData,GenArgs,LightingDirect,ProbePlacement,ProbeMark,ProbeCompact,ProbeCompactFromOccupancy,ProbeGenArgs,ProbeTraceRadiance", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref sceneVoxelBuildComputeShader, SceneVoxelBuildComputeShaderResourcePath, "SceneVoxelClearLiteCS,SceneVoxelReprojectHistoryCS,SceneVoxelPopulateScreenProbesLiteCS,SceneVoxelVoxelizeTrianglesCS,SceneVoxelBuildOccupancyMipLiteCS,SceneVoxelDownsampleOccupancyMipCS", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref sceneVoxelSdfComputeShader, SceneVoxelSdfComputeShaderResourcePath, "FillUV,JFA,Finalize", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref sceneVoxelLightingComputeShader, SceneVoxelLightingComputeShaderResourcePath, "SceneVoxelBuildLightingLiteCS", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref sceneVoxelLightingProbeSetupComputeShader, SceneVoxelLightingProbeSetupComputeShaderResourcePath, "ProbePlacement,ProbeMark,ProbeCompact,ProbeCompactFromOccupancy,ProbeGenArgs", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref sceneVoxelLightingProbeTraceComputeShader, SceneVoxelLightingProbeTraceComputeShaderResourcePath, "ProbeTraceRadiance", ref missing, ref missingCount, ref kernelCount);
+            var sceneRepresentVoxelOccupyBuildShader = (ComputeShader)null;
+            var sceneRepresentVoxelGenMipShader = (ComputeShader)null;
+            var sceneRepresentLightingVoxelShader = (ComputeShader)null;
+            var xgiToolsVoxelDebugShader = (ComputeShader)null;
+            var xgiToolsVoxelOccupyShader = (ComputeShader)null;
+            var xgiToolsVoxelMaterialShader = (ComputeShader)null;
+            var xgiToolsVoxelLightingShader = (ComputeShader)null;
+            AppendMissingComputeResourceKernels(ref sceneRepresentVoxelOccupyBuildShader, SceneRepresentVoxelOccupyBuildComputeShaderResourcePath, "SceneRepresentVoxelOccupyBuild", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref sceneRepresentVoxelGenMipShader, SceneRepresentVoxelGenMipComputeShaderResourcePath, "SceneRepresentVoxelGenMipCS,VoxelGenMip", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref sceneRepresentLightingVoxelShader, SceneRepresentLightingVoxelComputeShaderResourcePath, "SceneRepresentLightingVoxelCS,SceneRepresentLightingVoxelGenArgsCS", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref xgiToolsVoxelDebugShader, XGIToolsVoxelDebugComputeShaderResourcePath, "SceneRepresentVoxelOccupyDebug,VoxelDebugTraceCS,DebugGenArgs,DebugProbeCompactFromOccupancy,DebugProbeGenArgs,DebugCulling", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref xgiToolsVoxelOccupyShader, XGIToolsVoxelOccupyComputeShaderResourcePath, "ProbeVolumeCull,GenBrick,PopulateGenArgs,Populate,FillPageTable,FillGenArgs,Fill,AllocateChunk,ClearChunkFreeList,ClearChunkData", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref xgiToolsVoxelMaterialShader, XGIToolsVoxelMaterialComputeShaderResourcePath, "GenMaterialArgs,GenMaterialFillPrepare,GenMaterialFillChunk,GenMaterialFillArgs,GenMaterialFillClear,GenMaterialFill,GenMaterialPopulate", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref xgiToolsVoxelLightingShader, XGIToolsVoxelLightingComputeShaderResourcePath, "GenArgsData,GenArgs,LightingDirect", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref sceneVoxelOctreeBuildComputeShader, SceneVoxelOctreeBuildComputeShaderResourcePath, "SceneVoxelBuildOctreeLeafCS,SceneVoxelBuildOctreeParentCS,SceneVoxelBuildOctreeRootCS", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref xgiProbeBakingComputeShader, XGIProbeBakingComputeShaderResourcePath, "GenSkyVisibilityCS,GenTimeSliceCS,VoxelizePlacementTriangles,ProbeVolumeCull,GenBrick", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref xgiSdfDebugComputeShader, XGISdfDebugComputeShaderResourcePath, "VisualizeSdfCS", ref missing, ref missingCount, ref kernelCount);
 
             return missingCount == 0
-                ? "Ready(RadianceCacheClipMap=15,HashGrid=1,Stats=1,SceneVoxel=3,XGIBakingTools=5,Kernels=" + kernelCount + ")"
+                ? "Ready(RadianceCacheClipMap=15,HashGrid=1,Stats=1,SceneVoxel=12,XGIBakingTools=5,Kernels=" + kernelCount + ")"
                 : "Missing(" + missing + ")";
         }
 
@@ -5049,6 +5073,57 @@ namespace Burt.RenderPipeline
             }
 
             return sceneVoxelLightingComputeShader;
+        }
+
+        private static ComputeShader GetSceneVoxelLightingProbeSetupComputeShader()
+        {
+            if (sceneVoxelLightingProbeSetupComputeShader != null)
+            {
+                return sceneVoxelLightingProbeSetupComputeShader;
+            }
+
+            sceneVoxelLightingProbeSetupComputeShader = Resources.Load<ComputeShader>(SceneVoxelLightingProbeSetupComputeShaderResourcePath);
+            if (sceneVoxelLightingProbeSetupComputeShader == null && !hasLoggedMissingSceneVoxelLightingProbeSetupComputeShader)
+            {
+                Debug.LogWarning("BurtRP could not find compute shader resource: " + SceneVoxelLightingProbeSetupComputeShaderResourcePath);
+                hasLoggedMissingSceneVoxelLightingProbeSetupComputeShader = true;
+            }
+
+            return sceneVoxelLightingProbeSetupComputeShader;
+        }
+
+        private static ComputeShader GetSceneVoxelLightingProbeTraceComputeShader()
+        {
+            if (sceneVoxelLightingProbeTraceComputeShader != null)
+            {
+                return sceneVoxelLightingProbeTraceComputeShader;
+            }
+
+            sceneVoxelLightingProbeTraceComputeShader = Resources.Load<ComputeShader>(SceneVoxelLightingProbeTraceComputeShaderResourcePath);
+            if (sceneVoxelLightingProbeTraceComputeShader == null && !hasLoggedMissingSceneVoxelLightingProbeTraceComputeShader)
+            {
+                Debug.LogWarning("BurtRP could not find compute shader resource: " + SceneVoxelLightingProbeTraceComputeShaderResourcePath);
+                hasLoggedMissingSceneVoxelLightingProbeTraceComputeShader = true;
+            }
+
+            return sceneVoxelLightingProbeTraceComputeShader;
+        }
+
+        internal static ComputeShader GetSceneVoxelSdfComputeShader()
+        {
+            if (sceneVoxelSdfComputeShader != null)
+            {
+                return sceneVoxelSdfComputeShader;
+            }
+
+            sceneVoxelSdfComputeShader = Resources.Load<ComputeShader>(SceneVoxelSdfComputeShaderResourcePath);
+            if (sceneVoxelSdfComputeShader == null && !hasLoggedMissingSceneVoxelSdfComputeShader)
+            {
+                Debug.LogWarning("BurtRP could not find compute shader resource: " + SceneVoxelSdfComputeShaderResourcePath);
+                hasLoggedMissingSceneVoxelSdfComputeShader = true;
+            }
+
+            return sceneVoxelSdfComputeShader;
         }
 
         private static ComputeShader GetSceneVoxelOctreeBuildComputeShader()
@@ -8199,7 +8274,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var shader = GetSceneVoxelBuildComputeShader();
+            var shader = GetSceneVoxelSdfComputeShader();
             if (!BurtXGISdfGenDispatchUtility.HasRequiredKernels(shader))
             {
                 BurtGISceneVoxelClipmapStateUtility.SetBaseSdfStatus(camera, "MissingKernels(FillUV,JFA,Finalize)");
@@ -9196,16 +9271,23 @@ namespace Burt.RenderPipeline
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass : BurtScreenSpaceGlobalIlluminationPass
     {
         private const int ScreenProbeTraceAtlasPassIndex = 15;
-        private const string ScreenProbeTraceCompactComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeTraceAtlasClearComputeShaderResourcePath = "BurtGIScreenProbeTraceAtlasClear";
+        private const string ScreenProbeTraceScreenComputeShaderResourcePath = "BurtGIScreenProbeTraceScreen";
+        private const string ScreenProbeTraceHashGridComputeShaderResourcePath = "BurtGIScreenProbeTraceHashGrid";
+        private const string ScreenProbeTraceVoxelComputeShaderResourcePath = "BurtGIScreenProbeTraceVoxel";
+        private const string ScreenProbeTraceScreenGridComputeShaderResourcePath = "BurtGIScreenProbeTraceScreenGrid";
+        private const string ScreenProbeTraceRadianceCacheClipMapComputeShaderResourcePath = "BurtGIScreenProbeTraceRadianceCacheClipMap";
+        private const string ScreenProbeTraceLocalSkyComputeShaderResourcePath = "BurtGIScreenProbeTraceLocalSky";
         private const string ScreenProbeTraceVoxelOctreeComputeShaderResourcePath = "BurtGIScreenProbeTraceVoxelOctree";
         private const string ScreenProbeTraceSkyCubemapComputeShaderResourcePath = "BurtGIScreenProbeTraceSkyCubemap";
         private const string ScreenProbeTraceAtlasClearKernelName = "ScreenProbeTraceClearCS";
         private const string ScreenProbeTraceAtlasClearFallbackKernelName = "ScreenProbeTraceAtlasClearCS";
-        private const string ScreenProbeTraceAtlasFromCompactKernelName = "ScreenProbeTraceAtlasFromCompactCS";
         private const string ScreenProbeTraceScreenKernelName = "ScreenProbeTraceScreenCS";
         private const string ScreenProbeTraceHashGridKernelName = "ScreenProbeTraceHashGridCacheCS";
         private const string ScreenProbeTraceVoxelKernelName = "ScreenProbeTraceVoxelCS";
         private const string ScreenProbeTraceVoxelOctreeKernelName = "ScreenProbeTraceVoxelOctreeCS";
+        private const string ScreenProbeTraceScreenGridKernelName = "ScreenProbeTraceScreenGridCS";
+        private const string ScreenProbeTraceRadianceCacheClipMapKernelName = "ScreenProbeTraceRadianceCacheClipMapCS";
         private const string ScreenProbeTraceSkyCubemapKernelName = "ScreenProbeTraceSkyCubemapCS";
         private const string ScreenProbeTraceLocalSkyProbeKernelName = "ScreenProbeTraceLocalSkyProbeCS";
         private const string HardwareRayTracingPassName = "BurtGI";
@@ -9256,13 +9338,25 @@ namespace Burt.RenderPipeline
         private static readonly int HardwareRayAdditionalLightSpotParamsId = Shader.PropertyToID("_BurtGIHardwareRayAdditionalLightSpotParams");
         private static readonly int HardwareRayAdditionalLightCountId = Shader.PropertyToID("_BurtGIHardwareRayAdditionalLightCount");
         private static readonly Vector4[] ZeroHardwareRayAdditionalLights = new Vector4[BurtLightingData.MaxAdditionalLights];
-        private static ComputeShader screenProbeTraceCompactComputeShader;
+        private static ComputeShader screenProbeTraceAtlasClearComputeShader;
+        private static ComputeShader screenProbeTraceScreenComputeShader;
+        private static ComputeShader screenProbeTraceHashGridComputeShader;
+        private static ComputeShader screenProbeTraceVoxelComputeShader;
         private static ComputeShader screenProbeTraceVoxelOctreeComputeShader;
+        private static ComputeShader screenProbeTraceScreenGridComputeShader;
+        private static ComputeShader screenProbeTraceRadianceCacheClipMapComputeShader;
+        private static ComputeShader screenProbeTraceLocalSkyComputeShader;
         private static ComputeShader screenProbeTraceSkyCubemapComputeShader;
         private static GraphicsBuffer fallbackUint4StructuredBuffer;
         private static GraphicsBuffer fallbackFloat4StructuredBuffer;
-        private static bool hasLoggedMissingScreenProbeTraceCompactComputeShader;
+        private static bool hasLoggedMissingScreenProbeTraceAtlasClearComputeShader;
+        private static bool hasLoggedMissingScreenProbeTraceScreenComputeShader;
+        private static bool hasLoggedMissingScreenProbeTraceHashGridComputeShader;
+        private static bool hasLoggedMissingScreenProbeTraceVoxelComputeShader;
         private static bool hasLoggedMissingScreenProbeTraceVoxelOctreeComputeShader;
+        private static bool hasLoggedMissingScreenProbeTraceScreenGridComputeShader;
+        private static bool hasLoggedMissingScreenProbeTraceRadianceCacheClipMapComputeShader;
+        private static bool hasLoggedMissingScreenProbeTraceLocalSkyComputeShader;
         private static bool hasLoggedMissingScreenProbeTraceSkyCubemapComputeShader;
         private static bool hasLoggedMissingScreenProbeTraceAtlasKernel;
 
@@ -9501,8 +9595,8 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var shader = GetScreenProbeTraceCompactComputeShader();
-            if (!TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceAtlasClearKernelName, out var clearKernel, ScreenProbeTraceAtlasClearFallbackKernelName))
+            var clearShader = GetScreenProbeTraceAtlasClearComputeShader();
+            if (!TryFindScreenProbeTraceAtlasKernel(clearShader, ScreenProbeTraceAtlasClearKernelName, out var clearKernel, ScreenProbeTraceAtlasClearFallbackKernelName))
             {
                 return false;
             }
@@ -9510,31 +9604,42 @@ namespace Burt.RenderPipeline
             var traceScreenKernel = -1;
             var traceHashGridKernel = -1;
             var traceVoxelKernel = -1;
+            var traceScreenGridKernel = -1;
+            var traceRadianceCacheClipMapKernel = -1;
             var traceSkyKernel = -1;
             var traceLocalSkyKernel = -1;
-            var traceKernel = -1;
-            var traceVoxelShader = shader;
-            var traceSkyShader = shader;
+            var traceScreenShader = (ComputeShader)null;
+            var traceHashGridShader = (ComputeShader)null;
+            var traceVoxelShader = (ComputeShader)null;
+            var traceScreenGridShader = (ComputeShader)null;
+            var traceRadianceCacheClipMapShader = (ComputeShader)null;
+            var traceLocalSkyShader = (ComputeShader)null;
+            var traceSkyShader = (ComputeShader)null;
+            var useTraceVoxelOctreeBaseOnly = false;
             var useTraceScreen = settings.TraceScreen;
             var useTraceHashGrid = settings.TraceHashGridCache &&
                 BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationRadianceCacheHashGrid(context.Request, context.Asset);
-            var useTraceVoxel = settings.TraceVoxelOctree || settings.TraceSceneVoxel || settings.TraceScreenGrid || settings.TraceUseWorldRadianceClipMap;
+            var useTraceVoxel = settings.TraceVoxelOctree || settings.TraceSceneVoxel;
+            var useTraceScreenGrid = settings.TraceScreenGrid;
+            var useTraceRadianceCacheClipMap = settings.TraceUseWorldRadianceClipMap &&
+                BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationRadianceCacheClipMapContract(context.Request, context.Asset);
             var useTraceLocalSkyProbe = settings.TraceLocalSkyProbe;
             var needTraceSkyCubemap = settings.TraceSkyCubemap && giSettings.ScreenProbeTraceSkyCubemap;
-            var useTraceSubpasses =
-                (!useTraceScreen ||
-                    TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceScreenKernelName, out traceScreenKernel)) &&
-                (!useTraceHashGrid ||
-                    TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceHashGridKernelName, out traceHashGridKernel)) &&
-                (!useTraceVoxel ||
-                    TryResolveScreenProbeTraceVoxelShader(shader, out traceVoxelShader, out traceVoxelKernel)) &&
-                (!useTraceLocalSkyProbe ||
-                    TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceLocalSkyProbeKernelName, out traceLocalSkyKernel)) &&
-                (!needTraceSkyCubemap ||
-                    TryResolveScreenProbeTraceSkyCubemapShader(shader, out traceSkyShader, out traceSkyKernel));
 
-            if (!useTraceSubpasses &&
-                !TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceAtlasFromCompactKernelName, out traceKernel))
+            if ((useTraceScreen &&
+                    !TryResolveScreenProbeTraceScreenShader(out traceScreenShader, out traceScreenKernel)) ||
+                (useTraceHashGrid &&
+                    !TryResolveScreenProbeTraceHashGridShader(out traceHashGridShader, out traceHashGridKernel)) ||
+                (useTraceVoxel &&
+                    !TryResolveScreenProbeTraceVoxelShader(settings, out traceVoxelShader, out traceVoxelKernel, out useTraceVoxelOctreeBaseOnly)) ||
+                (useTraceScreenGrid &&
+                    !TryResolveScreenProbeTraceScreenGridShader(out traceScreenGridShader, out traceScreenGridKernel)) ||
+                (useTraceRadianceCacheClipMap &&
+                    !TryResolveScreenProbeTraceRadianceCacheClipMapShader(out traceRadianceCacheClipMapShader, out traceRadianceCacheClipMapKernel)) ||
+                (useTraceLocalSkyProbe &&
+                    !TryResolveScreenProbeTraceLocalSkyShader(out traceLocalSkyShader, out traceLocalSkyKernel)) ||
+                (needTraceSkyCubemap &&
+                    !TryResolveScreenProbeTraceSkyCubemapShader(out traceSkyShader, out traceSkyKernel)))
             {
                 return false;
             }
@@ -9548,20 +9653,39 @@ namespace Burt.RenderPipeline
             var cmd = CommandBufferPool.Get(Name + " Compact Compute");
 
             BurtIndirectLightingUtility.UploadSkyReflectionForTracing(cmd, context.Request);
-            BurtLocalSkyProbeUtility.BindCompute(cmd, shader, clearKernel, camera);
-            UploadCompactTraceAtlasParams(cmd, shader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
-            if (useTraceSubpasses && useTraceVoxel && traceVoxelShader != shader)
+            UploadCompactTraceAtlasParams(cmd, clearShader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
+            if (useTraceScreen)
+            {
+                UploadCompactTraceAtlasParams(cmd, traceScreenShader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
+            }
+            if (useTraceHashGrid)
+            {
+                UploadCompactTraceAtlasParams(cmd, traceHashGridShader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
+            }
+            if (useTraceVoxel)
             {
                 UploadCompactTraceAtlasParams(cmd, traceVoxelShader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
             }
-            if (useTraceSubpasses && needTraceSkyCubemap && traceSkyShader != shader)
+            if (useTraceScreenGrid)
+            {
+                UploadCompactTraceAtlasParams(cmd, traceScreenGridShader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
+            }
+            if (useTraceRadianceCacheClipMap)
+            {
+                UploadCompactTraceAtlasParams(cmd, traceRadianceCacheClipMapShader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
+            }
+            if (useTraceLocalSkyProbe)
+            {
+                UploadCompactTraceAtlasParams(cmd, traceLocalSkyShader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
+            }
+            if (needTraceSkyCubemap)
             {
                 UploadCompactTraceAtlasParams(cmd, traceSkyShader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
             }
 
-            BindCompactTraceAtlasOutputs(cmd, shader, clearKernel, traceRadianceTarget, traceHitTarget);
+            BindCompactTraceAtlasOutputs(cmd, clearShader, clearKernel, traceRadianceTarget, traceHitTarget);
             cmd.DispatchCompute(
-                shader,
+                clearShader,
                 clearKernel,
                 DivRoundUpInt(traceWidth, ScreenProbeTraceAtlasClearThreadGroupSize),
                 DivRoundUpInt(traceHeight, ScreenProbeTraceAtlasClearThreadGroupSize),
@@ -9569,36 +9693,39 @@ namespace Burt.RenderPipeline
 
             var clipMapState = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapState(camera, settings);
             var baseCenterExtent = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveSceneVoxelCenterExtent(camera, settings, clipMapState, giSettings.SceneVoxelClipMapResolution);
-            if (useTraceSubpasses)
+            if (useTraceScreen)
             {
-                if (useTraceScreen)
-                {
-                    DispatchCompactTraceAtlasSubpass(cmd, shader, traceScreenKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
-                }
-
-                if (useTraceHashGrid)
-                {
-                    DispatchCompactTraceAtlasSubpass(cmd, shader, traceHashGridKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
-                }
-
-                if (useTraceVoxel)
-                {
-                    DispatchCompactTraceAtlasSubpass(cmd, traceVoxelShader, traceVoxelKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
-                }
-
-                if (useTraceLocalSkyProbe)
-                {
-                    DispatchCompactTraceAtlasSubpass(cmd, shader, traceLocalSkyKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
-                }
-
-                if (needTraceSkyCubemap)
-                {
-                    DispatchCompactTraceAtlasSubpass(cmd, traceSkyShader, traceSkyKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
-                }
+                DispatchCompactTraceAtlasSubpass(cmd, traceScreenShader, traceScreenKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
             }
-            else
+
+            if (useTraceHashGrid)
             {
-                DispatchCompactTraceAtlasSubpass(cmd, shader, traceKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
+                DispatchCompactTraceAtlasSubpass(cmd, traceHashGridShader, traceHashGridKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
+            }
+
+            if (useTraceVoxel)
+            {
+                DispatchCompactTraceAtlasSubpass(cmd, traceVoxelShader, traceVoxelKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget, useTraceVoxelOctreeBaseOnly);
+            }
+
+            if (useTraceScreenGrid)
+            {
+                DispatchCompactTraceAtlasSubpass(cmd, traceScreenGridShader, traceScreenGridKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
+            }
+
+            if (useTraceRadianceCacheClipMap)
+            {
+                DispatchCompactTraceAtlasSubpass(cmd, traceRadianceCacheClipMapShader, traceRadianceCacheClipMapKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
+            }
+
+            if (useTraceLocalSkyProbe)
+            {
+                DispatchCompactTraceAtlasSubpass(cmd, traceLocalSkyShader, traceLocalSkyKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
+            }
+
+            if (needTraceSkyCubemap)
+            {
+                DispatchCompactTraceAtlasSubpass(cmd, traceSkyShader, traceSkyKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
             }
 
             cmd.SetGlobalTexture(BurtGIScreenProbeTraceRadianceTextureId, traceRadianceTarget.Identifier);
@@ -9608,33 +9735,62 @@ namespace Burt.RenderPipeline
             return true;
         }
 
-        private static bool TryResolveScreenProbeTraceVoxelShader(
-            ComputeShader compactShader,
-            out ComputeShader shader,
-            out int kernel)
+        private static bool TryResolveScreenProbeTraceScreenShader(out ComputeShader shader, out int kernel)
         {
-            shader = GetScreenProbeTraceVoxelOctreeComputeShader();
-            if (TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceVoxelOctreeKernelName, out kernel))
+            shader = GetScreenProbeTraceScreenComputeShader();
+            return TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceScreenKernelName, out kernel);
+        }
+
+        private static bool TryResolveScreenProbeTraceHashGridShader(out ComputeShader shader, out int kernel)
+        {
+            shader = GetScreenProbeTraceHashGridComputeShader();
+            return TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceHashGridKernelName, out kernel);
+        }
+
+        private static bool TryResolveScreenProbeTraceVoxelShader(
+            BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings,
+            out ComputeShader shader,
+            out int kernel,
+            out bool useVoxelOctreeBaseOnly)
+        {
+            useVoxelOctreeBaseOnly = false;
+            var canUseStandaloneVoxelOctree = settings.TraceVoxelOctree;
+
+            if (canUseStandaloneVoxelOctree)
             {
-                return true;
+                shader = GetScreenProbeTraceVoxelOctreeComputeShader();
+                if (TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceVoxelOctreeKernelName, out kernel))
+                {
+                    useVoxelOctreeBaseOnly = true;
+                    return true;
+                }
             }
 
-            shader = compactShader;
+            shader = GetScreenProbeTraceVoxelComputeShader();
             return TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceVoxelKernelName, out kernel);
         }
 
-        private static bool TryResolveScreenProbeTraceSkyCubemapShader(
-            ComputeShader compactShader,
-            out ComputeShader shader,
-            out int kernel)
+        private static bool TryResolveScreenProbeTraceScreenGridShader(out ComputeShader shader, out int kernel)
+        {
+            shader = GetScreenProbeTraceScreenGridComputeShader();
+            return TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceScreenGridKernelName, out kernel);
+        }
+
+        private static bool TryResolveScreenProbeTraceRadianceCacheClipMapShader(out ComputeShader shader, out int kernel)
+        {
+            shader = GetScreenProbeTraceRadianceCacheClipMapComputeShader();
+            return TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceRadianceCacheClipMapKernelName, out kernel);
+        }
+
+        private static bool TryResolveScreenProbeTraceLocalSkyShader(out ComputeShader shader, out int kernel)
+        {
+            shader = GetScreenProbeTraceLocalSkyComputeShader();
+            return TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceLocalSkyProbeKernelName, out kernel);
+        }
+
+        private static bool TryResolveScreenProbeTraceSkyCubemapShader(out ComputeShader shader, out int kernel)
         {
             shader = GetScreenProbeTraceSkyCubemapComputeShader();
-            if (TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceSkyCubemapKernelName, out kernel))
-            {
-                return true;
-            }
-
-            shader = compactShader;
             return TryFindScreenProbeTraceAtlasKernel(shader, ScreenProbeTraceSkyCubemapKernelName, out kernel);
         }
 
@@ -9653,8 +9809,21 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle importancePDFTarget,
             BurtRenderTargetHandle importanceRayInfoTarget,
             BurtRenderTargetHandle traceRadianceTarget,
-            BurtRenderTargetHandle traceHitTarget)
+            BurtRenderTargetHandle traceHitTarget,
+            bool useVoxelOctreeBaseOnly = false)
         {
+            if (useVoxelOctreeBaseOnly)
+            {
+                BindCompactTraceAtlasVoxelOctreeInputs(cmd, shader, kernel, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, context);
+                BurtGISceneVoxelOctreeUtility.BindCompute(cmd, shader, kernel);
+                BindCompactSceneVoxelTexture(cmd, shader, kernel, BurtRenderGraphResourceRegistry.BurtGISceneVoxelRadianceReadTextureId, context.BurtGISceneVoxelRadianceTarget);
+                BindCompactSceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelGeometryReadTextureId, context.BurtGISceneVoxelGeometryTarget);
+                BindCompactSceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelLightingReadTextureId, context.BurtGISceneVoxelLightingTarget);
+                BindCompactTraceAtlasOutputs(cmd, shader, kernel, traceRadianceTarget, traceHitTarget);
+                cmd.DispatchCompute(shader, kernel, context.BurtGIScreenProbeTraceCompactIndirectArgsBuffer.Buffer, 0u);
+                return;
+            }
+
             BindCompactTraceAtlasInputs(cmd, shader, kernel, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, context, settings);
             BurtGISceneVoxelOctreeUtility.BindCompute(cmd, shader, kernel);
             BindCompactSceneVoxelTexture(cmd, shader, kernel, BurtRenderGraphResourceRegistry.BurtGISceneVoxelRadianceReadTextureId, context.BurtGISceneVoxelRadianceTarget);
@@ -9781,55 +9950,96 @@ namespace Burt.RenderPipeline
             return true;
         }
 
-        private static ComputeShader GetScreenProbeTraceCompactComputeShader()
+        private static ComputeShader GetScreenProbeTraceAtlasClearComputeShader()
         {
-            if (screenProbeTraceCompactComputeShader != null)
-            {
-                return screenProbeTraceCompactComputeShader;
-            }
+            return LoadScreenProbeTraceComputeShader(
+                ScreenProbeTraceAtlasClearComputeShaderResourcePath,
+                ref screenProbeTraceAtlasClearComputeShader,
+                ref hasLoggedMissingScreenProbeTraceAtlasClearComputeShader);
+        }
 
-            screenProbeTraceCompactComputeShader = Resources.Load<ComputeShader>(ScreenProbeTraceCompactComputeShaderResourcePath);
-            if (screenProbeTraceCompactComputeShader == null && !hasLoggedMissingScreenProbeTraceCompactComputeShader)
-            {
-                Debug.LogWarning("BurtRP could not find compute shader resource: " + ScreenProbeTraceCompactComputeShaderResourcePath);
-                hasLoggedMissingScreenProbeTraceCompactComputeShader = true;
-            }
+        private static ComputeShader GetScreenProbeTraceScreenComputeShader()
+        {
+            return LoadScreenProbeTraceComputeShader(
+                ScreenProbeTraceScreenComputeShaderResourcePath,
+                ref screenProbeTraceScreenComputeShader,
+                ref hasLoggedMissingScreenProbeTraceScreenComputeShader);
+        }
 
-            return screenProbeTraceCompactComputeShader;
+        private static ComputeShader GetScreenProbeTraceHashGridComputeShader()
+        {
+            return LoadScreenProbeTraceComputeShader(
+                ScreenProbeTraceHashGridComputeShaderResourcePath,
+                ref screenProbeTraceHashGridComputeShader,
+                ref hasLoggedMissingScreenProbeTraceHashGridComputeShader);
+        }
+
+        private static ComputeShader GetScreenProbeTraceVoxelComputeShader()
+        {
+            return LoadScreenProbeTraceComputeShader(
+                ScreenProbeTraceVoxelComputeShaderResourcePath,
+                ref screenProbeTraceVoxelComputeShader,
+                ref hasLoggedMissingScreenProbeTraceVoxelComputeShader);
         }
 
         private static ComputeShader GetScreenProbeTraceVoxelOctreeComputeShader()
         {
-            if (screenProbeTraceVoxelOctreeComputeShader != null)
-            {
-                return screenProbeTraceVoxelOctreeComputeShader;
-            }
+            return LoadScreenProbeTraceComputeShader(
+                ScreenProbeTraceVoxelOctreeComputeShaderResourcePath,
+                ref screenProbeTraceVoxelOctreeComputeShader,
+                ref hasLoggedMissingScreenProbeTraceVoxelOctreeComputeShader);
+        }
 
-            screenProbeTraceVoxelOctreeComputeShader = Resources.Load<ComputeShader>(ScreenProbeTraceVoxelOctreeComputeShaderResourcePath);
-            if (screenProbeTraceVoxelOctreeComputeShader == null && !hasLoggedMissingScreenProbeTraceVoxelOctreeComputeShader)
-            {
-                Debug.LogWarning("BurtRP could not find compute shader resource: " + ScreenProbeTraceVoxelOctreeComputeShaderResourcePath);
-                hasLoggedMissingScreenProbeTraceVoxelOctreeComputeShader = true;
-            }
+        private static ComputeShader GetScreenProbeTraceScreenGridComputeShader()
+        {
+            return LoadScreenProbeTraceComputeShader(
+                ScreenProbeTraceScreenGridComputeShaderResourcePath,
+                ref screenProbeTraceScreenGridComputeShader,
+                ref hasLoggedMissingScreenProbeTraceScreenGridComputeShader);
+        }
 
-            return screenProbeTraceVoxelOctreeComputeShader;
+        private static ComputeShader GetScreenProbeTraceRadianceCacheClipMapComputeShader()
+        {
+            return LoadScreenProbeTraceComputeShader(
+                ScreenProbeTraceRadianceCacheClipMapComputeShaderResourcePath,
+                ref screenProbeTraceRadianceCacheClipMapComputeShader,
+                ref hasLoggedMissingScreenProbeTraceRadianceCacheClipMapComputeShader);
+        }
+
+        private static ComputeShader GetScreenProbeTraceLocalSkyComputeShader()
+        {
+            return LoadScreenProbeTraceComputeShader(
+                ScreenProbeTraceLocalSkyComputeShaderResourcePath,
+                ref screenProbeTraceLocalSkyComputeShader,
+                ref hasLoggedMissingScreenProbeTraceLocalSkyComputeShader);
         }
 
         private static ComputeShader GetScreenProbeTraceSkyCubemapComputeShader()
         {
-            if (screenProbeTraceSkyCubemapComputeShader != null)
+            return LoadScreenProbeTraceComputeShader(
+                ScreenProbeTraceSkyCubemapComputeShaderResourcePath,
+                ref screenProbeTraceSkyCubemapComputeShader,
+                ref hasLoggedMissingScreenProbeTraceSkyCubemapComputeShader);
+        }
+
+        private static ComputeShader LoadScreenProbeTraceComputeShader(
+            string resourcePath,
+            ref ComputeShader shader,
+            ref bool hasLoggedMissingResource)
+        {
+            if (shader != null)
             {
-                return screenProbeTraceSkyCubemapComputeShader;
+                return shader;
             }
 
-            screenProbeTraceSkyCubemapComputeShader = Resources.Load<ComputeShader>(ScreenProbeTraceSkyCubemapComputeShaderResourcePath);
-            if (screenProbeTraceSkyCubemapComputeShader == null && !hasLoggedMissingScreenProbeTraceSkyCubemapComputeShader)
+            shader = Resources.Load<ComputeShader>(resourcePath);
+            if (shader == null && !hasLoggedMissingResource)
             {
-                Debug.LogWarning("BurtRP could not find compute shader resource: " + ScreenProbeTraceSkyCubemapComputeShaderResourcePath);
-                hasLoggedMissingScreenProbeTraceSkyCubemapComputeShader = true;
+                Debug.LogWarning("BurtRP could not find compute shader resource: " + resourcePath);
+                hasLoggedMissingResource = true;
             }
 
-            return screenProbeTraceSkyCubemapComputeShader;
+            return shader;
         }
 
         private static bool TryFindScreenProbeTraceAtlasKernel(ComputeShader shader, string kernelName, out int kernel, string fallbackKernelName = null)
@@ -10010,6 +10220,34 @@ namespace Burt.RenderPipeline
             BindCompactTraceAtlasBuffer(cmd, shader, kernel, BurtGIRadianceCacheClipMapProbeWorldOffsetBufferId, context.BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer, FallbackFloat4StructuredBuffer);
         }
 
+        private static void BindCompactTraceAtlasVoxelOctreeInputs(
+            CommandBuffer cmd,
+            ComputeShader shader,
+            int kernel,
+            BurtRenderTargetHandle radianceTarget,
+            BurtRenderTargetHandle irradianceTarget,
+            BurtRenderTargetHandle confidenceTarget,
+            BurtRenderTargetHandle hitDistanceTarget,
+            BurtRenderTargetHandle importancePDFTarget,
+            BurtRenderTargetHandle importanceRayInfoTarget,
+            BurtRenderGraphContext context)
+        {
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeRadianceTextureId, radianceTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeIrradianceTextureId, irradianceTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeConfidenceTextureId, confidenceTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHitDistanceTextureId, hitDistanceTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeImportancePDFReadTextureId, importancePDFTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeImportanceRayInfoReadTextureId, importanceRayInfoTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeScreenDepthTextureId, context.BurtGIScreenProbeScreenDepthTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldNormalTextureId, context.BurtGIScreenProbeWorldNormalTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldPositionTextureId, context.BurtGIScreenProbeWorldPositionTarget.Identifier);
+            cmd.SetComputeBufferParam(shader, kernel, BurtGIScreenProbeTraceCompactTexelCountBufferId, context.BurtGIScreenProbeTraceCompactTexelCountBuffer.Buffer);
+            cmd.SetComputeBufferParam(shader, kernel, BurtGIScreenProbeTraceCompactTexelDataBufferId, context.BurtGIScreenProbeTraceCompactTexelDataBuffer.Buffer);
+            cmd.SetComputeBufferParam(shader, kernel, BurtGIScreenProbeTraceCompactThreadCountXBufferId, context.BurtGIScreenProbeTraceCompactThreadCountXBuffer.Buffer);
+            cmd.SetComputeBufferParam(shader, kernel, BurtGIScreenProbeAdaptiveProbeNumBufferId, context.BurtGIScreenProbeAdaptiveProbeNumBuffer.Buffer);
+            cmd.SetComputeBufferParam(shader, kernel, BurtGIScreenProbeAdaptiveProbeDataBufferId, context.BurtGIScreenProbeAdaptiveProbeDataBuffer.Buffer);
+        }
+
         private static void BindCompactTraceAtlasBuffer(CommandBuffer cmd, ComputeShader shader, int kernel, int bufferId, BurtRenderBufferHandle buffer, GraphicsBuffer fallback)
         {
             cmd.SetComputeBufferParam(shader, kernel, bufferId, buffer.HasBuffer ? buffer.Buffer : fallback);
@@ -10136,7 +10374,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeCompositeTracesPass : BurtScreenSpaceGlobalIlluminationPass
     {
-        private const string ScreenProbeCompositeTracesComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeCompositeTracesComputeShaderResourcePath = "BurtGIScreenProbeCompositeTraces";
         private const string ScreenProbeCompositeTracesKernelName = "ScreenProbeFilterCompositeTraces";
         private const int ScreenProbeCompositeTracesThreadGroupSize = 8;
         private static readonly int BurtGIScreenProbeRadianceWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeRadianceWriteTexture");
@@ -10381,7 +10619,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeBentNormalPass : BurtRenderPass
     {
-        private const string ScreenProbeTraceCompactComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeTraceCompactComputeShaderResourcePath = "BurtGIScreenProbeBentNormal";
         private const string ScreenProbeBentNormalKernelName = "ScreenProbeShortRangeAOCS";
         private const string ScreenProbeBentNormalFallbackKernelName = "ScreenProbeBentNormalCS";
         private const int DispatchThreadGroupSize = 8;
@@ -10591,7 +10829,7 @@ namespace Burt.RenderPipeline
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeTemporalFilterPass : BurtScreenSpaceGlobalIlluminationPass
     {
         private const int ScreenProbeTemporalFilterPassIndex = 10;
-        private const string ScreenProbeUseCountComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeUseCountComputeShaderResourcePath = "BurtGIScreenProbeTemporalUseCount";
         private const string ScreenProbeTemporalFilterKernelName = "ScreenProbeFilterTemporalCS";
         private const string ScreenProbeReprojectionKernelName = "ScreenProbeReprojectionCS";
         private const string ScreenProbeSceneVelocityKernelName = "ScreenProbeSceneVelocityCS";
@@ -11270,7 +11508,7 @@ namespace Burt.RenderPipeline
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeSpatialFilterPass : BurtScreenSpaceGlobalIlluminationPass
     {
         private const int ScreenProbeSpatialFilterPassIndex = 11;
-        private const string ScreenProbeSpatialFilterComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeSpatialFilterComputeShaderResourcePath = "BurtGIScreenProbeSpatialFilter";
         private const string ScreenProbeSpatialFilterKernelName = "ScreenProbeFilterSpatialCS";
         private const int ScreenProbeSpatialFilterThreadGroupSize = 8;
         private static readonly int BurtGIScreenProbeTraceParamsId = Shader.PropertyToID("_BurtGIScreenProbeTraceParams");
@@ -12205,7 +12443,7 @@ namespace Burt.RenderPipeline
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeIrradianceSHPass : BurtScreenSpaceGlobalIlluminationPass
     {
         private const int ScreenProbeIrradianceSHPassIndex = 14;
-        private const string ScreenProbeIrradianceSHComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeIrradianceSHComputeShaderResourcePath = "BurtGIScreenProbeIrradianceSH";
         private const string ScreenProbeIrradianceSHComputeKernelName = "ScreenProbeIrradianceSH3CS";
         private const int ScreenProbeIrradianceSHComputeThreadGroupSize = 8;
         private static readonly int BurtGIScreenProbeSHParamsId = Shader.PropertyToID("_BurtGIScreenProbeSHParams");
@@ -12545,7 +12783,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeIrradianceOctPass : BurtScreenSpaceGlobalIlluminationPass
     {
-        private const string ScreenProbeIrradianceOctComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeIrradianceOctComputeShaderResourcePath = "BurtGIScreenProbeIrradianceOct";
         private const string ScreenProbeIrradianceOctComputeKernelName = "ScreenProbeIrradianceOctCS";
         private const string ScreenProbeRadianceOctComputeKernelName = "ScreenProbeRadianceOctLiteCS";
         private const string ScreenProbeIrradianceOctGenerateMipComputeKernelName = "ScreenProbeIrradianceOctGenerateMipCS";
@@ -12893,7 +13131,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeImportancePDFPass : BurtScreenSpaceGlobalIlluminationPass
     {
-        private const string ScreenProbeImportancePDFComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeImportancePDFComputeShaderResourcePath = "BurtGIScreenProbeImportancePDF";
         private const string ScreenProbeImportancePDFComputeKernelName = "ScreenProbeImportanceSamplingTransferCS";
         private const string ScreenProbeImportancePDFFallbackComputeKernelName = "ScreenProbeImportancePDFLiteCS";
         private static readonly int BurtGIScreenProbeAdaptiveParamsId = Shader.PropertyToID("_BurtGIScreenProbeAdaptiveParams");
@@ -13087,7 +13325,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeImportanceLightPDFPass : BurtScreenSpaceGlobalIlluminationPass
     {
-        private const string ScreenProbeImportanceLightPDFComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeImportanceLightPDFComputeShaderResourcePath = "BurtGIScreenProbeImportanceLightPDF";
         private const string ScreenProbeImportanceLightPDFComputeKernelName = "ScreenProbeImportanceSamplingLightCS";
         private static readonly int BurtGIScreenProbeTraceParamsId = Shader.PropertyToID("_BurtGIScreenProbeTraceParams");
         private static readonly int BurtGIScreenProbeImportanceLightPDFParamsId = Shader.PropertyToID("_BurtGIScreenProbeImportanceLightPDFParams");
@@ -13296,7 +13534,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeImportanceGenRaysPass : BurtScreenSpaceGlobalIlluminationPass
     {
-        private const string ScreenProbeImportanceGenRaysComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeImportanceGenRaysComputeShaderResourcePath = "BurtGIScreenProbeImportanceGenRays";
         private const string ScreenProbeImportanceGenRaysComputeKernelName = "ScreenProbeImportanceSamplingGenRaysCS";
         private static readonly int BurtGIScreenProbeTraceParamsId = Shader.PropertyToID("_BurtGIScreenProbeTraceParams");
         private static readonly int BurtGIScreenProbeImportanceGenRaysParamsId = Shader.PropertyToID("_BurtGIScreenProbeImportanceGenRaysParams");
@@ -13593,7 +13831,7 @@ namespace Burt.RenderPipeline
         protected static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("_BurtDeferredInverseViewProjectionMatrix");
         protected static readonly int CameraWorldPositionId = Shader.PropertyToID("_BurtDeferredCameraWorldPosition");
         protected static readonly int DeferredScreenSizeId = Shader.PropertyToID("_BurtDeferredScreenSize");
-        private const string ScreenProbeFilterComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeFilterComputeShaderResourcePath = "BurtGIScreenProbeFilter";
         private const string ScreenProbeFilterFixupBordersComputeKernelName = "ScreenProbeFilterFixupBordersCS";
         private const string ScreenProbeFilterGenerateMipComputeKernelName = "ScreenProbeFilterGenerateMipCS";
         private const string CopyTexture3DComputeShaderResourcePath = "BurtGICopyTexture3D";
@@ -14274,20 +14512,22 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationTranslucencyVolumeGeneratePass : BurtScreenSpaceGlobalIlluminationPass
     {
-        private const string TranslucencyVolumeComputeShaderResourcePath = "BurtGITranslucencyVolume";
-        private const string TranslucencyVolumeGenerateKernelName = "TranslucencyVolumeIntegratesCS";
-        private const string TranslucencyVolumeGenerateFallbackKernelName = "GenerateTranslucencyVolumeFromScreenGICS";
+        private const string TranslucencyVolumeTraceVoxelComputeShaderResourcePath = "BurtGITranslucencyVolumeTraceVoxel";
+        private const string TranslucencyVolumeTraceVoxelOctreeComputeShaderResourcePath = "BurtGITranslucencyVolumeTraceVoxelOctree";
+        private const string TranslucencyVolumeTraceVoxelKernelName = "TranslucencyVolumeTraceVoxelsCS";
+        private const string TranslucencyVolumeTraceVoxelOctreeKernelName = "TranslucencyVolumeTraceVoxelOctreeCS";
         private static readonly int BurtHiZDepthTextureId = BurtRenderGraphResourceRegistry.HiZDepthTextureId;
         private static readonly int BurtGISceneVoxelGeometryReadTextureId = BurtRenderGraphResourceRegistry.BurtGISceneVoxelGeometryReadTextureId;
         private static readonly int BurtGISceneVoxelOccupancyMipReadTextureId = BurtRenderGraphResourceRegistry.BurtGISceneVoxelOccupancyMipReadTextureId;
         private static readonly int BurtGISceneVoxelLightingReadTextureId = BurtRenderGraphResourceRegistry.BurtGISceneVoxelLightingReadTextureId;
         private static readonly int BurtGITranslucencyVolumeHiZParamsId = Shader.PropertyToID("_BurtGITranslucencyVolumeHiZParams");
-        private static readonly int BurtGITranslucencyVolumeExposureParamsId = Shader.PropertyToID("_BurtGITranslucencyVolumeExposureParams");
         private static readonly int BurtGITranslucencyVolumeTraceParamsId = Shader.PropertyToID("_BurtGITranslucencyVolumeTraceParams");
         private static readonly int BurtGITranslucencyVolumeTraceAtlasParamsId = Shader.PropertyToID("_BurtGITranslucencyVolumeTraceAtlasParams");
         private static readonly int BurtGISceneVoxelTraceControlsId = Shader.PropertyToID("_BurtGISceneVoxelTraceControls");
-        private static ComputeShader translucencyVolumeComputeShader;
-        private static bool hasLoggedMissingTranslucencyVolumeComputeShader;
+        private static ComputeShader translucencyVolumeTraceVoxelComputeShader;
+        private static ComputeShader translucencyVolumeTraceVoxelOctreeComputeShader;
+        private static bool hasLoggedMissingTranslucencyVolumeTraceVoxelComputeShader;
+        private static bool hasLoggedMissingTranslucencyVolumeTraceVoxelOctreeComputeShader;
         private static bool hasLoggedMissingTranslucencyVolumeGenerateKernel;
 
         public override string Name => "Burt Screen Space Global Illumination Translucency Volume Generate";
@@ -14301,10 +14541,6 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            builder.ReadScreenSpaceGlobalIllumination();
-            builder.ReadBurtGIBackfaceDiffuseIndirect();
-            builder.ReadBurtGIScreenProbeRadiance();
-            builder.ReadBurtGIScreenProbeConfidence();
             if (BurtHiZDepthPassUtility.ShouldUseHiZDepth(builder.Request, builder.Asset))
             {
                 builder.ReadHiZDepth();
@@ -14313,8 +14549,6 @@ namespace Burt.RenderPipeline
             builder.ReadBurtGISceneVoxelGeometry();
             builder.ReadBurtGISceneVoxelOccupancyMip();
             builder.ReadBurtGISceneVoxelLighting();
-            builder.WriteBurtGITranslucencyVolume0();
-            builder.WriteBurtGITranslucencyVolume1();
             builder.WriteBurtGITranslucencyVolumeTraceRadiance();
             builder.WriteBurtGITranslucencyVolumeTraceHitDistance();
         }
@@ -14328,12 +14562,6 @@ namespace Burt.RenderPipeline
 
             if (!TryGetRequiredTargets(
                     context,
-                    out var diffuseTarget,
-                    out var backfaceTarget,
-                    out var screenProbeRadianceTarget,
-                    out var screenProbeConfidenceTarget,
-                    out var volume0Target,
-                    out var volume1Target,
                     out var traceRadianceTarget,
                     out var traceHitDistanceTarget))
             {
@@ -14347,18 +14575,16 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var shader = GetTranslucencyVolumeComputeShader();
-            if (!TryFindTranslucencyVolumeGenerateKernel(shader, out var kernel))
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(context.Request, context.Asset);
+            var screenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context.Request, context.Asset);
+            if (!TryResolveTranslucencyVolumeTraceVoxelShader(screenProbeSettings, out var shader, out var kernel))
             {
                 return;
             }
 
-            var camera = context.Request != null ? context.Request.Camera : null;
-            var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(context.Request, context.Asset);
-            var screenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context.Request, context.Asset);
             var clipMapState = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapState(camera, screenProbeSettings);
             var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationTranslucencyVolumeDescriptor(camera, screenProbeSettings);
-            var history = BurtGITranslucencyVolumeHistoryUtility.EnsureHistoryTextures(context.Request, context.Asset, settings, screenProbeSettings, out var historyValid);
             var gridSize = new Vector4(
                 descriptor.width,
                 descriptor.height,
@@ -14371,54 +14597,38 @@ namespace Burt.RenderPipeline
                 context.Request,
                 camera,
                 out var inverseCurrentViewProjection,
-                out var previousViewProjection,
+                out _,
                 out var cameraWorldPosition);
             var gridZParams = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveTranslucencyVolumeGridZParams(screenProbeSettings);
-            var translucencyHistoryValid = historyValid && screenProbeSettings.TranslucencyVolumeUseTemporalReprojection;
-            var translucencyHistoryWeight = screenProbeSettings.TranslucencyVolumeUseTemporalReprojection ? screenProbeSettings.TranslucencyVolumeHistoryWeight : 0f;
             var jitterOffset = ResolveTranslucencyVolumeJitterOffset(screenProbeSettings, Time.frameCount);
-            var previousJitterOffset = ResolveTranslucencyVolumeJitterOffset(screenProbeSettings, Time.frameCount - (translucencyHistoryValid ? 1 : 0));
             var hiZDepthTarget = context.HiZDepthTarget;
             var hiZDepthValid = hiZDepthTarget.IsValid && BurtHiZDepthPassUtility.ShouldUseHiZDepth(context.Request, context.Asset);
-            var fallbackVolumeTexture = BurtGITranslucencyVolumeFallbackUtility.BlackVolumeTexture;
             var cmd = CommandBufferPool.Get(Name);
-            cmd.SetComputeTextureParam(shader, kernel, BurtGIApplyIndirectDiffuseTextureId, diffuseTarget.Identifier);
-            cmd.SetComputeTextureParam(shader, kernel, BurtGIApplyIndirectBackfaceDiffuseTextureId, backfaceTarget.Identifier);
-            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeRadianceTextureId, screenProbeRadianceTarget.Identifier);
-            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeConfidenceTextureId, screenProbeConfidenceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtHiZDepthTextureId, hiZDepthValid ? hiZDepthTarget.Identifier : new RenderTargetIdentifier(Texture2D.blackTexture));
             BindTranslucencySceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelGeometryReadTextureId, context.BurtGISceneVoxelGeometryTarget);
             BindTranslucencySceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelOccupancyMipReadTextureId, context.BurtGISceneVoxelOccupancyMipTarget);
             BindTranslucencySceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelLightingReadTextureId, context.BurtGISceneVoxelLightingTarget);
             BurtGISceneVoxelOctreeUtility.BindCompute(cmd, shader, kernel);
             var sceneVoxelCenterExtent = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveSceneVoxelCenterExtent(camera, screenProbeSettings, clipMapState, settings.SceneVoxelClipMapResolution);
-            BurtGISceneVoxelClipmapStateUtility.BindTraceCompute(
+            BurtGISceneVoxelClipmapStateUtility.BindTranslucencyTraceCompute(
                 cmd,
                 shader,
                 kernel,
                 camera,
                 sceneVoxelCenterExtent,
                 ResolveTranslucencySceneVoxelFallback(context.BurtGISceneVoxelGeometryTarget),
-                ResolveTranslucencySceneVoxelFallback(context.BurtGISceneVoxelOccupancyMipTarget),
                 ResolveTranslucencySceneVoxelFallback(context.BurtGISceneVoxelLightingTarget));
-            cmd.SetComputeTextureParam(shader, kernel, BurtGITranslucencyVolumeHistory0TextureId, history.Volume0 != null ? (Texture)history.Volume0 : fallbackVolumeTexture);
-            cmd.SetComputeTextureParam(shader, kernel, BurtGITranslucencyVolumeHistory1TextureId, history.Volume1 != null ? (Texture)history.Volume1 : fallbackVolumeTexture);
-            cmd.SetComputeTextureParam(shader, kernel, BurtGITranslucencyVolume0TextureId, volume0Target.Identifier);
-            cmd.SetComputeTextureParam(shader, kernel, BurtGITranslucencyVolume1TextureId, volume1Target.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceRadianceTextureId, traceRadianceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceHitDistanceTextureId, traceHitDistanceTarget.Identifier);
             cmd.SetComputeVectorParam(shader, BurtGITranslucencyVolumeGridSizeId, gridSize);
             cmd.SetComputeVectorParam(shader, BurtGITranslucencyVolumeParams0Id, new Vector4(nearPlane, farPlane, 0.75f, 0.65f));
             cmd.SetComputeVectorParam(shader, BurtGITranslucencyVolumeGridZParamsId, gridZParams);
-            cmd.SetComputeVectorParam(shader, BurtGITranslucencyVolumeTemporalParamsId, new Vector4(translucencyHistoryWeight, translucencyHistoryValid ? 1f : 0f, 0.65f, 1f));
             cmd.SetComputeVectorParam(shader, BurtGITranslucencyVolumeJitterParamsId, jitterOffset);
-            cmd.SetComputeVectorParam(shader, BurtGITranslucencyVolumePreviousJitterParamsId, previousJitterOffset);
             cmd.SetComputeVectorParam(shader, BurtGITranslucencyVolumeHiZParamsId, new Vector4(
                 hiZDepthValid ? 1f : 0f,
                 screenProbeSettings.TranslucencyVolumeGridCenterOffsetFromDepthBuffer,
                 screenProbeSettings.TranslucencyVolumeOffsetThresholdToAcceptDepthBufferOffset,
                 0f));
-            cmd.SetComputeVectorParam(shader, BurtGITranslucencyVolumeExposureParamsId, new Vector4(history.HistoryExposureCorrection, 0f, 0f, 0f));
             cmd.SetComputeVectorParam(shader, BurtGITranslucencyVolumeTraceParamsId, new Vector4(
                 screenProbeSettings.TranslucencyVolumeMaxRayIntensity,
                 screenProbeSettings.TranslucencyVolumeMaxTraceDistance,
@@ -14430,29 +14640,23 @@ namespace Burt.RenderPipeline
                 0f,
                 0f));
             cmd.SetComputeMatrixParam(shader, InverseViewProjectionMatrixId, inverseCurrentViewProjection);
-            cmd.SetComputeMatrixParam(shader, BurtGIScreenProbePreviousViewProjectionMatrixId, previousViewProjection);
             cmd.SetComputeVectorParam(shader, CameraWorldPositionId, cameraWorldPosition);
-            cmd.SetComputeVectorArrayParam(shader, BurtGIRadianceCacheClipMapClipmapCenterExtentId, clipMapState.ClipmapCenterExtent);
             cmd.SetComputeVectorParam(shader, BurtGISceneVoxelCenterExtentId, sceneVoxelCenterExtent);
             cmd.SetComputeVectorParam(shader, BurtGISceneVoxelTraceControlsId, new Vector4(
                 settings.SceneVoxelTraceMaxSteps,
                 settings.SceneVoxelTraceStepFactor,
                 0f,
                 0f));
-            cmd.SetGlobalTexture(BurtGITranslucencyVolume0TextureId, volume0Target.Identifier);
-            cmd.SetGlobalTexture(BurtGITranslucencyVolume1TextureId, volume1Target.Identifier);
             cmd.SetGlobalVector(BurtGITranslucencyVolumeGridSizeId, gridSize);
             cmd.SetGlobalVector(BurtGITranslucencyVolumeGridZParamsId, gridZParams);
             cmd.SetGlobalVector(BurtGITranslucencyVolumeParams0Id, new Vector4(nearPlane, farPlane, 0.75f, 0.65f));
-            cmd.SetGlobalVector(BurtGITranslucencyVolumeTemporalParamsId, new Vector4(translucencyHistoryWeight, translucencyHistoryValid ? 1f : 0f, 0.65f, 1f));
             cmd.SetGlobalVector(BurtGITranslucencyVolumeJitterParamsId, jitterOffset);
-            cmd.SetGlobalVector(BurtGITranslucencyVolumePreviousJitterParamsId, previousJitterOffset);
             cmd.DispatchCompute(
                 shader,
                 kernel,
-                Mathf.Max(1, (descriptor.width + 3) / 4),
-                Mathf.Max(1, (descriptor.height + 3) / 4),
-                Mathf.Max(1, (descriptor.volumeDepth + 3) / 4));
+                Mathf.Max(1, (descriptor.width * Mathf.Clamp(screenProbeSettings.TranslucencyVolumeTracingOctahedronResolution, 1, 8) + 7) / 8),
+                Mathf.Max(1, (descriptor.height * Mathf.Clamp(screenProbeSettings.TranslucencyVolumeTracingOctahedronResolution, 1, 8) + 7) / 8),
+                Mathf.Max(1, descriptor.volumeDepth));
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
             BurtGITranslucencyVolumeRuntimeState.MarkTraceAtlasGenerated(
@@ -14536,51 +14740,65 @@ namespace Burt.RenderPipeline
 
         private static bool TryGetRequiredTargets(
             BurtRenderGraphContext context,
-            out BurtRenderTargetHandle diffuseTarget,
-            out BurtRenderTargetHandle backfaceTarget,
-            out BurtRenderTargetHandle screenProbeRadianceTarget,
-            out BurtRenderTargetHandle screenProbeConfidenceTarget,
-            out BurtRenderTargetHandle volume0Target,
-            out BurtRenderTargetHandle volume1Target,
             out BurtRenderTargetHandle traceRadianceTarget,
             out BurtRenderTargetHandle traceHitDistanceTarget)
         {
-            diffuseTarget = context != null ? context.ScreenSpaceGlobalIlluminationTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationName);
-            backfaceTarget = context != null ? context.BurtGIBackfaceDiffuseIndirectTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName);
-            screenProbeRadianceTarget = context != null ? context.BurtGIScreenProbeRadianceTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName);
-            screenProbeConfidenceTarget = context != null ? context.BurtGIScreenProbeConfidenceTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName);
-            volume0Target = context != null ? context.BurtGITranslucencyVolume0Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume0Name);
-            volume1Target = context != null ? context.BurtGITranslucencyVolume1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume1Name);
             traceRadianceTarget = context != null ? context.BurtGITranslucencyVolumeTraceRadianceTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceRadianceName);
             traceHitDistanceTarget = context != null ? context.BurtGITranslucencyVolumeTraceHitDistanceTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceHitDistanceName);
-            return diffuseTarget.IsValid &&
-                backfaceTarget.IsValid &&
-                screenProbeRadianceTarget.IsValid &&
-                screenProbeConfidenceTarget.IsValid &&
-                volume0Target.IsValid &&
-                volume1Target.IsValid &&
-                traceRadianceTarget.IsValid &&
+            return traceRadianceTarget.IsValid &&
                 traceHitDistanceTarget.IsValid;
         }
 
-        private static ComputeShader GetTranslucencyVolumeComputeShader()
+        private static bool TryResolveTranslucencyVolumeTraceVoxelShader(
+            BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings,
+            out ComputeShader shader,
+            out int kernel)
         {
-            if (translucencyVolumeComputeShader != null)
+            if (settings.TraceVoxelOctree)
             {
-                return translucencyVolumeComputeShader;
+                shader = GetTranslucencyVolumeTraceVoxelOctreeComputeShader();
+                return TryFindTranslucencyVolumeGenerateKernel(shader, TranslucencyVolumeTraceVoxelOctreeKernelName, out kernel);
             }
 
-            translucencyVolumeComputeShader = Resources.Load<ComputeShader>(TranslucencyVolumeComputeShaderResourcePath);
-            if (translucencyVolumeComputeShader == null && !hasLoggedMissingTranslucencyVolumeComputeShader)
-            {
-                Debug.LogWarning("BurtRP could not find compute shader resource: " + TranslucencyVolumeComputeShaderResourcePath);
-                hasLoggedMissingTranslucencyVolumeComputeShader = true;
-            }
-
-            return translucencyVolumeComputeShader;
+            shader = GetTranslucencyVolumeTraceVoxelComputeShader();
+            return TryFindTranslucencyVolumeGenerateKernel(shader, TranslucencyVolumeTraceVoxelKernelName, out kernel);
         }
 
-        private static bool TryFindTranslucencyVolumeGenerateKernel(ComputeShader shader, out int kernel)
+        private static ComputeShader GetTranslucencyVolumeTraceVoxelComputeShader()
+        {
+            if (translucencyVolumeTraceVoxelComputeShader != null)
+            {
+                return translucencyVolumeTraceVoxelComputeShader;
+            }
+
+            translucencyVolumeTraceVoxelComputeShader = Resources.Load<ComputeShader>(TranslucencyVolumeTraceVoxelComputeShaderResourcePath);
+            if (translucencyVolumeTraceVoxelComputeShader == null && !hasLoggedMissingTranslucencyVolumeTraceVoxelComputeShader)
+            {
+                Debug.LogWarning("BurtRP could not find compute shader resource: " + TranslucencyVolumeTraceVoxelComputeShaderResourcePath);
+                hasLoggedMissingTranslucencyVolumeTraceVoxelComputeShader = true;
+            }
+
+            return translucencyVolumeTraceVoxelComputeShader;
+        }
+
+        private static ComputeShader GetTranslucencyVolumeTraceVoxelOctreeComputeShader()
+        {
+            if (translucencyVolumeTraceVoxelOctreeComputeShader != null)
+            {
+                return translucencyVolumeTraceVoxelOctreeComputeShader;
+            }
+
+            translucencyVolumeTraceVoxelOctreeComputeShader = Resources.Load<ComputeShader>(TranslucencyVolumeTraceVoxelOctreeComputeShaderResourcePath);
+            if (translucencyVolumeTraceVoxelOctreeComputeShader == null && !hasLoggedMissingTranslucencyVolumeTraceVoxelOctreeComputeShader)
+            {
+                Debug.LogWarning("BurtRP could not find compute shader resource: " + TranslucencyVolumeTraceVoxelOctreeComputeShaderResourcePath);
+                hasLoggedMissingTranslucencyVolumeTraceVoxelOctreeComputeShader = true;
+            }
+
+            return translucencyVolumeTraceVoxelOctreeComputeShader;
+        }
+
+        private static bool TryFindTranslucencyVolumeGenerateKernel(ComputeShader shader, string kernelName, out int kernel)
         {
             kernel = -1;
             if (shader == null)
@@ -14588,31 +14806,25 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            if (!shader.HasKernel(TranslucencyVolumeGenerateKernelName))
+            if (!shader.HasKernel(kernelName))
             {
-                if (shader.HasKernel(TranslucencyVolumeGenerateFallbackKernelName))
-                {
-                    kernel = shader.FindKernel(TranslucencyVolumeGenerateFallbackKernelName);
-                    return kernel >= 0;
-                }
-
                 if (!hasLoggedMissingTranslucencyVolumeGenerateKernel)
                 {
-                    Debug.LogWarning("BurtRP compute shader is missing kernel: " + TranslucencyVolumeGenerateKernelName);
+                    Debug.LogWarning("BurtRP compute shader is missing kernel: " + kernelName);
                     hasLoggedMissingTranslucencyVolumeGenerateKernel = true;
                 }
 
                 return false;
             }
 
-            kernel = shader.FindKernel(TranslucencyVolumeGenerateKernelName);
+            kernel = shader.FindKernel(kernelName);
             return kernel >= 0;
         }
     }
 
     internal sealed class BurtScreenSpaceGlobalIlluminationTranslucencyVolumeTraceSpatialFilterPass : BurtScreenSpaceGlobalIlluminationPass
     {
-        private const string TranslucencyVolumeComputeShaderResourcePath = "BurtGITranslucencyVolume";
+        private const string TranslucencyVolumeComputeShaderResourcePath = "BurtGITranslucencyVolumeTraceSpatialFilter";
         private const string TranslucencyVolumeTraceSpatialFilterKernelName = "TranslucencyVolumeTraceSpatialFilterCS";
         private static readonly int BurtGITranslucencyVolumeTraceReadRadianceTextureId = Shader.PropertyToID("_BurtGITranslucencyVolumeTraceReadRadiance");
         private static readonly int BurtGITranslucencyVolumeSpatialFilterParamsId = Shader.PropertyToID("_BurtGITranslucencyVolumeSpatialFilterParams");
@@ -14828,7 +15040,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationTranslucencyVolumeIntegratePass : BurtScreenSpaceGlobalIlluminationPass
     {
-        private const string TranslucencyVolumeComputeShaderResourcePath = "BurtGITranslucencyVolume";
+        private const string TranslucencyVolumeComputeShaderResourcePath = "BurtGITranslucencyVolumeIntegrate";
         private const string TranslucencyVolumeIntegrateKernelName = "TranslucencyVolumeIntegratesCS";
         private static readonly int BurtHiZDepthTextureId = BurtRenderGraphResourceRegistry.HiZDepthTextureId;
         private static readonly int BurtGISceneVoxelGeometryReadTextureId = BurtRenderGraphResourceRegistry.BurtGISceneVoxelGeometryReadTextureId;
@@ -14859,12 +15071,7 @@ namespace Burt.RenderPipeline
             builder.ReadBurtGIBackfaceDiffuseIndirect();
             builder.ReadBurtGIScreenProbeRadiance();
             builder.ReadBurtGIScreenProbeConfidence();
-            builder.ReadBurtGISceneVoxelGeometry();
-            builder.ReadBurtGISceneVoxelOccupancyMip();
-            builder.ReadBurtGISceneVoxelLighting();
-            builder.ReadBurtGITranslucencyVolumeTraceRadiance();
             builder.ReadBurtGITranslucencyVolumeTraceFilteredRadiance();
-            builder.ReadBurtGITranslucencyVolumeTraceHitDistance();
             if (BurtHiZDepthPassUtility.ShouldUseHiZDepth(builder.Request, builder.Asset))
             {
                 builder.ReadHiZDepth();
@@ -14887,9 +15094,7 @@ namespace Burt.RenderPipeline
                     out var backfaceTarget,
                     out var screenProbeRadianceTarget,
                     out var screenProbeConfidenceTarget,
-                    out var rawTraceRadianceTarget,
                     out var filteredTraceRadianceTarget,
-                    out var traceHitDistanceTarget,
                     out var volume0Target,
                     out var volume1Target))
             {
@@ -14905,7 +15110,6 @@ namespace Burt.RenderPipeline
             var camera = context.Request != null ? context.Request.Camera : null;
             var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(context.Request, context.Asset);
             var screenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context.Request, context.Asset);
-            var clipMapState = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapState(camera, screenProbeSettings);
             var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationTranslucencyVolumeDescriptor(camera, screenProbeSettings);
             var history = BurtGITranslucencyVolumeHistoryUtility.EnsureHistoryTextures(context.Request, context.Asset, settings, screenProbeSettings, out var historyValid);
             var gridSize = new Vector4(
@@ -14936,24 +15140,8 @@ namespace Burt.RenderPipeline
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeRadianceTextureId, screenProbeRadianceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeConfidenceTextureId, screenProbeConfidenceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtHiZDepthTextureId, hiZDepthValid ? hiZDepthTarget.Identifier : new RenderTargetIdentifier(Texture2D.blackTexture));
-            BindTranslucencySceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelGeometryReadTextureId, context.BurtGISceneVoxelGeometryTarget);
-            BindTranslucencySceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelOccupancyMipReadTextureId, context.BurtGISceneVoxelOccupancyMipTarget);
-            BindTranslucencySceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelLightingReadTextureId, context.BurtGISceneVoxelLightingTarget);
-            BurtGISceneVoxelOctreeUtility.BindCompute(cmd, shader, kernel);
-            var sceneVoxelCenterExtent = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveSceneVoxelCenterExtent(camera, screenProbeSettings, clipMapState, settings.SceneVoxelClipMapResolution);
-            BurtGISceneVoxelClipmapStateUtility.BindTraceCompute(
-                cmd,
-                shader,
-                kernel,
-                camera,
-                sceneVoxelCenterExtent,
-                ResolveTranslucencySceneVoxelFallback(context.BurtGISceneVoxelGeometryTarget),
-                ResolveTranslucencySceneVoxelFallback(context.BurtGISceneVoxelOccupancyMipTarget),
-                ResolveTranslucencySceneVoxelFallback(context.BurtGISceneVoxelLightingTarget));
             cmd.SetComputeTextureParam(shader, kernel, BurtGITranslucencyVolumeHistory0TextureId, history.Volume0 != null ? (Texture)history.Volume0 : fallbackVolumeTexture);
             cmd.SetComputeTextureParam(shader, kernel, BurtGITranslucencyVolumeHistory1TextureId, history.Volume1 != null ? (Texture)history.Volume1 : fallbackVolumeTexture);
-            cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceRadianceTextureId, rawTraceRadianceTarget.Identifier);
-            cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceHitDistanceTextureId, traceHitDistanceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGITranslucencyVolumeTraceReadRadianceTextureId, filteredTraceRadianceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGITranslucencyVolume0TextureId, volume0Target.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGITranslucencyVolume1TextureId, volume1Target.Identifier);
@@ -14982,13 +15170,6 @@ namespace Burt.RenderPipeline
             cmd.SetComputeMatrixParam(shader, InverseViewProjectionMatrixId, inverseCurrentViewProjection);
             cmd.SetComputeMatrixParam(shader, BurtGIScreenProbePreviousViewProjectionMatrixId, previousViewProjection);
             cmd.SetComputeVectorParam(shader, CameraWorldPositionId, cameraWorldPosition);
-            cmd.SetComputeVectorArrayParam(shader, BurtGIRadianceCacheClipMapClipmapCenterExtentId, clipMapState.ClipmapCenterExtent);
-            cmd.SetComputeVectorParam(shader, BurtGISceneVoxelCenterExtentId, sceneVoxelCenterExtent);
-            cmd.SetComputeVectorParam(shader, BurtGISceneVoxelTraceControlsId, new Vector4(
-                settings.SceneVoxelTraceMaxSteps,
-                settings.SceneVoxelTraceStepFactor,
-                0f,
-                0f));
             cmd.SetGlobalTexture(BurtGITranslucencyVolume0TextureId, volume0Target.Identifier);
             cmd.SetGlobalTexture(BurtGITranslucencyVolume1TextureId, volume1Target.Identifier);
             cmd.SetGlobalVector(BurtGITranslucencyVolumeGridSizeId, gridSize);
@@ -15018,9 +15199,7 @@ namespace Burt.RenderPipeline
             out BurtRenderTargetHandle backfaceTarget,
             out BurtRenderTargetHandle screenProbeRadianceTarget,
             out BurtRenderTargetHandle screenProbeConfidenceTarget,
-            out BurtRenderTargetHandle rawTraceRadianceTarget,
             out BurtRenderTargetHandle filteredTraceRadianceTarget,
-            out BurtRenderTargetHandle traceHitDistanceTarget,
             out BurtRenderTargetHandle volume0Target,
             out BurtRenderTargetHandle volume1Target)
         {
@@ -15028,32 +15207,16 @@ namespace Burt.RenderPipeline
             backfaceTarget = context != null ? context.BurtGIBackfaceDiffuseIndirectTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName);
             screenProbeRadianceTarget = context != null ? context.BurtGIScreenProbeRadianceTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceName);
             screenProbeConfidenceTarget = context != null ? context.BurtGIScreenProbeConfidenceTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeConfidenceName);
-            rawTraceRadianceTarget = context != null ? context.BurtGITranslucencyVolumeTraceRadianceTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceRadianceName);
             filteredTraceRadianceTarget = context != null ? context.BurtGITranslucencyVolumeTraceFilteredRadianceTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceFilteredRadianceName);
-            traceHitDistanceTarget = context != null ? context.BurtGITranslucencyVolumeTraceHitDistanceTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceHitDistanceName);
             volume0Target = context != null ? context.BurtGITranslucencyVolume0Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume0Name);
             volume1Target = context != null ? context.BurtGITranslucencyVolume1Target : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume1Name);
             return diffuseTarget.IsValid &&
                 backfaceTarget.IsValid &&
                 screenProbeRadianceTarget.IsValid &&
                 screenProbeConfidenceTarget.IsValid &&
-                rawTraceRadianceTarget.IsValid &&
                 filteredTraceRadianceTarget.IsValid &&
-                traceHitDistanceTarget.IsValid &&
                 volume0Target.IsValid &&
                 volume1Target.IsValid;
-        }
-
-        private static void BindTranslucencySceneVoxelTexture(CommandBuffer cmd, ComputeShader shader, int kernel, int textureId, BurtRenderTargetHandle target)
-        {
-            cmd.SetComputeTextureParam(shader, kernel, textureId, ResolveTranslucencySceneVoxelFallback(target));
-        }
-
-        private static RenderTargetIdentifier ResolveTranslucencySceneVoxelFallback(BurtRenderTargetHandle target)
-        {
-            return target.IsValid
-                ? target.Identifier
-                : new RenderTargetIdentifier(BurtGITranslucencyVolumeFallbackUtility.BlackVolumeRenderTexture);
         }
 
         private static ComputeShader GetTranslucencyVolumeComputeShader()
@@ -15099,7 +15262,7 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtScreenSpaceGlobalIlluminationTranslucencyVolumeSpatialFilterPass : BurtScreenSpaceGlobalIlluminationPass
     {
-        private const string TranslucencyVolumeComputeShaderResourcePath = "BurtGITranslucencyVolume";
+        private const string TranslucencyVolumeComputeShaderResourcePath = "BurtGITranslucencyVolumeSpatialFilter";
         private const string TranslucencyVolumeSpatialFilterKernelName = "TranslucencyVolumeSpatialFilterCS";
         private const string TranslucencyVolumeSpatialFilterFallbackKernelName = "FilterTranslucencyVolumeSpatialCS";
         private static readonly int BurtGITranslucencyVolumeRead0TextureId = Shader.PropertyToID("_BurtGITranslucencyVolumeRead0");
@@ -17496,10 +17659,10 @@ namespace Burt.RenderPipeline
         private const int HashGridDebugGeometryPassIndex = 17;
         private const int RadianceCacheVisualizeGeometryPassIndex = 19;
         private const int ScreenProbeTraceVisualizeGeometryPassIndex = 20;
-        private const string ScreenProbeTraceVisualizeComputeShaderResourcePath = "BurtGIScreenProbeTraceCompact";
+        private const string ScreenProbeTraceVisualizeComputeShaderResourcePath = "BurtGIScreenProbeTraceVisualize";
         private const string ScreenProbeTraceVisualizeKernelName = "ScreenProbeTraceVisualizeCS";
         private const int ScreenProbeTraceVisualizeThreadGroupSize = 8;
-        private const string SceneVoxelDebugComputeShaderResourcePath = "BurtGISceneVoxelBuild";
+        private const string SceneVoxelDebugComputeShaderResourcePath = "BurtGIXGIToolsVoxelDebug";
         private const string SceneVoxelDebugTraceKernelName = "VoxelDebugTraceCS";
         private const string SceneVoxelDebugProbeCompactKernelName = "DebugProbeCompactFromOccupancy";
         private const string SceneVoxelDebugProbeGenArgsKernelName = "DebugProbeGenArgs";
@@ -18133,7 +18296,7 @@ namespace Burt.RenderPipeline
             {
                 if (!hasLoggedMissingSceneVoxelTraceKernel)
                 {
-                    Debug.LogWarning("BurtRP compute shader BurtGISceneVoxelBuild is missing kernel " + SceneVoxelDebugTraceKernelName + ".");
+                    Debug.LogWarning("BurtRP compute shader " + SceneVoxelDebugComputeShaderResourcePath + " is missing kernel " + SceneVoxelDebugTraceKernelName + ".");
                     hasLoggedMissingSceneVoxelTraceKernel = true;
                 }
 
@@ -18355,7 +18518,7 @@ namespace Burt.RenderPipeline
             {
                 if (!hasLoggedMissingSceneVoxelDebugProbeCompactKernel)
                 {
-                    Debug.LogWarning("BurtRP compute shader BurtGISceneVoxelBuild is missing kernel " + SceneVoxelDebugProbeCompactKernelName + ".");
+                    Debug.LogWarning("BurtRP compute shader " + SceneVoxelDebugComputeShaderResourcePath + " is missing kernel " + SceneVoxelDebugProbeCompactKernelName + ".");
                     hasLoggedMissingSceneVoxelDebugProbeCompactKernel = true;
                 }
 
@@ -18378,7 +18541,7 @@ namespace Burt.RenderPipeline
             {
                 if (!hasLoggedMissingSceneVoxelDebugProbeGenArgsKernel)
                 {
-                    Debug.LogWarning("BurtRP compute shader BurtGISceneVoxelBuild is missing kernel " + SceneVoxelDebugProbeGenArgsKernelName + ".");
+                    Debug.LogWarning("BurtRP compute shader " + SceneVoxelDebugComputeShaderResourcePath + " is missing kernel " + SceneVoxelDebugProbeGenArgsKernelName + ".");
                     hasLoggedMissingSceneVoxelDebugProbeGenArgsKernel = true;
                 }
 
@@ -25708,12 +25871,15 @@ namespace Burt.RenderPipeline
 
         public static string ResolveTranslucencyVolumeComputeStatusLabel()
         {
-            const string resourcePath = "BurtGITranslucencyVolume";
-            const string generateKernel = "TranslucencyVolumeIntegratesCS";
-            const string generateFallbackKernel = "GenerateTranslucencyVolumeFromScreenGICS";
+            const string traceVoxelResourcePath = "BurtGITranslucencyVolumeTraceVoxel";
+            const string traceVoxelOctreeResourcePath = "BurtGITranslucencyVolumeTraceVoxelOctree";
+            const string traceSpatialFilterResourcePath = "BurtGITranslucencyVolumeTraceSpatialFilter";
+            const string integrateResourcePath = "BurtGITranslucencyVolumeIntegrate";
+            const string spatialFilterResourcePath = "BurtGITranslucencyVolumeSpatialFilter";
             const string traceVoxelKernel = "TranslucencyVolumeTraceVoxelsCS";
             const string traceVoxelOctreeKernel = "TranslucencyVolumeTraceVoxelOctreeCS";
             const string traceSpatialFilterKernel = "TranslucencyVolumeTraceSpatialFilterCS";
+            const string integrateKernel = "TranslucencyVolumeIntegratesCS";
             const string spatialFilterKernel = "TranslucencyVolumeSpatialFilterCS";
             const string spatialFilterFallbackKernel = "FilterTranslucencyVolumeSpatialCS";
 
@@ -25722,45 +25888,64 @@ namespace Burt.RenderPipeline
                 return "Unsupported(SystemInfo.supportsComputeShaders=false)";
             }
 
-            var shader = Resources.Load<ComputeShader>(resourcePath);
-            if (shader == null)
+            var traceVoxelShader = Resources.Load<ComputeShader>(traceVoxelResourcePath);
+            if (traceVoxelShader == null)
             {
-                return "Missing(" + resourcePath + ")";
+                return "Missing(" + traceVoxelResourcePath + ")";
             }
 
-            var hasGenerate = shader.HasKernel(generateKernel);
-            var hasGenerateFallback = shader.HasKernel(generateFallbackKernel);
-            var hasTraceVoxel = shader.HasKernel(traceVoxelKernel);
-            var hasTraceVoxelOctree = shader.HasKernel(traceVoxelOctreeKernel);
-            var hasTraceSpatialFilter = shader.HasKernel(traceSpatialFilterKernel);
-            var hasSpatialFilter = shader.HasKernel(spatialFilterKernel);
-            var hasSpatialFilterFallback = shader.HasKernel(spatialFilterFallbackKernel);
-            if (!hasGenerate && !hasGenerateFallback)
+            if (!traceVoxelShader.HasKernel(traceVoxelKernel))
             {
-                return "MissingKernel(" + generateKernel + ")";
+                return "MissingKernel(" + traceVoxelKernel + "@" + traceVoxelResourcePath + ")";
             }
 
-            if (!hasTraceVoxel)
+            var traceVoxelOctreeShader = Resources.Load<ComputeShader>(traceVoxelOctreeResourcePath);
+            if (traceVoxelOctreeShader == null)
             {
-                return "MissingKernel(" + traceVoxelKernel + ")";
+                return "Missing(" + traceVoxelOctreeResourcePath + ")";
             }
 
-            if (!hasTraceVoxelOctree)
+            if (!traceVoxelOctreeShader.HasKernel(traceVoxelOctreeKernel))
             {
-                return "MissingKernel(" + traceVoxelOctreeKernel + ")";
+                return "MissingKernel(" + traceVoxelOctreeKernel + "@" + traceVoxelOctreeResourcePath + ")";
             }
 
-            if (!hasTraceSpatialFilter)
+            var traceSpatialFilterShader = Resources.Load<ComputeShader>(traceSpatialFilterResourcePath);
+            if (traceSpatialFilterShader == null)
             {
-                return "MissingKernel(" + traceSpatialFilterKernel + ")";
+                return "Missing(" + traceSpatialFilterResourcePath + ")";
             }
 
+            if (!traceSpatialFilterShader.HasKernel(traceSpatialFilterKernel))
+            {
+                return "MissingKernel(" + traceSpatialFilterKernel + "@" + traceSpatialFilterResourcePath + ")";
+            }
+
+            var integrateShader = Resources.Load<ComputeShader>(integrateResourcePath);
+            if (integrateShader == null)
+            {
+                return "Missing(" + integrateResourcePath + ")";
+            }
+
+            if (!integrateShader.HasKernel(integrateKernel))
+            {
+                return "MissingKernel(" + integrateKernel + "@" + integrateResourcePath + ")";
+            }
+
+            var spatialFilterShader = Resources.Load<ComputeShader>(spatialFilterResourcePath);
+            if (spatialFilterShader == null)
+            {
+                return "Missing(" + spatialFilterResourcePath + ")";
+            }
+
+            var hasSpatialFilter = spatialFilterShader.HasKernel(spatialFilterKernel);
+            var hasSpatialFilterFallback = spatialFilterShader.HasKernel(spatialFilterFallbackKernel);
             if (!hasSpatialFilter && !hasSpatialFilterFallback)
             {
-                return "MissingKernel(" + spatialFilterKernel + ")";
+                return "MissingKernel(" + spatialFilterKernel + "@" + spatialFilterResourcePath + ")";
             }
 
-            return "Ready(Generate=" + (hasGenerate ? generateKernel : generateFallbackKernel) +
+            return "Ready(Generate=" + traceVoxelKernel +
                 ",TraceVoxel=" + traceVoxelKernel +
                 ",TraceVoxelOctree=" + traceVoxelOctreeKernel +
                 ",TraceSpatialFilter=" + traceSpatialFilterKernel +
@@ -25779,48 +25964,77 @@ namespace Burt.RenderPipeline
             var missingCount = 0;
             var kernelCount = 0;
             AppendMissingComputeKernels(
-                "BurtGIScreenProbeTraceCompact",
+                "BurtGIScreenProbePlacement",
+                new[]
+                {
+                    "ScreenProbePlacementUniformCS",
+                    "ScreenProbePlacementDebugCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeAdaptivePlacement",
+                new[]
+                {
+                    "ScreenProbePlacementAdaptiveCS",
+                    "ScreenProbeAdaptivePlacementLiteCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeIndirectArgs",
+                new[]
+                {
+                    "ScreenProbeIndirectArgsSetupCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceCompactSetup",
                 new[]
                 {
                     "ScreenProbeTraceCompactCS",
-                    "ScreenProbePlacementUniformCS",
-                    "ScreenProbePlacementDebugCS",
-                    "ScreenProbeFilterTemporalCS",
-                    "ScreenProbeReprojectionCS",
-                    "ScreenProbeFilterSpatialCS",
-                    "ScreenProbeFilterCompositeTraces",
-                    "ScreenProbeFilterFixupBordersCS",
-                    "ScreenProbeFilterGenerateMipCS",
-                    "ScreenProbePlacementAdaptiveCS",
-                    "ScreenProbeAdaptivePlacementLiteCS",
-                    "ScreenProbeIndirectArgsSetupCS",
                     "ScreenProbeTraceGenArgsCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceAtlasClear",
+                new[]
+                {
                     "ScreenProbeTraceClearCS",
                     "ScreenProbeTraceAtlasClearCS",
-                    "ScreenProbeTraceAtlasFromCompactCS",
-                    "ScreenProbeTraceVisualizeCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceScreen",
+                new[]
+                {
                     "ScreenProbeTraceScreenCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceHashGrid",
+                new[]
+                {
                     "ScreenProbeTraceHashGridCacheCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceVoxel",
+                new[]
+                {
                     "ScreenProbeTraceVoxelCS",
-                    "ScreenProbeTraceSkyCubemapCS",
-                    "ScreenProbeTraceLocalSkyProbeCS",
-                    "ScreenProbeShortRangeAOCS",
-                    "ScreenProbeBentNormalCS",
-                    "ScreenProbeIrradianceSH3CS",
-                    "ScreenProbeIrradianceOctCS",
-                    "ScreenProbeIrradianceOctLiteCS",
-                    "ScreenProbeRadianceOctLiteCS",
-                    "ScreenProbeIrradianceOctGenerateMipCS",
-                    "ScreenProbeImportanceSamplingTransferCS",
-                    "ScreenProbeImportancePDFLiteCS",
-                    "ScreenProbeImportanceSamplingLightCS",
-                    "ScreenProbeImportanceLightPDFLiteCS",
-                    "ScreenProbeImportanceSamplingGenRaysCS",
-                    "ScreenProbeImportanceGenRaysLiteCS",
-                    "ScreenProbeSceneVelocityCS",
-                    "ScreenProbeClearUseCountCS",
-                    "XGIScreenProbeUseCountScatterCS",
-                    "ScreenProbeUseCountScatterCS",
                 },
                 ref missing,
                 ref missingCount,
@@ -25830,6 +26044,154 @@ namespace Burt.RenderPipeline
                 new[]
                 {
                     "ScreenProbeTraceVoxelOctreeCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceScreenGrid",
+                new[]
+                {
+                    "ScreenProbeTraceScreenGridCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceRadianceCacheClipMap",
+                new[]
+                {
+                    "ScreenProbeTraceRadianceCacheClipMapCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceLocalSky",
+                new[]
+                {
+                    "ScreenProbeTraceLocalSkyProbeCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceSkyCubemap",
+                new[]
+                {
+                    "ScreenProbeTraceSkyCubemapCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeCompositeTraces",
+                new[]
+                {
+                    "ScreenProbeFilterCompositeTraces",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeBentNormal",
+                new[]
+                {
+                    "ScreenProbeShortRangeAOCS",
+                    "ScreenProbeBentNormalCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTemporalUseCount",
+                new[]
+                {
+                    "ScreenProbeFilterTemporalCS",
+                    "ScreenProbeReprojectionCS",
+                    "ScreenProbeSceneVelocityCS",
+                    "ScreenProbeClearUseCountCS",
+                    "XGIScreenProbeUseCountScatterCS",
+                    "ScreenProbeUseCountScatterCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeSpatialFilter",
+                new[]
+                {
+                    "ScreenProbeFilterSpatialCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeIrradianceSH",
+                new[]
+                {
+                    "ScreenProbeIrradianceSH3CS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeIrradianceOct",
+                new[]
+                {
+                    "ScreenProbeIrradianceOctCS",
+                    "ScreenProbeIrradianceOctLiteCS",
+                    "ScreenProbeRadianceOctLiteCS",
+                    "ScreenProbeIrradianceOctGenerateMipCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeImportancePDF",
+                new[]
+                {
+                    "ScreenProbeImportanceSamplingTransferCS",
+                    "ScreenProbeImportancePDFLiteCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeImportanceLightPDF",
+                new[]
+                {
+                    "ScreenProbeImportanceSamplingLightCS",
+                    "ScreenProbeImportanceLightPDFLiteCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeImportanceGenRays",
+                new[]
+                {
+                    "ScreenProbeImportanceSamplingGenRaysCS",
+                    "ScreenProbeImportanceGenRaysLiteCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeFilter",
+                new[]
+                {
+                    "ScreenProbeFilterFixupBordersCS",
+                    "ScreenProbeFilterGenerateMipCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIScreenProbeTraceVisualize",
+                new[]
+                {
+                    "ScreenProbeTraceVisualizeCS",
                 },
                 ref missing,
                 ref missingCount,
@@ -25884,7 +26246,7 @@ namespace Burt.RenderPipeline
                 ref kernelCount);
 
             return missingCount == 0
-                ? "Ready(Resources=5,Kernels=" + kernelCount + ",TraceCompact=Placement+TraceAtlas+Filter+Importance+Irradiance+UseCount)"
+                ? "Ready(Resources=28,Kernels=" + kernelCount + ",TraceSplit=Placement+TraceAtlasSubpasses+Filter+Importance+Irradiance+UseCount)"
                 : "Missing(" + missing + ")";
         }
 
@@ -25925,19 +26287,59 @@ namespace Burt.RenderPipeline
                     "SceneVoxelPopulateScreenProbesLiteCS",
                     "SceneVoxelVoxelizeTrianglesCS",
                     "SceneVoxelBuildOccupancyMipLiteCS",
-                    "SceneRepresentVoxelOccupyBuild",
                     "SceneVoxelDownsampleOccupancyMipCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGISceneRepresentVoxelOccupyBuild",
+                new[]
+                {
+                    "SceneRepresentVoxelOccupyBuild",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGISceneRepresentVoxelGenMip",
+                new[]
+                {
                     "SceneRepresentVoxelGenMipCS",
                     "VoxelGenMip",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIXGIToolsVoxelDebug",
+                new[]
+                {
                     "SceneRepresentVoxelOccupyDebug",
                     "VoxelDebugTraceCS",
                     "DebugGenArgs",
                     "DebugProbeCompactFromOccupancy",
                     "DebugProbeGenArgs",
                     "DebugCulling",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIXGISdfGen",
+                new[]
+                {
                     "FillUV",
                     "JFA",
                     "Finalize",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIXGIToolsVoxelOccupy",
+                new[]
+                {
                     "ProbeVolumeCull",
                     "GenBrick",
                     "PopulateGenArgs",
@@ -25948,6 +26350,14 @@ namespace Burt.RenderPipeline
                     "AllocateChunk",
                     "ClearChunkFreeList",
                     "ClearChunkData",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIXGIToolsVoxelMaterial",
+                new[]
+                {
                     "GenMaterialArgs",
                     "GenMaterialFillPrepare",
                     "GenMaterialFillChunk",
@@ -25964,16 +26374,48 @@ namespace Burt.RenderPipeline
                 new[]
                 {
                     "SceneVoxelBuildLightingLiteCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGISceneRepresentLightingVoxel",
+                new[]
+                {
                     "SceneRepresentLightingVoxelCS",
                     "SceneRepresentLightingVoxelGenArgsCS",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGIXGIToolsVoxelLighting",
+                new[]
+                {
                     "GenArgsData",
                     "GenArgs",
                     "LightingDirect",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGISceneVoxelLightingProbeSetup",
+                new[]
+                {
                     "ProbePlacement",
                     "ProbeMark",
                     "ProbeCompact",
                     "ProbeCompactFromOccupancy",
                     "ProbeGenArgs",
+                },
+                ref missing,
+                ref missingCount,
+                ref kernelCount);
+            AppendMissingComputeKernels(
+                "BurtGISceneVoxelLightingProbeTrace",
+                new[]
+                {
                     "ProbeTraceRadiance",
                 },
                 ref missing,
@@ -26023,7 +26465,7 @@ namespace Burt.RenderPipeline
                 ref kernelCount);
 
             return missingCount == 0
-                ? "Ready(Resources=7,Kernels=" + kernelCount + ",SceneVoxel+PhysicalPool+ProbeBaking+SdfKernels)"
+                ? "Ready(Resources=17,Kernels=" + kernelCount + ",SceneVoxelSplit+PhysicalPool+ProbeBaking+SdfKernels)"
                 : "Missing(" + missing + ")";
         }
 

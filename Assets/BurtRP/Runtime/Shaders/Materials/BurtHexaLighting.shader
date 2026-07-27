@@ -17,6 +17,7 @@ Shader "BurtRP/Hexa Lighting"
 
         [Enum(Off,0,Front,1,Back,2)] _Cull ("Cull", Float) = 2
         [Toggle] _ZWrite ("ZWrite", Float) = 0
+        [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 1
     }
 
     SubShader
@@ -63,6 +64,23 @@ Shader "BurtRP/Hexa Lighting"
             #pragma target 3.5
             #pragma vertex VertMotionVector
             #pragma fragment FragMotionVector
+            #pragma multi_compile_instancing
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHexaLightingPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Hexa Lighting Responsive AA Mask"
+            Tags { "LightMode" = "BurtResponsiveAAMask" }
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex VertMotionVector
+            #pragma fragment FragResponsiveAAMask
             #pragma multi_compile_instancing
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHexaLightingPass.hlsl"
             ENDHLSL

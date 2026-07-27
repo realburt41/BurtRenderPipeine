@@ -275,6 +275,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" AerialPerspectivePassRequested=").Append(BurtAtmosphereUtility.ShouldUseAerialPerspective(request));
             builder.Append(" AtmosphereGate=").Append(BurtAtmosphereUtility.FormatRequestGate(request));
             builder.AppendLine();
+            builder.Append("  AtmosphereLut=").Append(BurtAtmosphereLutUtility.FormatDebugState());
+            builder.Append(" AtmosphereReflection=").Append(BurtAtmosphereReflectionUtility.FormatDebugState());
+            builder.AppendLine();
             builder.Append("  AtmosphereAerialPass=").Append(BurtAtmosphereUtility.FormatAerialPassState(request));
             builder.AppendLine();
             builder.Append("  Fog=").Append(BurtFogUtility.FormatDebugState(request));
@@ -1010,6 +1013,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 var colorAndType = lightingData.AdditionalLightColorAndType[lightIndex];
                 var directionAndSpot = lightingData.AdditionalLightDirectionAndSpot[lightIndex];
                 var spotParams = lightingData.AdditionalLightSpotParams[lightIndex];
+                var useInverseSquaredFalloff = BurtLightingData.DecodeUseInverseSquaredFalloff(spotParams.w);
+                var volumetricNearCutoff = BurtLightingData.DecodeVolumetricNearCutoff(spotParams.w);
 
                 builder.Append("    #").Append(lightIndex);
                 builder.Append(" Type=").Append(FormatAdditionalLightType(colorAndType.w));
@@ -1018,7 +1023,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" Range=").Append(FormatFloat(positionAndRange.w));
                 builder.Append(" Direction=").Append(FormatVector3(directionAndSpot.x, directionAndSpot.y, directionAndSpot.z));
                 builder.Append(" VolumetricScale=").Append(FormatFloat(directionAndSpot.w));
-                builder.Append(" VolumetricNearCutoff=").Append(FormatFloat(spotParams.w));
+                builder.Append(" Falloff=").Append(useInverseSquaredFalloff ? "InverseSquared" : "Linear");
+                builder.Append(" VolumetricNearCutoff=").Append(FormatFloat(volumetricNearCutoff));
                 builder.Append(" SpotParams=").Append(FormatSpotParams(spotParams));
                 builder.Append(" Shadow=").Append(FormatAdditionalLightShadowState(lightingData, lightIndex));
                 builder.AppendLine();
@@ -1293,7 +1299,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             return "(InnerCos=" + FormatFloat(spotParams.x)
                 + " OuterCos=" + FormatFloat(spotParams.y)
                 + " InvAngleRange=" + FormatFloat(spotParams.z)
-                + " Spare=" + FormatFloat(spotParams.w)
+                + " PackedFalloffNearCutoff=" + FormatFloat(spotParams.w)
                 + ")";
         }
 

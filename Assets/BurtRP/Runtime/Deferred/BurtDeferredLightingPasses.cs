@@ -179,12 +179,24 @@ namespace Burt.RenderPipeline
             Full
         }
 
+        private enum DeferredLightingDebugLightingVariant
+        {
+            Main,
+            Detail,
+            Additional,
+            Indirect,
+            Final
+        }
+
         private const string DeferredLightingShaderName = "Hidden/BurtRP/DeferredLighting";
-        private const string DeferredLightingDebugShaderName = "Hidden/BurtRP/DeferredLightingDebug";
-        private const string DeferredLightingDebugLightingKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING";
-        private const string DeferredLightingDebugBrdfKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF";
-        private const string DeferredLightingDebugShadowKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW";
-        private const string DeferredLightingDebugTransmissionKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION";
+        private const string DeferredLightingDebugLightingShaderName = "Hidden/BurtRP/DeferredLightingDebugLighting";
+        private const string DeferredLightingDebugBrdfShaderName = "Hidden/BurtRP/DeferredLightingDebugBRDF";
+        private const string DeferredLightingDebugShadowShaderName = "Hidden/BurtRP/DeferredLightingDebugShadow";
+        private const string DeferredLightingDebugTransmissionShaderName = "Hidden/BurtRP/DeferredLightingDebugTransmission";
+        private const string DeferredLightingDebugDetailKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_DETAIL";
+        private const string DeferredLightingDebugAdditionalKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_ADDITIONAL";
+        private const string DeferredLightingDebugIndirectKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_INDIRECT";
+        private const string DeferredLightingDebugFinalKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_FINAL";
 
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -925,11 +937,12 @@ namespace Burt.RenderPipeline
         {
             if (ShouldUseDeferredLightingDebugShader())
             {
+                var debugShaderName = ResolveDeferredLightingDebugShaderName(BurtShadingDebugSettings.Mode);
                 var debugMaterial = GetDeferredLightingMaterial(
-                    DeferredLightingDebugShaderName,
+                    debugShaderName,
                     ref deferredLightingDebugMaterial,
                     ref hasLoggedMissingDebugShader);
-                ApplyDeferredLightingDebugCategoryKeywords(debugMaterial, BurtShadingDebugSettings.Mode);
+                ConfigureDeferredLightingDebugLightingVariant(debugMaterial, BurtShadingDebugSettings.Mode);
                 return debugMaterial;
             }
 
@@ -954,32 +967,81 @@ namespace Burt.RenderPipeline
             return ResolveDeferredLightingDebugCategory(BurtShadingDebugSettings.Mode) != DeferredLightingDebugCategory.None;
         }
 
-        private static void ApplyDeferredLightingDebugCategoryKeywords(Material material, BurtShadingDebugMode mode)
+        private static string ResolveDeferredLightingDebugShaderName(BurtShadingDebugMode mode)
         {
-            if (material == null)
+            switch (ResolveDeferredLightingDebugCategory(mode))
+            {
+                case DeferredLightingDebugCategory.Lighting:
+                    return DeferredLightingDebugLightingShaderName;
+                case DeferredLightingDebugCategory.Brdf:
+                    return DeferredLightingDebugBrdfShaderName;
+                case DeferredLightingDebugCategory.Shadow:
+                    return DeferredLightingDebugShadowShaderName;
+                case DeferredLightingDebugCategory.Transmission:
+                    return DeferredLightingDebugTransmissionShaderName;
+                default:
+                    return DeferredLightingShaderName;
+            }
+        }
+
+        private static void ConfigureDeferredLightingDebugLightingVariant(Material material, BurtShadingDebugMode mode)
+        {
+            if (material == null || material.shader == null || material.shader.name != DeferredLightingDebugLightingShaderName)
             {
                 return;
             }
 
-            material.DisableKeyword(DeferredLightingDebugLightingKeyword);
-            material.DisableKeyword(DeferredLightingDebugBrdfKeyword);
-            material.DisableKeyword(DeferredLightingDebugShadowKeyword);
-            material.DisableKeyword(DeferredLightingDebugTransmissionKeyword);
+            material.DisableKeyword(DeferredLightingDebugDetailKeyword);
+            material.DisableKeyword(DeferredLightingDebugAdditionalKeyword);
+            material.DisableKeyword(DeferredLightingDebugIndirectKeyword);
+            material.DisableKeyword(DeferredLightingDebugFinalKeyword);
 
-            switch (ResolveDeferredLightingDebugCategory(mode))
+            switch (ResolveDeferredLightingDebugLightingVariant(mode))
             {
-                case DeferredLightingDebugCategory.Lighting:
-                    material.EnableKeyword(DeferredLightingDebugLightingKeyword);
+                case DeferredLightingDebugLightingVariant.Detail:
+                    material.EnableKeyword(DeferredLightingDebugDetailKeyword);
                     break;
-                case DeferredLightingDebugCategory.Brdf:
-                    material.EnableKeyword(DeferredLightingDebugBrdfKeyword);
+                case DeferredLightingDebugLightingVariant.Additional:
+                    material.EnableKeyword(DeferredLightingDebugAdditionalKeyword);
                     break;
-                case DeferredLightingDebugCategory.Shadow:
-                    material.EnableKeyword(DeferredLightingDebugShadowKeyword);
+                case DeferredLightingDebugLightingVariant.Indirect:
+                    material.EnableKeyword(DeferredLightingDebugIndirectKeyword);
                     break;
-                case DeferredLightingDebugCategory.Transmission:
-                    material.EnableKeyword(DeferredLightingDebugTransmissionKeyword);
+                case DeferredLightingDebugLightingVariant.Final:
+                    material.EnableKeyword(DeferredLightingDebugFinalKeyword);
                     break;
+            }
+        }
+
+        private static DeferredLightingDebugLightingVariant ResolveDeferredLightingDebugLightingVariant(BurtShadingDebugMode mode)
+        {
+            switch (mode)
+            {
+                case BurtShadingDebugMode.DetailLighting:
+                    return DeferredLightingDebugLightingVariant.Detail;
+
+                case BurtShadingDebugMode.AdditionalLighting:
+                case BurtShadingDebugMode.AdditionalDiffuse:
+                case BurtShadingDebugMode.AdditionalSpecular:
+                case BurtShadingDebugMode.HairAdditionalLighting:
+                case BurtShadingDebugMode.AdditionalLightingUnshadowed:
+                    return DeferredLightingDebugLightingVariant.Additional;
+
+                case BurtShadingDebugMode.IndirectLighting:
+                case BurtShadingDebugMode.IndirectDiffuse:
+                case BurtShadingDebugMode.IndirectSpecular:
+                case BurtShadingDebugMode.AmbientOcclusion:
+                case BurtShadingDebugMode.GIProbeIrradiance:
+                case BurtShadingDebugMode.GIProbeValidity:
+                case BurtShadingDebugMode.GIProbeSkyVisibility:
+                    return DeferredLightingDebugLightingVariant.Indirect;
+
+                case BurtShadingDebugMode.Emission:
+                case BurtShadingDebugMode.FinalLighting:
+                    return DeferredLightingDebugLightingVariant.Final;
+
+                default:
+                    return DeferredLightingDebugLightingVariant.Main;
             }
         }
 
@@ -1086,8 +1148,14 @@ namespace Burt.RenderPipeline
         {
             if (material != null)
             {
-                BurtShadingModelIds.ApplyDeferredLightingStencilProperties(material);
-                return material;
+                if (material.shader != null && material.shader.name == shaderName)
+                {
+                    BurtShadingModelIds.ApplyDeferredLightingStencilProperties(material);
+                    return material;
+                }
+
+                CoreUtils.Destroy(material);
+                material = null;
             }
 
             var shader = Shader.Find(shaderName);

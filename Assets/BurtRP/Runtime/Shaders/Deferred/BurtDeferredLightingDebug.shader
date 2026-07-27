@@ -1,5 +1,5 @@
 // BurtRP hidden deferred lighting debug shader; C# uses it only while shading debug is enabled.
-Shader "Hidden/BurtRP/DeferredLightingDebug"
+Shader "Hidden/BurtRP/DeferredLightingDebugLighting"
 {
     Properties
     {
@@ -21,6 +21,15 @@ Shader "Hidden/BurtRP/DeferredLightingDebug"
 
         HLSLINCLUDE
             #define BURT_COMPILE_SHADING_DEBUG 1
+            #define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING 1
+            // Keep one XRender-style deferred debug shader, but compile the
+            // expensive lighting diagnostics into mutually exclusive local variants.
+            // The no-keyword variant is Main lighting.
+            #pragma multi_compile_local_fragment _ BURT_DEFERRED_LIGHTING_DEBUG_DETAIL BURT_DEFERRED_LIGHTING_DEBUG_ADDITIONAL BURT_DEFERRED_LIGHTING_DEBUG_INDIRECT BURT_DEFERRED_LIGHTING_DEBUG_FINAL
+            // This shader is editor/debug-only. D3D11's optimizer can spend
+            // minutes on each full deferred material model without changing
+            // debug correctness, so skip that optimization stage here.
+            #pragma skip_optimizations d3d11
             // 顶点输入只需要系统生成的顶点 ID。
             struct Attributes
             {
@@ -62,7 +71,6 @@ Shader "Hidden/BurtRP/DeferredLightingDebug"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_DEFAULT_LIT 1
             #pragma target 4.5
-            #pragma multi_compile_local_fragment _ BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
@@ -89,7 +97,6 @@ Shader "Hidden/BurtRP/DeferredLightingDebug"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_HAIR 1
             #pragma target 4.5
-            #pragma multi_compile_local_fragment _ BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
@@ -116,7 +123,6 @@ Shader "Hidden/BurtRP/DeferredLightingDebug"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT 1
             #pragma target 4.5
-            #pragma multi_compile_local_fragment _ BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
@@ -144,7 +150,6 @@ Shader "Hidden/BurtRP/DeferredLightingDebug"
             #define BURT_DEFERRED_SHADING_MODEL_SUBSURFACE 1
             #define BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT 1
             #pragma target 4.5
-            #pragma multi_compile_local_fragment _ BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
@@ -171,7 +176,6 @@ Shader "Hidden/BurtRP/DeferredLightingDebug"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_FABRIC 1
             #pragma target 4.5
-            #pragma multi_compile_local_fragment _ BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
@@ -198,7 +202,6 @@ Shader "Hidden/BurtRP/DeferredLightingDebug"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_FOLIAGE 1
             #pragma target 4.5
-            #pragma multi_compile_local_fragment _ BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
@@ -225,7 +228,6 @@ Shader "Hidden/BurtRP/DeferredLightingDebug"
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_FUR 1
             #pragma target 4.5
-            #pragma multi_compile_local_fragment _ BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION
             #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag

@@ -1,0 +1,1080 @@
+#pragma kernel BuildConservativeDepth
+#pragma kernel BuildMaterialVolume
+#pragma kernel InjectLocalVolume
+#pragma kernel BuildLightingVolume
+#pragma kernel BuildIntegratedVolume
+#pragma target 5.0
+
+#include "UnityCG.cginc"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
+
+RWTexture3D<float4> _BurtVolumetricFogIntegratedOutput;
+RWTexture3D<float4> _BurtVolumetricFogMaterialOutput;
+Texture3D<float4> _BurtVolumetricFogMaterialTexture;
+Texture3D<float> _BurtVolumetricFogLocalDensityTexture;
+Texture2D<float4> _BurtVolumetricFogMapTexture;
+RWTexture3D<float4> _BurtVolumetricFogLightingOutput;
+Texture3D<float4> _BurtVolumetricFogLightingTexture;
+Texture3D<float4> _BurtVolumetricFogLightingHistory;
+Texture2D<float> _BurtVolumetricFogCameraDepthTexture;
+RWTexture2D<float> _BurtVolumetricFogConservativeDepthOutput;
+Texture2D<float> _BurtVolumetricFogConservativeDepthTexture;
+Texture2D<float> _BurtVolumetricFogPreviousConservativeDepthTexture;
+Texture2D<float4> _BurtVolumetricFogHorizontalScatteringLut;
+Texture3D<float4> _BurtVolumetricFogTranslucencyVolume0;
+Texture3D<float4> _BurtVolumetricFogTranslucencyVolume1;
+
+float4 _BurtVolumetricFogIntegratedGridSize; // xyz=grid size, w=visible slice end
+float4 _BurtVolumetricFogConservativeDepthParams; // xy=source size, z=footprint margin, w=slice safety margin
+float4 _BurtVolumetricFogIntegratedGridZParams; // xyz=(B,O,S), w=total slice count
+float4 _BurtVolumetricFogIntegratedBuildParams; // x=visible distance, y=start distance, z=max opacity, w=jitter frame or -1
+float4 _BurtVolumetricFogIntegratedDensityParams; // x=height, y=density, z=height falloff, w=extinction scale
+float4 _BurtVolumetricFogIntegratedSecondDensityParams; // x=absolute height, y=density, z=height falloff
+float4 _BurtVolumetricFogMapWorldParams; // xy=world center XZ, zw=inverse coverage XZ
+float4 _BurtVolumetricFogMapAltitudeParams; // xy=min/max altitude, z=enabled
+float4 _BurtVolumetricFogIntegratedScatteringParams; // x=anisotropy, y=direct, z=ambient, w=use atmosphere horizontal scattering
+float4 _BurtVolumetricFogIntegratedAlbedo;
+float4x4 _BurtVolumetricFogIntegratedInverseViewProjection;
+float4x4 _BurtVolumetricFogIntegratedWorldToView;
+float4x4 _BurtVolumetricFogPreviousViewProjection;
+float4 _BurtVolumetricFogTemporalParams; // x=lighting history valid, y=previous conservative depth valid, z=history alpha, w=jitter enabled
+float4 _BurtVolumetricFogHaltonJitter; // xyz=Halton(2,3,5) for this frame
+float4 _BurtVolumetricFogLocalDispatchParams; // xyz=dispatch offset, w=use density texture
+float4 _BurtVolumetricFogLocalAlbedoExtinction; // rgb=bottom albedo, w=extinction
+float4 _BurtVolumetricFogLocalAlbedoTopGradient; // rgb=top albedo, w=use gradient
+float4 _BurtVolumetricFogLocalShapeParams; // x=height falloff, y=falloff mode, z=invert fade, w=blend mode
+float4 _BurtVolumetricFogLocalPositiveFaceFade;
+float4 _BurtVolumetricFogLocalNegativeFaceFade;
+float4 _BurtVolumetricFogLocalDistanceFade; // xy=start/end
+float4 _BurtVolumetricFogLocalTextureTiling;
+float4 _BurtVolumetricFogLocalTextureScrolling;
+float4x4 _BurtVolumetricFogLocalWorldToVolume;
+float3 _BurtVolumetricFogIntegratedCameraPositionWS;
+float4 _BurtVolumetricFogIntegratedMainLightDirection;
+float4 _BurtVolumetricFogIntegratedLegacyLightColorScale; // rgb=outer-space light * atmosphere transmittance, w=volumetric scale
+float _BurtVolumetricFogIntegratedMainLightOcclusion;
+float4 _BurtVolumetricFogIntegratedAtmosphereParams; // x=enabled, y=sun uses main light
+float4 _BurtVolumetricFogIntegratedHorizontalSunDirection;
+float4 _BurtVolumetricFogIntegratedHorizontalLightColor;
+float4 _BurtVolumetricFogIntegratedHorizontalRayleighTintScale;
+float4 _BurtVolumetricFogIntegratedHorizontalMieTintScale;
+float4 _BurtVolumetricFogIntegratedHorizontalMultipleTintScale;
+float4 _BurtVolumetricFogIntegratedSkyLuminanceFactor;
+float4 _BurtVolumetricFogTranslucencyGIParams; // x=use current filtered translucency GI
+float4 _BurtGITranslucencyVolumeGridSize; // xyz=grid size, w=material intensity scale
+float4 _BurtGITranslucencyVolumeGridZParams; // x=log scale, y=log bias, z=slice scale
+float4 _BurtAmbientSHAr;
+float4 _BurtAmbientSHAg;
+float4 _BurtAmbientSHAb;
+float4 _BurtAmbientSHBr;
+float4 _BurtAmbientSHBg;
+float4 _BurtAmbientSHBb;
+float _BurtAmbientSHEnabled;
+
+#define BURT_VF_MAX_ADDITIONAL_LIGHTS 8
+#define BURT_VF_ADDITIONAL_LIGHT_BUFFER_ROWS 4
+
+float _BurtAdditionalLightCount;
+float4 _BurtAdditionalLightPositionAndRange[BURT_VF_MAX_ADDITIONAL_LIGHTS];
+float4 _BurtAdditionalLightColorAndType[BURT_VF_MAX_ADDITIONAL_LIGHTS];
+float4 _BurtAdditionalLightDirectionAndSpot[BURT_VF_MAX_ADDITIONAL_LIGHTS];
+float4 _BurtAdditionalLightSpotParams[BURT_VF_MAX_ADDITIONAL_LIGHTS];
+StructuredBuffer<float4> _BurtAdditionalLightBuffer;
+float _BurtAdditionalLightBufferEnabled;
+StructuredBuffer<uint> _BurtClusterLightCountBuffer;
+StructuredBuffer<uint> _BurtClusterLightListBuffer;
+StructuredBuffer<uint2> _BurtClusterLightOffsetBuffer;
+float4 _BurtClusterLightGridParams; // xyz=tile count xy/depth slices, w=max lights per cluster
+float4 _BurtClusterLightDepthParams; // xy=near/far, z=inverse log depth range, w=depth slices
+float4 _BurtClusterLightWorldToViewZ;
+float _BurtClusterLightBufferEnabled;
+
+static const float BURT_VF_PI = 3.14159265359f;
+
+float BurtVFFarDeviceDepth()
+{
+#if defined(UNITY_REVERSED_Z)
+    return 0.0f;
+#else
+    return 1.0f;
+#endif
+}
+
+float BurtVFNearDeviceDepth()
+{
+#if defined(UNITY_REVERSED_Z)
+    return 1.0f;
+#else
+    return 0.0f;
+#endif
+}
+
+bool BurtVFIsFarDeviceDepth(float rawDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return rawDepth <= 1.0e-6f;
+#else
+    return rawDepth >= 0.999999f;
+#endif
+}
+
+float BurtVFSelectFurthestDeviceDepth(float a, float b)
+{
+#if defined(UNITY_REVERSED_Z)
+    return min(a, b);
+#else
+    return max(a, b);
+#endif
+}
+
+[numthreads(8, 8, 1)]
+void BuildConservativeDepth(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint gridWidth = (uint)_BurtVolumetricFogIntegratedGridSize.x;
+    uint gridHeight = (uint)_BurtVolumetricFogIntegratedGridSize.y;
+    if (dispatchThreadId.x >= gridWidth || dispatchThreadId.y >= gridHeight)
+    {
+        return;
+    }
+
+    int2 sourceSize = max((int2)_BurtVolumetricFogConservativeDepthParams.xy, int2(1, 1));
+    float2 gridSize = float2(gridWidth, gridHeight);
+    float footprintMargin = max(_BurtVolumetricFogConservativeDepthParams.z, 0.0f);
+    float2 tileMin = (float2(dispatchThreadId.xy) - footprintMargin) / gridSize;
+    float2 tileMax = (float2(dispatchThreadId.xy) + 1.0f + footprintMargin) / gridSize;
+    int2 minPixel = clamp((int2)floor(tileMin * sourceSize), int2(0, 0), sourceSize - 1);
+    int2 maxPixel = clamp((int2)ceil(tileMax * sourceSize) - 1, int2(0, 0), sourceSize - 1);
+    float furthestDepth = BurtVFNearDeviceDepth();
+
+    [loop]
+    for (int pixelY = minPixel.y; pixelY <= maxPixel.y; pixelY++)
+    {
+        [loop]
+        for (int pixelX = minPixel.x; pixelX <= maxPixel.x; pixelX++)
+        {
+            float rawDepth = _BurtVolumetricFogCameraDepthTexture.Load(int3(pixelX, pixelY, 0));
+            furthestDepth = BurtVFSelectFurthestDeviceDepth(furthestDepth, rawDepth);
+        }
+    }
+
+    _BurtVolumetricFogConservativeDepthOutput[dispatchThreadId.xy] = furthestDepth;
+}
+
+float3 BurtVFSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 1.0e-8f ? value * rsqrt(lengthSq) : fallback;
+}
+
+float3 BurtVFNormalizeLightColor(float3 lightColor)
+{
+    float peak = max(max(lightColor.r, lightColor.g), lightColor.b);
+    return peak > 0.001f ? lightColor / peak : 1.0f;
+}
+
+float BurtVFHenyeyGreensteinPhase(float cosTheta, float anisotropy)
+{
+    float g2 = anisotropy * anisotropy;
+    float denominator = max(0.05f, pow(abs(1.0f + g2 - 2.0f * anisotropy * cosTheta), 1.5f));
+    return (1.0f - g2) / (4.0f * BURT_VF_PI * denominator);
+}
+
+// XRender reconstructs sky radiance from the L0/L1 portion of Unity's packed
+// irradiance SH, then convolves L1 with the HG anisotropy. Unity stores C0-C6
+// in shA.w and 3*C6 in shB.z, so C0 is recovered by adding shB.z / 3.
+float3 BurtVFEvaluateSkyAmbientScattering(float3 directionToCamera, float anisotropy)
+{
+    float3 direction = BurtVFSafeNormalize(directionToCamera, float3(0.0f, 0.0f, -1.0f));
+    float3 c6 = float3(_BurtAmbientSHBr.z, _BurtAmbientSHBg.z, _BurtAmbientSHBb.z) / 3.0f;
+    float3 l0 = float3(_BurtAmbientSHAr.w, _BurtAmbientSHAg.w, _BurtAmbientSHAb.w) + c6;
+    float3 l1 = float3(
+        dot(_BurtAmbientSHAr.xyz, direction),
+        dot(_BurtAmbientSHAg.xyz, direction),
+        dot(_BurtAmbientSHAb.xyz, direction));
+    float3 skyScattering = max(
+        0.0f,
+        l0 / BURT_VF_PI + l1 * (anisotropy * (3.0f / (2.0f * BURT_VF_PI))));
+    return lerp(1.0f, skyScattering, saturate(_BurtAmbientSHEnabled));
+}
+
+float3 BurtVFEvaluateTranslucencyGIAmbientScattering(
+    float2 screenUV,
+    float3 positionWS,
+    float3 cameraToSampleDirection,
+    float anisotropy)
+{
+    float viewDepth = max(-mul(_BurtVolumetricFogIntegratedWorldToView, float4(positionWS, 1.0f)).z, 0.00001f);
+    float normalizedSlice = log2(
+        viewDepth * _BurtGITranslucencyVolumeGridZParams.x
+        + _BurtGITranslucencyVolumeGridZParams.y)
+        * _BurtGITranslucencyVolumeGridZParams.z
+        / max(_BurtGITranslucencyVolumeGridSize.z, 1.0f);
+    float3 volumeUVW = saturate(float3(screenUV, normalizedSlice));
+    float3 ambientLighting = _BurtVolumetricFogTranslucencyVolume0.SampleLevel(
+        sampler_LinearClamp,
+        volumeUVW,
+        0.0f).rgb;
+    float3 directionalLighting = _BurtVolumetricFogTranslucencyVolume1.SampleLevel(
+        sampler_LinearClamp,
+        volumeUVW,
+        0.0f).rgb;
+
+    // BurtRP stores the material-facing TGI volume pre-scaled by four; XRender's
+    // VF consumes the unscaled current volume, so remove that scale here.
+    float inverseMaterialScale = rcp(max(_BurtGITranslucencyVolumeGridSize.w, 0.00001f));
+    ambientLighting *= inverseMaterialScale;
+    directionalLighting *= inverseMaterialScale;
+    float ambientLuminance = dot(ambientLighting, float3(0.2126729f, 0.7151522f, 0.0721750f));
+    float3 normalizedAmbientColor = ambientLighting / (ambientLuminance + 0.00001f);
+    float3 rotatedHG = float3(
+        cameraToSampleDirection.y,
+        cameraToSampleDirection.z,
+        cameraToSampleDirection.x) * anisotropy;
+    return max(
+        0.0f,
+        ambientLighting + normalizedAmbientColor * dot(directionalLighting, rotatedHG));
+}
+
+float BurtVFRayleighPhase(float cosTheta)
+{
+    return 3.0f * (1.0f + cosTheta * cosTheta) / (16.0f * BURT_VF_PI);
+}
+
+float BurtVFSchlickPhase(float anisotropy, float cosTheta)
+{
+    float g = clamp(anisotropy, -0.9f, 0.9f);
+    float k = 1.55f * g - 0.55f * g * g * g;
+    float factor = max(abs(1.0f + k * cosTheta), 1.0e-4f);
+    return (1.0f - k * k) / (4.0f * BURT_VF_PI * factor * factor);
+}
+
+float BurtVFInterleavedGradientNoise(float2 pixelPosition, float frameIndex)
+{
+    float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
+    return frac(magic.z * frac(dot(pixelPosition + frameIndex * 0.37f, magic.xy)));
+}
+
+float BurtVFMapSliceToViewDepth(float slice)
+{
+    float b = _BurtVolumetricFogIntegratedGridZParams.x;
+    float o = _BurtVolumetricFogIntegratedGridZParams.y;
+    float s = _BurtVolumetricFogIntegratedGridZParams.z;
+    return (exp2(slice / s) - o) / max(b, 1.0e-6f);
+}
+
+float4 BurtVFBuildFarClipPosition(float2 screenUV)
+{
+    float2 clipXY = screenUV * 2.0f - 1.0f;
+#if UNITY_UV_STARTS_AT_TOP
+    clipXY.y = -clipXY.y;
+#endif
+#if defined(UNITY_REVERSED_Z)
+    const float clipZ = 0.0f;
+#else
+    const float clipZ = 1.0f;
+#endif
+    return float4(clipXY, clipZ, 1.0f);
+}
+
+float3 BurtVFResolveViewDirection(float2 screenUV, out float viewDepthPerWorldUnit)
+{
+    float4 farWS = mul(_BurtVolumetricFogIntegratedInverseViewProjection, BurtVFBuildFarClipPosition(screenUV));
+    farWS.xyz /= max(abs(farWS.w), 1.0e-6f);
+    float3 viewDirection = BurtVFSafeNormalize(
+        farWS.xyz - _BurtVolumetricFogIntegratedCameraPositionWS,
+        float3(0.0f, 0.0f, 1.0f));
+    viewDepthPerWorldUnit = max(
+        -mul((float3x3)_BurtVolumetricFogIntegratedWorldToView, viewDirection).z,
+        1.0e-4f);
+    return viewDirection;
+}
+
+float3 BurtVFResolveSamplePosition(
+    uint3 gridPosition,
+    float3 sampleOffset,
+    out float3 viewDirection,
+    out float worldDistance)
+{
+    float2 gridSize = max(_BurtVolumetricFogIntegratedGridSize.xy, 1.0f);
+    float2 screenUV = (float2(gridPosition.xy) + sampleOffset.xy) / gridSize;
+    float viewDepthPerWorldUnit;
+    viewDirection = BurtVFResolveViewDirection(screenUV, viewDepthPerWorldUnit);
+    float viewDepth = BurtVFMapSliceToViewDepth((float)gridPosition.z + sampleOffset.z);
+    worldDistance = viewDepth / viewDepthPerWorldUnit;
+    return _BurtVolumetricFogIntegratedCameraPositionWS + viewDirection * worldDistance;
+}
+
+float BurtVFSampleHeightDensity(float3 positionWS)
+{
+    float fogHeight = _BurtVolumetricFogIntegratedDensityParams.x;
+    float density = max(_BurtVolumetricFogIntegratedDensityParams.y, 0.0f);
+    float falloff = max(_BurtVolumetricFogIntegratedDensityParams.z, 0.001f);
+    float extinctionScale = max(_BurtVolumetricFogIntegratedDensityParams.w, 0.0f);
+    float extinction = density * exp2(-max(-127.0f, falloff * (positionWS.y - fogHeight)));
+    float secondFogHeight = _BurtVolumetricFogIntegratedSecondDensityParams.x;
+    float secondDensity = max(_BurtVolumetricFogIntegratedSecondDensityParams.y, 0.0f);
+    float secondFalloff = max(_BurtVolumetricFogIntegratedSecondDensityParams.z, 0.0f);
+    extinction += secondDensity * exp2(
+        -max(-127.0f, secondFalloff * (positionWS.y - secondFogHeight)));
+    if (_BurtVolumetricFogMapAltitudeParams.z > 0.5f)
+    {
+        float2 fogMapUV = saturate(
+            (positionWS.xz - _BurtVolumetricFogMapWorldParams.xy)
+            * _BurtVolumetricFogMapWorldParams.zw
+            + 0.5f);
+        float3 fogMapTexel = _BurtVolumetricFogMapTexture.SampleLevel(
+            sampler_LinearRepeat,
+            fogMapUV,
+            0.0f).rgb;
+        float minimumAltitude = _BurtVolumetricFogMapAltitudeParams.x;
+        float maximumAltitude = max(_BurtVolumetricFogMapAltitudeParams.y, minimumAltitude);
+        float mapFogHeight = lerp(minimumAltitude, maximumAltitude, fogMapTexel.r);
+        float mapFalloffRate = rcp(max(0.5f, fogMapTexel.g * 300.0f));
+        float mapDensity = max(fogMapTexel.b * 0.1f, 0.0f);
+        extinction += mapDensity * exp2(
+            -mapFalloffRate * max(positionWS.y - mapFogHeight, 0.0f));
+    }
+
+    return max(extinction * extinctionScale, 0.0f);
+}
+
+float BurtVFMaterialLuminance(float3 value)
+{
+    return dot(max(value, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+float4 BurtVFBuildGlobalMaterial(float3 positionWS)
+{
+    float extinction = max(BurtVFSampleHeightDensity(positionWS), 0.0f);
+    float3 scatteringCoefficient = max(_BurtVolumetricFogIntegratedAlbedo.rgb, 0.0f) * extinction;
+    float absorption = max(extinction - BurtVFMaterialLuminance(scatteringCoefficient), 0.0f);
+    return min(max(float4(scatteringCoefficient, absorption), 0.0f), 65504.0f);
+}
+
+[numthreads(4, 4, 4)]
+void BuildMaterialVolume(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 materialGridSize = uint3(
+        (uint)_BurtVolumetricFogIntegratedGridSize.x,
+        (uint)_BurtVolumetricFogIntegratedGridSize.y,
+        128u);
+    if (any(dispatchThreadId >= materialGridSize))
+    {
+        return;
+    }
+
+    float3 viewDirection;
+    float worldDistance;
+    float3 positionWS = BurtVFResolveSamplePosition(
+        dispatchThreadId,
+        0.5f,
+        viewDirection,
+        worldDistance);
+    _BurtVolumetricFogMaterialOutput[dispatchThreadId] = BurtVFBuildGlobalMaterial(positionWS);
+}
+
+float3 BurtVFComputeLocalFaceFade(float3 volumeUVW, float3 fadeWidth, bool positiveFace)
+{
+    float3 distanceToFace = positiveFace ? (1.0f - volumeUVW) : volumeUVW;
+    float3 safeFadeWidth = max(fadeWidth, 1.0e-6f);
+    return saturate(distanceToFace / safeFadeWidth);
+}
+
+[numthreads(4, 4, 4)]
+void InjectLocalVolume(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 gridPosition = dispatchThreadId + (uint3)_BurtVolumetricFogLocalDispatchParams.xyz;
+    uint3 materialGridSize = uint3(
+        (uint)_BurtVolumetricFogIntegratedGridSize.x,
+        (uint)_BurtVolumetricFogIntegratedGridSize.y,
+        128u);
+    if (any(gridPosition >= materialGridSize))
+    {
+        return;
+    }
+
+    float3 viewDirection;
+    float worldDistance;
+    float3 positionWS = BurtVFResolveSamplePosition(
+        gridPosition,
+        0.5f,
+        viewDirection,
+        worldDistance);
+    float3 localPosition = mul(_BurtVolumetricFogLocalWorldToVolume, float4(positionWS, 1.0f)).xyz;
+    if (any(abs(localPosition) > 0.50001f))
+    {
+        return;
+    }
+
+    float3 volumeUVW = saturate(localPosition + 0.5f);
+    float3 positiveFade = BurtVFComputeLocalFaceFade(
+        volumeUVW,
+        max(_BurtVolumetricFogLocalPositiveFaceFade.xyz, 0.0f),
+        true);
+    float3 negativeFade = BurtVFComputeLocalFaceFade(
+        volumeUVW,
+        max(_BurtVolumetricFogLocalNegativeFaceFade.xyz, 0.0f),
+        false);
+    float densityScale = positiveFade.x * positiveFade.y * positiveFade.z
+        * negativeFade.x * negativeFade.y * negativeFade.z;
+    if (_BurtVolumetricFogLocalShapeParams.y > 0.5f)
+    {
+        densityScale = pow(max(densityScale, 0.0f), 2.2f);
+    }
+
+    if (_BurtVolumetricFogLocalShapeParams.z > 0.5f)
+    {
+        densityScale = 1.0f - densityScale;
+    }
+
+    float distanceFadeStart = max(_BurtVolumetricFogLocalDistanceFade.x, 0.0f);
+    float distanceFadeEnd = max(_BurtVolumetricFogLocalDistanceFade.y, distanceFadeStart);
+    float distanceFadeLength = max(distanceFadeEnd - distanceFadeStart, 1.526e-5f);
+    float viewDepth = BurtVFMapSliceToViewDepth((float)gridPosition.z + 0.5f);
+    densityScale *= saturate((distanceFadeEnd - viewDepth) / distanceFadeLength);
+    densityScale *= exp2(-volumeUVW.y * max(_BurtVolumetricFogLocalShapeParams.x, 0.0f));
+
+    if (_BurtVolumetricFogLocalDispatchParams.w > 0.5f)
+    {
+        float3 densityUVW = volumeUVW * _BurtVolumetricFogLocalTextureTiling.xyz
+            + _BurtVolumetricFogLocalTextureScrolling.xyz * _Time.x;
+        densityScale *= max(_BurtVolumetricFogLocalDensityTexture.SampleLevel(
+            sampler_LinearRepeat,
+            densityUVW,
+            0.0f), 0.0f);
+    }
+
+    float heightFactor = volumeUVW.y;
+    float3 albedo = _BurtVolumetricFogLocalAlbedoTopGradient.w > 0.5f
+        ? lerp(
+            _BurtVolumetricFogLocalAlbedoExtinction.rgb,
+            _BurtVolumetricFogLocalAlbedoTopGradient.rgb,
+            heightFactor)
+        : _BurtVolumetricFogLocalAlbedoExtinction.rgb;
+    float extinction = max(_BurtVolumetricFogLocalAlbedoExtinction.w * densityScale, 0.0f);
+    float3 scatteringCoefficient = max(albedo, 0.0f) * extinction;
+    float absorption = max(extinction - BurtVFMaterialLuminance(scatteringCoefficient), 0.0f);
+    float4 localMaterial = min(max(float4(scatteringCoefficient, absorption), 0.0f), 65504.0f);
+    if (_BurtVolumetricFogLocalShapeParams.w > 0.5f)
+    {
+        localMaterial += _BurtVolumetricFogMaterialOutput[gridPosition];
+    }
+
+    _BurtVolumetricFogMaterialOutput[gridPosition] = min(max(localMaterial, 0.0f), 65504.0f);
+}
+
+float3 BurtVFSampleHorizontalScattering(float component)
+{
+    float3 scattering = _BurtVolumetricFogHorizontalScatteringLut.SampleLevel(
+        sampler_LinearClamp,
+        float2((component + 0.5f) / 3.0f, 0.5f),
+        0.0f).rgb;
+    return component < 1.5f
+        ? scattering * max(_BurtVolumetricFogIntegratedSkyLuminanceFactor.rgb, 0.0f)
+        : scattering;
+}
+
+void BurtVFEvaluateHorizontalLightingTerms(
+    float lightViewCosine,
+    float anisotropy,
+    out float3 singleScatteringLighting,
+    out float3 multipleScatteringLighting)
+{
+    float3 rayleigh = BurtVFSampleHorizontalScattering(0.0f)
+        * max(_BurtVolumetricFogIntegratedHorizontalRayleighTintScale.rgb, 0.0f)
+        * BurtVFRayleighPhase(lightViewCosine);
+    float3 mie = BurtVFSampleHorizontalScattering(1.0f)
+        * max(_BurtVolumetricFogIntegratedHorizontalMieTintScale.rgb, 0.0f)
+        * BurtVFSchlickPhase(anisotropy, -lightViewCosine);
+    float3 multiple = BurtVFSampleHorizontalScattering(2.0f)
+        * max(_BurtVolumetricFogIntegratedHorizontalMultipleTintScale.rgb, 0.0f);
+    float3 lightColor = max(_BurtVolumetricFogIntegratedHorizontalLightColor.rgb, 0.0f);
+    singleScatteringLighting = lightColor * (rayleigh + mie);
+    multipleScatteringLighting = lightColor * multiple;
+}
+
+float4 BurtVFReadAdditionalLightPositionAndRange(int lightIndex)
+{
+    return _BurtAdditionalLightBufferEnabled > 0.5f
+        ? _BurtAdditionalLightBuffer[lightIndex * BURT_VF_ADDITIONAL_LIGHT_BUFFER_ROWS]
+        : _BurtAdditionalLightPositionAndRange[lightIndex];
+}
+
+float4 BurtVFReadAdditionalLightColorAndType(int lightIndex)
+{
+    return _BurtAdditionalLightBufferEnabled > 0.5f
+        ? _BurtAdditionalLightBuffer[lightIndex * BURT_VF_ADDITIONAL_LIGHT_BUFFER_ROWS + 1]
+        : _BurtAdditionalLightColorAndType[lightIndex];
+}
+
+float4 BurtVFReadAdditionalLightDirectionAndSpot(int lightIndex)
+{
+    return _BurtAdditionalLightBufferEnabled > 0.5f
+        ? _BurtAdditionalLightBuffer[lightIndex * BURT_VF_ADDITIONAL_LIGHT_BUFFER_ROWS + 2]
+        : _BurtAdditionalLightDirectionAndSpot[lightIndex];
+}
+
+float4 BurtVFReadAdditionalLightSpotParams(int lightIndex)
+{
+    return _BurtAdditionalLightBufferEnabled > 0.5f
+        ? _BurtAdditionalLightBuffer[lightIndex * BURT_VF_ADDITIONAL_LIGHT_BUFFER_ROWS + 3]
+        : _BurtAdditionalLightSpotParams[lightIndex];
+}
+
+bool BurtVFAdditionalLightUsesInverseSquaredFalloff(float packedFalloffAndNearCutoff)
+{
+    return packedFalloffAndNearCutoff >= 0.0f;
+}
+
+float BurtVFDecodeAdditionalLightVolumetricNearCutoff(float packedFalloffAndNearCutoff)
+{
+    return packedFalloffAndNearCutoff >= 0.0f
+        ? packedFalloffAndNearCutoff
+        : max(-packedFalloffAndNearCutoff - 1.0f, 0.0f);
+}
+
+float BurtVFEvaluateAdditionalLightDistanceAttenuation(
+    float distanceSquared,
+    float distanceBiasSquared,
+    float range,
+    bool useInverseSquaredFalloff)
+{
+    float safeRange = max(range, 0.0001f);
+    float biasedDistanceSquared = distanceSquared + max(distanceBiasSquared, 1.0f);
+    float normalizedDistanceSquared = biasedDistanceSquared / max(safeRange * safeRange, 1.0e-6f);
+    if (!useInverseSquaredFalloff)
+    {
+        return saturate(1.0f - sqrt(saturate(normalizedDistanceSquared)));
+    }
+
+    float smoothFactor = saturate(1.0f - normalizedDistanceSquared * normalizedDistanceSquared);
+    return smoothFactor * smoothFactor * rcp(max(biasedDistanceSquared, 0.0001f));
+}
+
+bool BurtVFUseClusterLightList(int additionalLightCount)
+{
+    return _BurtClusterLightBufferEnabled > 0.5f &&
+        additionalLightCount > 0 &&
+        _BurtClusterLightGridParams.x > 0.5f &&
+        _BurtClusterLightGridParams.y > 0.5f &&
+        _BurtClusterLightGridParams.z > 0.5f &&
+        _BurtClusterLightGridParams.w > 0.5f &&
+        _BurtClusterLightDepthParams.x > 0.0f &&
+        _BurtClusterLightDepthParams.z > 0.0f;
+}
+
+uint BurtVFGetClusterLightIndex(float2 screenUV, float3 positionWS)
+{
+    float2 tileUV = screenUV;
+#if UNITY_UV_STARTS_AT_TOP
+    tileUV.y = 1.0f - tileUV.y;
+#endif
+    tileUV = saturate(tileUV);
+
+    uint tileCountX = (uint)max((int)round(_BurtClusterLightGridParams.x), 1);
+    uint tileCountY = (uint)max((int)round(_BurtClusterLightGridParams.y), 1);
+    uint depthSliceCount = (uint)max((int)round(_BurtClusterLightGridParams.z), 1);
+    uint tileX = min((uint)floor(tileUV.x * (float)tileCountX), tileCountX - 1u);
+    uint tileY = min((uint)floor(tileUV.y * (float)tileCountY), tileCountY - 1u);
+    float nearPlane = max(_BurtClusterLightDepthParams.x, 0.0001f);
+    float viewDepth = max(dot(float4(positionWS, 1.0f), _BurtClusterLightWorldToViewZ), nearPlane);
+    float depth01 = saturate(log(viewDepth / nearPlane) * _BurtClusterLightDepthParams.z);
+    uint depthSlice = min((uint)floor(depth01 * (float)depthSliceCount), depthSliceCount - 1u);
+    return depthSlice * tileCountX * tileCountY + tileY * tileCountX + tileX;
+}
+
+bool BurtVFTryGetClusterLightRange(
+    float2 screenUV,
+    float3 positionWS,
+    int additionalLightCount,
+    out uint2 range)
+{
+    range = uint2(0u, 0u);
+    if (!BurtVFUseClusterLightList(additionalLightCount))
+    {
+        return false;
+    }
+
+    uint clusterIndex = BurtVFGetClusterLightIndex(screenUV, positionWS);
+    uint maxLightsPerCluster = (uint)max((int)round(_BurtClusterLightGridParams.w), 1);
+    uint storedCapacity = min(maxLightsPerCluster, (uint)additionalLightCount);
+    uint rawCount = _BurtClusterLightCountBuffer[clusterIndex];
+    if (rawCount > storedCapacity)
+    {
+        // Preserve all lighting when CPU metadata reports an overflow.
+        return false;
+    }
+
+    uint tileCountX = (uint)max((int)round(_BurtClusterLightGridParams.x), 1);
+    uint tileCountY = (uint)max((int)round(_BurtClusterLightGridParams.y), 1);
+    uint depthSliceCount = (uint)max((int)round(_BurtClusterLightGridParams.z), 1);
+    uint packedCapacity = max(tileCountX * tileCountY * depthSliceCount * storedCapacity, 1u);
+    range = _BurtClusterLightOffsetBuffer[clusterIndex];
+    if (range.y > rawCount || range.y > storedCapacity || range.x > packedCapacity)
+    {
+        range = uint2(0u, 0u);
+        return false;
+    }
+    if (range.y > packedCapacity - range.x)
+    {
+        range = uint2(0u, 0u);
+        return false;
+    }
+
+    return true;
+}
+
+float3 BurtVFEvaluateAdditionalLightScattering(
+    float2 screenUV,
+    float3 positionWS,
+    float3 viewDirection,
+    float anisotropy,
+    float distanceBiasSquared)
+{
+    float3 scattering = 0.0f;
+    int lightCount = min((int)round(max(_BurtAdditionalLightCount, 0.0f)), BURT_VF_MAX_ADDITIONAL_LIGHTS);
+    uint2 clusterRange;
+    bool useClusterLightList = BurtVFTryGetClusterLightRange(
+        screenUV,
+        positionWS,
+        lightCount,
+        clusterRange);
+    int iterationCount = useClusterLightList ? (int)clusterRange.y : lightCount;
+    [loop]
+    for (int iterationIndex = 0; iterationIndex < BURT_VF_MAX_ADDITIONAL_LIGHTS; iterationIndex++)
+    {
+        if (iterationIndex >= iterationCount)
+        {
+            break;
+        }
+
+        int lightIndex = useClusterLightList
+            ? (int)_BurtClusterLightListBuffer[clusterRange.x + (uint)iterationIndex]
+            : iterationIndex;
+        if (lightIndex < 0 || lightIndex >= lightCount)
+        {
+            continue;
+        }
+
+        float4 colorAndType = BurtVFReadAdditionalLightColorAndType(lightIndex);
+        float3 lightColor = max(colorAndType.rgb, 0.0f);
+        float4 directionAndSpot = BurtVFReadAdditionalLightDirectionAndSpot(lightIndex);
+        float volumetricScale = max(directionAndSpot.w, 0.0f);
+        if (volumetricScale <= 0.0001f || dot(lightColor, float3(0.2126f, 0.7152f, 0.0722f)) <= 0.0001f)
+        {
+            continue;
+        }
+
+        float lightType = colorAndType.w;
+        // XRender's local volumetric loop contains punctual lights only. Extra
+        // directional lights stay out of this near-layer contribution.
+        if (lightType <= 0.5f)
+        {
+            continue;
+        }
+
+        float3 lightDirection = BurtVFSafeNormalize(directionAndSpot.xyz, float3(0.0f, 1.0f, 0.0f));
+        float attenuation = 1.0f;
+        float nearCutoffMask = 1.0f;
+        {
+            float4 positionAndRange = BurtVFReadAdditionalLightPositionAndRange(lightIndex);
+            float3 toLight = positionAndRange.xyz - positionWS;
+            float distanceSquared = dot(toLight, toLight);
+            lightDirection = BurtVFSafeNormalize(toLight, lightDirection);
+            float4 spotParams = BurtVFReadAdditionalLightSpotParams(lightIndex);
+            attenuation = BurtVFEvaluateAdditionalLightDistanceAttenuation(
+                distanceSquared,
+                distanceBiasSquared,
+                positionAndRange.w,
+                BurtVFAdditionalLightUsesInverseSquaredFalloff(spotParams.w));
+            float nearCutoff = BurtVFDecodeAdditionalLightVolumetricNearCutoff(spotParams.w);
+            float softEdge = max(nearCutoff * 0.1f, 0.0001f);
+            // Near cutoff intentionally uses the true geometric distance. XRender
+            // applies the froxel footprint bias to attenuation only.
+            nearCutoffMask = smoothstep(nearCutoff, nearCutoff + softEdge, sqrt(max(distanceSquared, 0.0f)));
+            if (lightType > 1.5f)
+            {
+                float3 spotDirection = BurtVFSafeNormalize(directionAndSpot.xyz, float3(0.0f, 0.0f, 1.0f));
+                float spotCosine = dot(-lightDirection, spotDirection);
+                float spotFade = saturate((spotCosine - spotParams.y) * spotParams.z);
+                attenuation *= spotFade * spotFade;
+            }
+        }
+
+        float phase = BurtVFHenyeyGreensteinPhase(dot(lightDirection, viewDirection), anisotropy) * 4.0f;
+        scattering += lightColor * attenuation * nearCutoffMask * volumetricScale * phase;
+    }
+
+    return scattering;
+}
+
+float4 BurtVFEvaluateLightingVolumeSample(uint3 gridPosition, float3 sampleOffset)
+{
+    float3 viewDirection;
+    float worldDistance;
+    float3 positionWS = BurtVFResolveSamplePosition(
+        gridPosition,
+        sampleOffset,
+        viewDirection,
+        worldDistance);
+    float4 material = gridPosition.z < 128u
+        ? _BurtVolumetricFogMaterialTexture.Load(int4(gridPosition, 0))
+        : BurtVFBuildGlobalMaterial(positionWS);
+    float3 scatteringCoefficient = max(material.rgb, 0.0f);
+    float extinction = max(material.a + BurtVFMaterialLuminance(scatteringCoefficient), 0.0f);
+    if (extinction <= 1.0e-8f)
+    {
+        return 0.0f;
+    }
+
+    float anisotropy = _BurtVolumetricFogIntegratedScatteringParams.x;
+    float directScale = max(_BurtVolumetricFogIntegratedScatteringParams.y, 0.0f);
+    float ambientScale = max(_BurtVolumetricFogIntegratedScatteringParams.z, 0.0f);
+    float3 mainLightDirection = BurtVFSafeNormalize(
+        _BurtVolumetricFogIntegratedMainLightDirection.xyz,
+        float3(0.0f, 1.0f, 0.0f));
+    float3 legacyLightColor = BurtVFNormalizeLightColor(
+        max(_BurtVolumetricFogIntegratedLegacyLightColorScale.rgb, 0.0f))
+        * max(_BurtVolumetricFogIntegratedLegacyLightColorScale.w, 0.0f);
+    float mainLightPhase = BurtVFHenyeyGreensteinPhase(
+        dot(mainLightDirection, viewDirection),
+        anisotropy);
+    float mainLightVisibility = BurtSampleMainLightVolumetricShadow(positionWS);
+    float mainLightOcclusion = saturate(_BurtVolumetricFogIntegratedMainLightOcclusion);
+    float2 screenUV = (float2(gridPosition.xy) + sampleOffset.xy)
+        / max(_BurtVolumetricFogIntegratedGridSize.xy, 1.0f);
+    float3 legacyAmbientLighting = _BurtVolumetricFogTranslucencyGIParams.x > 0.5f
+        && gridPosition.z < 128u
+        ? BurtVFEvaluateTranslucencyGIAmbientScattering(
+            screenUV,
+            positionWS,
+            viewDirection,
+            anisotropy) * ambientScale
+        : BurtVFEvaluateSkyAmbientScattering(
+            -viewDirection,
+            anisotropy) * ambientScale;
+    float3 legacyLighting = legacyAmbientLighting
+        + directScale * mainLightPhase * 4.0f * legacyLightColor
+            * (mainLightOcclusion * mainLightVisibility);
+
+    float useAtmosphere = saturate(
+        _BurtVolumetricFogIntegratedScatteringParams.w
+        * _BurtVolumetricFogIntegratedAtmosphereParams.x);
+    float3 atmosphereLighting = 0.0f;
+    if (useAtmosphere > 0.5f)
+    {
+        float3 horizontalSunDirection = BurtVFSafeNormalize(
+            _BurtVolumetricFogIntegratedHorizontalSunDirection.xyz,
+            mainLightDirection);
+        float3 atmosphereSingleScatteringLighting;
+        float3 atmosphereMultipleScatteringLighting;
+        BurtVFEvaluateHorizontalLightingTerms(
+            dot(horizontalSunDirection, viewDirection),
+            anisotropy,
+            atmosphereSingleScatteringLighting,
+            atmosphereMultipleScatteringLighting);
+        float atmosphereSingleVisibility = lerp(
+            1.0f,
+            mainLightVisibility,
+            saturate(_BurtVolumetricFogIntegratedAtmosphereParams.y));
+        atmosphereLighting = (
+            atmosphereSingleScatteringLighting * atmosphereSingleVisibility
+            + atmosphereMultipleScatteringLighting)
+            * mainLightOcclusion;
+    }
+
+    float3 additionalLighting = 0.0f;
+    if (gridPosition.z < 128u)
+    {
+        float3 cornerViewDirection;
+        float cornerWorldDistance;
+        float3 cornerPositionWS = BurtVFResolveSamplePosition(
+            gridPosition,
+            float3(1.0f, 1.0f, 1.0f),
+            cornerViewDirection,
+            cornerWorldDistance);
+        float froxelCellRadius = max(length(positionWS - cornerPositionWS), 1.0f);
+        float distanceBiasSquared = froxelCellRadius * froxelCellRadius;
+        additionalLighting = BurtVFEvaluateAdditionalLightScattering(
+            screenUV,
+            positionWS,
+            viewDirection,
+            anisotropy,
+            distanceBiasSquared);
+    }
+    float horizontalBlend = gridPosition.z >= 128u
+        ? useAtmosphere * smoothstep(130.0f, 150.0f, worldDistance)
+        : 0.0f;
+    float3 inScatteringCoefficient = lerp(
+        legacyLighting * scatteringCoefficient,
+        atmosphereLighting * extinction,
+        horizontalBlend)
+        + additionalLighting * scatteringCoefficient;
+    return min(max(float4(inScatteringCoefficient, extinction), 0.0f), 65504.0f);
+}
+
+bool BurtVFCurrentFroxelIsOccluded(uint3 gridPosition)
+{
+    float rawDepth = _BurtVolumetricFogConservativeDepthTexture.Load(int3(gridPosition.xy, 0));
+    if (BurtVFIsFarDeviceDepth(rawDepth))
+    {
+        return false;
+    }
+
+    float conservativeViewDepth = max(LinearEyeDepth(rawDepth), 0.0f);
+    float froxelNearViewDepth = BurtVFMapSliceToViewDepth((float)gridPosition.z - 0.5f);
+    return conservativeViewDepth < froxelNearViewDepth;
+}
+
+float2 BurtVFPreviousClipToUV(float4 previousClip)
+{
+    float2 uv = previousClip.xy / max(previousClip.w, 1.0e-6f) * 0.5f + 0.5f;
+#if UNITY_UV_STARTS_AT_TOP
+    uv.y = 1.0f - uv.y;
+#endif
+    return uv;
+}
+
+bool BurtVFResolveHistoryUVW(
+    uint3 gridPosition,
+    out float3 historyUVW,
+    out float historyAlpha)
+{
+    historyUVW = 0.0f;
+    historyAlpha = saturate(_BurtVolumetricFogTemporalParams.z);
+    if (_BurtVolumetricFogTemporalParams.x < 0.5f)
+    {
+        return false;
+    }
+
+    float3 centerViewDirection;
+    float centerWorldDistance;
+    float3 centerPositionWS = BurtVFResolveSamplePosition(
+        gridPosition,
+        0.5f,
+        centerViewDirection,
+        centerWorldDistance);
+    float4 previousClip = mul(_BurtVolumetricFogPreviousViewProjection, float4(centerPositionWS, 1.0f));
+    if (previousClip.w <= 1.0e-5f)
+    {
+        return false;
+    }
+
+    historyUVW.xy = BurtVFPreviousClipToUV(previousClip);
+    float historyLogArgument = previousClip.w * _BurtVolumetricFogIntegratedGridZParams.x
+        + _BurtVolumetricFogIntegratedGridZParams.y;
+    if (historyLogArgument <= 0.0f)
+    {
+        return false;
+    }
+
+    historyUVW.z = log2(historyLogArgument)
+        * _BurtVolumetricFogIntegratedGridZParams.z
+        / max(_BurtVolumetricFogIntegratedGridSize.z, 1.0f);
+    if (any(historyUVW < -0.2f) || any(historyUVW > 1.2f))
+    {
+        return false;
+    }
+
+    if (any(historyUVW.xy < 0.0f) || any(historyUVW.xy > 1.0f))
+    {
+        historyAlpha = min(historyAlpha, 0.8f);
+    }
+
+    if (_BurtVolumetricFogTemporalParams.y > 0.5f)
+    {
+        float3 thresholdViewDirection;
+        float thresholdWorldDistance;
+        float3 thresholdPositionWS = BurtVFResolveSamplePosition(
+            gridPosition,
+            float3(0.5f, 0.5f, -0.5f),
+            thresholdViewDirection,
+            thresholdWorldDistance);
+        float4 previousThresholdClip = mul(
+            _BurtVolumetricFogPreviousViewProjection,
+            float4(thresholdPositionWS, 1.0f));
+        int2 previousDepthPosition = (int2)(historyUVW.xy * _BurtVolumetricFogIntegratedGridSize.xy);
+        int2 gridSize = (int2)_BurtVolumetricFogIntegratedGridSize.xy;
+        if (previousThresholdClip.w > 0.0f && all(previousDepthPosition >= 0) && all(previousDepthPosition < gridSize))
+        {
+            float previousRawDepth = _BurtVolumetricFogPreviousConservativeDepthTexture.Load(
+                int3(previousDepthPosition, 0));
+            if (!BurtVFIsFarDeviceDepth(previousRawDepth)
+                && previousThresholdClip.w > max(LinearEyeDepth(previousRawDepth), 0.0f))
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+[numthreads(4, 4, 4)]
+void BuildLightingVolume(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 gridSize = (uint3)_BurtVolumetricFogIntegratedGridSize.xyz;
+    uint visibleSliceEnd = (uint)_BurtVolumetricFogIntegratedGridSize.w;
+    if (any(dispatchThreadId >= gridSize))
+    {
+        return;
+    }
+
+    if (dispatchThreadId.z >= visibleSliceEnd || BurtVFCurrentFroxelIsOccluded(dispatchThreadId))
+    {
+        _BurtVolumetricFogLightingOutput[dispatchThreadId] = 0.0f;
+        return;
+    }
+
+    float3 historyUVW;
+    float historyAlpha;
+    bool historyValid = BurtVFResolveHistoryUVW(dispatchThreadId, historyUVW, historyAlpha);
+    uint sampleCount = historyValid ? 1u : 4u;
+    float4 currentLighting = 0.0f;
+    float scalarNoise = BurtVFInterleavedGradientNoise(
+        float2(dispatchThreadId.xy),
+        (float)dispatchThreadId.z);
+    static const float3 latinHypercubeOffsets[4] =
+    {
+        float3(0.0f, 0.0f, 0.0f),
+        float3(0.25f, 0.5f, 0.75f),
+        float3(0.5f, 0.75f, 0.25f),
+        float3(0.75f, 0.25f, 0.5f)
+    };
+    [unroll]
+    for (uint sampleIndex = 0u; sampleIndex < 4u; sampleIndex++)
+    {
+        if (sampleIndex >= sampleCount)
+        {
+            break;
+        }
+
+        float3 sampleOffset = _BurtVolumetricFogTemporalParams.w > 0.5f
+            ? frac(
+                _BurtVolumetricFogHaltonJitter.xyz
+                + latinHypercubeOffsets[sampleIndex]
+                + scalarNoise)
+            : 0.5f;
+        currentLighting += BurtVFEvaluateLightingVolumeSample(dispatchThreadId, sampleOffset);
+    }
+
+    currentLighting /= (float)sampleCount;
+    if (historyValid)
+    {
+        float4 historyLighting = _BurtVolumetricFogLightingHistory.SampleLevel(
+            sampler_LinearClamp,
+            saturate(historyUVW),
+            0.0f);
+        currentLighting = lerp(currentLighting, historyLighting, historyAlpha);
+    }
+
+    _BurtVolumetricFogLightingOutput[dispatchThreadId] = min(max(currentLighting, 0.0f), 65504.0f);
+}
+
+float4 BurtVFApplyOpacityCap(float3 scattering, float transmittance, float maxOpacity)
+{
+    float fogAmount = saturate(1.0f - transmittance);
+    float opacityScale = fogAmount > 1.0e-5f ? min(saturate(maxOpacity) / fogAmount, 1.0f) : 1.0f;
+    float3 cappedScattering = min(max(scattering * opacityScale, 0.0f), 65504.0f);
+    float cappedFogAmount = fogAmount * opacityScale;
+    return float4(cappedScattering, saturate(1.0f - cappedFogAmount));
+}
+
+float BurtVFLoadConservativeDepthOrFar(int2 position, int2 gridSize)
+{
+    if (any(position < 0) || any(position >= gridSize))
+    {
+        return BurtVFFarDeviceDepth();
+    }
+
+    return _BurtVolumetricFogConservativeDepthTexture.Load(int3(position, 0));
+}
+
+uint BurtVFComputeValidSliceEnd(uint2 gridPosition, uint2 gridSize, uint totalGridDepth)
+{
+    int2 position = int2(gridPosition);
+    int2 size = int2(gridSize);
+    float depth00 = BurtVFLoadConservativeDepthOrFar(position, size);
+    float depth10 = BurtVFLoadConservativeDepthOrFar(position + int2(1, 0), size);
+    float depth01 = BurtVFLoadConservativeDepthOrFar(position + int2(0, 1), size);
+    float depth11 = BurtVFLoadConservativeDepthOrFar(position + int2(1, 1), size);
+    float furthestDepth = BurtVFSelectFurthestDeviceDepth(
+        BurtVFSelectFurthestDeviceDepth(depth00, depth10),
+        BurtVFSelectFurthestDeviceDepth(depth01, depth11));
+    if (BurtVFIsFarDeviceDepth(furthestDepth))
+    {
+        return totalGridDepth;
+    }
+
+    float conservativeViewDepth = max(LinearEyeDepth(furthestDepth), 0.0f);
+    float logArgument = conservativeViewDepth * _BurtVolumetricFogIntegratedGridZParams.x
+        + _BurtVolumetricFogIntegratedGridZParams.y;
+    if (logArgument <= 0.0f)
+    {
+        return 0;
+    }
+
+    float occluderSlice = log2(logArgument) * _BurtVolumetricFogIntegratedGridZParams.z;
+    float safetyMargin = max(_BurtVolumetricFogConservativeDepthParams.w, 0.0f);
+    return (uint)clamp(occluderSlice + safetyMargin, 0.0f, (float)totalGridDepth);
+}
+
+[numthreads(8, 8, 1)]
+void BuildIntegratedVolume(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint gridWidth = (uint)_BurtVolumetricFogIntegratedGridSize.x;
+    uint gridHeight = (uint)_BurtVolumetricFogIntegratedGridSize.y;
+    uint gridDepth = (uint)_BurtVolumetricFogIntegratedGridSize.z;
+    uint visibleSliceEnd = (uint)_BurtVolumetricFogIntegratedGridSize.w;
+    if (dispatchThreadId.x >= gridWidth || dispatchThreadId.y >= gridHeight)
+    {
+        return;
+    }
+
+    uint2 gridPosition = dispatchThreadId.xy;
+    uint validSliceEnd = min(
+        visibleSliceEnd,
+        BurtVFComputeValidSliceEnd(gridPosition, uint2(gridWidth, gridHeight), gridDepth));
+    float2 screenUV = (float2(gridPosition) + 0.5f) / float2(gridWidth, gridHeight);
+    float viewDepthPerWorldUnit;
+    BurtVFResolveViewDirection(screenUV, viewDepthPerWorldUnit);
+    float startViewDepth = max(_BurtVolumetricFogIntegratedBuildParams.y, 0.0f);
+    float maxOpacity = saturate(_BurtVolumetricFogIntegratedBuildParams.z);
+    float previousCenterViewDepth = BurtVFMapSliceToViewDepth(0.0f);
+    float3 accumulatedScattering = 0.0f;
+    float accumulatedTransmittance = 1.0f;
+
+    [loop]
+    for (uint sliceIndex = 0; sliceIndex < gridDepth; sliceIndex++)
+    {
+        uint3 outputPosition = uint3(gridPosition, sliceIndex);
+        if (sliceIndex >= validSliceEnd)
+        {
+            _BurtVolumetricFogIntegratedOutput[outputPosition] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+            continue;
+        }
+
+        float centerViewDepth = BurtVFMapSliceToViewDepth((float)sliceIndex + 0.5f);
+        float segmentStartViewDepth = max(previousCenterViewDepth, startViewDepth);
+        if (centerViewDepth > segmentStartViewDepth)
+        {
+            float stepLength = (centerViewDepth - segmentStartViewDepth) / viewDepthPerWorldUnit;
+            float4 scatteringAndExtinction = _BurtVolumetricFogLightingTexture.Load(
+                int4(outputPosition, 0));
+            float extinction = max(scatteringAndExtinction.a, 0.0f);
+            float stepTransmittance = exp2(-max(extinction * stepLength, 0.0f));
+            float3 integratedSliceScattering = scatteringAndExtinction.rgb
+                * (1.0f - stepTransmittance)
+                / max(extinction, 1.0e-5f);
+            accumulatedScattering += accumulatedTransmittance * integratedSliceScattering;
+            accumulatedTransmittance *= stepTransmittance;
+        }
+
+        previousCenterViewDepth = centerViewDepth;
+        _BurtVolumetricFogIntegratedOutput[outputPosition] = BurtVFApplyOpacityCap(
+            accumulatedScattering,
+            accumulatedTransmittance,
+            maxOpacity);
+    }
+}

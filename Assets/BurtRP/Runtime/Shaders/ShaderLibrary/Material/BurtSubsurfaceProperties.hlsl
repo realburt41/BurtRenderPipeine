@@ -6,11 +6,13 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 
 #define BURT_FORWARD_ENABLE_REFRACTION 0
+#define BURT_MATERIAL_SUPPORTS_TRANSPARENT_FOG 1
 
 CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;
     float4 _BaseMap_ST;
     float4 _MaskMap_ST;
+    float _Surface;
     float _AlphaClip;
     float _Cutoff;
     float _NormalScale;
@@ -56,6 +58,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _SkinnedDecalPluginModel_DecalPosition5;
     float4 _SkinnedDecalPluginModel_DecalBasisX5;
     float4 _SkinnedDecalPluginModel_DecalBasisY5;
+    float _ResponsiveAA;
 CBUFFER_END
 
 #endif // BURT_SUBSURFACE_PROPERTIES_INCLUDED

@@ -80,6 +80,8 @@ namespace Burt.RenderPipeline
                 Current = null;
             }
             BurtAtmosphereReflectionUtility.Release();
+            BurtAtmosphereLutUtility.Release();
+            BurtVolumetricFogIntegratedUtility.Release();
             BurtImageBasedFilterUtility.Release();
             BurtRadianceCacheClipMapHistoryUtility.ReleaseAll();
             BurtRadianceCacheClipMapPersistentBufferUtility.ReleaseAll();

@@ -1,0 +1,483 @@
+#pragma kernel SceneRepresentVoxelOccupyDebug
+#pragma kernel VoxelDebugTraceCS
+#pragma kernel DebugGenArgs
+#pragma kernel DebugProbeCompactFromOccupancy
+#pragma kernel DebugProbeGenArgs
+#pragma kernel DebugCulling
+
+#define BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE 8
+#define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_OCCUPY_DEBUG_THREADGROUP_SIZE 8
+#define BURT_GI_XGI_OCCUPY_SIZE_CUBIC 64u
+#define BURT_GI_XGI_DEBUG_PROBE_ARGS_DATA_ALLOCATOR_OFFSET 8u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_INDEX 0u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET 1u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_MAX_COUNT 128u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT 16u
+#define BURT_GI_XGI_MATERIAL_UINT_SIZE 7u
+#define BURT_GI_XGI_MATERIAL_TEMP_DATA_SIZE 11u
+#define BURT_GI_XGI_MATERIAL_PENDING_DATA_SIZE 4u
+#define BURT_GI_XGI_MATERIAL_EMISSIVE_QUANTIZE_VALUE 16384.0
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_PROCESS_COUNT_PER_THREAD 4u
+#define BURT_GI_XGI_CHUNK_UPDATE_PROCESS_COUNT_PER_THREAD 4u
+#define BURT_GI_XGI_OLD_INVALID_CHUNK_INDEX 0xffffffffu
+#define BURT_GI_XGI_OLD_INVALID_CHUNK_ALLOCATED_INDEX 0u
+
+Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
+Texture3D<uint> _XGIVoxelApply_VoxelOccupyTexture;
+RWTexture2D<float4> RWDebugOccupyPass_RenderTarget;
+RWBuffer<uint> RWDebugArgsBuffer;
+RWBuffer<uint> RWDebugProbeArgsBuffer;
+RWStructuredBuffer<uint> RWVoxelNodeDataCulled;
+RWStructuredBuffer<uint> RWDebugProbeArgsBufferParams;
+RWStructuredBuffer<uint> RWDebugProbePlaceProbeIndex;
+StructuredBuffer<float4> FrustumPlanesBuffer;
+StructuredBuffer<uint> VoxelNodeDataCulled;
+StructuredBuffer<uint> DebugProbePlaceProbeIndex;
+float4 _BurtGISceneVoxelTraceControls;
+
+struct XGIProbeVolumeGpuOBB
+{
+    float3 corner;
+    float3 X;
+    float3 Y;
+    float3 Z;
+    int minControllerSubdivLevel;
+    int maxControllerSubdivLevel;
+    int fillEmptySpaces;
+    int maxSubdivLevelInsideVolume;
+};
+
+
+struct BurtGISceneVoxelTriangle
+{
+    float3 Position0;
+    float Padding0;
+    float3 Position1;
+    float Padding1;
+    float3 Position2;
+    float Padding2;
+    float3 Normal;
+    float Padding3;
+    float3 Albedo;
+    float Padding4;
+    float3 Emission;
+    float Padding5;
+};
+
+
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelHistoryPreviousCenterExtent;
+float4 _BurtGISceneVoxelHistoryCurrentCenterExtent;
+float4 _BurtGISceneVoxelHistoryParams;
+float4 _BurtGISceneVoxelDebugProbeParams;
+float4 _BurtGISceneVoxelLightingParams;
+float4 _BurtGISceneVoxelMaterialParams;
+float4 _BurtDeferredCameraWorldPosition;
+float4 _XGIVoxelApply_VolumeOffsetsWS[8];
+float4 _XGIVoxelApply_VolumeSizesWS[8];
+float4 _XGIVoxelApply_TextureSize;
+float4 _XGIVoxelApply_ClipmapCount;
+float4 _XGISdfGenFillUVPass_TextureSize;
+float4 _XGISdfGenFillUVPass_ClipmapIndexAndCount;
+float4 _XGISdfGenJFAPass_TextureSize;
+float4 _XGISdfGenFinalizePass_TextureSize;
+float4 _XGISdfGenFinalizePass_ClipmapIndexAndCount;
+float4 _XGISdfApply_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeSizeWS;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeOffsetWS;
+float4 _XGIPlacementProbeVolumeCullPass_MaxBrickCount;
+float _XGIPlacementProbeVolumeCullPass_ProbeVolumeCount;
+float _XGIPlacementProbeVolumeCullPass_SubdivLevel;
+float _XGIPlacementProbeVolumeCullPass_BrickSize;
+float _XGIPlacementProbeVolumeCullPass_Padding0;
+float4 _XGIGenBrickPass_VolumeSizeInBricks;
+float4 _XGIGenBrickPass_VolumeOffsetInBricks;
+float4 _XGIGenBrickPass_MaxBrickCount;
+float _XGIGenBrickPass_SubdivLevel;
+float _XGIGenBrickPass_Padding0;
+float _XGIGenBrickPass_Padding1;
+float _XGIGenBrickPass_Padding2;
+float4 _XGIGenerateVoxelOccupyChunkPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyChunkPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyChunkClearDataPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyChunkClearDataPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_MaterialBudgetSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_MaterialBudgetSize;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_MaterialBudgetSize;
+int VoxelMaterialPopulateArgsBufferMaxPendingListCount;
+int VoxelMaterialPopulateClipmapIndex;
+int VoxelMaterialPopulateIndexOffsetForClipmap;
+int VoxelMaterialPopulatePhysicalPoolSize;
+int VoxelMaterialFillVoxelTextureSize;
+int VoxelMaterialFillClipmapIndex;
+int VoxelMaterialFillTextureSize;
+int VoxelMaterialFillClipmapID;
+int FillIndex;
+int MaxPendingListCount;
+int FillChunkChunkCountPerTime;
+int FillChunkChunkThreadGroupNumbX;
+int FillArgsChunkSizeInOccupy;
+int FillClearChunkCountPerTime;
+int FillClearChunkSizeInOccupy;
+int FillClearFillIndex;
+int FillClearMaterialBudgetSize;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+uint _BurtGISceneVoxelTriangleCount;
+uint _BurtGISceneVoxelOccupancyMipSourceMip;
+float4 DebugArgsData;
+float4 DebugProbeArgsData;
+float4 DebugProbeCompactParams; // x=probe node size, y=max compact probes, z=index offset per clipmap, w=occupancy threshold.
+float4 CameraPos;
+int DebugProbeArgsClipmapCount;
+int DebugProbeArgsMaxCount;
+int MipLevel;
+float CullingDistance;
+
+
+struct BurtXGIVoxelMaterialUint
+{
+    uint4 albedo;
+    uint opaque;
+    uint3 normal;
+    uint3 emissive;
+};
+
+struct BurtXGIVoxelMaterialFloat
+{
+    float3 albedo;
+    float opaque;
+    float3 normal;
+    float3 emissive;
+};
+
+struct BurtXGIVoxelMaterialPendingData
+{
+    uint nodeIndex;
+    uint albedoOpaque;
+    uint normal;
+    uint emissive;
+};
+
+float3 BurtGISceneVoxelWorldToUVW(float3 worldPosition)
+{
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    float extent = max(centerExtent.w, 0.001);
+    return (worldPosition - centerExtent.xyz) / (extent * 2.0) + 0.5;
+}
+float3 BurtGISceneVoxelUVWToWorld(float3 uvw)
+{
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    return (uvw * 2.0 - 1.0) * centerExtent.w + centerExtent.xyz;
+}
+float3 BurtGISceneVoxelDebugHeatmap(float value)
+{
+    value = saturate(value);
+    float3 blue = float3(0.0, 0.15, 1.0);
+    float3 cyan = float3(0.0, 1.0, 1.0);
+    float3 green = float3(0.0, 1.0, 0.15);
+    float3 yellow = float3(1.0, 0.92, 0.0);
+    float3 red = float3(1.0, 0.0, 0.0);
+    float3 low = lerp(blue, cyan, saturate(value * 4.0));
+    float3 mid = lerp(green, yellow, saturate(value * 4.0 - 2.0));
+    float3 high = lerp(yellow, red, saturate(value * 4.0 - 3.0));
+    return value < 0.5 ? lerp(low, mid, saturate(value * 2.0)) : lerp(mid, high, saturate(value * 2.0 - 1.0));
+}
+float4 BurtGISceneVoxelBuildClipPosition(float2 screenUV, float rawDepth)
+{
+    float2 clipXY = screenUV * 2.0 - 1.0;
+#if UNITY_UV_STARTS_AT_TOP
+    clipXY.y = -clipXY.y;
+#endif
+    return float4(clipXY, rawDepth, 1.0);
+}
+float3 BurtGISceneVoxelReconstructPositionWS(float2 screenUV, float rawDepth)
+{
+    float4 clipPosition = BurtGISceneVoxelBuildClipPosition(screenUV, rawDepth);
+    float4 positionWS = mul(_BurtDeferredInverseViewProjectionMatrix, clipPosition);
+    float safeW = abs(positionWS.w) > 1.0e-6 ? positionWS.w : (positionWS.w < 0.0 ? -1.0e-6 : 1.0e-6);
+    return positionWS.xyz / safeW;
+}
+float3 BurtGISceneVoxelSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+uint BurtGIXGIVoxelMipSize(uint textureSize, uint mipLevel)
+{
+    return max(textureSize >> (mipLevel * 2u), 1u);
+}
+uint BurtGIXGIVoxelNodeIndex2Flat(uint3 nodeIndexWithClipmap, uint textureSize, uint clipmapCount)
+{
+    uint safeTextureSize = max(textureSize, 1u);
+    uint safeClipmapCount = max(clipmapCount, 1u);
+    uint3 volumeSizeWithClipmap = uint3(safeTextureSize, safeTextureSize, safeTextureSize * safeClipmapCount);
+    return nodeIndexWithClipmap.x +
+        nodeIndexWithClipmap.z * volumeSizeWithClipmap.x +
+        nodeIndexWithClipmap.y * volumeSizeWithClipmap.x * volumeSizeWithClipmap.z;
+}
+bool BurtGIXGIFrustumAABBIntersect(float3 boundsMin, float3 boundsMax)
+{
+    [unroll]
+    for (uint planeIndex = 0u; planeIndex < 6u; ++planeIndex)
+    {
+        float4 plane = FrustumPlanesBuffer[planeIndex];
+        float3 positive = float3(
+            plane.x >= 0.0 ? boundsMax.x : boundsMin.x,
+            plane.y >= 0.0 ? boundsMax.y : boundsMin.y,
+            plane.z >= 0.0 ? boundsMax.z : boundsMin.z);
+        if (dot(plane.xyz, positive) + plane.w < 0.0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+[numthreads(1, 1, 1)]
+void DebugGenArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    RWDebugArgsBuffer[0] = (uint)DebugArgsData.x;
+    RWDebugArgsBuffer[2] = (uint)DebugArgsData.y;
+    RWDebugArgsBuffer[3] = (uint)DebugArgsData.z;
+    RWDebugArgsBuffer[4] = (uint)DebugArgsData.w;
+
+    uint totalNodeCount = VoxelNodeDataCulled[0];
+    uint totalVoxelCount = totalNodeCount > (0xffffffffu / BURT_GI_XGI_OCCUPY_SIZE_CUBIC)
+        ? 0xffffffffu
+        : totalNodeCount * BURT_GI_XGI_OCCUPY_SIZE_CUBIC;
+    RWDebugArgsBuffer[1] = totalVoxelCount;
+
+    RWDebugProbeArgsBuffer[0] = (uint)DebugProbeArgsData.x;
+    RWDebugProbeArgsBuffer[2] = (uint)DebugProbeArgsData.y;
+    RWDebugProbeArgsBuffer[3] = (uint)DebugProbeArgsData.z;
+    RWDebugProbeArgsBuffer[4] = (uint)DebugProbeArgsData.w;
+
+    uint probeCount = 0u;
+    int clipmapCount = max(DebugProbeArgsClipmapCount, 0);
+    [loop]
+    for (int i = 0; i < clipmapCount; ++i)
+    {
+        RWDebugProbeArgsBufferParams[i] = probeCount;
+        probeCount += DebugProbePlaceProbeIndex[i];
+    }
+
+    probeCount = min(probeCount, (uint)max(DebugProbeArgsMaxCount, 0));
+    [loop]
+    for (int j = clipmapCount; j <= (int)BURT_GI_XGI_DEBUG_PROBE_ARGS_DATA_ALLOCATOR_OFFSET; ++j)
+    {
+        RWDebugProbeArgsBufferParams[j] = probeCount;
+    }
+
+    RWDebugProbeArgsBuffer[1] = probeCount;
+}
+[numthreads(BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE)]
+void DebugProbeCompactFromOccupancy(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint probeNodeSize = max((uint)DebugProbeCompactParams.x, 1u);
+    if (any(dispatchThreadId >= probeNodeSize))
+    {
+        return;
+    }
+
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    _BurtGISceneVoxelOccupancyMipReadTexture.GetDimensions(width, height, depth);
+    uint3 occupancySize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    uint3 occupancyCoord = min((dispatchThreadId * occupancySize) / probeNodeSize, occupancySize - 1u);
+    float4 occupancyValue = _BurtGISceneVoxelOccupancyMipReadTexture.Load(int4((int3)occupancyCoord, 0));
+    float occupancy = max(max(occupancyValue.r, occupancyValue.g), max(occupancyValue.b, occupancyValue.a));
+    if (occupancy <= max(DebugProbeCompactParams.w, 0.0001))
+    {
+        return;
+    }
+
+    uint compactIndex = 0u;
+    InterlockedAdd(RWDebugProbePlaceProbeIndex[0], 1u, compactIndex);
+    uint maxCompactProbes = max((uint)DebugProbeCompactParams.y, 1u);
+    if (compactIndex >= maxCompactProbes)
+    {
+        return;
+    }
+
+    uint indexOffset = max((uint)DebugProbeCompactParams.z, 1u);
+    RWDebugProbePlaceProbeIndex[indexOffset + compactIndex] =
+        dispatchThreadId.x + dispatchThreadId.z * probeNodeSize + dispatchThreadId.y * probeNodeSize * probeNodeSize;
+}
+[numthreads(1, 1, 1)]
+void DebugProbeGenArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    RWDebugProbeArgsBuffer[0] = (uint)DebugProbeArgsData.x;
+    RWDebugProbeArgsBuffer[2] = (uint)DebugProbeArgsData.y;
+    RWDebugProbeArgsBuffer[3] = (uint)DebugProbeArgsData.z;
+    RWDebugProbeArgsBuffer[4] = (uint)DebugProbeArgsData.w;
+
+    uint probeCount = 0u;
+    int clipmapCount = max(DebugProbeArgsClipmapCount, 0);
+    [loop]
+    for (int i = 0; i < clipmapCount; ++i)
+    {
+        RWDebugProbeArgsBufferParams[i] = probeCount;
+        probeCount += DebugProbePlaceProbeIndex[i];
+    }
+
+    probeCount = min(probeCount, (uint)max(DebugProbeArgsMaxCount, 0));
+    [loop]
+    for (int j = clipmapCount; j <= (int)BURT_GI_XGI_DEBUG_PROBE_ARGS_DATA_ALLOCATOR_OFFSET; ++j)
+    {
+        RWDebugProbeArgsBufferParams[j] = probeCount;
+    }
+
+    RWDebugProbeArgsBuffer[1] = probeCount;
+}
+[numthreads(BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE)]
+void DebugCulling(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint textureSize = max((uint)_XGIVoxelApply_TextureSize.x, 1u);
+    uint clipmapCount = max((uint)_XGIVoxelApply_ClipmapCount.x, 1u);
+    uint mipLevel = (uint)max(MipLevel, 0);
+    uint textureSizeCurMip = BurtGIXGIVoxelMipSize(textureSize, mipLevel);
+    uint clipmapIndex = dispatchThreadId.z / textureSizeCurMip;
+    if (clipmapIndex >= clipmapCount)
+    {
+        return;
+    }
+
+    uint3 nodeIndex = uint3(dispatchThreadId.x, dispatchThreadId.y, dispatchThreadId.z % textureSizeCurMip);
+    if (any(nodeIndex >= textureSizeCurMip))
+    {
+        return;
+    }
+
+    uint3 occupancyCoord = uint3(nodeIndex.xy, nodeIndex.z + clipmapIndex * textureSizeCurMip);
+    uint occupancyValue = _XGIVoxelApply_VoxelOccupyTexture.Load(int4((int)occupancyCoord.x, (int)occupancyCoord.y, (int)occupancyCoord.z, 0));
+    if (occupancyValue == 0u)
+    {
+        return;
+    }
+
+    float3 volumeOffsetWS = _XGIVoxelApply_VolumeOffsetsWS[clipmapIndex].xyz;
+    float3 volumeSizeWS = _XGIVoxelApply_VolumeSizesWS[clipmapIndex].xyz;
+    float3 boundsMin = ((float3)nodeIndex / (float)textureSizeCurMip) * volumeSizeWS + volumeOffsetWS;
+    float3 boundsMax = ((float3)(nodeIndex + 1u) / (float)textureSizeCurMip) * volumeSizeWS + volumeOffsetWS;
+    float3 boundsCenter = (boundsMin + boundsMax) * 0.5;
+    if (length(boundsCenter - CameraPos.xyz) >= CullingDistance)
+    {
+        return;
+    }
+
+    if (!BurtGIXGIFrustumAABBIntersect(boundsMin, boundsMax))
+    {
+        return;
+    }
+
+    uint allocatedIndex;
+    InterlockedAdd(RWVoxelNodeDataCulled[0], 1u, allocatedIndex);
+    allocatedIndex++;
+    uint3 nodeIndexWithClipmap = dispatchThreadId.xyz;
+    RWVoxelNodeDataCulled[allocatedIndex] = BurtGIXGIVoxelNodeIndex2Flat(nodeIndexWithClipmap, textureSizeCurMip, clipmapCount);
+}
+[numthreads(BURT_GI_SCENE_VOXEL_OCCUPY_DEBUG_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_OCCUPY_DEBUG_THREADGROUP_SIZE, 1)]
+void SceneRepresentVoxelOccupyDebug(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint outputWidth;
+    uint outputHeight;
+    RWDebugOccupyPass_RenderTarget.GetDimensions(outputWidth, outputHeight);
+    uint2 outputSize = uint2(outputWidth, outputHeight);
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (any(pixelCoord >= outputSize))
+    {
+        return;
+    }
+
+    uint volumeWidth;
+    uint volumeHeight;
+    uint volumeDepth;
+    _BurtGISceneVoxelOccupancyMipReadTexture.GetDimensions(volumeWidth, volumeHeight, volumeDepth);
+    uint3 volumeSize = max(uint3(volumeWidth, volumeHeight, volumeDepth), uint3(1u, 1u, 1u));
+    float2 screenUV = ((float2)pixelCoord + 0.5) / max((float2)outputSize, 1.0);
+    float3 rayOriginWS = _BurtDeferredCameraWorldPosition.xyz;
+    float3 farPositionWS = BurtGISceneVoxelReconstructPositionWS(screenUV, 1.0);
+    float3 rayDirectionWS = BurtGISceneVoxelSafeNormalize(farPositionWS - rayOriginWS, float3(0.0, 0.0, 1.0));
+    float3 boxMinWS = BurtGISceneVoxelUVWToWorld(float3(0.0, 0.0, 0.0));
+    float3 boxMaxWS = BurtGISceneVoxelUVWToWorld(float3(1.0, 1.0, 1.0));
+    float3 safeDirection = float3(
+        abs(rayDirectionWS.x) > 1.0e-5 ? rayDirectionWS.x : (rayDirectionWS.x < 0.0 ? -1.0e-5 : 1.0e-5),
+        abs(rayDirectionWS.y) > 1.0e-5 ? rayDirectionWS.y : (rayDirectionWS.y < 0.0 ? -1.0e-5 : 1.0e-5),
+        abs(rayDirectionWS.z) > 1.0e-5 ? rayDirectionWS.z : (rayDirectionWS.z < 0.0 ? -1.0e-5 : 1.0e-5));
+    float3 invDirection = rcp(safeDirection);
+    float3 t0 = (boxMinWS - rayOriginWS) * invDirection;
+    float3 t1 = (boxMaxWS - rayOriginWS) * invDirection;
+    float3 tMin3 = min(t0, t1);
+    float3 tMax3 = max(t0, t1);
+    float tMin = max(max(tMin3.x, tMin3.y), max(tMin3.z, 0.0));
+    float tMax = min(tMax3.x, min(tMax3.y, tMax3.z));
+    if (tMax <= tMin)
+    {
+        RWDebugOccupyPass_RenderTarget[pixelCoord] = float4(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+
+    uint maxSteps = 64u;
+    float traceLength = tMax - tMin;
+    float bestOccupancy = 0.0;
+    float3 bestUVW = 0.0;
+    uint hitStep = maxSteps;
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < maxSteps; ++stepIndex)
+    {
+        float stepT = ((float)stepIndex + 0.5) / (float)maxSteps;
+        float3 samplePositionWS = rayOriginWS + rayDirectionWS * (tMin + traceLength * stepT);
+        float3 uvw = BurtGISceneVoxelWorldToUVW(samplePositionWS);
+        uint3 coord = min((uint3)(saturate(uvw) * (float3)volumeSize), volumeSize - 1u);
+        float occupancy = saturate(_BurtGISceneVoxelOccupancyMipReadTexture.Load(int4(coord, 0)).a);
+        if (occupancy > bestOccupancy)
+        {
+            bestOccupancy = occupancy;
+            bestUVW = uvw;
+            hitStep = stepIndex;
+        }
+
+        if (occupancy > 0.5)
+        {
+            break;
+        }
+    }
+
+    if (bestOccupancy <= 0.0001)
+    {
+        RWDebugOccupyPass_RenderTarget[pixelCoord] = float4(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+
+    float stepHeat = 1.0 - saturate((float)hitStep / (float)maxSteps);
+    float3 color = BurtGISceneVoxelDebugHeatmap(stepHeat) * lerp(0.35, 1.0, bestOccupancy);
+    if (_BurtGISceneVoxelDebugProbeParams.x > 0.5)
+    {
+        float extentWS = max(_BurtGISceneVoxelCenterExtent.w * 2.0, 0.001);
+        float probeSizeWS = clamp(_BurtGISceneVoxelDebugProbeParams.y, 0.01, 2.0);
+        float probeGridResolution = clamp(extentWS / probeSizeWS, 4.0, 128.0);
+        float3 probeCell = abs(frac(bestUVW * probeGridResolution) - 0.5);
+        float marker = 1.0 - smoothstep(0.11, 0.22, length(probeCell));
+        color = lerp(color, float3(1.0, 0.18, 0.48), marker * 0.85);
+    }
+    RWDebugOccupyPass_RenderTarget[pixelCoord] = float4(color, bestOccupancy);
+}
+[numthreads(BURT_GI_SCENE_VOXEL_OCCUPY_DEBUG_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_OCCUPY_DEBUG_THREADGROUP_SIZE, 1)]
+void VoxelDebugTraceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    SceneRepresentVoxelOccupyDebug(dispatchThreadId);
+}

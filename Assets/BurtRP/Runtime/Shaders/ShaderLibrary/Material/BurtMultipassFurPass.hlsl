@@ -540,6 +540,17 @@ float4 FragMultipassFurDepth(BurtMultipassFurVaryings input) : SV_Target
     return 0;
 }
 
+float4 FragMultipassFurResponsiveAAMask(BurtMultipassFurVaryings input) : SV_Target
+{
+    float4 baseMap;
+    float4 maskMap;
+    float furAtten;
+    float4 baseColor = BurtResolveMultipassFurBaseColor(input, baseMap, maskMap, furAtten);
+    BurtApplyMultipassFurClip(baseColor.a, input.PositionCS);
+    clip(_ResponsiveAA - 0.5f);
+    return float4(1.0f, 0.0f, 0.0f, 0.0f);
+}
+
 float4 FragMultipassFurBlurProperty(BurtMultipassFurVaryings input) : SV_Target
 {
     float4 baseMap;

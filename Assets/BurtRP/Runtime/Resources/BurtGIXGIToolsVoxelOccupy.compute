@@ -1,0 +1,718 @@
+#pragma kernel ProbeVolumeCull
+#pragma kernel GenBrick
+#pragma kernel PopulateGenArgs
+#pragma kernel Populate
+#pragma kernel FillPageTable
+#pragma kernel FillGenArgs
+#pragma kernel Fill
+#pragma kernel AllocateChunk
+#pragma kernel ClearChunkFreeList
+#pragma kernel ClearChunkData
+
+#define BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE 8
+#define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_OCCUPY_DEBUG_THREADGROUP_SIZE 8
+#define BURT_GI_XGI_OCCUPY_SIZE_CUBIC 64u
+#define BURT_GI_XGI_DEBUG_PROBE_ARGS_DATA_ALLOCATOR_OFFSET 8u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_INDEX 0u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET 1u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_MAX_COUNT 128u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT 16u
+#define BURT_GI_XGI_MATERIAL_UINT_SIZE 7u
+#define BURT_GI_XGI_MATERIAL_TEMP_DATA_SIZE 11u
+#define BURT_GI_XGI_MATERIAL_PENDING_DATA_SIZE 4u
+#define BURT_GI_XGI_MATERIAL_EMISSIVE_QUANTIZE_VALUE 16384.0
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_PROCESS_COUNT_PER_THREAD 4u
+#define BURT_GI_XGI_CHUNK_UPDATE_PROCESS_COUNT_PER_THREAD 4u
+#define BURT_GI_XGI_OLD_INVALID_CHUNK_INDEX 0xffffffffu
+#define BURT_GI_XGI_OLD_INVALID_CHUNK_ALLOCATED_INDEX 0u
+
+Texture3D<float> _XGISdfApply_SdfTexture;
+Texture3D<float2> _XGIGenBrickPass_ProbeVolumeCullData;
+Texture3D<uint> VoxelMaterialFillOccupyTexture;
+Texture3D<uint> VoxelMaterialFillPageTable;
+Texture3D<uint> _XGIGenerateVoxelOccupyChunkPass_VoxelOccupy;
+RWTexture3D<uint> RWVoxelMaterialFillPageTable;
+RWTexture3D<uint> _RW_XGIGenerateVoxelOccupyChunkPass_ChunkData;
+RWTexture3D<uint> _RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkData;
+RWTexture3D<float2> _RW_XGIPlacementProbeVolumeCullPass_Result;
+RWTexture2D<float4> RWVoxelMaterialPopulateAtlasAlbedo;
+RWTexture2D<float2> RWVoxelMaterialPopulateAtlasNormal;
+RWTexture2D<float3> RWVoxelMaterialPopulateAtlasEmissive;
+RWBuffer<uint> RWVoxelMaterialPopulateArgsBuffer;
+RWBuffer<uint> RWVoxelMaterialFillArgsBuffer;
+RWStructuredBuffer<uint> _RW_XGIGenBrickPass_BrickCount;
+RWStructuredBuffer<float4> _RW_XGIGenBrickPass_Bricks;
+RWStructuredBuffer<uint> _RW_XGIGenerateVoxelOccupyChunkPass_ChunkAllocator;
+RWStructuredBuffer<int> _RW_XGIGenerateVoxelOccupyChunkPass_ChunkFreeListAllocator;
+RWStructuredBuffer<uint> _RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkAllocator;
+RWStructuredBuffer<int> _RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkFreeListAllocator;
+RWStructuredBuffer<uint> RWVoxelMaterialPopulateArgsBufferParams;
+RWStructuredBuffer<uint> RWVoxelMaterialFillArgsBufferParams;
+RWStructuredBuffer<uint> RWVoxelMaterialFillFinalPendingList;
+RWStructuredBuffer<uint> RWVoxelMaterialFillPendingList;
+StructuredBuffer<uint> VoxelMaterialPopulateArgsBufferPendingList;
+StructuredBuffer<uint> VoxelMaterialPopulateArgsBufferParams;
+StructuredBuffer<uint> VoxelMaterialPopulatePendingList;
+StructuredBuffer<uint> VoxelMaterialFillArgsPendingList;
+StructuredBuffer<uint> VoxelMaterialFillArgsBufferParams;
+StructuredBuffer<uint> VoxelMaterialFillPendingList;
+float4 _BurtGISceneVoxelTraceControls;
+
+struct XGIProbeVolumeGpuOBB
+{
+    float3 corner;
+    float3 X;
+    float3 Y;
+    float3 Z;
+    int minControllerSubdivLevel;
+    int maxControllerSubdivLevel;
+    int fillEmptySpaces;
+    int maxSubdivLevelInsideVolume;
+};
+
+StructuredBuffer<XGIProbeVolumeGpuOBB> _XGIPlacementProbeVolumeCullPass_ProbeVolumes;
+
+struct BurtGISceneVoxelTriangle
+{
+    float3 Position0;
+    float Padding0;
+    float3 Position1;
+    float Padding1;
+    float3 Position2;
+    float Padding2;
+    float3 Normal;
+    float Padding3;
+    float3 Albedo;
+    float Padding4;
+    float3 Emission;
+    float Padding5;
+};
+
+
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelHistoryPreviousCenterExtent;
+float4 _BurtGISceneVoxelHistoryCurrentCenterExtent;
+float4 _BurtGISceneVoxelHistoryParams;
+float4 _BurtGISceneVoxelDebugProbeParams;
+float4 _BurtGISceneVoxelLightingParams;
+float4 _BurtGISceneVoxelMaterialParams;
+float4 _BurtDeferredCameraWorldPosition;
+float4 _XGIVoxelApply_VolumeOffsetsWS[8];
+float4 _XGIVoxelApply_VolumeSizesWS[8];
+float4 _XGIVoxelApply_TextureSize;
+float4 _XGIVoxelApply_ClipmapCount;
+float4 _XGISdfGenFillUVPass_TextureSize;
+float4 _XGISdfGenFillUVPass_ClipmapIndexAndCount;
+float4 _XGISdfGenJFAPass_TextureSize;
+float4 _XGISdfGenFinalizePass_TextureSize;
+float4 _XGISdfGenFinalizePass_ClipmapIndexAndCount;
+float4 _XGISdfApply_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeSizeWS;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeOffsetWS;
+float4 _XGIPlacementProbeVolumeCullPass_MaxBrickCount;
+float _XGIPlacementProbeVolumeCullPass_ProbeVolumeCount;
+float _XGIPlacementProbeVolumeCullPass_SubdivLevel;
+float _XGIPlacementProbeVolumeCullPass_BrickSize;
+float _XGIPlacementProbeVolumeCullPass_Padding0;
+float4 _XGIGenBrickPass_VolumeSizeInBricks;
+float4 _XGIGenBrickPass_VolumeOffsetInBricks;
+float4 _XGIGenBrickPass_MaxBrickCount;
+float _XGIGenBrickPass_SubdivLevel;
+float _XGIGenBrickPass_Padding0;
+float _XGIGenBrickPass_Padding1;
+float _XGIGenBrickPass_Padding2;
+float4 _XGIGenerateVoxelOccupyChunkPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyChunkPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyChunkClearDataPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyChunkClearDataPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_MaterialBudgetSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_MaterialBudgetSize;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_MaterialBudgetSize;
+int VoxelMaterialPopulateArgsBufferMaxPendingListCount;
+int VoxelMaterialPopulateClipmapIndex;
+int VoxelMaterialPopulateIndexOffsetForClipmap;
+int VoxelMaterialPopulatePhysicalPoolSize;
+int VoxelMaterialFillVoxelTextureSize;
+int VoxelMaterialFillClipmapIndex;
+int VoxelMaterialFillTextureSize;
+int VoxelMaterialFillClipmapID;
+int FillIndex;
+int MaxPendingListCount;
+int FillChunkChunkCountPerTime;
+int FillChunkChunkThreadGroupNumbX;
+int FillArgsChunkSizeInOccupy;
+int FillClearChunkCountPerTime;
+int FillClearChunkSizeInOccupy;
+int FillClearFillIndex;
+int FillClearMaterialBudgetSize;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+uint _BurtGISceneVoxelTriangleCount;
+uint _BurtGISceneVoxelOccupancyMipSourceMip;
+float4 DebugArgsData;
+float4 DebugProbeArgsData;
+float4 DebugProbeCompactParams; // x=probe node size, y=max compact probes, z=index offset per clipmap, w=occupancy threshold.
+float4 CameraPos;
+int DebugProbeArgsClipmapCount;
+int DebugProbeArgsMaxCount;
+int MipLevel;
+float CullingDistance;
+
+groupshared uint BurtXGIOldSharedChunkValid;
+
+struct BurtXGIVoxelMaterialUint
+{
+    uint4 albedo;
+    uint opaque;
+    uint3 normal;
+    uint3 emissive;
+};
+
+struct BurtXGIVoxelMaterialFloat
+{
+    float3 albedo;
+    float opaque;
+    float3 normal;
+    float3 emissive;
+};
+
+struct BurtXGIVoxelMaterialPendingData
+{
+    uint nodeIndex;
+    uint albedoOpaque;
+    uint normal;
+    uint emissive;
+};
+
+float3 BurtGISceneVoxelSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+uint3 BurtXGIOldChunkCountPerClipmapVec(uint3 textureSize, uint chunkSizeInOccupy)
+{
+    return max(textureSize / max(chunkSizeInOccupy, 1u), uint3(1u, 1u, 1u));
+}
+uint BurtXGIOldChunkCountPerClipmap(uint3 chunkCountPerClipmapVec)
+{
+    return chunkCountPerClipmapVec.x * chunkCountPerClipmapVec.y * chunkCountPerClipmapVec.z;
+}
+uint3 BurtXGIOldChunkIndex3DFromFlat(uint chunkIndexFlat, uint3 chunkCountPerClipmapVec)
+{
+    uint indexFlatYZ = chunkIndexFlat / chunkCountPerClipmapVec.x;
+    return uint3(
+        chunkIndexFlat % chunkCountPerClipmapVec.x,
+        indexFlatYZ % chunkCountPerClipmapVec.y,
+        indexFlatYZ / chunkCountPerClipmapVec.y);
+}
+uint3 BurtXGIOldChunkIndex3DWithClipmap(uint3 chunkIndex3D, uint3 chunkCountPerClipmapVec, uint clipmapIndex)
+{
+    return uint3(chunkIndex3D.x, chunkIndex3D.y, chunkIndex3D.z + clipmapIndex * chunkCountPerClipmapVec.z);
+}
+uint BurtXGIOldChunkIndex3DEncode(uint3 chunkIndex3D)
+{
+    return ((chunkIndex3D.x & 0x3ffu) << 22u) | ((chunkIndex3D.y & 0x3ffu) << 12u) | (chunkIndex3D.z & 0xfffu);
+}
+void BurtXGIOldWriteChunkIndex3DWithClipmap(RWStructuredBuffer<uint> chunkAllocator, uint chunkAllocatedIndex, uint3 chunkIndex3DWithClipmap)
+{
+    chunkAllocator[chunkAllocatedIndex] = BurtXGIOldChunkIndex3DEncode(chunkIndex3DWithClipmap);
+}
+bool BurtXGIOldReadChunkAllocatedIndex(RWTexture3D<uint> chunkData, uint3 chunkIndex3DWithClipmap, out uint chunkAllocatedIndex)
+{
+    chunkAllocatedIndex = chunkData[chunkIndex3DWithClipmap];
+    return chunkAllocatedIndex != BURT_GI_XGI_OLD_INVALID_CHUNK_ALLOCATED_INDEX;
+}
+[numthreads(BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE)]
+void AllocateChunk(uint groupIndex : SV_GroupIndex, uint3 groupId : SV_GroupID, uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (groupIndex == 0u)
+    {
+        BurtXGIOldSharedChunkValid = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint chunkSizeInOccupy = BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE;
+    uint3 textureSize = max((uint3)_XGIGenerateVoxelOccupyChunkPass_TextureSize.xyz, uint3(1u, 1u, 1u));
+    uint clipmapIndex = (uint)max((int)_XGIGenerateVoxelOccupyChunkPass_ClipmapIndexAndCount.x, 0);
+    uint3 chunkCountPerClipmapVec = BurtXGIOldChunkCountPerClipmapVec(textureSize, chunkSizeInOccupy);
+    uint3 chunkIndex3D = groupId;
+    if (any(chunkIndex3D >= chunkCountPerClipmapVec))
+    {
+        return;
+    }
+
+    uint3 indexInClipmap = dispatchThreadId + uint3(0u, 0u, clipmapIndex * textureSize.z);
+    int3 textureCoord0 = int3((int)(indexInClipmap.x * 2u + 1u), (int)indexInClipmap.y, (int)indexInClipmap.z);
+    int3 textureCoord1 = int3((int)(indexInClipmap.x * 2u), (int)indexInClipmap.y, (int)indexInClipmap.z);
+    uint value0 = _XGIGenerateVoxelOccupyChunkPass_VoxelOccupy.Load(int4(textureCoord0, 0));
+    uint value1 = _XGIGenerateVoxelOccupyChunkPass_VoxelOccupy.Load(int4(textureCoord1, 0));
+    InterlockedOr(BurtXGIOldSharedChunkValid, value0 | value1);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex != 0u)
+    {
+        return;
+    }
+
+    uint3 chunkIndex3DWithClipmap = BurtXGIOldChunkIndex3DWithClipmap(chunkIndex3D, chunkCountPerClipmapVec, clipmapIndex);
+    if (BurtXGIOldSharedChunkValid == 0u)
+    {
+        _RW_XGIGenerateVoxelOccupyChunkPass_ChunkData[chunkIndex3DWithClipmap] = BURT_GI_XGI_OLD_INVALID_CHUNK_ALLOCATED_INDEX;
+        return;
+    }
+
+    uint chunkAllocatedIndex;
+    int freeIndex;
+    InterlockedAdd(_RW_XGIGenerateVoxelOccupyChunkPass_ChunkFreeListAllocator[0], -1, freeIndex);
+    if (freeIndex > 0)
+    {
+        chunkAllocatedIndex = (uint)_RW_XGIGenerateVoxelOccupyChunkPass_ChunkFreeListAllocator[(uint)freeIndex];
+    }
+    else
+    {
+        InterlockedAdd(_RW_XGIGenerateVoxelOccupyChunkPass_ChunkAllocator[0], 1u, chunkAllocatedIndex);
+        chunkAllocatedIndex++;
+    }
+
+    _RW_XGIGenerateVoxelOccupyChunkPass_ChunkData[chunkIndex3DWithClipmap] = chunkAllocatedIndex;
+    BurtXGIOldWriteChunkIndex3DWithClipmap(_RW_XGIGenerateVoxelOccupyChunkPass_ChunkAllocator, chunkAllocatedIndex, chunkIndex3DWithClipmap);
+}
+[numthreads(1, 1, 1)]
+void ClearChunkFreeList(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    _RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkFreeListAllocator[0] = max(_RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkFreeListAllocator[0], 0);
+}
+[numthreads(BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, 1)]
+void ClearChunkData(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 textureSize = max((uint3)_XGIGenerateVoxelOccupyChunkClearDataPass_TextureSize.xyz, uint3(1u, 1u, 1u));
+    uint clipmapIndex = (uint)max((int)_XGIGenerateVoxelOccupyChunkClearDataPass_ClipmapIndexAndCount.x, 0);
+    uint chunkSizeInOccupy = max((uint)_XGIGenerateVoxelOccupyChunkClearDataPass_ClipmapIndexAndCount.z, 1u);
+    uint threadGroupNumX = max((uint)_XGIGenerateVoxelOccupyChunkClearDataPass_ClipmapIndexAndCount.w, 1u);
+    uint chunkIndexFlat = dispatchThreadId.x + dispatchThreadId.y * threadGroupNumX * BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE;
+    uint3 chunkCountPerClipmapVec = BurtXGIOldChunkCountPerClipmapVec(textureSize, chunkSizeInOccupy);
+    if (chunkIndexFlat >= BurtXGIOldChunkCountPerClipmap(chunkCountPerClipmapVec))
+    {
+        return;
+    }
+
+    uint3 chunkIndex3D = BurtXGIOldChunkIndex3DFromFlat(chunkIndexFlat, chunkCountPerClipmapVec);
+    uint3 chunkIndex3DWithClipmap = BurtXGIOldChunkIndex3DWithClipmap(chunkIndex3D, chunkCountPerClipmapVec, clipmapIndex);
+    uint chunkAllocatedIndex;
+    if (!BurtXGIOldReadChunkAllocatedIndex(_RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkData, chunkIndex3DWithClipmap, chunkAllocatedIndex))
+    {
+        return;
+    }
+
+    _RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkData[chunkIndex3DWithClipmap] = BURT_GI_XGI_OLD_INVALID_CHUNK_ALLOCATED_INDEX;
+    int freeIndex;
+    InterlockedAdd(_RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkFreeListAllocator[0], 1, freeIndex);
+    freeIndex++;
+    _RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkFreeListAllocator[(uint)freeIndex] = (int)chunkAllocatedIndex;
+    _RW_XGIGenerateVoxelOccupyChunkClearDataPass_ChunkAllocator[chunkAllocatedIndex] = BURT_GI_XGI_OLD_INVALID_CHUNK_INDEX;
+}
+float2 BurtXGIProjectOBB(XGIProbeVolumeGpuOBB obb, float3 axis)
+{
+    float pMin = dot(axis, obb.corner);
+    float pMax = pMin;
+    [unroll]
+    for (int z = 0; z < 2; ++z)
+    {
+        [unroll]
+        for (int y = 0; y < 2; ++y)
+        {
+            [unroll]
+            for (int x = 0; x < 2; ++x)
+            {
+                float3 vertex = obb.corner + obb.X * x + obb.Y * y + obb.Z * z;
+                float projection = dot(axis, vertex);
+                pMin = min(pMin, projection);
+                pMax = max(pMax, projection);
+            }
+        }
+    }
+
+    return float2(pMin, pMax);
+}
+bool BurtXGIProbeOBBAxisOverlaps(XGIProbeVolumeGpuOBB obbA, XGIProbeVolumeGpuOBB obbB, float3 axis)
+{
+    float axisLengthSq = dot(axis, axis);
+    if (axisLengthSq <= 1.0e-8)
+    {
+        return true;
+    }
+
+    float3 normalizedAxis = axis * rsqrt(axisLengthSq);
+    float2 projectionA = BurtXGIProjectOBB(obbA, normalizedAxis);
+    float2 projectionB = BurtXGIProjectOBB(obbB, normalizedAxis);
+    return !(projectionA.y < projectionB.x || projectionB.y < projectionA.x);
+}
+bool BurtXGIProbeOBBIntersects(XGIProbeVolumeGpuOBB obbA, XGIProbeVolumeGpuOBB obbB)
+{
+    return BurtXGIProbeOBBAxisOverlaps(obbA, obbB, obbA.X) &&
+        BurtXGIProbeOBBAxisOverlaps(obbA, obbB, obbA.Y) &&
+        BurtXGIProbeOBBAxisOverlaps(obbA, obbB, obbA.Z) &&
+        BurtXGIProbeOBBAxisOverlaps(obbA, obbB, obbB.X) &&
+        BurtXGIProbeOBBAxisOverlaps(obbA, obbB, obbB.Y) &&
+        BurtXGIProbeOBBAxisOverlaps(obbA, obbB, obbB.Z);
+}
+float BurtXGISampleSdfByUVWithClipmap(float3 position01, uint clipmapIndex)
+{
+    uint3 textureSize = max((uint3)_XGISdfApply_TextureSize.xyz, uint3(1u, 1u, 1u));
+    uint border = (uint)max((int)_XGISdfApply_TextureSize.w, 0);
+    uint3 coord = min((uint3)(saturate(position01) * (float3)textureSize), textureSize - 1u);
+    coord.z += clipmapIndex * (textureSize.z + border);
+    return _XGISdfApply_SdfTexture.Load(int4((int)coord.x, (int)coord.y, (int)coord.z, 0));
+}
+[numthreads(BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, 1)]
+void ProbeVolumeCull(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 totalIndex = dispatchThreadId;
+    uint3 maxBrickCount = max((uint3)_XGIPlacementProbeVolumeCullPass_MaxBrickCount.xyz, uint3(1u, 1u, 1u));
+    if (any(totalIndex >= maxBrickCount))
+    {
+        _RW_XGIPlacementProbeVolumeCullPass_Result[totalIndex] = float2(0.0, 0.0);
+        return;
+    }
+
+    float brickSize = max(_XGIPlacementProbeVolumeCullPass_BrickSize, 0.0001);
+    XGIProbeVolumeGpuOBB brickOBB;
+    brickOBB.corner = (float3)totalIndex * brickSize + _XGIPlacementProbeVolumeCullPass_VolumeOffsetWS.xyz;
+    brickOBB.X = float3(brickSize, 0.0, 0.0);
+    brickOBB.Y = float3(0.0, brickSize, 0.0);
+    brickOBB.Z = float3(0.0, 0.0, brickSize);
+    brickOBB.minControllerSubdivLevel = 0;
+    brickOBB.maxControllerSubdivLevel = 0;
+    brickOBB.fillEmptySpaces = 0;
+    brickOBB.maxSubdivLevelInsideVolume = 0;
+
+    bool generate = false;
+    int ignoreSdf = 2147483647;
+    int probeVolumeCount = max((int)_XGIPlacementProbeVolumeCullPass_ProbeVolumeCount, 0);
+    int subdivLevel = (int)_XGIPlacementProbeVolumeCullPass_SubdivLevel;
+    [loop]
+    for (int i = 0; i < probeVolumeCount; ++i)
+    {
+        XGIProbeVolumeGpuOBB volumeOBB = _XGIPlacementProbeVolumeCullPass_ProbeVolumes[i];
+        if (subdivLevel < volumeOBB.minControllerSubdivLevel || subdivLevel > volumeOBB.maxControllerSubdivLevel)
+        {
+            continue;
+        }
+
+        if (!BurtXGIProbeOBBIntersects(volumeOBB, brickOBB))
+        {
+            continue;
+        }
+
+        generate = true;
+        if (volumeOBB.fillEmptySpaces != 0)
+        {
+            ignoreSdf = min(ignoreSdf, volumeOBB.maxControllerSubdivLevel);
+        }
+    }
+
+    _RW_XGIPlacementProbeVolumeCullPass_Result[totalIndex] = float2(generate ? 1.0 : 0.0, (float)ignoreSdf);
+}
+[numthreads(BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, 1)]
+void GenBrick(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint3 totalIndex = dispatchThreadId;
+    uint3 maxBrickCount = max((uint3)_XGIGenBrickPass_MaxBrickCount.xyz, uint3(1u, 1u, 1u));
+    if (any(totalIndex >= maxBrickCount))
+    {
+        return;
+    }
+
+    uint subdivLevel = (uint)max((int)_XGIGenBrickPass_SubdivLevel, 0);
+    float2 subdivisionLevelData = _XGIGenBrickPass_ProbeVolumeCullData.Load(int4((int)totalIndex.x, (int)totalIndex.y, (int)totalIndex.z, (int)subdivLevel));
+    if (subdivisionLevelData.x == 0.0)
+    {
+        return;
+    }
+
+    bool generateBrick = subdivLevel == (uint)subdivisionLevelData.y;
+    if (!generateBrick)
+    {
+        float3 position01 = ((float3)totalIndex + 0.5) / (float3)maxBrickCount;
+        float sdfDistance = BurtXGISampleSdfByUVWithClipmap(position01, 0u);
+        float voxelDetectionDistance = rcp((float)maxBrickCount.x);
+        voxelDetectionDistance = sqrt(voxelDetectionDistance * voxelDetectionDistance * 3.0) * 0.5;
+        generateBrick = sdfDistance <= voxelDetectionDistance;
+    }
+
+    if (!generateBrick)
+    {
+        return;
+    }
+
+    float3 positionInCell = _XGIGenBrickPass_VolumeOffsetInBricks.xyz + ((float3)totalIndex / (float3)maxBrickCount) * _XGIGenBrickPass_VolumeSizeInBricks.xyz;
+    uint brickIndex;
+    InterlockedAdd(_RW_XGIGenBrickPass_BrickCount[subdivLevel], 1u, brickIndex);
+    _RW_XGIGenBrickPass_Bricks[brickIndex] = float4(positionInCell, 0.0);
+}
+uint BurtXGIDivRoundUp(uint x, uint y)
+{
+    return (x + y - 1u) / max(y, 1u);
+}
+uint4 BurtXGIUnpackUintToUint4(uint packedValue)
+{
+    return uint4(
+        (packedValue >> 0u) & 0xffu,
+        (packedValue >> 8u) & 0xffu,
+        (packedValue >> 16u) & 0xffu,
+        (packedValue >> 24u) & 0xffu);
+}
+float3 BurtXGIUnpackNormalOct(float2 encodedNormal)
+{
+    float3 normal = float3(encodedNormal.x, encodedNormal.y, 1.0 - abs(encodedNormal.x) - abs(encodedNormal.y));
+    if (normal.z < 0.0)
+    {
+        float2 signNotZero = float2(normal.x >= 0.0 ? 1.0 : -1.0, normal.y >= 0.0 ? 1.0 : -1.0);
+        normal.xy = (1.0 - abs(normal.yx)) * signNotZero;
+    }
+
+    return BurtGISceneVoxelSafeNormalize(normal, float3(0.0, 1.0, 0.0));
+}
+float3 BurtXGIUnpackNormalFromUInt32(uint packedNormal)
+{
+    uint2 quantized = uint2((packedNormal >> 16u) & 0xffffu, packedNormal & 0xffffu);
+    float2 oct = ((float2)quantized / 65535.0 - 0.5) * 2.0;
+    return BurtXGIUnpackNormalOct(oct);
+}
+uint3 BurtXGIPackNormalToUInt3(float3 normal)
+{
+    return (uint3)round(saturate(normal * 0.5 + 0.5) * 255.0);
+}
+float3 BurtXGIUnpackNormalFromUInt3(uint3 packedNormal)
+{
+    return BurtGISceneVoxelSafeNormalize((float3)packedNormal / 255.0 * 2.0 - 1.0, float3(0.0, 1.0, 0.0));
+}
+float3 BurtXGIUnpackR11G11B10Approx(uint packedValue)
+{
+    uint r = (packedValue >> 0u) & 0x7ffu;
+    uint g = (packedValue >> 11u) & 0x7ffu;
+    uint b = (packedValue >> 22u) & 0x3ffu;
+    return float3((float)r / 2047.0, (float)g / 2047.0, (float)b / 1023.0);
+}
+uint3 BurtXGIPackEmissiveToUInt3(float3 emissive)
+{
+    return (uint3)round(max(emissive, 0.0) * BURT_GI_XGI_MATERIAL_EMISSIVE_QUANTIZE_VALUE);
+}
+float3 BurtXGIUnpackEmissiveFromUInt3(uint3 packedEmissive)
+{
+    return (float3)packedEmissive / BURT_GI_XGI_MATERIAL_EMISSIVE_QUANTIZE_VALUE;
+}
+BurtXGIVoxelMaterialUint BurtXGIReadMaterialFromBuffer(StructuredBuffer<uint> materialDataBuffer, uint materialNodeIndex, uint materialDataIndexOffset)
+{
+    BurtXGIVoxelMaterialUint materialData;
+    uint start = materialDataIndexOffset + materialNodeIndex * BURT_GI_XGI_MATERIAL_UINT_SIZE;
+    uint packData0 = materialDataBuffer[start + 0u];
+    uint packData1 = materialDataBuffer[start + 1u];
+    uint packData2 = materialDataBuffer[start + 2u];
+    uint packData3 = materialDataBuffer[start + 3u];
+    materialData.albedo.x = packData0 >> BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT;
+    materialData.albedo.y = packData0 & 0xffffu;
+    materialData.albedo.z = packData1 >> BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT;
+    materialData.albedo.w = packData1 & 0xffffu;
+    materialData.opaque = packData2 >> BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT;
+    materialData.normal.x = packData2 & 0xffffu;
+    materialData.normal.y = packData3 >> BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT;
+    materialData.normal.z = packData3 & 0xffffu;
+    materialData.emissive.x = materialDataBuffer[start + 4u];
+    materialData.emissive.y = materialDataBuffer[start + 5u];
+    materialData.emissive.z = materialDataBuffer[start + 6u];
+    return materialData;
+}
+BurtXGIVoxelMaterialFloat BurtXGIMaterialUintToFloat(BurtXGIVoxelMaterialUint materialUint)
+{
+    BurtXGIVoxelMaterialFloat materialFloat;
+    float count = max((float)materialUint.albedo.w, 1.0);
+    float invCount = rcp(count);
+    materialFloat.albedo = (float3)materialUint.albedo.xyz * invCount / 255.0;
+    materialFloat.opaque = (float)materialUint.opaque * invCount / 255.0;
+    materialFloat.normal = BurtXGIUnpackNormalFromUInt3((uint3)((float3)materialUint.normal * invCount));
+    materialFloat.emissive = BurtXGIUnpackEmissiveFromUInt3((uint3)((float3)materialUint.emissive * invCount));
+    return materialFloat;
+}
+uint2 BurtXGIMaterialAtlasUV(uint flatIndex, uint atlasSize)
+{
+    uint safeAtlasSize = max(atlasSize, 1u);
+    return uint2(flatIndex % safeAtlasSize, flatIndex / safeAtlasSize);
+}
+void BurtXGIWriteMaterialToAtlas(uint atlasSize, uint flatIndex, BurtXGIVoxelMaterialFloat material)
+{
+    uint2 uv = BurtXGIMaterialAtlasUV(flatIndex, atlasSize);
+    RWVoxelMaterialPopulateAtlasAlbedo[uv] = float4(saturate(material.albedo), saturate(material.opaque));
+    RWVoxelMaterialPopulateAtlasNormal[uv] = saturate(material.normal.xy * 0.5 + 0.5);
+    RWVoxelMaterialPopulateAtlasEmissive[uv] = max(material.emissive, 0.0);
+}
+BurtXGIVoxelMaterialPendingData BurtXGIReadMaterialFromPendingList(StructuredBuffer<uint> materialPendingList, uint materialPendingIndex)
+{
+    BurtXGIVoxelMaterialPendingData pendingData;
+    uint start = BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET + materialPendingIndex * BURT_GI_XGI_MATERIAL_PENDING_DATA_SIZE;
+    pendingData.nodeIndex = materialPendingList[start + 0u];
+    pendingData.albedoOpaque = materialPendingList[start + 1u];
+    pendingData.normal = materialPendingList[start + 2u];
+    pendingData.emissive = materialPendingList[start + 3u];
+    return pendingData;
+}
+BurtXGIVoxelMaterialUint BurtXGIPendingDataToMaterialUint(BurtXGIVoxelMaterialPendingData pendingData, out uint nodeIndexFlat)
+{
+    BurtXGIVoxelMaterialUint materialUint;
+    nodeIndexFlat = pendingData.nodeIndex;
+    uint4 albedoOpaque = BurtXGIUnpackUintToUint4(pendingData.albedoOpaque);
+    materialUint.albedo = uint4(albedoOpaque.xyz, 1u);
+    materialUint.opaque = albedoOpaque.w;
+    materialUint.normal = BurtXGIPackNormalToUInt3(BurtXGIUnpackNormalFromUInt32(pendingData.normal));
+    materialUint.emissive = BurtXGIPackEmissiveToUInt3(BurtXGIUnpackR11G11B10Approx(pendingData.emissive));
+    return materialUint;
+}
+void BurtXGIClearMaterialBufferSingleThread(RWStructuredBuffer<uint> materialDataBuffer, uint materialNodeIndex, uint materialDataIndexOffset)
+{
+    uint start = materialDataIndexOffset + materialNodeIndex * BURT_GI_XGI_MATERIAL_UINT_SIZE;
+    [unroll]
+    for (uint i = 0u; i < BURT_GI_XGI_MATERIAL_UINT_SIZE; ++i)
+    {
+        materialDataBuffer[start + i] = 0u;
+    }
+}
+void BurtXGIInterlockedAddMaterialToBuffer(RWStructuredBuffer<uint> materialDataBuffer, uint materialNodeIndex, BurtXGIVoxelMaterialUint materialData, uint materialDataIndexOffset, uint maxAddCount)
+{
+    uint start = materialDataIndexOffset + materialNodeIndex * BURT_GI_XGI_MATERIAL_UINT_SIZE;
+    uint packPrevCount;
+    InterlockedAdd(materialDataBuffer[start + 1u], 0u, packPrevCount);
+    uint prevCount = packPrevCount & 0xffffu;
+    if (prevCount >= maxAddCount)
+    {
+        return;
+    }
+
+    uint packData0 = (materialData.albedo.x << BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT) | materialData.albedo.y;
+    uint packData1 = (materialData.albedo.z << BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT) | materialData.albedo.w;
+    uint packData2 = (materialData.opaque << BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT) | materialData.normal.x;
+    uint packData3 = (materialData.normal.y << BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT) | materialData.normal.z;
+    InterlockedAdd(materialDataBuffer[start + 0u], packData0);
+    InterlockedAdd(materialDataBuffer[start + 1u], packData1);
+    InterlockedAdd(materialDataBuffer[start + 2u], packData2);
+    InterlockedAdd(materialDataBuffer[start + 3u], packData3);
+    InterlockedAdd(materialDataBuffer[start + 4u], materialData.emissive.x);
+    InterlockedAdd(materialDataBuffer[start + 5u], materialData.emissive.y);
+    InterlockedAdd(materialDataBuffer[start + 6u], materialData.emissive.z);
+}
+uint3 BurtXGIVoxelNodeIndexWithClipmap(uint3 nodeIndex, uint textureSize, uint clipmapIndex)
+{
+    return nodeIndex + uint3(0u, 0u, clipmapIndex * textureSize);
+}
+uint3 BurtXGIVoxelFlat2NodeIndex(uint nodeIndexFlat, uint textureSize, uint clipmapCount)
+{
+    uint safeTextureSize = max(textureSize, 1u);
+    uint safeClipmapCount = max(clipmapCount, 1u);
+    uint3 volumeSizeWithClipmap = uint3(safeTextureSize, safeTextureSize, safeTextureSize * safeClipmapCount);
+    uint indexFlatYZ = nodeIndexFlat / volumeSizeWithClipmap.x;
+    return uint3(
+        nodeIndexFlat % volumeSizeWithClipmap.x,
+        indexFlatYZ / volumeSizeWithClipmap.z,
+        indexFlatYZ % volumeSizeWithClipmap.z);
+}
+[numthreads(1, 1, 1)]
+void PopulateGenArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint populateCount = min(VoxelMaterialPopulateArgsBufferPendingList[BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_INDEX], (uint)max(VoxelMaterialPopulateArgsBufferMaxPendingListCount, 0));
+    uint populateThreadNumSqrt = (uint)ceil(sqrt((float)populateCount));
+    uint groupX = BurtXGIDivRoundUp(populateThreadNumSqrt, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE);
+    uint groupY = BurtXGIDivRoundUp(populateThreadNumSqrt, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE);
+    RWVoxelMaterialPopulateArgsBuffer[0] = groupX;
+    RWVoxelMaterialPopulateArgsBuffer[1] = groupY;
+    RWVoxelMaterialPopulateArgsBuffer[2] = 1u;
+    RWVoxelMaterialPopulateArgsBufferParams[0] = populateCount;
+    RWVoxelMaterialPopulateArgsBufferParams[1] = groupX;
+}
+[numthreads(BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, 1)]
+void Populate(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint populateCount = VoxelMaterialPopulateArgsBufferParams[0];
+    uint groupX = max(VoxelMaterialPopulateArgsBufferParams[1], 1u);
+    uint populateThreadIndex = dispatchThreadId.x + dispatchThreadId.y * BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE * groupX;
+    if (populateThreadIndex >= populateCount)
+    {
+        return;
+    }
+
+    BurtXGIVoxelMaterialUint materialUint = BurtXGIReadMaterialFromBuffer(VoxelMaterialPopulatePendingList, populateThreadIndex, BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET);
+    uint materialIndexInPhysicalPoolFlat = populateThreadIndex + (uint)max(VoxelMaterialPopulateIndexOffsetForClipmap, 0) * (uint)max(VoxelMaterialPopulateClipmapIndex, 0);
+    BurtXGIWriteMaterialToAtlas((uint)max(VoxelMaterialPopulatePhysicalPoolSize, 1), materialIndexInPhysicalPoolFlat, BurtXGIMaterialUintToFloat(materialUint));
+}
+[numthreads(BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE)]
+void FillPageTable(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint textureSize = max((uint)VoxelMaterialFillVoxelTextureSize, 1u);
+    uint3 nodeIndex = dispatchThreadId;
+    if (any(nodeIndex >= textureSize))
+    {
+        return;
+    }
+
+    uint clipmapIndex = (uint)max(VoxelMaterialFillClipmapIndex, 0);
+    uint3 nodeIndexWithClipmap = BurtXGIVoxelNodeIndexWithClipmap(nodeIndex, textureSize, clipmapIndex);
+    uint occupied = VoxelMaterialFillOccupyTexture.Load(int4((int)nodeIndexWithClipmap.x, (int)nodeIndexWithClipmap.y, (int)nodeIndexWithClipmap.z, 0));
+    if (occupied == 0u)
+    {
+        return;
+    }
+
+    uint materialPendingIndex;
+    InterlockedAdd(RWVoxelMaterialFillFinalPendingList[BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_INDEX], 1u, materialPendingIndex);
+    materialPendingIndex++;
+    RWVoxelMaterialFillPageTable[nodeIndexWithClipmap] = materialPendingIndex;
+    BurtXGIClearMaterialBufferSingleThread(RWVoxelMaterialFillFinalPendingList, materialPendingIndex - 1u, BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET);
+}
+[numthreads(1, 1, 1)]
+void FillGenArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint fillCount = VoxelMaterialFillArgsPendingList[BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_INDEX];
+    uint fillThreadNumSqrt = (uint)ceil(sqrt((float)fillCount));
+    uint groupX = BurtXGIDivRoundUp(fillThreadNumSqrt, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE);
+    uint groupY = BurtXGIDivRoundUp(fillThreadNumSqrt, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE);
+    RWVoxelMaterialFillArgsBuffer[0] = groupX;
+    RWVoxelMaterialFillArgsBuffer[1] = groupY;
+    RWVoxelMaterialFillArgsBuffer[2] = 1u;
+    RWVoxelMaterialFillArgsBufferParams[0] = fillCount;
+    RWVoxelMaterialFillArgsBufferParams[1] = groupX;
+}
+[numthreads(BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, 1)]
+void Fill(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint fillCount = VoxelMaterialFillArgsBufferParams[0];
+    uint groupX = max(VoxelMaterialFillArgsBufferParams[1], 1u);
+    uint pendingListIndex = dispatchThreadId.x + dispatchThreadId.y * BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE * groupX;
+    if (pendingListIndex >= fillCount)
+    {
+        return;
+    }
+
+    BurtXGIVoxelMaterialPendingData pendingData = BurtXGIReadMaterialFromPendingList(VoxelMaterialFillPendingList, pendingListIndex);
+    uint nodeIndexFlat;
+    BurtXGIVoxelMaterialUint materialDataUint = BurtXGIPendingDataToMaterialUint(pendingData, nodeIndexFlat);
+    uint textureSize = max((uint)VoxelMaterialFillTextureSize, 1u);
+    uint3 nodeIndex = BurtXGIVoxelFlat2NodeIndex(nodeIndexFlat, textureSize, 1u);
+    uint3 nodeIndexWithClipmap = BurtXGIVoxelNodeIndexWithClipmap(nodeIndex, max((uint)VoxelMaterialFillVoxelTextureSize, 1u), (uint)max(VoxelMaterialFillClipmapID, 0));
+    uint allocatedPhysicalIndex = VoxelMaterialFillPageTable.Load(int4((int)nodeIndexWithClipmap.x, (int)nodeIndexWithClipmap.y, (int)nodeIndexWithClipmap.z, 0));
+    if (allocatedPhysicalIndex == 0u)
+    {
+        return;
+    }
+
+    BurtXGIInterlockedAddMaterialToBuffer(RWVoxelMaterialFillPendingList, allocatedPhysicalIndex - 1u, materialDataUint, BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET, BURT_GI_XGI_MATERIAL_PENDING_LIST_MAX_COUNT);
+}

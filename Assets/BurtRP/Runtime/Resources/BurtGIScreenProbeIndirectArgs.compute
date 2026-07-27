@@ -1,0 +1,395 @@
+#pragma kernel ScreenProbeIndirectArgsSetupCS
+
+#define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
+#define BURT_GI_SCREEN_PROBE_PLACEMENT_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_TRACE_VISUALIZE_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_TRACE_VISUALIZE_DATA_STRIDE 3u
+#define BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_SPATIAL_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_COMPOSITE_TRACES_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_FIXUP_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_FILTER_MIP_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_TRACE_ATLAS_CLEAR_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_USE_COUNT_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_USE_COUNT_QUANTIZATION 255.0f
+#define BURT_GI_SCREEN_PROBE_USE_COUNT_INV_QUANTIZATION (1.0f / BURT_GI_SCREEN_PROBE_USE_COUNT_QUANTIZATION)
+#define BURT_GI_SCREEN_PROBE_BENT_NORMAL_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_SH3_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT (BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE)
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_SH_COEFFICIENT_COUNT 9
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION 6u
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_BORDER_SIZE 1u
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER 8u
+#define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION 8u
+#define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_BORDER_SIZE 1u
+#define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER 10u
+#define BURT_GI_SCREEN_PROBE_IMPORTANCE_PDF_RESOLUTION 8u
+#define BURT_GI_SCREEN_PROBE_IMPORTANCE_PDF_BORDER_SIZE 1u
+#define BURT_GI_SCREEN_PROBE_IMPORTANCE_PDF_RESOLUTION_WITH_BORDER 10u
+#define BURT_GI_SCREEN_PROBE_IMPORTANCE_PDF_SH_COEFFICIENT_COUNT 9u
+#define BURT_GI_SH0_IRRADIANCE_TO_COEFFICIENT 0.28209479
+#define BURT_GI_HASH_GRID_TILE_MIP0_OFFSET 0u
+#define BURT_GI_HASH_GRID_TILE_MIP1_OFFSET 64u
+#define BURT_GI_HASH_GRID_TILE_MIP2_OFFSET 80u
+#define BURT_GI_HASH_GRID_TILE_MIP3_OFFSET 84u
+#define BURT_GI_HASH_GRID_FILTER_CONFIDENCE 0.75
+#define BURT_GI_HASH_GRID_TILE_DECAY_MAX 500u
+#define BURT_GI_CLIPMAP_COUNT 6
+#define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT 5u
+#define BURT_GI_SCREEN_PROBE_SCENE_VOXEL_MAX_TRACE_STEPS 128u
+#define BURT_GI_RADIANCE_CACHE_COVERAGE_TRACE_OFFSET 20.0f
+#define BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_BITS 6u
+#define BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_MASK 0x3fu
+#define BURT_GI_SCREEN_PROBE_VALID_FLAG 0x2000u
+#define BURT_GI_SCREEN_PROBE_SKIP_SCREEN_TRACE_FLAG 0x4000u
+#define BURT_GI_SCREEN_PROBE_SKIP_ADAPTIVE_FLAG 0x8000u
+#define BURT_GI_SCREEN_PROBE_SPHERICAL_VISIBILITY_FLAG 0x10000u
+#define BURT_GI_SHADING_MODEL_HAIR 1.0f
+#define BURT_GI_SHADING_MODEL_SUBSURFACE 3.0f
+#define BURT_GI_SHADING_MODEL_FOLIAGE 5.0f
+#define BURT_GI_SHADING_MODEL_FUR 6.0f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT 8.0f
+
+#ifndef UNITY_NEAR_CLIP_VALUE
+    #if defined(SHADER_API_GLCORE) || defined(SHADER_API_GLES) || defined(SHADER_API_GLES3)
+        #define UNITY_NEAR_CLIP_VALUE (-1.0)
+    #else
+        #define UNITY_NEAR_CLIP_VALUE 0.0
+    #endif
+#endif
+
+float _BurtGISceneVoxelOctreeValid;
+
+
+
+RWStructuredBuffer<uint3> _BurtGIScreenProbeIndirectArgsBuffer;
+RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
+
+#define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6
+#define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffffffu
+#define BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX 0xfffffffeu
+
+float4 _BurtGIScreenProbeParams;
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGIScreenProbePlacementParams;
+float4 _BurtGIScreenProbeTraceParams;
+float4 _BurtGIScreenProbeBentNormalParams;
+float4 _BurtGIScreenProbeBentNormalParams1;
+float4 _BurtGIScreenProbeScreenTraceParams;
+float4 _BurtGIScreenProbeScreenTraceParams1;
+float4 _BurtGIScreenProbeScreenTraceParams2;
+float4 _BurtGIScreenProbeTraceModeParams;
+float4 _BurtGIScreenProbeTraceIntensityParams;
+float4 _BurtGIScreenProbeImportancePDFParams;
+float4 _BurtGIScreenProbeImportanceLightPDFParams;
+float4 _BurtGIScreenProbeImportanceLightPDFParams1;
+float4 _BurtGIScreenProbeHistoryParams;
+float4 _BurtGIScreenProbeTemporalParams;
+float4 _BurtGIScreenProbeReprojectionParams;
+float4 _BurtGIScreenProbeFilterParams; // x=spatial passes, y=half kernel, z=fixup borders, w=placement jitter index.
+float4 _BurtGIScreenProbeSpatialFilterParams; // x=max radiance hit angle radians, y=position weight scale.
+float4 _BurtGIScreenProbeFilterGenerateMipParams;
+float4 _BurtGIScreenProbeImportanceGenRaysParams;
+float4 _BurtGIScreenProbeAdaptiveParams;
+float4 _BurtGIScreenProbeAdaptivePlacementParams;
+float4 _BurtGIScreenProbeIndirectArgsParams;
+float4 _BurtGIScreenProbeTraceCompactParams;
+float4 _BurtGIScreenProbeUseCountParams;
+float4 _BurtGIScreenProbeTraceVisualizeParams;
+float4 _BurtGISceneVoxelTraceControls;
+float4 _BurtGIScreenProbeSkyLeakParams;
+float4 _BurtGIScreenProbeIrradianceOctMipParams;
+float4 _BurtGIRadianceCacheHashGridParams0;
+float4 _BurtGIRadianceCacheHashGridParams1;
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapWorldParams;
+float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS];
+float4 _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS];
+float4 _BurtGIRadianceCacheClipMapClipmapCenterExtent[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapClipmapParams[BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS];
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtGIRadianceCacheClipMapApplyParams;
+uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
+uint _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution;
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelClipmapCenterExtent[6];
+uint _BurtGISceneVoxelClipmapValidMask;
+float4 _ZBufferParams;
+float4 _BurtDeferredCameraWorldPosition;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+float4x4 _BurtGIScreenProbeViewProjectionMatrix;
+float4x4 _BurtGIPreviousViewProjectionMatrix;
+float4 _BurtSkyReflectionHDR;
+float4 _BurtSkyReflectionTint;
+float4 _BurtSkyReflectionRotation;
+float4 _BurtSkyLowerHemisphereDiffuseColor;
+float4 _BurtGILocalSkyProbeParams0;
+float4 _BurtGILocalSkyProbeParams1;
+float _BurtSkyReflectionIntensity;
+float _BurtSkyReflectionEnabled;
+float _BurtSkyReflectionMaxMip;
+float _BurtSkyLowerHemisphereEnabled;
+uint _BurtGIScreenProbeTraceCompactGroupSize;
+uint _BurtGIRadianceCacheClipMapFrameIndex;
+uint _BurtGIScreenProbeTraceStageMask;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+bool BurtGIScreenProbeHasValidPlacement(uint2 screenProbeCoord);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+struct BurtGIScreenProbeMipOutput
+{
+    float4 Radiance;
+    float4 Irradiance;
+    float4 Confidence;
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+uint2 BurtGIScreenProbeDecodePlacementSourcePixel(uint2 screenProbeCoord, float placementPayload, float spacingPixels, uint jitterIndex, uint2 sourceSize);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCREEN 1u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_HASH_GRID 2u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCENE_VOXEL 4u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCREEN_GRID 8u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_CLIPMAP 16u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_LOCAL_SKY 32u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SKY_CUBEMAP 64u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCENE (BURT_GI_SCREEN_PROBE_TRACE_STAGE_HASH_GRID | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCENE_VOXEL | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCREEN_GRID | BURT_GI_SCREEN_PROBE_TRACE_STAGE_CLIPMAP)
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SKY (BURT_GI_SCREEN_PROBE_TRACE_STAGE_LOCAL_SKY | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SKY_CUBEMAP)
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_ALL (BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCREEN | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCENE | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SKY)
+
+
+
+
+
+
+
+
+
+
+
+
+void BurtGISampleScreenProbeTraceAtlasComposite(
+    uint2 atlasScreenProbeCoord,
+    float2 gatherUV,
+    uint traceResolution,
+    uint gatherResolution,
+    out float4 compositeRadiance,
+    out float compositeHit);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+uint BurtGIDivRoundUp(uint value, uint divisor)
+{
+    return divisor == 0u ? 0u : (value + divisor - 1u) / divisor;
+}
+void BurtGIWriteDispatchArgs(uint index, uint workItemCount, uint threadGroupSize)
+{
+    _BurtGIScreenProbeIndirectArgsBuffer[index] = uint3(
+        BurtGIDivRoundUp(max(1u, workItemCount), max(1u, threadGroupSize)),
+        1u,
+        1u);
+}
+uint BurtGIGetScreenProbeUniformCount(uint screenProbeWidth, uint screenProbeHeight)
+{
+    return max(1u, screenProbeWidth * screenProbeHeight);
+}
+uint BurtGIGetScreenProbeAdaptiveCount(uint maxAdaptiveProbeCount)
+{
+    return min(_BurtGIScreenProbeAdaptiveProbeNumBuffer[0], maxAdaptiveProbeCount);
+}
+[numthreads(1, 1, 1)]
+void ScreenProbeIndirectArgsSetupCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    uint probeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight) + BurtGIGetScreenProbeAdaptiveCount(maxAdaptiveProbeCount);
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeIndirectArgsParams.x));
+    uint gatherResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeIndirectArgsParams.y));
+    uint gatherResolutionWithBorder = max(1u, min(64u, (uint)_BurtGIScreenProbeIndirectArgsParams.z));
+    uint lightSampleResolutionXY = max(1u, min(8u, (uint)_BurtGIScreenProbeIndirectArgsParams.w));
+    uint threadGroupSize = max(1u, _BurtGIScreenProbeTraceCompactGroupSize);
+
+    BurtGIWriteDispatchArgs(0u, probeCount, 1u);
+    BurtGIWriteDispatchArgs(1u, probeCount, threadGroupSize);
+    BurtGIWriteDispatchArgs(2u, probeCount * traceResolution * traceResolution, threadGroupSize);
+    BurtGIWriteDispatchArgs(3u, probeCount * gatherResolution * gatherResolution, threadGroupSize);
+    BurtGIWriteDispatchArgs(4u, probeCount * gatherResolutionWithBorder * gatherResolutionWithBorder, threadGroupSize);
+    BurtGIWriteDispatchArgs(5u, probeCount * lightSampleResolutionXY * lightSampleResolutionXY, threadGroupSize);
+}

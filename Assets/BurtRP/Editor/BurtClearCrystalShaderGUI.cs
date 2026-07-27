@@ -72,6 +72,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty cutoff;
         private MaterialProperty refraction;
         private MaterialProperty zWrite;
+        private MaterialProperty responsiveAA;
         private MaterialProperty cull;
         private MaterialProperty doubleSidedNormalMode;
         private MaterialProperty transparentSortPriority;
@@ -137,6 +138,7 @@ namespace Burt.RenderPipeline.Editor
             cutoff = Find("_Cutoff");
             refraction = Find("_Refraction");
             zWrite = Find("_ZWrite");
+            responsiveAA = Find("_ResponsiveAA");
             cull = Find("_Cull");
             doubleSidedNormalMode = Find("_DoubleSidedNormalMode");
             transparentSortPriority = Find("_TransparentSortPriority");
@@ -180,6 +182,7 @@ namespace Burt.RenderPipeline.Editor
 
             DrawProperty(refraction);
             DrawProperty(zWrite);
+            DrawProperty(responsiveAA);
             DrawProperty(cull);
             DrawProperty(doubleSidedNormalMode);
             DrawProperty(transparentSortPriority);
@@ -375,7 +378,8 @@ namespace Burt.RenderPipeline.Editor
             material.SetShaderPassEnabled("BurtDepthNormals", false);
             material.SetShaderPassEnabled("BurtGBuffer", false);
             material.SetShaderPassEnabled("BurtMotionVectors", false);
-            material.SetShaderPassEnabled("BurtTransparentMotionVectors", false);
+            material.SetShaderPassEnabled("BurtTransparentMotionVectors", true);
+            material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
             material.SetShaderPassEnabled("ShadowCaster", true);
             material.SetShaderPassEnabled("BurtForward", true);
             bool refractionEnabled = material.HasProperty("_Refraction") && material.GetFloat("_Refraction") > 1.0e-4f;

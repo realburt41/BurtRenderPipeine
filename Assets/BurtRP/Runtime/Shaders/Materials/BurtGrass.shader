@@ -163,6 +163,28 @@ Shader "BurtRP/Grass"
 
         Pass
         {
+            Name "Burt Grass Responsive AA Mask"
+            Tags { "LightMode" = "BurtResponsiveAAMask" }
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+            HLSLPROGRAM
+            #pragma vertex VertMotionVector
+            #pragma fragment FragResponsiveAAMask
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #define BURT_MATERIAL_SHADING_MODEL_FOLIAGE 1
+            #define BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS 1
+            #define BURT_MOTION_VECTOR_RESPONSIVE_AA_MASK 1
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGrassProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "Burt Grass GBuffer"
             Tags { "LightMode" = "BurtGBuffer" }
             ZWrite Off

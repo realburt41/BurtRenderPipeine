@@ -55,6 +55,7 @@ namespace Burt.RenderPipeline
 
         public static readonly int MotionVectorsStencilRefId = Shader.PropertyToID("_MotionVectorsStencilRef");
         public static readonly int MotionVectorsStencilMaskId = Shader.PropertyToID("_MotionVectorsStencilMask");
+        public static readonly int ResponsiveAAId = Shader.PropertyToID("_ResponsiveAA");
         public static readonly int DeferredStencilDefaultLitRefId = Shader.PropertyToID("_BurtDeferredStencilDefaultLitRef");
         public static readonly int DeferredStencilSubsurfaceRefId = Shader.PropertyToID("_BurtDeferredStencilSubsurfaceRef");
         public static readonly int DeferredStencilHairRefId = Shader.PropertyToID("_BurtDeferredStencilHairRef");
@@ -66,8 +67,11 @@ namespace Burt.RenderPipeline
 
         public static void ApplyMotionVectorStencilProperties(Material material)
         {
-            SetFloatIfPropertyExists(material, MotionVectorsStencilRefId, DeferredStencilObjectMotionBit);
-            SetFloatIfPropertyExists(material, MotionVectorsStencilMaskId, DeferredStencilObjectMotionBit);
+            var responsive = material != null && material.HasProperty(ResponsiveAAId) && material.GetFloat(ResponsiveAAId) >= 0.5f;
+            var stencilRef = DeferredStencilObjectMotionBit | (responsive ? DeferredStencilResponsiveAABit : 0);
+            var stencilMask = DeferredStencilObjectMotionBit | (responsive ? DeferredStencilResponsiveAABit : 0);
+            SetFloatIfPropertyExists(material, MotionVectorsStencilRefId, stencilRef);
+            SetFloatIfPropertyExists(material, MotionVectorsStencilMaskId, stencilMask);
         }
 
         public static void ApplyDeferredLightingStencilProperties(Material material)

@@ -28,6 +28,16 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter ambientIntensity = new ClampedFloatParameter(0.75f, 0f, 4f);
         public ClampedFloatParameter anisotropy = new ClampedFloatParameter(0.2f, -0.9f, 0.9f);
 
+        [Title("Atmosphere Horizontal Scattering")]
+        [InfoBox("Uses XRender-style phase-separated atmosphere lighting. The LUT already contains sun-path transmittance, so the fog pass uses the outer-space main-light color.")]
+        public BoolParameter useAtmosphereHorizontalScattering = new BoolParameter(true);
+        public ColorParameter atmosphereRayleighTint = new ColorParameter(Color.white, true, false, true);
+        public ClampedFloatParameter atmosphereRayleighScale = new ClampedFloatParameter(1f, 0f, 10f);
+        public ColorParameter atmosphereMieTint = new ColorParameter(Color.white, true, false, true);
+        public ClampedFloatParameter atmosphereMieScale = new ClampedFloatParameter(1f, 0f, 10f);
+        public ColorParameter atmosphereMultipleScatteringTint = new ColorParameter(Color.white, true, false, true);
+        public ClampedFloatParameter atmosphereMultipleScatteringScale = new ClampedFloatParameter(1f, 0f, 10f);
+
         public bool IsEnabled()
         {
             return active && enabled.value && density.value > 0.000001f && maxOpacity.value > 0.000001f;

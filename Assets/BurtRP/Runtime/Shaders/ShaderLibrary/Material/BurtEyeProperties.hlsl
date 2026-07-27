@@ -11,6 +11,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _MaskMap_ST;
     float _AlphaClip;
     float _Cutoff;
+    float _ResponsiveAA;
     float _NormalScale;
     float _NormalMapScale;
     float4 _DoubleSidedNormalModeConstants;

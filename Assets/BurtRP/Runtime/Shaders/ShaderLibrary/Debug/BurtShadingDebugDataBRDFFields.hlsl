@@ -1,0 +1,15 @@
+    float SpecularAARoughness;
+    float3 SpecularEnergyCompensation;
+    float3 IndirectSpecularEnergyCompensation;
+    float EnergyPreservation;
+    float SpecularOcclusion;
+    float DirectBRDFD;
+    float DirectBRDFVisibility;
+    float3 DirectBRDFFresnel;
+    float DirectDiffuseLobe;
+    float3 DirectDiffuseBRDF;
+    float3 DirectSpecularBRDF;
+    float SpecularAANormalVariance;
+    float SpecularAARoughnessDelta;
+    float2 IndirectSpecularDFG;
+    float3 IndirectSpecularEnvBRDF;

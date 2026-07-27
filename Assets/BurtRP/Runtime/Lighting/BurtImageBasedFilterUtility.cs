@@ -143,10 +143,10 @@ namespace Burt.RenderPipeline
 
         public static BurtImageBasedFilterResult Filter(CommandBuffer cmd, Texture sourceTexture, Vector4 sourceHDRDecodeValues, string sourceName)
         {
-            return Filter(cmd, sourceTexture, sourceHDRDecodeValues, sourceName, BurtImageBasedFilterBakeSettings.Default);
+            return Filter(cmd, sourceTexture, sourceHDRDecodeValues, sourceName, BurtImageBasedFilterBakeSettings.Default, 0);
         }
 
-        public static BurtImageBasedFilterResult Filter(CommandBuffer cmd, Texture sourceTexture, Vector4 sourceHDRDecodeValues, string sourceName, BurtImageBasedFilterBakeSettings bakeSettings)
+        public static BurtImageBasedFilterResult Filter(CommandBuffer cmd, Texture sourceTexture, Vector4 sourceHDRDecodeValues, string sourceName, BurtImageBasedFilterBakeSettings bakeSettings, int dynamicSourceVersion = 0)
         {
             if (sourceTexture == null)
             {
@@ -184,13 +184,19 @@ namespace Burt.RenderPipeline
                 Cache.DiffuseSH = CreateTexture2DRenderTexture(DiffuseSHWidth, DiffuseSHHeight, diffuseSHFormat, "Burt IBL Diffuse SH9: " + sourceTexture.name);
                 Cache.Ready = false;
                 Cache.LastFilteredFrame = -1;
+                Cache.LastDynamicSourceVersion = 0;
                 Cache.ResetDiffuseSHReadback();
             }
 
             var sourceIsDynamic = sourceTexture is RenderTexture;
             var currentFrame = Time.frameCount;
             var bakeSettingsChanged = !Cache.MatchesBakeSettings(sourceHDRDecodeValues, bakeSettings);
-            if (!Cache.Ready || bakeSettingsChanged || sourceIsDynamic && Cache.LastFilteredFrame != currentFrame)
+            // Most dynamic sources refresh once per frame. Atmosphere supplies a monotonically
+            // increasing version, so another camera can refresh its own sky in the same frame.
+            var dynamicSourceChanged = sourceIsDynamic && (dynamicSourceVersion != 0
+                ? Cache.LastDynamicSourceVersion != dynamicSourceVersion
+                : Cache.LastFilteredFrame != currentFrame);
+            if (!Cache.Ready || bakeSettingsChanged || dynamicSourceChanged)
             {
                 Cache.SourceHDRDecodeValues = sourceHDRDecodeValues;
                 Cache.BakeSettings = bakeSettings;
@@ -198,6 +204,7 @@ namespace Burt.RenderPipeline
                 ScheduleFilter(cmd, material, sourceTexture, sourceHDRDecodeValues, sourceMaxMip, bakeSettings, Cache);
                 Cache.Ready = true;
                 Cache.LastFilteredFrame = currentFrame;
+                Cache.LastDynamicSourceVersion = dynamicSourceVersion;
             }
 
             var safeName = string.IsNullOrEmpty(sourceName) ? sourceTexture.name : sourceName;
@@ -691,6 +698,7 @@ namespace Burt.RenderPipeline
             public int SourceWidth;
             public int SourceMipCount;
             public int LastFilteredFrame = -1;
+            public int LastDynamicSourceVersion;
             public bool Ready;
             public Vector4 SourceHDRDecodeValues = DefaultHDRDecodeValues;
             public BurtImageBasedFilterBakeSettings BakeSettings = BurtImageBasedFilterBakeSettings.Default;
@@ -724,6 +732,7 @@ namespace Burt.RenderPipeline
                 BakeSettings = BurtImageBasedFilterBakeSettings.Default;
                 CubeFormat = RenderTextureFormat.Default;
                 LastFilteredFrame = -1;
+                LastDynamicSourceVersion = 0;
                 Ready = false;
                 ResetDiffuseSHReadback();
             }

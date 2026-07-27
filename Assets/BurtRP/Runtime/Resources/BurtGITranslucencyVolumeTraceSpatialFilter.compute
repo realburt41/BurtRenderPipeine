@@ -1,0 +1,125 @@
+#pragma kernel TranslucencyVolumeTraceSpatialFilterCS
+
+#define BURT_GI_TRANSLUCENCY_VOLUME_THREADGROUP_SIZE 4
+#define BURT_GI_TRANSLUCENCY_VOLUME_TRACE_FILTER_THREADGROUP_SIZE 8
+#define BURT_GI_CLIPMAP_COUNT 6
+
+#if !defined(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_VOXEL_OCTREE_STANDALONE)
+#endif
+float _BurtGISceneVoxelOctreeValid;
+#if !defined(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_VOXEL_OCTREE_STANDALONE)
+Texture3D<float4> _BurtGITranslucencyVolumeTraceReadRadiance;
+#endif
+
+#if !defined(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_VOXEL_OCTREE_STANDALONE)
+#endif
+#if !defined(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_VOXEL_OCTREE_STANDALONE)
+RWTexture3D<float4> _BurtGITranslucencyVolumeTraceFilteredRadiance;
+#endif
+
+float4 _BurtGITranslucencyVolumeGridSize; // xyz=volume grid size, w=apply scale.
+float4 _BurtGITranslucencyVolumeParams0; // x=near, y=far, z=depth fade power, w=screen-probe blend.
+#if !defined(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_VOXEL_OCTREE_STANDALONE)
+float4 _BurtGITranslucencyVolumeTemporalParams; // x=history feedback, y=history valid, z=confidence weight, w=world reprojection.
+float4 _BurtGITranslucencyVolumeSpatialFilterParams; // x=sample count, y=sigma, z=enabled, w=confidence weight.
+float4 _BurtGITranslucencyVolumeSpatialFilterDirection; // xyz=separable filter axis.
+#endif
+float4 _BurtGITranslucencyVolumeGridZParams; // x=log scale, y=log bias, z=slice scale.
+float4 _BurtGITranslucencyVolumeHiZParams; // x=HiZ visibility enabled, y=depth-buffer center offset, z=accepted depth offset threshold.
+#if !defined(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_VOXEL_OCTREE_STANDALONE)
+float4 _BurtGITranslucencyVolumeExposureParams; // x=history exposure correction.
+#endif
+float4 _BurtGITranslucencyVolumeJitterParams; // xyz=current froxel jitter offset.
+#if !defined(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_VOXEL_OCTREE_STANDALONE)
+float4 _BurtGITranslucencyVolumePreviousJitterParams; // xyz=previous froxel jitter offset.
+#endif
+float4 _BurtGITranslucencyVolumeTraceParams; // x=max ray intensity, y=max trace distance, z=step factor, w=voxel trace start distance scale.
+float4 _BurtGITranslucencyVolumeTraceAtlasParams; // x=oct trace resolution, y=temporal direction frame.
+float4 _ZBufferParams;
+float4 _BurtDeferredCameraWorldPosition;
+#if !defined(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_VOXEL_OCTREE_STANDALONE)
+float4 _BurtGIRadianceCacheClipMapClipmapCenterExtent[BURT_GI_CLIPMAP_COUNT];
+#endif
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelTraceControls;
+float4 _BurtGISceneVoxelClipmapCenterExtent[6];
+uint _BurtGISceneVoxelClipmapValidMask;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+#if !defined(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_VOXEL_OCTREE_STANDALONE)
+float4x4 _BurtGIPreviousViewProjectionMatrix;
+#endif
+
+float BurtGITranslucencyVolumeGaussianWeight(float distance, float sigma)
+{
+    float safeSigma = max(sigma, 0.01f);
+    return exp(-0.5f * distance * distance / (safeSigma * safeSigma));
+}
+
+void BurtGITranslucencyVolumeAccumulateTraceSpatialSample(
+    uint2 traceTexelCoord,
+    int3 gridCoord,
+    int3 gridMax,
+    uint traceOctResolution,
+    int3 offset,
+    float weight,
+    inout float4 sum,
+    inout float totalWeight)
+{
+    int3 neighborGridCoord = clamp(gridCoord + offset, int3(0, 0, 0), gridMax);
+    uint3 sampleCoord = uint3((uint2)neighborGridCoord.xy * traceOctResolution + traceTexelCoord, (uint)neighborGridCoord.z);
+    float4 sampleRadiance = _BurtGITranslucencyVolumeTraceReadRadiance.Load(int4((int3)sampleCoord, 0));
+    float confidenceWeight = lerp(1.0f, saturate(sampleRadiance.a), saturate(_BurtGITranslucencyVolumeSpatialFilterParams.w));
+    float sampleWeight = weight * confidenceWeight;
+    sum += sampleRadiance * sampleWeight;
+    totalWeight += sampleWeight;
+}
+
+void BurtGITranslucencyVolumeTraceSpatialFilter(uint3 id)
+{
+    uint3 gridSize = max((uint3)_BurtGITranslucencyVolumeGridSize.xyz, uint3(1, 1, 1));
+    uint traceOctResolution = (uint)clamp(round(_BurtGITranslucencyVolumeTraceAtlasParams.x), 1.0f, 8.0f);
+    uint3 traceAtlasSize = uint3(gridSize.xy * traceOctResolution, gridSize.z);
+    if (any(id >= traceAtlasSize))
+    {
+        return;
+    }
+
+    uint3 gridCoordU = uint3(id.xy / traceOctResolution, id.z);
+    uint2 traceTexelCoord = id.xy - gridCoordU.xy * traceOctResolution;
+    int3 gridCoord = int3(gridCoordU);
+    int3 gridMax = int3(gridSize) - 1;
+    float4 center = _BurtGITranslucencyVolumeTraceReadRadiance.Load(int4((int3)id, 0));
+    if (_BurtGITranslucencyVolumeSpatialFilterParams.z < 0.5f)
+    {
+        _BurtGITranslucencyVolumeTraceFilteredRadiance[id] = center;
+        return;
+    }
+
+    int sampleCount = (int)clamp(_BurtGITranslucencyVolumeSpatialFilterParams.x, 1.0f, 5.0f);
+    float sigma = max(_BurtGITranslucencyVolumeSpatialFilterParams.y, 0.01f);
+    float centerWeight = BurtGITranslucencyVolumeGaussianWeight(0.0f, sigma);
+    float4 sum = center * centerWeight;
+    float totalWeight = centerWeight;
+    int3 filterDirection = (int3)round(_BurtGITranslucencyVolumeSpatialFilterDirection.xyz);
+    if (all(filterDirection == int3(0, 0, 0)))
+    {
+        filterDirection = int3(1, 0, 0);
+    }
+
+    [loop]
+    for (int offset = 1; offset <= sampleCount; offset++)
+    {
+        float weight = BurtGITranslucencyVolumeGaussianWeight((float)offset, sigma);
+        int3 axisOffset = filterDirection * offset;
+        BurtGITranslucencyVolumeAccumulateTraceSpatialSample(traceTexelCoord, gridCoord, gridMax, traceOctResolution, axisOffset, weight, sum, totalWeight);
+        BurtGITranslucencyVolumeAccumulateTraceSpatialSample(traceTexelCoord, gridCoord, gridMax, traceOctResolution, -axisOffset, weight, sum, totalWeight);
+    }
+
+    _BurtGITranslucencyVolumeTraceFilteredRadiance[id] = max(sum / max(totalWeight, 0.00001f), 0.0f);
+}
+
+[numthreads(BURT_GI_TRANSLUCENCY_VOLUME_TRACE_FILTER_THREADGROUP_SIZE, BURT_GI_TRANSLUCENCY_VOLUME_TRACE_FILTER_THREADGROUP_SIZE, 1)]
+void TranslucencyVolumeTraceSpatialFilterCS(uint3 id : SV_DispatchThreadID)
+{
+    BurtGITranslucencyVolumeTraceSpatialFilter(id);
+}

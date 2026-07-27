@@ -43,6 +43,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty flowmapSpeed;
         private MaterialProperty flowmapIntensity;
         private MaterialProperty cull;
+        private MaterialProperty responsiveAA;
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
@@ -84,6 +85,7 @@ namespace Burt.RenderPipeline.Editor
             material.SetShaderPassEnabled("BurtDepthOnly", false);
             material.SetShaderPassEnabled("BurtMotionVectors", false);
             material.SetShaderPassEnabled("BurtTransparentMotionVectors", true);
+            material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
             material.SetShaderPassEnabled("BurtDepthNormals", false);
             material.SetShaderPassEnabled("BurtGBuffer", false);
             material.SetShaderPassEnabled("BurtSubsurfaceForward", false);
@@ -108,6 +110,7 @@ namespace Burt.RenderPipeline.Editor
             flowmapSpeed = Find("_FlowmapSpeed");
             flowmapIntensity = Find("_FlowmapIntensity");
             cull = Find("_Cull");
+            responsiveAA = Find("_ResponsiveAA");
         }
 
         private MaterialProperty Find(string propertyName)
@@ -169,6 +172,7 @@ namespace Burt.RenderPipeline.Editor
             BurtShaderGUIUtility.DrawProperty(materialEditor, depthFadeDistance);
             BurtShaderGUIUtility.DrawProperty(materialEditor, depthFadePower);
             BurtShaderGUIUtility.DrawProperty(materialEditor, enableBillboard);
+            BurtShaderGUIUtility.DrawProperty(materialEditor, responsiveAA);
             BurtShaderGUIUtility.EndSection();
         }
 

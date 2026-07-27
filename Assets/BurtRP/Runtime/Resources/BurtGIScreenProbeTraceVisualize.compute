@@ -1,0 +1,522 @@
+#pragma kernel ScreenProbeTraceVisualizeCS
+
+#define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
+#define BURT_GI_SCREEN_PROBE_PLACEMENT_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_TRACE_VISUALIZE_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_TRACE_VISUALIZE_DATA_STRIDE 3u
+#define BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_SPATIAL_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_COMPOSITE_TRACES_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_FIXUP_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_FILTER_MIP_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_TRACE_ATLAS_CLEAR_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_USE_COUNT_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_USE_COUNT_QUANTIZATION 255.0f
+#define BURT_GI_SCREEN_PROBE_USE_COUNT_INV_QUANTIZATION (1.0f / BURT_GI_SCREEN_PROBE_USE_COUNT_QUANTIZATION)
+#define BURT_GI_SCREEN_PROBE_BENT_NORMAL_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_SH3_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE 8
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT (BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREADGROUP_SIZE)
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_SH_COEFFICIENT_COUNT 9
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION 6u
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_BORDER_SIZE 1u
+#define BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION_WITH_BORDER 8u
+#define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION 8u
+#define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_BORDER_SIZE 1u
+#define BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION_WITH_BORDER 10u
+#define BURT_GI_SCREEN_PROBE_IMPORTANCE_PDF_RESOLUTION 8u
+#define BURT_GI_SCREEN_PROBE_IMPORTANCE_PDF_BORDER_SIZE 1u
+#define BURT_GI_SCREEN_PROBE_IMPORTANCE_PDF_RESOLUTION_WITH_BORDER 10u
+#define BURT_GI_SCREEN_PROBE_IMPORTANCE_PDF_SH_COEFFICIENT_COUNT 9u
+#define BURT_GI_SH0_IRRADIANCE_TO_COEFFICIENT 0.28209479
+#define BURT_GI_HASH_GRID_TILE_MIP0_OFFSET 0u
+#define BURT_GI_HASH_GRID_TILE_MIP1_OFFSET 64u
+#define BURT_GI_HASH_GRID_TILE_MIP2_OFFSET 80u
+#define BURT_GI_HASH_GRID_TILE_MIP3_OFFSET 84u
+#define BURT_GI_HASH_GRID_FILTER_CONFIDENCE 0.75
+#define BURT_GI_HASH_GRID_TILE_DECAY_MAX 500u
+#define BURT_GI_CLIPMAP_COUNT 6
+#define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT 5u
+#define BURT_GI_SCREEN_PROBE_SCENE_VOXEL_MAX_TRACE_STEPS 128u
+#define BURT_GI_RADIANCE_CACHE_COVERAGE_TRACE_OFFSET 20.0f
+#define BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_BITS 6u
+#define BURT_GI_SCREEN_PROBE_IN_TILE_OFFSET_MASK 0x3fu
+#define BURT_GI_SCREEN_PROBE_VALID_FLAG 0x2000u
+#define BURT_GI_SCREEN_PROBE_SKIP_SCREEN_TRACE_FLAG 0x4000u
+#define BURT_GI_SCREEN_PROBE_SKIP_ADAPTIVE_FLAG 0x8000u
+#define BURT_GI_SCREEN_PROBE_SPHERICAL_VISIBILITY_FLAG 0x10000u
+#define BURT_GI_SHADING_MODEL_HAIR 1.0f
+#define BURT_GI_SHADING_MODEL_SUBSURFACE 3.0f
+#define BURT_GI_SHADING_MODEL_FOLIAGE 5.0f
+#define BURT_GI_SHADING_MODEL_FUR 6.0f
+#define BURT_GI_GBUFFER_SHADING_MODEL_PACK_COUNT 8.0f
+
+#ifndef UNITY_NEAR_CLIP_VALUE
+    #if defined(SHADER_API_GLCORE) || defined(SHADER_API_GLES) || defined(SHADER_API_GLES3)
+        #define UNITY_NEAR_CLIP_VALUE (-1.0)
+    #else
+        #define UNITY_NEAR_CLIP_VALUE 0.0
+    #endif
+#endif
+
+Texture2D<float> _BurtGIScreenProbeScreenDepthTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldNormalTexture;
+Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
+float _BurtGISceneVoxelOctreeValid;
+
+RWTexture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
+RWTexture2D<float> _BurtGIScreenProbeTraceHitTexture;
+
+
+RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
+RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+RWStructuredBuffer<float4> _RW_XGIScreenProbeTraceVisualize_TracesData;
+
+#define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6
+#define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffffffu
+#define BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX 0xfffffffeu
+
+float4 _BurtGIScreenProbeParams;
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGIScreenProbePlacementParams;
+float4 _BurtGIScreenProbeTraceParams;
+float4 _BurtGIScreenProbeBentNormalParams;
+float4 _BurtGIScreenProbeBentNormalParams1;
+float4 _BurtGIScreenProbeScreenTraceParams;
+float4 _BurtGIScreenProbeScreenTraceParams1;
+float4 _BurtGIScreenProbeScreenTraceParams2;
+float4 _BurtGIScreenProbeTraceModeParams;
+float4 _BurtGIScreenProbeTraceIntensityParams;
+float4 _BurtGIScreenProbeImportancePDFParams;
+float4 _BurtGIScreenProbeImportanceLightPDFParams;
+float4 _BurtGIScreenProbeImportanceLightPDFParams1;
+float4 _BurtGIScreenProbeHistoryParams;
+float4 _BurtGIScreenProbeTemporalParams;
+float4 _BurtGIScreenProbeReprojectionParams;
+float4 _BurtGIScreenProbeFilterParams; // x=spatial passes, y=half kernel, z=fixup borders, w=placement jitter index.
+float4 _BurtGIScreenProbeSpatialFilterParams; // x=max radiance hit angle radians, y=position weight scale.
+float4 _BurtGIScreenProbeFilterGenerateMipParams;
+float4 _BurtGIScreenProbeImportanceGenRaysParams;
+float4 _BurtGIScreenProbeAdaptiveParams;
+float4 _BurtGIScreenProbeAdaptivePlacementParams;
+float4 _BurtGIScreenProbeIndirectArgsParams;
+float4 _BurtGIScreenProbeTraceCompactParams;
+float4 _BurtGIScreenProbeUseCountParams;
+float4 _BurtGIScreenProbeTraceVisualizeParams;
+float4 _BurtGISceneVoxelTraceControls;
+float4 _BurtGIScreenProbeSkyLeakParams;
+float4 _BurtGIScreenProbeIrradianceOctMipParams;
+float4 _BurtGIRadianceCacheHashGridParams0;
+float4 _BurtGIRadianceCacheHashGridParams1;
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapWorldParams;
+float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS];
+float4 _BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS];
+float4 _BurtGIRadianceCacheClipMapClipmapCenterExtent[BURT_GI_CLIPMAP_COUNT];
+float4 _BurtGIRadianceCacheClipMapClipmapParams[BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS];
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtGIRadianceCacheClipMapApplyParams;
+uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
+uint _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution;
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelClipmapCenterExtent[6];
+uint _BurtGISceneVoxelClipmapValidMask;
+float4 _ZBufferParams;
+float4 _BurtDeferredCameraWorldPosition;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+float4x4 _BurtGIScreenProbeViewProjectionMatrix;
+float4x4 _BurtGIPreviousViewProjectionMatrix;
+float4 _BurtSkyReflectionHDR;
+float4 _BurtSkyReflectionTint;
+float4 _BurtSkyReflectionRotation;
+float4 _BurtSkyLowerHemisphereDiffuseColor;
+float4 _BurtGILocalSkyProbeParams0;
+float4 _BurtGILocalSkyProbeParams1;
+float _BurtSkyReflectionIntensity;
+float _BurtSkyReflectionEnabled;
+float _BurtSkyReflectionMaxMip;
+float _BurtSkyLowerHemisphereEnabled;
+uint _BurtGIScreenProbeTraceCompactGroupSize;
+uint _BurtGIRadianceCacheClipMapFrameIndex;
+uint _BurtGIScreenProbeTraceStageMask;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+bool BurtGIScreenProbeHasValidPlacement(uint2 screenProbeCoord);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+struct BurtGIScreenProbeMipOutput
+{
+    float4 Radiance;
+    float4 Irradiance;
+    float4 Confidence;
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+uint2 BurtGIScreenProbeDecodePlacementSourcePixel(uint2 screenProbeCoord, float placementPayload, float spacingPixels, uint jitterIndex, uint2 sourceSize);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCREEN 1u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_HASH_GRID 2u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCENE_VOXEL 4u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCREEN_GRID 8u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_CLIPMAP 16u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_LOCAL_SKY 32u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SKY_CUBEMAP 64u
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCENE (BURT_GI_SCREEN_PROBE_TRACE_STAGE_HASH_GRID | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCENE_VOXEL | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCREEN_GRID | BURT_GI_SCREEN_PROBE_TRACE_STAGE_CLIPMAP)
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_SKY (BURT_GI_SCREEN_PROBE_TRACE_STAGE_LOCAL_SKY | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SKY_CUBEMAP)
+#define BURT_GI_SCREEN_PROBE_TRACE_STAGE_ALL (BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCREEN | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SCENE | BURT_GI_SCREEN_PROBE_TRACE_STAGE_SKY)
+
+
+
+
+
+
+
+
+
+
+
+
+void BurtGISampleScreenProbeTraceAtlasComposite(
+    uint2 atlasScreenProbeCoord,
+    float2 gatherUV,
+    uint traceResolution,
+    uint gatherResolution,
+    out float4 compositeRadiance,
+    out float compositeHit);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+bool BurtGIScreenProbeTraceCompactIsSkyDepth(float rawDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return rawDepth <= 0.00001f;
+#else
+    return rawDepth >= 0.99999f;
+#endif
+}
+float3 BurtGIScreenProbeTraceSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+void BurtGIUnpackScreenProbeAdaptiveProbeData(uint packedProbeData, out uint2 adaptiveFineProbeCoord, out uint adaptiveLevel)
+{
+    adaptiveFineProbeCoord.x = packedProbeData & 0x3fffu;
+    adaptiveFineProbeCoord.y = (packedProbeData >> 14) & 0x3fffu;
+    adaptiveLevel = (packedProbeData >> 28) & 0xfu;
+}
+uint2 BurtGIAdaptiveFineProbeCoordToBaseCoord(uint2 adaptiveFineProbeCoord, uint adaptiveLevel, uint2 screenProbeGridSize)
+{
+    uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
+    return min(adaptiveFineProbeCoord / max(1u, adaptiveSubGridSize), screenProbeGridSize - 1u);
+}
+uint BurtGIGetScreenProbeUniformCount(uint screenProbeWidth, uint screenProbeHeight)
+{
+    return max(1u, screenProbeWidth * screenProbeHeight);
+}
+uint BurtGIGetScreenProbeAdaptiveCount(uint maxAdaptiveProbeCount)
+{
+    return min(_BurtGIScreenProbeAdaptiveProbeNumBuffer[0], maxAdaptiveProbeCount);
+}
+bool BurtGIResolveScreenProbeSourceAndAtlasCoord(
+    uint screenProbeIndex,
+    uint screenProbeWidth,
+    uint screenProbeHeight,
+    uint maxAdaptiveProbeCount,
+    out uint2 sourceScreenProbeCoord,
+    out uint2 atlasScreenProbeCoord)
+{
+    uint uniformProbeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
+    atlasScreenProbeCoord = uint2(screenProbeIndex % screenProbeWidth, screenProbeIndex / screenProbeWidth);
+    if (screenProbeIndex < uniformProbeCount)
+    {
+        sourceScreenProbeCoord = atlasScreenProbeCoord;
+        return sourceScreenProbeCoord.y < screenProbeHeight;
+    }
+
+    uint adaptiveProbeIndex = screenProbeIndex - uniformProbeCount;
+    if (adaptiveProbeIndex >= BurtGIGetScreenProbeAdaptiveCount(maxAdaptiveProbeCount))
+    {
+        sourceScreenProbeCoord = uint2(0u, 0u);
+        return false;
+    }
+
+    uint adaptiveLevel;
+    uint2 adaptiveFineProbeCoord;
+    BurtGIUnpackScreenProbeAdaptiveProbeData(
+        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex],
+        adaptiveFineProbeCoord,
+        adaptiveLevel);
+    sourceScreenProbeCoord = BurtGIAdaptiveFineProbeCoordToBaseCoord(
+        adaptiveFineProbeCoord,
+        adaptiveLevel,
+        uint2(screenProbeWidth, screenProbeHeight));
+    return sourceScreenProbeCoord.x < screenProbeWidth && sourceScreenProbeCoord.y < screenProbeHeight;
+}
+float3 BurtGIEquiAreaSphericalMapping(float2 uv)
+{
+    uv = 2.0 * uv - 1.0;
+    float d = 1.0 - (abs(uv.x) + abs(uv.y));
+    float r = 1.0 - abs(d);
+    float phi = r == 0.0 ? 0.0 : 0.7853981633974483 * ((abs(uv.y) - abs(uv.x)) / r + 1.0);
+    float f = r * sqrt(max(2.0 - r * r, 0.0));
+    return BurtGIScreenProbeTraceSafeNormalize(float3(
+        f * sign(uv.y) * abs(sin(phi)),
+        sign(d) * (1.0 - r * r),
+        f * sign(uv.x) * abs(cos(phi))),
+        float3(0.0f, 1.0f, 0.0f));
+}
+bool BurtGIScreenProbeHasValidPlacement(uint2 screenProbeCoord)
+{
+    float rawDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(screenProbeCoord, 0));
+    float4 encodedPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(screenProbeCoord, 0));
+    return encodedNormal.a > 0.5f &&
+        encodedPosition.a > 0.5f &&
+        !BurtGIScreenProbeTraceCompactIsSkyDepth(rawDepth);
+}
+[numthreads(BURT_GI_SCREEN_PROBE_TRACE_VISUALIZE_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TRACE_VISUALIZE_THREADGROUP_SIZE, 1)]
+void ScreenProbeTraceVisualizeCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 traceTexelCoord = dispatchThreadId.xy;
+    if (traceTexelCoord.x >= traceResolution || traceTexelCoord.y >= traceResolution)
+    {
+        return;
+    }
+
+    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
+    uint2 queryScreenProbeCoord = uint2(screenProbeWidth / 2u, screenProbeHeight / 2u);
+    if (_BurtGIScreenProbeTraceVisualizeParams.z > 0.5f)
+    {
+        queryScreenProbeCoord = min(
+            (uint2)floor(max(_BurtGIScreenProbeTraceVisualizeParams.xy, 0.0f)),
+            uint2(screenProbeWidth - 1u, screenProbeHeight - 1u));
+    }
+
+    uint screenProbeIndex = queryScreenProbeCoord.y * screenProbeWidth + queryScreenProbeCoord.x;
+    uint2 sourceScreenProbeCoord;
+    uint2 atlasScreenProbeCoord;
+    if (!BurtGIResolveScreenProbeSourceAndAtlasCoord(
+        screenProbeIndex,
+        screenProbeWidth,
+        screenProbeHeight,
+        maxAdaptiveProbeCount,
+        sourceScreenProbeCoord,
+        atlasScreenProbeCoord))
+    {
+        return;
+    }
+
+    uint2 traceAtlasSize = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
+    uint2 traceAtlasCoord = atlasScreenProbeCoord * traceResolution + traceTexelCoord;
+    if (any(traceAtlasCoord >= traceAtlasSize))
+    {
+        return;
+    }
+
+    float3 probeWorldPosition = 0.0f;
+    if (BurtGIScreenProbeHasValidPlacement(sourceScreenProbeCoord))
+    {
+        probeWorldPosition = _BurtGIScreenProbeWorldPositionTexture.Load(int3(sourceScreenProbeCoord, 0)).xyz;
+    }
+
+    float2 octUV = ((float2)traceTexelCoord + 0.5f) / (float)traceResolution;
+    float3 traceDirection = BurtGIEquiAreaSphericalMapping(octUV);
+    float4 traceRadiance = _BurtGIScreenProbeTraceRadianceTexture[traceAtlasCoord];
+    float traceHit = saturate(max(traceRadiance.a, _BurtGIScreenProbeTraceHitTexture[traceAtlasCoord]));
+    float traceHitDistance = max(_BurtGIScreenProbeTraceParams.w, 0.001f) * traceHit;
+    float3 visualizeRadiance = sqrt(max(traceRadiance.rgb, 0.0f));
+    if (traceHit <= 0.001f)
+    {
+        traceHitDistance = 0.0f;
+        visualizeRadiance = 0.3f.xxx;
+    }
+    else if (traceHitDistance < 0.01f)
+    {
+        traceHitDistance = 0.1f;
+        visualizeRadiance = float3(1.0f, 0.0f, 1.0f);
+    }
+
+    uint traceIndex = traceTexelCoord.y * traceResolution + traceTexelCoord.x;
+    uint outputIndex = traceIndex * BURT_GI_SCREEN_PROBE_TRACE_VISUALIZE_DATA_STRIDE;
+    _RW_XGIScreenProbeTraceVisualize_TracesData[outputIndex + 0u] = float4(probeWorldPosition, 0.0f);
+    _RW_XGIScreenProbeTraceVisualize_TracesData[outputIndex + 1u] = float4(traceDirection * traceHitDistance, 0.0f);
+    _RW_XGIScreenProbeTraceVisualize_TracesData[outputIndex + 2u] = float4(visualizeRadiance, 0.0f);
+}

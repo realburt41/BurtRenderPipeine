@@ -2295,6 +2295,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
     {
         private static readonly int MainLightDirectionId = Shader.PropertyToID("_BurtMainLightDirection");
         private static readonly int MainLightColorId = Shader.PropertyToID("_BurtMainLightColor");
+        private static readonly int MainLightColorOuterSpaceId = Shader.PropertyToID("_BurtMainLightColorOuterSpace");
+        private static readonly int MainLightAtmosphereTransmittanceId = Shader.PropertyToID("_BurtMainLightAtmosphereTransmittance");
+        private static readonly int MainLightOcclusionFactorId = Shader.PropertyToID("_BurtMainLightOcclusionFactor");
         private static readonly int AmbientLightColorId = Shader.PropertyToID("_BurtAmbientLightColor");
         private static readonly int AdditionalLightCountId = Shader.PropertyToID("_BurtAdditionalLightCount");
         private static readonly int AdditionalLightPositionAndRangeId = Shader.PropertyToID("_BurtAdditionalLightPositionAndRange");
@@ -2330,6 +2333,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             PreExposureUtility.UploadGlobals(cmd, PreExposureUtility.ResolveForFrame(request, asset));
             cmd.SetGlobalVector(MainLightDirectionId, new Vector4(mainLightDirection.x, mainLightDirection.y, mainLightDirection.z, 0f));
             cmd.SetGlobalColor(MainLightColorId, mainLightColor);
+            cmd.SetGlobalColor(MainLightColorOuterSpaceId, lightingData.MainLightColorOuterSpace);
+            cmd.SetGlobalColor(MainLightAtmosphereTransmittanceId, lightingData.AtmosphereTransmittance);
+            cmd.SetGlobalFloat(MainLightOcclusionFactorId, lightingData.MainLightOcclusion);
             cmd.SetGlobalColor(AmbientLightColorId, ambientLightColor);
             cmd.SetGlobalFloat(AdditionalLightCountId, lightingData.AdditionalLightCount);
             cmd.SetGlobalVectorArray(AdditionalLightPositionAndRangeId, lightingData.AdditionalLightPositionAndRange);
@@ -2728,6 +2734,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var request = context.Request; // 从 GraphContext 中取出当前渲染请求。
 
             var camera = request.Camera; // 从 request 中取出当前相机，用来创建排序设置。
+
+            var transparentFogCmd = CommandBufferPool.Get(Name + " Transparent Fog Globals");
+            BurtVolumetricFogIntegratedUtility.BindForTransparentFog(transparentFogCmd, camera, request);
+            BurtAtmosphereLutUtility.EnsureAndBindForTransparentFog(transparentFogCmd, camera, request);
+            renderContext.ExecuteCommandBuffer(transparentFogCmd);
+            CommandBufferPool.Release(transparentFogCmd);
 
             var sortingSettings = new SortingSettings(camera); // 创建排序设置，Unity 会根据相机信息计算透明排序参数。
 

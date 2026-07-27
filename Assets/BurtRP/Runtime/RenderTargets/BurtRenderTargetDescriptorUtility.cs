@@ -43,6 +43,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             descriptor.autoGenerateMips = false; // 中间颜色 RT 不生成 mipmap，避免 Unity 在 FinalBlit 前做额外工作。
 
+            ApplyInputRenderScale(ref descriptor, camera);
             return descriptor; // 返回创建好的颜色 RT 描述，供分配 Pass 使用。
         }
 
@@ -53,6 +54,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             descriptor.depthBufferBits = 0; // 后处理颜色 RT 不需要深度缓冲，深度仍由 CameraDepth 单独管理。
 
             return descriptor; // 返回后处理颜色 RT 描述，供分配 Pass 使用。
+        }
+
+        public static RenderTextureDescriptor CreateOutputPostProcessColorDescriptor(Camera camera)
+        {
+            var descriptor = CreatePostProcessColorDescriptor(camera);
+            descriptor.width = ResolveOutputTargetWidth(camera);
+            descriptor.height = ResolveOutputTargetHeight(camera);
+            return descriptor;
         }
 
         public static RenderTextureDescriptor CreateScreenSpaceReflectionColorDescriptor(Camera camera)
@@ -415,6 +424,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             descriptor.autoGenerateMips = false; // 深度缓冲不生成 mipmap，避免 Unity 做额外工作。
 
+            ApplyInputRenderScale(ref descriptor, camera);
             return descriptor; // 返回创建好的深度 RT 描述，供分配 Pass 使用。
         }
 
@@ -541,6 +551,50 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             }
 
             cmd.SetViewport(new Rect(0f, 0f, Mathf.Max(1, width), Mathf.Max(1, height)));
+        }
+
+        public static void SetOutputTargetViewport(CommandBuffer cmd, Camera camera)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            var width = ResolveOutputTargetWidth(camera);
+            var height = ResolveOutputTargetHeight(camera);
+            SetViewport(cmd, width, height);
+        }
+
+        public static int ResolveOutputTargetWidth(Camera camera)
+        {
+            return Mathf.Max(1, camera != null && camera.targetTexture != null ? camera.targetTexture.width : camera != null ? camera.pixelWidth : 1);
+        }
+
+        public static int ResolveOutputTargetHeight(Camera camera)
+        {
+            return Mathf.Max(1, camera != null && camera.targetTexture != null ? camera.targetTexture.height : camera != null ? camera.pixelHeight : 1);
+        }
+
+        public static float ResolveInputRenderScale(Camera camera)
+        {
+            if (camera != null && camera.TryGetComponent<BurtCameraData>(out var cameraData) && cameraData != null)
+            {
+                return cameraData.RenderScale;
+            }
+
+            return 1f;
+        }
+
+        private static void ApplyInputRenderScale(ref RenderTextureDescriptor descriptor, Camera camera)
+        {
+            var scale = ResolveInputRenderScale(camera);
+            if (scale >= 0.9999f)
+            {
+                return;
+            }
+
+            descriptor.width = Mathf.Max(1, Mathf.RoundToInt(descriptor.width * scale));
+            descriptor.height = Mathf.Max(1, Mathf.RoundToInt(descriptor.height * scale));
         }
 
         public static RenderTextureDescriptor CreateMainLightShadowMapDescriptor(BurtShadowData shadowData) // 定义创建主光阴影图 RT 描述的函数。

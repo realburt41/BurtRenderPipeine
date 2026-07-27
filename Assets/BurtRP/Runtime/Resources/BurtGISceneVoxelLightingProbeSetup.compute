@@ -1,0 +1,484 @@
+#pragma kernel ProbePlacement
+#pragma kernel ProbeMark
+#pragma kernel ProbeCompact
+#pragma kernel ProbeCompactFromOccupancy
+#pragma kernel ProbeGenArgs
+
+#define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT 5u
+#define BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE_1D 64u
+#define BURT_GI_XGI_PROBE_TRACE_THREADGROUP_SIZE 8
+#define BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET 8u
+#define BURT_GI_XGI_PROBE_PAGE_INVALID 0u
+#define BURT_GI_XGI_PROBE_PAGE_CANDIDATE 1u
+#define BURT_GI_XGI_PROBE_PAGE_MARKED 2u
+#define BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT 9
+#define BURT_GI_XGI_PROBE_TRACE_SAMPLE_COUNT 64
+#define BURT_GI_FOUR_PI 12.56637061435917295385
+#define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6u
+#define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffffffu
+#define BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX 0xfffffffeu
+#define XGI_VOXEL_MATERIAL_INDEX_INVALID_ID 0u
+#define XGI_VOXEL_MATERIAL_INDEX_WAITING 0xfffffffeu
+#define XGI_VOXEL_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET 1u
+#define XGI_VOXEL_LIGHTING_ARGS_DATA_ALLOCATOR_OFFSET 8u
+
+Texture3D<float4> _BurtGISceneVoxelGeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
+
+Texture3D<float4> _BurtGISceneVoxelClipmap1GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap1OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3OccupancyMipReadTexture;
+
+SamplerState sampler_BurtGISceneVoxelOccupancyMipReadTexture;
+
+RWTexture3D<uint4> ProbePlaceProbePageTable;
+RWStructuredBuffer<uint> RWProbePlaceProbeIndex;
+RWBuffer<uint> RWVoxelProbeArgsBuffer;
+RWStructuredBuffer<uint> RWVoxelProbeArgsBufferParams;
+StructuredBuffer<uint> VoxelProbeArgsProbeIndex;
+
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapWorldParams;
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS];
+uint _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
+uint _BurtGIRadianceCacheClipMapUseIrradianceField;
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelClipmapCenterExtent[6];
+uint _BurtGISceneVoxelClipmapValidMask;
+float4 _BurtGISceneVoxelLightingParams;
+float4 _BurtGISceneVoxelDirectLightTint;
+float4 _BurtGISceneVoxelIndirectLightTint;
+float4 _BurtGISceneVoxelExposureParams;
+float4 _BurtGISceneVoxelTraceControls;
+float4 _BurtGISceneVoxelRadianceCacheParams;
+float4 _BurtGIMainLightDirection;
+float4 _BurtGIMainLightColor;
+float4 _BurtGIAdditionalLightPositionAndRange[8];
+float4 _BurtGIAdditionalLightColorAndType[8];
+float4 _BurtGIAdditionalLightDirectionAndSpot[8];
+float4 _BurtGIAdditionalLightSpotParams[8];
+float4 _BurtGIXGILightGridBoundMin[6];
+float4 _BurtGIXGILightGridBoundMax[6];
+float4 _BurtGIXGILightGridAxis[6];
+uint _BurtGIXGILightGridResolution;
+uint _BurtGIXGILightGridMaxLights;
+uint _BurtGIXGILightGridValid;
+uint _BurtGIAdditionalLightCount;
+uint _XGISceneRepresentUpdateVoxel_ClipMapResolution;
+uint _XGISceneRepresentUpdateVoxel_ClipMapNum;
+uint _XGISceneRepresentUpdateVoxel_VoxelDirectionsNum;
+int GenArgsDataVoxelTextureSize;
+int GenArgsDataIndexOffsetClipmap;
+int GenArgsDataClipmapIndex;
+int GenArgsDataClipmapCount;
+int VoxelApplyTextureSize;
+int VoxelApplyVolumeSize;
+int VoxelApplyClipmapCount;
+int VoxelApplyMaterialIndexOffsetForClipmap;
+int ProbePlaceIndexOffsetClipmap;
+int ProbePlaceClipmapIndex;
+int ProbePlaceClipmapCount;
+int VoxelProbeIndexOffsetClipmap;
+int VoxelProbeClipmapValidMask;
+int VoxelProbeArgsMaxProbeCount;
+int VoxelProbeArgsClipmapCount;
+
+groupshared uint BurtGISharedNumProbesToAllocate;
+groupshared uint BurtGISharedProbeBaseIndex;
+groupshared uint BurtGISharedProbeNodeIndex[BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE_1D];
+
+struct BurtGISceneVoxelOccupancySample
+{
+    uint Sampled;
+    float Occupancy;
+};
+
+float3 BurtGISceneVoxelWorldToUVW(float3 worldPosition)
+{
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    float extent = max(centerExtent.w, 0.001);
+    return (worldPosition - centerExtent.xyz) / (extent * 2.0) + 0.5;
+}
+uint3 BurtGIVoxelNodeIndexWithClipmap(uint3 nodeIndex, uint textureSize, uint clipmapIndex)
+{
+    return nodeIndex + uint3(0u, 0u, clipmapIndex * textureSize);
+}
+uint BurtGIVoxelNodeIndex2Flat(uint3 nodeIndexWithClipmap, uint textureSize, uint clipmapCount)
+{
+    uint safeTextureSize = max(textureSize, 1u);
+    uint safeClipmapCount = max(clipmapCount, 1u);
+    uint3 volumeSizeWithClipmap = uint3(safeTextureSize, safeTextureSize, safeTextureSize * safeClipmapCount);
+    return nodeIndexWithClipmap.x +
+        nodeIndexWithClipmap.z * volumeSizeWithClipmap.x +
+        nodeIndexWithClipmap.y * volumeSizeWithClipmap.x * volumeSizeWithClipmap.z;
+}
+uint BurtGIVoxelProbeNodeSize(uint volumeSize)
+{
+    return max(volumeSize >> 2u, 1u);
+}
+uint3 BurtGIVoxelProbeFlat2NodeIndex(uint flatIndex, uint textureSize, uint clipmapCount)
+{
+    uint safeTextureSize = max(textureSize, 1u);
+    uint safeClipmapCount = max(clipmapCount, 1u);
+    uint3 volumeSizeWithClipmap = uint3(safeTextureSize, safeTextureSize, safeTextureSize * safeClipmapCount);
+    uint yz = flatIndex / volumeSizeWithClipmap.x;
+    return uint3(flatIndex % volumeSizeWithClipmap.x, yz / volumeSizeWithClipmap.z, yz % volumeSizeWithClipmap.z);
+}
+bool BurtGIVoxelProbeClipmapValid(uint validMask, uint clipmapIndex)
+{
+    return ((validMask >> clipmapIndex) & 1u) != 0u;
+}
+uint BurtGIVoxelProbeClipmapFromArgs(uint threadIndex)
+{
+    uint clipmapIndex = 0u;
+    if (BurtGIVoxelProbeClipmapValid((uint)max(VoxelProbeClipmapValidMask, 0), 4u) && VoxelProbeArgsBufferParams[4] <= threadIndex)
+    {
+        clipmapIndex = 4u;
+    }
+    if (clipmapIndex + 2u < BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET && VoxelProbeArgsBufferParams[clipmapIndex + 2u] <= threadIndex)
+    {
+        clipmapIndex += 2u;
+    }
+    if (clipmapIndex + 1u < BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET && VoxelProbeArgsBufferParams[clipmapIndex + 1u] <= threadIndex)
+    {
+        clipmapIndex += 1u;
+    }
+    return clipmapIndex;
+}
+float4 BurtGIProbeClipmapCenterExtent(uint clipmapIndex)
+{
+    return clipmapIndex < 6u ? _BurtGISceneVoxelClipmapCenterExtent[clipmapIndex] : _BurtGISceneVoxelCenterExtent;
+}
+bool BurtGIProbeSampleOccupied(uint3 probeNodeIndex, uint probeNodeSize, uint clipmapIndex, out float4 occupancyValue)
+{
+    occupancyValue = 0.0;
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    _BurtGISceneVoxelOccupancyMipReadTexture.GetDimensions(width, height, depth);
+    uint3 occupancySize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    uint3 occupancyCoord = min((probeNodeIndex * occupancySize) / max(probeNodeSize, 1u), occupancySize - 1u);
+
+    if (clipmapIndex == 1u)
+    {
+        _BurtGISceneVoxelClipmap1OccupancyMipReadTexture.GetDimensions(width, height, depth);
+        occupancySize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+        occupancyCoord = min((probeNodeIndex * occupancySize) / max(probeNodeSize, 1u), occupancySize - 1u);
+        occupancyValue = _BurtGISceneVoxelClipmap1OccupancyMipReadTexture.Load(int4((int3)occupancyCoord, 0));
+    }
+    else if (clipmapIndex == 2u)
+    {
+        _BurtGISceneVoxelClipmap2OccupancyMipReadTexture.GetDimensions(width, height, depth);
+        occupancySize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+        occupancyCoord = min((probeNodeIndex * occupancySize) / max(probeNodeSize, 1u), occupancySize - 1u);
+        occupancyValue = _BurtGISceneVoxelClipmap2OccupancyMipReadTexture.Load(int4((int3)occupancyCoord, 0));
+    }
+    else if (clipmapIndex == 3u)
+    {
+        _BurtGISceneVoxelClipmap3OccupancyMipReadTexture.GetDimensions(width, height, depth);
+        occupancySize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+        occupancyCoord = min((probeNodeIndex * occupancySize) / max(probeNodeSize, 1u), occupancySize - 1u);
+        occupancyValue = _BurtGISceneVoxelClipmap3OccupancyMipReadTexture.Load(int4((int3)occupancyCoord, 0));
+    }
+    else
+    {
+        occupancyValue = _BurtGISceneVoxelOccupancyMipReadTexture.Load(int4((int3)occupancyCoord, 0));
+    }
+
+    return max(occupancyValue.x, occupancyValue.y) > 0.001;
+}
+uint3 BurtGIVoxelFlat2LocalChildIndex(uint flatIndex)
+{
+    uint yz = flatIndex >> 2u;
+    return uint3(flatIndex & 3u, yz >> 2u, yz & 3u);
+}
+bool BurtGIProbeChildOccupied(uint3 probeNodeIndex, uint3 childIndex, uint clipmapIndex)
+{
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    float4 geometry = 0.0;
+
+    if (clipmapIndex == 1u)
+    {
+        _BurtGISceneVoxelClipmap1GeometryReadTexture.GetDimensions(width, height, depth);
+        uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+        uint3 coord = min(probeNodeIndex * 4u + childIndex, volumeSize - 1u);
+        geometry = _BurtGISceneVoxelClipmap1GeometryReadTexture.Load(int4((int3)coord, 0));
+    }
+    else if (clipmapIndex == 2u)
+    {
+        _BurtGISceneVoxelClipmap2GeometryReadTexture.GetDimensions(width, height, depth);
+        uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+        uint3 coord = min(probeNodeIndex * 4u + childIndex, volumeSize - 1u);
+        geometry = _BurtGISceneVoxelClipmap2GeometryReadTexture.Load(int4((int3)coord, 0));
+    }
+    else if (clipmapIndex == 3u)
+    {
+        _BurtGISceneVoxelClipmap3GeometryReadTexture.GetDimensions(width, height, depth);
+        uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+        uint3 coord = min(probeNodeIndex * 4u + childIndex, volumeSize - 1u);
+        geometry = _BurtGISceneVoxelClipmap3GeometryReadTexture.Load(int4((int3)coord, 0));
+    }
+    else
+    {
+        _BurtGISceneVoxelGeometryReadTexture.GetDimensions(width, height, depth);
+        uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+        uint3 coord = min(probeNodeIndex * 4u + childIndex, volumeSize - 1u);
+        geometry = _BurtGISceneVoxelGeometryReadTexture.Load(int4((int3)coord, 0));
+    }
+
+    return saturate(geometry.a) > 0.001;
+}
+[numthreads(BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE)]
+void ProbePlacement(
+    uint groupIndex : SV_GroupIndex,
+    uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint probeNodeSize = BurtGIVoxelProbeNodeSize((uint)max(VoxelApplyVolumeSize, 1));
+    uint clipmapIndex = min((uint)max(ProbePlaceClipmapIndex, 0), max((uint)max(ProbePlaceClipmapCount, 1), 1u) - 1u);
+    uint3 probeNodeIndex = dispatchThreadId;
+    if (any(probeNodeIndex >= probeNodeSize))
+    {
+        return;
+    }
+
+    int3 offsets[7];
+    offsets[0] = int3(0, 0, 0);
+    offsets[1] = int3(-1, 0, 0);
+    offsets[2] = int3(1, 0, 0);
+    offsets[3] = int3(0, 0, 1);
+    offsets[4] = int3(0, 0, -1);
+    offsets[5] = int3(0, 1, 0);
+    offsets[6] = int3(0, -1, 0);
+
+    bool probeValid = false;
+    bool probeNodeSelfValid = false;
+    int3 probeTriggerOffset = int3(0, 0, 0);
+    [unroll]
+    for (int offsetIndex = 0; offsetIndex < 7; ++offsetIndex)
+    {
+        int3 neighborProbeNodeIndex = (int3)probeNodeIndex + offsets[offsetIndex];
+        if (any(neighborProbeNodeIndex < 0) || any(neighborProbeNodeIndex >= (int3)probeNodeSize))
+        {
+            continue;
+        }
+
+        float4 occupancyValue = 0.0;
+        bool nodeValid = BurtGIProbeSampleOccupied((uint3)neighborProbeNodeIndex, probeNodeSize, clipmapIndex, occupancyValue);
+        if (offsetIndex == 0)
+        {
+            probeNodeSelfValid = nodeValid;
+        }
+        if (nodeValid)
+        {
+            probeValid = true;
+            probeTriggerOffset = offsets[offsetIndex];
+            break;
+        }
+    }
+
+    uint3 probeNodeIndexWithClipmap = BurtGIVoxelNodeIndexWithClipmap(probeNodeIndex, probeNodeSize, clipmapIndex);
+    if (!probeValid)
+    {
+        ProbePlaceProbePageTable[probeNodeIndexWithClipmap] = uint4(0u, 0u, 0u, BURT_GI_XGI_PROBE_PAGE_INVALID);
+        return;
+    }
+
+    uint3 probeOffset = uint3(0u, 0u, 0u);
+    bool probeOffsetValid = false;
+    if (probeNodeSelfValid)
+    {
+        float minDistanceSqr = 65504.0;
+        [unroll]
+        for (uint childID = 0u; childID < 64u; ++childID)
+        {
+            uint3 childIndex = BurtGIVoxelFlat2LocalChildIndex(childID);
+            if (BurtGIProbeChildOccupied(probeNodeIndex, childIndex, clipmapIndex))
+            {
+                continue;
+            }
+
+            float3 childDelta = (float3)childIndex - 1.5;
+            float distanceSqr = dot(childDelta, childDelta);
+            if (distanceSqr < minDistanceSqr)
+            {
+                minDistanceSqr = distanceSqr;
+                probeOffset = childIndex;
+                probeOffsetValid = true;
+            }
+        }
+    }
+    else
+    {
+        probeOffset = uint3(1u, 1u, 1u);
+        if (probeTriggerOffset.x < 0) probeOffset.x = 0u;
+        else if (probeTriggerOffset.x > 0) probeOffset.x = 3u;
+        if (probeTriggerOffset.y < 0) probeOffset.y = 0u;
+        else if (probeTriggerOffset.y > 0) probeOffset.y = 3u;
+        if (probeTriggerOffset.z < 0) probeOffset.z = 0u;
+        else if (probeTriggerOffset.z > 0) probeOffset.z = 3u;
+        probeOffsetValid = true;
+    }
+
+    ProbePlaceProbePageTable[probeNodeIndexWithClipmap] = probeOffsetValid
+        ? uint4(probeOffset, BURT_GI_XGI_PROBE_PAGE_CANDIDATE)
+        : uint4(0u, 0u, 0u, BURT_GI_XGI_PROBE_PAGE_INVALID);
+}
+[numthreads(BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE)]
+void ProbeMark(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint voxelTextureSize = max((uint)max(VoxelApplyTextureSize, 1), 1u);
+    uint clipmapIndex = min((uint)max(ProbePlaceClipmapIndex, 0), max((uint)max(VoxelApplyClipmapCount, 1), 1u) - 1u);
+    uint3 nodeIndex = dispatchThreadId;
+    if (any(nodeIndex >= voxelTextureSize))
+    {
+        return;
+    }
+
+    float4 occupancyValue = 0.0;
+    if (!BurtGIProbeSampleOccupied(nodeIndex, voxelTextureSize, clipmapIndex, occupancyValue))
+    {
+        return;
+    }
+
+    uint probeNodeSize = BurtGIVoxelProbeNodeSize((uint)max(VoxelApplyVolumeSize, 1));
+    float3 position01 = ((float3)nodeIndex + 0.5) / (float)voxelTextureSize;
+    int3 cornerProbeIndex3D = (int3)floor(position01 * (float)probeNodeSize - 0.5);
+
+    [unroll]
+    for (uint neighborIndex = 0u; neighborIndex < 8u; ++neighborIndex)
+    {
+        int3 probeOffset = int3((neighborIndex & 4u) >> 2u, (neighborIndex & 2u) >> 1u, neighborIndex & 1u);
+        int3 probeIndex3DInt = cornerProbeIndex3D + probeOffset;
+        if (any(probeIndex3DInt < 0) || any(probeIndex3DInt >= (int3)probeNodeSize))
+        {
+            continue;
+        }
+
+        uint3 probeIndex3DWithClipmap = BurtGIVoxelNodeIndexWithClipmap((uint3)probeIndex3DInt, probeNodeSize, clipmapIndex);
+        uint4 probeInfo = ProbePlaceProbePageTable[probeIndex3DWithClipmap];
+        if (probeInfo.w == BURT_GI_XGI_PROBE_PAGE_INVALID)
+        {
+            continue;
+        }
+
+        ProbePlaceProbePageTable[probeIndex3DWithClipmap] = uint4(probeInfo.xyz, BURT_GI_XGI_PROBE_PAGE_MARKED);
+    }
+}
+[numthreads(BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE)]
+void ProbeCompact(
+    uint groupIndex : SV_GroupIndex,
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint groupThreadIndex = groupThreadId.z * BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE * BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE +
+        groupThreadId.y * BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE +
+        groupThreadId.x;
+    if (groupThreadIndex == 0u)
+    {
+        BurtGISharedNumProbesToAllocate = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint probeNodeSize = BurtGIVoxelProbeNodeSize((uint)max(VoxelApplyVolumeSize, 1));
+    uint clipmapIndex = min((uint)max(ProbePlaceClipmapIndex, 0), max((uint)max(ProbePlaceClipmapCount, 1), 1u) - 1u);
+    uint3 probeNodeIndex = dispatchThreadId;
+    bool probeValid = false;
+    if (!any(probeNodeIndex >= probeNodeSize))
+    {
+        uint3 probeNodeIndexWithClipmap = BurtGIVoxelNodeIndexWithClipmap(probeNodeIndex, probeNodeSize, clipmapIndex);
+        uint4 probeInfo = ProbePlaceProbePageTable[probeNodeIndexWithClipmap];
+        probeValid = probeInfo.w == BURT_GI_XGI_PROBE_PAGE_MARKED;
+        ProbePlaceProbePageTable[probeNodeIndexWithClipmap] = probeValid ? uint4(probeInfo.xyz, 1u) : uint4(0u, 0u, 0u, 0u);
+    }
+
+    if (probeValid)
+    {
+        uint probeAllocatedIndex = 0u;
+        InterlockedAdd(BurtGISharedNumProbesToAllocate, 1u, probeAllocatedIndex);
+        BurtGISharedProbeNodeIndex[probeAllocatedIndex] = BurtGIVoxelNodeIndex2Flat(probeNodeIndex, probeNodeSize, 1u);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupThreadIndex == 0u)
+    {
+        InterlockedAdd(RWProbePlaceProbeIndex[clipmapIndex], BurtGISharedNumProbesToAllocate, BurtGISharedProbeBaseIndex);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupThreadIndex < BurtGISharedNumProbesToAllocate)
+    {
+        uint indexOffsetClipmap = max((uint)max(ProbePlaceIndexOffsetClipmap, 1), 1u);
+        uint probePlaceProbeIndex = groupThreadIndex + BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET + BurtGISharedProbeBaseIndex + clipmapIndex * indexOffsetClipmap;
+        RWProbePlaceProbeIndex[probePlaceProbeIndex] = BurtGISharedProbeNodeIndex[groupThreadIndex];
+    }
+}
+[numthreads(BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE)]
+void ProbeCompactFromOccupancy(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint probeNodeSize = BurtGIVoxelProbeNodeSize((uint)max(VoxelApplyVolumeSize, 1));
+    uint clipmapIndex = min((uint)max(ProbePlaceClipmapIndex, 0), max((uint)max(ProbePlaceClipmapCount, 1), 1u) - 1u);
+    uint3 probeNodeIndex = dispatchThreadId;
+    if (any(probeNodeIndex >= probeNodeSize))
+    {
+        return;
+    }
+
+    float4 occupancyValue = 0.0;
+    bool probeValid = BurtGIProbeSampleOccupied(probeNodeIndex, probeNodeSize, clipmapIndex, occupancyValue);
+    uint3 probeNodeIndexWithClipmap = BurtGIVoxelNodeIndexWithClipmap(probeNodeIndex, probeNodeSize, clipmapIndex);
+    if (!probeValid)
+    {
+        ProbePlaceProbePageTable[probeNodeIndexWithClipmap] = uint4(0u, 0u, 0u, 0u);
+        return;
+    }
+
+    ProbePlaceProbePageTable[probeNodeIndexWithClipmap] = uint4(1u, 1u, 1u, 1u);
+
+    uint compactIndex = 0u;
+    InterlockedAdd(RWProbePlaceProbeIndex[clipmapIndex], 1u, compactIndex);
+    uint indexOffsetClipmap = max((uint)max(ProbePlaceIndexOffsetClipmap, 1), 1u);
+    if (compactIndex >= indexOffsetClipmap)
+    {
+        return;
+    }
+
+    uint probePlaceProbeIndex = compactIndex + BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET + clipmapIndex * indexOffsetClipmap;
+    RWProbePlaceProbeIndex[probePlaceProbeIndex] = BurtGIVoxelNodeIndex2Flat(probeNodeIndex, probeNodeSize, 1u);
+}
+[numthreads(1, 1, 1)]
+void ProbeGenArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint probeCount = 0u;
+    int clipmapCount = max(VoxelProbeArgsClipmapCount, 0);
+    [loop]
+    for (int i = 0; i < clipmapCount; ++i)
+    {
+        RWVoxelProbeArgsBufferParams[i] = probeCount;
+        if (BurtGIVoxelProbeClipmapValid((uint)max(VoxelProbeClipmapValidMask, 0), (uint)i))
+        {
+            probeCount += VoxelProbeArgsProbeIndex[i];
+        }
+    }
+
+    probeCount = min(probeCount, (uint)max(VoxelProbeArgsMaxProbeCount, 0));
+    [loop]
+    for (int j = clipmapCount; j <= (int)BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET; ++j)
+    {
+        RWVoxelProbeArgsBufferParams[j] = probeCount;
+    }
+
+    uint probeThreadNumSqrt = max((uint)ceil(sqrt((float)probeCount)), 1u);
+    RWVoxelProbeArgsBuffer[0] = probeThreadNumSqrt;
+    RWVoxelProbeArgsBuffer[1] = probeThreadNumSqrt;
+    RWVoxelProbeArgsBuffer[2] = 1u;
+    RWVoxelProbeArgsBufferParams[BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET + 1u] = probeThreadNumSqrt;
+}

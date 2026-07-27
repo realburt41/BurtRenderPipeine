@@ -44,6 +44,7 @@ CBUFFER_START(UnityPerMaterial)
     float _WindNormalStrength;
     float4 _EmissionColor;
     float4 _EmissionMap_ST;
+    float _ResponsiveAA;
 CBUFFER_END
 
 #endif // BURT_GRASS_PROPERTIES_INCLUDED

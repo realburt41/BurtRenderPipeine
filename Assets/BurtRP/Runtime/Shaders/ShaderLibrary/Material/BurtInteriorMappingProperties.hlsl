@@ -30,6 +30,7 @@ CBUFFER_START(UnityPerMaterial)
     float _DitherSteps;
     float4 _EmissionColor;
     float4 _EmissionMap_ST;
+    float _ResponsiveAA;
 CBUFFER_END
 
 #endif // BURT_INTERIOR_MAPPING_PROPERTIES_INCLUDED

@@ -137,6 +137,7 @@ BurtDirectPBRComponents BurtApplyClearCoatPBRDirectFromCore(BurtDirectPBRCompone
     return Components;
 }
 
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
 void BurtApplyClearCoatPBRDebugComponents(
     BurtPBRShadingCoreData CoreData,
     inout float DebugSpecularAARoughness,
@@ -173,5 +174,6 @@ void BurtApplyClearCoatPBRDebugComponents(
     DebugIndirectDFG = lerp(DebugIndirectDFG, ClearCoatDFG, ClearCoatMask);
     DebugIndirectEnvBRDF = lerp(DebugIndirectEnvBRDF, BottomLayerEnvBRDF * ClearCoatLayerTransmission + ClearCoatEnvBRDF, ClearCoatMask);
 }
+#endif
 
 #endif // BURT_LIGHTING_PBR_CORE_CLEAR_COAT_INCLUDED

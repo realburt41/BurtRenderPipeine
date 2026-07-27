@@ -4,6 +4,7 @@
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEasyFogProperties.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtTransparentAtmosphereFog.hlsl"
 
 UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
 
@@ -21,6 +22,7 @@ struct BurtEasyFogVaryings
     float4 ScreenPos : TEXCOORD1;
     float ViewDepth : TEXCOORD2;
     float CameraFade : TEXCOORD3;
+    float3 PositionWS : TEXCOORD4;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -118,6 +120,7 @@ BurtEasyFogVaryings BurtEasyFogVert(BurtEasyFogAttributes input)
     output.ScreenPos = ComputeScreenPos(output.PositionCS);
     output.ViewDepth = max(-mul(UNITY_MATRIX_V, positionWS).z, 0.0f);
     output.CameraFade = BurtEasyFogCameraFade();
+    output.PositionWS = positionWS.xyz;
     return output;
 }
 
@@ -136,7 +139,12 @@ float4 BurtEasyFogFrag(BurtEasyFogVaryings input) : SV_Target
     clip(opacity - 0.0001f);
 
     float3 fogColor = _BaseColorTink.rgb * max(_EmissiveIntensity, 0.0f);
-    return float4(BurtApplyPreExposure(fogColor * opacity), opacity);
+    float3 premultipliedFogColor = BurtApplyPremultipliedTransparentFog(
+        fogColor * opacity,
+        opacity,
+        screenUV,
+        input.PositionWS);
+    return float4(BurtApplyPreExposure(premultipliedFogColor), opacity);
 }
 
 BurtEasyFogMotionVectorVaryings BurtEasyFogMotionVectorVert(BurtEasyFogAttributes input)
@@ -177,6 +185,14 @@ float4 BurtEasyFogMotionVectorFrag(BurtEasyFogMotionVectorVaryings input) : SV_T
     float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
     clip(max(velocityPixels.x, velocityPixels.y) - 0.02f);
     return float4(velocity * valid, 1.0f, 1.0f);
+}
+
+float4 BurtEasyFogResponsiveAAMaskFrag(BurtEasyFogMotionVectorVaryings input) : SV_Target
+{
+    float opacity = saturate(BurtEasyFogSampleFlowOpacity(input.UV0) * _FogIntensity);
+    clip(opacity - 0.0001f);
+    clip(_ResponsiveAA - 0.5f);
+    return float4(1.0f, 0.0f, 0.0f, 0.0f);
 }
 
 #endif // BURT_EASY_FOG_PASS_INCLUDED

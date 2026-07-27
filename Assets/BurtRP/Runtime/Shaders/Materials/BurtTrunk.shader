@@ -82,6 +82,27 @@ Shader "BurtRP/Trunk"
 
         Pass
         {
+            Name "Burt Trunk Responsive AA Mask"
+            Tags { "LightMode" = "BurtResponsiveAAMask" }
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+            HLSLPROGRAM
+            #pragma vertex VertMotionVector
+            #pragma fragment FragResponsiveAAMask
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+            #define BURT_MATERIAL_SHADING_MODEL_TRUNK 1
+            #define BURT_MOTION_VECTOR_RESPONSIVE_AA_MASK 1
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkProperties.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "Burt Trunk Shadow Caster"
             Tags { "LightMode" = "ShadowCaster" }
             ColorMask 0

@@ -8,6 +8,9 @@ float4 _BurtMainLightDirection;
 #endif
 
 float4 _BurtMainLightColor;
+float4 _BurtMainLightColorOuterSpace;
+float4 _BurtMainLightAtmosphereTransmittance;
+float _BurtMainLightOcclusionFactor;
 
 
 #define BURT_MAX_ADDITIONAL_LIGHTS 8
@@ -127,11 +130,32 @@ float4 BurtReadAdditionalLightSpotParams(int lightIndex)
     return _BurtAdditionalLightSpotParams[lightIndex];
 }
 
-float BurtEvaluateAdditionalLightDistanceAttenuation(float distanceSquared, float range)
+bool BurtAdditionalLightUsesInverseSquaredFalloff(float packedFalloffAndNearCutoff)
+{
+    return packedFalloffAndNearCutoff >= 0.0f;
+}
+
+float BurtDecodeAdditionalLightVolumetricNearCutoff(float packedFalloffAndNearCutoff)
+{
+    return packedFalloffAndNearCutoff >= 0.0f
+        ? packedFalloffAndNearCutoff
+        : max(-packedFalloffAndNearCutoff - 1.0f, 0.0f);
+}
+
+float BurtEvaluateAdditionalLightDistanceAttenuation(
+    float distanceSquared,
+    float range,
+    bool useInverseSquaredFalloff)
 {
     float safeRange = max(range, 0.0001f);
-    float rangeFade = saturate(1.0f - distanceSquared / max(safeRange * safeRange, BURT_EPSILON));
-    return rangeFade * rangeFade * rcp(max(distanceSquared, 0.25f));
+    float normalizedDistanceSquared = distanceSquared / max(safeRange * safeRange, BURT_EPSILON);
+    if (!useInverseSquaredFalloff)
+    {
+        return saturate(1.0f - sqrt(saturate(normalizedDistanceSquared)));
+    }
+
+    float smoothFactor = saturate(1.0f - normalizedDistanceSquared * normalizedDistanceSquared);
+    return smoothFactor * smoothFactor * rcp(max(distanceSquared, 0.0001f));
 }
 
 BurtLight BurtCreateAdditionalLightInternal(int lightIndex, float3 positionWS, float3 normalWS, bool sampleShadow, float3 shadowPositionWS)
@@ -158,14 +182,17 @@ BurtLight BurtCreateAdditionalLightInternal(int lightIndex, float3 positionWS, f
     float distanceSquared = dot(toLight, toLight);
     light.DirectionWS = BurtSafeNormalize(toLight);
 
-    float attenuation = BurtEvaluateAdditionalLightDistanceAttenuation(distanceSquared, positionAndRange.w);
+    float4 spotParams = BurtReadAdditionalLightSpotParams(lightIndex);
+    float attenuation = BurtEvaluateAdditionalLightDistanceAttenuation(
+        distanceSquared,
+        positionAndRange.w,
+        BurtAdditionalLightUsesInverseSquaredFalloff(spotParams.w));
 
     if (lightType > 1.5f)
     {
         float3 spotDirectionWS = BurtSafeNormalize(BurtReadAdditionalLightDirectionAndSpot(lightIndex).xyz);
         float3 fromLightDirectionWS = -light.DirectionWS;
         float spotCos = dot(fromLightDirectionWS, spotDirectionWS);
-        float3 spotParams = BurtReadAdditionalLightSpotParams(lightIndex).xyz;
         float spotFade = saturate((spotCos - spotParams.y) * spotParams.z);
         attenuation *= spotFade * spotFade;
     }

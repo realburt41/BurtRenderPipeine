@@ -44,6 +44,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty overallAlpha;
         private MaterialProperty cull;
         private MaterialProperty zWrite;
+        private MaterialProperty responsiveAA;
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
@@ -75,6 +76,7 @@ namespace Burt.RenderPipeline.Editor
             material.renderQueue = (int)RenderQueue.Transparent;
             material.SetShaderPassEnabled("BurtForward", true);
             material.SetShaderPassEnabled("BurtTransparentMotionVectors", true);
+            material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
         }
 
         private void CacheProperties()
@@ -91,6 +93,7 @@ namespace Burt.RenderPipeline.Editor
             overallAlpha = Find("_OverallAlpha");
             cull = Find("_Cull");
             zWrite = Find("_ZWrite");
+            responsiveAA = Find("_ResponsiveAA");
         }
 
         private MaterialProperty Find(string propertyName)
@@ -173,6 +176,7 @@ namespace Burt.RenderPipeline.Editor
 
             BurtShaderGUIUtility.DrawProperty(materialEditor, cull);
             BurtShaderGUIUtility.DrawProperty(materialEditor, zWrite);
+            BurtShaderGUIUtility.DrawProperty(materialEditor, responsiveAA);
             BurtShaderGUIUtility.EndSection();
         }
 

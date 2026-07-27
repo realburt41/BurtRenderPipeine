@@ -27,6 +27,7 @@ CBUFFER_START(UnityPerMaterial)
     float _ZWrite;
     float _ZTest;
     float _Cull;
+    float _ResponsiveAA;
 CBUFFER_END
 
 #endif // BURT_EASY_FOG_PROPERTIES_INCLUDED

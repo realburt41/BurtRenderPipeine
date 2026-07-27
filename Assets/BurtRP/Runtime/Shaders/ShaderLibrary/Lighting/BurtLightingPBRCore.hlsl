@@ -2,6 +2,14 @@
 #ifndef BURT_LIGHTING_PBR_CORE_INCLUDED
 #define BURT_LIGHTING_PBR_CORE_INCLUDED
 
+#ifndef BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
+#define BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG 1
+#endif
+
+#ifndef BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
+#define BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG 1
+#endif
+
 struct BurtPBRShadingCoreData
 
 {
@@ -128,9 +136,10 @@ struct BurtPBRShadingComponents
 {
     float3 DiffuseColor;
 
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     float3 F0;
-
-float3 F90;
+    float3 F90;
+#endif
 
     float3 DirectDiffuse;
 
@@ -154,38 +163,27 @@ float3 IndirectLighting;
 
     float3 Lighting;
 
-    float PerceptualRoughness;
-
-    float SpecularAARoughness;
-
-    float SpecularAANormalVariance;
-
-    float SpecularAARoughnessDelta;
-
-    float3 SpecularEnergyCompensation;
-
-    float3 IndirectSpecularEnergyCompensation;
-
     float EnergyPreservation;
 
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
+    float PerceptualRoughness;
+    float SpecularAARoughness;
+    float SpecularAANormalVariance;
+    float SpecularAARoughnessDelta;
+    float3 SpecularEnergyCompensation;
+    float3 IndirectSpecularEnergyCompensation;
     float SpecularOcclusion;
-
     float DirectBRDFD;
-
     float DirectBRDFVisibility;
-
     float3 DirectBRDFFresnel;
-
-float DirectDiffuseLobe;
-
-float3 DirectDiffuseBRDF;
-
-float3 DirectSpecularBRDF;
-
-float2 IndirectSpecularDFG;
-
+    float DirectDiffuseLobe;
+    float3 DirectDiffuseBRDF;
+    float3 DirectSpecularBRDF;
+    float2 IndirectSpecularDFG;
     float3 IndirectSpecularEnvBRDF;
+#endif
 
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     float HairPrimaryLobe;
 
     float HairSecondaryLobe;
@@ -193,8 +191,6 @@ float2 IndirectSpecularDFG;
     float HairTransmissionLobe;
 
     float HairScatter;
-
-    float ClearCoatMask;
 
     float SubsurfaceProfileIndex;
 
@@ -214,10 +210,12 @@ float2 IndirectSpecularDFG;
 
     float3 SubsurfaceKernelWeight;
 
-    float3 SubsurfaceIndirect;
+#endif
 
+    float3 SubsurfaceIndirect;
     float3 SubsurfaceIndirectTransmission;
 
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     float FoliageMask;
 
     float3 FoliageTransmission;
@@ -229,6 +227,11 @@ float2 IndirectSpecularDFG;
     float FoliageTransmissionShadow;
 
     float3 FoliageSpecularBRDF;
+#endif
+
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
+    float ClearCoatMask;
+#endif
 };
 
 #if BURT_ENABLE_SUBSURFACE_SHADING && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE))
@@ -249,6 +252,7 @@ BurtPBRShadingComponents BurtApplySubsurfacePBRShadingComponents(
     BurtDirectPBRComponents DirectComponents,
     BurtIndirectPBRComponents IndirectComponents)
 {
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.SubsurfaceProfileIndex = CoreData.MaterialData.SubsurfaceProfileIndex;
     Components.SubsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceDirectTransmission = DirectComponents.Transmission;
@@ -258,6 +262,7 @@ BurtPBRShadingComponents BurtApplySubsurfacePBRShadingComponents(
     Components.SubsurfaceTransmissionShadow = DirectComponents.TransmissionShadow;
     Components.SubsurfaceTransmissionThickness = DirectComponents.TransmissionThickness;
     Components.SubsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
+#endif
     Components.SubsurfaceIndirect = IndirectComponents.SubsurfaceIndirect;
     Components.SubsurfaceIndirectTransmission = IndirectComponents.SubsurfaceIndirectTransmission;
     return Components;
@@ -272,12 +277,14 @@ BurtPBRShadingComponents BurtApplyFoliagePBRShadingComponents(
     BurtPBRShadingCoreData CoreData,
     BurtDirectPBRComponents DirectComponents)
 {
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.FoliageMask = 0.0f;
     Components.FoliageTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionShadow = 1.0f;
     Components.FoliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
+#endif
     return Components;
 }
 #endif
@@ -579,8 +586,10 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
 {
     BurtPBRShadingComponents Components;
 
-    Components.PerceptualRoughness = CoreData.MaterialData.PerceptualRoughness;
     Components.DiffuseColor = CoreData.MaterialData.DiffuseColor;
+    Components.EnergyPreservation = CoreData.EnergyTerms.EnergyPreservation;
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
+    Components.PerceptualRoughness = CoreData.MaterialData.PerceptualRoughness;
     Components.F0 = CoreData.MaterialData.F0;
     Components.F90 = CoreData.MaterialData.F90;
 
@@ -591,7 +600,6 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     float3 DebugDirectSpecularEnergyCompensation = CoreData.EnergyTerms.DirectSpecularEnergyCompensation;
     float3 DebugIndirectSpecularEnergyCompensation = CoreData.EnergyTerms.IndirectSpecularEnergyCompensation;
 
-    Components.EnergyPreservation = CoreData.EnergyTerms.EnergyPreservation;
     float DebugIndirectNoV = CoreData.GeometryData.NDotV;
     float DebugIndirectRoughness = CoreData.MaterialData.PerceptualRoughness;
     float2 DebugIndirectDFG = GetSpecularDFGTerms(DebugIndirectRoughness, DebugIndirectNoV);
@@ -616,6 +624,7 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
 
     Components.SpecularEnergyCompensation = DebugDirectSpecularEnergyCompensation;
     Components.IndirectSpecularEnergyCompensation = DebugIndirectSpecularEnergyCompensation;
+#endif
     float3 ResolvedDirectDiffuse = DirectComponents.Diffuse;
     float3 ResolvedDirectTransmission = DirectComponents.Transmission;
     float3 ResolvedIndirectDiffuse = IndirectComponents.Diffuse;
@@ -627,12 +636,14 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
         ResolvedIndirectDiffuse,
         ResolvedIndirectTransmission);
 
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.DirectBRDFD = DirectComponents.BrdfTerms.D;
     Components.DirectBRDFVisibility = DirectComponents.BrdfTerms.Visibility;
     Components.DirectBRDFFresnel = DirectComponents.BrdfTerms.Fresnel;
     Components.DirectDiffuseLobe = DirectComponents.BrdfTerms.DiffuseLobe;
     Components.DirectDiffuseBRDF = DirectComponents.BrdfTerms.DiffuseBRDF;
     Components.DirectSpecularBRDF = DirectComponents.BrdfTerms.SpecularBRDF;
+#endif
     Components.DirectDiffuse = ResolvedDirectDiffuse;
     Components.DirectSpecular = DirectComponents.Specular;
     Components.DirectTransmission = ResolvedDirectTransmission;
@@ -645,14 +656,20 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     Components.IndirectSpecular = IndirectComponents.Specular;
     Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular + ResolvedIndirectTransmission;
     Components.Lighting = Components.DirectLighting + Components.IndirectLighting;
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.SpecularOcclusion = GetIndirectSpecularOcclusion(DebugIndirectNoV, CoreData.MaterialData.Occlusion, DebugIndirectRoughness);
     Components.IndirectSpecularDFG = DebugIndirectDFG;
     Components.IndirectSpecularEnvBRDF = DebugIndirectEnvBRDF;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.HairPrimaryLobe = 0.0f;
     Components.HairSecondaryLobe = 0.0f;
     Components.HairTransmissionLobe = 0.0f;
     Components.HairScatter = 0.0f;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.ClearCoatMask = CoreData.MaterialData.ClearCoatMask;
+#endif
     Components = BurtApplySubsurfacePBRShadingComponents(Components, CoreData, DirectComponents, IndirectComponents);
     Components = BurtApplyFoliagePBRShadingComponents(Components, CoreData, DirectComponents);
 

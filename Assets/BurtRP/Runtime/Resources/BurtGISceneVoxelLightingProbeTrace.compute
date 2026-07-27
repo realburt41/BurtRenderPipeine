@@ -1,0 +1,1031 @@
+#pragma kernel ProbeTraceRadiance
+
+#define BURT_GI_SCENE_VOXEL_LIGHTING_PROBE_SINGLE_CLIPMAP 1
+#define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT 5u
+#define BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE_1D 64u
+#define BURT_GI_XGI_PROBE_TRACE_THREADGROUP_SIZE 8
+#define BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET 8u
+#define BURT_GI_XGI_PROBE_PAGE_INVALID 0u
+#define BURT_GI_XGI_PROBE_PAGE_CANDIDATE 1u
+#define BURT_GI_XGI_PROBE_PAGE_MARKED 2u
+#define BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT 9
+#define BURT_GI_XGI_PROBE_TRACE_SAMPLE_COUNT 64
+#define BURT_GI_FOUR_PI 12.56637061435917295385
+#define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6u
+#define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffffffu
+#define BURT_GI_RADIANCE_CACHE_USED_PROBE_INDEX 0xfffffffeu
+#define XGI_VOXEL_MATERIAL_INDEX_INVALID_ID 0u
+#define XGI_VOXEL_MATERIAL_INDEX_WAITING 0xfffffffeu
+#define XGI_VOXEL_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET 1u
+#define XGI_VOXEL_LIGHTING_ARGS_DATA_ALLOCATOR_OFFSET 8u
+
+Texture3D<float4> _BurtGISceneVoxelRadianceReadTexture;
+Texture3D<float4> _BurtGISceneVoxelGeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelLightingReadTexture;
+#if !defined(BURT_GI_SCENE_VOXEL_LIGHTING_PROBE_SINGLE_CLIPMAP)
+Texture3D<float4> _BurtGISceneVoxelClipmap1GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap1RadianceReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2RadianceReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3RadianceReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap1LightingReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2LightingReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3LightingReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap1OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap2OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap3OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap4GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap4RadianceReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap4LightingReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap4OccupancyMipReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap5GeometryReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap5RadianceReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap5LightingReadTexture;
+Texture3D<float4> _BurtGISceneVoxelClipmap5OccupancyMipReadTexture;
+#endif
+Texture3D<uint> _BurtGISceneVoxelOctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeRootHighTexture;
+SamplerState sampler_BurtGISceneVoxelOccupancyMipReadTexture;
+
+RWTexture3D<float4> RWVoxelProbeIrradianceSHAmbient;
+RWTexture3D<float4> RWVoxelProbeIrradianceSHDirectional;
+Texture3D<uint4> VoxelProbePageTable;
+StructuredBuffer<uint> VoxelProbeIndexBuffer;
+StructuredBuffer<uint> VoxelProbeArgsBufferParams;
+float4 _BurtGIRadianceCacheClipMapParams;
+float4 _BurtGIRadianceCacheClipMapWorldParams;
+float4 _BurtGIRadianceCacheClipMapIndirectionSize;
+float4 _BurtGIRadianceCacheClipMapWorldPositionToProbeCoord[BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS];
+uint _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalOcclusionProbeResolution;
+uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
+uint _BurtGIRadianceCacheClipMapUseIrradianceField;
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelClipmapCenterExtent[6];
+uint _BurtGISceneVoxelClipmapValidMask;
+float _BurtGISceneVoxelOctreeValid;
+float4 _BurtGISceneVoxelLightingParams;
+float4 _BurtGISceneVoxelDirectLightTint;
+float4 _BurtGISceneVoxelIndirectLightTint;
+float4 _BurtGISceneVoxelExposureParams;
+float4 _BurtGISceneVoxelTraceControls;
+float4 _BurtGISceneVoxelRadianceCacheParams;
+float4 _BurtGIMainLightDirection;
+float4 _BurtGIMainLightColor;
+float4 _BurtGIAdditionalLightPositionAndRange[8];
+float4 _BurtGIAdditionalLightColorAndType[8];
+float4 _BurtGIAdditionalLightDirectionAndSpot[8];
+float4 _BurtGIAdditionalLightSpotParams[8];
+float4 _BurtGIXGILightGridBoundMin[6];
+float4 _BurtGIXGILightGridBoundMax[6];
+float4 _BurtGIXGILightGridAxis[6];
+uint _BurtGIXGILightGridResolution;
+uint _BurtGIXGILightGridMaxLights;
+uint _BurtGIXGILightGridValid;
+uint _BurtGIAdditionalLightCount;
+uint _XGISceneRepresentUpdateVoxel_ClipMapResolution;
+uint _XGISceneRepresentUpdateVoxel_ClipMapNum;
+uint _XGISceneRepresentUpdateVoxel_VoxelDirectionsNum;
+int VoxelApplyTextureSize;
+int VoxelApplyVolumeSize;
+int VoxelApplyClipmapCount;
+int VoxelApplyMaterialIndexOffsetForClipmap;
+int VoxelProbeIndexOffsetClipmap;
+int VoxelProbeClipmapValidMask;
+
+float4 unity_SHAr;
+float4 unity_SHAg;
+float4 unity_SHAb;
+float4 unity_SHBr;
+float4 unity_SHBg;
+float4 unity_SHBb;
+float4 unity_SHC;
+
+groupshared float3 BurtGISharedProbeTraceSH[BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT * BURT_GI_XGI_PROBE_TRACE_SAMPLE_COUNT];
+
+struct BurtGISceneVoxelOccupancySample
+{
+    uint Sampled;
+    float Occupancy;
+};
+
+float3 BurtGISceneVoxelWorldToUVW(float3 worldPosition)
+{
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    float extent = max(centerExtent.w, 0.001);
+    return (worldPosition - centerExtent.xyz) / (extent * 2.0) + 0.5;
+}
+uint3 BurtGIVoxelNodeIndexWithClipmap(uint3 nodeIndex, uint textureSize, uint clipmapIndex)
+{
+    return nodeIndex + uint3(0u, 0u, clipmapIndex * textureSize);
+}
+uint BurtGIVoxelNodeIndex2Flat(uint3 nodeIndexWithClipmap, uint textureSize, uint clipmapCount)
+{
+    uint safeTextureSize = max(textureSize, 1u);
+    uint safeClipmapCount = max(clipmapCount, 1u);
+    uint3 volumeSizeWithClipmap = uint3(safeTextureSize, safeTextureSize, safeTextureSize * safeClipmapCount);
+    return nodeIndexWithClipmap.x +
+        nodeIndexWithClipmap.z * volumeSizeWithClipmap.x +
+        nodeIndexWithClipmap.y * volumeSizeWithClipmap.x * volumeSizeWithClipmap.z;
+}
+uint BurtGIVoxelProbeNodeSize(uint volumeSize)
+{
+    return max(volumeSize >> 2u, 1u);
+}
+uint3 BurtGIVoxelProbeFlat2NodeIndex(uint flatIndex, uint textureSize, uint clipmapCount)
+{
+    uint safeTextureSize = max(textureSize, 1u);
+    uint safeClipmapCount = max(clipmapCount, 1u);
+    uint3 volumeSizeWithClipmap = uint3(safeTextureSize, safeTextureSize, safeTextureSize * safeClipmapCount);
+    uint yz = flatIndex / volumeSizeWithClipmap.x;
+    return uint3(flatIndex % volumeSizeWithClipmap.x, yz / volumeSizeWithClipmap.z, yz % volumeSizeWithClipmap.z);
+}
+bool BurtGIVoxelProbeClipmapValid(uint validMask, uint clipmapIndex)
+{
+    return ((validMask >> clipmapIndex) & 1u) != 0u;
+}
+uint BurtGIVoxelProbeClipmapFromArgs(uint threadIndex)
+{
+    uint clipmapIndex = 0u;
+    if (BurtGIVoxelProbeClipmapValid((uint)max(VoxelProbeClipmapValidMask, 0), 4u) && VoxelProbeArgsBufferParams[4] <= threadIndex)
+    {
+        clipmapIndex = 4u;
+    }
+    if (clipmapIndex + 2u < BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET && VoxelProbeArgsBufferParams[clipmapIndex + 2u] <= threadIndex)
+    {
+        clipmapIndex += 2u;
+    }
+    if (clipmapIndex + 1u < BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET && VoxelProbeArgsBufferParams[clipmapIndex + 1u] <= threadIndex)
+    {
+        clipmapIndex += 1u;
+    }
+    return clipmapIndex;
+}
+float4 BurtGIProbeClipmapCenterExtent(uint clipmapIndex)
+{
+#if defined(BURT_GI_SCENE_VOXEL_LIGHTING_PROBE_SINGLE_CLIPMAP)
+    return _BurtGISceneVoxelCenterExtent;
+#else
+    return clipmapIndex < 6u ? _BurtGISceneVoxelClipmapCenterExtent[clipmapIndex] : _BurtGISceneVoxelCenterExtent;
+#endif
+}
+float3 BurtGISceneVoxelLightingSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSq = dot(value, value);
+    return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+}
+float BurtGISceneVoxelSmoothDistanceAttenuation(float distanceSqr, float lightRange)
+{
+    float invSqrAttRadius = rcp(max(lightRange * lightRange, 0.000001));
+    float factor = distanceSqr * invSqrAttRadius;
+    float smoothFactor = saturate(1.0 - factor * factor);
+    return (smoothFactor * smoothFactor) / max(distanceSqr, 0.0001);
+}
+float BurtGISceneVoxelAdditionalLightDistanceAttenuation(float distanceSqr, float lightRange, float packedFalloffAndNearCutoff)
+{
+    if (packedFalloffAndNearCutoff < 0.0)
+    {
+        float normalizedDistanceSqr = saturate(distanceSqr / max(lightRange * lightRange, 0.000001));
+        return saturate(1.0 - sqrt(normalizedDistanceSqr));
+    }
+
+    return BurtGISceneVoxelSmoothDistanceAttenuation(distanceSqr, lightRange);
+}
+float BurtGISceneVoxelSpotAngleAttenuation(float3 normalizedLightVector, float3 lightForward, float outerCos, float invAngleRange)
+{
+    float angleScale = max(invAngleRange, 0.0);
+    float angleOffset = -outerCos * angleScale;
+    float attenuation = saturate(dot(lightForward, normalizedLightVector) * angleScale + angleOffset);
+    return attenuation * attenuation;
+}
+float3 BurtGISceneVoxelEquiAreaSphericalMapping(float2 uv)
+{
+    float2 f = uv * 2.0 - 1.0;
+    float3 direction = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    if (direction.z < 0.0)
+    {
+        float2 signNotZero = float2(direction.x >= 0.0 ? 1.0 : -1.0, direction.y >= 0.0 ? 1.0 : -1.0);
+        direction.xy = (1.0 - abs(direction.yx)) * signNotZero;
+    }
+
+    return BurtGISceneVoxelLightingSafeNormalize(direction, float3(0.0, 1.0, 0.0));
+}
+void BurtGISceneVoxelEvaluateSHBasis3(float3 directionWS, out float SH[BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT])
+{
+    const float shBasis0 = 0.28209479177387814;
+    const float shBasis1 = 0.4886025119029199;
+    const float shBasis2 = 1.092548430592079;
+    const float shBasis3 = 0.31539156525252;
+    const float shBasis4 = 0.5462742152960395;
+    float3 axis = BurtGISceneVoxelLightingSafeNormalize(directionWS, float3(0.0, 1.0, 0.0)).zxy;
+    SH[0] = shBasis0;
+    SH[1] = -shBasis1 * axis.y;
+    SH[2] = shBasis1 * axis.z;
+    SH[3] = -shBasis1 * axis.x;
+    SH[4] = shBasis2 * axis.x * axis.y;
+    SH[5] = -shBasis2 * axis.y * axis.z;
+    SH[6] = shBasis3 * (3.0 * axis.z * axis.z - 1.0);
+    SH[7] = -shBasis2 * axis.x * axis.z;
+    SH[8] = shBasis4 * (axis.x * axis.x - axis.y * axis.y);
+}
+void BurtGISceneVoxelWriteProbeSH(
+    uint groupThreadIndexFlat,
+    uint3 probeNodeIndex3DWithClipmap,
+    uint probeNodeSize,
+    float SH[BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT],
+    float3 radiance)
+{
+    [unroll]
+    for (uint coefficientIndex = 0u; coefficientIndex < BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT; ++coefficientIndex)
+    {
+        BurtGISharedProbeTraceSH[coefficientIndex * BURT_GI_XGI_PROBE_TRACE_SAMPLE_COUNT + groupThreadIndexFlat] = SH[coefficientIndex] * radiance;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupThreadIndexFlat != 0u)
+    {
+        return;
+    }
+
+    float3 sums[BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT];
+    [unroll]
+    for (uint coefficientIndex = 0u; coefficientIndex < BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT; ++coefficientIndex)
+    {
+        sums[coefficientIndex] = 0.0;
+        [unroll]
+        for (uint sampleIndex = 0u; sampleIndex < BURT_GI_XGI_PROBE_TRACE_SAMPLE_COUNT; ++sampleIndex)
+        {
+            sums[coefficientIndex] += BurtGISharedProbeTraceSH[coefficientIndex * BURT_GI_XGI_PROBE_TRACE_SAMPLE_COUNT + sampleIndex];
+        }
+    }
+
+    float normalizeWeight = BURT_GI_FOUR_PI / (float)BURT_GI_XGI_PROBE_TRACE_SAMPLE_COUNT;
+    RWVoxelProbeIrradianceSHAmbient[probeNodeIndex3DWithClipmap] = float4(max(sums[0] * normalizeWeight, 0.0), 1.0);
+    [unroll]
+    for (uint colorColumn = 0u; colorColumn < 3u; ++colorColumn)
+    {
+        float4 directionalSH0 = float4(sums[1][colorColumn], sums[2][colorColumn], sums[3][colorColumn], sums[4][colorColumn]) * normalizeWeight;
+        float4 directionalSH1 = float4(sums[5][colorColumn], sums[6][colorColumn], sums[7][colorColumn], sums[8][colorColumn]) * normalizeWeight;
+        RWVoxelProbeIrradianceSHDirectional[uint3(probeNodeIndex3DWithClipmap.x + (colorColumn * 2u + 0u) * probeNodeSize, probeNodeIndex3DWithClipmap.y, probeNodeIndex3DWithClipmap.z)] = directionalSH0;
+        RWVoxelProbeIrradianceSHDirectional[uint3(probeNodeIndex3DWithClipmap.x + (colorColumn * 2u + 1u) * probeNodeSize, probeNodeIndex3DWithClipmap.y, probeNodeIndex3DWithClipmap.z)] = directionalSH1;
+    }
+}
+float3 BurtGISceneVoxelEvaluateAmbientSH(float3 normalWS)
+{
+    float4 normal = float4(BurtGISceneVoxelLightingSafeNormalize(normalWS, float3(0.0, 1.0, 0.0)), 1.0);
+    float3 sh = float3(
+        dot(unity_SHAr, normal),
+        dot(unity_SHAg, normal),
+        dot(unity_SHAb, normal));
+
+    float4 vB = normal.xyzz * normal.yzzx;
+    sh += float3(
+        dot(unity_SHBr, vB),
+        dot(unity_SHBg, vB),
+        dot(unity_SHBb, vB));
+
+    float vC = normal.x * normal.x - normal.y * normal.y;
+    sh += unity_SHC.rgb * vC;
+    return max(sh, 0.0);
+}
+float3 BurtGISceneVoxelRecoverBoostedDiffuseColor(float3 storedRadiance)
+{
+    return saturate(max(storedRadiance, float3(0.0, 0.0, 0.0)) / 0.12);
+}
+bool BurtGISceneVoxelOctreeMaskContains(uint lowMask, uint highMask, uint bitIndex)
+{
+    uint word = bitIndex < 32u ? lowMask : highMask;
+    return ((word >> (bitIndex & 31u)) & 1u) != 0u;
+}
+bool BurtGISceneVoxelOctreeContainsVoxel(uint3 voxelCoord)
+{
+    uint3 parentCoord = voxelCoord >> 4u;
+    uint3 leafCoord = voxelCoord >> 2u;
+    uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+    if (!BurtGISceneVoxelOctreeMaskContains(
+            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            rootBit))
+    {
+        return false;
+    }
+
+    uint3 parentChild = leafCoord & 3u;
+    uint parentBit = parentChild.x + parentChild.y * 4u + parentChild.z * 16u;
+    if (!BurtGISceneVoxelOctreeMaskContains(
+            _BurtGISceneVoxelOctreeParentLowTexture[parentCoord],
+            _BurtGISceneVoxelOctreeParentHighTexture[parentCoord],
+            parentBit))
+    {
+        return false;
+    }
+
+    uint3 leafChild = voxelCoord & 3u;
+    uint leafBit = leafChild.x + leafChild.y * 4u + leafChild.z * 16u;
+    return BurtGISceneVoxelOctreeMaskContains(
+        _BurtGISceneVoxelOctreeLeafLowTexture[leafCoord],
+        _BurtGISceneVoxelOctreeLeafHighTexture[leafCoord],
+        leafBit);
+}
+bool BurtGISceneVoxelOctreeMayContain(float3 samplePosition)
+{
+    if (_BurtGISceneVoxelOctreeValid <= 0.5)
+    {
+        return true;
+    }
+
+    uint geometryWidth = 1u;
+    uint geometryHeight = 1u;
+    uint geometryDepth = 1u;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(geometryWidth, geometryHeight, geometryDepth);
+    uint3 geometrySize = max(uint3(geometryWidth, geometryHeight, geometryDepth), uint3(1u, 1u, 1u));
+    float3 uvw = BurtGISceneVoxelWorldToUVW(samplePosition);
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return false;
+    }
+
+    uint3 voxelCoord = min((uint3)(uvw * (float3)geometrySize), geometrySize - 1u);
+    return BurtGISceneVoxelOctreeContainsVoxel(voxelCoord);
+}
+bool BurtGIRayTraceSceneVoxelOctree(float3 originWS, float3 directionWS, float maxDistance, out float hitDistance)
+{
+    hitDistance = maxDistance;
+    if (_BurtGISceneVoxelOctreeValid <= 0.5 || maxDistance <= 0.0)
+    {
+        return false;
+    }
+
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    float extent = max(centerExtent.w, 0.001);
+    float3 boxMin = centerExtent.xyz - extent;
+    float3 boxMax = centerExtent.xyz + extent;
+    float3 direction = BurtGISceneVoxelLightingSafeNormalize(directionWS, float3(0.0, 0.0, 1.0));
+    float3 invDirection = rcp(max(abs(direction), 0.000001)) * sign(direction + 0.000001);
+    float3 t0 = (boxMin - originWS) * invDirection;
+    float3 t1 = (boxMax - originWS) * invDirection;
+    float entryDistance = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+    float exitDistance = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+    float voxelSizeWS = extent * 2.0 / max((float)volumeSize.x, 1.0);
+    float traceDistance = max(0.0, entryDistance) + voxelSizeWS * 0.001;
+    float traceEnd = min(maxDistance, exitDistance);
+    if (traceDistance >= traceEnd)
+    {
+        return false;
+    }
+
+    uint maxTraceSteps = min((uint)max(_BurtGISceneVoxelTraceControls.x, 1.0), 64u);
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < maxTraceSteps && traceDistance < traceEnd; ++stepIndex)
+    {
+        float3 positionWS = originWS + direction * traceDistance;
+        float3 localPosition = clamp(positionWS - boxMin, 0.0, extent * 2.0 - voxelSizeWS * 0.001);
+        uint3 voxelCoord = min((uint3)(localPosition / voxelSizeWS), volumeSize - 1u);
+        uint3 parentCoord = voxelCoord >> 4u;
+        uint3 leafCoord = voxelCoord >> 2u;
+        uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+        bool occupied = BurtGISceneVoxelOctreeMaskContains(
+            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            rootBit);
+        uint levelScale = 16u;
+        if (occupied)
+        {
+            uint3 parentChild = leafCoord & 3u;
+            uint parentBit = parentChild.x + parentChild.y * 4u + parentChild.z * 16u;
+            occupied = BurtGISceneVoxelOctreeMaskContains(
+                _BurtGISceneVoxelOctreeParentLowTexture[parentCoord],
+                _BurtGISceneVoxelOctreeParentHighTexture[parentCoord],
+                parentBit);
+            levelScale = 4u;
+        }
+        if (occupied)
+        {
+            uint3 leafChild = voxelCoord & 3u;
+            uint leafBit = leafChild.x + leafChild.y * 4u + leafChild.z * 16u;
+            occupied = BurtGISceneVoxelOctreeMaskContains(
+                _BurtGISceneVoxelOctreeLeafLowTexture[leafCoord],
+                _BurtGISceneVoxelOctreeLeafHighTexture[leafCoord],
+                leafBit);
+            levelScale = 1u;
+        }
+        if (occupied)
+        {
+            hitDistance = traceDistance;
+            return true;
+        }
+
+        float cellSizeWS = voxelSizeWS * (float)levelScale;
+        float3 cellIndex = floor(localPosition / cellSizeWS);
+        float3 cellMin = boxMin + cellIndex * cellSizeWS;
+        float3 cellMax = cellMin + cellSizeWS;
+        float3 boundary = lerp(cellMin, cellMax, step(0.0, direction));
+        float3 safeDirection = sign(direction + 0.000001) * max(abs(direction), 0.000001);
+        float3 distanceToBoundary = (boundary - positionWS) / safeDirection;
+        distanceToBoundary = max(distanceToBoundary, voxelSizeWS * 0.001);
+        traceDistance += min(min(distanceToBoundary.x, distanceToBoundary.y), distanceToBoundary.z);
+    }
+
+    return false;
+}
+uint BurtGIResolveSceneVoxelClipmap(float3 samplePosition)
+{
+#if defined(BURT_GI_SCENE_VOXEL_LIGHTING_PROBE_SINGLE_CLIPMAP)
+    return 0u;
+#else
+    float4 baseCenterExtent = _BurtGISceneVoxelCenterExtent;
+    if (all(abs(samplePosition - baseCenterExtent.xyz) <= baseCenterExtent.www))
+    {
+        return 0u;
+    }
+
+    if ((_BurtGISceneVoxelClipmapValidMask & 2u) != 0u &&
+        all(abs(samplePosition - _BurtGISceneVoxelClipmapCenterExtent[1].xyz) <= _BurtGISceneVoxelClipmapCenterExtent[1].www))
+    {
+        return 1u;
+    }
+
+    if ((_BurtGISceneVoxelClipmapValidMask & 4u) != 0u &&
+        all(abs(samplePosition - _BurtGISceneVoxelClipmapCenterExtent[2].xyz) <= _BurtGISceneVoxelClipmapCenterExtent[2].www))
+    {
+        return 2u;
+    }
+
+    if ((_BurtGISceneVoxelClipmapValidMask & 8u) != 0u &&
+        all(abs(samplePosition - _BurtGISceneVoxelClipmapCenterExtent[3].xyz) <= _BurtGISceneVoxelClipmapCenterExtent[3].www))
+    {
+        return 3u;
+    }
+
+    if ((_BurtGISceneVoxelClipmapValidMask & 16u) != 0u &&
+        all(abs(samplePosition - _BurtGISceneVoxelClipmapCenterExtent[4].xyz) <= _BurtGISceneVoxelClipmapCenterExtent[4].www))
+    {
+        return 4u;
+    }
+
+    if ((_BurtGISceneVoxelClipmapValidMask & 32u) != 0u &&
+        all(abs(samplePosition - _BurtGISceneVoxelClipmapCenterExtent[5].xyz) <= _BurtGISceneVoxelClipmapCenterExtent[5].www))
+    {
+        return 5u;
+    }
+
+    return 0u;
+#endif
+}
+BurtGISceneVoxelOccupancySample BurtGIMakeSceneVoxelOccupancySample(uint sampled, float occupancy)
+{
+    BurtGISceneVoxelOccupancySample result = (BurtGISceneVoxelOccupancySample)0;
+    result.Sampled = sampled;
+    result.Occupancy = occupancy;
+    return result;
+}
+BurtGISceneVoxelOccupancySample BurtGITrySampleSceneVoxelOccupancyMipResource(
+    Texture3D<float4> occupancyTexture,
+    float4 centerExtent,
+    float3 samplePosition,
+    float sampleRadius)
+{
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    occupancyTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float3 uvw = (samplePosition - centerExtent.xyz) / max(centerExtent.w * 2.0, 0.001) + 0.5;
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return BurtGIMakeSceneVoxelOccupancySample(0u, 0.0);
+    }
+
+    float voxelSizeWS = max(centerExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
+    uint mipLevel = (uint)clamp(floor(log2(max(sampleRadius, voxelSizeWS) / voxelSizeWS)), 0.0, (float)(BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT - 1u));
+    uint3 mipSize = max(volumeSize >> mipLevel, uint3(1u, 1u, 1u));
+    uint3 mipCoord = min((uint3)(uvw * (float3)mipSize), mipSize - 1u);
+    float4 occupancyMip = occupancyTexture.Load(int4((int3)mipCoord, (int)mipLevel));
+    float occupancy = saturate(max(occupancyMip.x, occupancyMip.y));
+    return BurtGIMakeSceneVoxelOccupancySample(occupancy > 0.001 ? 1u : 0u, occupancy);
+}
+BurtGISceneVoxelOccupancySample BurtGITrySampleSceneVoxelOccupancyMip(float3 samplePosition, float sampleRadius)
+{
+#if !defined(BURT_GI_SCENE_VOXEL_LIGHTING_PROBE_SINGLE_CLIPMAP)
+    uint clipmapLevel = BurtGIResolveSceneVoxelClipmap(samplePosition);
+    if (clipmapLevel == 1u)
+    {
+        return BurtGITrySampleSceneVoxelOccupancyMipResource(
+            _BurtGISceneVoxelClipmap1OccupancyMipReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[1],
+            samplePosition,
+            sampleRadius);
+    }
+    if (clipmapLevel == 2u)
+    {
+        return BurtGITrySampleSceneVoxelOccupancyMipResource(
+            _BurtGISceneVoxelClipmap2OccupancyMipReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[2],
+            samplePosition,
+            sampleRadius);
+    }
+    if (clipmapLevel == 3u)
+    {
+        return BurtGITrySampleSceneVoxelOccupancyMipResource(
+            _BurtGISceneVoxelClipmap3OccupancyMipReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[3],
+            samplePosition,
+            sampleRadius);
+    }
+    if (clipmapLevel == 4u)
+    {
+        return BurtGITrySampleSceneVoxelOccupancyMipResource(
+            _BurtGISceneVoxelClipmap4OccupancyMipReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[4],
+            samplePosition,
+            sampleRadius);
+    }
+    if (clipmapLevel == 5u)
+    {
+        return BurtGITrySampleSceneVoxelOccupancyMipResource(
+            _BurtGISceneVoxelClipmap5OccupancyMipReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[5],
+            samplePosition,
+            sampleRadius);
+    }
+#endif
+    if (!BurtGISceneVoxelOctreeMayContain(samplePosition))
+    {
+        return BurtGIMakeSceneVoxelOccupancySample(0u, 0.0);
+    }
+
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    _BurtGISceneVoxelOccupancyMipReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float3 uvw = BurtGISceneVoxelWorldToUVW(samplePosition);
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return BurtGIMakeSceneVoxelOccupancySample(0u, 0.0);
+    }
+
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    float voxelSizeWS = max(centerExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
+    float mipLevel = clamp(floor(log2(max(sampleRadius, voxelSizeWS) / voxelSizeWS)), 0.0, (float)(BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT - 1u));
+    float4 occupancyMip = _BurtGISceneVoxelOccupancyMipReadTexture.SampleLevel(sampler_BurtGISceneVoxelOccupancyMipReadTexture, uvw, mipLevel);
+    float occupancy = saturate(max(occupancyMip.x, occupancyMip.y));
+    return BurtGIMakeSceneVoxelOccupancySample(occupancy > 0.001 ? 1u : 0u, occupancy);
+}
+bool BurtGITrySampleSceneVoxelLightingResource(
+    Texture3D<float4> radianceTexture,
+    Texture3D<float4> geometryTexture,
+    Texture3D<float4> lightingTexture,
+    float4 centerExtent,
+    float3 samplePosition,
+    float3 traceDirection,
+    float sampleRadius,
+    out float3 radiance,
+    out float confidence,
+    out uint hitBackface)
+{
+    radiance = 0.0;
+    confidence = 0.0;
+    hitBackface = 0u;
+
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    geometryTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float extent = max(centerExtent.w, 0.001);
+    float3 uvw = (samplePosition - centerExtent.xyz) / (extent * 2.0) + 0.5;
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return false;
+    }
+
+    uint3 coord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
+    float4 storedRadiance = radianceTexture.Load(int4((int3)coord, 0));
+    float4 geometry = geometryTexture.Load(int4((int3)coord, 0));
+    float4 lighting = lightingTexture.Load(int4((int3)coord, 0));
+    float occupancy = saturate(geometry.a);
+    float lightingConfidence = saturate(lighting.a);
+    float3 lightingRadiance = max(lighting.rgb, 0.0);
+    if (occupancy <= 0.001 || lightingConfidence <= 0.001)
+    {
+        return false;
+    }
+
+    float3 normalWS = BurtGISceneVoxelLightingSafeNormalize(geometry.xyz * 2.0 - 1.0, float3(0.0, 1.0, 0.0));
+    float3 traceDirectionWS = BurtGISceneVoxelLightingSafeNormalize(traceDirection, float3(0.0, 0.0, 1.0));
+    float frontFacing = dot(normalWS, -traceDirectionWS);
+    hitBackface = frontFacing < 0.0 ? 1u : 0u;
+    float facing = hitBackface != 0u ? -frontFacing : frontFacing;
+    float normalFacingWeight = saturate(facing * 0.85 + 0.15);
+    float voxelSizeWS = max(extent * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
+    float footprintWeight = saturate(voxelSizeWS / max(sampleRadius, voxelSizeWS));
+    confidence = lightingConfidence * occupancy * normalFacingWeight * lerp(0.5, 1.0, footprintWeight);
+    radiance = lightingRadiance;
+    if (hitBackface != 0u)
+    {
+        float3 backNormalWS = -normalWS;
+        float backHemi = saturate(backNormalWS.y * 0.5 + 0.5);
+        float skyLightEnabled = _BurtGISceneVoxelDirectLightTint.w > 0.5 ? 1.0 : 0.0;
+        float3 analyticSkyTint = lerp(float3(0.015, 0.018, 0.022), float3(0.08, 0.095, 0.12), backHemi);
+        float3 ambientSkyTint = BurtGISceneVoxelEvaluateAmbientSH(backNormalWS);
+        float3 skyTint = max(ambientSkyTint, analyticSkyTint) * skyLightEnabled;
+        float3 boostedDiffuseColor = BurtGISceneVoxelRecoverBoostedDiffuseColor(storedRadiance.rgb);
+        float3 mainLightDirection = _BurtGIMainLightDirection.xyz;
+        float mainLightDirectionLengthSq = dot(mainLightDirection, mainLightDirection);
+        mainLightDirection = mainLightDirectionLengthSq > 0.0001 ? mainLightDirection * rsqrt(mainLightDirectionLengthSq) : float3(0.0, 1.0, 0.0);
+        float mainLightNdotL = saturate(dot(backNormalWS, mainLightDirection));
+        float oneOverPreExposure = max(_BurtGISceneVoxelExposureParams.x, 0.0);
+        float normalBoost = lerp(0.75, 1.2, saturate(dot(backNormalWS, normalize(float3(0.35, 0.75, 0.45))) * 0.5 + 0.5));
+        float3 mainLightRadiance = max(_BurtGIMainLightColor.rgb, 0.0) * mainLightNdotL;
+        float3 directLighting = (normalBoost.xxx + mainLightRadiance) *
+            (max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.z, 0.0) * oneOverPreExposure);
+        const float xgiSecondaryBounceSkyScale = 0.2;
+        float3 indirectLighting = skyTint * boostedDiffuseColor *
+            (max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.w, 0.0) * xgiSecondaryBounceSkyScale);
+        radiance = max(storedRadiance.rgb, 0.0) * directLighting + indirectLighting * storedRadiance.a;
+        radiance = max(radiance, lightingRadiance * 0.2);
+    }
+    return confidence > 0.001 && dot(radiance, radiance) > 0.0;
+}
+bool BurtGITrySampleSceneVoxelLightingHit(
+    uint clipmapLevel,
+    float3 samplePosition,
+    float3 traceDirection,
+    float sampleRadius,
+    out float3 radiance,
+    out float confidence,
+    out uint hitBackface)
+{
+#if !defined(BURT_GI_SCENE_VOXEL_LIGHTING_PROBE_SINGLE_CLIPMAP)
+    if (clipmapLevel == 1u)
+    {
+        return BurtGITrySampleSceneVoxelLightingResource(
+            _BurtGISceneVoxelClipmap1RadianceReadTexture,
+            _BurtGISceneVoxelClipmap1GeometryReadTexture,
+            _BurtGISceneVoxelClipmap1LightingReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[1],
+            samplePosition,
+            traceDirection,
+            sampleRadius,
+            radiance,
+            confidence,
+            hitBackface);
+    }
+
+    if (clipmapLevel == 2u)
+    {
+        return BurtGITrySampleSceneVoxelLightingResource(
+            _BurtGISceneVoxelClipmap2RadianceReadTexture,
+            _BurtGISceneVoxelClipmap2GeometryReadTexture,
+            _BurtGISceneVoxelClipmap2LightingReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[2],
+            samplePosition,
+            traceDirection,
+            sampleRadius,
+            radiance,
+            confidence,
+            hitBackface);
+    }
+
+    if (clipmapLevel == 3u)
+    {
+        return BurtGITrySampleSceneVoxelLightingResource(
+            _BurtGISceneVoxelClipmap3RadianceReadTexture,
+            _BurtGISceneVoxelClipmap3GeometryReadTexture,
+            _BurtGISceneVoxelClipmap3LightingReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[3],
+            samplePosition,
+            traceDirection,
+            sampleRadius,
+            radiance,
+            confidence,
+            hitBackface);
+    }
+
+    if (clipmapLevel == 4u)
+    {
+        return BurtGITrySampleSceneVoxelLightingResource(
+            _BurtGISceneVoxelClipmap4RadianceReadTexture,
+            _BurtGISceneVoxelClipmap4GeometryReadTexture,
+            _BurtGISceneVoxelClipmap4LightingReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[4],
+            samplePosition,
+            traceDirection,
+            sampleRadius,
+            radiance,
+            confidence,
+            hitBackface);
+    }
+
+    if (clipmapLevel == 5u)
+    {
+        return BurtGITrySampleSceneVoxelLightingResource(
+            _BurtGISceneVoxelClipmap5RadianceReadTexture,
+            _BurtGISceneVoxelClipmap5GeometryReadTexture,
+            _BurtGISceneVoxelClipmap5LightingReadTexture,
+            _BurtGISceneVoxelClipmapCenterExtent[5],
+            samplePosition,
+            traceDirection,
+            sampleRadius,
+            radiance,
+            confidence,
+            hitBackface);
+    }
+#endif
+
+    return BurtGITrySampleSceneVoxelLightingResource(
+        _BurtGISceneVoxelRadianceReadTexture,
+        _BurtGISceneVoxelGeometryReadTexture,
+        _BurtGISceneVoxelLightingReadTexture,
+        _BurtGISceneVoxelCenterExtent,
+        samplePosition,
+        traceDirection,
+        sampleRadius,
+        radiance,
+        confidence,
+        hitBackface);
+}
+bool BurtGITraceSceneVoxelLighting(float3 worldPosition, float3 directionWS, float maxTraceDistance, out float3 radiance)
+{
+    radiance = 0.0;
+
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    _BurtGISceneVoxelLightingReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float4 baseCenterExtent = _BurtGISceneVoxelCenterExtent;
+    float voxelSizeWS = max(baseCenterExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
+    float3 direction = BurtGISceneVoxelLightingSafeNormalize(directionWS, float3(0.0, 0.0, 1.0));
+    float startDistance = voxelSizeWS * 1.5;
+    float traceDistance = 0.0;
+
+    if (_BurtGISceneVoxelOctreeValid > 0.5 &&
+        BurtGIRayTraceSceneVoxelOctree(
+            worldPosition + direction * startDistance,
+            direction,
+            max(maxTraceDistance - startDistance, 0.0),
+            traceDistance))
+    {
+        float hitDistance = startDistance + traceDistance;
+        float3 hitPosition = worldPosition + direction * (hitDistance + voxelSizeWS * 0.001);
+        float confidence = 0.0;
+        uint hitBackface = 0u;
+        if (BurtGITrySampleSceneVoxelLightingHit(
+                0u,
+                hitPosition,
+                direction,
+                voxelSizeWS,
+                radiance,
+                confidence,
+                hitBackface))
+        {
+            radiance *= confidence;
+            return true;
+        }
+    }
+
+    uint maxTraceSteps = min((uint)max(_BurtGISceneVoxelTraceControls.x, 1.0), 64u);
+    float bestConfidence = 0.0;
+    float3 bestRadiance = 0.0;
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < maxTraceSteps; ++stepIndex)
+    {
+        float stepT = ((float)stepIndex + 0.5) / max((float)maxTraceSteps, 1.0);
+        float sampleDistance = lerp(startDistance, maxTraceDistance, stepT);
+        float sampleRadius = max(voxelSizeWS, sampleDistance * 0.08);
+        float3 samplePosition = worldPosition + direction * sampleDistance;
+        BurtGISceneVoxelOccupancySample occupancySample = BurtGITrySampleSceneVoxelOccupancyMip(samplePosition, sampleRadius);
+        if (occupancySample.Sampled == 0u)
+        {
+            continue;
+        }
+
+        uint clipmapLevel = BurtGIResolveSceneVoxelClipmap(samplePosition);
+        float4 sampleCenterExtent = BurtGIProbeClipmapCenterExtent(clipmapLevel);
+        float hitBiasWS = max(sampleCenterExtent.w / 65536.0, 0.0005);
+        float3 hitPosition = samplePosition + direction * hitBiasWS;
+        float3 sampleRadiance = 0.0;
+        float sampleConfidence = 0.0;
+        uint hitBackface = 0u;
+        if (!BurtGITrySampleSceneVoxelLightingHit(
+                clipmapLevel,
+                hitPosition,
+                direction,
+                sampleRadius,
+                sampleRadiance,
+                sampleConfidence,
+                hitBackface))
+        {
+            continue;
+        }
+
+        sampleConfidence *= occupancySample.Occupancy * (1.0 - stepT * 0.35);
+        if (sampleConfidence > 0.02)
+        {
+            radiance = sampleRadiance * saturate(sampleConfidence);
+            return dot(radiance, radiance) > 0.0;
+        }
+
+        if (sampleConfidence > bestConfidence)
+        {
+            bestConfidence = sampleConfidence;
+            bestRadiance = sampleRadiance;
+            if (bestConfidence > 0.75)
+            {
+                break;
+            }
+        }
+    }
+
+    if (bestConfidence <= 0.001)
+    {
+        return false;
+    }
+
+    radiance = bestRadiance * saturate(bestConfidence);
+    return dot(radiance, radiance) > 0.0;
+}
+float BurtGITraceSceneVoxelDirectionalVisibility(float3 worldPosition, float3 direction, float maxDistance)
+{
+    float4 octreeCenterExtent = _BurtGISceneVoxelCenterExtent;
+    float octreeVoxelSizeWS = max(octreeCenterExtent.w / 32.0, 0.001);
+    float3 octreeDirection = BurtGISceneVoxelLightingSafeNormalize(direction, float3(0.0, 0.0, 1.0));
+    float octreeHitDistance = 0.0;
+    if (BurtGIRayTraceSceneVoxelOctree(
+            worldPosition + octreeDirection * (octreeVoxelSizeWS * 1.5),
+            octreeDirection,
+            max(maxDistance - octreeVoxelSizeWS * 1.5, 0.0),
+            octreeHitDistance))
+    {
+        return 0.0;
+    }
+    if (_BurtGISceneVoxelOctreeValid > 0.5)
+    {
+        return 1.0;
+    }
+
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(width, height, depth);
+    uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    float voxelSizeWS = max(centerExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
+    float3 traceDirection = BurtGISceneVoxelLightingSafeNormalize(direction, float3(0.0, 0.0, 1.0));
+    float transmittance = 1.0;
+    float traceDistance = voxelSizeWS * 1.5;
+
+    [unroll]
+    for (uint stepIndex = 0u; stepIndex < 6u && traceDistance < maxDistance; ++stepIndex)
+    {
+        float sampleRadius = max(voxelSizeWS, traceDistance * 0.45);
+        BurtGISceneVoxelOccupancySample occupancySample = BurtGITrySampleSceneVoxelOccupancyMip(
+            worldPosition + traceDirection * traceDistance,
+            sampleRadius);
+        if (occupancySample.Sampled != 0u)
+        {
+            transmittance *= 1.0 - saturate(occupancySample.Occupancy * 0.55);
+            if (transmittance <= 0.02)
+            {
+                return 0.0;
+            }
+        }
+
+        traceDistance += max(voxelSizeWS, sampleRadius * 1.35);
+    }
+
+    return saturate(transmittance);
+}
+float3 BurtGISceneVoxelEvaluateAdditionalLights(float3 worldPosition, float3 normalWS)
+{
+    float3 lighting = 0.0;
+    uint additionalLightCount = min(_BurtGIAdditionalLightCount, 8u);
+    [loop]
+    for (uint lightIndex = 0u; lightIndex < additionalLightCount; ++lightIndex)
+    {
+        float4 positionAndRange = _BurtGIAdditionalLightPositionAndRange[lightIndex];
+        float4 colorAndType = _BurtGIAdditionalLightColorAndType[lightIndex];
+        float lightType = colorAndType.w;
+        float3 lightDirection = float3(0.0, 1.0, 0.0);
+        float attenuation = 1.0;
+        float lightTraceDistance = 0.0;
+
+        if (lightType < 0.5)
+        {
+            lightDirection = BurtGISceneVoxelLightingSafeNormalize(
+                _BurtGIAdditionalLightDirectionAndSpot[lightIndex].xyz,
+                float3(0.0, 1.0, 0.0));
+        }
+        else
+        {
+            float3 toLight = positionAndRange.xyz - worldPosition;
+            float distanceToLight = length(toLight);
+            float lightRange = max(positionAndRange.w, 0.001);
+            if (distanceToLight >= lightRange)
+            {
+                continue;
+            }
+
+            lightDirection = toLight / max(distanceToLight, 0.0001);
+            lightTraceDistance = distanceToLight;
+            float distanceSqr = max(distanceToLight * distanceToLight, 0.0001);
+            float4 spotParams = _BurtGIAdditionalLightSpotParams[lightIndex];
+            attenuation = BurtGISceneVoxelAdditionalLightDistanceAttenuation(distanceSqr, lightRange, spotParams.w);
+
+            if (lightType > 1.5)
+            {
+                float3 lightForward = BurtGISceneVoxelLightingSafeNormalize(
+                    _BurtGIAdditionalLightDirectionAndSpot[lightIndex].xyz,
+                    float3(0.0, 0.0, 1.0));
+                attenuation *= BurtGISceneVoxelSpotAngleAttenuation(-lightDirection, lightForward, spotParams.y, spotParams.z);
+            }
+        }
+
+        float lightVisibility = 1.0;
+        if (_BurtGISceneVoxelRadianceCacheParams.w > 0.5 && lightType >= 0.5)
+        {
+            float normalBias = min(max(_BurtGISceneVoxelCenterExtent.w / 64.0, 0.01), 1.0);
+            lightVisibility = BurtGITraceSceneVoxelDirectionalVisibility(
+                worldPosition + normalWS * normalBias,
+                lightDirection,
+                max(lightTraceDistance, 1.0));
+        }
+
+        lighting += max(colorAndType.rgb, 0.0) * (saturate(dot(normalWS, lightDirection)) * attenuation * lightVisibility);
+    }
+
+    return lighting;
+}
+[numthreads(BURT_GI_XGI_PROBE_TRACE_THREADGROUP_SIZE, BURT_GI_XGI_PROBE_TRACE_THREADGROUP_SIZE, 1)]
+void ProbeTraceRadiance(
+    uint groupIndex : SV_GroupIndex,
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint threadGroupNumX = max(VoxelProbeArgsBufferParams[BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET + 1u], 1u);
+    uint probeThreadIndex = groupId.x + groupId.y * threadGroupNumX;
+    uint probeCount = VoxelProbeArgsBufferParams[BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET];
+    if (probeThreadIndex >= probeCount)
+    {
+        return;
+    }
+
+    uint clipmapIndex = min(BurtGIVoxelProbeClipmapFromArgs(probeThreadIndex), max((uint)max(VoxelApplyClipmapCount, 1), 1u) - 1u);
+    uint clipmapProbeBaseIndex = VoxelProbeArgsBufferParams[clipmapIndex];
+    uint localProbeIndex = probeThreadIndex - min(clipmapProbeBaseIndex, probeThreadIndex);
+    uint indexOffsetClipmap = max((uint)max(VoxelProbeIndexOffsetClipmap, 1), 1u);
+    uint probeIndexBufferIndex = localProbeIndex + BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET + clipmapIndex * indexOffsetClipmap;
+    uint probeNodeIndexFlat = VoxelProbeIndexBuffer[probeIndexBufferIndex];
+
+    uint voxelVolumeSize = max((uint)max(VoxelApplyVolumeSize, 1), max(_XGISceneRepresentUpdateVoxel_ClipMapResolution, 1u));
+    uint probeNodeSize = BurtGIVoxelProbeNodeSize(voxelVolumeSize);
+    uint3 probeNodeIndex3D = BurtGIVoxelProbeFlat2NodeIndex(probeNodeIndexFlat, probeNodeSize, 1u);
+    if (any(probeNodeIndex3D >= probeNodeSize))
+    {
+        return;
+    }
+
+    uint3 probeNodeIndex3DWithClipmap = BurtGIVoxelNodeIndexWithClipmap(probeNodeIndex3D, probeNodeSize, clipmapIndex);
+    uint4 probeInfo = VoxelProbePageTable[probeNodeIndex3DWithClipmap];
+    if (probeInfo.w == BURT_GI_XGI_PROBE_PAGE_INVALID)
+    {
+        return;
+    }
+
+    uint groupThreadIndexFlat = groupThreadId.y * BURT_GI_XGI_PROBE_TRACE_THREADGROUP_SIZE + groupThreadId.x;
+    float3 childOffset01 = ((float3)min(probeInfo.xyz, uint3(3u, 3u, 3u)) + 0.5) * 0.25;
+    float3 probePosition01 = ((float3)probeNodeIndex3D + childOffset01) / max((float)probeNodeSize, 1.0);
+    float4 centerExtent = BurtGIProbeClipmapCenterExtent(clipmapIndex);
+    float3 worldPosition = centerExtent.xyz + (probePosition01 - 0.5) * (centerExtent.w * 2.0);
+    float2 traceUV = ((float2)groupThreadId.xy + 0.5) / (float)BURT_GI_XGI_PROBE_TRACE_THREADGROUP_SIZE;
+    float3 rayDirectionWS = BurtGISceneVoxelEquiAreaSphericalMapping(traceUV);
+    float3 tracedRadiance = 0.0;
+    float maxTraceDistance = max(centerExtent.w * 2.0, 1.0);
+    bool tracedSceneVoxel = BurtGITraceSceneVoxelLighting(worldPosition, rayDirectionWS, maxTraceDistance, tracedRadiance);
+    float3 ambientIrradiance = max(BurtGISceneVoxelEvaluateAmbientSH(rayDirectionWS), float3(0.015, 0.018, 0.022));
+    float3 directIrradiance = max(BurtGISceneVoxelEvaluateAdditionalLights(worldPosition, rayDirectionWS), 0.0);
+    float3 fallbackRadiance = max(
+        ambientIrradiance * max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) +
+        directIrradiance * max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0),
+        0.0);
+    float3 radiance = tracedSceneVoxel ? max(tracedRadiance, 0.0) : fallbackRadiance;
+
+    float SH[BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT];
+    BurtGISceneVoxelEvaluateSHBasis3(rayDirectionWS, SH);
+    BurtGISceneVoxelWriteProbeSH(groupThreadIndexFlat, probeNodeIndex3DWithClipmap, probeNodeSize, SH, radiance);
+}

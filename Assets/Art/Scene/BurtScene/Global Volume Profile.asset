@@ -809,7 +809,7 @@ MonoBehaviour:
     m_Value: 1
   intensity:
     m_OverrideState: 1
-    m_Value: 0.5
+    m_Value: 1.232
   radius:
     m_OverrideState: 1
     m_Value: 1.6
@@ -885,37 +885,436 @@ MonoBehaviour:
   screenProbeSpacingPixels:
     m_OverrideState: 0
     m_Value: 16
+  screenProbeAdaptiveAllocationFraction:
+    m_OverrideState: 0
+    m_Value: 0.5
+  screenProbeAdaptiveMinDownSampleFactor:
+    m_OverrideState: 0
+    m_Value: 8
+  screenProbeTraceOctahedronResolution:
+    m_OverrideState: 0
+    m_Value: 8
   screenProbeTraceDistance:
     m_OverrideState: 0
     m_Value: 12
+  screenProbeTraceScreenDistance:
+    m_OverrideState: 0
+    m_Value: 5
+  screenProbeTraceVoxelMaxTraceSteps:
+    m_OverrideState: 0
+    m_Value: 64
+  screenProbeTraceVoxelStepFactor:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeTraceHierarchically:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeTraceHierarchicalMaxIterations:
+    m_OverrideState: 0
+    m_Value: 50
+  screenProbeTraceRelativeDepthThickness:
+    m_OverrideState: 0
+    m_Value: 0.02
+  screenProbeTraceHistoryDepthTestRelativeThickness:
+    m_OverrideState: 0
+    m_Value: 0.01
+  screenProbeScreenTraceThicknessScaleWhenNoFallback:
+    m_OverrideState: 0
+    m_Value: 2
+  screenProbeGatherMaxRayIntensity:
+    m_OverrideState: 0
+    m_Value: 1
   screenProbeSampleCount:
     m_OverrideState: 0
     m_Value: 8
   screenProbeTemporalFeedback:
     m_OverrideState: 0
     m_Value: 0.9
+  screenProbeTemporalFilterHistoryWeight:
+    m_OverrideState: 0
+    m_Value: 0.5
+  screenProbeTemporalFilter:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeTemporalReprojection:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeReprojectionMaxFramesAccumulated:
+    m_OverrideState: 0
+    m_Value: 20
+  screenProbeHistoryDistanceThreshold:
+    m_OverrideState: 0
+    m_Value: 0.02
+  screenProbeTemporalHistoryNormalThreshold:
+    m_OverrideState: 0
+    m_Value: 45
+  screenProbeReprojectionDepthRejectParamsA:
+    m_OverrideState: 0
+    m_Value: 4
+  screenProbeReprojectionDepthRejectParamsB:
+    m_OverrideState: 0
+    m_Value: 2
+  screenProbeTemporalExposureCheckThreshold:
+    m_OverrideState: 0
+    m_Value: 0.1
+  screenProbeTemporalPlayerVelocityThreshold:
+    m_OverrideState: 0
+    m_Value: 0.1
   screenProbeApplyStrength:
     m_OverrideState: 0
     m_Value: 0
+  screenProbeTraceCompact:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeTraceHardwareRay:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeTraceUseWorldRadianceClipMap:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeTraceSources:
+    m_OverrideState: 0
+    m_Value: 69
+  screenProbeImportanceSampling:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeImportanceSampleLighting:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeImportanceSampleProbeRadianceHistory:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeImportanceSamplingHistoryDistanceThreshold:
+    m_OverrideState: 0
+    m_Value: 0.3
+  screenProbeFixedJitterIndex:
+    m_OverrideState: 0
+    m_Value: -1
+  screenProbeSpatialFilter:
+    m_OverrideState: 0
+    m_Value: 1
   screenProbeSpatialFilterPasses:
     m_OverrideState: 0
     m_Value: 3
   screenProbeSpatialFilterHalfKernelSize:
     m_OverrideState: 0
     m_Value: 1
+  screenProbeSpatialFilterMaxRadianceHitAngle:
+    m_OverrideState: 0
+    m_Value: 10
+  screenProbeSpatialFilterPositionWeightScale:
+    m_OverrideState: 0
+    m_Value: 1000
   screenProbeFixupBorders:
     m_OverrideState: 0
     m_Value: 1
+  screenProbeIrradianceFormat:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeIntegrateType:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeIntegrateMethod:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeRadianceCacheType:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeRadianceCacheForceFullUpdate:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeRadianceCacheTraceHardwareRay:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeRadianceCacheCalculateIrradiance:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeRadianceCacheEnableMultiBounceFromRadianceCache:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeRadianceCacheRadianceProbeResolution:
+    m_OverrideState: 0
+    m_Value: 32
+  screenProbeRadianceCacheIrradianceProbeResolution:
+    m_OverrideState: 0
+    m_Value: 6
+  screenProbeRadianceCacheOcclusionProbeResolution:
+    m_OverrideState: 0
+    m_Value: 16
+  screenProbeRadianceCacheFilterProbes:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeRadianceCacheFilterMaxRadianceHitAngle:
+    m_OverrideState: 0
+    m_Value: 0.2
+  screenProbeRadianceCacheReprojectionRadiusScale:
+    m_OverrideState: 0
+    m_Value: 1.5
+  screenProbeRadianceCacheClipMapCount:
+    m_OverrideState: 0
+    m_Value: 5
+  screenProbeRadianceCacheClipMapResolution:
+    m_OverrideState: 0
+    m_Value: 48
+  screenProbeRadianceCacheClipMapWorldExtent:
+    m_OverrideState: 0
+    m_Value: 40
+  screenProbeRadianceCacheNumProbesToTraceBudget:
+    m_OverrideState: 0
+    m_Value: 100
+  screenProbeRadianceCacheIrradianceRadianceProbeResolution:
+    m_OverrideState: 0
+    m_Value: 16
+  screenProbeRadianceCacheIrradianceClipMapCount:
+    m_OverrideState: 0
+    m_Value: 4
+  screenProbeRadianceCacheIrradianceClipMapResolution:
+    m_OverrideState: 0
+    m_Value: 64
+  screenProbeRadianceCacheIrradianceClipMapWorldExtent:
+    m_OverrideState: 0
+    m_Value: 50
+  screenProbeRadianceCacheIrradianceNumProbesToTraceBudget:
+    m_OverrideState: 0
+    m_Value: 200
+  screenProbeRadianceCacheVisualizeRadiusScale:
+    m_OverrideState: 0
+    m_Value: 0.05
+  screenProbeRadianceCacheVisualizeClipmapIndex:
+    m_OverrideState: 0
+    m_Value: -1
+  screenProbeRadianceCacheHashGridDebugMaxCellDecay:
+    m_OverrideState: 0
+    m_Value: 500
   finalGather:
     m_OverrideState: 0
     m_Value: 0
   irradianceFieldStrength:
     m_OverrideState: 0
     m_Value: 1
+  irradianceFieldBaked:
+    m_OverrideState: 0
+    m_Value: 0
+  enableBackfaceDiffuse:
+    m_OverrideState: 0
+    m_Value: 0
+  enableRoughSpecular:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeMaxRoughnessToEvaluateRoughSpecular:
+    m_OverrideState: 0
+    m_Value: 0.4
+  xgiIntensityScale:
+    m_OverrideState: 0
+    m_Value: 1
+  xgiCharacterIntensity:
+    m_OverrideState: 0
+    m_Value: 1.5
+  xgiScreenRatio:
+    m_OverrideState: 0
+    m_Value: 1
+  xgiScreenRatioSpeed:
+    m_OverrideState: 0
+    m_Value: 0.1
+  xgiUseProbeFirst:
+    m_OverrideState: 0
+    m_Value: 0
+  useTranslucencyVolume:
+    m_OverrideState: 0
+    m_Value: 1
+  translucencyVolumeGridPixelSize:
+    m_OverrideState: 0
+    m_Value: 64
+  translucencyVolumeEndDistanceFromCamera:
+    m_OverrideState: 0
+    m_Value: 80
+  translucencyVolumeGridDistributionZScale:
+    m_OverrideState: 0
+    m_Value: 4
+  translucencyVolumeTracingOctahedronResolution:
+    m_OverrideState: 0
+    m_Value: 3
+  translucencyVolumeJitter:
+    m_OverrideState: 0
+    m_Value: 1
+  translucencyVolumeUseTemporalReprojection:
+    m_OverrideState: 0
+    m_Value: 1
+  translucencyVolumeHistoryWeight:
+    m_OverrideState: 0
+    m_Value: 0.95
+  translucencyVolumeTemporalMaxRayDirections:
+    m_OverrideState: 0
+    m_Value: 8
+  translucencyVolumeSpatialFilter:
+    m_OverrideState: 0
+    m_Value: 1
+  translucencyVolumeSpatialFilterSampleCount:
+    m_OverrideState: 0
+    m_Value: 3
+  translucencyVolumeSpatialFilterStandardDeviation:
+    m_OverrideState: 0
+    m_Value: 5
+  translucencyVolumeGridCenterOffsetFromDepthBuffer:
+    m_OverrideState: 0
+    m_Value: 0.5
+  translucencyVolumeOffsetThresholdToAcceptDepthBufferOffset:
+    m_OverrideState: 0
+    m_Value: 1
+  translucencyVolumeTraceStepFactor:
+    m_OverrideState: 0
+    m_Value: 1
+  translucencyVolumeMaxTraceDistance:
+    m_OverrideState: 0
+    m_Value: 200
+  translucencyVolumeVoxelTraceStartDistanceScale:
+    m_OverrideState: 0
+    m_Value: 1
+  translucencyVolumeMaxRayIntensity:
+    m_OverrideState: 0
+    m_Value: 20
+  sceneVoxelClipMapFirstWorldExtent:
+    m_OverrideState: 0
+    m_Value: 25
+  sceneVoxelFollowCamera:
+    m_OverrideState: 0
+    m_Value: 1
+  sceneVoxelCameraForward:
+    m_OverrideState: 0
+    m_Value: 10
+  sceneVoxelOrigin:
+    m_OverrideState: 0
+    m_Value: {x: 0, y: 0, z: 0}
+  sceneVoxelAlwaysUpdate:
+    m_OverrideState: 0
+    m_Value: 0
+  sceneVoxelOriginUpdateDistance:
+    m_OverrideState: 0
+    m_Value: 50
+  sceneVoxelClipMapCount:
+    m_OverrideState: 0
+    m_Value: 4
+  sceneVoxelClipMapDistributionBase:
+    m_OverrideState: 0
+    m_Value: 3
+  sceneVoxelClipMapOffset03:
+    m_OverrideState: 0
+    m_Value: {x: 10, y: 20, z: 30, w: 50}
+  sceneVoxelClipMapUpdateDistance03:
+    m_OverrideState: 0
+    m_Value: {x: 30, y: 60, z: 70, w: 100}
+  sceneVoxelClipMapOffset47:
+    m_OverrideState: 0
+    m_Value: {x: 60, y: 120, z: 250, w: 500}
+  sceneVoxelClipMapUpdateDistance47:
+    m_OverrideState: 0
+    m_Value: {x: 200, y: 400, z: 800, w: 1600}
+  sceneVoxelClipMapResolution:
+    m_OverrideState: 0
+    m_Value: 64
+  sceneVoxelMaterialBudget:
+    m_OverrideState: 0
+    m_Value: 1024
+  sceneVoxelMaterialGenerateMethod:
+    m_OverrideState: 0
+    m_Value: 0
+  sceneVoxelDrawVegetation:
+    m_OverrideState: 0
+    m_Value: 1
+  sceneVoxelDrawGrass:
+    m_OverrideState: 0
+    m_Value: 0
+  sceneVoxelLightingType:
+    m_OverrideState: 0
+    m_Value: 3
+  sceneVoxelLightingDirectionalShadow:
+    m_OverrideState: 0
+    m_Value: 1
+  sceneVoxelLightingPunctualShadow:
+    m_OverrideState: 0
+    m_Value: 1
+  sceneVoxelLightingSkyLight:
+    m_OverrideState: 0
+    m_Value: 1
+  sceneVoxelDiffuseColorBoost:
+    m_OverrideState: 0
+    m_Value: 1
+  sceneVoxelAvoidBleeding:
+    m_OverrideState: 0
+    m_Value: 0.5
+  sceneVoxelMaxSampleCount:
+    m_OverrideState: 0
+    m_Value: 12
+  sceneVoxelMultiBounce:
+    m_OverrideState: 0
+    m_Value: 1
+  sceneVoxelDirectionCount:
+    m_OverrideState: 0
+    m_Value: 6
+  sceneVoxelDirectLightIntensity:
+    m_OverrideState: 0
+    m_Value: 1
+  sceneVoxelDirectLightTint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  sceneVoxelIndirectLightIntensity:
+    m_OverrideState: 0
+    m_Value: 0.5
+  sceneVoxelIndirectLightTint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  sceneVoxelEnableSkyVisibility:
+    m_OverrideState: 0
+    m_Value: 0
+  sceneVoxelDebugExpandView:
+    m_OverrideState: 0
+    m_Value: 0
+  sceneVoxelDebugExpandViewDistance:
+    m_OverrideState: 0
+    m_Value: 1000
+  sceneVoxelDebugShowMipmapID:
+    m_OverrideState: 0
+    m_Value: 0
+  sceneVoxelDebugByTrace:
+    m_OverrideState: 0
+    m_Value: 0
+  sceneVoxelDebugDrawProbe:
+    m_OverrideState: 0
+    m_Value: 0
+  sceneVoxelDebugProbeSizeWS:
+    m_OverrideState: 0
+    m_Value: 0.5
+  localSkyProbeCameraDistance:
+    m_OverrideState: 0
+    m_Value: 2
+  localSkyProbeShowDebugSphere:
+    m_OverrideState: 0
+    m_Value: 1
+  sceneVoxelTraceMaxSteps:
+    m_OverrideState: 0
+    m_Value: 64
+  sceneVoxelTraceStepFactor:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeSkylightLeaking:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeSkylightLeakingRoughness:
+    m_OverrideState: 0
+    m_Value: 0.3
+  screenProbeFullSkylightLeakingDistance:
+    m_OverrideState: 0
+    m_Value: 10
+  screenProbeTraceSkyCubemap:
+    m_OverrideState: 0
+    m_Value: 1
   shortRangeAO:
     m_OverrideState: 0
     m_Value: 0
   shortRangeAOWeight:
+    m_OverrideState: 0
+    m_Value: 1
+  shortRangeAOApplyWeight:
     m_OverrideState: 0
     m_Value: 1
   shortRangeAOSlopeCompareToleranceScale:

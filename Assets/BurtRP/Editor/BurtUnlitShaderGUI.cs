@@ -18,12 +18,14 @@ namespace Burt.RenderPipeline.Editor
         private MaterialEditor materialEditor;
         private MaterialProperty[] properties;
         private MaterialProperty baseColor;
+        private MaterialProperty responsiveAA;
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
             this.materialEditor = materialEditor;
             properties = props;
             baseColor = FindProperty("_BaseColor", properties, false);
+            responsiveAA = FindProperty("_ResponsiveAA", properties, false);
 
             Material material = materialEditor.target as Material;
             DrawSurfaceOptions(material);
@@ -46,6 +48,9 @@ namespace Burt.RenderPipeline.Editor
             material.SetOverrideTag("Queue", string.Empty);
             material.renderQueue = (int)RenderQueue.Geometry;
             material.SetShaderPassEnabled("BurtDepthOnly", true);
+            BurtShadingModelIds.ApplyMotionVectorStencilProperties(material);
+            material.SetShaderPassEnabled("BurtMotionVectors", true);
+            material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
             material.SetShaderPassEnabled("ShadowCaster", false);
             material.SetShaderPassEnabled("BurtForward", true);
             material.SetShaderPassEnabled("BurtForwardOnly", true);
@@ -68,7 +73,7 @@ namespace Burt.RenderPipeline.Editor
                     BurtShaderGUIUtility.DrawSeparator();
                     BurtShaderGUIUtility.DrawSubHeader("Resolved State");
                     EditorGUILayout.LabelField(RenderQueueLabel, new GUIContent(material.renderQueue.ToString()));
-                    EditorGUILayout.TextField(EnabledPassesLabel, "BurtDepthOnly, BurtForward, BurtForwardOnly");
+                    EditorGUILayout.TextField(EnabledPassesLabel, "BurtDepthOnly, BurtMotionVectors, BurtForward, BurtForwardOnly");
                 }
             }
 
@@ -83,6 +88,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             BurtShaderGUIUtility.DrawProperty(materialEditor, baseColor);
+            BurtShaderGUIUtility.DrawProperty(materialEditor, responsiveAA);
             BurtShaderGUIUtility.EndSection();
         }
     }

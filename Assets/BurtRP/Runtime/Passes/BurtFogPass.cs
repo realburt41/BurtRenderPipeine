@@ -12,6 +12,9 @@ namespace Burt.RenderPipeline
         private static readonly int FogDistanceParamsId = Shader.PropertyToID("_BurtFogDistanceParams");
         private static readonly int FogAlbedoId = Shader.PropertyToID("_BurtFogAlbedo");
         private static readonly int FogScatteringParamsId = Shader.PropertyToID("_BurtFogScatteringParams");
+        private static readonly int FogAtmosphereRayleighTintScaleId = Shader.PropertyToID("_BurtFogAtmosphereRayleighTintScale");
+        private static readonly int FogAtmosphereMieTintScaleId = Shader.PropertyToID("_BurtFogAtmosphereMieTintScale");
+        private static readonly int FogAtmosphereMultipleScatteringTintScaleId = Shader.PropertyToID("_BurtFogAtmosphereMultipleScatteringTintScale");
         private static readonly int FogAerialInteractionParamsId = Shader.PropertyToID("_BurtFogAerialInteractionParams");
         private static readonly int FogDebugModeId = Shader.PropertyToID("_BurtFogDebugMode");
         private static readonly int InverseViewProjectionId = Shader.PropertyToID("_BurtFogInverseViewProjection");
@@ -74,6 +77,7 @@ namespace Burt.RenderPipeline
             UploadMaterialProperties(drawMaterial, camera, request, settings);
 
             var cmd = CommandBufferPool.Get(Name);
+            BurtAtmosphereLutUtility.EnsureAndBindForFog(cmd, drawMaterial, camera, request);
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
             cmd.GetTemporaryRT(FogSourceColorTextureId, descriptor, FilterMode.Bilinear);
             cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(FogSourceColorTextureId));
@@ -92,7 +96,14 @@ namespace Burt.RenderPipeline
             targetMaterial.SetVector(FogParamsId, new Vector4(settings.Height, settings.Density, settings.HeightFalloff, settings.MaxOpacity));
             targetMaterial.SetVector(FogDistanceParamsId, new Vector4(settings.StartDistance, settings.CutoffDistance, 0f, 0f));
             targetMaterial.SetColor(FogAlbedoId, settings.Albedo);
-            targetMaterial.SetVector(FogScatteringParamsId, new Vector4(settings.DirectionalIntensity, settings.AmbientIntensity, settings.Anisotropy, 0f));
+            targetMaterial.SetVector(FogScatteringParamsId, new Vector4(
+                settings.DirectionalIntensity,
+                settings.AmbientIntensity,
+                settings.Anisotropy,
+                settings.HorizontalScattering.Enabled ? 1f : 0f));
+            targetMaterial.SetVector(FogAtmosphereRayleighTintScaleId, ToTintScaleVector(settings.HorizontalScattering.RayleighTint, settings.HorizontalScattering.RayleighScale));
+            targetMaterial.SetVector(FogAtmosphereMieTintScaleId, ToTintScaleVector(settings.HorizontalScattering.MieTint, settings.HorizontalScattering.MieScale));
+            targetMaterial.SetVector(FogAtmosphereMultipleScatteringTintScaleId, ToTintScaleVector(settings.HorizontalScattering.MultipleScatteringTint, settings.HorizontalScattering.MultipleScatteringScale));
             targetMaterial.SetVector(FogAerialInteractionParamsId, new Vector4((float)settings.AerialInteraction, settings.AerialFadeStart, settings.AerialFadeEnd, 0f));
             targetMaterial.SetFloat(FogDebugModeId, ResolveDebugMode());
             targetMaterial.SetMatrix(InverseViewProjectionId, ResolveInverseViewProjection(camera));
@@ -108,6 +119,13 @@ namespace Burt.RenderPipeline
             lightDirection.Normalize();
             targetMaterial.SetVector(MainLightDirectionId, new Vector4(lightDirection.x, lightDirection.y, lightDirection.z, 0f));
             targetMaterial.SetVector(MainLightColorId, ResolveMainLightColor(lightingData));
+        }
+
+        private static Vector4 ToTintScaleVector(Color tint, float scale)
+        {
+            var linearTint = tint.linear;
+            var safeScale = Mathf.Max(0f, scale);
+            return new Vector4(linearTint.r * safeScale, linearTint.g * safeScale, linearTint.b * safeScale, safeScale);
         }
 
         private static float ResolveDebugMode()

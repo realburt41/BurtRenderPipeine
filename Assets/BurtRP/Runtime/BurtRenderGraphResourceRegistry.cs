@@ -72,6 +72,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int PostProcessColorTextureId = Shader.PropertyToID(PostProcessColorTextureShaderName); // 把后处理中间颜色名称转换成整数 ID，申请、绑定和释放都会复用它。
 
+        public const string TemporalAAOutputName = "TemporalAAOutput";
+
+        public const string TemporalAAOutputTextureShaderName = "_BurtTemporalAAOutputTexture";
+
+        public static readonly int TemporalAAOutputTextureId = Shader.PropertyToID(TemporalAAOutputTextureShaderName);
+
         public const string GBuffer0Name = "GBuffer0"; // 定义 Deferred 第一张 GBuffer 的统一资源名，用于保存 DepthNormals prepass 写入的 normal 和 perceptual roughness。
 
         public const string GBuffer0ShaderName = "_BurtGBuffer0"; // 定义 GBuffer0 暴露给 shader 的全局纹理名称，Deferred Lighting 会采样它。
@@ -1312,6 +1318,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetPostProcessColor() // 定义读取 PostProcessColor 的快捷函数。
         {
             return GetRenderTarget(PostProcessColorName); // 使用统一名称从资源表读取后处理中间颜色目标。
+        }
+
+        public BurtRenderTargetHandle RegisterTemporalAAOutputTexture()
+        {
+            return RegisterRenderTarget(TemporalAAOutputName, new RenderTargetIdentifier(TemporalAAOutputTextureId));
+        }
+
+        public BurtRenderTargetHandle GetTemporalAAOutput()
+        {
+            return GetRenderTarget(TemporalAAOutputName);
         }
 
         public BurtRenderTargetHandle RegisterGBuffer0Texture() // 定义注册 Deferred GBuffer0 临时 RT 的快捷函数。

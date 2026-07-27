@@ -10,6 +10,7 @@ float _Rows;
 float _Columns;
 float _PlaySpeed;
 float _MotionVectorScale;
+float _ResponsiveAA;
 float4 _BasicColor;
 float _Density;
 float _OverallAlpha;

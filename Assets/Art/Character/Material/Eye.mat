@@ -126,13 +126,14 @@ Material:
     - _LimbusScale: 1
     - _Metallic: 0
     - _Mode: 0
-    - _MotionVectorsStencilMask: 8
-    - _MotionVectorsStencilRef: 8
+    - _MotionVectorsStencilMask: 24
+    - _MotionVectorsStencilRef: 24
     - _NormalMapScale: 1
     - _NormalScale: 1
     - _OcclusionStrength: 1
     - _Parallax: 0.02
     - _PupilScale: 1
+    - _ResponsiveAA: 1
     - _ScalebyCenter: 0.83
     - _ScleraRoughness: 0.1
     - _ScleraSpecular: 1

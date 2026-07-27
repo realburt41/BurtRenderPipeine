@@ -182,7 +182,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             var skyDiffuseIntensity = skyLightActive && skyLight != null && skyLight.affectDiffuse ? skyLight.EffectiveDiffuseIntensity : 0f;
             var imageBasedFilterBakeIntensity = skyLightActive ? Mathf.Max(skyReflectionIntensity, skyDiffuseIntensity) : skyReflectionIntensity;
             var bakeSettings = CreateImageBasedFilterBakeSettings(skyReflection, imageBasedFilterBakeIntensity, lowerHemisphere);
-            var imageBasedFilter = BurtImageBasedFilterUtility.Filter(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflection.Source, bakeSettings);
+            var imageBasedFilter = BurtImageBasedFilterUtility.Filter(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflection.Source, bakeSettings, ResolveDynamicSkyReflectionVersion(skyReflection.Texture));
             var skyDiffuseCubemap = skyLightActive ? ResolveSkyLightDiffuseCubemap(skyLight, skyReflection, imageBasedFilter) : CreateDisabledSkyDiffuseCubemap();
             var runtimeLowerHemisphere = imageBasedFilter.Filtered ? CreateDisabledLowerHemisphere() : lowerHemisphere;
             var runtimeSkyReflectionIntensity = imageBasedFilter.Filtered ? ResolveBakedIntensityScale(skyReflectionIntensity, imageBasedFilter.BakedIntensity) : skyReflectionIntensity;
@@ -240,7 +240,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             var skyDiffuseIntensity = skyLightActive && skyLight != null && skyLight.affectDiffuse ? skyLight.EffectiveDiffuseIntensity : 0f;
             var imageBasedFilterBakeIntensity = skyLightActive ? Mathf.Max(skyReflectionIntensity, skyDiffuseIntensity) : skyReflectionIntensity;
             var bakeSettings = CreateImageBasedFilterBakeSettings(skyReflection, imageBasedFilterBakeIntensity, lowerHemisphere);
-            var imageBasedFilter = BurtImageBasedFilterUtility.Filter(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflection.Source, bakeSettings);
+            var imageBasedFilter = BurtImageBasedFilterUtility.Filter(cmd, skyReflection.Texture, skyReflection.HDRDecodeValues, skyReflection.Source, bakeSettings, ResolveDynamicSkyReflectionVersion(skyReflection.Texture));
             var runtimeSkyReflectionIntensity = imageBasedFilter.Filtered ? ResolveBakedIntensityScale(skyReflectionIntensity, imageBasedFilter.BakedIntensity) : skyReflectionIntensity;
             var runtimeSkyReflectionTint = imageBasedFilter.Filtered ? Color.white : skyReflection.Tint;
             var runtimeSkyReflectionRotation = imageBasedFilter.Filtered ? DefaultSkyReflectionRotation : skyReflection.Rotation;
@@ -1100,6 +1100,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
         private static float CalculateSkyReflectionSpecularMipMax(Texture skyReflection) // 根据纹理真实 mip 链推导 shader 实际使用的反射高光 LOD 上限。
         {
             return Mathf.Min(CalculateSkyReflectionMaxMip(skyReflection), ReflectionCaptureSpecularMipMax); // XRender/Unity reflection capture 的预过滤范围按 0..8 处理，不直接使用 512/1024 cubemap 的全部 mip。
+        }
+
+        private static int ResolveDynamicSkyReflectionVersion(Texture skyReflection)
+        {
+            return BurtAtmosphereReflectionUtility.TryGetContentVersion(skyReflection, out var version) ? version : 0;
         }
 
         private static BurtImageBasedFilterResult CreateDebugImageBasedFilterResult(ResolvedSkyReflection skyReflection, float intensity, ResolvedLowerHemisphere lowerHemisphere)

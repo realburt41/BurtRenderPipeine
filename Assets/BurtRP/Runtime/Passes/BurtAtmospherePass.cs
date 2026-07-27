@@ -9,20 +9,47 @@ namespace Burt.RenderPipeline
         private static readonly int RayleighIntensityId = Shader.PropertyToID("_BurtAtmosphereRayleighIntensity");
         private static readonly int MieIntensityId = Shader.PropertyToID("_BurtAtmosphereMieIntensity");
         private static readonly int MieAnisotropyId = Shader.PropertyToID("_BurtAtmosphereMieAnisotropy");
+        private static readonly int RayleighScatteringCoefficientId = Shader.PropertyToID("_BurtAtmosphereRayleighScatteringCoefficient");
+        private static readonly int MieScatteringCoefficientId = Shader.PropertyToID("_BurtAtmosphereMieScatteringCoefficient");
+        private static readonly int MieAbsorptionCoefficientId = Shader.PropertyToID("_BurtAtmosphereMieAbsorptionCoefficient");
+        private static readonly int OzoneAbsorptionCoefficientId = Shader.PropertyToID("_BurtAtmosphereOzoneAbsorptionCoefficient");
         private static readonly int PlanetParamsId = Shader.PropertyToID("_BurtAtmospherePlanetParams");
         private static readonly int GroundColorId = Shader.PropertyToID("_BurtAtmosphereGroundColor");
         private static readonly int SkyTintId = Shader.PropertyToID("_BurtAtmosphereSkyTint");
+        private static readonly int SkyLuminanceFactorId = Shader.PropertyToID("_BurtAtmosphereSkyLuminanceFactor");
         private static readonly int SunIntensityId = Shader.PropertyToID("_BurtAtmosphereSunIntensity");
+        private static readonly int MainLightOcclusionFactorId = Shader.PropertyToID("_BurtMainLightOcclusionFactor");
         private static readonly int SunDirectionId = Shader.PropertyToID("_BurtAtmosphereSunDirection");
         private static readonly int SunParamsId = Shader.PropertyToID("_BurtAtmosphereSunParams");
+        private static readonly int SunDiskLuminanceAndCosHalfApexId = Shader.PropertyToID("_BurtAtmosphereSunDiskLuminanceAndCosHalfApex");
         private static readonly int HorizonColorId = Shader.PropertyToID("_BurtAtmosphereHorizonColor");
         private static readonly int HorizonSunsetColorId = Shader.PropertyToID("_BurtAtmosphereHorizonSunsetColor");
         private static readonly int HorizonParamsId = Shader.PropertyToID("_BurtAtmosphereHorizonParams");
         private static readonly int GroundParamsId = Shader.PropertyToID("_BurtAtmosphereGroundParams");
         private static readonly int ExposureParamsId = Shader.PropertyToID("_BurtAtmosphereExposureParams");
+        private static readonly int StylizedParamsId = Shader.PropertyToID("_BurtAtmosphereStylizedParams");
+        private static readonly int StylizedSunRiseParamsId = Shader.PropertyToID("_BurtAtmosphereStylizedSunRiseParams");
+        private static readonly int StylizedBaseSkyColorDayId = Shader.PropertyToID("_BurtAtmosphereStylizedBaseSkyColorDay");
+        private static readonly int StylizedBaseSkyColorDawnDuskId = Shader.PropertyToID("_BurtAtmosphereStylizedBaseSkyColorDawnDusk");
+        private static readonly int StylizedBaseSkyColorNightId = Shader.PropertyToID("_BurtAtmosphereStylizedBaseSkyColorNight");
+        private static readonly int StylizedHorizonSkyColorDayId = Shader.PropertyToID("_BurtAtmosphereStylizedHorizonSkyColorDay");
+        private static readonly int StylizedHorizonSkyColorDawnDuskId = Shader.PropertyToID("_BurtAtmosphereStylizedHorizonSkyColorDawnDusk");
+        private static readonly int StylizedHorizonSkyColorNightId = Shader.PropertyToID("_BurtAtmosphereStylizedHorizonSkyColorNight");
+        private static readonly int StylizedSunDiskColorScaleId = Shader.PropertyToID("_BurtAtmosphereStylizedSunDiskColorScale");
+        private static readonly int StylizedSunGlowColorId = Shader.PropertyToID("_BurtAtmosphereStylizedSunGlowColor");
+        private static readonly int MoonSurfaceTextureId = Shader.PropertyToID("_BurtAtmosphereMoonSurfaceTexture");
+        private static readonly int MoonDirectionId = Shader.PropertyToID("_BurtAtmosphereMoonDirection");
+        private static readonly int MoonUpId = Shader.PropertyToID("_BurtAtmosphereMoonUp");
+        private static readonly int MoonRightId = Shader.PropertyToID("_BurtAtmosphereMoonRight");
+        private static readonly int MoonSurfaceTintId = Shader.PropertyToID("_BurtAtmosphereMoonSurfaceTint");
+        private static readonly int MoonFlareTintId = Shader.PropertyToID("_BurtAtmosphereMoonFlareTint");
+        private static readonly int MoonGeometryId = Shader.PropertyToID("_BurtAtmosphereMoonGeometry");
+        private static readonly int MoonPhaseId = Shader.PropertyToID("_BurtAtmosphereMoonPhase");
+        private static readonly int MoonVisibilityId = Shader.PropertyToID("_BurtAtmosphereMoonVisibility");
         private static readonly int AerialPerspectiveParamsId = Shader.PropertyToID("_BurtAtmosphereAerialPerspectiveParams");
         private static readonly int AerialPerspectiveTintId = Shader.PropertyToID("_BurtAtmosphereAerialPerspectiveTint");
         private static readonly int AerialPerspectiveFadeParamsId = Shader.PropertyToID("_BurtAtmosphereAerialPerspectiveFadeParams");
+        private static readonly int FogLutDistanceParamsId = Shader.PropertyToID("_BurtAtmosphereFogLutDistanceParams");
         private static readonly int InverseViewProjectionId = Shader.PropertyToID("_BurtAtmosphereInverseViewProjection");
         private static readonly int CameraPositionWSId = Shader.PropertyToID("_BurtAtmosphereCameraPositionWS");
         private static readonly int DebugModeId = Shader.PropertyToID("_BurtAtmosphereDebugMode");
@@ -78,9 +105,10 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            UploadMaterialProperties(drawMaterial, camera, request, settings);
-
             var cmd = CommandBufferPool.Get(Name);
+            var sunDirection4 = ResolveSunDirection(request, settings);
+            BurtAtmosphereLutUtility.EnsureLuts(cmd, camera, settings, new Vector3(sunDirection4.x, sunDirection4.y, sunDirection4.z));
+            UploadMaterialProperties(drawMaterial, camera, request, settings);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
@@ -94,28 +122,77 @@ namespace Burt.RenderPipeline
             targetMaterial.SetFloat(RayleighIntensityId, settings.RayleighIntensity);
             targetMaterial.SetFloat(MieIntensityId, settings.MieIntensity);
             targetMaterial.SetFloat(MieAnisotropyId, settings.MieAnisotropy);
+            targetMaterial.SetVector(RayleighScatteringCoefficientId, settings.RayleighScatteringCoefficient);
+            targetMaterial.SetVector(MieScatteringCoefficientId, settings.MieScatteringCoefficient);
+            targetMaterial.SetVector(MieAbsorptionCoefficientId, settings.MieAbsorptionCoefficient);
+            targetMaterial.SetVector(OzoneAbsorptionCoefficientId, settings.OzoneAbsorptionCoefficient);
             targetMaterial.SetVector(PlanetParamsId, new Vector4(settings.PlanetRadius, settings.AtmosphereHeight, settings.RayleighScaleHeight, settings.MieScaleHeight));
             targetMaterial.SetColor(GroundColorId, settings.GroundColor);
             targetMaterial.SetColor(SkyTintId, settings.SkyTint);
+            targetMaterial.SetColor(SkyLuminanceFactorId, settings.SkyLuminanceFactor);
             targetMaterial.SetFloat(SunIntensityId, settings.SunIntensity);
+            targetMaterial.SetFloat(MainLightOcclusionFactorId, settings.MainLightOcclusion);
             targetMaterial.SetVector(SunDirectionId, ResolveSunDirection(request, settings));
             targetMaterial.SetVector(SunParamsId, new Vector4(settings.SunDiskSize, settings.SunDiskIntensity, settings.SunHaloSize, settings.SunHaloIntensity));
+            targetMaterial.SetVector(SunDiskLuminanceAndCosHalfApexId, BurtAtmosphereUtility.EvaluateSunDiskLuminanceAndCosHalfApex(request, settings));
             targetMaterial.SetColor(HorizonColorId, settings.HorizonColor);
             targetMaterial.SetColor(HorizonSunsetColorId, settings.HorizonSunsetColor);
             targetMaterial.SetVector(HorizonParamsId, new Vector4(settings.HorizonIntensity, settings.HorizonFalloff, settings.HorizonSunsetInfluence, 0f));
             targetMaterial.SetVector(GroundParamsId, new Vector4(settings.GroundContribution, settings.GroundBlendStart, settings.GroundBlendEnd, 0f));
             targetMaterial.SetVector(ExposureParamsId, new Vector4(Mathf.Pow(2f, settings.ExposureCompensation), settings.TonemapSafeSunIntensity, settings.ExposureCompensation, 0f));
+            var stylized = settings.StylizedSky;
+            targetMaterial.SetVector(StylizedParamsId, new Vector4(stylized.Blend, stylized.HorizonBrightness, stylized.HorizonFalloff, stylized.SunGlowScale));
+            targetMaterial.SetVector(StylizedSunRiseParamsId, new Vector4(stylized.SunRiseBlendMin, stylized.SunRiseBlendMax, 0f, 0f));
+            targetMaterial.SetColor(StylizedBaseSkyColorDayId, stylized.BaseSkyColorDay);
+            targetMaterial.SetColor(StylizedBaseSkyColorDawnDuskId, stylized.BaseSkyColorDawnDusk);
+            targetMaterial.SetColor(StylizedBaseSkyColorNightId, stylized.BaseSkyColorNight);
+            targetMaterial.SetColor(StylizedHorizonSkyColorDayId, stylized.HorizonSkyColorDay);
+            targetMaterial.SetColor(StylizedHorizonSkyColorDawnDuskId, stylized.HorizonSkyColorDawnDusk);
+            targetMaterial.SetColor(StylizedHorizonSkyColorNightId, stylized.HorizonSkyColorNight);
+            targetMaterial.SetColor(StylizedSunDiskColorScaleId, stylized.SunDiskColorScale);
+            targetMaterial.SetColor(StylizedSunGlowColorId, stylized.SunGlowColor);
+            var moon = settings.Moon;
+            BurtAtmosphereUtility.ResolveMoonBasis(moon, out var moonDirection, out var moonUp, out var moonRight);
+            var phaseRadians = moon.Phase * 2f * Mathf.PI;
+            var phaseRotationRadians = moon.PhaseRotation * Mathf.Deg2Rad;
+            targetMaterial.SetTexture(MoonSurfaceTextureId, moon.SurfaceTexture != null ? moon.SurfaceTexture : Texture2D.whiteTexture);
+            targetMaterial.SetVector(MoonDirectionId, new Vector4(moonDirection.x, moonDirection.y, moonDirection.z, 0f));
+            targetMaterial.SetVector(MoonUpId, new Vector4(moonUp.x, moonUp.y, moonUp.z, 0f));
+            targetMaterial.SetVector(MoonRightId, new Vector4(moonRight.x, moonRight.y, moonRight.z, 0f));
+            targetMaterial.SetColor(MoonSurfaceTintId, moon.SurfaceTint);
+            targetMaterial.SetColor(MoonFlareTintId, moon.FlareTint);
+            targetMaterial.SetVector(MoonGeometryId, BurtAtmosphereUtility.EvaluateMoonDiskLuminanceAndGeometry(moon));
+            targetMaterial.SetVector(MoonPhaseId, new Vector4(
+                Mathf.Sin(phaseRadians),
+                Mathf.Cos(phaseRadians),
+                Mathf.Sin(phaseRotationRadians),
+                Mathf.Cos(phaseRotationRadians)));
+            targetMaterial.SetVector(MoonVisibilityId, new Vector4(
+                moon.Enabled ? 1f : 0f,
+                moon.Earthshine,
+                moon.RiseBlendMin,
+                moon.RiseBlendMax));
+            // XY are retained for the analytic fallback only; the physical LUT
+            // follows XRender's density/luminance/sampling-scale controls.
             targetMaterial.SetVector(AerialPerspectiveParamsId, new Vector4(settings.AerialPerspectiveIntensity, settings.AerialPerspectiveDistance, settings.AerialPerspectiveHeightFalloff, settings.AerialPerspectiveEnabled ? 1f : 0f));
             targetMaterial.SetColor(AerialPerspectiveTintId, settings.AerialPerspectiveTint);
+            // XRender's atmosphere fog LUT has a fixed 96 km physical coverage.
+            const float fogLutCoverageKm = 96f;
+            targetMaterial.SetVector(FogLutDistanceParamsId, new Vector4(
+                settings.WorldToKilometers,
+                fogLutCoverageKm,
+                settings.AerialPerspectiveSamplingDistanceScale,
+                settings.AerialPerspectiveLuminanceScale));
             var affectsSkyPixels = settings.AerialPerspectivePlacement == AtmosphereAerialPerspectivePlacement.AfterSkyBeforeSSR
                 || settings.AerialPerspectivePlacement == AtmosphereAerialPerspectivePlacement.BeforeTransparent;
             targetMaterial.SetVector(AerialPerspectiveFadeParamsId, new Vector4(settings.AerialPerspectiveNearFadeStart, settings.AerialPerspectiveNearFadeEnd, settings.AerialPerspectiveMaxOpacity, affectsSkyPixels ? 1f : 0f));
             targetMaterial.SetMatrix(InverseViewProjectionId, ResolveInverseViewProjection(camera));
             targetMaterial.SetVector(CameraPositionWSId, camera.transform.position);
             targetMaterial.SetFloat(DebugModeId, ResolveDebugMode());
+            BurtAtmosphereLutUtility.BindToMaterial(targetMaterial);
         }
 
-        private static Vector4 ResolveSunDirection(BurtRenderRequest request, BurtAtmosphereSettings settings)
+        internal static Vector4 ResolveSunDirection(BurtRenderRequest request, BurtAtmosphereSettings settings)
         {
             var direction = settings.SunSource == AtmosphereSunSource.CustomDirection
                 ? settings.CustomSunDirection
@@ -173,6 +250,12 @@ namespace Burt.RenderPipeline
                     return 13f;
                 case BurtShadingDebugMode.AtmosphereViewDirection:
                     return 14f;
+                case BurtShadingDebugMode.AtmosphereLutSkyView:
+                    return 15f;
+                case BurtShadingDebugMode.AtmosphereLutMultipleScattering:
+                    return 16f;
+                case BurtShadingDebugMode.AtmosphereLutHorizontalScattering:
+                    return 17f;
                 default:
                     return 0f;
             }
@@ -292,9 +375,10 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            BurtDrawAtmospherePass.UploadMaterialProperties(drawMaterial, camera, request, settings);
-
             var cmd = CommandBufferPool.Get(Name);
+            var sunDirection4 = BurtDrawAtmospherePass.ResolveSunDirection(request, settings);
+            BurtAtmosphereLutUtility.EnsureLuts(cmd, camera, settings, new Vector3(sunDirection4.x, sunDirection4.y, sunDirection4.z));
+            BurtDrawAtmospherePass.UploadMaterialProperties(drawMaterial, camera, request, settings);
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
             cmd.GetTemporaryRT(AerialSourceColorTextureId, descriptor, FilterMode.Bilinear);
             cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(AerialSourceColorTextureId));

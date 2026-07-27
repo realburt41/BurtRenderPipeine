@@ -31,6 +31,7 @@ CBUFFER_START(UnityPerMaterial)
     float _AlphaCutoff;
     float4 _EmissionColor;
     float4 _EmissionMap_ST;
+    float _ResponsiveAA;
 CBUFFER_END
 
 #endif // BURT_TRUNK_PROPERTIES_INCLUDED

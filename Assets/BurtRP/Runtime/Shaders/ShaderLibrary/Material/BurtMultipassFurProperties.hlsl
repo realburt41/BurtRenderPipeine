@@ -48,6 +48,7 @@ CBUFFER_START(UnityPerMaterial)
     float _FurBlurDistance;
     float _AlphaClip;
     float _Cutoff;
+    float _ResponsiveAA;
     float4 _DoubleSidedNormalModeConstants;
 CBUFFER_END
 

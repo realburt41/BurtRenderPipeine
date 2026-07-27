@@ -19,6 +19,7 @@ Shader "Hidden/BurtRP/Fog"
 
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/BurtAtmosphereLut.hlsl"
 
             sampler2D _BurtCameraColorTexture;
             UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -26,13 +27,21 @@ Shader "Hidden/BurtRP/Fog"
             float4 _BurtFogParams; // x=height, y=density, z=height falloff, w=max opacity
             float4 _BurtFogDistanceParams; // x=start distance, y=cutoff distance
             float4 _BurtFogAlbedo;
-            float4 _BurtFogScatteringParams; // x=directional, y=ambient, z=anisotropy
+            float4 _BurtFogScatteringParams; // x=directional, y=ambient, z=anisotropy, w=use atmosphere horizontal scattering
+            float4 _BurtFogAtmosphereRayleighTintScale;
+            float4 _BurtFogAtmosphereMieTintScale;
+            float4 _BurtFogAtmosphereMultipleScatteringTintScale;
             float4 _BurtFogAerialInteractionParams; // x=interaction, y=aerial fade start, z=aerial fade end
             float _BurtFogDebugMode;
             float4x4 _BurtFogInverseViewProjection;
             float3 _BurtFogCameraPositionWS;
             float4 _BurtMainLightDirection;
             float4 _BurtMainLightColor;
+            float4 _BurtMainLightColorOuterSpace;
+            float4 _BurtMainLightAtmosphereTransmittance;
+            float4 _BurtAtmosphereHorizontalFogSunDirection;
+            float4 _BurtAtmosphereHorizontalFogLightColor;
+            float _BurtMainLightOcclusionFactor;
 
             static const float PI = 3.14159265359f;
 
@@ -216,12 +225,35 @@ Shader "Hidden/BurtRP/Fog"
                 }
 
                 float3 lightDirWS = SafeNormalize(_BurtMainLightDirection.xyz, float3(0.0f, 1.0f, 0.0f));
-                float3 lightColor = NormalizeLightColor(max(_BurtMainLightColor.rgb, 0.0f));
+                // Use the unoccluded, atmosphere-transmitted light chroma here;
+                // environment occlusion is applied explicitly once below.
+                float3 lightColor = NormalizeLightColor(max(_BurtMainLightColorOuterSpace.rgb * _BurtMainLightAtmosphereTransmittance.rgb, 0.0f));
                 float lDotV = dot(lightDirWS, viewDirWS);
                 float phase = HenyeyGreensteinPhase(lDotV, _BurtFogScatteringParams.z);
                 float directional = max(_BurtFogScatteringParams.x, 0.0f) * phase * 4.0f;
                 float ambient = max(_BurtFogScatteringParams.y, 0.0f);
-                float3 fogColor = BurtApplyPreExposure(max(_BurtFogAlbedo.rgb, 0.0f) * (ambient + directional * lightColor));
+                float mainLightOcclusion = saturate(_BurtMainLightOcclusionFactor);
+                float3 legacyFogColor = max(_BurtFogAlbedo.rgb, 0.0f) * (ambient + directional * lightColor * mainLightOcclusion);
+
+                float useAtmosphereHorizontalScattering = _BurtFogScatteringParams.w * _BurtAtmosphereUseLuts;
+                float3 evaluatedFogColor = legacyFogColor;
+                [branch]
+                if (useAtmosphereHorizontalScattering > 0.5f)
+                {
+                    float3 horizontalSunDirection = SafeNormalize(_BurtAtmosphereHorizontalFogSunDirection.xyz, lightDirWS);
+                    float horizontalLDotV = dot(horizontalSunDirection, viewDirWS);
+                    evaluatedFogColor = BurtAtmosphereEvaluateHorizontalFogLighting(
+                        horizontalLDotV,
+                        _BurtFogScatteringParams.z,
+                        _BurtAtmosphereHorizontalFogLightColor.rgb,
+                        _BurtFogAtmosphereRayleighTintScale.rgb,
+                        _BurtFogAtmosphereMieTintScale.rgb,
+                        _BurtFogAtmosphereMultipleScatteringTintScale.rgb,
+                        1.0f,
+                        mainLightOcclusion);
+                }
+
+                float3 fogColor = BurtApplyPreExposure(evaluatedFogColor);
 
                 return float4(lerp(sourceColor, fogColor, fogAmount), 1.0f);
             }

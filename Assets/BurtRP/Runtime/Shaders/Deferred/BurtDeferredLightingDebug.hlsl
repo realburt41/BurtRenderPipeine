@@ -1,46 +1,80 @@
 #ifndef BURT_DEFERRED_LIGHTING_DEBUG_INCLUDED
 #define BURT_DEFERRED_LIGHTING_DEBUG_INCLUDED
 #if BURT_ENABLE_SHADING_DEBUG
-#if !defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING) && !defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF) && !defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW) && !defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION)
-#define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_FULL 1
-#endif
-
-#ifndef BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_FULL
-#define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_FULL 0
-#endif
-
 #if defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING)
 #define BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING 1
 #else
-#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_FULL
+#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING 0
 #endif
 
 #if defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF)
 #define BURT_DEFERRED_LIGHTING_DEBUG_FILL_BRDF 1
 #else
-#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_BRDF BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_FULL
+#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_BRDF 0
 #endif
 
 #if defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_SHADOW)
 #define BURT_DEFERRED_LIGHTING_DEBUG_FILL_SHADOW 1
 #else
-#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_SHADOW BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_FULL
+#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_SHADOW 0
 #endif
 
 #if defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION)
 #define BURT_DEFERRED_LIGHTING_DEBUG_FILL_TRANSMISSION 1
 #else
-#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_TRANSMISSION BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_FULL
+#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_TRANSMISSION 0
 #endif
 
-#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_GBUFFER BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_FULL
+#if BURT_DEFERRED_LIGHTING_DEBUG_FILL_BRDF
+#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_GBUFFER 1
+#else
+#define BURT_DEFERRED_LIGHTING_DEBUG_FILL_GBUFFER 0
+#endif
+
+#if BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING || BURT_DEFERRED_LIGHTING_DEBUG_FILL_BRDF || BURT_DEFERRED_LIGHTING_DEBUG_FILL_TRANSMISSION
+#define BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_SHADED_COMPONENTS 1
+#else
+#define BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_SHADED_COMPONENTS 0
+#endif
 
 #if !BURT_DEFERRED_LIGHTING_DEBUG_FILL_SHADOW
 #define BURT_SHADING_DEBUG_INCLUDE_SHADOW 0
 #define BURT_SHADING_DEBUG_INCLUDE_ADDITIONAL_LIGHTS 0
 #endif
 
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_CORE BURT_DEFERRED_LIGHTING_DEBUG_FILL_BRDF
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_BRDF BURT_DEFERRED_LIGHTING_DEBUG_FILL_BRDF
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING
+#ifndef BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING
+#endif
+#ifndef BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN
+#endif
+#ifndef BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN
+#endif
+#ifndef BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING
+#endif
+#ifndef BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING
+#endif
+#ifndef BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING
+#endif
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_TRANSMISSION BURT_DEFERRED_LIGHTING_DEBUG_FILL_TRANSMISSION
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_HAIR BURT_DEFERRED_LIGHTING_DEBUG_FILL_TRANSMISSION
+#define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_SHADOW BURT_DEFERRED_LIGHTING_DEBUG_FILL_SHADOW
+
+#if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_CORE || BURT_SHADING_DEBUG_MATERIAL_INCLUDE_BRDF || BURT_SHADING_DEBUG_MATERIAL_INCLUDE_TRANSMISSION || BURT_SHADING_DEBUG_MATERIAL_INCLUDE_HAIR
+#define BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_FULL_SURFACE_DATA 1
+#else
+#define BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_FULL_SURFACE_DATA 0
+#endif
+
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebug.hlsl"
+#if BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_FULL_SURFACE_DATA
 float BurtGetDeferredLightingDebugMaterialChannel(BurtGBufferData GBufferData)
 {
 #if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
@@ -53,28 +87,9 @@ float BurtGetDeferredLightingDebugMaterialChannel(BurtGBufferData GBufferData)
     return saturate(GBufferData.Metallic);
 #endif
 }
-
-void BurtApplyDeferredLightingDebugBaseline(
-    BurtGBufferData ShadingGBufferData,
-    BurtLight MainLight,
-    float3 ViewDirectionWS,
-    float3 PositionWS,
-    float3 ShadowPositionWS,
-    float2 ScreenUV,
-    inout BurtPBRShadingComponents DebugComponents)
-{
-#if defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE)
-    ShadingGBufferData.ShadingModelID = BURT_SHADING_MODEL_DEFAULT_LIT;
-
-    BurtPBRShadingCoreData DebugCoreData = BurtPreparePBRShadingCoreData(ShadingGBufferData, ViewDirectionWS);
-    BurtDirectPBRComponents MainDirectComponents = BurtEvaluatePBRDirectFromCore(DebugCoreData, MainLight);
-    BurtDirectPBRComponents AdditionalDirectComponents = BurtEvaluatePBRAdditionalDirectLightingFromCore(DebugCoreData, PositionWS, ShadowPositionWS, ScreenUV);
-    BurtDirectPBRComponents DirectComponents = BurtAddPBRDirectComponents(MainDirectComponents, AdditionalDirectComponents);
-    BurtIndirectPBRComponents IndirectComponents = BurtEvaluatePBRIndirectFromCore(DebugCoreData);
-    DebugComponents = BurtComposePBRShadingComponentsWithAdditional(DebugCoreData, DirectComponents, IndirectComponents, AdditionalDirectComponents);
 #endif
-}
 
+#if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL
 float3 BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(
     BurtGBufferData GBufferData,
     float3 ViewDirectionWS,
@@ -92,17 +107,17 @@ float3 BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(
     return Additional.Diffuse + Additional.Specular;
 #endif
 }
+#endif
+
+#if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL
 void BurtApplyDeferredLightingDetailDebugOverride(inout BurtGBufferData ShadingGBufferData)
 {
-    if (BurtIsShadingDebugEnabled() && BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_DETAIL_LIGHTING))
-    {
-        ShadingGBufferData.BaseColor = float3(0.18f, 0.18f, 0.18f);
-    }
+    ShadingGBufferData.BaseColor = float3(0.18f, 0.18f, 0.18f);
 }
+#endif
 float4 BurtEvaluateDeferredLightingDebugOutput(
     BurtGBufferData GBufferData,
     BurtGBufferData ShadingGBufferData,
-    BurtLight MainLight,
     BurtPBRShadingComponents PBRComponents,
     float3 FinalColor,
     float3 FinalPreExposedColor,
@@ -119,6 +134,7 @@ float4 BurtEvaluateDeferredLightingDebugOutput(
         return float4(FinalPreExposedColor, OutputAlpha);
     }
 
+#if BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_FULL_SURFACE_DATA
     BurtSurfaceData DebugSurfaceData = BurtCreateSurfaceData(float4(GBufferData.BaseColor, 1.0f));
     DebugSurfaceData.BaseColor = float4(GBufferData.BaseColor, 1.0f);
     DebugSurfaceData.Alpha = 1.0f;
@@ -164,36 +180,41 @@ float4 BurtEvaluateDeferredLightingDebugOutput(
 #endif
     DebugSurfaceData.Occlusion = GBufferData.Occlusion;
     DebugSurfaceData.ShadingModelID = GBufferData.ShadingModelID;
+#elif BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL
+    BurtSurfaceData DebugSurfaceData = (BurtSurfaceData)0;
+    DebugSurfaceData.ShadingModelID = GBufferData.ShadingModelID;
+#else
+    BurtSurfaceData DebugSurfaceData = (BurtSurfaceData)0;
+#endif
 
 #if BURT_DEFERRED_LIGHTING_DEBUG_FILL_GBUFFER
     BurtPBRMaterialData DebugGBufferMaterialData = BurtPreparePBRMaterialData(GBufferData);
 #endif
-    BurtPBRShadingComponents DebugLightingComponents = PBRComponents;
-#if BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING
-    BurtApplyDeferredLightingDebugBaseline(
-        ShadingGBufferData,
-        MainLight,
-        ViewDirectionWS,
-        PositionWS,
-        ShadowPositionWS,
-        ScreenUV,
-        DebugLightingComponents);
-#endif
-
     float3 DeferredAONormalWS = BurtGetDeferredSurfaceNormalWS(GBufferData);
     BurtShadingDebugData DebugData = BurtCreateDefaultShadingDebugData(DeferredAONormalWS);
+    #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_CORE
     DebugData.NormalWS = DeferredAONormalWS;
+    #endif
 #if BURT_DEFERRED_LIGHTING_DEBUG_FILL_LIGHTING
-    DebugData.DetailLightingColor = DebugLightingComponents.Lighting;
-    DebugData.DirectDiffuseColor = DebugLightingComponents.DirectDiffuse;
-    DebugData.DirectSpecularColor = DebugLightingComponents.DirectSpecular;
-    DebugData.AdditionalDiffuseColor = DebugLightingComponents.AdditionalDiffuse;
-    DebugData.AdditionalSpecularColor = DebugLightingComponents.AdditionalSpecular;
+    #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN
+        #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL
+    DebugData.DetailLightingColor = PBRComponents.Lighting;
+        #endif
+        #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT
+    DebugData.DirectDiffuseColor = PBRComponents.DirectDiffuse;
+    DebugData.DirectSpecularColor = PBRComponents.DirectSpecular;
+        #endif
+    #endif
+    #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL
+    DebugData.AdditionalDiffuseColor = PBRComponents.AdditionalDiffuse;
+    DebugData.AdditionalSpecularColor = PBRComponents.AdditionalSpecular;
     DebugData.AdditionalUnshadowedColor = BurtNeedsAdditionalLightingUnshadowedShadingDebug()
         ? BurtEvaluateDeferredLightingAdditionalUnshadowedDebug(ShadingGBufferData, ViewDirectionWS, PositionWS, ScreenUV)
         : float3(0.0f, 0.0f, 0.0f);
-    DebugData.IndirectDiffuseColor = DebugLightingComponents.IndirectDiffuse;
-    DebugData.IndirectSpecularColor = DebugLightingComponents.IndirectSpecular;
+    #endif
+    #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT
+    DebugData.IndirectDiffuseColor = PBRComponents.IndirectDiffuse;
+    DebugData.IndirectSpecularColor = PBRComponents.IndirectSpecular;
     float3 GIProbeIrradiance;
     float GIProbeValidity;
     float GIProbeSkyVisibility;
@@ -208,8 +229,11 @@ float4 BurtEvaluateDeferredLightingDebugOutput(
     DebugData.GIProbeValidity = GIProbeValidity;
     DebugData.GIProbeSkyVisibility = GIProbeSkyVisibility;
     DebugData.AmbientOcclusion = ShadingGBufferData.Occlusion;
+    #endif
+    #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL
     DebugData.EmissionColor = GBufferData.Emission;
     DebugData.FinalLightingColor = FinalColor;
+    #endif
 #endif
 #if BURT_DEFERRED_LIGHTING_DEBUG_FILL_SHADOW
     DebugData.ShadowAttenuation = BurtSampleMainLightShadowWithoutPerObject(ShadowPositionWS, ShadowNormalWS);
@@ -231,7 +255,7 @@ float4 BurtEvaluateDeferredLightingDebugOutput(
 
     BurtFillMainLightShadowShadingDebugData(
         ShadowPositionWS,
-        DebugData.NormalWS,
+        DeferredAONormalWS,
         DebugData.ShadowCascadeColor,
         DebugData.ShadowCascadeBlend,
         DebugData.ShadowDistanceFade,
@@ -257,23 +281,23 @@ float4 BurtEvaluateDeferredLightingDebugOutput(
 #endif
 #if BURT_DEFERRED_LIGHTING_DEBUG_FILL_BRDF
     DebugData.Reflectance = GBufferData.Reflectance;
-    DebugData.PerceptualRoughness = DebugLightingComponents.PerceptualRoughness;
-    DebugData.SpecularAARoughness = DebugLightingComponents.SpecularAARoughness;
-    DebugData.SpecularEnergyCompensation = DebugLightingComponents.SpecularEnergyCompensation;
-    DebugData.IndirectSpecularEnergyCompensation = DebugLightingComponents.IndirectSpecularEnergyCompensation;
-    DebugData.EnergyPreservation = DebugLightingComponents.EnergyPreservation;
-    DebugData.SpecularOcclusion = DebugLightingComponents.SpecularOcclusion;
-    DebugData.DiffuseColor = DebugLightingComponents.DiffuseColor;
-    DebugData.DirectBRDFD = DebugLightingComponents.DirectBRDFD;
-    DebugData.DirectBRDFVisibility = DebugLightingComponents.DirectBRDFVisibility;
-    DebugData.DirectBRDFFresnel = DebugLightingComponents.DirectBRDFFresnel;
-    DebugData.DirectDiffuseLobe = DebugLightingComponents.DirectDiffuseLobe;
-    DebugData.DirectDiffuseBRDF = DebugLightingComponents.DirectDiffuseBRDF;
-    DebugData.DirectSpecularBRDF = DebugLightingComponents.DirectSpecularBRDF;
-    DebugData.SpecularAANormalVariance = DebugLightingComponents.SpecularAANormalVariance;
-    DebugData.SpecularAARoughnessDelta = DebugLightingComponents.SpecularAARoughnessDelta;
-    DebugData.IndirectSpecularDFG = DebugLightingComponents.IndirectSpecularDFG;
-    DebugData.IndirectSpecularEnvBRDF = DebugLightingComponents.IndirectSpecularEnvBRDF;
+    DebugData.PerceptualRoughness = PBRComponents.PerceptualRoughness;
+    DebugData.SpecularAARoughness = PBRComponents.SpecularAARoughness;
+    DebugData.SpecularEnergyCompensation = PBRComponents.SpecularEnergyCompensation;
+    DebugData.IndirectSpecularEnergyCompensation = PBRComponents.IndirectSpecularEnergyCompensation;
+    DebugData.EnergyPreservation = PBRComponents.EnergyPreservation;
+    DebugData.SpecularOcclusion = PBRComponents.SpecularOcclusion;
+    DebugData.DiffuseColor = PBRComponents.DiffuseColor;
+    DebugData.DirectBRDFD = PBRComponents.DirectBRDFD;
+    DebugData.DirectBRDFVisibility = PBRComponents.DirectBRDFVisibility;
+    DebugData.DirectBRDFFresnel = PBRComponents.DirectBRDFFresnel;
+    DebugData.DirectDiffuseLobe = PBRComponents.DirectDiffuseLobe;
+    DebugData.DirectDiffuseBRDF = PBRComponents.DirectDiffuseBRDF;
+    DebugData.DirectSpecularBRDF = PBRComponents.DirectSpecularBRDF;
+    DebugData.SpecularAANormalVariance = PBRComponents.SpecularAANormalVariance;
+    DebugData.SpecularAARoughnessDelta = PBRComponents.SpecularAARoughnessDelta;
+    DebugData.IndirectSpecularDFG = PBRComponents.IndirectSpecularDFG;
+    DebugData.IndirectSpecularEnvBRDF = PBRComponents.IndirectSpecularEnvBRDF;
 #endif
 #if BURT_DEFERRED_LIGHTING_DEBUG_FILL_TRANSMISSION
     DebugData.SubsurfaceProfileIndex = PBRComponents.SubsurfaceProfileIndex;

@@ -6,12 +6,65 @@
 #define BURT_USE_TILED_LIGHTING 1
 
 // Normal deferred lighting must not compile shading-debug code. The dedicated
-// Hidden/BurtRP/DeferredLightingDebug shader defines BURT_COMPILE_SHADING_DEBUG.
+// Hidden/BurtRP/DeferredLightingDebug* shaders define BURT_COMPILE_SHADING_DEBUG.
 #ifndef BURT_COMPILE_SHADING_DEBUG
 #define BURT_COMPILE_SHADING_DEBUG 0
 #endif
 
 #define BURT_ENABLE_SHADING_DEBUG BURT_COMPILE_SHADING_DEBUG
+
+// Deferred debug shaders select these before BurtLighting.hlsl is included so
+// PBR composition can omit diagnostics that the active category never reads.
+#if BURT_ENABLE_SHADING_DEBUG && defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF)
+#define BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG 1
+#else
+#define BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG 0
+#endif
+
+#if BURT_ENABLE_SHADING_DEBUG && defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION)
+#define BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG 1
+#else
+#define BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG 0
+#endif
+
+#if BURT_ENABLE_SHADING_DEBUG && defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING)
+    #if defined(BURT_DEFERRED_LIGHTING_DEBUG_DETAIL)
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 1
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 1
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 0
+    #elif defined(BURT_DEFERRED_LIGHTING_DEBUG_ADDITIONAL)
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 1
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 0
+    #elif defined(BURT_DEFERRED_LIGHTING_DEBUG_INDIRECT)
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 1
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 0
+    #elif defined(BURT_DEFERRED_LIGHTING_DEBUG_FINAL)
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 1
+    #else
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 1
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 1
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 0
+        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 0
+    #endif
+#endif
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
@@ -476,6 +529,10 @@ BurtPBRShadingComponents BurtEvaluateDeferredLightingShadingModelComponents(
 #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingDebug.hlsl"
 #endif
 
+#ifndef BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_SHADED_COMPONENTS
+#define BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_SHADED_COMPONENTS 1
+#endif
+
 float4 Frag(Varyings input) : SV_Target
 {
     float2 ScreenUV = input.ScreenUV;
@@ -515,11 +572,17 @@ float4 Frag(Varyings input) : SV_Target
     float ScreenSpaceAmbientOcclusion = BurtResolveDeferredMaterialScreenSpaceAmbientOcclusion(ScreenUV, ShadingGBufferData);
     ShadingGBufferData.Occlusion = min(saturate(ShadingGBufferData.Occlusion), ScreenSpaceAmbientOcclusion);
 
-#if BURT_ENABLE_SHADING_DEBUG
+#if BURT_ENABLE_SHADING_DEBUG && BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL
     BurtApplyDeferredLightingDetailDebugOverride(ShadingGBufferData);
 #endif
 
-    BurtPBRShadingComponents PBRComponents = BurtEvaluateDeferredLightingShadingModelComponents(
+    BurtPBRShadingComponents PBRComponents = (BurtPBRShadingComponents)0;
+    float3 FinalColor = float3(0.0f, 0.0f, 0.0f);
+    float3 FinalPreExposedColor = float3(0.0f, 0.0f, 0.0f);
+    float OutputAlpha = 1.0f;
+
+#if !BURT_ENABLE_SHADING_DEBUG || BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_SHADED_COMPONENTS
+    PBRComponents = BurtEvaluateDeferredLightingShadingModelComponents(
         ShadingGBufferData,
         MainLight,
         ViewDirectionWS,
@@ -528,15 +591,15 @@ float4 Frag(Varyings input) : SV_Target
         ScreenUV);
     BurtApplyDeferredGIIndirect(ScreenUV, ShadingGBufferData, ViewDirectionWS, PBRComponents);
 
-    float3 FinalColor = PBRComponents.Lighting + GBufferData.Emission;
-    float3 FinalPreExposedColor = BurtApplyPreExposure(FinalColor);
-    float OutputAlpha = BurtEvaluateDeferredOutputAlpha(PBRComponents);
+    FinalColor = PBRComponents.Lighting + GBufferData.Emission;
+    FinalPreExposedColor = BurtApplyPreExposure(FinalColor);
+    OutputAlpha = BurtEvaluateDeferredOutputAlpha(PBRComponents);
+#endif
 
 #if BURT_ENABLE_SHADING_DEBUG
     return BurtEvaluateDeferredLightingDebugOutput(
         GBufferData,
         ShadingGBufferData,
-        MainLight,
         PBRComponents,
         FinalColor,
         FinalPreExposedColor,

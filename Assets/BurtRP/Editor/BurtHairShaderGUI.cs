@@ -59,6 +59,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty emissionMap;
         private MaterialProperty emissionColor;
         private MaterialProperty alphaClip;
+        private MaterialProperty responsiveAA;
         private MaterialProperty cutoff;
         private MaterialProperty shadowCutOff;
         private MaterialProperty opacityMaskValue;
@@ -172,6 +173,7 @@ namespace Burt.RenderPipeline.Editor
             emissionMap = Find("_EmissionMap");
             emissionColor = Find("_EmissionColor");
             alphaClip = Find("_AlphaClip");
+            responsiveAA = Find("_ResponsiveAA");
             cutoff = Find("_Cutoff");
             shadowCutOff = Find("_ShadowCutOff");
             opacityMaskValue = Find("_OpacityMaskValue");
@@ -235,6 +237,7 @@ namespace Burt.RenderPipeline.Editor
 
             DrawDoubleSidedOptions();
             DrawAlphaClipProperty();
+            DrawProperty(responsiveAA);
 
             if (cutoff != null)
             {
@@ -549,6 +552,7 @@ namespace Burt.RenderPipeline.Editor
             material.renderQueue = (int)RenderQueue.Geometry;
             material.SetShaderPassEnabled("BurtDepthOnly", true);
             material.SetShaderPassEnabled("BurtMotionVectors", true);
+            material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
             material.SetShaderPassEnabled("BurtGBuffer", true);
             material.SetShaderPassEnabled("ShadowCaster", true);
             material.SetShaderPassEnabled("BurtForward", true);

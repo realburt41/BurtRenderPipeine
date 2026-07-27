@@ -29,6 +29,7 @@ BurtPBRShadingComponents BurtApplySubsurfacePBRShadingComponents(
     BurtDirectPBRComponents DirectComponents,
     BurtIndirectPBRComponents IndirectComponents)
 {
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.SubsurfaceProfileIndex = CoreData.MaterialData.SubsurfaceProfileIndex;
     Components.SubsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceDirectTransmission = DirectComponents.Transmission;
@@ -38,9 +39,11 @@ BurtPBRShadingComponents BurtApplySubsurfacePBRShadingComponents(
     Components.SubsurfaceTransmissionShadow = DirectComponents.TransmissionShadow;
     Components.SubsurfaceTransmissionThickness = DirectComponents.TransmissionThickness;
     Components.SubsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
+#endif
     Components.SubsurfaceIndirect = IndirectComponents.SubsurfaceIndirect;
     Components.SubsurfaceIndirectTransmission = IndirectComponents.SubsurfaceIndirectTransmission;
 
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     if (BurtGetSubsurfaceMaterialWeight(CoreData.MaterialData) > 0.0001f)
     {
         Components.SubsurfaceTransmission = max(DirectComponents.TransmissionThroughput, float3(0.0f, 0.0f, 0.0f));
@@ -48,6 +51,7 @@ BurtPBRShadingComponents BurtApplySubsurfacePBRShadingComponents(
             ? max(BurtFetchSubsurfaceProfileParam(BURT_SUBSURFACE_PROFILE_PARAM_KERNEL0_OFFSET, CoreData.MaterialData.SubsurfaceProfileIndex).rgb, float3(0.0f, 0.0f, 0.0f))
             : float3(0.204f, 0.236f, 0.290f);
     }
+#endif
 
     return Components;
 }

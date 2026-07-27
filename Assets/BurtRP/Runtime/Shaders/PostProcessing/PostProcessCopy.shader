@@ -1479,7 +1479,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float motionPixels = length(velocityData * _BurtTAATexelSize.zw);
                 float surfaceWeight = BurtTaaValidSurfaceWeight(closestDepth);
                 float stencilResponsive = ((stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0) * surfaceWeight;
-                float responsiveStrength = stencilResponsive;
+                float responsiveStrength = max(stencilResponsive, taaMetadata.g);
                 float responsiveMask = responsiveStrength * finalHistoryAvailability;
 
                 float3 moment1 = neighborhoodSum * (1.0 / 9.0);
@@ -2853,6 +2853,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelIds.hlsl"
 
             sampler2D _BurtTAAVelocityTexture;
+            sampler2D _BurtTAAResponsiveMaskTexture;
             Texture2D<uint2> _BurtDeferredStencilTexture;
             float _BurtTAAObjectMotionStencilFallback;
             float4 _BurtDeferredStencilTexelSize;
@@ -2891,7 +2892,10 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float4 velocity = tex2D(_BurtTAAVelocityTexture, input.uv);
                 float objectMotion = step(0.75, velocity.w) * velocity.z;
                 uint generatedObjectMotion = (_BurtTAAObjectMotionStencilFallback > 0.5 && objectMotion > 0.0) ? BURT_DEFERRED_STENCIL_OBJECT_MOTION_BIT : 0u;
-                return float4((float)(realStencil | generatedObjectMotion), 0.0, 0.0, 0.0);
+                uint generatedResponsive = tex2D(_BurtTAAResponsiveMaskTexture, input.uv).r > 0.5
+                    ? BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT
+                    : 0u;
+                return float4((float)(realStencil | generatedObjectMotion | generatedResponsive), 0.0, 0.0, 0.0);
             }
             ENDHLSL
         }

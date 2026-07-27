@@ -209,7 +209,9 @@ namespace Burt.RenderPipeline
             request.CullingResults = cullingResults;
 
 
-            request.LightingData = BurtLightingData.Create(cullingResults); // Builds request-level lighting data from the same culling results used for drawing.
+            var applyAtmosphereTransmittance = request.Type != BurtRenderRequestType.Preview
+                && request.Type != BurtRenderRequestType.UICamera;
+            request.LightingData = BurtLightingData.Create(cullingResults, applyAtmosphereTransmittance); // Builds request-level lighting data and preserves unattenuated lighting for editor/UI previews.
             // 记录输出目标。
             request.TargetIdentifier = ResolveTargetIdentifier(camera);
 

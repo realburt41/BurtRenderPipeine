@@ -276,11 +276,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         FogTransmittance = 395, // Fog debug: screen-space fog transmittance after height and distance gates.
         FogHeight = 396, // Fog debug: reconstructed world height relative to the fog height plane.
         FogDistance = 397, // Fog debug: reconstructed camera-to-surface distance used by the fog pass.
-        VolumetricFogScattering = 398, // Volumetric fog debug: accumulated single-scattering contribution.
-        VolumetricFogTransmittance = 399, // Volumetric fog debug: raymarched transmittance.
-        VolumetricFogDensity = 400, // Volumetric fog debug: average and peak sampled density.
-        VolumetricFogDistance = 401, // Volumetric fog debug: raymarch distance versus visible distance.
-        VolumetricFogStepCount = 402, // Volumetric fog debug: normalized raymarch step count.
+        VolumetricFogScattering = 398, // Volumetric fog debug: shared integrated scattering contribution.
+        VolumetricFogTransmittance = 399, // Volumetric fog debug: shared integrated transmittance.
+        VolumetricFogDensity = 400, // Volumetric fog debug: legacy fallback average and peak sampled density.
+        VolumetricFogDistance = 401, // Volumetric fog debug: legacy fallback distance versus visible distance.
+        VolumetricFogStepCount = 402, // Volumetric fog debug: normalized legacy fallback step count.
         AutoExposureLuminance = 384, // Auto exposure debug: log luminance heatmap from current CameraColor.
         AutoExposureMeteringWeight = 385, // Auto exposure debug: center-weighted metering mask used by lightweight histogram.
         AutoExposureHistogramRange = 386, // Auto exposure debug: current histogram EV range and out-of-range colors.
@@ -326,7 +326,10 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         GIProbeIrradiance = 503, // XGIProbe debug: per-pixel probe volume irradiance after virtual/direct probe sampling.
         GIProbeValidity = 504, // XGIProbe debug: baked virtual validity, or the direct volume sample mask for non-virtual probe data.
         GIProbeSkyVisibility = 505, // XGIProbe debug: baked sky visibility evaluated from the active virtual probe, or white for direct probe data.
-        GIProbeRuntimeInfo = 507 // XGIProbe debug: runtime virtual probe streaming and memory overlay.
+        GIProbeRuntimeInfo = 507, // XGIProbe debug: runtime virtual probe streaming and memory overlay.
+        AtmosphereLutSkyView = 508, // Atmosphere debug: raw physical SkyView LUT lookup before artistic fallback blending.
+        AtmosphereLutMultipleScattering = 509, // Atmosphere debug: converged physical multiple-scattering LUT lookup.
+        AtmosphereLutHorizontalScattering = 510 // Atmosphere debug: XRender-style phase-independent horizon scattering triplet.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -344,15 +347,15 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         public const string ModeShaderName = "_BurtShadingDebugMode"; // 定义 shader 侧读取 debug 模式的全局属性名。
         public const string EnabledShaderName = "_BurtShadingDebugEnabled"; // 定义 shader 侧读取 debug 是否开启的全局属性名。
         public const string KeywordName = "BURT_SHADING_DEBUG";
-        private const string ForwardDebugLightingKeywordName = "BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING";
-        private const string ForwardDebugBrdfKeywordName = "BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF";
-        private const string ForwardDebugShadowKeywordName = "BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW";
-        private const string ForwardDebugTransmissionKeywordName = "BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION";
-
+        private const string ForwardDebugLightingKeywordName = "BURT_FORWARD_SHADING_DEBUG_LIGHTING";
+        private const string ForwardDebugBrdfKeywordName = "BURT_FORWARD_SHADING_DEBUG_BRDF";
+        private const string ForwardDebugShadowKeywordName = "BURT_FORWARD_SHADING_DEBUG_SHADOW";
+        private const string ForwardDebugTransmissionKeywordName = "BURT_FORWARD_SHADING_DEBUG_TRANSMISSION";
         private static readonly int ModeShaderId = Shader.PropertyToID(ModeShaderName); // 缓存模式属性 ID，避免每帧字符串查找。
         private static readonly int EnabledShaderId = Shader.PropertyToID(EnabledShaderName); // 缓存开关属性 ID，避免每帧字符串查找。
         private static BurtShadingDebugMode currentMode = BurtShadingDebugMode.None; // 保存当前 debug 模式，默认关闭。
-        private static BurtShadingDebugMode previousMode = BurtShadingDebugMode.None; // 保存上一个 debug 模式，方便后续做返回上次模式或切换统计。
+        private static BurtShadingDebugMode appliedMode;
+        private static bool hasAppliedGlobalShaderProperties;
 
         public static BurtShadingDebugMode Mode // 暴露当前 debug 模式，Editor UI 和渲染侧都通过它读写状态。
         {
@@ -360,21 +363,23 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
             set // 设置新的 debug 模式，并立刻同步到 shader 全局参数。
             {
                 var normalizedMode = NormalizeMode(value);
-                if (currentMode == normalizedMode) // 如果模式没有变化，说明只是需要刷新全局 shader 参数。
+                if (currentMode == normalizedMode)
                 {
-                    ApplyGlobalShaderProperties(); // 重新上传全局参数，避免域重载或相机切换后 shader 状态丢失。
-                    return; // 提前返回，避免重复写 previousMode。
+                    return;
                 }
 
-                previousMode = currentMode; // 记录切换前的模式，方便后续扩展返回上一个模式。
                 currentMode = normalizedMode; // 保存新的当前模式。
                 ApplyGlobalShaderProperties(); // 把新的模式同步给 shader 全局参数。
             }
         }
 
-        public static BurtShadingDebugMode PreviousMode => previousMode; // 暴露上一个模式，当前最小版本暂时只作为状态记录。
-
         public static bool IsDebugging => currentMode != BurtShadingDebugMode.None; // 只要不是 None，就认为 debug 已开启。
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetGlobalShaderPropertyCache()
+        {
+            hasAppliedGlobalShaderProperties = false;
+        }
 
         public static bool UseTileLightCpuDebugColorTextureFallback { get; set; } // Diagnostic fallback for tile-light debug; StructuredBuffer remains the default path.
 
@@ -386,215 +391,9 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
             set => tileLightDebugMaxLightsPerTile = Mathf.Clamp(value, 1, BurtLightingData.MaxAdditionalLights);
         }
 
-        public static bool IsImportantMode(BurtShadingDebugMode mode)
-        {
-            switch (mode)
-            {
-                case BurtShadingDebugMode.None:
-                case BurtShadingDebugMode.Albedo:
-                case BurtShadingDebugMode.DiffuseColor:
-                case BurtShadingDebugMode.NormalWS:
-                case BurtShadingDebugMode.Smoothness:
-                case BurtShadingDebugMode.Roughness:
-                case BurtShadingDebugMode.Metallic:
-                case BurtShadingDebugMode.Occlusion:
-                case BurtShadingDebugMode.Height:
-                case BurtShadingDebugMode.PreSkinPosition:
-                case BurtShadingDebugMode.Reflectance:
-                case BurtShadingDebugMode.GBufferBaseColor:
-                case BurtShadingDebugMode.GBufferNormalWS:
-                case BurtShadingDebugMode.GBufferMetallic:
-                case BurtShadingDebugMode.GBufferSmoothness:
-                case BurtShadingDebugMode.GBufferOcclusion:
-                case BurtShadingDebugMode.GBufferDiffuseColor:
-                case BurtShadingDebugMode.GBufferHairStrandDirection:
-                case BurtShadingDebugMode.GBufferHairScatter:
-                case BurtShadingDebugMode.GBufferHairShift:
-                case BurtShadingDebugMode.GBufferSubsurfaceStrength:
-                case BurtShadingDebugMode.GBufferSubsurfaceThickness:
-                case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
-                case BurtShadingDebugMode.GBufferFoliageTransmissionColor:
-                case BurtShadingDebugMode.GBufferFoliageTransmissionWeight:
-                case BurtShadingDebugMode.GBufferFoliageThickness:
-                case BurtShadingDebugMode.GBufferFoliageTransmissionNdotL:
-                case BurtShadingDebugMode.GBufferFoliageSpecularScale:
-                case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
-                case BurtShadingDebugMode.GBufferStencilRaw:
-                case BurtShadingDebugMode.GBufferStencilShadingModel:
-                case BurtShadingDebugMode.FoliageTransmission:
-                case BurtShadingDebugMode.FoliageDirectTransmission:
-                case BurtShadingDebugMode.FoliageTransmissionBRDF:
-                case BurtShadingDebugMode.FoliageTransmissionShadow:
-                case BurtShadingDebugMode.FoliageSpecularBRDF:
-                case BurtShadingDebugMode.GBufferGrassIsGrass:
-                case BurtShadingDebugMode.GBufferGrassSSSIntensity:
-                case BurtShadingDebugMode.GBufferGrassSpecularMultiply:
-                case BurtShadingDebugMode.GBufferGrassScreenSpaceShadowIntensity:
-                case BurtShadingDebugMode.GrassTransmission:
-                case BurtShadingDebugMode.GrassDirectTransmission:
-                case BurtShadingDebugMode.GrassTransmissionBRDF:
-                case BurtShadingDebugMode.GrassTransmissionShadow:
-                case BurtShadingDebugMode.GrassSpecularBRDF:
-                case BurtShadingDebugMode.SpecularAARoughness:
-                case BurtShadingDebugMode.DirectBRDFD:
-                case BurtShadingDebugMode.DirectBRDFVisibility:
-                case BurtShadingDebugMode.DirectBRDFFresnel:
-                case BurtShadingDebugMode.HairPrimaryLobe:
-                case BurtShadingDebugMode.HairSecondaryLobe:
-                case BurtShadingDebugMode.HairTransmissionLobe:
-                case BurtShadingDebugMode.HairScatter:
-                case BurtShadingDebugMode.HairAdditionalLighting:
-                case BurtShadingDebugMode.SubsurfaceProfileId:
-                case BurtShadingDebugMode.SubsurfaceTransmission:
-                case BurtShadingDebugMode.SubsurfaceDirectTransmission:
-                case BurtShadingDebugMode.SubsurfaceTransmissionBRDF:
-                case BurtShadingDebugMode.SubsurfaceTransmissionShadow:
-                case BurtShadingDebugMode.SubsurfaceTransmissionPhase:
-                case BurtShadingDebugMode.SubsurfaceTransmissionThickness:
-                case BurtShadingDebugMode.IndirectSpecularDFG:
-                case BurtShadingDebugMode.IndirectSpecularEnvBRDF:
-                case BurtShadingDebugMode.SpecularEnergyCompensation:
-                case BurtShadingDebugMode.SpecularOcclusion:
-                case BurtShadingDebugMode.DetailLighting:
-                case BurtShadingDebugMode.DirectDiffuse:
-                case BurtShadingDebugMode.DirectSpecular:
-                case BurtShadingDebugMode.AdditionalLighting:
-                case BurtShadingDebugMode.AdditionalDiffuse:
-                case BurtShadingDebugMode.AdditionalSpecular:
-                case BurtShadingDebugMode.AdditionalLightingUnshadowed:
-                case BurtShadingDebugMode.TileLightCount:
-                case BurtShadingDebugMode.ClusterLightCount:
-                case BurtShadingDebugMode.IndirectLighting:
-                case BurtShadingDebugMode.IndirectDiffuse:
-                case BurtShadingDebugMode.IndirectSpecular:
-                case BurtShadingDebugMode.AmbientOcclusion:
-                case BurtShadingDebugMode.Emission:
-                case BurtShadingDebugMode.FinalLighting:
-                case BurtShadingDebugMode.ShadowAttenuation:
-                case BurtShadingDebugMode.AdditionalShadowAttenuation:
-                case BurtShadingDebugMode.ShadowCascadeIndex:
-                case BurtShadingDebugMode.ShadowReceiverDepthDelta:
-                case BurtShadingDebugMode.ShadowPCSSBlockerFraction:
-                case BurtShadingDebugMode.MainLightShadowReceiverDepth:
-                case BurtShadingDebugMode.MainLightShadowRawDepth:
-                case BurtShadingDebugMode.MainLightShadowCompare:
-                case BurtShadingDebugMode.MainLightShadowProjectionValidity:
-                case BurtShadingDebugMode.MainLightShadow:
-                case BurtShadingDebugMode.PerObjectShadowAtlas:
-                case BurtShadingDebugMode.PerObjectShadowObjectIndex:
-                case BurtShadingDebugMode.PerObjectShadowSlice:
-                case BurtShadingDebugMode.PerObjectShadowUV:
-                case BurtShadingDebugMode.PerObjectShadowDepth:
-                case BurtShadingDebugMode.PerObjectShadowCompare:
-                case BurtShadingDebugMode.PerObjectShadowTransmissionDepth:
-                case BurtShadingDebugMode.PerObjectShadowTransmissionThickness:
-                case BurtShadingDebugMode.CameraDepth:
-                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw:
-                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal:
-                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay:
-                case BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference:
-                case BurtShadingDebugMode.ScreenSpaceShadow:
-                case BurtShadingDebugMode.ScreenSpaceShadowFinalMultiplier:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHashGridDebug:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStats:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheVisualize:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStatus:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbePlacement:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbeTraceVisualize:
-                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationSceneVoxelOccupancy:
-                case BurtShadingDebugMode.GIProbeIrradiance:
-                case BurtShadingDebugMode.GIProbeValidity:
-                case BurtShadingDebugMode.GIProbeSkyVisibility:
-                case BurtShadingDebugMode.GIProbeRuntimeInfo:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSetup:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceMask:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlur:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceCombine:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintRaw:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceProfileTintedFinal:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurAlpha:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurRadius:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceBlurDelta:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableValidity:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableIO:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceSeparableChain:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceAlgorithm:
-                case BurtShadingDebugMode.ScreenSpaceSubsurfaceHistory:
-                case BurtShadingDebugMode.FurBlurDirection:
-                case BurtShadingDebugMode.FurBlurPropertyDepth:
-                case BurtShadingDebugMode.FurBlurCurrent:
-                case BurtShadingDebugMode.FurBlurTemporal:
-                case BurtShadingDebugMode.FurBlurHistory:
-                case BurtShadingDebugMode.FurBlurDiagnostic:
-                case BurtShadingDebugMode.FurBlurReprojection:
-                case BurtShadingDebugMode.BloomPrefilter:
-                case BurtShadingDebugMode.BloomFinalBloom:
-                case BurtShadingDebugMode.BloomThresholdMask:
-                case BurtShadingDebugMode.AutoExposureLuminance:
-                case BurtShadingDebugMode.AutoExposureHistogramRange:
-                case BurtShadingDebugMode.Atmosphere:
-                case BurtShadingDebugMode.AtmosphereAerialSummary:
-                case BurtShadingDebugMode.AtmosphereSunDisk:
-                case BurtShadingDebugMode.FogAmount:
-                case BurtShadingDebugMode.FogTransmittance:
-                case BurtShadingDebugMode.VolumetricFogScattering:
-                case BurtShadingDebugMode.VolumetricFogDensity:
-                case BurtShadingDebugMode.ScreenSpaceReflectionRawHitMask:
-                case BurtShadingDebugMode.ScreenSpaceReflectionHitMask:
-                case BurtShadingDebugMode.ScreenSpaceReflectionColor:
-                case BurtShadingDebugMode.ScreenSpaceReflectionConfidence:
-                case BurtShadingDebugMode.ScreenSpaceReflectionDenoisedColor:
-                case BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor:
-                case BurtShadingDebugMode.ScreenSpaceReflectionCompositeDelta:
-                case BurtShadingDebugMode.TemporalAAHistory:
-                case BurtShadingDebugMode.TemporalAAFeedback:
-                case BurtShadingDebugMode.TemporalAARejection:
-                case BurtShadingDebugMode.TemporalAARejectionReasons:
-                case BurtShadingDebugMode.TemporalAAHistoryUV:
-                case BurtShadingDebugMode.TemporalAADifference:
-                case BurtShadingDebugMode.TemporalAAVelocity:
-                case BurtShadingDebugMode.TemporalAAConfidence:
-                case BurtShadingDebugMode.TemporalAACurrentDepth:
-                case BurtShadingDebugMode.TemporalAADepthHistory:
-                case BurtShadingDebugMode.TemporalAADepthDelta:
-                case BurtShadingDebugMode.TemporalAAParallaxRejection:
-                case BurtShadingDebugMode.TemporalAAFeedbackWeight:
-                case BurtShadingDebugMode.TemporalAACurrentColor:
-                case BurtShadingDebugMode.TemporalAAResolvedColor:
-                case BurtShadingDebugMode.TemporalAARawVelocity:
-                case BurtShadingDebugMode.TemporalAAUpdatedConfidence:
-                case BurtShadingDebugMode.TemporalAAStaticRelax:
-                case BurtShadingDebugMode.TemporalAALumaRejection:
-                case BurtShadingDebugMode.TemporalAAClipRejection:
-                case BurtShadingDebugMode.TemporalAADepthRejection:
-                case BurtShadingDebugMode.TemporalAANormalRejection:
-                case BurtShadingDebugMode.TemporalAAMotionRejection:
-                case BurtShadingDebugMode.TemporalAAConfidenceGate:
-                case BurtShadingDebugMode.TemporalAAVelocitySource:
-                case BurtShadingDebugMode.TemporalAAGBufferNormal:
-                case BurtShadingDebugMode.TemporalAAAntiFlicker:
-                case BurtShadingDebugMode.TemporalAAHistoryCoverage:
-                case BurtShadingDebugMode.TemporalAAPrevUseCount:
-                case BurtShadingDebugMode.TemporalAAResponsiveMask:
-                case BurtShadingDebugMode.TemporalAAMetadata:
-                case BurtShadingDebugMode.TemporalAAObjectMotionMask:
-                case BurtShadingDebugMode.TemporalAAUpscaleState:
-                case BurtShadingDebugMode.TemporalAAStencilMask:
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
         public static BurtShadingDebugMode NormalizeMode(BurtShadingDebugMode mode)
         {
-            return IsImportantMode(mode) ? mode : BurtShadingDebugMode.None;
+            return System.Enum.IsDefined(typeof(BurtShadingDebugMode), mode) ? mode : BurtShadingDebugMode.None;
         }
 
         public static bool IsMainLightShadowDebugMode(BurtShadingDebugMode mode) // 统一判断主光阴影相关调试模式，方便日志和阴影诊断共享同一套入口。
@@ -632,6 +431,9 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.AtmosphereHorizon:
                 case BurtShadingDebugMode.AtmosphereGroundBlend:
                 case BurtShadingDebugMode.AtmosphereViewDirection:
+                case BurtShadingDebugMode.AtmosphereLutSkyView:
+                case BurtShadingDebugMode.AtmosphereLutMultipleScattering:
+                case BurtShadingDebugMode.AtmosphereLutHorizontalScattering:
                     return true;
                 default:
                     return false;
@@ -671,7 +473,32 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         {
             switch (mode)
             {
+                case BurtShadingDebugMode.Albedo:
+                case BurtShadingDebugMode.NormalWS:
+                case BurtShadingDebugMode.Smoothness:
+                case BurtShadingDebugMode.Metallic:
+                case BurtShadingDebugMode.Occlusion:
+                case BurtShadingDebugMode.Reflectance:
+                case BurtShadingDebugMode.Roughness:
+                case BurtShadingDebugMode.DiffuseColor:
                 case BurtShadingDebugMode.Height:
+                case BurtShadingDebugMode.PreSkinPosition:
+                case BurtShadingDebugMode.GBufferBaseColor:
+                case BurtShadingDebugMode.GBufferNormalWS:
+                case BurtShadingDebugMode.GBufferMetallic:
+                case BurtShadingDebugMode.GBufferSmoothness:
+                case BurtShadingDebugMode.GBufferOcclusion:
+                case BurtShadingDebugMode.GBufferReflectance:
+                case BurtShadingDebugMode.GBufferRoughness:
+                case BurtShadingDebugMode.GBufferDiffuseColor:
+                case BurtShadingDebugMode.GBufferClearCoatMask:
+                case BurtShadingDebugMode.GBufferSubsurfaceStrength:
+                case BurtShadingDebugMode.GBufferClearCoatNormalWS:
+                case BurtShadingDebugMode.GBufferClearCoatRoughness:
+                case BurtShadingDebugMode.GBufferAnisotropy:
+                case BurtShadingDebugMode.GBufferTangentWS:
+                case BurtShadingDebugMode.GBufferSubsurfaceThickness:
+                case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
                 case BurtShadingDebugMode.SpecularAARoughness:
                 case BurtShadingDebugMode.SpecularEnergyCompensation:
                 case BurtShadingDebugMode.SpecularOcclusion:
@@ -753,6 +580,9 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 case BurtShadingDebugMode.AdditionalSpecular:
                 case BurtShadingDebugMode.HairAdditionalLighting:
                 case BurtShadingDebugMode.AdditionalLightingUnshadowed:
+                case BurtShadingDebugMode.GIProbeIrradiance:
+                case BurtShadingDebugMode.GIProbeValidity:
+                case BurtShadingDebugMode.GIProbeSkyVisibility:
                     return ForwardShadingDebugCategory.Lighting;
 
                 default:
@@ -766,7 +596,6 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
             Shader.DisableKeyword(ForwardDebugBrdfKeywordName);
             Shader.DisableKeyword(ForwardDebugShadowKeywordName);
             Shader.DisableKeyword(ForwardDebugTransmissionKeywordName);
-
             switch (category)
             {
                 case ForwardShadingDebugCategory.Lighting:
@@ -786,6 +615,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
 
         public static void ApplyGlobalShaderProperties() // 把当前 shading debug 状态上传给 shader。
         {
+            if (hasAppliedGlobalShaderProperties && appliedMode == currentMode)
+            {
+                return;
+            }
+
             var forwardDebugCategory = ResolveForwardShadingDebugCategory(currentMode);
             var enableForwardMaterialDebug = IsDebugging && forwardDebugCategory != ForwardShadingDebugCategory.None;
             Shader.SetGlobalInt(ModeShaderId, (int)currentMode); // 上传整数模式 ID，后续 shader 可以 switch 或 if 判断。
@@ -799,6 +633,9 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
             {
                 Shader.DisableKeyword(KeywordName);
             }
+
+            appliedMode = currentMode;
+            hasAppliedGlobalShaderProperties = true;
         }
     }
 }

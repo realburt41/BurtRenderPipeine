@@ -1,0 +1,259 @@
+#pragma kernel FillUV
+#pragma kernel JFA
+#pragma kernel Finalize
+
+#define BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE 8
+#define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_OCCUPY_DEBUG_THREADGROUP_SIZE 8
+#define BURT_GI_XGI_OCCUPY_SIZE_CUBIC 64u
+#define BURT_GI_XGI_DEBUG_PROBE_ARGS_DATA_ALLOCATOR_OFFSET 8u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_INDEX 0u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET 1u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_MAX_COUNT 128u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT 16u
+#define BURT_GI_XGI_MATERIAL_UINT_SIZE 7u
+#define BURT_GI_XGI_MATERIAL_TEMP_DATA_SIZE 11u
+#define BURT_GI_XGI_MATERIAL_PENDING_DATA_SIZE 4u
+#define BURT_GI_XGI_MATERIAL_EMISSIVE_QUANTIZE_VALUE 16384.0
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_PROCESS_COUNT_PER_THREAD 4u
+#define BURT_GI_XGI_CHUNK_UPDATE_PROCESS_COUNT_PER_THREAD 4u
+#define BURT_GI_XGI_OLD_INVALID_CHUNK_INDEX 0xffffffffu
+#define BURT_GI_XGI_OLD_INVALID_CHUNK_ALLOCATED_INDEX 0u
+
+Texture3D<float4> _XGISdfGenFillUVPass_VoxelOccupy;
+Texture3D<float4> _XGISdfGenJFAPass_SdfTemp1;
+Texture3D<float4> _XGISdfGenFinalizePass_SdfTemp2;
+RWTexture3D<float4> _RW_XGISdfGenFillUVPass_SdfTemp1;
+RWTexture3D<float4> _RW_XGISdfGenJFAPass_SdfTemp2;
+RWTexture3D<float> _RW_XGISdfGenFinalizePass_SdfResult;
+float4 _BurtGISceneVoxelTraceControls;
+
+struct XGIProbeVolumeGpuOBB
+{
+    float3 corner;
+    float3 X;
+    float3 Y;
+    float3 Z;
+    int minControllerSubdivLevel;
+    int maxControllerSubdivLevel;
+    int fillEmptySpaces;
+    int maxSubdivLevelInsideVolume;
+};
+
+
+struct BurtGISceneVoxelTriangle
+{
+    float3 Position0;
+    float Padding0;
+    float3 Position1;
+    float Padding1;
+    float3 Position2;
+    float Padding2;
+    float3 Normal;
+    float Padding3;
+    float3 Albedo;
+    float Padding4;
+    float3 Emission;
+    float Padding5;
+};
+
+
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelHistoryPreviousCenterExtent;
+float4 _BurtGISceneVoxelHistoryCurrentCenterExtent;
+float4 _BurtGISceneVoxelHistoryParams;
+float4 _BurtGISceneVoxelDebugProbeParams;
+float4 _BurtGISceneVoxelLightingParams;
+float4 _BurtGISceneVoxelMaterialParams;
+float4 _BurtDeferredCameraWorldPosition;
+float4 _XGIVoxelApply_VolumeOffsetsWS[8];
+float4 _XGIVoxelApply_VolumeSizesWS[8];
+float4 _XGIVoxelApply_TextureSize;
+float4 _XGIVoxelApply_ClipmapCount;
+float4 _XGISdfGenFillUVPass_TextureSize;
+float4 _XGISdfGenFillUVPass_ClipmapIndexAndCount;
+float4 _XGISdfGenJFAPass_TextureSize;
+float4 _XGISdfGenFinalizePass_TextureSize;
+float4 _XGISdfGenFinalizePass_ClipmapIndexAndCount;
+float4 _XGISdfApply_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeSizeWS;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeOffsetWS;
+float4 _XGIPlacementProbeVolumeCullPass_MaxBrickCount;
+float _XGIPlacementProbeVolumeCullPass_ProbeVolumeCount;
+float _XGIPlacementProbeVolumeCullPass_SubdivLevel;
+float _XGIPlacementProbeVolumeCullPass_BrickSize;
+float _XGIPlacementProbeVolumeCullPass_Padding0;
+float4 _XGIGenBrickPass_VolumeSizeInBricks;
+float4 _XGIGenBrickPass_VolumeOffsetInBricks;
+float4 _XGIGenBrickPass_MaxBrickCount;
+float _XGIGenBrickPass_SubdivLevel;
+float _XGIGenBrickPass_Padding0;
+float _XGIGenBrickPass_Padding1;
+float _XGIGenBrickPass_Padding2;
+float4 _XGIGenerateVoxelOccupyChunkPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyChunkPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyChunkClearDataPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyChunkClearDataPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_MaterialBudgetSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_MaterialBudgetSize;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_MaterialBudgetSize;
+int VoxelMaterialPopulateArgsBufferMaxPendingListCount;
+int VoxelMaterialPopulateClipmapIndex;
+int VoxelMaterialPopulateIndexOffsetForClipmap;
+int VoxelMaterialPopulatePhysicalPoolSize;
+int VoxelMaterialFillVoxelTextureSize;
+int VoxelMaterialFillClipmapIndex;
+int VoxelMaterialFillTextureSize;
+int VoxelMaterialFillClipmapID;
+int FillIndex;
+int MaxPendingListCount;
+int FillChunkChunkCountPerTime;
+int FillChunkChunkThreadGroupNumbX;
+int FillArgsChunkSizeInOccupy;
+int FillClearChunkCountPerTime;
+int FillClearChunkSizeInOccupy;
+int FillClearFillIndex;
+int FillClearMaterialBudgetSize;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+uint _BurtGISceneVoxelTriangleCount;
+uint _BurtGISceneVoxelOccupancyMipSourceMip;
+float4 DebugArgsData;
+float4 DebugProbeArgsData;
+float4 DebugProbeCompactParams; // x=probe node size, y=max compact probes, z=index offset per clipmap, w=occupancy threshold.
+float4 CameraPos;
+int DebugProbeArgsClipmapCount;
+int DebugProbeArgsMaxCount;
+int MipLevel;
+float CullingDistance;
+
+
+struct BurtXGIVoxelMaterialUint
+{
+    uint4 albedo;
+    uint opaque;
+    uint3 normal;
+    uint3 emissive;
+};
+
+struct BurtXGIVoxelMaterialFloat
+{
+    float3 albedo;
+    float opaque;
+    float3 normal;
+    float3 emissive;
+};
+
+struct BurtXGIVoxelMaterialPendingData
+{
+    uint nodeIndex;
+    uint albedoOpaque;
+    uint normal;
+    uint emissive;
+};
+
+bool BurtGIXGISdfSeedValid(uint3 voxelIndex, uint textureSize, uint clipmapIndex, uint clipmapCount)
+{
+    uint occupyWidth;
+    uint occupyHeight;
+    uint occupyDepth;
+    _XGISdfGenFillUVPass_VoxelOccupy.GetDimensions(occupyWidth, occupyHeight, occupyDepth);
+    uint safeClipmapCount = max(clipmapCount, 1u);
+    uint clipmapDepth = max(occupyDepth / safeClipmapCount, 1u);
+    uint3 occupyLocalSize = max(uint3(occupyWidth, occupyHeight, clipmapDepth), uint3(1u, 1u, 1u));
+    uint3 occupyCoord = min((voxelIndex * occupyLocalSize) / max(textureSize, 1u), occupyLocalSize - 1u);
+    occupyCoord.z += min(clipmapIndex, safeClipmapCount - 1u) * clipmapDepth;
+    float4 occupancy = _XGISdfGenFillUVPass_VoxelOccupy.Load(int4((int)occupyCoord.x, (int)occupyCoord.y, (int)occupyCoord.z, 0));
+    return max(max(occupancy.x, occupancy.y), max(occupancy.z, occupancy.w)) > 0.0001;
+}
+[numthreads(BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, 1)]
+void FillUV(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint textureSize = max((uint)_XGISdfGenFillUVPass_TextureSize.x, 1u);
+    uint3 voxelIndex = dispatchThreadId;
+    if (any(voxelIndex >= textureSize))
+    {
+        return;
+    }
+
+    uint clipmapIndex = (uint)max((int)_XGISdfGenFillUVPass_ClipmapIndexAndCount.x, 0);
+    uint clipmapCount = max((uint)_XGISdfGenFillUVPass_ClipmapIndexAndCount.y, 1u);
+    float voxelToUVScale = _XGISdfGenFillUVPass_TextureSize.y;
+    bool valid = BurtGIXGISdfSeedValid(voxelIndex, textureSize, clipmapIndex, clipmapCount);
+    _RW_XGISdfGenFillUVPass_SdfTemp1[voxelIndex] = valid ? float4((float3)voxelIndex * voxelToUVScale, 1.0) : float4(0.0, 0.0, 0.0, 0.0);
+}
+[numthreads(BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, 1)]
+void JFA(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint textureSize = max((uint)_XGISdfGenJFAPass_TextureSize.x, 1u);
+    uint3 totalIndex = dispatchThreadId;
+    if (any(totalIndex >= textureSize))
+    {
+        return;
+    }
+
+    float4 nearest = _XGISdfGenJFAPass_SdfTemp1[totalIndex];
+    if (nearest.w < 0.5)
+    {
+        nearest = float4(-10.0, -10.0, -10.0, 0.0);
+    }
+
+    int jumpOffset = max((int)_XGISdfGenJFAPass_TextureSize.z, 1);
+    int safeTextureSize = (int)textureSize;
+    [unroll]
+    for (int offsetZ = -1; offsetZ <= 1; ++offsetZ)
+    {
+        [unroll]
+        for (int offsetY = -1; offsetY <= 1; ++offsetY)
+        {
+            [unroll]
+            for (int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                int3 neighbor = int3(totalIndex) + int3(offsetX, offsetY, offsetZ) * jumpOffset;
+                neighbor = (neighbor % safeTextureSize + safeTextureSize) % safeTextureSize;
+                float4 candidate = _XGISdfGenJFAPass_SdfTemp1[uint3(neighbor)];
+                if (candidate.w < 0.5)
+                {
+                    continue;
+                }
+
+                float3 uv = (float3)totalIndex / (float)textureSize;
+                if (length(uv - candidate.xyz) < length(uv - nearest.xyz))
+                {
+                    nearest = candidate;
+                }
+            }
+        }
+    }
+
+    _RW_XGISdfGenJFAPass_SdfTemp2[totalIndex] = nearest;
+}
+[numthreads(BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE, 1)]
+void Finalize(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint textureSize = max((uint)_XGISdfGenFinalizePass_TextureSize.x, 1u);
+    uint3 globalIndex = dispatchThreadId;
+    if (any(globalIndex >= textureSize))
+    {
+        return;
+    }
+
+    uint clipmapIndex = (uint)max((int)_XGISdfGenFinalizePass_ClipmapIndexAndCount.x, 0);
+    uint clipmapBorder = (uint)max((int)_XGISdfGenFinalizePass_ClipmapIndexAndCount.z, 0);
+    uint3 resultIndex = globalIndex + uint3(0u, 0u, (textureSize + clipmapBorder) * clipmapIndex);
+    float3 defaultUV = (float3)globalIndex / (float)textureSize;
+    float4 nearest = _XGISdfGenFinalizePass_SdfTemp2[globalIndex];
+    float distanceToSeed = nearest.w >= 0.5 ? length(nearest.xyz - defaultUV) : 1.0;
+    _RW_XGISdfGenFinalizePass_SdfResult[resultIndex] = distanceToSeed;
+}

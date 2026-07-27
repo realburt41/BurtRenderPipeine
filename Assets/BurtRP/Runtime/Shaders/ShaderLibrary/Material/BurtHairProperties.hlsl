@@ -67,6 +67,7 @@ CBUFFER_START(UnityPerMaterial)
     float _OcclusionStrength;
     float4 _EmissionColor;
     float4 _EmissionMap_ST;
+    float _ResponsiveAA;
 CBUFFER_END
 
 float4 _GradientMap_TexelSize;

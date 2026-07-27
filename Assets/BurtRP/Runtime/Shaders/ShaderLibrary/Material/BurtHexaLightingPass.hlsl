@@ -3,9 +3,11 @@
 
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHexaLightingProperties.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingHexa.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtTransparentAtmosphereFog.hlsl"
 
 struct BurtHexaAttributes
 {
@@ -25,6 +27,7 @@ struct BurtHexaVaryings
     float4 TangentWS : TEXCOORD2;
     float2 UV0 : TEXCOORD3;
     float4 Color : TEXCOORD4;
+    float4 ScreenPos : TEXCOORD5;
     UNITY_VERTEX_OUTPUT_STEREO
 };
 
@@ -88,6 +91,7 @@ BurtHexaVaryings Vert(BurtHexaAttributes input)
         input.TangentOS.w * unity_WorldTransformParams.w);
     output.UV0 = input.UV0;
     output.Color = input.Color;
+    output.ScreenPos = ComputeScreenPos(output.PositionCS);
     return output;
 }
 
@@ -108,7 +112,13 @@ float4 Frag(BurtHexaVaryings input) : SV_Target
     BurtLight mainLight = BurtCreateMainLight(shadowAttenuation);
     float3 lighting = BurtEvaluateHexaLighting(data, mainLight, input.PositionWS, input.NormalWS, input.TangentWS);
     float alpha = saturate(positiveAxesSample.a * _OverallAlpha);
-    return float4(lighting * alpha, alpha);
+    float2 screenUV = saturate(input.ScreenPos.xy / max(input.ScreenPos.w, BURT_EPSILON));
+    float3 premultipliedLighting = BurtApplyPremultipliedTransparentFog(
+        lighting * alpha,
+        alpha,
+        screenUV,
+        input.PositionWS);
+    return float4(BurtApplyPreExposure(premultipliedLighting), alpha);
 }
 
 BurtHexaMotionVectorVaryings VertMotionVector(BurtHexaAttributes input)
@@ -149,6 +159,15 @@ float4 FragMotionVector(BurtHexaMotionVectorVaryings input) : SV_Target
     float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
     clip(max(velocityPixels.x, velocityPixels.y) - 0.02f);
     return float4(velocity * valid, 1.0f, 1.0f);
+}
+
+float4 FragResponsiveAAMask(BurtHexaMotionVectorVaryings input) : SV_Target
+{
+    float currentTile = _Time.y * 20.0f * _PlaySpeed;
+    float alpha = saturate(BurtHexaSampleFlipbookMotionVectors(_PositiveAxesLightmap, input.UV0, currentTile).a * _OverallAlpha);
+    clip(alpha - 1.0f / 255.0f);
+    clip(_ResponsiveAA - 0.5f);
+    return float4(1.0f, 0.0f, 0.0f, 0.0f);
 }
 
 #endif // BURT_HEXA_LIGHTING_PASS_INCLUDED

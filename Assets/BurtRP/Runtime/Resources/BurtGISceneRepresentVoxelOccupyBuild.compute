@@ -1,0 +1,209 @@
+#pragma kernel SceneRepresentVoxelOccupyBuild
+
+#define BURT_GI_SCENE_VOXEL_CLEAR_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_POPULATE_THREADGROUP_SIZE 8
+#define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_THREADGROUP_SIZE 4
+#define BURT_GI_SCENE_VOXEL_OCCUPY_DEBUG_THREADGROUP_SIZE 8
+#define BURT_GI_XGI_OCCUPY_SIZE_CUBIC 64u
+#define BURT_GI_XGI_DEBUG_PROBE_ARGS_DATA_ALLOCATOR_OFFSET 8u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_INDEX 0u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_ALLOCATOR_OFFSET 1u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_MAX_COUNT 128u
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_HALF_BIT 16u
+#define BURT_GI_XGI_MATERIAL_UINT_SIZE 7u
+#define BURT_GI_XGI_MATERIAL_TEMP_DATA_SIZE 11u
+#define BURT_GI_XGI_MATERIAL_PENDING_DATA_SIZE 4u
+#define BURT_GI_XGI_MATERIAL_EMISSIVE_QUANTIZE_VALUE 16384.0
+#define BURT_GI_XGI_MATERIAL_PENDING_LIST_PROCESS_COUNT_PER_THREAD 4u
+#define BURT_GI_XGI_CHUNK_UPDATE_PROCESS_COUNT_PER_THREAD 4u
+#define BURT_GI_XGI_OLD_INVALID_CHUNK_INDEX 0xffffffffu
+#define BURT_GI_XGI_OLD_INVALID_CHUNK_ALLOCATED_INDEX 0u
+
+Texture3D<float4> _BurtGISceneVoxelGeometryReadTexture;
+RWTexture3D<float4> _BurtGISceneVoxelOccupancyMipTexture;
+float4 _BurtGISceneVoxelTraceControls;
+
+struct XGIProbeVolumeGpuOBB
+{
+    float3 corner;
+    float3 X;
+    float3 Y;
+    float3 Z;
+    int minControllerSubdivLevel;
+    int maxControllerSubdivLevel;
+    int fillEmptySpaces;
+    int maxSubdivLevelInsideVolume;
+};
+
+
+struct BurtGISceneVoxelTriangle
+{
+    float3 Position0;
+    float Padding0;
+    float3 Position1;
+    float Padding1;
+    float3 Position2;
+    float Padding2;
+    float3 Normal;
+    float Padding3;
+    float3 Albedo;
+    float Padding4;
+    float3 Emission;
+    float Padding5;
+};
+
+
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGISceneVoxelCenterExtent;
+float4 _BurtGISceneVoxelHistoryPreviousCenterExtent;
+float4 _BurtGISceneVoxelHistoryCurrentCenterExtent;
+float4 _BurtGISceneVoxelHistoryParams;
+float4 _BurtGISceneVoxelDebugProbeParams;
+float4 _BurtGISceneVoxelLightingParams;
+float4 _BurtGISceneVoxelMaterialParams;
+float4 _BurtDeferredCameraWorldPosition;
+float4 _XGIVoxelApply_VolumeOffsetsWS[8];
+float4 _XGIVoxelApply_VolumeSizesWS[8];
+float4 _XGIVoxelApply_TextureSize;
+float4 _XGIVoxelApply_ClipmapCount;
+float4 _XGISdfGenFillUVPass_TextureSize;
+float4 _XGISdfGenFillUVPass_ClipmapIndexAndCount;
+float4 _XGISdfGenJFAPass_TextureSize;
+float4 _XGISdfGenFinalizePass_TextureSize;
+float4 _XGISdfGenFinalizePass_ClipmapIndexAndCount;
+float4 _XGISdfApply_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_TextureSize;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeSizeWS;
+float4 _XGIPlacementProbeVolumeCullPass_VolumeOffsetWS;
+float4 _XGIPlacementProbeVolumeCullPass_MaxBrickCount;
+float _XGIPlacementProbeVolumeCullPass_ProbeVolumeCount;
+float _XGIPlacementProbeVolumeCullPass_SubdivLevel;
+float _XGIPlacementProbeVolumeCullPass_BrickSize;
+float _XGIPlacementProbeVolumeCullPass_Padding0;
+float4 _XGIGenBrickPass_VolumeSizeInBricks;
+float4 _XGIGenBrickPass_VolumeOffsetInBricks;
+float4 _XGIGenBrickPass_MaxBrickCount;
+float _XGIGenBrickPass_SubdivLevel;
+float _XGIGenBrickPass_Padding0;
+float _XGIGenBrickPass_Padding1;
+float _XGIGenBrickPass_Padding2;
+float4 _XGIGenerateVoxelOccupyChunkPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyChunkPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyChunkClearDataPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyChunkClearDataPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialFillPreparePass_MaterialBudgetSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialFillPass_MaterialBudgetSize;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_TextureSize;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_ClipmapIndexAndCount;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_FillIndex;
+float4 _XGIGenerateVoxelOccupyMaterialPopulatePass_MaterialBudgetSize;
+int VoxelMaterialPopulateArgsBufferMaxPendingListCount;
+int VoxelMaterialPopulateClipmapIndex;
+int VoxelMaterialPopulateIndexOffsetForClipmap;
+int VoxelMaterialPopulatePhysicalPoolSize;
+int VoxelMaterialFillVoxelTextureSize;
+int VoxelMaterialFillClipmapIndex;
+int VoxelMaterialFillTextureSize;
+int VoxelMaterialFillClipmapID;
+int FillIndex;
+int MaxPendingListCount;
+int FillChunkChunkCountPerTime;
+int FillChunkChunkThreadGroupNumbX;
+int FillArgsChunkSizeInOccupy;
+int FillClearChunkCountPerTime;
+int FillClearChunkSizeInOccupy;
+int FillClearFillIndex;
+int FillClearMaterialBudgetSize;
+float4x4 _BurtDeferredInverseViewProjectionMatrix;
+uint _BurtGISceneVoxelTriangleCount;
+uint _BurtGISceneVoxelOccupancyMipSourceMip;
+float4 DebugArgsData;
+float4 DebugProbeArgsData;
+float4 DebugProbeCompactParams; // x=probe node size, y=max compact probes, z=index offset per clipmap, w=occupancy threshold.
+float4 CameraPos;
+int DebugProbeArgsClipmapCount;
+int DebugProbeArgsMaxCount;
+int MipLevel;
+float CullingDistance;
+
+
+struct BurtXGIVoxelMaterialUint
+{
+    uint4 albedo;
+    uint opaque;
+    uint3 normal;
+    uint3 emissive;
+};
+
+struct BurtXGIVoxelMaterialFloat
+{
+    float3 albedo;
+    float opaque;
+    float3 normal;
+    float3 emissive;
+};
+
+struct BurtXGIVoxelMaterialPendingData
+{
+    uint nodeIndex;
+    uint albedoOpaque;
+    uint normal;
+    uint emissive;
+};
+
+void BurtGISceneVoxelBuildOccupancyMip(uint3 dispatchThreadId)
+{
+    uint mipWidth;
+    uint mipHeight;
+    uint mipDepth;
+    _BurtGISceneVoxelOccupancyMipTexture.GetDimensions(mipWidth, mipHeight, mipDepth);
+    if (dispatchThreadId.x >= mipWidth || dispatchThreadId.y >= mipHeight || dispatchThreadId.z >= mipDepth)
+    {
+        return;
+    }
+
+    uint sourceWidth;
+    uint sourceHeight;
+    uint sourceDepth;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(sourceWidth, sourceHeight, sourceDepth);
+    uint3 sourceSize = max(uint3(sourceWidth, sourceHeight, sourceDepth), uint3(1u, 1u, 1u));
+    uint3 mipSize = max(uint3(mipWidth, mipHeight, mipDepth), uint3(1u, 1u, 1u));
+    uint3 blockSize = max(sourceSize / mipSize, uint3(1u, 1u, 1u));
+    uint3 sourceBase = dispatchThreadId * blockSize;
+
+    float maxOccupancy = 0.0;
+    float occupancySum = 0.0;
+    float sampleCount = 0.0;
+
+    [loop]
+    for (uint z = 0u; z < blockSize.z; ++z)
+    {
+        [loop]
+        for (uint y = 0u; y < blockSize.y; ++y)
+        {
+            [loop]
+            for (uint x = 0u; x < blockSize.x; ++x)
+            {
+                uint3 sourceCoord = min(sourceBase + uint3(x, y, z), sourceSize - 1u);
+                float occupancy = saturate(_BurtGISceneVoxelGeometryReadTexture.Load(int4((int)sourceCoord.x, (int)sourceCoord.y, (int)sourceCoord.z, 0)).a);
+                maxOccupancy = max(maxOccupancy, occupancy);
+                occupancySum += occupancy;
+                sampleCount += 1.0;
+            }
+        }
+    }
+
+    float meanOccupancy = sampleCount > 0.0 ? occupancySum / sampleCount : 0.0;
+    _BurtGISceneVoxelOccupancyMipTexture[dispatchThreadId] = float4(maxOccupancy, meanOccupancy, saturate(occupancySum), 1.0);
+}
+[numthreads(BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_THREADGROUP_SIZE)]
+void SceneRepresentVoxelOccupyBuild(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGISceneVoxelBuildOccupancyMip(dispatchThreadId);
+}

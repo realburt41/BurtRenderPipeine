@@ -666,6 +666,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.PostProcessColorName); // 使用统一资源名声明写入后处理中间颜色。
         }
 
+        public BurtRenderTargetHandle ReadTemporalAAOutput()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.TemporalAAOutputName);
+        }
+
+        public BurtRenderTargetHandle WriteTemporalAAOutput()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.TemporalAAOutputName);
+        }
+
         public BurtRenderTargetHandle ReadGBuffer0() // 定义声明读取 GBuffer0 的快捷函数。
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.GBuffer0Name); // 使用统一资源名声明读取 Deferred GBuffer0。

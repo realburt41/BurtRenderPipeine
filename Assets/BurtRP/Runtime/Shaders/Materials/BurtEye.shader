@@ -62,6 +62,7 @@ Shader "BurtRP/Eye"
         [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
         [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
         [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
+        [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 1
     }
 
     SubShader
@@ -120,6 +121,32 @@ Shader "BurtRP/Eye"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEyeProperties.hlsl"
 
             #define BURT_MATERIAL_SHADING_MODEL_EYE 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
+            ENDHLSL
+        }
+
+        // The cornea contains thin refractive and specular detail. Keep this history
+        // control signal independent from native depth-stencil availability.
+        Pass
+        {
+            Name "Burt Eye Responsive AA Mask"
+            Tags { "LightMode" = "BurtResponsiveAAMask" }
+            ZWrite Off
+            ZTest Equal
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertMotionVector
+            #pragma fragment FragResponsiveAAMask
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
+            #pragma target 3.5
+
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEyeProperties.hlsl"
+
+            #define BURT_MATERIAL_SHADING_MODEL_EYE 1
+            #define BURT_MOTION_VECTOR_RESPONSIVE_AA_MASK 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"
             ENDHLSL
         }
@@ -233,8 +260,7 @@ Shader "BurtRP/Eye"
             #pragma fragment Frag
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
-            #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_CATEGORY_LIGHTING BURT_FORWARD_SHADING_DEBUG_CATEGORY_BRDF BURT_FORWARD_SHADING_DEBUG_CATEGORY_SHADOW BURT_FORWARD_SHADING_DEBUG_CATEGORY_TRANSMISSION
+            #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_LIGHTING BURT_FORWARD_SHADING_DEBUG_BRDF BURT_FORWARD_SHADING_DEBUG_SHADOW BURT_FORWARD_SHADING_DEBUG_TRANSMISSION
             #pragma multi_compile_instancing
             #pragma target 3.5
 

@@ -57,6 +57,7 @@ CBUFFER_START(UnityPerMaterial)
     float _TransparentSortPriority;
     float _AlphaClip;
     float _Cutoff;
+    float _ResponsiveAA;
 CBUFFER_END
 
 #endif // BURT_CLEAR_CRYSTAL_PROPERTIES_INCLUDED

@@ -68,6 +68,7 @@ namespace Burt.RenderPipeline
         public int FrameIndex { get; private set; }
         public Vector2 Jitter { get; private set; }
         public Vector2 JitterPixels { get; private set; }
+        public int JitterPhaseCount { get; private set; } = 8;
         public Matrix4x4 NonJitteredProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 JitteredProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 ViewMatrix { get; private set; } = Matrix4x4.identity;
@@ -113,6 +114,7 @@ namespace Burt.RenderPipeline
             int frameIndex,
             Vector2 jitterPixels,
             Vector2 jitter,
+            int jitterPhaseCount,
             Matrix4x4 viewMatrix,
             Matrix4x4 nonJitteredProjectionMatrix,
             Matrix4x4 jitteredProjectionMatrix,
@@ -134,6 +136,7 @@ namespace Burt.RenderPipeline
                 FrameIndex = frameIndex,
                 JitterPixels = jitterPixels,
                 Jitter = jitter,
+                JitterPhaseCount = Mathf.Max(1, jitterPhaseCount),
                 ViewMatrix = viewMatrix,
                 NonJitteredProjectionMatrix = nonJitteredProjectionMatrix,
                 JitteredProjectionMatrix = jitteredProjectionMatrix,
@@ -156,11 +159,13 @@ namespace Burt.RenderPipeline
     {
         public RenderTexture Color { get; }
         public RenderTexture Depth { get; }
+        public RenderTexture Guide { get; }
 
-        public BurtTemporalAAHistoryTextures(RenderTexture color, RenderTexture depth)
+        public BurtTemporalAAHistoryTextures(RenderTexture color, RenderTexture depth, RenderTexture guide)
         {
             Color = color;
             Depth = depth;
+            Guide = guide;
         }
     }
 
@@ -207,10 +212,13 @@ namespace Burt.RenderPipeline
         private const float ProjectionChangeEpsilon = 0.0001f;
         private const float TemporalAAPostProcessSignatureEpsilon = 0.001f;
         private const float SceneViewJitterScaleMultiplier = 0.5f;
-        private const int HaltonSequenceLength = 8;
+        private const int NativeTemporalAAJitterPhaseCount = 8;
+        private const int MaxTemporalAAJitterPhaseCount = 1024;
+        private const float TAAUHistoryResolutionScale = 2f;
+        private const int TAAUMaxHistoryDimension = 6144;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
-        private const int HistoryLayoutVersion = 30;
+        private const int HistoryLayoutVersion = 33;
 
         private sealed class CameraState
         {
@@ -241,8 +249,10 @@ namespace Burt.RenderPipeline
             public Matrix4x4 PreviousViewMatrix = Matrix4x4.identity;
             public RenderTexture ColorHistory;
             public RenderTexture DepthHistory;
+            public RenderTexture GuideHistory;
             public RenderTextureDescriptor ColorDescriptor;
             public RenderTextureDescriptor DepthDescriptor;
+            public RenderTextureDescriptor GuideDescriptor;
             public int HistoryLayoutVersion;
             public bool HasValidHistory;
             public bool HasPreviousCameraState;
@@ -307,7 +317,7 @@ namespace Burt.RenderPipeline
 
             if (temporalAA.debugFreezeJitter.value)
             {
-                jitterFrameOverride = Mathf.Clamp(temporalAA.debugJitterFrame.value, 0, HaltonSequenceLength - 1) + 1;
+                jitterFrameOverride = Mathf.Clamp(temporalAA.debugJitterFrame.value, 0, MaxTemporalAAJitterPhaseCount - 1) + 1;
             }
 
             return temporalAA.debugOverrideJitterScale.value
@@ -408,7 +418,8 @@ namespace Burt.RenderPipeline
             var frameIndex = state.FrameIndex + 1;
             state.FrameIndex = frameIndex;
             var jitterFrameIndex = jitterFrameOverride.HasValue ? jitterFrameOverride.Value : frameIndex;
-            var jitterPixels = CalculateHaltonJitter(jitterFrameIndex) * settings.JitterScale;
+            var jitterPhaseCount = CalculateJitterPhaseCount(camera);
+            var jitterPixels = CalculateHaltonJitter(jitterFrameIndex, jitterPhaseCount) * settings.JitterScale;
             var pixelWidth = Mathf.Max(1, colorDescriptor.width);
             var pixelHeight = Mathf.Max(1, colorDescriptor.height);
             var jitter = new Vector2(jitterPixels.x * 2f / pixelWidth, jitterPixels.y * 2f / pixelHeight);
@@ -431,6 +442,7 @@ namespace Burt.RenderPipeline
                 frameIndex,
                 jitterPixels,
                 jitter,
+                jitterPhaseCount,
                 viewMatrix,
                 projectionMatrix,
                 jitteredProjection,
@@ -573,13 +585,15 @@ namespace Burt.RenderPipeline
             historyValid = false;
             if (camera == null)
             {
-                return new BurtTemporalAAHistoryTextures(null, null);
+                return new BurtTemporalAAHistoryTextures(null, null, null);
             }
 
             var state = GetOrCreateState(camera.GetInstanceID());
             state.Camera = camera;
             var colorDescriptor = CreateColorHistoryDescriptor(camera);
             var depthDescriptor = CreateScalarHistoryDescriptor(camera);
+            var guideDescriptor = CreateGuideHistoryDescriptor(camera);
+            var needsGuideHistory = ShouldUseOutputResolutionHistory(camera);
 
             if (state.ColorHistory == null || !Matches(state.ColorDescriptor, colorDescriptor))
             {
@@ -601,8 +615,24 @@ namespace Burt.RenderPipeline
                 SetAllocationInvalidationReason(state, "DepthHistoryAllocated");
             }
 
+            if (needsGuideHistory && (state.GuideHistory == null || !Matches(state.GuideDescriptor, guideDescriptor)))
+            {
+                ReleaseTexture(state.GuideHistory);
+                state.GuideDescriptor = guideDescriptor;
+                state.GuideHistory = CreateHistoryTexture(guideDescriptor, "Burt TAAU Guide History " + camera.GetInstanceID(), FilterMode.Bilinear);
+                state.HasValidHistory = false;
+                state.FirstValidFrameIndex = 0;
+                SetAllocationInvalidationReason(state, "GuideHistoryAllocated");
+            }
+            else if (!needsGuideHistory && state.GuideHistory != null)
+            {
+                ReleaseTexture(state.GuideHistory);
+                state.GuideHistory = null;
+                state.GuideDescriptor = default;
+            }
+
             historyValid = state.HasValidHistory;
-            return new BurtTemporalAAHistoryTextures(state.ColorHistory, state.DepthHistory);
+            return new BurtTemporalAAHistoryTextures(state.ColorHistory, state.DepthHistory, state.GuideHistory);
         }
 
         public static RenderTexture EnsureHistoryTexture(Camera camera, out bool historyValid)
@@ -721,8 +751,13 @@ namespace Burt.RenderPipeline
 
         private static RenderTextureDescriptor CreateColorHistoryDescriptor(Camera camera)
         {
-            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
-            ApplyTemporalAAUpscaleFactor(ref descriptor);
+            var descriptor = ShouldUseOutputResolutionHistory(camera)
+                ? BurtRenderTargetDescriptorUtility.CreateOutputPostProcessColorDescriptor(camera)
+                : BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            if (ShouldUseOutputResolutionHistory(camera))
+            {
+                ApplyTAAUHistoryResolutionScale(ref descriptor);
+            }
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
@@ -732,8 +767,9 @@ namespace Burt.RenderPipeline
 
         internal static RenderTextureDescriptor CreateScalarHistoryDescriptor(Camera camera)
         {
+            // Closest-depth history is consumed by input-resolution velocity dilation and
+            // disocclusion rejection, so it deliberately stays at the input resolution.
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
-            ApplyTemporalAAUpscaleFactor(ref descriptor);
             descriptor.colorFormat = RenderTextureFormat.RFloat;
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
@@ -743,22 +779,31 @@ namespace Burt.RenderPipeline
             return descriptor;
         }
 
-        private static void ApplyTemporalAAUpscaleFactor(ref RenderTextureDescriptor descriptor)
+        private static RenderTextureDescriptor CreateGuideHistoryDescriptor(Camera camera)
         {
-            var factor = Mathf.Clamp(ResolveTemporalAAUpscaleFactor(), 1f, 2f);
-            if (factor <= 1.0001f)
-            {
-                return;
-            }
-
-            descriptor.width = Mathf.Max(1, Mathf.RoundToInt(descriptor.width / factor));
-            descriptor.height = Mathf.Max(1, Mathf.RoundToInt(descriptor.height / factor));
+            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
+            return descriptor;
         }
 
-        private static float ResolveTemporalAAUpscaleFactor()
+        private static void ApplyTAAUHistoryResolutionScale(ref RenderTextureDescriptor descriptor)
         {
-            var temporalAA = GetTemporalAAVolumeComponent();
-            return temporalAA != null && temporalAA.IsEnabled() ? temporalAA.upscaleFactor.value : BurtTemporalAASettings.Default.UpscaleFactor;
+            var maxScale = Mathf.Min(
+                TAAUHistoryResolutionScale,
+                TAAUMaxHistoryDimension / (float)Mathf.Max(1, Mathf.Max(descriptor.width, descriptor.height)));
+            maxScale = Mathf.Max(1f, maxScale);
+            descriptor.width = Mathf.Max(1, Mathf.CeilToInt(descriptor.width * maxScale));
+            descriptor.height = Mathf.Max(1, Mathf.CeilToInt(descriptor.height * maxScale));
+        }
+
+        private static bool ShouldUseOutputResolutionHistory(Camera camera)
+        {
+            return BurtRenderTargetDescriptorUtility.ResolveInputRenderScale(camera) < 0.9999f;
         }
 
         private static RenderTexture CreateHistoryTexture(RenderTextureDescriptor descriptor, string name, FilterMode filterMode)
@@ -1066,8 +1111,10 @@ namespace Burt.RenderPipeline
 
             ReleaseTexture(state.ColorHistory);
             ReleaseTexture(state.DepthHistory);
+            ReleaseTexture(state.GuideHistory);
             state.ColorHistory = null;
             state.DepthHistory = null;
+            state.GuideHistory = null;
             state.HistoryLayoutVersion = 0;
             state.HasValidHistory = false;
             state.FirstValidFrameIndex = 0;
@@ -1084,9 +1131,28 @@ namespace Burt.RenderPipeline
             Object.DestroyImmediate(texture);
         }
 
-        private static Vector2 CalculateHaltonJitter(int frameIndex)
+        private static int CalculateJitterPhaseCount(Camera camera)
         {
-            var sequenceIndex = ((Mathf.Max(1, frameIndex) - 1) % HaltonSequenceLength) + 1;
+            if (!ShouldUseOutputResolutionHistory(camera))
+            {
+                return NativeTemporalAAJitterPhaseCount;
+            }
+
+            var input = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            var output = BurtRenderTargetDescriptorUtility.CreateOutputPostProcessColorDescriptor(camera);
+            var upscaleX = output.width / (float)Mathf.Max(1, input.width);
+            var upscaleY = output.height / (float)Mathf.Max(1, input.height);
+            var upscaleRatio = Mathf.Max(1f, Mathf.Max(upscaleX, upscaleY));
+            return Mathf.Clamp(
+                Mathf.CeilToInt(NativeTemporalAAJitterPhaseCount * upscaleRatio * upscaleRatio),
+                NativeTemporalAAJitterPhaseCount,
+                MaxTemporalAAJitterPhaseCount);
+        }
+
+        private static Vector2 CalculateHaltonJitter(int frameIndex, int phaseCount)
+        {
+            var sequenceLength = Mathf.Clamp(phaseCount, 1, MaxTemporalAAJitterPhaseCount);
+            var sequenceIndex = ((Mathf.Max(1, frameIndex) - 1) % sequenceLength) + 1;
             return new Vector2(Halton(sequenceIndex, 2) - 0.5f, Halton(sequenceIndex, 3) - 0.5f);
         }
 

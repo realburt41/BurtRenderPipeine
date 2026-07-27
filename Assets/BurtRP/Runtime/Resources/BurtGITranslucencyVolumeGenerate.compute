@@ -1,0 +1,6 @@
+#pragma kernel BurtGITranslucencyVolumeGenerateDeprecatedCS
+
+[numthreads(1, 1, 1)]
+void BurtGITranslucencyVolumeGenerateDeprecatedCS(uint3 id : SV_DispatchThreadID)
+{
+}

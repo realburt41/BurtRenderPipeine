@@ -168,7 +168,7 @@ namespace Burt.RenderPipeline.Editor
         private const int XGIPlacementDiagnosticGpuTriangleMaxCount = 4096;
         private const int XGIPlacementDiagnosticGpuBoundsMaxCount = 1024;
         private const string XGIProbeBakingComputeShaderResourcePath = "BurtGIXGIProbeBaking";
-        private const string XGISceneVoxelBuildComputeShaderResourcePath = "BurtGISceneVoxelBuild";
+        private const string XGISceneVoxelSdfComputeShaderResourcePath = "BurtGIXGISdfGen";
         private const string XGIProbeBakingRayTracingResourcePath = "BurtGIXGIProbeBakingHardwareRayTracing";
         private const string XGIProbeBakingRayTracingPassName = "BurtGI";
         private const string XGISkyVisibilityComputeKernelName = "GenSkyVisibilityCS";
@@ -1064,10 +1064,10 @@ namespace Burt.RenderPipeline.Editor
                 return false;
             }
 
-            var shader = Resources.Load<ComputeShader>(XGISceneVoxelBuildComputeShaderResourcePath);
+            var shader = Resources.Load<ComputeShader>(XGISceneVoxelSdfComputeShaderResourcePath);
             if (shader == null)
             {
-                status = "VoxelJfaSdfSkipped(MissingShader=" + XGISceneVoxelBuildComputeShaderResourcePath + ")";
+                status = "VoxelJfaSdfSkipped(MissingShader=" + XGISceneVoxelSdfComputeShaderResourcePath + ")";
                 return false;
             }
 

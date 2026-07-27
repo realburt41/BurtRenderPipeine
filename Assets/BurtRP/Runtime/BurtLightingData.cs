@@ -52,7 +52,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public Vector3 MainLightDirection { get; private set; } // 保存从着色点指向主光的世界空间方向。
 
-        public Color MainLightColor { get; private set; } // 保存 Unity 计算过强度后的主光最终颜色。
+        public Color MainLightColor { get; private set; } // Main-light color after XRender-style ground transmittance and environment occlusion; surface, GI and fog consumers use this value.
+
+        public Color MainLightColorOuterSpace { get; private set; } // Unity final light color before atmosphere transmittance; sky and atmosphere integration use this value.
+
+        public Color AtmosphereTransmittance { get; private set; } // RGB ground-level atmosphere transmittance applied to MainLightColorOuterSpace.
+
+        public float MainLightOcclusion { get; private set; } // Scalar XRender-style environment occlusion applied once after atmosphere transmittance.
 
         public Color AmbientLightColor { get; private set; } // 保存从 Unity Lighting 设置读取到的原始环境光颜色，Simple Lit 路径会直接使用它。
 
@@ -66,7 +72,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public Vector4[] AdditionalLightDirectionAndSpot { get; } = new Vector4[MaxAdditionalLights]; // xyz=方向光方向或聚光灯 forward，w=备用。
 
-        public Vector4[] AdditionalLightSpotParams { get; } = new Vector4[MaxAdditionalLights]; // x=innerCos，y=outerCos，z=1/(inner-outer)，w=备用。
+        public Vector4[] AdditionalLightSpotParams { get; } = new Vector4[MaxAdditionalLights]; // xyz=spot cone; w>=0 inverse-square + near cutoff, w<0 linear + encoded near cutoff.
         public int ShadowedAdditionalLightCount { get; private set; } // ??? request ??????? atlas ?????
         public float MainLightVolumetricScatteringIntensityScale { get; private set; } // XRender-style main light volumetric scattering scale.
         public bool HasShadowedAdditionalLights => ShadowedAdditionalLightCount > 0; // ? RenderGraph ? shadow pass ???????????? shadow atlas?
@@ -472,6 +478,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
         public static BurtLightingData Create(CullingResults cullingResults) // 从 Unity 当前相机的剔除结果里构建灯光数据。
         {
+            return Create(cullingResults, true);
+        }
+
+        public static BurtLightingData Create(CullingResults cullingResults, bool applyAtmosphereTransmittance)
+        {
             var visibleLights = cullingResults.visibleLights; // 读取 Unity 给当前相机筛出的可见灯光列表。
 
             var data = new BurtLightingData(); // 创建本次 request 专用的灯光数据对象。
@@ -479,6 +490,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             data.ResetToDefaults(visibleLights.Length); // 先写入安全默认值，后面找到真实主光时再覆盖。
 
             data.ResolveMainLight(visibleLights); // 遍历可见灯光，选择第一盏方向光作为 BurtRP 当前主光。
+
+            data.ApplyAtmosphereTransmittance(applyAtmosphereTransmittance);
 
             data.CollectAdditionalLights(visibleLights); // 把非主光方向光、点光和聚光灯打包成 shader 可读取的追加光源数组。
 
@@ -496,6 +509,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             MainLightDirection = DefaultMainLightDirection; // 使用兜底方向，避免无主光时 Lit 材质完全失去形体光照。
 
             MainLightColor = Color.white; // 使用白色兜底主光，避免没有灯光时材质直接变黑。
+
+            MainLightColorOuterSpace = Color.white;
+
+            AtmosphereTransmittance = Color.white;
+
+            MainLightOcclusion = 1f;
 
             AmbientLightColor = RenderSettings.ambientLight; // 读取 Unity Lighting 面板里的环境光颜色，后续 SetupLightingPass 会原样上传给 Simple Lit 路径。
 
@@ -544,11 +563,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
                 MainLightColor = visibleLight.finalColor; // 保存 Unity 已经乘过 light color 和 intensity 的最终颜色。
 
+                MainLightColorOuterSpace = visibleLight.finalColor;
+
                 MainLightVolumetricScatteringIntensityScale = ResolveVolumetricLightScatteringScale(visibleLight);
                 ShadowData = BurtShadowData.CreateForMainLight(visibleLight, lightIndex); // 根据当前主光和索引创建主光阴影数据。
 
                 return; // 当前规则只取第一盏方向光，所以找到后直接结束。
             }
+        }
+
+        private void ApplyAtmosphereTransmittance(bool enabled)
+        {
+            if (!HasMainLight || !enabled)
+            {
+                AtmosphereTransmittance = Color.white;
+                MainLightOcclusion = 1f;
+                MainLightColor = MainLightColorOuterSpace;
+                return;
+            }
+
+            var settings = BurtAtmosphereUtility.ResolveSettings();
+            AtmosphereTransmittance = BurtAtmosphereUtility.EvaluateMainLightGroundTransmittance(settings, MainLightDirection);
+            MainLightOcclusion = settings.MainLightOcclusion;
+            MainLightColor = new Color(
+                MainLightColorOuterSpace.r * AtmosphereTransmittance.r * MainLightOcclusion,
+                MainLightColorOuterSpace.g * AtmosphereTransmittance.g * MainLightOcclusion,
+                MainLightColorOuterSpace.b * AtmosphereTransmittance.b * MainLightOcclusion,
+                MainLightColorOuterSpace.a);
         }
 
         private void CollectAdditionalLights(Unity.Collections.NativeArray<VisibleLight> visibleLights)
@@ -637,11 +678,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             var slot = AdditionalLightCount++;
             var volumetricScale = ResolveVolumetricLightScatteringScale(visibleLight);
             var volumetricNearCutoff = ResolveVolumetricLightNearCutoff(visibleLight);
+            var useInverseSquaredFalloff = ResolveUseInverseSquaredFalloff(visibleLight);
+            var packedFalloffAndNearCutoff = EncodeFalloffAndNearCutoff(
+                useInverseSquaredFalloff,
+                volumetricNearCutoff);
 
             AdditionalLightPositionAndRange[slot] = new Vector4(positionColumn.x, positionColumn.y, positionColumn.z, range);
             AdditionalLightColorAndType[slot] = new Vector4(color.r, color.g, color.b, lightType);
             AdditionalLightDirectionAndSpot[slot] = new Vector4(direction.x, direction.y, direction.z, volumetricScale);
-            AdditionalLightSpotParams[slot] = new Vector4(innerCos, outerCos, invAngleRange, volumetricNearCutoff);
+            AdditionalLightSpotParams[slot] = new Vector4(innerCos, outerCos, invAngleRange, packedFalloffAndNearCutoff);
             PackAdditionalLightBufferSlot(slot);
 
             if (canCastShadow)
@@ -675,6 +720,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
         {
             var component = ResolveVolumetricLightComponent(visibleLight);
             return component != null ? component.EffectiveNearCutoffDistance : 0f;
+        }
+
+        private static bool ResolveUseInverseSquaredFalloff(VisibleLight visibleLight)
+        {
+            var component = ResolveVolumetricLightComponent(visibleLight);
+            return component == null || component.UseInverseSquaredFalloff;
+        }
+
+        internal static float EncodeFalloffAndNearCutoff(bool useInverseSquaredFalloff, float nearCutoffDistance)
+        {
+            var safeNearCutoff = Mathf.Max(0f, nearCutoffDistance);
+            return useInverseSquaredFalloff ? safeNearCutoff : -(safeNearCutoff + 1f);
+        }
+
+        internal static bool DecodeUseInverseSquaredFalloff(float packedFalloffAndNearCutoff)
+        {
+            return packedFalloffAndNearCutoff >= 0f;
+        }
+
+        internal static float DecodeVolumetricNearCutoff(float packedFalloffAndNearCutoff)
+        {
+            return packedFalloffAndNearCutoff >= 0f
+                ? packedFalloffAndNearCutoff
+                : Mathf.Max(-packedFalloffAndNearCutoff - 1f, 0f);
         }
 
         private static BurtVolumetricLight ResolveVolumetricLightComponent(VisibleLight visibleLight)

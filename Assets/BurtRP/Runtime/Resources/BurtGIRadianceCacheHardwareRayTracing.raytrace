@@ -208,6 +208,27 @@ float BurtGIHardwareRayVisibility(float3 origin, float3 normalWS, float3 lightDi
     return 1.0 - saturate(payload.Hit);
 }
 
+bool BurtGIHardwareRayUsesInverseSquaredFalloff(float packedFalloffAndNearCutoff)
+{
+    return packedFalloffAndNearCutoff >= 0.0;
+}
+
+float BurtGIHardwareRayEvaluateAdditionalLightDistanceAttenuation(
+    float distanceSquared,
+    float range,
+    bool useInverseSquaredFalloff)
+{
+    float safeRange = max(range, 0.0001);
+    float normalizedDistanceSquared = distanceSquared / max(safeRange * safeRange, 1.0e-6);
+    if (!useInverseSquaredFalloff)
+    {
+        return saturate(1.0 - sqrt(saturate(normalizedDistanceSquared)));
+    }
+
+    float smoothFactor = saturate(1.0 - normalizedDistanceSquared * normalizedDistanceSquared);
+    return smoothFactor * smoothFactor * rcp(max(distanceSquared, 0.0001));
+}
+
 float3 BurtGIHardwareRayEvaluateAdditionalLightSample(float3 origin, float3 normalWS, float randomValue)
 {
     uint lightCount = min(_BurtGIHardwareRayAdditionalLightCount, 8u);
@@ -240,14 +261,17 @@ float3 BurtGIHardwareRayEvaluateAdditionalLightSample(float3 origin, float3 norm
 
         lightDirection = toLight / max(distanceToLight, 0.0001);
         maxDistance = max(0.01, distanceToLight - 0.02);
-        float rangeAttenuation = saturate(1.0 - distanceToLight / lightRange);
-        attenuation = rangeAttenuation * rangeAttenuation;
+        float4 spotParams = _BurtGIHardwareRayAdditionalLightSpotParams[lightIndex];
+        attenuation = BurtGIHardwareRayEvaluateAdditionalLightDistanceAttenuation(
+            dot(toLight, toLight),
+            lightRange,
+            BurtGIHardwareRayUsesInverseSquaredFalloff(spotParams.w));
 
         if (lightType > 1.5)
         {
             float3 lightForward = normalize(_BurtGIHardwareRayAdditionalLightDirectionAndSpot[lightIndex].xyz);
-            float4 spotParams = _BurtGIHardwareRayAdditionalLightSpotParams[lightIndex];
-            attenuation *= saturate((dot(lightForward, -lightDirection) - spotParams.y) * spotParams.z);
+            float spotFade = saturate((dot(lightForward, -lightDirection) - spotParams.y) * spotParams.z);
+            attenuation *= spotFade * spotFade;
         }
     }
 

@@ -52,6 +52,7 @@ Shader "BurtRP/Multipass Fur"
 
         [Toggle(BURT_ALPHA_CLIP)] _AlphaClip ("Alpha Clip", Float) = 1
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.01
+        [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
 
         [HideInInspector] _FurScale ("Fur Scale", Vector) = (1, 1, 1, 1)
         [HideInInspector] _FurMaxCount ("Fur Max Count", Integer) = 16
@@ -84,6 +85,27 @@ Shader "BurtRP/Multipass Fur"
             HLSLPROGRAM
             #pragma vertex VertMultipassFur
             #pragma fragment FragMultipassFurDepth
+            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurProperties.hlsl"
+            #define BURT_MATERIAL_SHADING_MODEL_FUR 1
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMultipassFurPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Multipass Fur Responsive AA Mask"
+            Tags { "LightMode" = "BurtResponsiveAAMask" }
+            ZWrite Off
+            ZTest Equal
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex VertMultipassFur
+            #pragma fragment FragMultipassFurResponsiveAAMask
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
             #pragma multi_compile_instancing

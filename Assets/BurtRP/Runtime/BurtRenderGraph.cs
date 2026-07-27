@@ -65,6 +65,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             if (ShouldRegisterPostProcessColor(request, asset)) // 如果当前 request 启用了后处理框架，就把后处理中间颜色纳入资源表。
             {
                 resources.RegisterPostProcessColorTexture(); // 注册 PostProcessColor 临时 RT，让分配、No-op Copy 和释放 Pass 使用同一个资源句柄。
+                resources.RegisterTemporalAAOutputTexture();
             }
 
             if (ShouldRegisterGBufferTargets(request, asset)) // 如果当前 request 走 Deferred 实验路径，就把全部 GBuffer 目标纳入资源表。

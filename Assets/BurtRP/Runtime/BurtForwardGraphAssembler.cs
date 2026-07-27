@@ -67,6 +67,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
         private readonly BurtRenderPass rcasPass = new PostProcessPass.RCASPass();
 
         private readonly BurtRenderPass releasePostProcessColorPass = new ReleasePostProcessColorPass(); // 创建后处理颜色释放 Pass，用来在后处理完成后释放 PostProcessColor。
+        private readonly BurtRenderPass releaseTemporalAAOutputPass = new ReleaseTemporalAAOutputPass();
 
         private readonly BurtRenderPass debugCameraDepthPass = new BurtDebugCameraDepthPass(); // 创建 CameraDepth 调试 Pass，用来把深度纹理画到中间颜色目标上。
 
@@ -185,12 +186,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
                 graph.AddPass(drawOpaquePass); // 把不透明物体绘制 Pass 添加到 RenderGraph，让它在已有深度基础上写入颜色。
                 graph.AddPass(drawMultipassForwardOpaquePass);
+                var applyAerialPerspectiveAfterSky = !preserveShadingDebugOutputBeforeSceneEffects &&
+                    (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(request) ||
+                        BurtAtmosphereUtility.ShouldApplyAerialPerspectiveBeforeTransparent(request));
+
                 if (!preserveShadingDebugOutputBeforeSceneEffects && BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterOpaqueBeforeSky(request))
                 {
                     graph.AddPass(applyAtmosphereAerialPerspectivePass);
                 }
 
-                if (!preserveShadingDebugOutputBeforeSceneEffects && BurtFogUtility.ShouldUseFog(request))
+                // XRender accumulates fog from near to far as VF -> HF -> AF. Because
+                // BurtRP composites independent full-screen passes onto scene color, the
+                // equivalent execution order is the reverse: AF -> HF -> VF.
+                if (!applyAerialPerspectiveAfterSky &&
+                    !preserveShadingDebugOutputBeforeSceneEffects &&
+                    BurtFogUtility.ShouldUseFog(request))
                 {
                     graph.AddPass(applyFogPass);
                 }
@@ -204,11 +214,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 {
                     graph.AddPass(drawAtmospherePass);
                 }
-                if (!preserveShadingDebugOutputBeforeSceneEffects &&
-                    (BurtAtmosphereUtility.ShouldApplyAerialPerspectiveAfterSkyBeforeSSR(request) ||
-                        BurtAtmosphereUtility.ShouldApplyAerialPerspectiveBeforeTransparent(request)))
+                if (applyAerialPerspectiveAfterSky)
                 {
                     graph.AddPass(applyAtmosphereAerialPerspectivePass);
+                }
+
+                if (applyAerialPerspectiveAfterSky && BurtFogUtility.ShouldUseFog(request))
+                {
+                    graph.AddPass(applyFogPass);
                 }
 
                 if (!preserveShadingDebugOutputBeforeSceneEffects && BurtVolumetricFogUtility.ShouldUseVolumetricFog(request))
@@ -248,8 +261,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
             if (ShouldUsePostProcessFramework(request, asset, safeRenderOptions)) // 如果后处理框架启用且当前 request 会 FinalBlit，就插入全屏后处理链路。
             {
+                var useTemporalAAUpscale = PostProcessPass.ShouldUseTemporalAAUpscale(request, asset);
+                var useTemporalAA = PostProcessPass.ShouldUseTemporalAAPass(request, asset);
                 graph.AddPass(allocatePostProcessColorPass); // 申请后处理中间颜色 RT，避免 CameraColor 自读自写导致平台不稳定。
-                if (PostProcessPass.ShouldUseTemporalAAPass(request, asset))
+                if (useTemporalAA && !useTemporalAAUpscale)
                 {
                     graph.AddPass(temporalAAPass);
                     graph.AddPass(temporalAAFinalCopyPass);
@@ -287,6 +302,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 }
 
                 graph.AddPass(releasePostProcessColorPass); // 释放后处理中间 RT，确保临时资源生命周期清晰。
+
+                if (useTemporalAA && useTemporalAAUpscale)
+                {
+                    graph.AddPass(temporalAAPass);
+                }
             }
 
             if (!IsPreviewOrReflectionRequest(request) && ShouldUseDepthDebugView(asset)) // Preview/Reflection 不叠加场景调试视图，避免资产预览或 Probe 捕获被深度图覆盖。
@@ -312,6 +332,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             if (safeRenderOptions.ShouldFinalBlit) // 只有独立 request 或共享栈的最后一个 request 才输出到最终相机目标。
             {
                 graph.AddPass(finalBlitPass); // 把中间 CameraColor 拷贝到 request.TargetIdentifier，完成 BurtRP 内部 RT 到最终输出目标的交接。
+                graph.AddPass(releaseTemporalAAOutputPass);
             }
 
             if (useMainLightShadow) // 如果当前 request 申请过主光阴影图，就在相机渲染结束前释放它。
@@ -418,12 +439,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
         private static bool ShouldUseDepthDebugView(BurtRenderPipelineAsset asset) // 定义判断是否启用 CameraDepth 调试视图的辅助函数。
         {
-            if (asset == null) // 如果资产为空，说明当前没有 Inspector 配置来源。
-            {
-                return false; // 默认关闭调试视图，避免在异常配置下覆盖正常颜色输出。
-            }
-
-            return asset.EnableDepthDebugView; // 返回资产 Inspector 上配置的深度调试开关。
+            return (asset != null && asset.EnableDepthDebugView)
+                || BurtShadingDebugSettings.Mode == BurtShadingDebugMode.CameraDepth;
         }
 
         private static bool ShouldUseMainLightShadowDebugView( // 判断是否启用主光 shadow map 调试视图。

@@ -116,6 +116,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
+        public BurtRenderTargetHandle TemporalAAOutputTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.TemporalAAOutputName);
+                }
+
+                return ResourceRegistry.GetTemporalAAOutput();
+            }
+        }
+
         public BurtRenderTargetHandle MainLightShadowMapTarget // 定义读取 MainLightShadowMap 的快捷属性，方便 Pass 不直接操作资源名。
         {
             get // 定义属性 getter，每次访问时从资源注册表读取最新的 MainLightShadowMap。

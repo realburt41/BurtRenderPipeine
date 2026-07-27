@@ -549,8 +549,10 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     float3 HairIndirectSpecular = BurtEvaluateHairIndirectSpecular(GBufferData, GeometryData, HairEnvBRDF);
 
     Components.DiffuseColor = BurtHairAbsorptionTint(GBufferData.BaseColor);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.F0 = BurtHairSpecularF0(GBufferData);
     Components.F90 = float3(1.0f, 1.0f, 1.0f);
+#endif
     Components.DirectDiffuse = HairDirect.Diffuse;
     Components.DirectSpecular = HairDirect.Specular;
     Components.DirectLighting = Components.DirectDiffuse + Components.DirectSpecular;
@@ -559,13 +561,14 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular;
     Components.Lighting = Components.DirectLighting + Components.IndirectLighting;
 
+    Components.EnergyPreservation = 1.0f;
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.PerceptualRoughness = GBufferData.PerceptualRoughness;
     Components.SpecularAARoughness = GBufferData.PerceptualRoughness;
     Components.SpecularAANormalVariance = 0.0f;
     Components.SpecularAARoughnessDelta = 0.0f;
     Components.SpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
     Components.IndirectSpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
-    Components.EnergyPreservation = 1.0f;
     Components.SpecularOcclusion = saturate(GBufferData.Occlusion);
     Components.DirectBRDFD = HairDirect.PrimaryLobe;
     Components.DirectBRDFVisibility = 1.0f;
@@ -575,12 +578,18 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.DirectSpecularBRDF = HairDirect.SpecularBRDF;
     Components.IndirectSpecularDFG = float2(0.0f, 0.0f);
     Components.IndirectSpecularEnvBRDF = HairEnvBRDF;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.HairPrimaryLobe = HairDirect.PrimaryLobe;
     Components.HairSecondaryLobe = HairDirect.SecondaryLobe;
     Components.HairTransmissionLobe = HairDirect.TransmissionLobe;
     Components.HairScatter = HairDirect.Scatter;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.ClearCoatMask = 0.0f;
+#endif
     Components.DirectTransmission = float3(0.0f, 0.0f, 0.0f);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.SubsurfaceProfileIndex = 0.0f;
     Components.SubsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
@@ -590,14 +599,17 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.SubsurfaceTransmissionShadow = 1.0f;
     Components.SubsurfaceTransmissionThickness = 0.0f;
     Components.SubsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
+#endif
     Components.SubsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceIndirectTransmission = float3(0.0f, 0.0f, 0.0f);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.FoliageMask = 0.0f;
     Components.FoliageTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionShadow = 1.0f;
     Components.FoliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
+#endif
     return Components;
 }
 
@@ -616,8 +628,10 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     float3 HairIndirectSpecular = BurtEvaluateHairIndirectSpecular(GBufferData, GeometryData, HairEnvBRDF);
 
     Components.DiffuseColor = BurtHairAbsorptionTint(GBufferData.BaseColor);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.F0 = BurtHairSpecularF0(GBufferData);
     Components.F90 = float3(1.0f, 1.0f, 1.0f);
+#endif
     Components.DirectDiffuse = HairDirect.Diffuse;
     Components.DirectSpecular = HairDirect.Specular;
     Components.DirectLighting = Components.DirectDiffuse + Components.DirectSpecular;
@@ -629,13 +643,14 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular;
     Components.Lighting = Components.DirectLighting + Components.IndirectLighting;
 
+    Components.EnergyPreservation = 1.0f;
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.PerceptualRoughness = GBufferData.PerceptualRoughness;
     Components.SpecularAARoughness = GBufferData.PerceptualRoughness;
     Components.SpecularAANormalVariance = 0.0f;
     Components.SpecularAARoughnessDelta = 0.0f;
     Components.SpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
     Components.IndirectSpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
-    Components.EnergyPreservation = 1.0f;
     Components.SpecularOcclusion = saturate(GBufferData.Occlusion);
     Components.DirectBRDFD = HairDirect.PrimaryLobe;
     Components.DirectBRDFVisibility = 1.0f;
@@ -645,12 +660,18 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.DirectSpecularBRDF = HairDirect.SpecularBRDF;
     Components.IndirectSpecularDFG = float2(0.0f, 0.0f);
     Components.IndirectSpecularEnvBRDF = HairEnvBRDF;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.HairPrimaryLobe = HairDirect.PrimaryLobe;
     Components.HairSecondaryLobe = HairDirect.SecondaryLobe;
     Components.HairTransmissionLobe = HairDirect.TransmissionLobe;
     Components.HairScatter = HairDirect.Scatter;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.ClearCoatMask = 0.0f;
+#endif
     Components.DirectTransmission = float3(0.0f, 0.0f, 0.0f);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.SubsurfaceProfileIndex = 0.0f;
     Components.SubsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
@@ -660,14 +681,17 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.SubsurfaceTransmissionShadow = 1.0f;
     Components.SubsurfaceTransmissionThickness = 0.0f;
     Components.SubsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
+#endif
     Components.SubsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceIndirectTransmission = float3(0.0f, 0.0f, 0.0f);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.FoliageMask = 0.0f;
     Components.FoliageTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionShadow = 1.0f;
     Components.FoliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
+#endif
     return Components;
 }
 
@@ -686,8 +710,10 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     float3 HairIndirectSpecular = BurtEvaluateHairIndirectSpecular(GBufferData, GeometryData, HairEnvBRDF);
 
     Components.DiffuseColor = BurtHairAbsorptionTint(GBufferData.BaseColor);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.F0 = BurtHairSpecularF0(GBufferData);
     Components.F90 = float3(1.0f, 1.0f, 1.0f);
+#endif
     Components.DirectDiffuse = HairDirect.Diffuse;
     Components.DirectSpecular = HairDirect.Specular;
     Components.AdditionalDiffuse = HairAdditionalDirect.Diffuse;
@@ -698,13 +724,14 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.IndirectSpecular = HairIndirectSpecular;
     Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular;
     Components.Lighting = Components.DirectLighting + Components.IndirectLighting;
+    Components.EnergyPreservation = 1.0f;
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.PerceptualRoughness = GBufferData.PerceptualRoughness;
     Components.SpecularAARoughness = GBufferData.PerceptualRoughness;
     Components.SpecularAANormalVariance = 0.0f;
     Components.SpecularAARoughnessDelta = 0.0f;
     Components.SpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
     Components.IndirectSpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
-    Components.EnergyPreservation = 1.0f;
     Components.SpecularOcclusion = saturate(GBufferData.Occlusion);
     Components.DirectBRDFD = HairDirect.PrimaryLobe;
     Components.DirectBRDFVisibility = 1.0f;
@@ -714,12 +741,18 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.DirectSpecularBRDF = HairDirect.SpecularBRDF;
     Components.IndirectSpecularDFG = float2(0.0f, 0.0f);
     Components.IndirectSpecularEnvBRDF = HairEnvBRDF;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.HairPrimaryLobe = HairDirect.PrimaryLobe;
     Components.HairSecondaryLobe = HairDirect.SecondaryLobe;
     Components.HairTransmissionLobe = HairDirect.TransmissionLobe;
     Components.HairScatter = HairDirect.Scatter;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.ClearCoatMask = 0.0f;
+#endif
     Components.DirectTransmission = float3(0.0f, 0.0f, 0.0f);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.SubsurfaceProfileIndex = 0.0f;
     Components.SubsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
@@ -729,14 +762,17 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.SubsurfaceTransmissionShadow = 1.0f;
     Components.SubsurfaceTransmissionThickness = 0.0f;
     Components.SubsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
+#endif
     Components.SubsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceIndirectTransmission = float3(0.0f, 0.0f, 0.0f);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.FoliageMask = 0.0f;
     Components.FoliageTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionShadow = 1.0f;
     Components.FoliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
+#endif
     return Components;
 }
 
@@ -755,8 +791,10 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     float3 HairIndirectSpecular = BurtEvaluateHairIndirectSpecular(GBufferData, GeometryData, HairEnvBRDF);
 
     Components.DiffuseColor = BurtHairAbsorptionTint(GBufferData.BaseColor);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.F0 = BurtHairSpecularF0(GBufferData);
     Components.F90 = float3(1.0f, 1.0f, 1.0f);
+#endif
     Components.DirectDiffuse = HairDirect.Diffuse;
     Components.DirectSpecular = HairDirect.Specular;
     Components.AdditionalDiffuse = HairAdditionalDirect.Diffuse;
@@ -767,13 +805,14 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.IndirectSpecular = HairIndirectSpecular;
     Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular;
     Components.Lighting = Components.DirectLighting + Components.IndirectLighting;
+    Components.EnergyPreservation = 1.0f;
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.PerceptualRoughness = GBufferData.PerceptualRoughness;
     Components.SpecularAARoughness = GBufferData.PerceptualRoughness;
     Components.SpecularAANormalVariance = 0.0f;
     Components.SpecularAARoughnessDelta = 0.0f;
     Components.SpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
     Components.IndirectSpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
-    Components.EnergyPreservation = 1.0f;
     Components.SpecularOcclusion = saturate(GBufferData.Occlusion);
     Components.DirectBRDFD = HairDirect.PrimaryLobe;
     Components.DirectBRDFVisibility = 1.0f;
@@ -783,12 +822,18 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.DirectSpecularBRDF = HairDirect.SpecularBRDF;
     Components.IndirectSpecularDFG = float2(0.0f, 0.0f);
     Components.IndirectSpecularEnvBRDF = HairEnvBRDF;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.HairPrimaryLobe = HairDirect.PrimaryLobe;
     Components.HairSecondaryLobe = HairDirect.SecondaryLobe;
     Components.HairTransmissionLobe = HairDirect.TransmissionLobe;
     Components.HairScatter = HairDirect.Scatter;
+#endif
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
     Components.ClearCoatMask = 0.0f;
+#endif
     Components.DirectTransmission = float3(0.0f, 0.0f, 0.0f);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.SubsurfaceProfileIndex = 0.0f;
     Components.SubsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
@@ -798,14 +843,17 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     Components.SubsurfaceTransmissionShadow = 1.0f;
     Components.SubsurfaceTransmissionThickness = 0.0f;
     Components.SubsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
+#endif
     Components.SubsurfaceIndirect = float3(0.0f, 0.0f, 0.0f);
     Components.SubsurfaceIndirectTransmission = float3(0.0f, 0.0f, 0.0f);
+#if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
     Components.FoliageMask = 0.0f;
     Components.FoliageTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageDirectTransmission = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
     Components.FoliageTransmissionShadow = 1.0f;
     Components.FoliageSpecularBRDF = float3(0.0f, 0.0f, 0.0f);
+#endif
     return Components;
 }
 

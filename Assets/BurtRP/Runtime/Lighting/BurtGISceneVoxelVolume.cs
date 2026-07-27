@@ -1228,6 +1228,52 @@ namespace Burt.RenderPipeline
             cmd.SetComputeIntParam(shader, ClipmapValidMaskId, (int)validMask);
         }
 
+        public static void BindTranslucencyTraceCompute(
+            CommandBuffer cmd,
+            ComputeShader shader,
+            int kernel,
+            Camera camera,
+            Vector4 baseCenterExtent,
+            RenderTargetIdentifier fallbackGeometry,
+            RenderTargetIdentifier fallbackLighting)
+        {
+            if (cmd == null || shader == null)
+            {
+                return;
+            }
+
+            BindFallbackTranslucencyTraceTextures(cmd, shader, kernel, fallbackGeometry, fallbackLighting);
+
+            var centerExtents = new Vector4[ClipmapCount];
+            for (var level = 0; level < ClipmapCount; ++level)
+            {
+                centerExtents[level] = baseCenterExtent;
+            }
+
+            uint validMask = 1u;
+            if (camera != null && CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
+            {
+                for (var level = 1; level < ClipmapCount; ++level)
+                {
+                    var bounds = state.Bounds[level];
+                    centerExtents[level] = new Vector4(bounds.center.x, bounds.center.y, bounds.center.z, bounds.extents.x);
+                    var resources = state.Resources[level];
+                    var levelValid = (state.ValidMask & (1u << level)) != 0u && resources != null && resources.IsValid;
+                    if (!levelValid)
+                    {
+                        continue;
+                    }
+
+                    validMask |= 1u << level;
+                    cmd.SetComputeTextureParam(shader, kernel, ClipmapGeometryTextureIds[level], resources.Geometry);
+                    cmd.SetComputeTextureParam(shader, kernel, ClipmapLightingTextureIds[level], resources.Lighting);
+                }
+            }
+
+            cmd.SetComputeVectorArrayParam(shader, ClipmapCenterExtentId, centerExtents);
+            cmd.SetComputeIntParam(shader, ClipmapValidMaskId, (int)validMask);
+        }
+
         public static void BindTraceFallbackCompute(CommandBuffer cmd, ComputeShader shader, int kernel)
         {
             if (cmd == null || shader == null)
@@ -1259,6 +1305,20 @@ namespace Burt.RenderPipeline
                 cmd.SetComputeTextureParam(shader, kernel, ClipmapGeometryTextureIds[level], fallbackGeometry);
                 cmd.SetComputeTextureParam(shader, kernel, ClipmapRadianceTextureIds[level], fallbackRadiance);
                 cmd.SetComputeTextureParam(shader, kernel, ClipmapOccupancyTextureIds[level], fallbackOccupancy);
+                cmd.SetComputeTextureParam(shader, kernel, ClipmapLightingTextureIds[level], fallbackLighting);
+            }
+        }
+
+        private static void BindFallbackTranslucencyTraceTextures(
+            CommandBuffer cmd,
+            ComputeShader shader,
+            int kernel,
+            RenderTargetIdentifier fallbackGeometry,
+            RenderTargetIdentifier fallbackLighting)
+        {
+            for (var level = 1; level < ClipmapCount; ++level)
+            {
+                cmd.SetComputeTextureParam(shader, kernel, ClipmapGeometryTextureIds[level], fallbackGeometry);
                 cmd.SetComputeTextureParam(shader, kernel, ClipmapLightingTextureIds[level], fallbackLighting);
             }
         }

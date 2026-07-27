@@ -417,6 +417,12 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Atmosphere Ground Blend";
                 case BurtShadingDebugMode.AtmosphereViewDirection:
                     return "Atmosphere View Direction";
+                case BurtShadingDebugMode.AtmosphereLutSkyView:
+                    return "Atmosphere LUT Sky View";
+                case BurtShadingDebugMode.AtmosphereLutMultipleScattering:
+                    return "Atmosphere LUT Multiple Scattering";
+                case BurtShadingDebugMode.AtmosphereLutHorizontalScattering:
+                    return "Atmosphere LUT Horizontal Scattering";
                 case BurtShadingDebugMode.FogAmount:
                     return "Fog Amount";
                 case BurtShadingDebugMode.FogTransmittance:
@@ -604,30 +610,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public BurtShadingDebugMode[] Modes { get; } // 当前分类的 Debug 模式列表。
 
-        public int VisibleModeCount
-        {
-            get
-            {
-                var count = 0;
-                foreach (var mode in Modes)
-                {
-                    if (BurtShadingDebugSettings.IsImportantMode(mode))
-                    {
-                        count++;
-                    }
-                }
-
-                return count;
-            }
-        }
+        public int VisibleModeCount => Modes.Length;
 
         public bool Contains(BurtShadingDebugMode mode) // 判断当前模式是否属于这个分类，用来高亮对应 Dropdown。
         {
-            if (!BurtShadingDebugSettings.IsImportantMode(mode))
-            {
-                return false;
-            }
-
             foreach (var candidate in Modes) // 遍历数组，保持 Unity 旧版本兼容，不依赖 LINQ。
             {
                 if (candidate == mode) // 命中当前模式。
@@ -642,11 +628,6 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
     internal static class BurtShadingDebugGroups // BurtRP 的分类表，结构参考 XRender Editor/XShaderDebug/Groups 的多 Dropdown 注册方式。
     {
-        public static readonly BurtShadingDebugGroup General = new BurtShadingDebugGroup("General", "Off", new[] // 通用开关分类，用来快速关闭 Debug。
-        {
-            BurtShadingDebugMode.None // 正常渲染模式。
-        });
-
         public static readonly BurtShadingDebugGroup Material = new BurtShadingDebugGroup("Material / Generic Data", "Material", new[] // 基础材质输入和 XRender GenericData 派生值。
         {
             BurtShadingDebugMode.Albedo, // BaseMap 与 BaseColor 合成后的基础色。
@@ -826,124 +807,6 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.CameraDepth // CameraDepth 全屏 Debug。
         });
 
-        public static readonly BurtShadingDebugGroup PostProcess = new BurtShadingDebugGroup("Post Process", "Post FX", new[] // SSAO、SSR、TAA、Bloom、Auto Exposure 等后处理相关调试统一入口。
-        {
-            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw,
-            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionFinal,
-            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionOverlay,
-            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionHistory,
-            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDifference,
-            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDepthValidity,
-            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionSurfaceStability,
-            BurtShadingDebugMode.ScreenSpaceAmbientOcclusionDiagnosticCompare,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalConfidence,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalRejection,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHistory,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDifference,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationLeakGuard,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiagnosticCompare,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationConfidence,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheSkyAO,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStats,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheVisualize,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRadianceCacheStatus,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbePlacement,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationScreenProbeTraceVisualize,
-            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationSceneVoxelOccupancy,
-            BurtShadingDebugMode.GIProbeIrradiance,
-            BurtShadingDebugMode.GIProbeValidity,
-            BurtShadingDebugMode.GIProbeSkyVisibility,
-            BurtShadingDebugMode.GIProbeRuntimeInfo,
-            BurtShadingDebugMode.BloomPrefilter,
-            BurtShadingDebugMode.BloomFinalBloom,
-            BurtShadingDebugMode.BloomMip1,
-            BurtShadingDebugMode.BloomMip2,
-            BurtShadingDebugMode.BloomMip3,
-            BurtShadingDebugMode.BloomMip4,
-            BurtShadingDebugMode.BloomMip5,
-            BurtShadingDebugMode.BloomAlpha,
-            BurtShadingDebugMode.BloomThresholdMask,
-            BurtShadingDebugMode.AutoExposureLuminance,
-            BurtShadingDebugMode.AutoExposureMeteringWeight,
-            BurtShadingDebugMode.AutoExposureHistogramRange,
-            BurtShadingDebugMode.ScreenSpaceReflectionRawHitMask,
-            BurtShadingDebugMode.ScreenSpaceReflectionHitMask,
-            BurtShadingDebugMode.ScreenSpaceReflectionHitUV,
-            BurtShadingDebugMode.ScreenSpaceReflectionStepCount,
-            BurtShadingDebugMode.ScreenSpaceReflectionColor,
-            BurtShadingDebugMode.ScreenSpaceReflectionConfidence,
-            BurtShadingDebugMode.ScreenSpaceReflectionDepthDelta,
-            BurtShadingDebugMode.ScreenSpaceReflectionWorldError,
-            BurtShadingDebugMode.ScreenSpaceReflectionDenoisedColor,
-            BurtShadingDebugMode.ScreenSpaceReflectionTemporalColor,
-            BurtShadingDebugMode.ScreenSpaceReflectionResolveAlpha,
-            BurtShadingDebugMode.ScreenSpaceReflectionVisibilityAlpha,
-            BurtShadingDebugMode.ScreenSpaceReflectionMaterialWeight,
-            BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMip,
-            BurtShadingDebugMode.ScreenSpaceReflectionResolvedColor,
-            BurtShadingDebugMode.ScreenSpaceReflectionTemporalAlpha,
-            BurtShadingDebugMode.ScreenSpaceReflectionRoughnessMipAlpha,
-            BurtShadingDebugMode.ScreenSpaceReflectionReceiverContinuity,
-            BurtShadingDebugMode.ScreenSpaceReflectionFallbackSpecular,
-            BurtShadingDebugMode.ScreenSpaceReflectionCompositeDelta,
-            BurtShadingDebugMode.ScreenSpaceReflectionCameraColor,
-            BurtShadingDebugMode.ScreenSpaceReflectionDepthQuality,
-            BurtShadingDebugMode.ScreenSpaceReflectionWorldQuality,
-            BurtShadingDebugMode.ScreenSpaceReflectionResolveQuality,
-            BurtShadingDebugMode.ScreenSpaceReflectionSurfaceSupport,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipCandidate,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZMipLevel,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZDivergence,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZMissedHits,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZRawHitMiss,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZResolvedHitMiss,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZVisibilityMiss,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZSkipUsed,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZProbeBlocked,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZStepCompare,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZWorkCompare,
-            BurtShadingDebugMode.ScreenSpaceReflectionHiZStepSaved,
-            BurtShadingDebugMode.TemporalAAHistory,
-            BurtShadingDebugMode.TemporalAAFeedback,
-            BurtShadingDebugMode.TemporalAARejection,
-            BurtShadingDebugMode.TemporalAARejectionReasons,
-            BurtShadingDebugMode.TemporalAAHistoryUV,
-            BurtShadingDebugMode.TemporalAADifference,
-            BurtShadingDebugMode.TemporalAAVelocity,
-            BurtShadingDebugMode.TemporalAAConfidence,
-            BurtShadingDebugMode.TemporalAACurrentDepth,
-            BurtShadingDebugMode.TemporalAADepthHistory,
-            BurtShadingDebugMode.TemporalAADepthDelta,
-            BurtShadingDebugMode.TemporalAAParallaxRejection,
-            BurtShadingDebugMode.TemporalAAFeedbackWeight,
-            BurtShadingDebugMode.TemporalAACurrentColor,
-            BurtShadingDebugMode.TemporalAAResolvedColor,
-            BurtShadingDebugMode.TemporalAARawVelocity,
-            BurtShadingDebugMode.TemporalAAUpdatedConfidence,
-            BurtShadingDebugMode.TemporalAAStaticRelax,
-            BurtShadingDebugMode.TemporalAALumaRejection,
-            BurtShadingDebugMode.TemporalAAClipRejection,
-            BurtShadingDebugMode.TemporalAADepthRejection,
-            BurtShadingDebugMode.TemporalAANormalRejection,
-            BurtShadingDebugMode.TemporalAAMotionRejection,
-            BurtShadingDebugMode.TemporalAAConfidenceGate,
-            BurtShadingDebugMode.TemporalAAVelocitySource,
-            BurtShadingDebugMode.TemporalAAGBufferNormal,
-            BurtShadingDebugMode.TemporalAAAntiFlicker,
-            BurtShadingDebugMode.TemporalAAHistoryCoverage,
-            BurtShadingDebugMode.TemporalAAPrevUseCount,
-            BurtShadingDebugMode.TemporalAAResponsiveMask,
-            BurtShadingDebugMode.TemporalAAMetadata,
-            BurtShadingDebugMode.TemporalAAObjectMotionMask,
-            BurtShadingDebugMode.TemporalAAUpscaleState,
-            BurtShadingDebugMode.TemporalAAStencilMask
-        });
-
         public static readonly BurtShadingDebugGroup ScreenSpaceAmbientOcclusion = new BurtShadingDebugGroup("Screen Space Ambient Occlusion", "SSAO", new[] // SSAO 后处理调试。
         {
             BurtShadingDebugMode.ScreenSpaceAmbientOcclusionRaw,
@@ -1053,7 +916,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.AtmosphereSunHalo,
             BurtShadingDebugMode.AtmosphereHorizon,
             BurtShadingDebugMode.AtmosphereGroundBlend,
-            BurtShadingDebugMode.AtmosphereViewDirection
+            BurtShadingDebugMode.AtmosphereViewDirection,
+            BurtShadingDebugMode.AtmosphereLutSkyView,
+            BurtShadingDebugMode.AtmosphereLutMultipleScattering,
+            BurtShadingDebugMode.AtmosphereLutHorizontalScattering
         });
 
         public static readonly BurtShadingDebugGroup Fog = new BurtShadingDebugGroup("Fog", "Fog", new[]
@@ -1616,11 +1482,6 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
             foreach (var mode in group.Modes) // 遍历当前分类下的所有模式。
             {
-                if (!BurtShadingDebugSettings.IsImportantMode(mode))
-                {
-                    continue;
-                }
-
                 DrawMode(mode); // 绘制单个模式项。
             }
 
@@ -1738,7 +1599,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             EditorGUILayout.LabelField("Scale Height", "Rayleigh " + Format(snapshot.RayleighScaleHeight) + "km   Mie " + Format(snapshot.MieScaleHeight) + "km");
             EditorGUILayout.LabelField("Planet", "Radius " + Format(snapshot.PlanetRadius) + "km   Atmosphere " + Format(snapshot.AtmosphereHeight) + "km");
             EditorGUILayout.LabelField("Sun", snapshot.SunSource + "   Intensity " + Format(snapshot.SunIntensity) + "   Clamp " + Format(snapshot.TonemapSafeSunIntensity));
-            EditorGUILayout.LabelField("Sun Disk", "Size " + Format(snapshot.SunDiskSize) + "   Intensity " + Format(snapshot.SunDiskIntensity));
+            EditorGUILayout.LabelField("Sun Disk", "Angular Diameter " + Format(snapshot.SunDiskSize) + " deg   Intensity " + Format(snapshot.SunDiskIntensity));
             EditorGUILayout.LabelField("Sun Halo", "Size " + Format(snapshot.SunHaloSize) + "   Intensity " + Format(snapshot.SunHaloIntensity));
             EditorGUILayout.LabelField("Horizon", "Intensity " + Format(snapshot.HorizonIntensity) + "   Falloff " + Format(snapshot.HorizonFalloff) + "   Sunset " + Format(snapshot.HorizonSunsetInfluence));
             EditorGUILayout.LabelField("Horizon Color", FormatColor(snapshot.HorizonColor));
@@ -1747,7 +1608,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             EditorGUILayout.LabelField("Sky Tint", FormatColor(snapshot.SkyTint));
             EditorGUILayout.LabelField("Exposure EV", Format(snapshot.ExposureCompensation));
             EditorGUILayout.LabelField("Aerial", snapshot.AerialPerspectiveEnabled + "   " + snapshot.AerialPerspectivePlacement + "   " + snapshot.FogInteraction);
-            EditorGUILayout.LabelField("Aerial Shape", "Intensity " + Format(snapshot.AerialPerspectiveIntensity) + "   Distance " + Format(snapshot.AerialPerspectiveDistance));
+            EditorGUILayout.LabelField("Aerial Fallback Shape", "Intensity " + Format(snapshot.AerialPerspectiveIntensity) + "   Distance " + Format(snapshot.AerialPerspectiveDistance));
             EditorGUILayout.LabelField("Aerial Fade", Format(snapshot.AerialPerspectiveNearFadeStart) + " / " + Format(snapshot.AerialPerspectiveNearFadeEnd) + "   Max " + Format(snapshot.AerialPerspectiveMaxOpacity));
             EditorGUILayout.LabelField("Formula", snapshot.SkyFormula + " / " + snapshot.AerialFormula);
 
@@ -1766,11 +1627,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 "ScaleHeightKm: rayleigh=" + Format(snapshot.RayleighScaleHeight) + " mie=" + Format(snapshot.MieScaleHeight) + "\n" +
                 "PlanetKm: radius=" + Format(snapshot.PlanetRadius) + " atmosphereHeight=" + Format(snapshot.AtmosphereHeight) + "\n" +
                 "Sun: source=" + snapshot.SunSource + " intensity=" + Format(snapshot.SunIntensity) + " clamp=" + Format(snapshot.TonemapSafeSunIntensity) + " customDirection=" + FormatVector(snapshot.CustomSunDirection) + "\n" +
-                "SunDisk: size=" + Format(snapshot.SunDiskSize) + " intensity=" + Format(snapshot.SunDiskIntensity) + "\n" +
+                "SunDisk: angularDiameterDeg=" + Format(snapshot.SunDiskSize) + " intensity=" + Format(snapshot.SunDiskIntensity) + "\n" +
                 "SunHalo: size=" + Format(snapshot.SunHaloSize) + " intensity=" + Format(snapshot.SunHaloIntensity) + "\n" +
                 "Art: horizonIntensity=" + Format(snapshot.HorizonIntensity) + " horizonFalloff=" + Format(snapshot.HorizonFalloff) + " horizonSunsetInfluence=" + Format(snapshot.HorizonSunsetInfluence) + " ground=" + Format(snapshot.GroundContribution) + " groundBlend=" + Format(snapshot.GroundBlendStart) + "/" + Format(snapshot.GroundBlendEnd) + " exposureEV=" + Format(snapshot.ExposureCompensation) + "\n" +
                 "Tint: sky=" + FormatColor(snapshot.SkyTint) + " horizon=" + FormatColor(snapshot.HorizonColor) + " sunset=" + FormatColor(snapshot.HorizonSunsetColor) + " ground=" + FormatColor(snapshot.GroundColor) + " aerial=" + FormatColor(snapshot.AerialPerspectiveTint) + "\n" +
-                "Aerial: enabled=" + snapshot.AerialPerspectiveEnabled + " intensity=" + Format(snapshot.AerialPerspectiveIntensity) + " distance=" + Format(snapshot.AerialPerspectiveDistance) + " heightFalloff=" + Format(snapshot.AerialPerspectiveHeightFalloff) + "\n" +
+                "Aerial: enabled=" + snapshot.AerialPerspectiveEnabled + " fallbackIntensity=" + Format(snapshot.AerialPerspectiveIntensity) + " fallbackDistance=" + Format(snapshot.AerialPerspectiveDistance) + " heightFalloff=" + Format(snapshot.AerialPerspectiveHeightFalloff) + "\n" +
                 "AerialFade: near=" + Format(snapshot.AerialPerspectiveNearFadeStart) + "/" + Format(snapshot.AerialPerspectiveNearFadeEnd) + " maxOpacity=" + Format(snapshot.AerialPerspectiveMaxOpacity) + "\n" +
                 "AerialRouting: placement=" + snapshot.AerialPerspectivePlacement + " fogInteraction=" + snapshot.FogInteraction + "\n" +
                 "Formula: sky=" + snapshot.SkyFormula + " aerial=" + snapshot.AerialFormula;
@@ -1930,133 +1791,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
     internal static class BurtShadingDebugOverlayUtility // Overlay 和 fallback window 共用的小工具。
     {
-        public static void SyncExistingDebugViews(BurtShadingDebugMode mode) // 把 enum 模式同步到 BurtRP 既有全屏 Debug bool。
-        {
-            var asset = GetActiveBurtAsset(); // 获取当前生效的 BurtRP Asset。
-
-            if (asset == null) // 非 BurtRP 或未绑定资产时无法同步。
-            {
-                return; // 直接返回，Shading Debug 的 shader 全局参数仍然有效。
-            }
-
-            var serializedAsset = new SerializedObject(asset); // 通过 SerializedObject 访问私有 SerializeField，避免改运行时 API。
-            SetBool(serializedAsset, "enableDepthDebugView", mode == BurtShadingDebugMode.CameraDepth); // CameraDepth 模式开启现有深度调试。
-            SetEnum(serializedAsset, "gBufferDebugViewMode", (int)ResolveGBufferDebugViewMode(mode)); // GBuffer 分类同步到资产上的全屏 GBuffer Debug 模式，让 RenderGraph 能插入 Burt Debug GBuffer。
-            serializedAsset.ApplyModifiedPropertiesWithoutUndo(); // Debug 切换不写 Undo 栈，避免污染用户操作历史。
-            EditorUtility.SetDirty(asset); // 标记资产已更新，Inspector 和渲染流程能看到变化。
-        }
-
-        public static void SetMode(BurtShadingDebugMode mode) // 设置 shading debug 模式并同步相关状态。
+        public static void SetMode(BurtShadingDebugMode mode) // 设置瞬时 shading debug 模式，不修改 Pipeline Asset。
         {
             var normalizedMode = BurtShadingDebugSettings.NormalizeMode(mode);
             BurtShadingDebugSettings.Mode = normalizedMode; // 写入运行时静态状态，并上传 shader 全局参数。
-            SyncExistingDebugViews(normalizedMode); // 同步 BurtRP Asset 上已有的 Depth / Shadow / GBuffer 全屏调试开关。
             BurtShadingDebugGroupDropdown.UpdateAllVisualStates(); // 刷新所有分类按钮的高亮和文本。
             SceneView.RepaintAll(); // 立即刷新 SceneView，避免等待下一次交互才看到结果。
         }
 
-        public static BurtRenderPipelineAsset GetActiveBurtAsset() // 获取当前 Unity 设置中的 BurtRP Asset。
-        {
-            var asset = GraphicsSettings.currentRenderPipeline as BurtRenderPipelineAsset; // 优先读取 GraphicsSettings 当前管线。
-
-            if (asset != null) // 如果项目级设置里已经是 BurtRP，直接返回。
-            {
-                return asset; // 返回当前 BurtRP Asset。
-            }
-
-            return QualitySettings.renderPipeline as BurtRenderPipelineAsset; // 否则尝试 QualitySettings 覆盖的渲染管线。
-        }
-
-        private static void SetBool(SerializedObject serializedObject, string propertyName, bool value) // 安全写入 bool SerializeField。
-        {
-            var property = serializedObject.FindProperty(propertyName); // 查找目标字段。
-
-            if (property != null) // 字段存在才写入，兼容后续资产字段重命名或裁剪。
-            {
-                property.boolValue = value; // 设置 bool 值。
-            }
-        }
-
-        private static void SetEnum(SerializedObject serializedObject, string propertyName, int value) // 安全写入 enum SerializeField。
-        {
-            var property = serializedObject.FindProperty(propertyName); // 查找目标字段。
-
-            if (property != null) // 字段存在才写入，兼容后续资产字段重命名或裁剪。
-            {
-                property.intValue = value; // 写入枚举底层整数值，避免后续 enum 显式数值和 Inspector 索引不一致时同步错误。
-            }
-        }
-
-        private static BurtGBufferDebugViewMode ResolveGBufferDebugViewMode(BurtShadingDebugMode mode) // 把 Overlay 的 GBuffer 分类映射到 BurtRenderPipelineAsset 的全屏 GBuffer Debug 模式。
-        {
-            switch (mode) // 逐项映射，避免非 GBuffer Debug 模式误触发全屏 GBuffer Pass。
-            {
-                case BurtShadingDebugMode.GBufferBaseColor: // Overlay 选择 GBuffer Base Color。
-                    return BurtGBufferDebugViewMode.BaseColor; // 资产同步为 BaseColor。
-                case BurtShadingDebugMode.GBufferNormalWS: // Overlay 选择 GBuffer Direction WS。
-                    return BurtGBufferDebugViewMode.NormalWS; // 资产同步为 NormalWS。
-                case BurtShadingDebugMode.GBufferMetallic: // Overlay 选择 GBuffer Material Channel。
-                    return BurtGBufferDebugViewMode.Metallic; // 资产同步为 Metallic。
-                case BurtShadingDebugMode.GBufferSmoothness: // Overlay 选择 GBuffer Smoothness。
-                    return BurtGBufferDebugViewMode.Smoothness; // 资产同步为 Smoothness。
-                case BurtShadingDebugMode.GBufferOcclusion: // Overlay 选择 GBuffer Occlusion。
-                    return BurtGBufferDebugViewMode.Occlusion; // 资产同步为 Occlusion。
-                case BurtShadingDebugMode.GBufferReflectance: // Overlay 选择 GBuffer Reflectance。
-                    return BurtGBufferDebugViewMode.Reflectance; // 资产同步为 Reflectance。
-                case BurtShadingDebugMode.GBufferRoughness: // Overlay 选择 GBuffer Roughness。
-                    return BurtGBufferDebugViewMode.Roughness; // 资产同步为 Roughness。
-                case BurtShadingDebugMode.GBufferDiffuseColor: // Overlay 选择 GBuffer Diffuse Color。
-                    return BurtGBufferDebugViewMode.DiffuseColor; // 资产同步为 DiffuseColor。
-                case BurtShadingDebugMode.GBufferHairStrandDirection: // Overlay 选择 Hair strand direction。
-                    return BurtGBufferDebugViewMode.HairStrandDirection; // 资产同步为 HairStrandDirection。
-                case BurtShadingDebugMode.GBufferHairScatter: // Overlay 选择 Hair scatter。
-                    return BurtGBufferDebugViewMode.HairScatter; // 资产同步为 HairScatter。
-                case BurtShadingDebugMode.GBufferHairShift: // Overlay 选择 Hair longitudinal shift scale。
-                    return BurtGBufferDebugViewMode.HairShift; // 资产同步为 HairShift。
-                case BurtShadingDebugMode.GBufferClearCoatMask:
-                    return BurtGBufferDebugViewMode.ClearCoatMask;
-                case BurtShadingDebugMode.GBufferClearCoatNormalWS:
-                    return BurtGBufferDebugViewMode.ClearCoatNormalWS;
-                case BurtShadingDebugMode.GBufferClearCoatRoughness:
-                    return BurtGBufferDebugViewMode.ClearCoatRoughness;
-                case BurtShadingDebugMode.GBufferSubsurfaceStrength:
-                    return BurtGBufferDebugViewMode.SubsurfaceStrength;
-                case BurtShadingDebugMode.GBufferSubsurfaceThickness:
-                    return BurtGBufferDebugViewMode.SubsurfaceThickness;
-                case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
-                    return BurtGBufferDebugViewMode.SubsurfaceProfileIndex;
-                case BurtShadingDebugMode.GBufferFoliageTransmissionColor:
-                    return BurtGBufferDebugViewMode.FoliageTransmissionColor;
-                case BurtShadingDebugMode.GBufferFoliageTransmissionWeight:
-                    return BurtGBufferDebugViewMode.FoliageTransmissionWeight;
-                case BurtShadingDebugMode.GBufferFoliageThickness:
-                    return BurtGBufferDebugViewMode.FoliageThickness;
-                case BurtShadingDebugMode.GBufferFoliageTransmissionNdotL:
-                    return BurtGBufferDebugViewMode.FoliageTransmissionNdotL;
-                case BurtShadingDebugMode.GBufferFoliageSpecularScale:
-                    return BurtGBufferDebugViewMode.FoliageSpecularScale;
-                case BurtShadingDebugMode.GBufferFoliageScreenSpaceShadowIntensity:
-                    return BurtGBufferDebugViewMode.FoliageScreenSpaceShadowIntensity;
-                case BurtShadingDebugMode.GBufferGrassIsGrass:
-                    return BurtGBufferDebugViewMode.GrassIsGrass;
-                case BurtShadingDebugMode.GBufferGrassSSSIntensity:
-                    return BurtGBufferDebugViewMode.GrassSSSIntensity;
-                case BurtShadingDebugMode.GBufferGrassSpecularMultiply:
-                    return BurtGBufferDebugViewMode.GrassSpecularMultiply;
-                case BurtShadingDebugMode.GBufferGrassScreenSpaceShadowIntensity:
-                    return BurtGBufferDebugViewMode.GrassScreenSpaceShadowIntensity;
-                case BurtShadingDebugMode.GBufferStencilRaw:
-                    return BurtGBufferDebugViewMode.StencilRaw;
-                case BurtShadingDebugMode.GBufferStencilShadingModel:
-                    return BurtGBufferDebugViewMode.StencilShadingModel;
-                case BurtShadingDebugMode.GBufferAnisotropy:
-                    return BurtGBufferDebugViewMode.Anisotropy;
-                case BurtShadingDebugMode.GBufferTangentWS:
-                    return BurtGBufferDebugViewMode.TangentWS;
-                default: // 其他 Overlay 模式不应该显示真实 GBuffer。
-                    return BurtGBufferDebugViewMode.Disabled; // 资产同步为 Disabled，避免切换到 Lighting/Material 后 GBuffer Debug 残留。
-            }
-        }
     }
 
 }

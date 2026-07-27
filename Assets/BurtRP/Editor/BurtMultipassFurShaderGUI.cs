@@ -89,6 +89,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty furBlurEnabled;
         private MaterialProperty furBlurDistance;
         private MaterialProperty alphaClip;
+        private MaterialProperty responsiveAA;
         private MaterialProperty cutoff;
         private MaterialProperty furScale;
         private MaterialProperty furMaxCount;
@@ -193,6 +194,7 @@ namespace Burt.RenderPipeline.Editor
             furBlurEnabled = Find("_FurBlurEnabled");
             furBlurDistance = Find("_FurBlurDistance");
             alphaClip = Find("_AlphaClip");
+            responsiveAA = Find("_ResponsiveAA");
             cutoff = Find("_Cutoff");
             furScale = Find("_FurScale");
             furMaxCount = Find("_FurMaxCount");
@@ -222,6 +224,7 @@ namespace Burt.RenderPipeline.Editor
             }
 
             DrawAlphaClipProperty();
+            DrawProperty(responsiveAA);
             if (cutoff != null)
             {
                 bool showCutoff = alphaClip == null || alphaClip.floatValue >= 0.5f;
@@ -573,6 +576,7 @@ namespace Burt.RenderPipeline.Editor
             BurtShadingModelIds.ApplyMotionVectorStencilProperties(material);
             material.SetShaderPassEnabled("BurtDepthOnly", true);
             material.SetShaderPassEnabled("BurtMotionVectors", true);
+            material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
             material.SetShaderPassEnabled("BurtGBuffer", true);
             material.SetShaderPassEnabled("ShadowCaster", true);
             material.SetShaderPassEnabled("BurtForward", true);
