@@ -44,6 +44,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty flowmapIntensity;
         private MaterialProperty cull;
         private MaterialProperty responsiveAA;
+        private MaterialProperty ignoreFog;
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
@@ -77,6 +78,14 @@ namespace Burt.RenderPipeline.Editor
             SetFloatIfPresent(material, "_ZWrite", 0.0f);
             SetFloatIfPresent(material, "_ZTest", (float)CompareFunction.LessEqual);
             SetFloatIfPresent(material, "_Cull", (float)CullMode.Off);
+            if (material.HasProperty("_IgnoreFog") && material.GetFloat("_IgnoreFog") >= 0.5f)
+            {
+                material.EnableKeyword("BURT_IGNORE_FOG");
+            }
+            else
+            {
+                material.DisableKeyword("BURT_IGNORE_FOG");
+            }
 
             material.SetOverrideTag("RenderType", "Transparent");
             material.SetOverrideTag("Queue", "Transparent");
@@ -111,6 +120,7 @@ namespace Burt.RenderPipeline.Editor
             flowmapIntensity = Find("_FlowmapIntensity");
             cull = Find("_Cull");
             responsiveAA = Find("_ResponsiveAA");
+            ignoreFog = Find("_IgnoreFog");
         }
 
         private MaterialProperty Find(string propertyName)
@@ -144,6 +154,7 @@ namespace Burt.RenderPipeline.Editor
                 }
             }
 
+            BurtShaderGUIUtility.DrawProperty(materialEditor, ignoreFog);
             BurtShaderGUIUtility.EndSection();
         }
 

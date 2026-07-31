@@ -1427,6 +1427,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
 
         public BurtRenderBufferHandle ClusterLightOffsetBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName);
 
+        public BurtRenderBufferHandle PunctualTileIdBuffer => GetBuffer(BurtRenderGraphResourceRegistry.PunctualTileIdBufferName);
+
         public BurtRenderBufferHandle ScreenSpaceSubsurfaceBurleyArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName);
 
         public BurtRenderBufferHandle ScreenSpaceSubsurfaceBurleyGroupBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName);

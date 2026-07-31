@@ -30,6 +30,8 @@ namespace Burt.RenderPipeline
 
         private readonly List<BurtRenderRequest> requests = new(); // 缓存当前帧创建出的所有有效 request，后续先排序再执行。
 
+        private readonly List<Camera> legacyCameraList = new(); // 复用旧 Camera[] 入口需要的列表，避免每帧分配。
+
         private readonly BurtRenderFrame renderFrame = new(); // 缓存当前帧的 Frame/Stack 分组快照；现阶段只用于诊断，不改变渲染顺序。
 
         // BurtRenderPipeline 构造函数。
@@ -58,8 +60,13 @@ namespace Burt.RenderPipeline
         // Unity 旧版渲染入口。
         protected override void Render(ScriptableRenderContext context, Camera[] cameras)
         {
-            // 执行共享的渲染逻辑。
-            RenderCameras(context, cameras);
+            legacyCameraList.Clear();
+            if (cameras != null)
+            {
+                legacyCameraList.AddRange(cameras);
+            }
+
+            RenderCameras(context, legacyCameraList);
         }
 
 #pragma warning restore 0618
@@ -95,65 +102,44 @@ namespace Burt.RenderPipeline
             base.Dispose(disposing);
         }
 
-        private void RenderCameras(ScriptableRenderContext context, Camera[] cameras)
-        {
-            // 清空上一帧的 request 列表。
-            requests.Clear();
-            avatarDecalPositionMapManager.ExecutePending(context);
-            avatarDecalManager.ExecutePending(context);
-
-            // 遍历 Unity 传入的相机数组。
-            foreach (var camera in cameras)
-            {
-                // 从当前相机创建 BurtRenderRequest。
-                var request = BurtRenderRequest.CreateCameraRequest(context, camera, asset);
-
-                // 如果 request 无效，就不加入列表。
-                if (!request.IsValid)
-                {
-                    // 跳过当前相机。
-                    continue;
-                }
-
-                request.SetGraphAssembler(ResolveGraphAssembler(request)); // 根据管线资产和 request 类型给当前 request 指定对应渲染图组装器。
-
-                // 把有效 request 加入列表。
-                requests.Add(request);
-            }
-
-            // 执行所有 request。
-            ExecuteRequests(context);
-        }
-
         // 渲染 List<Camera> 的共享逻辑。
         private void RenderCameras(ScriptableRenderContext context, List<Camera> cameras)
         {
-            // 清空上一帧的 request 列表。
-            requests.Clear();
-            avatarDecalPositionMapManager.ExecutePending(context);
-            avatarDecalManager.ExecutePending(context);
-
-            // 遍历 Unity 传入的相机列表。
-            foreach (var camera in cameras)
+            var safeCameras = cameras ?? legacyCameraList;
+            BeginContextRendering(context, safeCameras);
+            try
             {
-                // 从当前相机创建 BurtRenderRequest。
-                var request = BurtRenderRequest.CreateCameraRequest(context, camera, asset);
+                // 清空上一帧的 request 列表。
+                requests.Clear();
+                avatarDecalPositionMapManager.ExecutePending(context);
+                avatarDecalManager.ExecutePending(context);
 
-                // 如果 request 无效，就不加入列表。
-                if (!request.IsValid)
+                // 遍历 Unity 传入的相机列表。
+                foreach (var camera in safeCameras)
                 {
-                    // 跳过当前相机。
-                    continue;
+                    // 准备阶段只收集调度元数据；真正 Cull 会在 BeginCameraRendering 之后执行。
+                    var request = BurtRenderRequest.PrepareCameraRequest(camera, asset);
+
+                    // 如果 request 无效，就不加入列表。
+                    if (!request.IsValid)
+                    {
+                        // 跳过当前相机。
+                        continue;
+                    }
+
+                    request.SetGraphAssembler(ResolveGraphAssembler(request)); // 根据管线资产和 request 类型给当前 request 指定对应渲染图组装器。
+
+                    // 把有效 request 加入列表。
+                    requests.Add(request);
                 }
 
-                request.SetGraphAssembler(ResolveGraphAssembler(request)); // 根据管线资产和 request 类型给当前 request 指定对应渲染图组装器。
-
-                // 把有效 request 加入列表。
-                requests.Add(request);
+                // 执行所有 request。
+                ExecuteRequests(context);
             }
-
-            // 执行所有 request。
-            ExecuteRequests(context);
+            finally
+            {
+                EndContextRendering(context, safeCameras);
+            }
         }
 
         // 绑定 PBR 预积分 FG LUT，保证 Lit shader 能读取资产上的间接高光查找表。
@@ -336,6 +322,11 @@ namespace Burt.RenderPipeline
             // 使用 try/finally，保证即使渲染过程中报错，也能发出 EndCameraRendering。
             try
             {
+                if (!request.TryCull(context, asset))
+                {
+                    return;
+                }
+
                 // 把当前 request 和栈级 RT 生命周期选项交给 BurtCameraRenderer 执行。
                 cameraRenderer.Render(context, request, asset, renderOptions);
             }

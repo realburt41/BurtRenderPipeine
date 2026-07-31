@@ -121,6 +121,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAARawVelocityTextureId = Shader.PropertyToID("_BurtTAARawVelocityTexture");
         private static readonly int TemporalAAVelocityTextureId = Shader.PropertyToID("_BurtTAAVelocityTexture");
         private static readonly int TemporalAADilatedVelocityTextureId = Shader.PropertyToID("_BurtTAADilatedVelocityTexture");
+        private static readonly int TemporalAADilateMaskTextureId = Shader.PropertyToID("_BurtTAADilateMaskTexture");
+        private static readonly int TemporalAADilateMaskOutputTextureId = Shader.PropertyToID("_BurtTAADilateMaskOutputTexture");
         private static readonly int TemporalAAClosestDepthTextureId = Shader.PropertyToID("_BurtTAAClosestDepthTexture");
         private static readonly int TemporalAAClosestDepthOutputTextureId = Shader.PropertyToID("_BurtTAAClosestDepthOutputTexture");
         private static readonly int TemporalAAPrevUseCountTextureId = Shader.PropertyToID("_BurtTAAPrevUseCountTexture");
@@ -136,6 +138,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAAHistoryRejectionOutputTextureId = Shader.PropertyToID("_BurtTAAHistoryRejectionOutputTexture");
         private static readonly int TemporalAADilatedHistoryRejectionTextureId = Shader.PropertyToID("_BurtTAADilatedHistoryRejectionTexture");
         private static readonly int TemporalAADilatedHistoryRejectionOutputTextureId = Shader.PropertyToID("_BurtTAADilatedHistoryRejectionOutputTexture");
+        private static readonly int TemporalAAHasDilatedHistoryRejectionId = Shader.PropertyToID("_BurtTAAHasDilatedHistoryRejection");
         private static readonly int TemporalAAUReprojectedGuideTextureId = Shader.PropertyToID("_BurtTAAUReprojectedGuideTexture");
         private static readonly int TemporalAAUReprojectedGuideOutputTextureId = Shader.PropertyToID("_BurtTAAUReprojectedGuideOutputTexture");
         private static readonly int TemporalAAUHistoryGuideTextureId = Shader.PropertyToID("_BurtTAAUHistoryGuideTexture");
@@ -1505,7 +1508,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var histories = BurtTemporalAAUtility.EnsureHistoryTextures(camera, out var historyValid);
             temporalAA.HistoryValid = historyValid;
-            if (histories.Color == null || histories.Depth == null || (useTemporalAAUpscale && histories.Guide == null))
+            if (histories.PreviousColor == null ||
+                histories.CurrentColor == null ||
+                histories.Depth == null ||
+                (useTemporalAAUpscale && (histories.PreviousGuide == null || histories.CurrentGuide == null)))
             {
                 BurtTemporalAAUtility.InvalidateHistory(camera, "HistoryTextureUnavailable");
                 return false;
@@ -1515,8 +1521,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var outputDescriptor = BurtRenderTargetDescriptorUtility.CreateOutputPostProcessColorDescriptor(camera);
             var width = Mathf.Max(1, colorDescriptor.width);
             var height = Mathf.Max(1, colorDescriptor.height);
-            var historyWidth = Mathf.Max(1, histories.Color.width);
-            var historyHeight = Mathf.Max(1, histories.Color.height);
+            var historyWidth = Mathf.Max(1, histories.PreviousColor.width);
+            var historyHeight = Mathf.Max(1, histories.PreviousColor.height);
             var depthHistoryWidth = Mathf.Max(1, histories.Depth.width);
             var depthHistoryHeight = Mathf.Max(1, histories.Depth.height);
             var cameraTargetWidth = Mathf.Max(1, useTemporalAAUpscale ? outputDescriptor.width : colorDescriptor.width);
@@ -1568,13 +1574,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             temporalAAUGuideDescriptor.sRGB = false;
             temporalAAUGuideDescriptor.enableRandomWrite = true;
 
-            var temporalAAUHistoryDescriptor = histories.Color.descriptor;
-            temporalAAUHistoryDescriptor.depthBufferBits = 0;
-            temporalAAUHistoryDescriptor.msaaSamples = 1;
-            temporalAAUHistoryDescriptor.useMipMap = false;
-            temporalAAUHistoryDescriptor.autoGenerateMips = false;
-            temporalAAUHistoryDescriptor.enableRandomWrite = true;
-
             var velocityDescriptor = colorDescriptor;
             velocityDescriptor.colorFormat = RenderTextureFormat.ARGBHalf;
             velocityDescriptor.sRGB = false;
@@ -1598,6 +1597,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 closestDepthDescriptor.enableRandomWrite = true;
             }
 
+            var dilateMaskDescriptor = colorDescriptor;
+            dilateMaskDescriptor.graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm;
+            dilateMaskDescriptor.sRGB = false;
+            dilateMaskDescriptor.enableRandomWrite = useTemporalAAComputeDilateDecimate;
+
             var prevUseCountDescriptor = colorDescriptor;
             prevUseCountDescriptor.colorFormat = RenderTextureFormat.RFloat;
             prevUseCountDescriptor.sRGB = false;
@@ -1614,6 +1618,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.GetTemporaryRT(TemporalAACurrentDepthTextureId, scalarDescriptor, FilterMode.Point);
             cmd.GetTemporaryRT(TemporalAAVelocityTextureId, velocityDescriptor, FilterMode.Point);
             cmd.GetTemporaryRT(TemporalAADilatedVelocityTextureId, dilatedVelocityDescriptor, FilterMode.Point);
+            if (useTemporalAAComputeDilateDecimate)
+            {
+                cmd.GetTemporaryRT(TemporalAADilateMaskTextureId, dilateMaskDescriptor, FilterMode.Point);
+            }
             cmd.GetTemporaryRT(TemporalAAClosestDepthTextureId, closestDepthDescriptor, FilterMode.Point);
             cmd.GetTemporaryRT(TemporalAAPrevUseCountTextureId, prevUseCountDescriptor, FilterMode.Point);
             cmd.GetTemporaryRT(TemporalAAStencilMaskTextureId, scalarDescriptor, FilterMode.Point);
@@ -1640,9 +1648,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             if (useTemporalAAUComputePath)
             {
                 cmd.GetTemporaryRT(TemporalAAUReprojectedGuideTextureId, temporalAAUGuideDescriptor, FilterMode.Bilinear);
-                cmd.GetTemporaryRT(TemporalAAUHistoryGuideTextureId, temporalAAUGuideDescriptor, FilterMode.Bilinear);
                 cmd.GetTemporaryRT(TemporalAAUShadingRejectionTextureId, temporalAAUGuideDescriptor, FilterMode.Point);
-                cmd.GetTemporaryRT(TemporalAAUUpdatedHistoryTextureId, temporalAAUHistoryDescriptor, FilterMode.Bilinear);
             }
             if (useTemporalAADebug)
             {
@@ -1652,6 +1658,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var currentDepth = new RenderTargetIdentifier(TemporalAACurrentDepthTextureId);
             var velocity = new RenderTargetIdentifier(TemporalAAVelocityTextureId);
             var dilatedVelocity = new RenderTargetIdentifier(TemporalAADilatedVelocityTextureId);
+            var dilateMask = new RenderTargetIdentifier(TemporalAADilateMaskTextureId);
             var closestDepth = new RenderTargetIdentifier(TemporalAAClosestDepthTextureId);
             var prevUseCount = new RenderTargetIdentifier(TemporalAAPrevUseCountTextureId);
             var prevUseCountUint = new RenderTargetIdentifier(TemporalAAPrevUseCountUintTextureId);
@@ -1663,9 +1670,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var historyRejection = new RenderTargetIdentifier(TemporalAAHistoryRejectionTextureId);
             var dilatedHistoryRejection = new RenderTargetIdentifier(TemporalAADilatedHistoryRejectionTextureId);
             var temporalAAUReprojectedGuide = new RenderTargetIdentifier(TemporalAAUReprojectedGuideTextureId);
-            var temporalAAUHistoryGuide = new RenderTargetIdentifier(TemporalAAUHistoryGuideTextureId);
+            var temporalAAUHistoryGuide = new RenderTargetIdentifier(histories.CurrentGuide);
             var temporalAAUShadingRejection = new RenderTargetIdentifier(TemporalAAUShadingRejectionTextureId);
-            var temporalAAUUpdatedHistory = new RenderTargetIdentifier(TemporalAAUUpdatedHistoryTextureId);
+            var temporalAAUUpdatedHistory = new RenderTargetIdentifier(histories.CurrentColor);
             var debugTarget = new RenderTargetIdentifier(TemporalAADebugTextureId);
             var blackTexture = new RenderTargetIdentifier(Texture2D.blackTexture);
             var hasTaaGBuffer = context.GBuffer0Target.IsValid && context.GBuffer2Target.IsValid;
@@ -1725,6 +1732,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     velocity,
                     stencilMask,
                     dilatedVelocity,
+                    dilateMask,
                     closestDepth,
                     prevUseCountUint,
                     temporalAA,
@@ -1742,6 +1750,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 ExecuteTemporalAADecimateHistoryCompute(
                     cmd,
                     dilatedVelocity,
+                    dilateMask,
                     prevUseCountUint,
                     closestDepth,
                     historyDepthForDecimate,
@@ -1790,7 +1799,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 ExecuteTemporalAAHistoryRejectionCompute(
                     cmd,
                     cameraColorTarget.Identifier,
-                    historyValid ? new RenderTargetIdentifier(histories.Color) : cameraColorTarget.Identifier,
+                    historyValid ? new RenderTargetIdentifier(histories.PreviousColor) : cameraColorTarget.Identifier,
                     dilatedVelocity,
                     parallaxRejection,
                     metadata,
@@ -1800,12 +1809,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     temporalAA.HistoryExposureCorrection,
                     width,
                     height);
+                cmd.SetGlobalTexture(TemporalAADilatedHistoryRejectionTextureId, dilatedHistoryRejection);
+                cmd.SetGlobalFloat(TemporalAAHasDilatedHistoryRejectionId, 1f);
+            }
+            else
+            {
+                cmd.SetGlobalFloat(TemporalAAHasDilatedHistoryRejectionId, 0f);
             }
 
             // TAAU history is larger than the input, so even on a reset frame bind the
             // correctly-sized persistent texture and let the history-valid flag bypass it.
             var historyColorTarget = (historyValid || useTemporalAAUpscale)
-                ? new RenderTargetIdentifier(histories.Color)
+                ? new RenderTargetIdentifier(histories.PreviousColor)
                 : cameraColorTarget.Identifier;
             var historyDepthTarget = historyValid ? new RenderTargetIdentifier(histories.Depth) : currentDepth;
             cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier);
@@ -1824,13 +1839,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
 
             var resolvedHighResolutionHistory = useTemporalAAUComputePath &&
-                !useTemporalAADebug &&
                 TryExecuteTemporalAAUPipeline(
                     cmd,
                     cameraColorTarget.Identifier,
                     historyColorTarget,
-                    new RenderTargetIdentifier(histories.Guide),
+                    new RenderTargetIdentifier(histories.PreviousGuide),
                     dilatedVelocity,
+                    dilateMask,
                     parallaxRejection,
                     dilatedHistoryRejection,
                     metadata,
@@ -1887,21 +1902,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(TemporalAAClosestDepthTextureId, closestDepth);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAClosestDepthCopy), MeshTopology.Triangles, 3, 1);
 
-            if (resolvedHighResolutionHistory)
+            if (!resolvedHighResolutionHistory)
             {
-                cmd.CopyTexture(temporalAAUUpdatedHistory, new RenderTargetIdentifier(histories.Color));
-                cmd.CopyTexture(temporalAAUHistoryGuide, new RenderTargetIdentifier(histories.Guide));
-            }
-            else
-            {
-                cmd.SetRenderTarget(histories.Color);
+                cmd.SetRenderTarget(histories.CurrentColor);
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, historyWidth, historyHeight);
                 cmd.SetGlobalTexture(SourceTextureId, resolveTarget);
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACopy), MeshTopology.Triangles, 3, 1);
             }
+            // The TAAU compute path writes directly into the current side of the
+            // persistent ping-pong pair. MarkHistoryValid swaps the pair here.
             BurtTemporalAAUtility.MarkHistoryValid(camera);
 
-            if (!resolvedHighResolutionHistory)
+            if (!resolvedHighResolutionHistory || useTemporalAADebug)
             {
                 cmd.SetRenderTarget(postProcessColorTarget.Identifier);
                 if (useTemporalAAUpscale)
@@ -1922,6 +1934,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             }
 
             cmd.SetGlobalFloat(ShadingDebugEnabledId, BurtShadingDebugSettings.IsDebugging ? 1f : 0f);
+            cmd.SetGlobalFloat(TemporalAAHasDilatedHistoryRejectionId, 0f);
 
             if (useTemporalAADebug)
             {
@@ -1936,9 +1949,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             }
             if (useTemporalAAUComputePath)
             {
-                cmd.ReleaseTemporaryRT(TemporalAAUUpdatedHistoryTextureId);
                 cmd.ReleaseTemporaryRT(TemporalAAUShadingRejectionTextureId);
-                cmd.ReleaseTemporaryRT(TemporalAAUHistoryGuideTextureId);
                 cmd.ReleaseTemporaryRT(TemporalAAUReprojectedGuideTextureId);
             }
             cmd.ReleaseTemporaryRT(TemporalAAResolveTextureId);
@@ -1952,6 +1963,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.ReleaseTemporaryRT(TemporalAAStencilMaskTextureId);
             cmd.ReleaseTemporaryRT(TemporalAAResponsiveMaskTextureId);
             cmd.ReleaseTemporaryRT(TemporalAAClosestDepthTextureId);
+            if (useTemporalAAComputeDilateDecimate)
+            {
+                cmd.ReleaseTemporaryRT(TemporalAADilateMaskTextureId);
+            }
             cmd.ReleaseTemporaryRT(TemporalAADilatedVelocityTextureId);
             cmd.ReleaseTemporaryRT(TemporalAAVelocityTextureId);
             cmd.ReleaseTemporaryRT(TemporalAACurrentDepthTextureId);
@@ -1995,7 +2010,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             if (!SystemInfo.supportsComputeShaders ||
                 !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R32_UInt, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
                 !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
-                !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16_SFloat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
+                !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16_SFloat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
+                !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
             {
                 return false;
             }
@@ -2020,6 +2036,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             RenderTargetIdentifier rawVelocity,
             RenderTargetIdentifier stencilMask,
             RenderTargetIdentifier dilatedVelocity,
+            RenderTargetIdentifier dilateMask,
             RenderTargetIdentifier closestDepth,
             RenderTargetIdentifier prevUseCountUint,
             BurtTemporalAARequestState temporalAA,
@@ -2039,6 +2056,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetComputeTextureParam(shader, kernel, TemporalAARawVelocityTextureId, rawVelocity);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAStencilMaskTextureId, stencilMask);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAADilatedVelocityTextureId, dilatedVelocity);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAADilateMaskOutputTextureId, dilateMask);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAClosestDepthOutputTextureId, closestDepth);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAPrevUseCountOutputTextureId, prevUseCountUint);
             cmd.SetComputeMatrixParam(shader, TemporalAAInverseCurrentNonJitteredViewProjectionId, temporalAA != null ? temporalAA.InverseCurrentNonJitteredViewProjectionMatrix : Matrix4x4.identity);
@@ -2055,6 +2073,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static void ExecuteTemporalAADecimateHistoryCompute(
             CommandBuffer cmd,
             RenderTargetIdentifier dilatedVelocity,
+            RenderTargetIdentifier dilateMask,
             RenderTargetIdentifier prevUseCountUint,
             RenderTargetIdentifier closestDepth,
             RenderTargetIdentifier historyDepth,
@@ -2067,6 +2086,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var shader = GetTemporalAAComputeShader();
             var kernel = shader.FindKernel("DecimateHistoryAACS");
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAVelocityTextureId, dilatedVelocity);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAADilateMaskOutputTextureId, dilateMask);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAPrevUseCountUintTextureId, prevUseCountUint);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAClosestDepthTextureId, closestDepth);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAADepthHistoryTextureId, historyDepth);
@@ -2173,9 +2193,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static bool CanUseTemporalAAUComputePath(BurtTemporalAAHistoryTextures histories)
         {
-            if (!SystemInfo.supportsComputeShaders || histories.Color == null || histories.Guide == null ||
-                !SystemInfo.IsFormatSupported(histories.Color.graphicsFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
-                !SystemInfo.IsFormatSupported(histories.Guide.graphicsFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
+            if (!SystemInfo.supportsComputeShaders ||
+                histories.PreviousColor == null ||
+                histories.CurrentColor == null ||
+                histories.PreviousGuide == null ||
+                histories.CurrentGuide == null ||
+                !histories.CurrentColor.enableRandomWrite ||
+                !histories.CurrentGuide.enableRandomWrite ||
+                !SystemInfo.IsFormatSupported(histories.PreviousColor.graphicsFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
+                !SystemInfo.IsFormatSupported(histories.PreviousGuide.graphicsFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
             {
                 return false;
             }
@@ -2198,6 +2224,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             RenderTargetIdentifier history,
             RenderTargetIdentifier previousGuide,
             RenderTargetIdentifier velocity,
+            RenderTargetIdentifier dilateMask,
             RenderTargetIdentifier parallaxRejection,
             RenderTargetIdentifier dilatedHistoryRejection,
             RenderTargetIdentifier metadata,
@@ -2256,6 +2283,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             cmd.SetComputeTextureParam(shader, rejectKernel, SourceTextureId, source);
             cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAAUReprojectedGuideTextureId, reprojectedGuide);
+            cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAADilateMaskTextureId, dilateMask);
             cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAAParallaxRejectionTextureId, parallaxRejection);
             cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAADilatedHistoryRejectionTextureId, dilatedHistoryRejection);
             cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAAMetadataTextureId, metadata);

@@ -48,6 +48,8 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent DoubleSidedLabel = new GUIContent("Double Sided", "Render both front and back faces by switching culling off.");
         private static readonly GUIContent DoubleSidedNormalModeLabel = new GUIContent("Double Sided Normal Mode", "Back-face normal mode, matching XRender: None, Flip, or Mirror in tangent space.");
         private static readonly GUIContent SurfaceTypeLabel = new GUIContent("Surface Type");
+        private static readonly GUIContent TransparentBlendModeLabel = new GUIContent("Blend Mode", "XRender transparent fog contract: Alpha adds fog scattering normally, Additive applies only fog transmittance, and Premultiply scales fog scattering by surface alpha.");
+        private static readonly GUIContent IgnoreFogLabel = new GUIContent("Ignore Global Fog", "Matches XRender's Forward-only IgnoreFog material feature. Transparent lighting remains unchanged, but VF, Height Fog and Atmosphere Fog are not applied.");
         private static readonly GUIContent FoliageTintModeLabel = new GUIContent("Tint Type");
         private static readonly GUIContent FoliageUseBakedNormalsLabel = new GUIContent("Use Baked Normals", "Enable the XRender foliage baked-normal path and its ShadowCaster scale adjustment.");
         private static readonly GUIContent TrunkMaskMapLabel = new GUIContent("MOHR Map", "XRender trunk packed map: G occlusion and A roughness. R metallic and B thickness are ignored by the current trunk material model.");
@@ -60,6 +62,7 @@ namespace Burt.RenderPipeline.Editor
         private static readonly GUIContent ResponsiveAALabel = new GUIContent("Responsive AA", "Marks this material in stencil bit 16 so Temporal AA lowers history feedback on thin or fast-changing surfaces.");
         private static readonly GUIContent RefractionLabel = new GUIContent("Refraction", "Transparent Lit only. Samples the opaque camera color before transparent rendering for rough refraction.");
         private static readonly string[] SurfaceTypeNames = { "Opaque", "Transparent" };
+        private static readonly string[] TransparentBlendModeNames = { "Alpha", "Additive", "Premultiply" };
         private static readonly string[] DoubleSidedNormalModeNames = { "None", "Flip", "Mirror" };
         private static readonly string[] SubsurfaceScatteringModeNames = { "5S Burley", "4S Separable", "3S Preintegrated" };
         private static readonly string[] FoliageTintModeNames = { "Only Local", "Constant Tint", "Tint Map" };
@@ -197,6 +200,8 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty alphaClip;
         private MaterialProperty cutoff;
         private MaterialProperty surface;
+        private MaterialProperty blendMode;
+        private MaterialProperty ignoreFog;
         private MaterialProperty doubleSidedEnable;
         private MaterialProperty doubleSidedNormalMode;
         private MaterialProperty cull;
@@ -512,6 +517,8 @@ namespace Burt.RenderPipeline.Editor
             alphaClip = Find("_AlphaClip");
             cutoff = Find("_Cutoff");
             surface = Find("_Surface");
+            blendMode = Find("_BlendMode");
+            ignoreFog = Find("_IgnoreFog");
             doubleSidedEnable = Find("_DoubleSidedEnable");
             doubleSidedNormalMode = Find("_DoubleSidedNormalMode");
             cull = Find("_Cull");
@@ -571,6 +578,10 @@ namespace Burt.RenderPipeline.Editor
                     EditorGUILayout.TextField(SurfaceTypeLabel, transparent ? "Transparent" : "Opaque");
                 }
             }
+
+            transparent = IsTransparentMaterial(material) && !fixedOpaqueCutout;
+            DrawTransparentBlendMode(transparent);
+            DrawIgnoreFog(transparent);
 
             using (new EditorGUI.DisabledScope(true))
             {
@@ -709,6 +720,64 @@ namespace Burt.RenderPipeline.Editor
             }
 
             BurtShaderGUIUtility.EndSection();
+        }
+
+        private void DrawTransparentBlendMode(bool transparent)
+        {
+            if (blendMode == null)
+            {
+                return;
+            }
+
+            using (new EditorGUI.DisabledScope(!transparent))
+            {
+                EditorGUI.BeginChangeCheck();
+                EditorGUI.showMixedValue = blendMode.hasMixedValue;
+                var value = EditorGUILayout.Popup(
+                    TransparentBlendModeLabel,
+                    Mathf.Clamp(
+                        Mathf.RoundToInt(blendMode.floatValue),
+                        0,
+                        TransparentBlendModeNames.Length - 1),
+                    TransparentBlendModeNames);
+                EditorGUI.showMixedValue = false;
+                if (EditorGUI.EndChangeCheck())
+                {
+                    materialEditor.RegisterPropertyChangeUndo(TransparentBlendModeLabel.text);
+                    blendMode.floatValue = value;
+                    foreach (Object target in materialEditor.targets)
+                    {
+                        ApplySurfaceOptions(target as Material);
+                    }
+                }
+            }
+        }
+
+        private void DrawIgnoreFog(bool transparent)
+        {
+            if (ignoreFog == null)
+            {
+                return;
+            }
+
+            using (new EditorGUI.DisabledScope(!transparent))
+            {
+                EditorGUI.BeginChangeCheck();
+                EditorGUI.showMixedValue = ignoreFog.hasMixedValue;
+                bool value = EditorGUILayout.Toggle(
+                    IgnoreFogLabel,
+                    ignoreFog.floatValue >= 0.5f);
+                EditorGUI.showMixedValue = false;
+                if (EditorGUI.EndChangeCheck())
+                {
+                    materialEditor.RegisterPropertyChangeUndo(IgnoreFogLabel.text);
+                    ignoreFog.floatValue = value ? 1.0f : 0.0f;
+                    foreach (Object target in materialEditor.targets)
+                    {
+                        ApplySurfaceOptions(target as Material);
+                    }
+                }
+            }
         }
 
         private void DrawRefractionOptions(bool transparent)
@@ -1826,6 +1895,12 @@ namespace Burt.RenderPipeline.Editor
             }
 
             bool transparent = IsTransparentMaterial(material) && !UsesFixedOpaqueCutoutSurface(material);
+            var transparentBlendMode = material.HasProperty("_BlendMode")
+                ? Mathf.Clamp(Mathf.RoundToInt(material.GetFloat("_BlendMode")), 0, 2)
+                : 0;
+            bool ignoreFog = transparent &&
+                material.HasProperty("_IgnoreFog") &&
+                material.GetFloat("_IgnoreFog") >= 0.5f;
             if (material.HasProperty("_Surface"))
             {
                 material.SetFloat("_Surface", transparent ? 1.0f : 0.0f);
@@ -1838,13 +1913,41 @@ namespace Burt.RenderPipeline.Editor
 
             if (material.HasProperty("_SrcBlend"))
             {
-                material.SetFloat("_SrcBlend", transparent ? (float)BlendMode.SrcAlpha : (float)BlendMode.One);
+                var sourceBlend = BlendMode.One;
+                if (transparent && transparentBlendMode == 0)
+                {
+                    sourceBlend = BlendMode.SrcAlpha;
+                }
+
+                material.SetFloat("_SrcBlend", (float)sourceBlend);
             }
 
             if (material.HasProperty("_DstBlend"))
             {
-                material.SetFloat("_DstBlend", transparent ? (float)BlendMode.OneMinusSrcAlpha : (float)BlendMode.Zero);
+                var destinationBlend = BlendMode.Zero;
+                if (transparent)
+                {
+                    destinationBlend = transparentBlendMode == 1
+                        ? BlendMode.One
+                        : BlendMode.OneMinusSrcAlpha;
+                }
+
+                material.SetFloat("_DstBlend", (float)destinationBlend);
             }
+
+            if (material.HasProperty("_BlendMode"))
+            {
+                material.SetFloat("_BlendMode", transparentBlendMode);
+            }
+
+            // XRender's ordinary single-pass transparent Forward path evaluates
+            // total fog per vertex; opaque materials and unsupported shaders keep
+            // the per-pixel fallback variant.
+            SetKeyword(
+                material,
+                "BURT_TRANSPARENT_VERTEX_FOG",
+                transparent && material.HasProperty("_BlendMode") && !ignoreFog);
+            SetKeyword(material, "BURT_IGNORE_FOG", ignoreFog);
 
             if (material.HasProperty("_ZWrite"))
             {

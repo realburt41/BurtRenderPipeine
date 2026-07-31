@@ -29,6 +29,7 @@ Shader "BurtRP/Easy Fog"
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [HideInInspector] _Cull ("Cull", Float) = 0
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 1
+        [ToggleUI] _IgnoreFog ("Ignore Global Fog", Float) = 0
     }
 
     SubShader
@@ -48,9 +49,11 @@ Shader "BurtRP/Easy Fog"
             HLSLPROGRAM
             #pragma vertex BurtEasyFogVert
             #pragma fragment BurtEasyFogFrag
+            #pragma shader_feature_local _ BURT_IGNORE_FOG
             #pragma multi_compile_instancing
             #pragma target 3.5
 
+            #define BURT_TRANSPARENT_VERTEX_FOG 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEasyFogPass.hlsl"
             ENDHLSL
         }

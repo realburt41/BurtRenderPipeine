@@ -13,6 +13,11 @@ MonoBehaviour:
   m_Name: BurtRenderPipelineAsset
   m_EditorClassIdentifier: 
   rendererMode: 1
+  runtimeResources:
+    deferredLightingDebugProbeShader: {fileID: 4800000, guid: 3afc2827dfee49b1b6a8840fa56d68dd, type: 3}
+    deferredLightingDebugShadowShader: {fileID: 4800000, guid: b6e804284e054974b3e8e0fcb1a4806c, type: 3}
+    debugGBufferShader: {fileID: 4800000, guid: 325aed47de194efdbea39e2c71dfce73, type: 3}
+    debugTextureShader: {fileID: 4800000, guid: e12626bca4104bf4a88d7810dc6258ed, type: 3}
   clearColor: {r: 0, g: 0, b: 0, a: 1}
   enableDepthPrepass: 1
   enableDepthDebugView: 0

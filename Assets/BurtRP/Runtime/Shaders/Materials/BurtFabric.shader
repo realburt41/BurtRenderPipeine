@@ -23,6 +23,8 @@ Shader "BurtRP/Fabric"
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
 
         [HideInInspector] _Surface ("Surface Type", Float) = 0
+        [HideInInspector] _BlendMode ("Transparent Blend Mode", Float) = 0
+        [ToggleUI] _IgnoreFog ("Ignore Global Fog", Float) = 0
         [HideInInspector] _DoubleSidedEnable ("Double Sided", Float) = 0
         [HideInInspector] _DoubleSidedNormalMode ("Double Sided Normal Mode", Float) = 0
         [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (1, 1, 1, 0)
@@ -201,9 +203,11 @@ Shader "BurtRP/Fabric"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma shader_feature_local _ BURT_TRANSPARENT_VERTEX_FOG
+            #pragma shader_feature_local _ BURT_IGNORE_FOG
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
-            #pragma multi_compile_fragment _ BURT_FORWARD_SHADING_DEBUG_LIGHTING BURT_FORWARD_SHADING_DEBUG_BRDF BURT_FORWARD_SHADING_DEBUG_SHADOW BURT_FORWARD_SHADING_DEBUG_TRANSMISSION
+            #pragma shader_feature_fragment _ BURT_USE_DEBUG_MODE_FORWARD
             #pragma multi_compile_instancing
             #pragma target 3.5
             #define BURT_MATERIAL_SHADING_MODEL_FABRIC 1

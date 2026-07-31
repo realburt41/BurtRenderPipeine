@@ -13,6 +13,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _BaseMap_ST;
     float4 _MaskMap_ST;
     float _Surface;
+    float _BlendMode;
     float _AlphaClip;
     float _Cutoff;
     float _NormalScale;

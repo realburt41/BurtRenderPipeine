@@ -585,6 +585,8 @@ BurtGISceneVoxelOccupancySample BurtGITrySampleSceneVoxelOccupancyMip(float3 sam
     float occupancy = saturate(max(occupancyMip.x, occupancyMip.y));
     return BurtGIMakeSceneVoxelOccupancySample(occupancy > 0.001 ? 1u : 0u, occupancy);
 }
+float3 BurtGISceneVoxelEvaluateAdditionalLights(float3 worldPosition, float3 normalWS);
+
 bool BurtGITrySampleSceneVoxelLightingResource(
     Texture3D<float4> radianceTexture,
     Texture3D<float4> geometryTexture,
@@ -643,7 +645,9 @@ bool BurtGITrySampleSceneVoxelLightingResource(
         float3 analyticSkyTint = lerp(float3(0.015, 0.018, 0.022), float3(0.08, 0.095, 0.12), backHemi);
         float3 ambientSkyTint = BurtGISceneVoxelEvaluateAmbientSH(backNormalWS);
         float3 skyTint = max(ambientSkyTint, analyticSkyTint) * skyLightEnabled;
-        float3 boostedDiffuseColor = BurtGISceneVoxelRecoverBoostedDiffuseColor(storedRadiance.rgb);
+        float3 estimatedEmission = max(storedRadiance.rgb - 0.12, 0.0);
+        float3 storedDiffuseRadiance = max(storedRadiance.rgb - estimatedEmission, 0.0);
+        float3 boostedDiffuseColor = BurtGISceneVoxelRecoverBoostedDiffuseColor(storedDiffuseRadiance);
         float3 mainLightDirection = _BurtGIMainLightDirection.xyz;
         float mainLightDirectionLengthSq = dot(mainLightDirection, mainLightDirection);
         mainLightDirection = mainLightDirectionLengthSq > 0.0001 ? mainLightDirection * rsqrt(mainLightDirectionLengthSq) : float3(0.0, 1.0, 0.0);
@@ -651,12 +655,19 @@ bool BurtGITrySampleSceneVoxelLightingResource(
         float oneOverPreExposure = max(_BurtGISceneVoxelExposureParams.x, 0.0);
         float normalBoost = lerp(0.75, 1.2, saturate(dot(backNormalWS, normalize(float3(0.35, 0.75, 0.45))) * 0.5 + 0.5));
         float3 mainLightRadiance = max(_BurtGIMainLightColor.rgb, 0.0) * mainLightNdotL;
-        float3 directLighting = (normalBoost.xxx + mainLightRadiance) *
+        float sceneVoxelLightingType = _BurtGISceneVoxelRadianceCacheParams.y;
+        float3 additionalLightRadiance = sceneVoxelLightingType >= 1.5
+            ? BurtGISceneVoxelEvaluateAdditionalLights(samplePosition, backNormalWS)
+            : 0.0;
+        float3 directLighting = (normalBoost.xxx + mainLightRadiance + additionalLightRadiance) *
             (max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.z, 0.0) * oneOverPreExposure);
         const float xgiSecondaryBounceSkyScale = 0.2;
         float3 indirectLighting = skyTint * boostedDiffuseColor *
             (max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.w, 0.0) * xgiSecondaryBounceSkyScale);
-        radiance = max(storedRadiance.rgb, 0.0) * directLighting + indirectLighting * storedRadiance.a;
+        radiance =
+            estimatedEmission +
+            boostedDiffuseColor * directLighting +
+            indirectLighting * storedRadiance.a;
         radiance = max(radiance, lightingRadiance * 0.2);
     }
     return confidence > 0.001 && dot(radiance, radiance) > 0.0;

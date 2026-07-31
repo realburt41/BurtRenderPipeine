@@ -11,10 +11,13 @@
 #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT
     float3 IndirectDiffuseColor;
     float3 IndirectSpecularColor;
+    float AmbientOcclusion;
+#endif
+
+#if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_GI_PROBE
     float3 GIProbeIrradiance;
     float GIProbeValidity;
     float GIProbeSkyVisibility;
-    float AmbientOcclusion;
 #endif
 
 #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL

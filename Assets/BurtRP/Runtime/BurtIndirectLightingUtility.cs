@@ -674,14 +674,24 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
                 case BurtSkyLightSourceType.ConstantColor:
                     return CreateDisabledSkyReflection(skyLight, "SkyLight.ConstantColorSpecularDisabled");
                 case BurtSkyLightSourceType.CapturedScene:
-                    if (!skyLight.affectSpecular)
+                    if (!skyLight.affectSpecular && !skyLight.affectDiffuse)
                     {
-                        return CreateDisabledSkyReflection(skyLight, "SkyLight.SpecularDisabled");
+                        return CreateDisabledSkyReflection(skyLight, "SkyLight.CapturedSceneDisabled");
                     }
 
-                    var capturedFallback = ResolveSkyReflection(cmd, request, camera);
-                    capturedFallback.Source = "SkyLight.CapturedSceneUnimplemented->" + capturedFallback.Source;
-                    capturedFallback.IntensityMultiplier *= skyLight.EffectiveSpecularIntensity;
+                    var capturedFallback = ResolveSkyReflection(
+                        cmd,
+                        request,
+                        camera,
+                        skyLight.transform.position,
+                        skyLight.GetInstanceID(),
+                        "SkyLight:" + skyLight.name,
+                        skyLight.CaptureEveryFrame,
+                        skyLight.CaptureRequestVersion);
+                    capturedFallback.Source = "SkyLight.CapturedScene->" + capturedFallback.Source;
+                    capturedFallback.IntensityMultiplier *= skyLight.affectSpecular
+                        ? skyLight.EffectiveSpecularIntensity
+                        : 0f;
                     capturedFallback.Tint = skyLight.SafeTint;
                     capturedFallback.ForceOverride = true;
                     capturedFallback.Rotation = DefaultSkyReflectionRotation;
@@ -899,12 +909,45 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
 
         private static ResolvedSkyReflection ResolveSkyReflection(CommandBuffer cmd, BurtRenderRequest request, Camera camera) // 解析当前 BurtRP 全局反射纹理和 HDR 解码参数。
         {
+            var captureOrigin = camera != null ? camera.transform.position : Vector3.zero;
+            var captureOwnerId = camera != null ? camera.GetInstanceID() : 0;
+            return ResolveSkyReflection(
+                cmd,
+                request,
+                camera,
+                captureOrigin,
+                captureOwnerId,
+                "Camera",
+                true,
+                0);
+        }
+
+        private static ResolvedSkyReflection ResolveSkyReflection(
+            CommandBuffer cmd,
+            BurtRenderRequest request,
+            Camera camera,
+            Vector3 atmosphereCaptureOrigin,
+            int atmosphereCaptureOwnerId,
+            string atmosphereCaptureSource,
+            bool atmosphereCaptureEveryFrame,
+            int atmosphereCaptureRequestVersion)
+        {
             if (IsPreviewCamera(camera)) // Inspector 的 Cubemap / ReflectionProbe 预览没有场景语义，不能被当前场景 Probe 或 Lighting Custom Reflection 污染。
             {
                 return ResolvePreviewReflectionFallback(); // 预览窗口只使用 Unity 默认反射兜底，避免资产预览被场景 IBL 覆盖。
             }
 
-            if (cmd != null && BurtAtmosphereReflectionUtility.TryGetReflection(cmd, request, out var atmosphereReflection, out var atmosphereHDR, out var atmosphereSource))
+            if (cmd != null && BurtAtmosphereReflectionUtility.TryGetReflection(
+                    cmd,
+                    request,
+                    atmosphereCaptureOrigin,
+                    atmosphereCaptureOwnerId,
+                    atmosphereCaptureSource,
+                    atmosphereCaptureEveryFrame,
+                    atmosphereCaptureRequestVersion,
+                    out var atmosphereReflection,
+                    out var atmosphereHDR,
+                    out var atmosphereSource))
             {
                 return new ResolvedSkyReflection
                 {

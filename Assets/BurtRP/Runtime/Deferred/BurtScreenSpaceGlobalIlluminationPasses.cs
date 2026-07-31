@@ -3864,6 +3864,18 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGISceneVoxelGeometryReadTextureId = BurtRenderGraphResourceRegistry.BurtGISceneVoxelGeometryReadTextureId;
         private static readonly int BurtGISceneVoxelOccupancyMipTextureId = BurtRenderGraphResourceRegistry.BurtGISceneVoxelOccupancyMipTextureId;
         private static readonly int BurtGISceneVoxelOccupancyMipReadTextureId = BurtRenderGraphResourceRegistry.BurtGISceneVoxelOccupancyMipReadTextureId;
+        private static readonly int[] BurtGISceneVoxelProbeSetupFallbackGeometryTextureIds =
+        {
+            Shader.PropertyToID("_BurtGISceneVoxelClipmap1GeometryReadTexture"),
+            Shader.PropertyToID("_BurtGISceneVoxelClipmap2GeometryReadTexture"),
+            Shader.PropertyToID("_BurtGISceneVoxelClipmap3GeometryReadTexture")
+        };
+        private static readonly int[] BurtGISceneVoxelProbeSetupFallbackOccupancyTextureIds =
+        {
+            Shader.PropertyToID("_BurtGISceneVoxelClipmap1OccupancyMipReadTexture"),
+            Shader.PropertyToID("_BurtGISceneVoxelClipmap2OccupancyMipReadTexture"),
+            Shader.PropertyToID("_BurtGISceneVoxelClipmap3OccupancyMipReadTexture")
+        };
         private static readonly int BurtGISceneVoxelOccupancyMipSourceMipId = Shader.PropertyToID("_BurtGISceneVoxelOccupancyMipSourceMip");
         private static readonly int BurtGISceneVoxelLightingTextureId = BurtRenderGraphResourceRegistry.BurtGISceneVoxelLightingTextureId;
         private static readonly int BurtGISceneVoxelLightingReadTextureId = BurtRenderGraphResourceRegistry.BurtGISceneVoxelLightingReadTextureId;
@@ -4231,7 +4243,7 @@ namespace Burt.RenderPipeline
             int groupsZ)
         {
             if (context == null ||
-                !ShouldUse(context.Request, context.Asset) ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(context.Request, context.Asset) ||
                 !history.NeedsReprojection ||
                 history.Radiance == null ||
                 history.Geometry == null ||
@@ -4382,7 +4394,8 @@ namespace Burt.RenderPipeline
             string passName,
             BurtGISceneVoxelClipmapResources resources)
         {
-            if (context == null || !ShouldUse(context.Request, context.Asset) ||
+            if (context == null ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(context.Request, context.Asset) ||
                 resources == null || !resources.IsValid)
             {
                 if (resources != null)
@@ -4437,7 +4450,8 @@ namespace Burt.RenderPipeline
             int targetMip,
             int sourceMip)
         {
-            if (context == null || !ShouldUse(context.Request, context.Asset) ||
+            if (context == null ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(context.Request, context.Asset) ||
                 resources == null || !resources.IsValid)
             {
                 return false;
@@ -4464,6 +4478,7 @@ namespace Burt.RenderPipeline
                 case "SceneVoxelVoxelizeTrianglesCS":
                     cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelRadianceTextureId, resources.Radiance);
                     cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelGeometryTextureId, resources.Geometry);
+                    cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelLightingTextureId, resources.Lighting);
                     BurtGISceneVoxelMeshRasterizerUtility.BindCompute(cmd, shader, kernel, kernelName);
                     UploadSceneVoxelBuildComputeParams(cmd, shader, context);
                     break;
@@ -4492,7 +4507,8 @@ namespace Burt.RenderPipeline
             int groupsY,
             int groupsZ)
         {
-            if (context == null || !ShouldUse(context.Request, context.Asset) ||
+            if (context == null ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(context.Request, context.Asset) ||
                 resources == null || !resources.IsValid)
             {
                 return false;
@@ -4540,7 +4556,8 @@ namespace Burt.RenderPipeline
             BurtGISceneVoxelClipmapResources resources,
             Vector4 centerExtent)
         {
-            if (context == null || !ShouldUse(context.Request, context.Asset) ||
+            if (context == null ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(context.Request, context.Asset) ||
                 resources == null || !resources.IsValid)
             {
                 return false;
@@ -4630,6 +4647,10 @@ namespace Burt.RenderPipeline
             cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelGeometryReadTextureId, resources.Geometry);
             cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelOccupancyMipReadTextureId, resources.OccupancyMip);
             cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelLightingReadTextureId, resources.Lighting);
+            if (shader == sceneVoxelLightingProbeSetupComputeShader)
+            {
+                BindPersistentSceneVoxelProbeSetupFallbackTextures(cmd, shader, kernel, resources);
+            }
             cmd.SetComputeVectorParam(shader, BurtGISceneVoxelCenterExtentId, centerExtent);
             var clipmapCenterExtents = new Vector4[BurtGISceneVoxelClipmapStateUtility.ClipmapCount];
             for (var level = 0; level < clipmapCenterExtents.Length; ++level)
@@ -4651,6 +4672,27 @@ namespace Burt.RenderPipeline
             cmd.SetComputeIntParam(shader, VoxelProbeClipmapValidMaskId, 1);
         }
 
+        private static void BindPersistentSceneVoxelProbeSetupFallbackTextures(
+            CommandBuffer cmd,
+            ComputeShader shader,
+            int kernel,
+            BurtGISceneVoxelClipmapResources resources)
+        {
+            for (var index = 0; index < BurtGISceneVoxelProbeSetupFallbackGeometryTextureIds.Length; ++index)
+            {
+                cmd.SetComputeTextureParam(
+                    shader,
+                    kernel,
+                    BurtGISceneVoxelProbeSetupFallbackGeometryTextureIds[index],
+                    resources.Geometry);
+                cmd.SetComputeTextureParam(
+                    shader,
+                    kernel,
+                    BurtGISceneVoxelProbeSetupFallbackOccupancyTextureIds[index],
+                    resources.OccupancyMip);
+            }
+        }
+
         private static bool TryDispatchPersistentSceneVoxelClipmapOctreeBuildCompute(
             BurtRenderGraphContext context,
             string passName,
@@ -4660,7 +4702,8 @@ namespace Burt.RenderPipeline
             int groupsY,
             int groupsZ)
         {
-            if (context == null || !ShouldUse(context.Request, context.Asset) ||
+            if (context == null ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(context.Request, context.Asset) ||
                 resources == null || !resources.IsValid ||
                 !BurtGISceneVoxelOctreeUtility.EnsureResources(resources.Octree, "BurtGI Scene Voxel Clipmap " + resources.Level))
             {
@@ -6157,7 +6200,8 @@ namespace Burt.RenderPipeline
             int targetMip = 0,
             int sourceMip = 0)
         {
-            if (context == null || !ShouldUse(context.Request, context.Asset) ||
+            if (context == null ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(context.Request, context.Asset) ||
                 !HasSceneVoxelBuildTargets(context, kernelName))
             {
                 return false;
@@ -6188,12 +6232,14 @@ namespace Burt.RenderPipeline
                 case "SceneVoxelPopulateScreenProbesLiteCS":
                     return context.BurtGISceneVoxelRadianceTarget.IsValid &&
                         context.BurtGISceneVoxelGeometryTarget.IsValid &&
+                        context.BurtGISceneVoxelLightingTarget.IsValid &&
                         context.ScreenSpaceGlobalIlluminationRawTarget.IsValid &&
                         context.BurtGIScreenProbeWorldNormalTarget.IsValid &&
                         context.BurtGIScreenProbeWorldPositionTarget.IsValid;
                 case "SceneVoxelVoxelizeTrianglesCS":
                     return context.BurtGISceneVoxelRadianceTarget.IsValid &&
-                        context.BurtGISceneVoxelGeometryTarget.IsValid;
+                        context.BurtGISceneVoxelGeometryTarget.IsValid &&
+                        context.BurtGISceneVoxelLightingTarget.IsValid;
                 case "SceneVoxelBuildOccupancyMipLiteCS":
                     return context.BurtGISceneVoxelGeometryTarget.IsValid &&
                         context.BurtGISceneVoxelOccupancyMipTarget.IsValid;
@@ -6223,6 +6269,7 @@ namespace Burt.RenderPipeline
                 case "SceneVoxelPopulateScreenProbesLiteCS":
                     BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelRadianceTextureId, context.BurtGISceneVoxelRadianceTarget);
                     BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelGeometryTextureId, context.BurtGISceneVoxelGeometryTarget);
+                    BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelLightingTextureId, context.BurtGISceneVoxelLightingTarget);
                     BindComputeTexture(cmd, shader, kernel, BurtGIRawTextureId, context.ScreenSpaceGlobalIlluminationRawTarget);
                     BindComputeTexture(cmd, shader, kernel, BurtGIScreenProbeWorldNormalTextureId, context.BurtGIScreenProbeWorldNormalTarget);
                     BindComputeTexture(cmd, shader, kernel, BurtGIScreenProbeWorldPositionTextureId, context.BurtGIScreenProbeWorldPositionTarget);
@@ -6231,6 +6278,7 @@ namespace Burt.RenderPipeline
                 case "SceneVoxelVoxelizeTrianglesCS":
                     BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelRadianceTextureId, context.BurtGISceneVoxelRadianceTarget);
                     BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelGeometryTextureId, context.BurtGISceneVoxelGeometryTarget);
+                    BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelLightingTextureId, context.BurtGISceneVoxelLightingTarget);
                     BurtGISceneVoxelMeshRasterizerUtility.BindCompute(cmd, shader, kernel, kernelName);
                     UploadSceneVoxelBuildComputeParams(cmd, shader, context);
                     break;
@@ -6272,7 +6320,8 @@ namespace Burt.RenderPipeline
             int groupsY,
             int groupsZ)
         {
-            if (context == null || !ShouldUse(context.Request, context.Asset) ||
+            if (context == null ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(context.Request, context.Asset) ||
                 !context.BurtGISceneVoxelRadianceTarget.IsValid ||
                 !context.BurtGISceneVoxelGeometryTarget.IsValid ||
                 !context.BurtGISceneVoxelOccupancyMipTarget.IsValid ||
@@ -6314,7 +6363,8 @@ namespace Burt.RenderPipeline
             int groupsY,
             int groupsZ)
         {
-            if (context == null || !ShouldUse(context.Request, context.Asset) ||
+            if (context == null ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(context.Request, context.Asset) ||
                 !context.BurtGISceneVoxelGeometryTarget.IsValid ||
                 !BurtGISceneVoxelOctreeUtility.EnsureResources())
             {
@@ -9325,6 +9375,8 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGIScreenProbeTraceIntensityParamsId = Shader.PropertyToID("_BurtGIScreenProbeTraceIntensityParams");
         private static readonly int BurtGIScreenProbeViewProjectionMatrixId = Shader.PropertyToID("_BurtGIScreenProbeViewProjectionMatrix");
         private static readonly int BurtGIScreenProbeHistoryScreenDepthTextureId = Shader.PropertyToID("_BurtGIScreenProbeHistoryScreenDepthTexture");
+        private static readonly int BurtGIPreviousSceneColorTextureId = Shader.PropertyToID("_BurtGIPreviousSceneColorTexture");
+        private static readonly int BurtGIPreviousSceneColorParamsId = Shader.PropertyToID("_BurtGIPreviousSceneColorParams");
         private static readonly int HardwareRayTracingAccelerationStructureId = Shader.PropertyToID("_BurtGIRayTracingAccelerationStructure");
         private static readonly int HardwareRayMaxDistanceId = Shader.PropertyToID("_BurtGIHardwareRayMaxDistance");
         private static readonly int HardwareRayMissRadianceId = Shader.PropertyToID("_BurtGIHardwareRayMissRadiance");
@@ -10203,6 +10255,23 @@ namespace Burt.RenderPipeline
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHistoryRadianceTextureId, screenProbeHistoryValid && screenProbeHistory.Radiance != null ? (Texture)screenProbeHistory.Radiance : Texture2D.blackTexture);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHistoryTraceRadianceTextureId, screenProbeHistoryValid && screenProbeHistory.TraceRadiance != null ? (Texture)screenProbeHistory.TraceRadiance : Texture2D.blackTexture);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHistoryScreenDepthTextureId, screenProbeHistoryValid && screenProbeHistory.ScreenDepth != null ? (Texture)screenProbeHistory.ScreenDepth : Texture2D.blackTexture);
+            var previousSceneColor = BurtGIPreviousSceneColorHistoryUtility.GetPreviousSceneColor(
+                context.Request,
+                context.Asset,
+                out var previousSceneColorValid,
+                out var previousSceneColorExposureCorrection);
+            var previousSceneColorWidth = previousSceneColor != null ? Mathf.Max(1, previousSceneColor.width) : 1;
+            var previousSceneColorHeight = previousSceneColor != null ? Mathf.Max(1, previousSceneColor.height) : 1;
+            cmd.SetComputeTextureParam(
+                shader,
+                kernel,
+                BurtGIPreviousSceneColorTextureId,
+                previousSceneColorValid && previousSceneColor != null ? (Texture)previousSceneColor : Texture2D.blackTexture);
+            cmd.SetComputeVectorParam(shader, BurtGIPreviousSceneColorParamsId, new Vector4(
+                previousSceneColorValid ? 1f : 0f,
+                previousSceneColorExposureCorrection,
+                1f / previousSceneColorWidth,
+                1f / previousSceneColorHeight));
             BindCompactSceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelGeometryReadTextureId, context.BurtGISceneVoxelGeometryTarget);
             BindCompactSceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelOccupancyMipReadTextureId, context.BurtGISceneVoxelOccupancyMipTarget);
             BindCompactSceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelLightingReadTextureId, context.BurtGISceneVoxelLightingTarget);
@@ -17584,6 +17653,230 @@ namespace Burt.RenderPipeline
         }
     }
 
+    internal static class BurtGIPreviousSceneColorHistoryUtility
+    {
+        private sealed class CameraState
+        {
+            public Camera Camera;
+            public RenderTexture Texture;
+            public int Width;
+            public int Height;
+            public float StoredPreExposure = 1f;
+            public int LastStoredFrame = -1;
+            public bool Valid;
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<int, CameraState> CameraStates =
+            new System.Collections.Generic.Dictionary<int, CameraState>();
+        private static readonly System.Collections.Generic.List<int> RemovalKeys =
+            new System.Collections.Generic.List<int>();
+
+#if UNITY_EDITOR
+        [UnityEditor.InitializeOnLoadMethod]
+        private static void RegisterEditorCleanup()
+        {
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= ReleaseAll;
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += ReleaseAll;
+        }
+#endif
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetRuntimeState()
+        {
+            ReleaseAll();
+        }
+
+        public static RenderTexture GetPreviousSceneColor(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            out bool valid,
+            out float exposureCorrection)
+        {
+            valid = false;
+            exposureCorrection = 1f;
+            var camera = request != null ? request.Camera : null;
+            if (camera == null)
+            {
+                return null;
+            }
+
+            var state = GetOrCreateState(camera);
+            EnsureTexture(state, camera);
+            var frameGap = state.LastStoredFrame >= 0 ? Time.frameCount - state.LastStoredFrame : int.MaxValue;
+            valid = state.Valid && state.Texture != null && frameGap >= 0 && frameGap <= 2;
+            if (valid)
+            {
+                var currentPreExposure = PreExposureUtility.SanitizeExposure(
+                    PreExposureUtility.ResolveForFrame(request, asset).PreExposure,
+                    1f);
+                exposureCorrection = currentPreExposure /
+                    PreExposureUtility.SanitizeExposure(state.StoredPreExposure, 1f);
+            }
+
+            return state.Texture;
+        }
+
+        public static void Store(
+            CommandBuffer cmd,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            RenderTargetIdentifier source)
+        {
+            var camera = request != null ? request.Camera : null;
+            if (cmd == null || camera == null)
+            {
+                return;
+            }
+
+            var state = GetOrCreateState(camera);
+            EnsureTexture(state, camera);
+            if (state.Texture == null)
+            {
+                return;
+            }
+
+            cmd.Blit(source, new RenderTargetIdentifier(state.Texture));
+            state.StoredPreExposure = PreExposureUtility.SanitizeExposure(
+                PreExposureUtility.ResolveForFrame(request, asset).PreExposure,
+                1f);
+            state.LastStoredFrame = Time.frameCount;
+            state.Valid = true;
+        }
+
+        private static CameraState GetOrCreateState(Camera camera)
+        {
+            var key = camera.GetInstanceID();
+            if (!CameraStates.TryGetValue(key, out var state))
+            {
+                state = new CameraState();
+                CameraStates.Add(key, state);
+            }
+
+            state.Camera = camera;
+            PruneDisposedCameras();
+            return state;
+        }
+
+        private static void EnsureTexture(CameraState state, Camera camera)
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.enableRandomWrite = false;
+            descriptor.sRGB = false;
+            var width = Mathf.Max(1, descriptor.width);
+            var height = Mathf.Max(1, descriptor.height);
+            if (state.Texture != null &&
+                state.Texture.IsCreated() &&
+                state.Width == width &&
+                state.Height == height)
+            {
+                return;
+            }
+
+            ReleaseTexture(state);
+            state.Texture = new RenderTexture(descriptor)
+            {
+                name = "BurtGI Previous Scene Color " + camera.GetInstanceID(),
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            state.Texture.Create();
+            state.Width = width;
+            state.Height = height;
+            state.Valid = false;
+            state.LastStoredFrame = -1;
+        }
+
+        private static void PruneDisposedCameras()
+        {
+            RemovalKeys.Clear();
+            foreach (var pair in CameraStates)
+            {
+                if (pair.Value.Camera == null)
+                {
+                    ReleaseTexture(pair.Value);
+                    RemovalKeys.Add(pair.Key);
+                }
+            }
+
+            for (var index = 0; index < RemovalKeys.Count; index++)
+            {
+                CameraStates.Remove(RemovalKeys[index]);
+            }
+        }
+
+        private static void ReleaseTexture(CameraState state)
+        {
+            if (state.Texture != null)
+            {
+                state.Texture.Release();
+                Object.DestroyImmediate(state.Texture);
+                state.Texture = null;
+            }
+
+            state.Valid = false;
+        }
+
+        private static void ReleaseAll()
+        {
+            foreach (var pair in CameraStates)
+            {
+                ReleaseTexture(pair.Value);
+            }
+
+            CameraStates.Clear();
+            RemovalKeys.Clear();
+        }
+    }
+
+    internal sealed class BurtStoreGIPreviousSceneColorPass : BurtRenderPass
+    {
+        public override string Name => "Burt Store GI Previous Scene Color";
+
+        public override void Configure(BurtRenderPassBuilder builder)
+        {
+            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(
+                builder.Request,
+                builder.Asset))
+            {
+                return;
+            }
+
+            builder.ReadCameraColor();
+        }
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            if (context == null ||
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(
+                    context.Request,
+                    context.Asset))
+            {
+                return;
+            }
+
+            var cameraColorTarget = context.CameraColorTarget;
+            if (!cameraColorTarget.IsValid)
+            {
+                return;
+            }
+
+            var cmd = CommandBufferPool.Get(Name);
+            BurtGIPreviousSceneColorHistoryUtility.Store(
+                cmd,
+                context.Request,
+                context.Asset,
+                cameraColorTarget.Identifier);
+            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            CommandBufferPool.Release(cmd);
+        }
+    }
+
     internal sealed class BurtScreenSpaceGlobalIlluminationCompositePass : BurtScreenSpaceGlobalIlluminationPass
     {
         public override string Name => "Burt Screen Space Global Illumination Composite";
@@ -17738,6 +18031,11 @@ namespace Burt.RenderPipeline
 
             builder.ReadScreenSpaceGlobalIlluminationRaw();
             builder.ReadScreenSpaceGlobalIllumination();
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationIndirectChannelDebugMode(BurtShadingDebugSettings.Mode))
+            {
+                builder.ReadBurtGIBackfaceDiffuseIndirect();
+                builder.ReadBurtGIRoughSpecularIndirect();
+            }
             builder.ReadCameraDepth();
             builder.ReadGBuffer0();
             if (BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationHashGridDebugMode(BurtShadingDebugSettings.Mode))
@@ -17812,6 +18110,8 @@ namespace Burt.RenderPipeline
             var gbuffer0Target = context.GBuffer0Target;
             var rawTarget = context.ScreenSpaceGlobalIlluminationRawTarget;
             var burtGITarget = context.ScreenSpaceGlobalIlluminationTarget;
+            var backfaceDiffuseTarget = context.BurtGIBackfaceDiffuseIndirectTarget;
+            var roughSpecularTarget = context.BurtGIRoughSpecularIndirectTarget;
             var temporalDiagnosticsTarget = context.BurtGITemporalDiagnosticsTarget;
             var radianceCacheStatsTarget = context.BurtGIRadianceCacheStatsTarget;
             var hashGridValueBuffer = context.GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridValueBufferName);
@@ -17835,6 +18135,12 @@ namespace Burt.RenderPipeline
             var radianceCacheProbeLastUsedFrameBuffer = context.BurtGIRadianceCacheClipMapProbeLastUsedFrameBuffer;
             var radianceCacheProbeLastTracedFrameBuffer = context.BurtGIRadianceCacheClipMapProbeLastTracedFrameBuffer;
             if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid || !gbuffer0Target.IsValid || !rawTarget.IsValid || !burtGITarget.IsValid)
+            {
+                return;
+            }
+
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationIndirectChannelDebugMode(BurtShadingDebugSettings.Mode) &&
+                (!backfaceDiffuseTarget.IsValid || !roughSpecularTarget.IsValid))
             {
                 return;
             }
@@ -17923,6 +18229,12 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
             cmd.SetGlobalTexture(BurtGIRawTextureId, rawTarget.Identifier);
             cmd.SetGlobalTexture(BurtGITextureId, burtGITarget.Identifier);
+            cmd.SetGlobalTexture(
+                BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectTextureId,
+                backfaceDiffuseTarget.IsValid ? backfaceDiffuseTarget.Identifier : Texture2D.blackTexture);
+            cmd.SetGlobalTexture(
+                BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectTextureId,
+                roughSpecularTarget.IsValid ? roughSpecularTarget.Identifier : Texture2D.blackTexture);
             var isHashGridDebug = BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationHashGridDebugMode(BurtShadingDebugSettings.Mode);
             if (hashGridValueBuffer.HasBuffer)
             {
@@ -18034,6 +18346,11 @@ namespace Burt.RenderPipeline
             }
 
             cmd.SetGlobalFloat(BurtGIDebugModeId, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationShaderDebugMode());
+            cmd.SetGlobalVector(BurtGIIndirectChannelParamsId, new Vector4(
+                settings.EnableBackfaceDiffuse ? 1f : 0f,
+                settings.EnableRoughSpecular ? 1f : 0f,
+                1f,
+                settings.ScreenProbeMaxRoughnessToEvaluateRoughSpecular));
             UploadCameraGlobals(cmd, context.Request, camera, descriptor);
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, DebugPassIndex, MeshTopology.Triangles, 3, 1);
@@ -19103,10 +19420,14 @@ namespace Burt.RenderPipeline
         protected abstract int TextureId { get; }
         protected abstract BurtRenderTargetHandle GetTarget(BurtRenderGraphContext context);
         protected abstract void ReadTarget(BurtRenderPassBuilder builder);
+        protected virtual bool ShouldRelease(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(request, asset);
+        }
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(builder.Request, builder.Asset))
+            if (!ShouldRelease(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -19116,7 +19437,7 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            if (context == null || !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeLite(context.Request, context.Asset))
+            if (context == null || !ShouldRelease(context.Request, context.Asset))
             {
                 return;
             }
@@ -19131,7 +19452,15 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    internal abstract class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    {
+        protected override bool ShouldRelease(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            return BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationRadianceCacheClipMapContract(request, asset);
+        }
+    }
+
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionPass : BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPass
     {
         public override string Name => "Burt Release RadianceCache ClipMap Indirection";
         protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapIndirectionTextureId;
@@ -19147,7 +19476,7 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapDepthProbeAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPass
     {
         public override string Name => "Burt Release RadianceCache ClipMap Depth Probe Atlas";
         protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapDepthProbeAtlasTextureId;
@@ -19163,7 +19492,7 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapRadianceProbeAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPass
     {
         public override string Name => "Burt Release RadianceCache ClipMap Radiance Probe Atlas";
         protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceProbeAtlasTextureId;
@@ -19179,7 +19508,7 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalRadianceAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPass
     {
         public override string Name => "Burt Release RadianceCache ClipMap Final Radiance Atlas";
         protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFinalRadianceAtlasTextureId;
@@ -19195,7 +19524,7 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPass
     {
         public override string Name => "Burt Release RadianceCache ClipMap Final Irradiance Atlas";
         protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapFinalIrradianceAtlasTextureId;
@@ -19211,7 +19540,7 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPass
     {
         public override string Name => "Burt Release RadianceCache ClipMap Probe Occlusion Atlas";
         protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureId;
@@ -19227,7 +19556,7 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeSkyAOAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationScreenProbePass
+    internal sealed class BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeSkyAOAtlasPass : BurtReleaseScreenSpaceGlobalIlluminationRadianceCacheClipMapPass
     {
         public override string Name => "Burt Release RadianceCache ClipMap Probe Sky AO Atlas";
         protected override int TextureId => BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeSkyAOAtlasTextureId;
@@ -21883,7 +22212,7 @@ namespace Burt.RenderPipeline
 
     internal static class BurtGISceneVoxelMeshRasterizerUtility
     {
-        private const int MaxTriangleCount = 16384;
+        private const int MaxTriangleCount = 131072;
         private const int UpdateIntervalFrames = 8;
         private const float XRenderFourPi = 12.56637061436f;
         private const float XRenderManualEmissiveLuminanceScale = 6f * XRenderFourPi;
@@ -21897,6 +22226,10 @@ namespace Burt.RenderPipeline
         private static readonly int LegacyColorId = Shader.PropertyToID("_Color");
         private static readonly int MainTextureId = Shader.PropertyToID("_MainTex");
         private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
+        private static readonly int EmissiveColorId = Shader.PropertyToID("_EmissiveColor");
+        private static readonly int EmissionMapId = Shader.PropertyToID("_EmissionMap");
+        private static readonly int EmissiveMapId = Shader.PropertyToID("_EmissiveMap");
+        private static readonly int MetallicId = Shader.PropertyToID("_Metallic");
         private static readonly int AlphaClipId = Shader.PropertyToID("_AlphaClip");
         private static readonly int AlphaCutoffEnableId = Shader.PropertyToID("_AlphaCutoffEnable");
         private static readonly int CutoffId = Shader.PropertyToID("_Cutoff");
@@ -22163,8 +22496,13 @@ namespace Burt.RenderPipeline
                     : renderer.sharedMaterial;
                 var baseColor = useMaterialSampling ? ResolveMaterialColor(material) : Color.white;
                 var emission = useMaterialSampling ? ResolveEmissionColor(material) : Color.black;
+                var metallic = useMaterialSampling && material != null && material.HasProperty(MetallicId)
+                    ? Mathf.Clamp01(material.GetFloat(MetallicId))
+                    : 0f;
                 var baseMapPropertyId = -1;
                 var baseMap = useMaterialSampling ? ResolveMaterialBaseMap(material, out baseMapPropertyId) : null;
+                var emissionMapPropertyId = -1;
+                var emissionMap = useMaterialSampling ? ResolveMaterialEmissionMap(material, out emissionMapPropertyId) : null;
                 if (!useMaterialSampling)
                 {
                     baseMapPropertyId = -1;
@@ -22187,11 +22525,20 @@ namespace Burt.RenderPipeline
                     var position1 = localToWorld.MultiplyPoint3x4(vertices[index1]);
                     var position2 = localToWorld.MultiplyPoint3x4(vertices[index2]);
                     var sampledColor = Color.white;
+                    var sampledEmission = Color.white;
                     if (baseMap != null && (uint)index0 < (uint)uvs.Length && (uint)index1 < (uint)uvs.Length && (uint)index2 < (uint)uvs.Length)
                     {
                         var uv = (uvs[index0] + uvs[index1] + uvs[index2]) / 3f;
                         uv = Vector2.Scale(uv, material.GetTextureScale(baseMapPropertyId)) + material.GetTextureOffset(baseMapPropertyId);
                         sampledColor = baseMap.GetPixelBilinear(uv.x, uv.y);
+                        ++LastCollectedTexturedTriangleCount;
+                    }
+
+                    if (emissionMap != null && (uint)index0 < (uint)uvs.Length && (uint)index1 < (uint)uvs.Length && (uint)index2 < (uint)uvs.Length)
+                    {
+                        var emissionUV = (uvs[index0] + uvs[index1] + uvs[index2]) / 3f;
+                        emissionUV = Vector2.Scale(emissionUV, material.GetTextureScale(emissionMapPropertyId)) + material.GetTextureOffset(emissionMapPropertyId);
+                        sampledEmission = emissionMap.GetPixelBilinear(emissionUV.x, emissionUV.y);
                         ++LastCollectedTexturedTriangleCount;
                     }
 
@@ -22201,7 +22548,8 @@ namespace Burt.RenderPipeline
                         continue;
                     }
 
-                    var albedo = baseColor * sampledColor;
+                    var albedo = baseColor * sampledColor * (1f - metallic);
+                    var materialEmission = emission * sampledEmission;
 
                     var normal = Vector3.Cross(position1 - position0, position2 - position0);
                     if (normal.sqrMagnitude <= 0.0000001f)
@@ -22216,7 +22564,7 @@ namespace Burt.RenderPipeline
                         Position2 = position2,
                         Normal = normal.normalized,
                         Albedo = new Vector3(albedo.r, albedo.g, albedo.b),
-                        Emission = new Vector3(emission.r, emission.g, emission.b)
+                        Emission = new Vector3(materialEmission.r, materialEmission.g, materialEmission.b)
                     });
                 }
             }
@@ -22568,9 +22916,42 @@ namespace Burt.RenderPipeline
 
         private static Color ResolveEmissionColor(Material material)
         {
-            return material != null && material.HasProperty(EmissionColorId)
-                ? material.GetColor(EmissionColorId)
+            if (material == null)
+            {
+                return Color.black;
+            }
+
+            if (material.HasProperty(EmissionColorId))
+            {
+                return material.GetColor(EmissionColorId);
+            }
+
+            return material.HasProperty(EmissiveColorId)
+                ? material.GetColor(EmissiveColorId)
                 : Color.black;
+        }
+
+        private static Texture2D ResolveMaterialEmissionMap(Material material, out int propertyId)
+        {
+            propertyId = -1;
+            if (material == null)
+            {
+                return null;
+            }
+
+            Texture texture = null;
+            if (material.HasProperty(EmissionMapId))
+            {
+                propertyId = EmissionMapId;
+                texture = material.GetTexture(EmissionMapId);
+            }
+            else if (material.HasProperty(EmissiveMapId))
+            {
+                propertyId = EmissiveMapId;
+                texture = material.GetTexture(EmissiveMapId);
+            }
+
+            return texture is Texture2D texture2D && texture2D.isReadable ? texture2D : null;
         }
 
         private static bool TryResolveAlphaCutoff(Material material, out float cutoff)
@@ -23632,11 +24013,9 @@ namespace Burt.RenderPipeline
                 return "ProjectionMatrixChanged";
             }
 
-            var maxCameraDelta = Mathf.Max(0.1f, settings.TemporalPlayerVelocityThreshold);
-            if ((camera.transform.position - state.PreviousCameraPosition).sqrMagnitude > maxCameraDelta * maxCameraDelta)
-            {
-                return "CameraVelocityChanged";
-            }
+            // XRender keeps ScreenProbe history while the camera moves and rejects individual
+            // samples with reprojection UV, plane-distance and depth tests. Invalidating the
+            // entire atlas here exposed raw probe noise on every SceneView navigation frame.
 
             var previousPreExposure = PreExposureUtility.SanitizeExposure(state.PreviousPreExposure, 1f);
             var safeCurrentPreExposure = PreExposureUtility.SanitizeExposure(currentPreExposure, 1f);
@@ -26586,6 +26965,7 @@ namespace Burt.RenderPipeline
         {
             return mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw ||
                 mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal ||
+                IsScreenSpaceGlobalIlluminationIndirectChannelDebugMode(mode) ||
                 mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio ||
                 mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationOverlay ||
                 mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite ||
@@ -26601,6 +26981,14 @@ namespace Burt.RenderPipeline
                 IsScreenSpaceGlobalIlluminationScreenProbeDebugMode(mode) ||
                 IsScreenSpaceGlobalIlluminationSceneVoxelDebugMode(mode) ||
                 IsScreenSpaceGlobalIlluminationTemporalDiagnosticDebugMode(mode);
+        }
+
+        public static bool IsScreenSpaceGlobalIlluminationIndirectChannelDebugMode(BurtShadingDebugMode mode)
+        {
+            return mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationCombinedIndirect ||
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiffuseIndirect ||
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationBackfaceDiffuseIndirect ||
+                mode == BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRoughSpecularIndirect;
         }
 
         public static bool IsScreenSpaceGlobalIlluminationHashGridDebugMode(BurtShadingDebugMode mode)
@@ -28473,6 +28861,14 @@ namespace Burt.RenderPipeline
                     return "RGB=TraceAtlasRadianceTonemap;G=TraceHit;Grid=TraceTexelTiles";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationSceneVoxelOccupancy:
                     return "RGB=SceneVoxelOccupancyMipAtSurface;R=MaxOccupancy;G=MeanOccupancy;B=MipID;Magenta=OutsideVoxelVolume";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationCombinedIndirect:
+                    return "RGB=DiffuseIrradiancePlusBackfaceDiffusePlusRoughSpecular";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiffuseIndirect:
+                    return "RGB=FilteredDiffuseIrradianceOnly";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationBackfaceDiffuseIndirect:
+                    return "RGB=BackfaceDiffuseTransmissionOnly";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRoughSpecularIndirect:
+                    return "RGB=RoughSpecularOnly";
                 default:
                     return "Disabled";
             }
@@ -28667,6 +29063,14 @@ namespace Burt.RenderPipeline
                     return 19;
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationSceneVoxelOccupancy:
                     return 20;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationCombinedIndirect:
+                    return 21;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiffuseIndirect:
+                    return 22;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationBackfaceDiffuseIndirect:
+                    return 23;
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRoughSpecularIndirect:
+                    return 24;
                 default:
                     return 0;
             }
@@ -28716,6 +29120,14 @@ namespace Burt.RenderPipeline
                     return "ScreenProbeTraceVisualize";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationSceneVoxelOccupancy:
                     return "SceneVoxelOccupancy";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationCombinedIndirect:
+                    return "CombinedIndirect";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiffuseIndirect:
+                    return "DiffuseIndirect";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationBackfaceDiffuseIndirect:
+                    return "BackfaceDiffuseIndirect";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRoughSpecularIndirect:
+                    return "RoughSpecularIndirect";
                 default:
                     return "Disabled";
             }

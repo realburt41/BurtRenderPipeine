@@ -430,8 +430,6 @@ namespace Burt.RenderPipeline
         private static readonly int HorizontalRayleighTintScaleId = Shader.PropertyToID("_BurtVolumetricFogIntegratedHorizontalRayleighTintScale");
         private static readonly int HorizontalMieTintScaleId = Shader.PropertyToID("_BurtVolumetricFogIntegratedHorizontalMieTintScale");
         private static readonly int HorizontalMultipleTintScaleId = Shader.PropertyToID("_BurtVolumetricFogIntegratedHorizontalMultipleTintScale");
-        private static readonly int SkyLuminanceFactorId = Shader.PropertyToID("_BurtVolumetricFogIntegratedSkyLuminanceFactor");
-        private static readonly int HorizontalScatteringLutId = Shader.PropertyToID("_BurtVolumetricFogHorizontalScatteringLut");
         private static readonly int AmbientSHEnabledId = Shader.PropertyToID("_BurtAmbientSHEnabled");
         private static readonly int AmbientSHArId = Shader.PropertyToID("_BurtAmbientSHAr");
         private static readonly int AmbientSHAgId = Shader.PropertyToID("_BurtAmbientSHAg");
@@ -475,6 +473,7 @@ namespace Burt.RenderPipeline
         private static int lastInjectedLocalVolumeCount;
         private static bool lastTranslucencyGIEnabled;
         private static bool lastClusterLightListEnabled;
+        private static BurtRenderRequest lastBuiltRequest;
 
         internal static bool IsTranslucencyGIActive => lastTranslucencyGIEnabled;
 
@@ -509,6 +508,7 @@ namespace Burt.RenderPipeline
             BurtRenderBufferHandle clusterLightOffsetBuffer)
         {
             lastClusterLightListEnabled = false;
+            lastBuiltRequest = null;
             if (cmd == null || camera == null || camera.orthographic || request == null || !settings.Enabled ||
                 !SystemInfo.supportsComputeShaders || !SystemInfo.supports3DTextures ||
                 !SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.LoadStore) ||
@@ -604,12 +604,11 @@ namespace Burt.RenderPipeline
                 ? Mathf.Max(0f, lightingData.MainLightVolumetricScatteringIntensityScale)
                 : 1f;
             var horizontalLutAvailable = settings.HorizontalScattering.Enabled &&
-                atmosphereSettings.Enabled &&
+                BurtAtmosphereUtility.ShouldUseAtmosphereResources(request) &&
                 BurtAtmosphereLutUtility.BindHorizontalScatteringToCompute(
                     cmd,
                     computeShader,
-                    lightingKernel,
-                    HorizontalScatteringLutId);
+                    lightingKernel);
 
             cmd.SetComputeVectorParam(computeShader, GridSizeId, new Vector4(gridWidth, gridHeight, GridDepth, visibleSliceEnd));
             cmd.SetComputeVectorParam(computeShader, ConservativeDepthParamsId, new Vector4(
@@ -705,8 +704,6 @@ namespace Burt.RenderPipeline
             cmd.SetComputeVectorParam(computeShader, HorizontalMultipleTintScaleId, ToTintScaleVector(
                 settings.HorizontalScattering.MultipleScatteringTint,
                 settings.HorizontalScattering.MultipleScatteringScale));
-            cmd.SetComputeVectorParam(computeShader, SkyLuminanceFactorId, atmosphereSettings.SkyLuminanceFactor);
-
             cmd.SetComputeTextureParam(computeShader, materialKernel, MaterialOutputId, materialLut);
             cmd.DispatchCompute(
                 computeShader,
@@ -781,6 +778,7 @@ namespace Burt.RenderPipeline
             ready = true;
             lastBuiltFrame = Time.frameCount;
             lastBuiltCameraId = cameraId;
+            lastBuiltRequest = request;
             lastLightingHistoryValid = lightingHistoryValid;
             lastConservativeHistoryValid = conservativeHistoryValid;
             lastHistoryInvalidationReason = lightingHistoryValid
@@ -807,9 +805,21 @@ namespace Burt.RenderPipeline
                 camera != null &&
                 request != null &&
                 BurtVolumetricFogUtility.ShouldUseVolumetricFog(request) &&
+                ReferenceEquals(lastBuiltRequest, request) &&
                 lastBuiltFrame == Time.frameCount &&
                 lastBuiltCameraId == camera.GetInstanceID();
             BindGlobals(cmd, valid);
+        }
+
+        public static void BeginCameraRequest(
+            CommandBuffer cmd,
+            BurtRenderRequest request)
+        {
+            lastBuiltRequest = null;
+            if (cmd != null)
+            {
+                BindGlobals(cmd, false);
+            }
         }
 
         public static string FormatDebugState()
@@ -860,6 +870,7 @@ namespace Burt.RenderPipeline
             visibleSliceEnd = 0;
             lastBuiltFrame = -1;
             lastBuiltCameraId = 0;
+            lastBuiltRequest = null;
             gridZParams = Vector4.zero;
             samplingParams = Vector4.zero;
             ready = false;
@@ -1545,6 +1556,28 @@ namespace Burt.RenderPipeline
             visibleSlices = Mathf.Approximately(clampedVisibleDistance, far)
                 ? GridDepth
                 : Mathf.Clamp(Mathf.FloorToInt(visibleSliceCenter) + 1, 1, GridDepth);
+        }
+
+        internal static float ResolveFeatureBoundaryDepth(
+            Camera camera,
+            float visibleDistance)
+        {
+            if (camera == null)
+            {
+                return 0f;
+            }
+
+            ResolveGridZParams(
+                camera,
+                visibleDistance,
+                out var b,
+                out var o,
+                out var s,
+                out _);
+            var featureBoundaryDepth =
+                (Mathf.Pow(2f, MaterialGridDepth / Mathf.Max(s, 0.0001f)) - o) /
+                Mathf.Max(b, 0.000001f);
+            return Mathf.Max(0f, featureBoundaryDepth);
         }
 
         private static Vector4 ToTintScaleVector(Color tint, float scale)

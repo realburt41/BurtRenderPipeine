@@ -38,6 +38,10 @@ namespace Burt.RenderPipeline
 
             builder.ReadCameraColor();
             builder.ReadCameraDepth();
+            if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftOcclusion(builder.Request))
+            {
+                builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.LightShaftOcclusionName);
+            }
             builder.WriteCameraColor();
         }
 
@@ -77,6 +81,7 @@ namespace Burt.RenderPipeline
             UploadMaterialProperties(drawMaterial, camera, request, settings);
 
             var cmd = CommandBufferPool.Get(Name);
+            BurtLightShaftOcclusionUtility.BindForOpaqueFog(cmd, context);
             BurtAtmosphereLutUtility.EnsureAndBindForFog(cmd, drawMaterial, camera, request);
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
             cmd.GetTemporaryRT(FogSourceColorTextureId, descriptor, FilterMode.Bilinear);
@@ -93,8 +98,12 @@ namespace Burt.RenderPipeline
 
         private static void UploadMaterialProperties(Material targetMaterial, Camera camera, BurtRenderRequest request, BurtFogSettings settings)
         {
+            var effectiveStartDistance = BurtFogUtility.ResolveEffectiveStartDistance(
+                request,
+                camera,
+                settings);
             targetMaterial.SetVector(FogParamsId, new Vector4(settings.Height, settings.Density, settings.HeightFalloff, settings.MaxOpacity));
-            targetMaterial.SetVector(FogDistanceParamsId, new Vector4(settings.StartDistance, settings.CutoffDistance, 0f, 0f));
+            targetMaterial.SetVector(FogDistanceParamsId, new Vector4(effectiveStartDistance, settings.CutoffDistance, 0f, 0f));
             targetMaterial.SetColor(FogAlbedoId, settings.Albedo);
             targetMaterial.SetVector(FogScatteringParamsId, new Vector4(
                 settings.DirectionalIntensity,
@@ -171,11 +180,15 @@ namespace Burt.RenderPipeline
             }
 
             var shader = Shader.Find(BurtFogUtility.ShaderName);
-            if (shader == null)
+            if (shader == null ||
+                !shader.isSupported ||
+                shader.passCount < 1)
             {
                 if (!hasLoggedMissingShader)
                 {
-                    Debug.LogWarning("BurtRP could not find shader: " + BurtFogUtility.ShaderName);
+                    Debug.LogWarning(
+                        "BurtRP cannot use shader: " +
+                        BurtFogUtility.ShaderName);
                     hasLoggedMissingShader = true;
                 }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -39,6 +40,7 @@ namespace Burt.RenderPipeline.Editor
         [MenuItem(MenuPath, false, 2400)]
         private static void ValidateXGIResources()
         {
+            ReimportMissingXGIComputeResources();
             var report = BurtScreenSpaceGlobalIlluminationDiagnosticsUtility.ResolveXGIResourceStatusReport();
             var hasIssue = ContainsStatusIssue(report);
             if (hasIssue)
@@ -58,6 +60,7 @@ namespace Burt.RenderPipeline.Editor
 
         public static void ValidateXGIResourcesFromCommandLine()
         {
+            ReimportMissingXGIComputeResources();
             var report = AppendXGIEditorValidationCommands(
                 BurtScreenSpaceGlobalIlluminationDiagnosticsUtility.ResolveXGIResourceStatusReport());
             var hasIssue = ContainsStatusIssue(report);
@@ -70,6 +73,45 @@ namespace Burt.RenderPipeline.Editor
 
             Debug.Log(report);
             EditorApplication.Exit(0);
+        }
+
+        private static void ReimportMissingXGIComputeResources()
+        {
+            const string resourceAssetFolder = "Assets/BurtRP/Runtime/Resources";
+            var resourceAbsoluteFolder = Path.Combine(
+                Directory.GetParent(Application.dataPath).FullName,
+                resourceAssetFolder);
+            if (!Directory.Exists(resourceAbsoluteFolder))
+            {
+                return;
+            }
+
+            var computeFiles = Directory.GetFiles(resourceAbsoluteFolder, "*.compute", SearchOption.TopDirectoryOnly);
+            var reimportedResources = new List<string>();
+            for (var i = 0; i < computeFiles.Length; i++)
+            {
+                var resourceName = Path.GetFileNameWithoutExtension(computeFiles[i]);
+                if (string.IsNullOrEmpty(resourceName) || Resources.Load<ComputeShader>(resourceName) != null)
+                {
+                    continue;
+                }
+
+                var assetPath = resourceAssetFolder + "/" + Path.GetFileName(computeFiles[i]);
+                AssetDatabase.ImportAsset(
+                    assetPath,
+                    ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+                if (Resources.Load<ComputeShader>(resourceName) != null)
+                {
+                    reimportedResources.Add(resourceName);
+                }
+            }
+
+            if (reimportedResources.Count > 0)
+            {
+                Debug.Log(
+                    "[BurtRP][XGIResourceValidation] Reimported stale ComputeShader resources: " +
+                    string.Join(",", reimportedResources));
+            }
         }
 
         public static void ValidateXGILightComponentCoverageFromCommandLine()

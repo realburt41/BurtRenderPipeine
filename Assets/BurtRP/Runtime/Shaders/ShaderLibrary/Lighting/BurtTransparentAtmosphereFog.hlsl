@@ -5,9 +5,7 @@
 
 float _BurtTransparentAtmosphereFogEnabled;
 float4 _BurtTransparentAtmosphereFogLightColor;
-float4 _BurtTransparentAtmosphereFogDistanceParams;
-float4 _BurtTransparentAtmosphereFogFadeParams;
-float4x4 _BurtTransparentAtmosphereWorldToLocal;
+float4 _BurtTransparentAtmosphereFogDistanceParams; // x=world to km, y=sampling scale, z=XRender start depth, w=coverage km
 
 float _BurtTransparentHeightFogEnabled;
 float4 _BurtTransparentHeightFogParams; // x=height, y=density, z=height falloff, w=max opacity
@@ -45,9 +43,11 @@ float4 BurtEvaluateTransparentVolumetricFog(float2 screenUV, float3 positionWS)
     float lastVisibleSliceCenter = max(_BurtVolumetricFogIntegratedSamplingParams.x - 0.5f, 0.5f);
     zSlice = clamp(zSlice, 0.5f, lastVisibleSliceCenter);
     float normalizedZ = zSlice / totalSliceCount;
-    return tex3D(
+    // Explicit LOD is required because XRender's default transparent path
+    // evaluates total fog in the vertex shader.
+    return tex3Dlod(
         _BurtVolumetricFogIntegratedLut,
-        float3(saturate(screenUV), saturate(normalizedZ)));
+        float4(saturate(screenUV), saturate(normalizedZ), 0.0f));
 }
 
 float3 BurtTransparentHeightFogSafeNormalize(float3 value, float3 fallback)
@@ -74,12 +74,10 @@ float3 BurtTransparentHeightFogNormalizeLightColor(float3 lightColor)
     return peak > 0.001f ? lightColor / peak : 1.0f;
 }
 
-float BurtTransparentHeightFogHenyeyGreensteinPhase(float cosTheta, float anisotropy)
+float BurtTransparentHeightFogPhase(float cosTheta, float anisotropy)
 {
-    const float pi = 3.14159265359f;
-    float g2 = anisotropy * anisotropy;
-    float denominator = max(0.05f, pow(abs(1.0f + g2 - 2.0f * anisotropy * cosTheta), 1.5f));
-    return (1.0f - g2) / (4.0f * pi * denominator);
+    // XRender Height Fog uses Schlick with the PBRT phase convention (-L.V).
+    return BurtAtmosphereSchlickPhase(anisotropy, -cosTheta);
 }
 
 float4 BurtEvaluateTransparentHeightFog(float3 positionWS)
@@ -122,7 +120,11 @@ float4 BurtEvaluateTransparentHeightFog(float3 positionWS)
         heightFalloff,
         rayDeltaY,
         mediumDensity) * rayLength;
-    float transmittance = lerp(1.0f, exp2(-max(opticalDepth, 0.0f)), maxOpacity);
+    // Match AEvaluateGlobalHeightFog: MaxOpacity is a final opacity cap,
+    // expressed as a lower bound on transmittance.
+    float transmittance = max(
+        saturate(exp2(-max(opticalDepth, 0.0f))),
+        1.0f - maxOpacity);
     float fogAmount = saturate(1.0f - transmittance);
 
     float aerialInteraction = _BurtTransparentHeightFogAerialParams.x;
@@ -140,7 +142,7 @@ float4 BurtEvaluateTransparentHeightFog(float3 positionWS)
     float3 lightColor = BurtTransparentHeightFogNormalizeLightColor(
         max(_BurtTransparentHeightFogLegacyLightColor.rgb, 0.0f));
     float lightViewCosine = dot(lightDirection, viewDirection);
-    float phase = BurtTransparentHeightFogHenyeyGreensteinPhase(
+    float phase = BurtTransparentHeightFogPhase(
         lightViewCosine,
         _BurtTransparentHeightFogScatteringParams.z);
     float directional = max(_BurtTransparentHeightFogScatteringParams.x, 0.0f) * phase * 4.0f;
@@ -181,15 +183,11 @@ float4 BurtEvaluateTransparentAtmosphereFog(float2 screenUV, float3 positionWS)
 
     float3 cameraToPixel = positionWS - _WorldSpaceCameraPos.xyz;
     float distanceWS = length(cameraToPixel);
-    float nearFadeStart = max(_BurtTransparentAtmosphereFogDistanceParams.z, 0.0f);
-    float nearFadeEnd = max(_BurtTransparentAtmosphereFogFadeParams.x, nearFadeStart + 0.001f);
-    float opacityGate = smoothstep(nearFadeStart, nearFadeEnd, distanceWS)
-        * saturate(_BurtTransparentAtmosphereFogFadeParams.y);
-    float3 atmosphereCameraToPixel = mul((float3x3)_BurtTransparentAtmosphereWorldToLocal, cameraToPixel);
-    float heightFade = exp(-max(atmosphereCameraToPixel.y, 0.0f)
-        * max(_BurtTransparentAtmosphereFogFadeParams.z, 0.0f));
-    float distanceRatio = max(distanceWS - nearFadeStart, 0.0f)
-        * max(_BurtTransparentAtmosphereFogDistanceParams.x, 0.000001f)
+    float startDepth = max(_BurtTransparentAtmosphereFogDistanceParams.z, 0.0f);
+    float worldToKilometers = max(_BurtTransparentAtmosphereFogDistanceParams.x, 0.000001f);
+    float distanceKm = distanceWS * worldToKilometers;
+    float startDepthKm = startDepth * worldToKilometers;
+    float distanceRatio = max(distanceKm - startDepthKm, 0.0f)
         * max(_BurtTransparentAtmosphereFogDistanceParams.y, 0.0f)
         / max(_BurtTransparentAtmosphereFogDistanceParams.w, 0.001f);
 
@@ -199,10 +197,10 @@ float4 BurtEvaluateTransparentAtmosphereFog(float2 screenUV, float3 positionWS)
 #endif
     float4 fogLut = BurtAtmosphereSampleFog(fogScreenUV, distanceRatio);
 
-    const float fogLutDepth = 16.0f;
-    float nonLinearSlice = saturate(sqrt(max(distanceRatio, 0.0f))) * fogLutDepth;
-    float startWeight = saturate(nonLinearSlice * nonLinearSlice * 2.0f);
-    float lutWeight = saturate(opacityGate * heightFade * startWeight);
+    float startWeight = BurtAtmosphereFogStartWeight(distanceRatio);
+    // Exact AEvaluateAtmosphereFog contract: the physical LUT has only its
+    // intrinsic first-froxel fade. Legacy BRP shape controls do not participate.
+    float lutWeight = startWeight;
     float transmittance = lerp(1.0f, fogLut.a, lutWeight);
     float3 scattering = max(fogLut.rgb, 0.0f)
         * max(_BurtTransparentAtmosphereFogLightColor.rgb, 0.0f)
@@ -223,10 +221,28 @@ float4 BurtEvaluateTransparentFog(float2 screenUV, float3 positionWS)
         saturate(volumetricFog.a * farFogTransmittance));
 }
 
+float3 BurtBlendTransparentFog(float3 surfaceRadiance, float4 fog)
+{
+    return surfaceRadiance * fog.a + fog.rgb;
+}
+
+float3 BurtBlendPremultipliedTransparentFog(
+    float3 premultipliedSurfaceRadiance,
+    float alpha,
+    float4 fog)
+{
+    return premultipliedSurfaceRadiance * fog.a + fog.rgb * saturate(alpha);
+}
+
+float3 BurtBlendAdditiveTransparentFog(float3 additiveRadiance, float4 fog)
+{
+    return additiveRadiance * fog.a;
+}
+
 float3 BurtApplyTransparentFog(float3 surfaceRadiance, float2 screenUV, float3 positionWS)
 {
     float4 fog = BurtEvaluateTransparentFog(screenUV, positionWS);
-    return surfaceRadiance * fog.a + fog.rgb;
+    return BurtBlendTransparentFog(surfaceRadiance, fog);
 }
 
 float3 BurtApplyPremultipliedTransparentFog(
@@ -236,13 +252,16 @@ float3 BurtApplyPremultipliedTransparentFog(
     float3 positionWS)
 {
     float4 fog = BurtEvaluateTransparentFog(screenUV, positionWS);
-    return premultipliedSurfaceRadiance * fog.a + fog.rgb * saturate(alpha);
+    return BurtBlendPremultipliedTransparentFog(
+        premultipliedSurfaceRadiance,
+        alpha,
+        fog);
 }
 
 float3 BurtApplyAdditiveTransparentFog(float3 additiveRadiance, float2 screenUV, float3 positionWS)
 {
     float4 fog = BurtEvaluateTransparentFog(screenUV, positionWS);
-    return additiveRadiance * fog.a;
+    return BurtBlendAdditiveTransparentFog(additiveRadiance, fog);
 }
 
 // Compatibility wrappers for materials integrated before total transparent fog

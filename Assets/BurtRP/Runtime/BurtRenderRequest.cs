@@ -127,8 +127,7 @@ namespace Burt.RenderPipeline
             return request;
         }
 
-        public static BurtRenderRequest CreateCameraRequest(
-            ScriptableRenderContext context,
+        public static BurtRenderRequest PrepareCameraRequest(
             Camera camera,
             BurtRenderPipelineAsset asset)
         {
@@ -147,35 +146,6 @@ namespace Burt.RenderPipeline
             {
                 // 返回无效请求。
                 return Invalid();
-            }
-
-            BurtEditorGizmoUtility.EmitWorldGeometryForSceneView(camera); // SceneView 剔除前注入编辑器世界几何，恢复 SRP Gizmos/辅助绘制数据。
-            BurtTemporalAAUtility.RecoverCameraProjectionForCulling(camera); // 剔除前把 TAA/异常留下的 custom projection 交还给 Unity，避免 GameView 只剩天空盒。
-            PostProcessUtility.UpdateVolumeStack(camera, asset); // Cull 前刷新 VolumeStack，让 Global Volume 里的阴影距离参与 shadow caster 剔除。
-
-            // 尝试从相机获取剔除参数。
-            if (!camera.TryGetCullingParameters(out var cullingParameters))
-            {
-                // 如果获取失败，就返回无效请求。
-                return Invalid();
-            }
-
-            // 在 Cull 前写入阴影剔除距离，否则 Unity 可能不会为 DrawShadows 收集可投影物体。
-            ApplyShadowCullingParameters(ref cullingParameters, camera, asset);
-
-            // 在 Cull 前声明当前管线需要 reflection probe，否则部分 Unity 版本可能不会为 per-object probe 绑定准备数据。
-            ApplyIndirectLightingCullingParameters(ref cullingParameters);
-
-            // 使用 Unity 内置剔除系统得到当前相机可见物体。
-            var perObjectShadowLightMaskScope = BurtPerObjectShadowUtility.BeginDirectionalLightRenderingLayerMaskOverrideForCulling();
-            CullingResults cullingResults;
-            try
-            {
-                cullingResults = context.Cull(ref cullingParameters);
-            }
-            finally
-            {
-                perObjectShadowLightMaskScope?.Dispose();
             }
 
             // 创建一个新的请求对象。
@@ -205,13 +175,7 @@ namespace Burt.RenderPipeline
             // 记录 BurtRP 相机数据。
             request.CameraData = cameraData;
 
-            // 记录剔除结果。
-            request.CullingResults = cullingResults;
-
-
-            var applyAtmosphereTransmittance = request.Type != BurtRenderRequestType.Preview
-                && request.Type != BurtRenderRequestType.UICamera;
-            request.LightingData = BurtLightingData.Create(cullingResults, applyAtmosphereTransmittance); // Builds request-level lighting data and preserves unattenuated lighting for editor/UI previews.
+            request.LightingData = BurtLightingData.Default(); // Culling and request-local lighting are populated inside the camera rendering lifecycle.
             // 记录输出目标。
             request.TargetIdentifier = ResolveTargetIdentifier(camera);
 
@@ -223,6 +187,44 @@ namespace Burt.RenderPipeline
 
             // 返回创建好的请求。
             return request;
+        }
+
+        public bool TryCull(
+            ScriptableRenderContext context,
+            BurtRenderPipelineAsset asset)
+        {
+            if (!IsValid || Camera == null)
+            {
+                return false;
+            }
+
+            BurtEditorGizmoUtility.EmitWorldGeometryForSceneView(Camera); // SceneView geometry must be emitted after BeginCameraRendering and before culling.
+            BurtTemporalAAUtility.RecoverCameraProjectionForCulling(Camera); // Recover any previous jitter before Unity derives culling planes.
+            PostProcessUtility.UpdateVolumeStack(Camera, asset); // Refresh volume-driven shadow distance while the camera lifecycle is active.
+
+            if (!Camera.TryGetCullingParameters(out var cullingParameters))
+            {
+                LightingData = BurtLightingData.Default();
+                return false;
+            }
+
+            ApplyShadowCullingParameters(ref cullingParameters, Camera, asset);
+            ApplyIndirectLightingCullingParameters(ref cullingParameters);
+
+            var perObjectShadowLightMaskScope = BurtPerObjectShadowUtility.BeginDirectionalLightRenderingLayerMaskOverrideForCulling();
+            try
+            {
+                CullingResults = context.Cull(ref cullingParameters);
+            }
+            finally
+            {
+                perObjectShadowLightMaskScope?.Dispose();
+            }
+
+            var applyAtmosphereTransmittance = Type != BurtRenderRequestType.Preview
+                && Type != BurtRenderRequestType.UICamera;
+            LightingData = BurtLightingData.Create(CullingResults, applyAtmosphereTransmittance);
+            return true;
         }
 
         private static void ApplyShadowCullingParameters( // 定义阴影剔除参数写入函数，专门在 Unity Cull 前调整 shadowDistance。

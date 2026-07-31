@@ -3,6 +3,7 @@
 #define BURT_SHADING_DEBUG_DATA_INCLUDED
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreSkinPosition.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebugCommon.hlsl"
 
 struct BurtShadingDebugData
 {
@@ -30,67 +31,6 @@ struct BurtShadingDebugData
     #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebugDataHairFields.hlsl"
 #endif
 };
-
-bool BurtIsShadingDebugEnabled()
-{
-    return _BurtShadingDebugEnabled > 0.5f;
-}
-
-bool BurtIsSameShadingDebugMode(float mode, float expectedMode)
-{
-    return abs(mode - expectedMode) < 0.5f;
-}
-
-#if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL
-bool BurtNeedsAdditionalLightingUnshadowedShadingDebug()
-{
-    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_LIGHTING_UNSHADOWED);
-}
-#endif
-
-#if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_SHADOW
-bool BurtNeedsAdditionalShadowAttenuationShadingDebug()
-{
-    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_ATTENUATION);
-}
-
-bool BurtNeedsAdditionalShadowProjectionShadingDebug()
-{
-    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_FACE)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_UV)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_ADDITIONAL_SHADOW_DEPTH_DELTA);
-}
-
-bool BurtNeedsMainLightShadowProjectionShadingDebug()
-{
-    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_RECEIVER_DEPTH)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_RAW_DEPTH)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_COMPARE)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_MAIN_LIGHT_SHADOW_PROJECTION_VALIDITY);
-}
-
-bool BurtNeedsPerObjectShadowProjectionShadingDebug()
-{
-    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_OBJECT_INDEX)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_SLICE)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_UV)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_DEPTH)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_COMPARE);
-}
-
-bool BurtNeedsPerObjectShadowTransmissionShadingDebug()
-{
-    return BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_TRANSMISSION_DEPTH)
-        || BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_PER_OBJECT_SHADOW_TRANSMISSION_THICKNESS);
-}
-#endif
-
-float3 BurtEncodeNormalWSForDebug(float3 normalWS)
-{
-    float3 safeNormalWS = BurtSafeNormalize(normalWS);
-    return safeNormalWS * 0.5f + 0.5f;
-}
 
 BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS)
 {
@@ -137,10 +77,13 @@ BurtShadingDebugData BurtCreateDefaultShadingDebugData(float3 normalWS)
 #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT
     data.IndirectDiffuseColor = float3(0.0f, 0.0f, 0.0f);
     data.IndirectSpecularColor = float3(0.0f, 0.0f, 0.0f);
+    data.AmbientOcclusion = 1.0f;
+#endif
+
+#if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_GI_PROBE
     data.GIProbeIrradiance = float3(0.0f, 0.0f, 0.0f);
     data.GIProbeValidity = 0.0f;
     data.GIProbeSkyVisibility = 0.0f;
-    data.AmbientOcclusion = 1.0f;
 #endif
 
 #if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL

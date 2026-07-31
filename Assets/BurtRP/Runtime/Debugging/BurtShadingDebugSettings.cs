@@ -1,4 +1,5 @@
 using UnityEngine; // 引入 UnityEngine，下面需要使用 Shader.PropertyToID 和 Shader.SetGlobalXXX。
+using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染侧和 shader debug 状态处在同一模块。
 {
@@ -329,7 +330,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         GIProbeRuntimeInfo = 507, // XGIProbe debug: runtime virtual probe streaming and memory overlay.
         AtmosphereLutSkyView = 508, // Atmosphere debug: raw physical SkyView LUT lookup before artistic fallback blending.
         AtmosphereLutMultipleScattering = 509, // Atmosphere debug: converged physical multiple-scattering LUT lookup.
-        AtmosphereLutHorizontalScattering = 510 // Atmosphere debug: XRender-style phase-independent horizon scattering triplet.
+        AtmosphereLutHorizontalScattering = 510, // Atmosphere debug: XRender-style phase-independent horizon scattering triplet.
+        ScreenSpaceGlobalIlluminationCombinedIndirect = 511, // BurtGI debug: isolated diffuse, backface-diffuse and rough-specular channels combined.
+        ScreenSpaceGlobalIlluminationDiffuseIndirect = 512, // BurtGI debug: isolated filtered diffuse irradiance channel used by deferred lighting.
+        ScreenSpaceGlobalIlluminationBackfaceDiffuseIndirect = 513, // BurtGI debug: isolated backface diffuse/transmission channel.
+        ScreenSpaceGlobalIlluminationRoughSpecularIndirect = 514 // BurtGI debug: isolated rough-specular channel.
     }
 
     // 保存 Editor Overlay 和运行时渲染共享的 shading debug 状态。
@@ -347,10 +352,11 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         public const string ModeShaderName = "_BurtShadingDebugMode"; // 定义 shader 侧读取 debug 模式的全局属性名。
         public const string EnabledShaderName = "_BurtShadingDebugEnabled"; // 定义 shader 侧读取 debug 是否开启的全局属性名。
         public const string KeywordName = "BURT_SHADING_DEBUG";
-        private const string ForwardDebugLightingKeywordName = "BURT_FORWARD_SHADING_DEBUG_LIGHTING";
-        private const string ForwardDebugBrdfKeywordName = "BURT_FORWARD_SHADING_DEBUG_BRDF";
-        private const string ForwardDebugShadowKeywordName = "BURT_FORWARD_SHADING_DEBUG_SHADOW";
-        private const string ForwardDebugTransmissionKeywordName = "BURT_FORWARD_SHADING_DEBUG_TRANSMISSION";
+        public const string ForwardKeywordName = "BURT_USE_DEBUG_MODE_FORWARD";
+        private const string LegacyForwardDebugLightingKeywordName = "BURT_FORWARD_SHADING_DEBUG_LIGHTING";
+        private const string LegacyForwardDebugBrdfKeywordName = "BURT_FORWARD_SHADING_DEBUG_BRDF";
+        private const string LegacyForwardDebugShadowKeywordName = "BURT_FORWARD_SHADING_DEBUG_SHADOW";
+        private const string LegacyForwardDebugTransmissionKeywordName = "BURT_FORWARD_SHADING_DEBUG_TRANSMISSION";
         private static readonly int ModeShaderId = Shader.PropertyToID(ModeShaderName); // 缓存模式属性 ID，避免每帧字符串查找。
         private static readonly int EnabledShaderId = Shader.PropertyToID(EnabledShaderName); // 缓存开关属性 ID，避免每帧字符串查找。
         private static BurtShadingDebugMode currentMode = BurtShadingDebugMode.None; // 保存当前 debug 模式，默认关闭。
@@ -368,8 +374,8 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                     return;
                 }
 
-                currentMode = normalizedMode; // 保存新的当前模式。
-                ApplyGlobalShaderProperties(); // 把新的模式同步给 shader 全局参数。
+                currentMode = normalizedMode; // 保存新的当前模式；相机级 Prepare Pass 会按命令流同步到 shader。
+                hasAppliedGlobalShaderProperties = false;
             }
         }
 
@@ -590,26 +596,72 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
             }
         }
 
-        private static void ApplyForwardShadingDebugKeywords(ForwardShadingDebugCategory category)
+        public static bool IsForwardMaterialDebugMode(BurtShadingDebugMode mode)
         {
-            Shader.DisableKeyword(ForwardDebugLightingKeywordName);
-            Shader.DisableKeyword(ForwardDebugBrdfKeywordName);
-            Shader.DisableKeyword(ForwardDebugShadowKeywordName);
-            Shader.DisableKeyword(ForwardDebugTransmissionKeywordName);
-            switch (category)
+            return mode != BurtShadingDebugMode.None &&
+                ResolveForwardShadingDebugCategory(mode) != ForwardShadingDebugCategory.None;
+        }
+
+        public static bool IsShadingDebugAllowedForRequest(BurtRenderRequest request)
+        {
+            if (request == null)
             {
-                case ForwardShadingDebugCategory.Lighting:
-                    Shader.EnableKeyword(ForwardDebugLightingKeywordName);
-                    break;
-                case ForwardShadingDebugCategory.Brdf:
-                    Shader.EnableKeyword(ForwardDebugBrdfKeywordName);
-                    break;
-                case ForwardShadingDebugCategory.Shadow:
-                    Shader.EnableKeyword(ForwardDebugShadowKeywordName);
-                    break;
-                case ForwardShadingDebugCategory.Transmission:
-                    Shader.EnableKeyword(ForwardDebugTransmissionKeywordName);
-                    break;
+                return true;
+            }
+
+            // Keep material/shading debug scoped to the two user-facing scene cameras.
+            // Preview, reflection, UI and unknown utility requests must not inherit the
+            // global editor selection and compile/run the Forward debug permutation.
+            switch (request.Type)
+            {
+                case BurtRenderRequestType.BaseCamera:
+                case BurtRenderRequestType.OverlayCamera:
+                case BurtRenderRequestType.SceneView:
+                    return request.Camera == null ||
+                        (request.Camera.cameraType != CameraType.Preview &&
+                         request.Camera.cameraType != CameraType.Reflection);
+                default:
+                    return false;
+            }
+        }
+
+        public static void RecordGlobalShaderProperties(CommandBuffer cmd)
+        {
+            RecordGlobalShaderProperties(cmd, null);
+        }
+
+        public static void RecordGlobalShaderProperties(CommandBuffer cmd, BurtRenderRequest request)
+        {
+            if (cmd == null)
+            {
+                return;
+            }
+
+            var requestAllowsDebug = IsShadingDebugAllowedForRequest(request);
+            var requestMode = requestAllowsDebug ? currentMode : BurtShadingDebugMode.None;
+            var enableForwardMaterialDebug = IsForwardMaterialDebugMode(requestMode);
+            cmd.SetGlobalInt(ModeShaderId, (int)requestMode);
+            cmd.SetGlobalFloat(EnabledShaderId, requestMode != BurtShadingDebugMode.None ? 1f : 0f);
+            SetKeyword(cmd, ForwardKeywordName, enableForwardMaterialDebug);
+            cmd.DisableShaderKeyword(KeywordName);
+
+            // Always clear the four retired category keywords so domain reloads and old
+            // editor sessions cannot leak a stale variant into a later camera.
+            cmd.DisableShaderKeyword(LegacyForwardDebugLightingKeywordName);
+            cmd.DisableShaderKeyword(LegacyForwardDebugBrdfKeywordName);
+            cmd.DisableShaderKeyword(LegacyForwardDebugShadowKeywordName);
+            cmd.DisableShaderKeyword(LegacyForwardDebugTransmissionKeywordName);
+        }
+
+        private static void SetKeyword(CommandBuffer cmd, string keyword, bool enabled)
+        {
+            if (enabled)
+            {
+                cmd.EnableShaderKeyword(keyword);
+            }
+            else
+            {
+                cmd.DisableShaderKeyword(keyword);
             }
         }
 
@@ -620,19 +672,22 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
                 return;
             }
 
-            var forwardDebugCategory = ResolveForwardShadingDebugCategory(currentMode);
-            var enableForwardMaterialDebug = IsDebugging && forwardDebugCategory != ForwardShadingDebugCategory.None;
+            var enableForwardMaterialDebug = IsForwardMaterialDebugMode(currentMode);
             Shader.SetGlobalInt(ModeShaderId, (int)currentMode); // 上传整数模式 ID，后续 shader 可以 switch 或 if 判断。
             Shader.SetGlobalFloat(EnabledShaderId, IsDebugging ? 1f : 0f); // 上传 0/1 开关，方便 shader 快速判断是否走调试分支。
-            ApplyForwardShadingDebugKeywords(forwardDebugCategory);
+            Shader.DisableKeyword(LegacyForwardDebugLightingKeywordName);
+            Shader.DisableKeyword(LegacyForwardDebugBrdfKeywordName);
+            Shader.DisableKeyword(LegacyForwardDebugShadowKeywordName);
+            Shader.DisableKeyword(LegacyForwardDebugTransmissionKeywordName);
             if (enableForwardMaterialDebug)
             {
-                Shader.EnableKeyword(KeywordName);
+                Shader.EnableKeyword(ForwardKeywordName);
             }
             else
             {
-                Shader.DisableKeyword(KeywordName);
+                Shader.DisableKeyword(ForwardKeywordName);
             }
+            Shader.DisableKeyword(KeywordName);
 
             appliedMode = currentMode;
             hasAppliedGlobalShaderProperties = true;

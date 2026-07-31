@@ -273,67 +273,27 @@ MonoBehaviour:
   anisotropy:
     m_OverrideState: 0
     m_Value: 0.2
---- !u!114 &-4438491104656152674
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 321d677b8bf4460faa234d4179e042a8, type: 3}
-  m_Name: BurtMainLightShadowVolumeComponent
-  m_EditorClassIdentifier: 
-  active: 1
-  enabled:
-    m_OverrideState: 1
+  useAtmosphereHorizontalScattering:
+    m_OverrideState: 0
     m_Value: 1
-  resolution:
-    m_OverrideState: 1
-    m_Value: 2048
-  distance:
-    m_OverrideState: 1
-    m_Value: 50
-  cascadeCount:
-    m_OverrideState: 1
-    m_Value: 4
-  cascadeSplit1:
-    m_OverrideState: 1
-    m_Value: 0.1
-  cascadeSplit2:
-    m_OverrideState: 1
-    m_Value: 0.25
-  cascadeSplit3:
-    m_OverrideState: 1
-    m_Value: 0.5
-  cascadeBlendDistance:
-    m_OverrideState: 1
-    m_Value: 0.05
-  shadowFadeDistance:
-    m_OverrideState: 1
-    m_Value: 5
-  depthBias:
+  atmosphereRayleighTint:
     m_OverrideState: 0
-    m_Value: 0.05
-  normalBias:
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  atmosphereRayleighScale:
     m_OverrideState: 0
-    m_Value: 0.4
-  sampleBias:
-    m_OverrideState: 0
-    m_Value: 0.001
-  pcssEnabled:
-    m_OverrideState: 1
     m_Value: 1
-  pcssLightSize:
-    m_OverrideState: 1
-    m_Value: 6
-  pcssBlockerSearchRadius:
-    m_OverrideState: 1
-    m_Value: 8
-  pcssMaxFilterRadius:
-    m_OverrideState: 1
-    m_Value: 24
+  atmosphereMieTint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  atmosphereMieScale:
+    m_OverrideState: 0
+    m_Value: 1
+  atmosphereMultipleScatteringTint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  atmosphereMultipleScatteringScale:
+    m_OverrideState: 0
+    m_Value: 1
 --- !u!114 &-3316782616265043417
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -447,6 +407,52 @@ MonoBehaviour:
   colorLUTSize:
     m_OverrideState: 0
     m_Value: 16
+--- !u!114 &-2720303215096882270
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7f906b805af14d648c49ee048ad5b0f6, type: 3}
+  m_Name: TemporalAAVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  enabled:
+    m_OverrideState: 0
+    m_Value: 0
+  jitterScale:
+    m_OverrideState: 0
+    m_Value: 1
+  sharpness:
+    m_OverrideState: 0
+    m_Value: 0.04
+  untrustedMotionFeedbackScale:
+    m_OverrideState: 0
+    m_Value: 0.35
+  upscaleFactor:
+    m_OverrideState: 0
+    m_Value: 1
+  motionEdgeResponsiveStrength:
+    m_OverrideState: 0
+    m_Value: 1.2
+  depthEdgeResponsiveStrength:
+    m_OverrideState: 0
+    m_Value: 1.1
+  debugFreezeJitter:
+    m_OverrideState: 0
+    m_Value: 0
+  debugJitterFrame:
+    m_OverrideState: 0
+    m_Value: 0
+  debugOverrideJitterScale:
+    m_OverrideState: 0
+    m_Value: 0
+  debugJitterScale:
+    m_OverrideState: 0
+    m_Value: 1
 --- !u!114 &-1826804953292601650
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -519,6 +525,33 @@ MonoBehaviour:
   mieAnisotropy:
     m_OverrideState: 0
     m_Value: 0.76
+  rayleighScatteringCoefficient:
+    m_OverrideState: 0
+    m_Value: {r: 0.005802, g: 0.013558, b: 0.0331, a: 1}
+  mieScatteringCoefficient:
+    m_OverrideState: 0
+    m_Value: {r: 0.003996, g: 0.003996, b: 0.003996, a: 1}
+  mieAbsorptionCoefficient:
+    m_OverrideState: 0
+    m_Value: {r: 0.000444, g: 0.000444, b: 0.000444, a: 1}
+  ozoneAbsorptionIntensity:
+    m_OverrideState: 0
+    m_Value: 1
+  ozoneAbsorptionCoefficient:
+    m_OverrideState: 0
+    m_Value: {r: 0.00065, g: 0.001881, b: 0.000085, a: 1}
+  ozoneLayerCenter:
+    m_OverrideState: 0
+    m_Value: 25
+  ozoneLayerThickness:
+    m_OverrideState: 0
+    m_Value: 15
+  multipleScatteringIntensity:
+    m_OverrideState: 0
+    m_Value: 1
+  traceSampleCountScale:
+    m_OverrideState: 0
+    m_Value: 1
   sunIntensity:
     m_OverrideState: 0
     m_Value: 0.6
@@ -540,6 +573,12 @@ MonoBehaviour:
   customSunDirection:
     m_OverrideState: 0
     m_Value: {x: 0.3, y: 0.8, z: 0.4}
+  mainLightTransmittanceStrength:
+    m_OverrideState: 0
+    m_Value: 1
+  mainLightOcclusion:
+    m_OverrideState: 0
+    m_Value: 1
   planetRadius:
     m_OverrideState: 0
     m_Value: 6371
@@ -552,12 +591,30 @@ MonoBehaviour:
   mieScaleHeight:
     m_OverrideState: 0
     m_Value: 1.2
+  planetTransformMode:
+    m_OverrideState: 0
+    m_Value: 0
+  planetAnchorWorld:
+    m_OverrideState: 0
+    m_Value: {x: 0, y: 0, z: 0}
+  planetCenterWorld:
+    m_OverrideState: 0
+    m_Value: {x: 0, y: -6360000, z: 0}
+  worldToKilometers:
+    m_OverrideState: 0
+    m_Value: 0.001
+  groundAlbedo:
+    m_OverrideState: 0
+    m_Value: {r: 0.6666667, g: 0.6666667, b: 0.6666667, a: 1}
   groundColor:
     m_OverrideState: 0
     m_Value: {r: 0.18, g: 0.2, b: 0.18, a: 1}
   skyTint:
     m_OverrideState: 0
     m_Value: {r: 0.65, g: 0.78, b: 1, a: 1}
+  skyLuminanceFactor:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
   horizonColor:
     m_OverrideState: 0
     m_Value: {r: 0.48, g: 0.66, b: 0.92, a: 1}
@@ -588,8 +645,373 @@ MonoBehaviour:
   tonemapSafeSunIntensity:
     m_OverrideState: 0
     m_Value: 4
+  physicalSkyMaterial:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+  physicalSkyMesh:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+  physicalSkyMeshWorldPosition:
+    m_OverrideState: 0
+    m_Value: {x: 0, y: 0, z: 0}
+  physicalSkyTimeOfDayCurve:
+    m_OverrideState: 0
+    m_Value: 0
+  stylizedSkyBlend:
+    m_OverrideState: 0
+    m_Value: 0
+  stylizedBaseSkyColorDay:
+    m_OverrideState: 0
+    m_Value: {r: 0.0838, g: 0.1645, b: 0.8716, a: 1}
+  stylizedBaseSkyColorDawnDusk:
+    m_OverrideState: 0
+    m_Value: {r: 0.1651, g: 0.1946, b: 0.3662, a: 1}
+  stylizedBaseSkyColorNight:
+    m_OverrideState: 0
+    m_Value: {r: 0.0166, g: 0.0265, b: 0.1245, a: 1}
+  stylizedHorizonSkyColorDay:
+    m_OverrideState: 0
+    m_Value: {r: 0.55, g: 0.66, b: 1.92, a: 1}
+  stylizedHorizonSkyColorDawnDusk:
+    m_OverrideState: 0
+    m_Value: {r: 0.4735, g: 0.1844, b: 0.1274, a: 1}
+  stylizedHorizonSkyColorNight:
+    m_OverrideState: 0
+    m_Value: {r: 0.3132, g: 0.211, b: 0.1672, a: 1}
+  stylizedHorizonBrightness:
+    m_OverrideState: 0
+    m_Value: 1.5
+  stylizedHorizonFalloff:
+    m_OverrideState: 0
+    m_Value: 10
+  stylizedSunDiskColorScale:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  stylizedSunGlowColor:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  stylizedSunRiseBlendMin:
+    m_OverrideState: 0
+    m_Value: -0.6
+  stylizedSunRiseBlendMax:
+    m_OverrideState: 0
+    m_Value: 0.07
+  stylizedSunGlowScale:
+    m_OverrideState: 0
+    m_Value: 3.5
+  moonEnabled:
+    m_OverrideState: 0
+    m_Value: 1
+  moonSurfaceTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  moonPhaseNormalTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  moonRotationEuler:
+    m_OverrideState: 0
+    m_Value: {x: 0, y: 0, z: 0}
+  moonIntensity:
+    m_OverrideState: 0
+    m_Value: 0
+  moonAngularDiameter:
+    m_OverrideState: 0
+    m_Value: 2
+  moonSurfaceTint:
+    m_OverrideState: 0
+    m_Value: {r: 0.06, g: 0.06, b: 0.14, a: 1}
+  moonAdditionalTint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  moonPhase:
+    m_OverrideState: 0
+    m_Value: 0.6
+  moonPhaseRotation:
+    m_OverrideState: 0
+    m_Value: 300
+  moonEarthshine:
+    m_OverrideState: 0
+    m_Value: 0.01
+  moonPhaseSharpness:
+    m_OverrideState: 0
+    m_Value: 5
+  moonFlareSize:
+    m_OverrideState: 0
+    m_Value: 0
+  moonFlareFalloff:
+    m_OverrideState: 0
+    m_Value: 50
+  moonFlareTint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  moonLightBloomIntensity:
+    m_OverrideState: 0
+    m_Value: 0
+  moonLightBloomSize:
+    m_OverrideState: 0
+    m_Value: 0
+  moonLightBloomFalloff:
+    m_OverrideState: 0
+    m_Value: 3
+  moonLightBloomEdgeAlpha:
+    m_OverrideState: 0
+    m_Value: 20
+  moonRiseBlendMin:
+    m_OverrideState: 0
+    m_Value: 0.1
+  moonRiseBlendMax:
+    m_OverrideState: 0
+    m_Value: 0.75
+  starsEnabled:
+    m_OverrideState: 0
+    m_Value: 1
+  starsTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  starsTintColorTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  starsIntensity:
+    m_OverrideState: 0
+    m_Value: 0.15
+  starsRotation:
+    m_OverrideState: 0
+    m_Value: 0
+  starsTintColor:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  starsTintColorSaturation:
+    m_OverrideState: 0
+    m_Value: 0
+  starsTintColorTextureTiling:
+    m_OverrideState: 0
+    m_Value: {x: 1, y: 1}
+  starsTintColorTextureOffset:
+    m_OverrideState: 0
+    m_Value: {x: 0, y: 0}
+  starsLayer1Height:
+    m_OverrideState: 0
+    m_Value: 6
+  starsLayer2Height:
+    m_OverrideState: 0
+    m_Value: 7
+  starsLayer3Height:
+    m_OverrideState: 0
+    m_Value: 8
+  starsLayerSpeed:
+    m_OverrideState: 0
+    m_Value: 0.01
+  starsLayerTwinkleStrength:
+    m_OverrideState: 0
+    m_Value: 0.5
+  starsLayerTwinkleSpeed:
+    m_OverrideState: 0
+    m_Value: 0.5
+  starsLayer1Falloff:
+    m_OverrideState: 0
+    m_Value: 2
+  starsLayer2Falloff:
+    m_OverrideState: 0
+    m_Value: 2
+  starsLayer3Falloff:
+    m_OverrideState: 0
+    m_Value: 2
+  starsHorizonFalloff:
+    m_OverrideState: 0
+    m_Value: 1
+  areaStarsTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  areaStarsIntensity:
+    m_OverrideState: 0
+    m_Value: 0.15
+  areaStarsDensityMinMax:
+    m_OverrideState: 0
+    m_Value: {x: 20, y: 50}
+  areaStarsMaskTiling:
+    m_OverrideState: 0
+    m_Value: {x: 2, y: 0.5}
+  areaStarsMaskOffset:
+    m_OverrideState: 0
+    m_Value: {x: 0, y: 0}
+  areaStarsSpeed:
+    m_OverrideState: 0
+    m_Value: 0.1
+  areaStarsFalloff:
+    m_OverrideState: 0
+    m_Value: 1.25
+  areaStarsMaskFalloff:
+    m_OverrideState: 0
+    m_Value: 2.5
+  galaxyCloudTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  galaxyCloudTiling:
+    m_OverrideState: 0
+    m_Value: {x: 0.5, y: 1.5}
+  galaxyCloudOffset:
+    m_OverrideState: 0
+    m_Value: {x: -0.3, y: -0.3}
+  galaxyCloudRotation:
+    m_OverrideState: 0
+    m_Value: 117
+  galaxyCloudIntensity:
+    m_OverrideState: 0
+    m_Value: 0.0001
+  galaxyCloudFalloff:
+    m_OverrideState: 0
+    m_Value: 2
+  galaxyStarIntensity:
+    m_OverrideState: 0
+    m_Value: 0.15
+  galaxyStarFalloff:
+    m_OverrideState: 0
+    m_Value: 1.5
+  galaxyStarHeight:
+    m_OverrideState: 0
+    m_Value: 6
+  galaxyStarSpeed:
+    m_OverrideState: 0
+    m_Value: 0.01
+  customStarTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  customStarTextureScale:
+    m_OverrideState: 0
+    m_Value: {x: 1, y: 1}
+  customStarTextureOffset:
+    m_OverrideState: 0
+    m_Value: {x: 0, y: 0}
+  customStarRotation:
+    m_OverrideState: 0
+    m_Value: 0
+  customStarScaleMin:
+    m_OverrideState: 0
+    m_Value: 0.8
+  customStarIntensityMax:
+    m_OverrideState: 0
+    m_Value: {x: 10, y: 5, z: 5, w: 100}
+  customStarIntensityMin:
+    m_OverrideState: 0
+    m_Value: {x: 1, y: 1, z: 1, w: 0.1}
+  customStarScatterSpeed:
+    m_OverrideState: 0
+    m_Value: 10
+  customStarScatterInterval:
+    m_OverrideState: 0
+    m_Value: 5
+  panoramicCloudEnabled:
+    m_OverrideState: 0
+    m_Value: 1
+  panoramicCloudUseDefaultTexture:
+    m_OverrideState: 0
+    m_Value: 0
+  panoramicCloudDefaultTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  panoramicCloudPreviousWeatherTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  panoramicCloudCurrentWeatherTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  panoramicCloudTextureInTransition:
+    m_OverrideState: 0
+    m_Value: 0
+  panoramicCloudTextureTransition:
+    m_OverrideState: 0
+    m_Value: 1
+  panoramicCloudDayUvOffset:
+    m_OverrideState: 0
+    m_Value: 0
+  panoramicCloudNightUvOffset:
+    m_OverrideState: 0
+    m_Value: 0
+  panoramicCloudRotationSpeed:
+    m_OverrideState: 0
+    m_Value: 0.0002
+  panoramicCloudSunnyLuminance:
+    m_OverrideState: 0
+    m_Value: 7000
+  panoramicCloudNightLuminance:
+    m_OverrideState: 0
+    m_Value: 0.1
+  panoramicCloudIgnoreTimeOfDayColors:
+    m_OverrideState: 0
+    m_Value: 0
+  panoramicCloudBaseColor:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  panoramicCloudDetailSpecular:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  panoramicCloudAlpha:
+    m_OverrideState: 0
+    m_Value: 1
+  physicalSkyDesaturationEnabled:
+    m_OverrideState: 0
+    m_Value: 0
+  physicalSkyDesaturationColor:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  physicalSkyDesaturationEffect:
+    m_OverrideState: 0
+    m_Value: 0
+  physicalSkyDesaturationIntensity:
+    m_OverrideState: 0
+    m_Value: 0.1
+  physicalSkyCloudDesaturationIntensity:
+    m_OverrideState: 0
+    m_Value: 0.05
+  weatherSkyCoverageEnabled:
+    m_OverrideState: 0
+    m_Value: 1
+  weatherSkyCoverageTexture:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  weatherRainIntensity:
+    m_OverrideState: 0
+    m_Value: 0
+  weatherRainWetCoverage:
+    m_OverrideState: 0
+    m_Value: 0
+  weatherSnowIntensity:
+    m_OverrideState: 0
+    m_Value: 0
+  weatherSnowCoverage:
+    m_OverrideState: 0
+    m_Value: 0
+  weatherCloudShadowMarchDistance:
+    m_OverrideState: 0
+    m_Value: 0.03
+  weatherCloudShadowBright:
+    m_OverrideState: 0
+    m_Value: {r: 0.76, g: 0.77, b: 0.8, a: 1}
+  weatherCloudShadowDark:
+    m_OverrideState: 0
+    m_Value: {r: 0.45, g: 0.5, b: 0.6, a: 1}
   aerialPerspective:
     m_OverrideState: 1
+    m_Value: 1
+  aerialPerspectiveDensityScale:
+    m_OverrideState: 0
+    m_Value: 1
+  aerialPerspectiveLuminanceScale:
+    m_OverrideState: 0
+    m_Value: 1
+  aerialPerspectiveSamplingDistanceScale:
+    m_OverrideState: 0
     m_Value: 1
   aerialPerspectiveIntensity:
     m_OverrideState: 1
@@ -603,7 +1025,7 @@ MonoBehaviour:
   aerialPerspectiveTint:
     m_OverrideState: 1
     m_Value: {r: 0.7, g: 0.82, b: 1, a: 1}
-  aerialPerspectiveNearFadeStart:
+  aerialPerspectiveStartDepth:
     m_OverrideState: 1
     m_Value: 0
   aerialPerspectiveNearFadeEnd:
@@ -633,10 +1055,7 @@ MonoBehaviour:
   components:
   - {fileID: -5432317182717837885}
   - {fileID: -1522021868769821207}
-  - {fileID: 9113136322530897853}
   - {fileID: 3971589225541114367}
-  - {fileID: 1724650135256992785}
-  - {fileID: -4438491104656152674}
   - {fileID: 1128726436058786600}
   - {fileID: -7662446673525914430}
   - {fileID: -142477189715346804}
@@ -651,6 +1070,9 @@ MonoBehaviour:
   - {fileID: -9050926445519798143}
   - {fileID: -9066545745583481370}
   - {fileID: 8370899641374450958}
+  - {fileID: 5212783151801675486}
+  - {fileID: 2241135635519108042}
+  - {fileID: -2720303215096882270}
 --- !u!114 &1128726436058786600
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -733,7 +1155,7 @@ MonoBehaviour:
   fadeDistance:
     m_OverrideState: 0
     m_Value: 80
---- !u!114 &1724650135256992785
+--- !u!114 &2241135635519108042
 MonoBehaviour:
   m_ObjectHideFlags: 3
   m_CorrespondingSourceObject: {fileID: 0}
@@ -742,49 +1164,19 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9eefaf3404c841038b2c13b49590b66e, type: 3}
-  m_Name: BurtScreenSpaceReflectionVolumeComponent
+  m_Script: {fileID: 11500000, guid: ed35d0ad4e8f3ff458acc92aba038adc, type: 3}
+  m_Name: LightShaftVolumeComponent
   m_EditorClassIdentifier: 
   active: 1
   enabled:
     m_OverrideState: 1
     m_Value: 1
-  quality:
-    m_OverrideState: 0
-    m_Value: 0
-  resolution:
+  occlusionMaskDarkness:
     m_OverrideState: 1
-    m_Value: 1
-  maxSteps:
-    m_OverrideState: 0
-    m_Value: 48
-  maxDistance:
-    m_OverrideState: 0
-    m_Value: 30
-  thickness:
-    m_OverrideState: 0
-    m_Value: 0.35
-  intensity:
-    m_OverrideState: 0
-    m_Value: 1
-  roughnessFade:
-    m_OverrideState: 0
-    m_Value: 0.6
-  experimentalHiZTrace:
+    m_Value: 0.213
+  occlusionDepthRange:
     m_OverrideState: 1
-    m_Value: 1
-  temporalAccumulation:
-    m_OverrideState: 0
-    m_Value: 1
-  temporalFeedback:
-    m_OverrideState: 0
-    m_Value: 0.86
-  temporalDepthRejection:
-    m_OverrideState: 0
-    m_Value: 0.02
-  temporalClamp:
-    m_OverrideState: 0
-    m_Value: 1
+    m_Value: 2229
 --- !u!114 &2718075953073365877
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -797,19 +1189,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b209dc77435b44698410251b02aaa798, type: 3}
   m_Name: BurtScreenSpaceGlobalIlluminationVolumeComponent
   m_EditorClassIdentifier: 
-  active: 1
+  active: 0
   enabled:
     m_OverrideState: 1
     m_Value: 1
   quality:
     m_OverrideState: 1
-    m_Value: 2
+    m_Value: 0
   resolution:
     m_OverrideState: 1
-    m_Value: 1
+    m_Value: 0
   intensity:
     m_OverrideState: 1
-    m_Value: 1.232
+    m_Value: 1
   radius:
     m_OverrideState: 1
     m_Value: 1.6
@@ -880,8 +1272,8 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 0.55
   screenProbeLite:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 1
   screenProbeSpacingPixels:
     m_OverrideState: 0
     m_Value: 16
@@ -961,8 +1353,8 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 0.1
   screenProbeApplyStrength:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 1
   screenProbeTraceCompact:
     m_OverrideState: 0
     m_Value: 1
@@ -973,16 +1365,16 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 1
   screenProbeTraceSources:
-    m_OverrideState: 0
-    m_Value: 69
+    m_OverrideState: 1
+    m_Value: -1
   screenProbeImportanceSampling:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 1
   screenProbeImportanceSampleLighting:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 1
   screenProbeImportanceSampleProbeRadianceHistory:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 1
   screenProbeImportanceSamplingHistoryDistanceThreshold:
     m_OverrideState: 0
@@ -1009,11 +1401,11 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 1
   screenProbeIrradianceFormat:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0
   screenProbeIntegrateType:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 1
   screenProbeIntegrateMethod:
     m_OverrideState: 0
     m_Value: 0
@@ -1087,7 +1479,7 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 500
   finalGather:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0
   irradianceFieldStrength:
     m_OverrideState: 0
@@ -1117,8 +1509,8 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 0.1
   xgiUseProbeFirst:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 1
   useTranslucencyVolume:
     m_OverrideState: 0
     m_Value: 1
@@ -1403,6 +1795,34 @@ MonoBehaviour:
   toneCurveAmount:
     m_OverrideState: 0
     m_Value: 1
+--- !u!114 &5212783151801675486
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a71df31f45dc49ca95f8de3749fafc65, type: 3}
+  m_Name: LensFlareVolumeComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  enabled:
+    m_OverrideState: 1
+    m_Value: 1
+  data:
+    m_OverrideState: 1
+    m_Value: {fileID: 11400000, guid: 6c79cf2a5a0bcc748adcee7346fd3c61, type: 2}
+  intensity:
+    m_OverrideState: 1
+    m_Value: 0.8
+  scale:
+    m_OverrideState: 0
+    m_Value: 1
+  tint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
 --- !u!114 &7039378954940126186
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -1415,7 +1835,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4d5f6b7a8c914f02a36e4d1b90c2a7e5, type: 3}
   m_Name: BurtScreenSpaceShadowVolumeComponent
   m_EditorClassIdentifier: 
-  active: 0
+  active: 1
   enabled:
     m_OverrideState: 1
     m_Value: 1
@@ -1423,10 +1843,10 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 1
   sampleCount:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 32
   maxDistance:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 5
   depthOffset:
     m_OverrideState: 0
@@ -1459,10 +1879,10 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 50
   halfResolution:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0
   quarterResolution:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0
 --- !u!114 &8370899641374450958
 MonoBehaviour:
@@ -1507,52 +1927,6 @@ MonoBehaviour:
   visualizeDOF:
     m_OverrideState: 0
     m_Value: 0
---- !u!114 &9113136322530897853
-MonoBehaviour:
-  m_ObjectHideFlags: 3
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7f906b805af14d648c49ee048ad5b0f6, type: 3}
-  m_Name: BurtTemporalAAVolumeComponent
-  m_EditorClassIdentifier: 
-  active: 1
-  enabled:
-    m_OverrideState: 1
-    m_Value: 1
-  jitterScale:
-    m_OverrideState: 0
-    m_Value: 1
-  sharpness:
-    m_OverrideState: 0
-    m_Value: 0.04
-  untrustedMotionFeedbackScale:
-    m_OverrideState: 0
-    m_Value: 0.35
-  upscaleFactor:
-    m_OverrideState: 0
-    m_Value: 1
-  motionEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.2
-  depthEdgeResponsiveStrength:
-    m_OverrideState: 0
-    m_Value: 1.1
-  debugFreezeJitter:
-    m_OverrideState: 0
-    m_Value: 0
-  debugJitterFrame:
-    m_OverrideState: 0
-    m_Value: 0
-  debugOverrideJitterScale:
-    m_OverrideState: 0
-    m_Value: 0
-  debugJitterScale:
-    m_OverrideState: 0
-    m_Value: 1
 --- !u!114 &9153360420279958332
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -1590,12 +1964,40 @@ MonoBehaviour:
   heightFalloff:
     m_OverrideState: 0
     m_Value: 0.15
+  secondLayerHeightOffset:
+    m_OverrideState: 0
+    m_Value: 0
+  secondLayerDensity:
+    m_OverrideState: 0
+    m_Value: 0
+  secondLayerHeightFalloff:
+    m_OverrideState: 0
+    m_Value: 0
   extinctionScale:
     m_OverrideState: 0
     m_Value: 1
   maxOpacity:
     m_OverrideState: 0
     m_Value: 0.75
+  useFogMap:
+    m_OverrideState: 0
+    m_Value: 0
+  fogMap:
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
+    dimension: 1
+  fogMapCenterXZ:
+    m_OverrideState: 0
+    m_Value: {x: 0, y: 0}
+  fogMapCoverageXZ:
+    m_OverrideState: 0
+    m_Value: {x: 4096, y: 4096}
+  fogMapMinAltitude:
+    m_OverrideState: 0
+    m_Value: -200
+  fogMapMaxAltitude:
+    m_OverrideState: 0
+    m_Value: 500
   albedo:
     m_OverrideState: 0
     m_Value: {r: 1, g: 1, b: 1, a: 1}
@@ -1608,3 +2010,24 @@ MonoBehaviour:
   ambientIntensity:
     m_OverrideState: 0
     m_Value: 0.35
+  useAtmosphereHorizontalScattering:
+    m_OverrideState: 0
+    m_Value: 1
+  atmosphereRayleighTint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  atmosphereRayleighScale:
+    m_OverrideState: 0
+    m_Value: 1
+  atmosphereMieTint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  atmosphereMieScale:
+    m_OverrideState: 0
+    m_Value: 1
+  atmosphereMultipleScatteringTint:
+    m_OverrideState: 0
+    m_Value: {r: 1, g: 1, b: 1, a: 1}
+  atmosphereMultipleScatteringScale:
+    m_OverrideState: 0
+    m_Value: 1

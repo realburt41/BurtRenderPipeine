@@ -173,30 +173,17 @@ namespace Burt.RenderPipeline
         {
             None,
             Lighting,
+            Probe,
             Brdf,
             Shadow,
-            Transmission,
-            Full
-        }
-
-        private enum DeferredLightingDebugLightingVariant
-        {
-            Main,
-            Detail,
-            Additional,
-            Indirect,
-            Final
+            Transmission
         }
 
         private const string DeferredLightingShaderName = "Hidden/BurtRP/DeferredLighting";
-        private const string DeferredLightingDebugLightingShaderName = "Hidden/BurtRP/DeferredLightingDebugLighting";
-        private const string DeferredLightingDebugBrdfShaderName = "Hidden/BurtRP/DeferredLightingDebugBRDF";
+        private const string DeferredAdditionalLightingShaderName = "Hidden/BurtRP/DeferredAdditionalLighting";
+        private const string DeferredLightingDebugProbeShaderName = "Hidden/BurtRP/DeferredLightingDebugProbe";
         private const string DeferredLightingDebugShadowShaderName = "Hidden/BurtRP/DeferredLightingDebugShadow";
-        private const string DeferredLightingDebugTransmissionShaderName = "Hidden/BurtRP/DeferredLightingDebugTransmission";
-        private const string DeferredLightingDebugDetailKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_DETAIL";
-        private const string DeferredLightingDebugAdditionalKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_ADDITIONAL";
-        private const string DeferredLightingDebugIndirectKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_INDIRECT";
-        private const string DeferredLightingDebugFinalKeyword = "BURT_DEFERRED_LIGHTING_DEBUG_FINAL";
+        private const string DeferredLightingDebugKeyword = "BURT_USE_DEBUG_MODE_DEFERRED";
 
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -235,17 +222,23 @@ namespace Burt.RenderPipeline
         private readonly string passName;
         private readonly int shaderPassIndex;
         private readonly bool readsExistingCameraColor;
+        private readonly bool isAdditionalLightingStage;
         private Material deferredLightingMaterial;
         private Material deferredLightingDebugMaterial;
         private bool hasLoggedMissingShader;
         private bool hasLoggedMissingDebugShader;
         private bool hasLoggedMissingShaderPass;
 
-        protected BurtDeferredLightingPass(string passName, int shaderPassIndex, bool readsExistingCameraColor)
+        protected BurtDeferredLightingPass(
+            string passName,
+            int shaderPassIndex,
+            bool readsExistingCameraColor,
+            bool isAdditionalLightingStage = false)
         {
             this.passName = passName;
             this.shaderPassIndex = shaderPassIndex;
             this.readsExistingCameraColor = readsExistingCameraColor;
+            this.isAdditionalLightingStage = isAdditionalLightingStage;
         }
 
         public override string Name => passName;
@@ -264,64 +257,51 @@ namespace Burt.RenderPipeline
             builder.ReadCameraDepth();
             builder.ReadDeferredLightingDepth();
 
-            if (BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(builder.Request, builder.Asset))
+            if (!isAdditionalLightingStage)
             {
-                builder.ReadScreenSpaceAmbientOcclusion();
-            }
-
-            if (BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadow(builder.Request, builder.Asset))
-            {
-                builder.ReadScreenSpaceShadow();
-            }
-
-            if (ShouldUseBurtGIApplyIndirect(builder.Request, builder.Asset, builder.ResourceRegistry))
-            {
-                builder.ReadScreenSpaceGlobalIllumination();
-                if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName))
+                if (BurtScreenSpaceAmbientOcclusionPassUtility.ShouldUseScreenSpaceAmbientOcclusion(builder.Request, builder.Asset))
                 {
-                    builder.ReadBurtGIBackfaceDiffuseIndirect();
+                    builder.ReadScreenSpaceAmbientOcclusion();
                 }
 
-                if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectName))
+                if (BurtScreenSpaceShadowPassUtility.ShouldUseScreenSpaceShadow(builder.Request, builder.Asset))
                 {
-                    builder.ReadBurtGIRoughSpecularIndirect();
+                    builder.ReadScreenSpaceShadow();
                 }
 
-                if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationBilateralUpsample(builder.Request, builder.Asset))
+                if (ShouldUseBurtGIApplyIndirect(builder.Request, builder.Asset, builder.ResourceRegistry))
                 {
-                    if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationUpsampledName))
+                    builder.ReadScreenSpaceGlobalIllumination();
+                    if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectName))
                     {
-                        builder.ReadScreenSpaceGlobalIlluminationUpsampled();
+                        builder.ReadBurtGIBackfaceDiffuseIndirect();
                     }
 
-                    if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectUpsampledName))
+                    if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectName))
                     {
-                        builder.ReadBurtGIBackfaceDiffuseIndirectUpsampled();
+                        builder.ReadBurtGIRoughSpecularIndirect();
                     }
 
-                    if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectUpsampledName))
+                    if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationBilateralUpsample(builder.Request, builder.Asset))
                     {
-                        builder.ReadBurtGIRoughSpecularIndirectUpsampled();
+                        if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceGlobalIlluminationUpsampledName))
+                        {
+                            builder.ReadScreenSpaceGlobalIlluminationUpsampled();
+                        }
+
+                        if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectUpsampledName))
+                        {
+                            builder.ReadBurtGIBackfaceDiffuseIndirectUpsampled();
+                        }
+
+                        if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectUpsampledName))
+                        {
+                            builder.ReadBurtGIRoughSpecularIndirectUpsampled();
+                        }
                     }
+
+                    builder.ReadGlobalResource(BurtRenderGraphResourceRegistry.BurtGIApplyIndirectGlobalsName);
                 }
-
-                if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTranslucencyVolume(builder.Request, builder.Asset))
-                {
-                    if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeFilter0Name) &&
-                        builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeFilter1Name))
-                    {
-                        builder.ReadBurtGITranslucencyVolumeFilter0();
-                        builder.ReadBurtGITranslucencyVolumeFilter1();
-                    }
-                    else if (builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume0Name) &&
-                        builder.ResourceRegistry.ContainsRenderTarget(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolume1Name))
-                    {
-                        builder.ReadBurtGITranslucencyVolume0();
-                        builder.ReadBurtGITranslucencyVolume1();
-                    }
-                }
-
-                builder.ReadGlobalResource(BurtRenderGraphResourceRegistry.BurtGIApplyIndirectGlobalsName);
             }
 
             if (ShouldUseRuntimeTiledLighting(builder.Request, builder.Asset, builder.ResourceRegistry))
@@ -336,12 +316,18 @@ namespace Burt.RenderPipeline
                 builder.ReadClusterLightCountBuffer();
                 builder.ReadClusterLightListBuffer();
                 builder.ReadClusterLightOffsetBuffer();
+                if (isAdditionalLightingStage &&
+                    builder.ResourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.PunctualTileIdBufferName))
+                {
+                    builder.ReadPunctualTileIdBuffer();
+                }
             }
 
             builder.ReadLightingGlobals();
             builder.ReadShadowGlobals();
 
-            if (BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset))
+            if (!isAdditionalLightingStage &&
+                BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset))
             {
                 builder.ReadMainLightShadowMap();
             }
@@ -356,6 +342,11 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
+            if (ShouldSkipDeferredLightingStage(context))
+            {
+                return;
+            }
+
             if (!TryGetRequiredTargets(
                     context,
                     out var cameraColorTarget,
@@ -372,7 +363,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var material = GetDeferredLightingMaterial();
+            var material = GetDeferredLightingMaterial(context.Asset);
             if (material == null || !HasRequiredShaderPass(material))
             {
                 return;
@@ -389,20 +380,86 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(GBuffer5Id, gbuffer5Target.Identifier);
             cmd.SetGlobalTexture(GBufferObjectIndexId, gbufferObjectIndexTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthId, deferredLightingDepthTarget.Identifier);
-            BindScreenSpaceAmbientOcclusion(context, cmd, material);
-            BindScreenSpaceShadow(context, cmd, material);
-            BindBurtGIApplyIndirect(context, cmd, material);
+            if (!isAdditionalLightingStage)
+            {
+                BindScreenSpaceAmbientOcclusion(context, cmd, material);
+                BindScreenSpaceShadow(context, cmd, material);
+                BindBurtGIApplyIndirect(context, cmd, material);
+            }
             BindAdditionalLightBuffer(context, cmd, material);
             BindRuntimeTiledLighting(context, cmd);
-            UploadMainLightShadowReceiverGlobals(context, cmd, material);
+            if (!isAdditionalLightingStage)
+            {
+                UploadMainLightShadowReceiverGlobals(context, cmd, material);
+            }
             UploadAdditionalLightShadowReceiverGlobals(context, cmd, material);
-            UploadPerObjectShadowReceiverGlobals(context, cmd, material);
+            if (!isAdditionalLightingStage)
+            {
+                UploadPerObjectShadowReceiverGlobals(context, cmd, material);
+            }
             UploadCameraReconstructionGlobals(context, cmd, material);
             BindSubsurfaceDiffuseLuminanceOutput(context, cmd, material);
-            cmd.DrawProcedural(Matrix4x4.identity, material, shaderPassIndex, MeshTopology.Triangles, 3, 1);
+            DrawDeferredLighting(context, cmd, material);
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier);
             context.ScriptableContext.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
+        }
+
+        private void DrawDeferredLighting(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
+        {
+            if (!isAdditionalLightingStage ||
+                context == null ||
+                context.Request == null ||
+                context.Request.LightingData == null)
+            {
+                cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 0f);
+                cmd.DrawProcedural(Matrix4x4.identity, material, shaderPassIndex, MeshTopology.Triangles, 3, 1);
+                return;
+            }
+
+            var lightingData = context.Request.LightingData;
+            if (!lightingData.ShouldUsePunctualTileDraw ||
+                context.ResourceRegistry == null ||
+                !context.ResourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.PunctualTileIdBufferName))
+            {
+                cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 0f);
+                cmd.DrawProcedural(Matrix4x4.identity, material, shaderPassIndex, MeshTopology.Triangles, 3, 1);
+                return;
+            }
+
+            var tileIdBuffer = context.PunctualTileIdBuffer;
+            if (!tileIdBuffer.IsValid ||
+                !tileIdBuffer.HasBuffer)
+            {
+                cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 0f);
+                cmd.DrawProcedural(Matrix4x4.identity, material, shaderPassIndex, MeshTopology.Triangles, 3, 1);
+                return;
+            }
+
+            cmd.SetGlobalBuffer(BurtTiledLightData.PunctualTileIdBufferId, tileIdBuffer.Buffer);
+            cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 1f);
+            for (var binIndex = 0; binIndex < BurtTiledLightData.PunctualTileBinCount; binIndex++)
+            {
+                var tileCount = lightingData.PunctualTileDrawBinCounts[binIndex];
+                if (tileCount <= 0)
+                {
+                    continue;
+                }
+
+                cmd.SetGlobalInt(
+                    BurtTiledLightData.PunctualTileIdOffsetId,
+                    lightingData.PunctualTileDrawBinOffsets[binIndex]);
+                cmd.DrawProcedural(
+                    Matrix4x4.identity,
+                    material,
+                    shaderPassIndex,
+                    MeshTopology.Triangles,
+                    6,
+                    tileCount);
+            }
+
+            cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 0f);
+            cmd.SetGlobalInt(BurtTiledLightData.PunctualTileIdOffsetId, 0);
         }
 
         private static bool TryGetRequiredTargets(
@@ -586,11 +643,9 @@ namespace Burt.RenderPipeline
 
             cmd.SetGlobalTexture(BurtGIApplyIndirectBackfaceDiffuseTextureId, enabled && backfaceDiffuseEnabled && backfaceDiffuseTarget.IsValid ? backfaceDiffuseTarget.Identifier : Texture2D.blackTexture);
             cmd.SetGlobalTexture(BurtGIApplyIndirectRoughSpecularTextureId, enabled && roughSpecularEnabled && roughSpecularTarget.IsValid ? roughSpecularTarget.Identifier : Texture2D.blackTexture);
-            var volumeEnabled = enabled &&
-                translucencyVolumeEnabled &&
-                BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTranslucencyVolume(context != null ? context.Request : null, context != null ? context.Asset : null) &&
-                translucencyVolume0Target.IsValid &&
-                translucencyVolume1Target.IsValid;
+            // XRender parity: the translucency froxel volume belongs to transparent forward
+            // materials, never to an opaque deferred lighting pass.
+            const bool volumeEnabled = false;
             var fallbackVolumeTexture = BurtGITranslucencyVolumeFallbackUtility.BlackVolumeTexture;
             cmd.SetGlobalTexture(BurtGITranslucencyVolume0TextureId, volumeEnabled ? translucencyVolume0Target.Identifier : fallbackVolumeTexture);
             cmd.SetGlobalTexture(BurtGITranslucencyVolume1TextureId, volumeEnabled ? translucencyVolume1Target.Identifier : fallbackVolumeTexture);
@@ -933,26 +988,117 @@ namespace Burt.RenderPipeline
             BurtMainLightShadowMatrixUtility.ClearMainLightShadowReceiverGlobals(cmd, material);
         }
 
-        private Material GetDeferredLightingMaterial()
+        private Material GetDeferredLightingMaterial(BurtRenderPipelineAsset asset)
         {
-            if (ShouldUseDeferredLightingDebugShader())
+            var debugCategory = ResolveDeferredLightingDebugCategory(BurtShadingDebugSettings.Mode);
+            if (isAdditionalLightingStage)
             {
-                var debugShaderName = ResolveDeferredLightingDebugShaderName(BurtShadingDebugSettings.Mode);
-                var debugMaterial = GetDeferredLightingMaterial(
-                    debugShaderName,
-                    ref deferredLightingDebugMaterial,
-                    ref hasLoggedMissingDebugShader);
-                ConfigureDeferredLightingDebugLightingVariant(debugMaterial, BurtShadingDebugSettings.Mode);
-                return debugMaterial;
+                var additionalMaterial = GetDeferredLightingMaterial(
+                    DeferredAdditionalLightingShaderName,
+                    asset,
+                    ref deferredLightingMaterial,
+                    ref hasLoggedMissingShader);
+                ConfigureDeferredLightingDebugKeyword(
+                    additionalMaterial,
+                    debugCategory == DeferredLightingDebugCategory.Lighting &&
+                    ShouldRunAdditionalLightingDebugStage(BurtShadingDebugSettings.Mode));
+                return additionalMaterial;
             }
 
-            return GetDeferredLightingMaterial(
+            if (debugCategory == DeferredLightingDebugCategory.Probe ||
+                debugCategory == DeferredLightingDebugCategory.Shadow)
+            {
+                var debugShaderName = ResolveDeferredLightingDebugShaderName(BurtShadingDebugSettings.Mode);
+                return GetDeferredLightingMaterial(
+                    debugShaderName,
+                    asset,
+                    ref deferredLightingDebugMaterial,
+                    ref hasLoggedMissingDebugShader);
+            }
+
+            var lightingMaterial = GetDeferredLightingMaterial(
                 DeferredLightingShaderName,
+                asset,
                 ref deferredLightingMaterial,
                 ref hasLoggedMissingShader);
+            ConfigureDeferredLightingDebugKeyword(
+                lightingMaterial,
+                debugCategory == DeferredLightingDebugCategory.Lighting ||
+                debugCategory == DeferredLightingDebugCategory.Brdf ||
+                debugCategory == DeferredLightingDebugCategory.Transmission);
+            return lightingMaterial;
         }
 
-        private static bool ShouldUseDeferredLightingDebugShader()
+        private bool ShouldSkipDeferredLightingStage(BurtRenderGraphContext context)
+        {
+            if (isAdditionalLightingStage)
+            {
+                var lightingData = context != null && context.Request != null
+                    ? context.Request.LightingData
+                    : null;
+                if (lightingData == null || lightingData.AdditionalLightCount <= 0)
+                {
+                    return true;
+                }
+
+                if (lightingData.PunctualTileDrawUploaded &&
+                    lightingData.PunctualTileDrawHitTileCount <= 0)
+                {
+                    return true;
+                }
+            }
+
+            if (!ShouldUseDeferredLightingDebug())
+            {
+                return false;
+            }
+
+            var debugCategory = ResolveDeferredLightingDebugCategory(BurtShadingDebugSettings.Mode);
+            if (!isAdditionalLightingStage &&
+                (debugCategory == DeferredLightingDebugCategory.Probe ||
+                 debugCategory == DeferredLightingDebugCategory.Shadow))
+            {
+                // Probe and shadow diagnostics are single fullscreen views. They do
+                // not need seven copies of the material-model lighting pass.
+                return shaderPassIndex != 0;
+            }
+
+            var isAdditionalLightingDebugMode = IsAdditionalLightingDebugMode(BurtShadingDebugSettings.Mode);
+            return isAdditionalLightingStage
+                ? !ShouldRunAdditionalLightingDebugStage(BurtShadingDebugSettings.Mode)
+                : isAdditionalLightingDebugMode;
+        }
+
+        private static bool ShouldRunAdditionalLightingDebugStage(BurtShadingDebugMode mode)
+        {
+            switch (mode)
+            {
+                case BurtShadingDebugMode.DetailLighting:
+                case BurtShadingDebugMode.DirectDiffuse:
+                case BurtShadingDebugMode.DirectSpecular:
+                case BurtShadingDebugMode.FinalLighting:
+                    return true;
+                default:
+                    return IsAdditionalLightingDebugMode(mode);
+            }
+        }
+
+        private static bool IsAdditionalLightingDebugMode(BurtShadingDebugMode mode)
+        {
+            switch (mode)
+            {
+                case BurtShadingDebugMode.AdditionalLighting:
+                case BurtShadingDebugMode.AdditionalDiffuse:
+                case BurtShadingDebugMode.AdditionalSpecular:
+                case BurtShadingDebugMode.HairAdditionalLighting:
+                case BurtShadingDebugMode.AdditionalLightingUnshadowed:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool ShouldUseDeferredLightingDebug()
         {
             if (!BurtShadingDebugSettings.IsDebugging)
             {
@@ -967,81 +1113,30 @@ namespace Burt.RenderPipeline
             return ResolveDeferredLightingDebugCategory(BurtShadingDebugSettings.Mode) != DeferredLightingDebugCategory.None;
         }
 
+        private static void ConfigureDeferredLightingDebugKeyword(Material material, bool enabled)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            CoreUtils.SetKeyword(material, DeferredLightingDebugKeyword, enabled);
+        }
+
         private static string ResolveDeferredLightingDebugShaderName(BurtShadingDebugMode mode)
         {
             switch (ResolveDeferredLightingDebugCategory(mode))
             {
                 case DeferredLightingDebugCategory.Lighting:
-                    return DeferredLightingDebugLightingShaderName;
                 case DeferredLightingDebugCategory.Brdf:
-                    return DeferredLightingDebugBrdfShaderName;
+                case DeferredLightingDebugCategory.Transmission:
+                    return DeferredLightingShaderName;
+                case DeferredLightingDebugCategory.Probe:
+                    return DeferredLightingDebugProbeShaderName;
                 case DeferredLightingDebugCategory.Shadow:
                     return DeferredLightingDebugShadowShaderName;
-                case DeferredLightingDebugCategory.Transmission:
-                    return DeferredLightingDebugTransmissionShaderName;
                 default:
                     return DeferredLightingShaderName;
-            }
-        }
-
-        private static void ConfigureDeferredLightingDebugLightingVariant(Material material, BurtShadingDebugMode mode)
-        {
-            if (material == null || material.shader == null || material.shader.name != DeferredLightingDebugLightingShaderName)
-            {
-                return;
-            }
-
-            material.DisableKeyword(DeferredLightingDebugDetailKeyword);
-            material.DisableKeyword(DeferredLightingDebugAdditionalKeyword);
-            material.DisableKeyword(DeferredLightingDebugIndirectKeyword);
-            material.DisableKeyword(DeferredLightingDebugFinalKeyword);
-
-            switch (ResolveDeferredLightingDebugLightingVariant(mode))
-            {
-                case DeferredLightingDebugLightingVariant.Detail:
-                    material.EnableKeyword(DeferredLightingDebugDetailKeyword);
-                    break;
-                case DeferredLightingDebugLightingVariant.Additional:
-                    material.EnableKeyword(DeferredLightingDebugAdditionalKeyword);
-                    break;
-                case DeferredLightingDebugLightingVariant.Indirect:
-                    material.EnableKeyword(DeferredLightingDebugIndirectKeyword);
-                    break;
-                case DeferredLightingDebugLightingVariant.Final:
-                    material.EnableKeyword(DeferredLightingDebugFinalKeyword);
-                    break;
-            }
-        }
-
-        private static DeferredLightingDebugLightingVariant ResolveDeferredLightingDebugLightingVariant(BurtShadingDebugMode mode)
-        {
-            switch (mode)
-            {
-                case BurtShadingDebugMode.DetailLighting:
-                    return DeferredLightingDebugLightingVariant.Detail;
-
-                case BurtShadingDebugMode.AdditionalLighting:
-                case BurtShadingDebugMode.AdditionalDiffuse:
-                case BurtShadingDebugMode.AdditionalSpecular:
-                case BurtShadingDebugMode.HairAdditionalLighting:
-                case BurtShadingDebugMode.AdditionalLightingUnshadowed:
-                    return DeferredLightingDebugLightingVariant.Additional;
-
-                case BurtShadingDebugMode.IndirectLighting:
-                case BurtShadingDebugMode.IndirectDiffuse:
-                case BurtShadingDebugMode.IndirectSpecular:
-                case BurtShadingDebugMode.AmbientOcclusion:
-                case BurtShadingDebugMode.GIProbeIrradiance:
-                case BurtShadingDebugMode.GIProbeValidity:
-                case BurtShadingDebugMode.GIProbeSkyVisibility:
-                    return DeferredLightingDebugLightingVariant.Indirect;
-
-                case BurtShadingDebugMode.Emission:
-                case BurtShadingDebugMode.FinalLighting:
-                    return DeferredLightingDebugLightingVariant.Final;
-
-                default:
-                    return DeferredLightingDebugLightingVariant.Main;
             }
         }
 
@@ -1125,16 +1220,18 @@ namespace Burt.RenderPipeline
                 case BurtShadingDebugMode.IndirectSpecular:
                 case BurtShadingDebugMode.AmbientOcclusion:
                 case BurtShadingDebugMode.Emission:
-                case BurtShadingDebugMode.FinalLighting:
                 case BurtShadingDebugMode.AdditionalLighting:
                 case BurtShadingDebugMode.AdditionalDiffuse:
                 case BurtShadingDebugMode.AdditionalSpecular:
                 case BurtShadingDebugMode.HairAdditionalLighting:
                 case BurtShadingDebugMode.AdditionalLightingUnshadowed:
+                case BurtShadingDebugMode.FinalLighting:
+                    return DeferredLightingDebugCategory.Lighting;
+
                 case BurtShadingDebugMode.GIProbeIrradiance:
                 case BurtShadingDebugMode.GIProbeValidity:
                 case BurtShadingDebugMode.GIProbeSkyVisibility:
-                    return DeferredLightingDebugCategory.Lighting;
+                    return DeferredLightingDebugCategory.Probe;
 
                 default:
                     return DeferredLightingDebugCategory.None;
@@ -1143,6 +1240,7 @@ namespace Burt.RenderPipeline
 
         private static Material GetDeferredLightingMaterial(
             string shaderName,
+            BurtRenderPipelineAsset asset,
             ref Material material,
             ref bool hasLoggedMissingShader)
         {
@@ -1158,7 +1256,13 @@ namespace Burt.RenderPipeline
                 material = null;
             }
 
-            var shader = Shader.Find(shaderName);
+            var shader = asset != null && asset.RuntimeResources != null
+                ? asset.RuntimeResources.ResolveDeferredShadingDebugShader(shaderName)
+                : null;
+            if (shader == null)
+            {
+                shader = Shader.Find(shaderName);
+            }
             if (shader == null)
             {
                 if (!hasLoggedMissingShader)
@@ -1187,7 +1291,10 @@ namespace Burt.RenderPipeline
 
             if (!hasLoggedMissingShaderPass)
             {
-                var shaderName = material != null && material.shader != null ? material.shader.name : DeferredLightingShaderName;
+                var fallbackShaderName = isAdditionalLightingStage
+                    ? DeferredAdditionalLightingShaderName
+                    : DeferredLightingShaderName;
+                var shaderName = material != null && material.shader != null ? material.shader.name : fallbackShaderName;
                 Debug.LogWarning("BurtRP deferred lighting shader pass missing: " + shaderName + " pass " + shaderPassIndex + " for " + Name);
                 hasLoggedMissingShaderPass = true;
             }
@@ -1234,56 +1341,84 @@ namespace Burt.RenderPipeline
 
     internal sealed class BurtDeferredLitLightingPass : BurtDeferredLightingPass
     {
-        public BurtDeferredLitLightingPass()
-            : base("Burt Deferred Lit Lighting", 0, false)
+        public BurtDeferredLitLightingPass(bool additionalLightingStage = false)
+            : base(
+                additionalLightingStage ? "Burt Deferred Lit Additional Lighting" : "Burt Deferred Lit Lighting",
+                0,
+                additionalLightingStage,
+                additionalLightingStage)
         {
         }
     }
 
     internal sealed class BurtDeferredHairLightingPass : BurtDeferredLightingPass
     {
-        public BurtDeferredHairLightingPass()
-            : base("Burt Deferred Hair Lighting", 1, true)
+        public BurtDeferredHairLightingPass(bool additionalLightingStage = false)
+            : base(
+                additionalLightingStage ? "Burt Deferred Hair Additional Lighting" : "Burt Deferred Hair Lighting",
+                1,
+                true,
+                additionalLightingStage)
         {
         }
     }
 
     internal sealed class BurtDeferredClearCoatLightingPass : BurtDeferredLightingPass
     {
-        public BurtDeferredClearCoatLightingPass()
-            : base("Burt Deferred Clear Coat Lighting", 2, true)
+        public BurtDeferredClearCoatLightingPass(bool additionalLightingStage = false)
+            : base(
+                additionalLightingStage ? "Burt Deferred Clear Coat Additional Lighting" : "Burt Deferred Clear Coat Lighting",
+                2,
+                true,
+                additionalLightingStage)
         {
         }
     }
 
     internal sealed class BurtDeferredSubsurfaceLightingPass : BurtDeferredLightingPass
     {
-        public BurtDeferredSubsurfaceLightingPass()
-            : base("Burt Deferred Subsurface Lighting", 3, true)
+        public BurtDeferredSubsurfaceLightingPass(bool additionalLightingStage = false)
+            : base(
+                additionalLightingStage ? "Burt Deferred Subsurface Additional Lighting" : "Burt Deferred Subsurface Lighting",
+                3,
+                true,
+                additionalLightingStage)
         {
         }
     }
 
     internal sealed class BurtDeferredFabricLightingPass : BurtDeferredLightingPass
     {
-        public BurtDeferredFabricLightingPass()
-            : base("Burt Deferred Fabric Lighting", 4, true)
+        public BurtDeferredFabricLightingPass(bool additionalLightingStage = false)
+            : base(
+                additionalLightingStage ? "Burt Deferred Fabric Additional Lighting" : "Burt Deferred Fabric Lighting",
+                4,
+                true,
+                additionalLightingStage)
         {
         }
     }
 
     internal sealed class BurtDeferredFoliageLightingPass : BurtDeferredLightingPass
     {
-        public BurtDeferredFoliageLightingPass()
-            : base("Burt Deferred Foliage Lighting", 5, true)
+        public BurtDeferredFoliageLightingPass(bool additionalLightingStage = false)
+            : base(
+                additionalLightingStage ? "Burt Deferred Foliage Additional Lighting" : "Burt Deferred Foliage Lighting",
+                5,
+                true,
+                additionalLightingStage)
         {
         }
     }
 
     internal sealed class BurtDeferredFurLightingPass : BurtDeferredLightingPass
     {
-        public BurtDeferredFurLightingPass()
-            : base("Burt Deferred Fur Lighting", 6, true)
+        public BurtDeferredFurLightingPass(bool additionalLightingStage = false)
+            : base(
+                additionalLightingStage ? "Burt Deferred Fur Additional Lighting" : "Burt Deferred Fur Lighting",
+                6,
+                true,
+                additionalLightingStage)
         {
         }
     }

@@ -11,9 +11,10 @@ Material:
   m_Shader: {fileID: 4800000, guid: a8b6208548b3416c817e0034dfab527d, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords: []
+  m_ValidKeywords:
+  - _EMISSION
   m_InvalidKeywords: []
-  m_LightmapFlags: 4
+  m_LightmapFlags: 0
   m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: 2000
@@ -46,6 +47,7 @@ Material:
     m_Floats:
     - _AlphaClip: 0
     - _Anisotropy: 0
+    - _BlendMode: 0
     - _BurtGBufferStencilReadMask: 224
     - _BurtGBufferStencilRef: 32
     - _BurtGBufferStencilWriteMask: 224
@@ -55,6 +57,7 @@ Material:
     - _DoubleSidedNormalMode: 0
     - _DstBlend: 0
     - _IOR: 1.5
+    - _IgnoreFog: 0
     - _Metallic: 1
     - _MotionVectorsStencilMask: 8
     - _MotionVectorsStencilRef: 8
@@ -72,6 +75,6 @@ Material:
     m_Colors:
     - _BaseColor: {r: 0.9150943, g: 0.75667745, b: 0.21150756, a: 0.3764706}
     - _DoubleSidedNormalModeConstants: {r: 1, g: 1, b: 1, a: 0}
-    - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}
     - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

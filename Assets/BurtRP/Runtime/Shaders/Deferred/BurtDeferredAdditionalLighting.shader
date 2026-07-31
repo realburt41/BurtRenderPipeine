@@ -1,5 +1,4 @@
-// BurtRP hidden deferred lighting debug shader for BRDF-oriented material views.
-Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
+Shader "Hidden/BurtRP/DeferredAdditionalLighting"
 {
     Properties
     {
@@ -16,31 +15,24 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
     SubShader
     {
         Tags { "RenderPipeline" = "BurtRenderPipeline" }
+        Cull Off
+        ZWrite Off
+        ZTest Always
 
         HLSLINCLUDE
-            #define BURT_COMPILE_SHADING_DEBUG 1
-            #define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF 1
-
-            struct Attributes
-            {
-                uint VertexID : SV_VertexID;
-            };
-
-            struct Varyings
-            {
-                float4 PositionCS : SV_POSITION;
-                float2 ScreenUV : TEXCOORD0;
-            };
-            // #pragma enable_d3d11_debug_symbols
+            // Matches XRender DeferredPunctual: normal and shading-debug output
+            // are variants of the same tiled punctual pass.
+            #pragma shader_feature_local_fragment _ BURT_USE_DEBUG_MODE_DEFERRED
+            #if defined(BURT_USE_DEBUG_MODE_DEFERRED)
+                #define BURT_DEFERRED_ADDITIONAL_LIGHTING_DEBUG 1
+                #pragma skip_optimizations d3d11
+            #endif
         ENDHLSL
 
         Pass
         {
-            Name "Burt Deferred Lit Lighting"
-            Tags { "LightMode" = "BurtDeferredLitLighting" }
-            Cull Off
-            ZWrite Off
-            ZTest Always
+            Name "Burt Deferred Lit Additional Lighting"
+            Tags { "LightMode" = "BurtDeferredLitAdditionalLighting" }
             Stencil
             {
                 Ref [_BurtDeferredStencilDefaultLitRef]
@@ -48,12 +40,11 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
                 Comp Equal
                 Pass Keep
             }
-            Blend Off
-
+            Blend One One, Zero One
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_DEFAULT_LIT 1
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredAdditionalLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
@@ -61,11 +52,8 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
 
         Pass
         {
-            Name "Burt Deferred Hair Lighting"
-            Tags { "LightMode" = "BurtDeferredHairLighting" }
-            Cull Off
-            ZWrite Off
-            ZTest Always
+            Name "Burt Deferred Hair Additional Lighting"
+            Tags { "LightMode" = "BurtDeferredHairAdditionalLighting" }
             Stencil
             {
                 Ref [_BurtDeferredStencilHairRef]
@@ -73,12 +61,11 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
                 Comp Equal
                 Pass Keep
             }
-            Blend One One
-
+            Blend One One, Zero One
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_HAIR 1
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredAdditionalLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
@@ -86,11 +73,8 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
 
         Pass
         {
-            Name "Burt Deferred Clear Coat Lighting"
-            Tags { "LightMode" = "BurtDeferredClearCoatLighting" }
-            Cull Off
-            ZWrite Off
-            ZTest Always
+            Name "Burt Deferred Clear Coat Additional Lighting"
+            Tags { "LightMode" = "BurtDeferredClearCoatAdditionalLighting" }
             Stencil
             {
                 Ref [_BurtDeferredStencilClearCoatRef]
@@ -98,12 +82,11 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
                 Comp Equal
                 Pass Keep
             }
-            Blend One One
-
+            Blend One One, Zero One
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT 1
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredAdditionalLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
@@ -111,11 +94,8 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
 
         Pass
         {
-            Name "Burt Deferred Subsurface Lighting"
-            Tags { "LightMode" = "BurtDeferredSubsurfaceLighting" }
-            Cull Off
-            ZWrite Off
-            ZTest Always
+            Name "Burt Deferred Subsurface Additional Lighting"
+            Tags { "LightMode" = "BurtDeferredSubsurfaceAdditionalLighting" }
             Stencil
             {
                 Ref [_BurtDeferredStencilSubsurfaceRef]
@@ -123,13 +103,12 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
                 Comp Equal
                 Pass Keep
             }
-            Blend One One, One Zero
-
+            Blend One One, One One
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_SUBSURFACE 1
             #define BURT_SUBSURFACE_DEFERRED_POSTPROCESS_INPUT 1
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredAdditionalLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
@@ -137,11 +116,8 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
 
         Pass
         {
-            Name "Burt Deferred Fabric Lighting"
-            Tags { "LightMode" = "BurtDeferredFabricLighting" }
-            Cull Off
-            ZWrite Off
-            ZTest Always
+            Name "Burt Deferred Fabric Additional Lighting"
+            Tags { "LightMode" = "BurtDeferredFabricAdditionalLighting" }
             Stencil
             {
                 Ref [_BurtDeferredStencilFabricRef]
@@ -149,12 +125,11 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
                 Comp Equal
                 Pass Keep
             }
-            Blend One One
-
+            Blend One One, Zero One
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_FABRIC 1
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredAdditionalLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
@@ -162,11 +137,8 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
 
         Pass
         {
-            Name "Burt Deferred Foliage Lighting"
-            Tags { "LightMode" = "BurtDeferredFoliageLighting" }
-            Cull Off
-            ZWrite Off
-            ZTest Always
+            Name "Burt Deferred Foliage Additional Lighting"
+            Tags { "LightMode" = "BurtDeferredFoliageAdditionalLighting" }
             Stencil
             {
                 Ref [_BurtDeferredStencilFoliageRef]
@@ -174,12 +146,11 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
                 Comp Equal
                 Pass Keep
             }
-            Blend One One
-
+            Blend One One, Zero One
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_FOLIAGE 1
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredAdditionalLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL
@@ -187,11 +158,8 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
 
         Pass
         {
-            Name "Burt Deferred Fur Lighting"
-            Tags { "LightMode" = "BurtDeferredFurLighting" }
-            Cull Off
-            ZWrite Off
-            ZTest Always
+            Name "Burt Deferred Fur Additional Lighting"
+            Tags { "LightMode" = "BurtDeferredFurAdditionalLighting" }
             Stencil
             {
                 Ref [_BurtDeferredStencilFurRef]
@@ -199,12 +167,11 @@ Shader "Hidden/BurtRP/DeferredLightingDebugBRDF"
                 Comp Equal
                 Pass Keep
             }
-            Blend One One
-
+            Blend One One, Zero One
             HLSLPROGRAM
             #define BURT_DEFERRED_SHADING_MODEL_FUR 1
             #pragma target 4.5
-            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingPass.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredAdditionalLightingPass.hlsl"
             #pragma vertex Vert
             #pragma fragment Frag
             ENDHLSL

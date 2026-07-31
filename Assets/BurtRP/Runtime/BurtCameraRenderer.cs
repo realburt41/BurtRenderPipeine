@@ -18,6 +18,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
         private static Vector4 blueNoiseModuloMasks = Vector4.zero;
 
         private readonly BurtRenderGraph renderGraph = new BurtRenderGraph(); // 创建一个可复用的 RenderGraph，用来承载当前 request 的 Pass 列表和资源表。
+        private readonly BurtRenderPass shadingDebugPreparePass = new BurtShadingDebugPreparePass();
 
         public void Render( // 保留旧渲染入口，未传入 options 时保持每个 request 独立分配、FinalBlit 和释放 RT。
             ScriptableRenderContext context, // 接收 Unity SRP 提供的渲染上下文。
@@ -61,6 +62,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
             request.SetTemporalAA(temporalAA);
             Shader.SetGlobalFloat(HairDitherFrameIndexId, temporalAA.Enabled ? temporalAA.FrameIndex : 0);
             BindBlueNoiseGlobals();
+            var submitted = false;
+            var renderSucceeded = false;
 
             try
             {
@@ -72,13 +75,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
                 context.SetupCameraProperties(request.Camera); // 设置当前相机的矩阵、裁剪参数和 Unity 内置 shader 变量。
 
-                BurtShadingDebugSettings.ApplyGlobalShaderProperties(); // 每个相机渲染前刷新 Shading Debug 全局参数，避免编辑器切换或域重载后 shader 读到旧值。
 
                 renderGraph.Clear(); // 清空上一次 request 留下的 Pass 和资源，准备组装当前 request 的图。
 
                 renderGraph.ImportRequestResources(request, asset); // 把 request 的基础渲染目标导入 RenderGraph 资源表，并让资源注册使用当前管线资产配置。
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                var cameraProfilingName = BuildCameraProfilingName(request);
+                renderGraph.BeginProfilingScope(cameraProfilingName);
+                try
+                {
+                    renderGraph.AddPass(shadingDebugPreparePass);
+                    request.GraphAssembler.Assemble(renderGraph, request, asset, safeRenderOptions); // 让当前 request 指定的 Assembler 按栈级 RT 选项把 Pass 添加到 RenderGraph。
+                }
+                finally
+                {
+                    renderGraph.EndProfilingScope(cameraProfilingName);
+                }
+#else
+                renderGraph.AddPass(shadingDebugPreparePass);
 
                 request.GraphAssembler.Assemble(renderGraph, request, asset, safeRenderOptions); // 让当前 request 指定的 Assembler 按栈级 RT 选项把 Pass 添加到 RenderGraph。
+#endif
 
                 var graphContext = new BurtRenderGraphContext(context, request, asset, renderGraph.Resources, safeRenderOptions); // 创建 RenderGraph 执行上下文，并把资源表与执行选项传给每个 Pass。
 
@@ -102,6 +119,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
                 }
 
                 context.Submit(); // Keep the jittered camera projection alive until SRP has submitted the queued draw commands.
+                submitted = true;
+                renderSucceeded = true;
             }
             finally
             {
@@ -109,10 +128,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
                 {
                     BurtTemporalAAUtility.RestoreCameraProjectionAfterJitter(request.Camera);
                 }
-            }
 
-            BurtTemporalAAUtility.CommitRequest(request);
-            renderGraph.FlushDeferredResourceReleases(); // Release graph-owned GraphicsBuffers only after queued draw commands have been submitted.
+                if (!submitted)
+                {
+                    try
+                    {
+                        context.Submit(); // Flush any commands queued before an exception so graph-owned buffers can be released safely.
+                    }
+                    catch (System.Exception submitException)
+                    {
+                        Debug.LogException(submitException);
+                    }
+                }
+
+                if (renderSucceeded)
+                {
+                    BurtTemporalAAUtility.CommitRequest(request);
+                }
+                else
+                {
+                    BurtTemporalAAUtility.InvalidateHistory(request.Camera, "RenderGraphExecutionFailed");
+                }
+
+                renderGraph.FlushDeferredResourceReleases(); // Always release deferred GraphicsBuffers after queued commands have been submitted.
+            }
         }
 
         private static void BindBlueNoiseGlobals()
@@ -153,6 +192,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             return Mathf.Max(0, powerOfTwo - 1);
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private static string BuildCameraProfilingName(BurtRenderRequest request)
+        {
+            var cameraName = request != null && request.Camera != null && !string.IsNullOrEmpty(request.Camera.name)
+                ? request.Camera.name
+                : "UnnamedCamera";
+            var assemblerName = request != null && request.GraphAssembler != null
+                ? request.GraphAssembler.Name
+                : "UnknownPath";
+            var renderPath = assemblerName.IndexOf("Deferred", System.StringComparison.OrdinalIgnoreCase) >= 0
+                ? "Deferred"
+                : "Forward";
+            return "BRP.Camera/" + cameraName + " [" + renderPath + "]";
+        }
+#endif
 
         private static bool ShouldCaptureRenderGraphDebug(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 判断当前 request 是否需要生成 RenderGraph Debug 文本。
         {

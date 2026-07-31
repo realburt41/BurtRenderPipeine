@@ -1,5 +1,6 @@
 using System; // 引入基础命名空间，用来捕获 Configure 阶段异常并写入诊断信息。
 using System.Collections.Generic; // Uses List for passes, resource declarations, and validation messages.
+using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和其他 BurtRP 代码处在同一个模块里。
 {
@@ -12,6 +13,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
         private readonly List<string> validationMessages = new List<string>(); // 保存当前图级别的轻量校验消息，只用于 Debug dump，不改变实际渲染顺序。
 
         private readonly BurtRenderGraphResourceRegistry resources = new BurtRenderGraphResourceRegistry(); // 创建一个可复用的资源注册表，用来保存当前图里的渲染目标资源。
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private readonly Dictionary<string, ProfilingSampler> profilingSamplers = new Dictionary<string, ProfilingSampler>(StringComparer.Ordinal);
+        private readonly Dictionary<string, BurtRenderGraphProfilingMarkerPass> beginProfilingPasses = new Dictionary<string, BurtRenderGraphProfilingMarkerPass>(StringComparer.Ordinal);
+        private readonly Dictionary<string, BurtRenderGraphProfilingMarkerPass> endProfilingPasses = new Dictionary<string, BurtRenderGraphProfilingMarkerPass>(StringComparer.Ordinal);
+        private readonly List<string> profilingAssemblyScopeStack = new List<string>();
+        private readonly List<BurtRenderGraphProfilingMarkerPass> activeProfilingScopes = new List<BurtRenderGraphProfilingMarkerPass>();
+#endif
 
         public int PassCount => passes.Count; // 暴露当前图里有多少个 Pass，方便后面调试或判断图是否为空。
 
@@ -30,6 +39,43 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             validationMessages.Clear(); // 清空上一轮图校验消息，避免不同相机或 request 互相污染。
 
             resources.Clear(); // 清空上一轮 request 注册的资源，避免 CameraColor 和 CameraDepth 等资源残留到下一次渲染。
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            profilingAssemblyScopeStack.Clear();
+            activeProfilingScopes.Clear();
+#endif
+        }
+
+        public void BeginProfilingScope(string name)
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            var safeName = NormalizeProfilingName(name, "BRP.Stage/Unnamed");
+            profilingAssemblyScopeStack.Add(safeName);
+            AddPass(GetOrCreateProfilingMarkerPass(safeName, true));
+#endif
+        }
+
+        public void EndProfilingScope(string name)
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            var safeName = NormalizeProfilingName(name, "BRP.Stage/Unnamed");
+            if (profilingAssemblyScopeStack.Count == 0)
+            {
+                AddValidationMessage("Profiling scope 结束时没有对应 Begin: " + safeName);
+                return;
+            }
+
+            var lastIndex = profilingAssemblyScopeStack.Count - 1;
+            var openedName = profilingAssemblyScopeStack[lastIndex];
+            profilingAssemblyScopeStack.RemoveAt(lastIndex);
+            if (!string.Equals(openedName, safeName, StringComparison.Ordinal))
+            {
+                AddValidationMessage("Profiling scope 顺序不匹配: expected " + openedName + ", actual " + safeName);
+                safeName = openedName;
+            }
+
+            AddPass(GetOrCreateProfilingMarkerPass(safeName, false));
+#endif
         }
 
         public void ImportRequestResources(BurtRenderRequest request, BurtRenderPipelineAsset asset) // 定义从 request 导入基础资源的函数，并允许资源注册使用管线资产配置。
@@ -59,6 +105,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             }
 
             resources.RegisterCameraDepthTexture(); // 把 BurtRP 自己的临时深度 RT 注册成 CameraDepth，让颜色目标和深度目标真正分离。
+
+            if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftOcclusion(request))
+            {
+                resources.RegisterRenderTarget(
+                    BurtRenderGraphResourceRegistry.LightShaftOcclusionName,
+                    new UnityEngine.Rendering.RenderTargetIdentifier(
+                        BurtRenderGraphResourceRegistry.LightShaftOcclusionTextureId));
+            }
 
             resources.RegisterBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName, BurtLightingData.CreateAdditionalLightBufferDescriptor()); // Register the graph-owned additional light buffer used by future tiled/cluster lighting.
 
@@ -92,6 +146,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ClusterLightCountBufferName, BurtTiledLightData.CreateClusterLightCountBufferDescriptor(request.Camera));
                     resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ClusterLightListBufferName, BurtTiledLightData.CreateClusterLightListBufferDescriptor(request.Camera, request.LightingData));
                     resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName, BurtTiledLightData.CreateClusterLightOffsetBufferDescriptor(request.Camera));
+                }
+                if (ShouldRegisterPunctualTileIdBuffer(request, asset))
+                {
+                    resources.RegisterBuffer(BurtRenderGraphResourceRegistry.PunctualTileIdBufferName, BurtTiledLightData.CreatePunctualTileIdBufferDescriptor(request.Camera));
                 }
                 if (ShouldRegisterHiZDepth(request, asset))
                 {
@@ -425,6 +483,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 BurtTiledLightData.ShouldUseClusterLightResources(request, asset, true);
         }
 
+        private static bool ShouldRegisterPunctualTileIdBuffer(
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset)
+        {
+            return ShouldRegisterGBufferTargets(request, asset) &&
+                BurtTiledLightData.ShouldUsePunctualTileDrawResources(request, asset, true);
+        }
+
         private static bool ShouldRegisterScreenSpaceReflectionColor(
             BurtRenderRequest request,
             BurtRenderPipelineAsset asset)
@@ -499,6 +565,64 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
             ValidateConfiguredGraph(); // 对配置结果做轻量校验，只记录问题，不重排 Pass，也不改变 RenderTarget 绑定逻辑。
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (profilingAssemblyScopeStack.Count > 0)
+            {
+                AddValidationMessage("RenderGraph 存在未闭合 Profiling scope: " + profilingAssemblyScopeStack[profilingAssemblyScopeStack.Count - 1]);
+            }
+
+            var profilingCommandBuffer = CommandBufferPool.Get("BRP.RenderGraph/Profiling");
+            var profileIndividualPasses = context.Asset != null && context.Asset.EnableRenderGraphDebug;
+            activeProfilingScopes.Clear();
+            try
+            {
+                for (var passIndex = 0; passIndex < passes.Count; passIndex++)
+                {
+                    var pass = passes[passIndex];
+                    if (pass == null)
+                    {
+                        continue;
+                    }
+
+                    if (pass is BurtRenderGraphProfilingMarkerPass markerPass)
+                    {
+                        ExecuteProfilingMarker(context, profilingCommandBuffer, markerPass);
+                        continue;
+                    }
+
+                    if (!profileIndividualPasses)
+                    {
+                        pass.Execute(context);
+                        continue;
+                    }
+
+                    var passSampler = GetOrCreateProfilingSampler("BRP.Pass/" + GetPassName(pass));
+                    passSampler.Begin(profilingCommandBuffer);
+                    ExecuteAndClearProfilingCommands(context, profilingCommandBuffer);
+                    try
+                    {
+                        pass.Execute(context);
+                    }
+                    finally
+                    {
+                        passSampler.End(profilingCommandBuffer);
+                        ExecuteAndClearProfilingCommands(context, profilingCommandBuffer);
+                    }
+                }
+            }
+            finally
+            {
+                for (var scopeIndex = activeProfilingScopes.Count - 1; scopeIndex >= 0; scopeIndex--)
+                {
+                    activeProfilingScopes[scopeIndex].Sampler.End(profilingCommandBuffer);
+                    ExecuteAndClearProfilingCommands(context, profilingCommandBuffer);
+                }
+
+                activeProfilingScopes.Clear();
+                profilingCommandBuffer.Clear();
+                CommandBufferPool.Release(profilingCommandBuffer);
+            }
+#else
             for (var passIndex = 0; passIndex < passes.Count; passIndex++) // 从前到后遍历当前图里的所有 Pass。
             {
                 var pass = passes[passIndex]; // 取出当前索引对应的 Pass。
@@ -510,7 +634,79 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
                 pass.Execute(context); // Execute the current pass without changing its internal command buffer behavior.
             }
+#endif
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private void ExecuteProfilingMarker(
+            BurtRenderGraphContext context,
+            CommandBuffer commandBuffer,
+            BurtRenderGraphProfilingMarkerPass markerPass)
+        {
+            if (markerPass.IsBegin)
+            {
+                markerPass.Sampler.Begin(commandBuffer);
+                activeProfilingScopes.Add(markerPass);
+            }
+            else
+            {
+                if (activeProfilingScopes.Count == 0)
+                {
+                    AddValidationMessage("执行 Profiling End 时没有活动 Scope: " + markerPass.ScopeName);
+                    return;
+                }
+
+                var lastIndex = activeProfilingScopes.Count - 1;
+                var openedPass = activeProfilingScopes[lastIndex];
+                activeProfilingScopes.RemoveAt(lastIndex);
+                if (!string.Equals(openedPass.ScopeName, markerPass.ScopeName, StringComparison.Ordinal))
+                {
+                    AddValidationMessage("执行 Profiling Scope 顺序不匹配: expected " + openedPass.ScopeName + ", actual " + markerPass.ScopeName);
+                }
+
+                openedPass.Sampler.End(commandBuffer);
+            }
+
+            ExecuteAndClearProfilingCommands(context, commandBuffer);
+        }
+
+        private static void ExecuteAndClearProfilingCommands(BurtRenderGraphContext context, CommandBuffer commandBuffer)
+        {
+            context.ScriptableContext.ExecuteCommandBuffer(commandBuffer);
+            commandBuffer.Clear();
+        }
+
+        private BurtRenderGraphProfilingMarkerPass GetOrCreateProfilingMarkerPass(string name, bool isBegin)
+        {
+            var cache = isBegin ? beginProfilingPasses : endProfilingPasses;
+            if (cache.TryGetValue(name, out var markerPass))
+            {
+                return markerPass;
+            }
+
+            markerPass = new BurtRenderGraphProfilingMarkerPass(name, GetOrCreateProfilingSampler(name), isBegin);
+            cache.Add(name, markerPass);
+            return markerPass;
+        }
+
+        private ProfilingSampler GetOrCreateProfilingSampler(string name)
+        {
+            var safeName = NormalizeProfilingName(name, "BRP.Unknown");
+            if (profilingSamplers.TryGetValue(safeName, out var sampler))
+            {
+                return sampler;
+            }
+
+            sampler = new ProfilingSampler(safeName);
+            profilingSamplers.Add(safeName, sampler);
+            return sampler;
+        }
+
+        private static string NormalizeProfilingName(string name, string fallback)
+        {
+            return string.IsNullOrWhiteSpace(name) ? fallback : name;
+        }
+#endif
 
         public string DumpDebugInfo(BurtRenderRequest request) // 保留旧 Dump 入口，未传入 RT 执行选项时仍然输出基础 RenderGraph 信息。
         {
@@ -595,4 +791,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             return pass != null && !string.IsNullOrEmpty(pass.Name) ? pass.Name : "UnnamedPass"; // 名称缺失时使用兜底文本。
         }
     }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+    internal sealed class BurtRenderGraphProfilingMarkerPass : BurtRenderPass
+    {
+        public BurtRenderGraphProfilingMarkerPass(string scopeName, ProfilingSampler sampler, bool isBegin)
+        {
+            ScopeName = scopeName;
+            Sampler = sampler;
+            IsBegin = isBegin;
+        }
+
+        public string ScopeName { get; }
+        public ProfilingSampler Sampler { get; }
+        public bool IsBegin { get; }
+        public override string Name => IsBegin ? "Begin " + ScopeName : "End " + ScopeName;
+        public override BurtRenderPassKind Kind => BurtRenderPassKind.Debug;
+
+        public override void Execute(BurtRenderGraphContext context)
+        {
+            // BurtRenderGraph executes marker passes with its shared profiling command buffer.
+        }
+    }
+#endif
 }

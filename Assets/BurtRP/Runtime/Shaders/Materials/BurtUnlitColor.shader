@@ -199,7 +199,7 @@ Shader "BurtRP/UnlitColor"
 
             // 声明片元 shader 函数名是 Frag。
             #pragma fragment Frag
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #pragma shader_feature_fragment _ BURT_USE_DEBUG_MODE_FORWARD
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
@@ -297,7 +297,7 @@ Shader "BurtRP/UnlitColor"
 
             // 声明片元 shader 函数名是 FragForwardOnly。
             #pragma fragment FragForwardOnly
-            #pragma multi_compile_fragment _ BURT_SHADING_DEBUG
+            #pragma shader_feature_fragment _ BURT_USE_DEBUG_MODE_FORWARD
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"

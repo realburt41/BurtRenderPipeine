@@ -2,7 +2,8 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 {
     SubShader
     {
-        Tags { "RenderPipeline" = "BurtRenderPipeline" }
+        Tags { "RenderPipeline" = "BurtRenderPipeline" "RenderType" = "Opaque" }
+        LOD 100
 
         Pass
         {
@@ -10,16 +11,33 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             Cull Off
             ZWrite Off
-            ZTest Always
+            ZTest LEqual
+            // Exact XRender PhysicalSky blend: add the sky term to RGB using
+            // source alpha as the destination factor, while preserving target alpha.
+            Blend One SrcAlpha, Zero One
 
             HLSLPROGRAM
             #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile _ _ATMOSPHERE_COMBINE_IS_SKY_CAPTURE
+            #pragma multi_compile _ _PHYSICAL_SKY_IS_NIGHT
 
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/BurtAtmosphereLut.hlsl"
+
+            // UNITY_RAW_FAR_CLIP_VALUE belongs to SRP Core's API headers and is
+            // not provided by UnityCG.cginc in stock Unity 2022. Preserve the
+            // same platform convention without pulling the full Core include
+            // stack into this otherwise UnityCG-based pass.
+            #ifndef UNITY_RAW_FAR_CLIP_VALUE
+                #if defined(UNITY_REVERSED_Z)
+                    #define UNITY_RAW_FAR_CLIP_VALUE 0.0f
+                #else
+                    #define UNITY_RAW_FAR_CLIP_VALUE 1.0f
+                #endif
+            #endif
 
             UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
 
@@ -48,9 +66,11 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
             float4 _BurtAtmosphereExposureParams;
             float4 _BurtAtmosphereAerialPerspectiveParams;
             float4 _BurtAtmosphereAerialPerspectiveTint;
-            float4 _BurtAtmosphereAerialPerspectiveFadeParams;
+            float4 _BurtAtmosphereAerialPerspectiveFadeParams; // x=XRender start depth, y=optional smooth-start end, z=max opacity, w=affects sky
             float4 _BurtAtmosphereFogLutDistanceParams;
             float4x4 _BurtAtmosphereInverseViewProjection;
+            float4x4 _BurtAtmosphereSkyMeshViewProjection;
+            float _BurtAtmosphereProceduralSky;
             float3 _BurtAtmosphereCameraPositionWS;
             float4x4 _BurtAtmosphereWorldToSkyViewLocal;
             float _BurtAtmosphereDebugMode;
@@ -59,24 +79,57 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             struct Attributes
             {
+                float3 PositionOS : POSITION;
+                float2 MeshUv0 : TEXCOORD0;
+                float2 MeshUv1 : TEXCOORD1;
                 uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
                 float4 PositionCS : SV_POSITION;
-                float2 ScreenUV : TEXCOORD0;
+                float3 PositionWS : TEXCOORD0;
+                float2 MeshUv0 : TEXCOORD1;
+                float2 MeshUv1 : TEXCOORD2;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                float2 uv = float2((input.VertexID << 1) & 2, input.VertexID & 2);
-                output.PositionCS = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
-                #if UNITY_UV_STARTS_AT_TOP
-                    uv.y = 1.0f - uv.y;
-                #endif
-                output.ScreenUV = uv;
+                if (_BurtAtmosphereProceduralSky > 0.5f)
+                {
+                    float2 triangleUv = float2(
+                        (input.VertexID << 1) & 2,
+                        input.VertexID & 2);
+                    output.PositionCS = float4(
+                        triangleUv * 2.0f - 1.0f,
+                        UNITY_RAW_FAR_CLIP_VALUE,
+                        1.0f);
+                    float4 farPositionWS = mul(
+                        _BurtAtmosphereInverseViewProjection,
+                        output.PositionCS);
+                    farPositionWS.xyz /= max(abs(farPositionWS.w), 1.0e-6f);
+                    float3 cameraToFar = farPositionWS.xyz - _BurtAtmosphereCameraPositionWS;
+                    cameraToFar *= rsqrt(max(dot(cameraToFar, cameraToFar), 1.0e-8f));
+                    // XRender's authored default sky mesh is a 19930-unit sky
+                    // shell. Preserve that world-position scale so its star
+                    // horizon formula remains valid in the procedural fallback.
+                    output.PositionWS = _BurtAtmosphereCameraPositionWS
+                        + cameraToFar * 19930.0f;
+                    // DrawProcedural supplies no mesh vertex streams in
+                    // XRender, so the fallback intentionally starts at zero UV.
+                    output.MeshUv0 = 0.0f;
+                    output.MeshUv1 = 0.0f;
+                    return output;
+                }
+
+                output.PositionWS = mul(unity_ObjectToWorld, float4(input.PositionOS, 1.0f)).xyz;
+                output.PositionCS = mul(
+                    _BurtAtmosphereSkyMeshViewProjection,
+                    float4(output.PositionWS, 1.0f));
+                output.PositionCS.z = UNITY_RAW_FAR_CLIP_VALUE * output.PositionCS.w;
+                output.MeshUv0 = input.MeshUv0;
+                output.MeshUv1 = input.MeshUv1;
                 return output;
             }
 
@@ -93,9 +146,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             float MiePhase(float cosTheta, float g)
             {
-                float g2 = g * g;
-                float denom = max(0.05f, pow(abs(1.0f + g2 - 2.0f * g * cosTheta), 1.5f));
-                return (1.0f / (4.0f * PI)) * ((1.0f - g2) / denom);
+                return BurtAtmosphereHenyeyGreensteinPhase(cosTheta, g);
             }
 
             float EstimateAirMass(float viewUp, float scaleHeight, float atmosphereHeight)
@@ -119,20 +170,34 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 return t * t * (3.0f - 2.0f * t);
             }
 
-            float3 EvaluateAtmosphere(float3 viewDirWS)
+            float3 EvaluateAtmosphere(
+                float3 viewDirWS,
+                float3 positionWS,
+                float2 meshUv0,
+                float2 meshUv1)
             {
                 float3 viewDirAtmosphere = mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, viewDirWS);
                 float3 lightDirWS = SafeNormalize(mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, _BurtAtmosphereSunDirection.xyz), float3(0.0f, 1.0f, 0.0f));
                 float3 lightColor = NormalizeLightColor(max(_BurtMainLightColorOuterSpace.rgb, 0.0f));
                 float mainLightOcclusion = saturate(_BurtMainLightOcclusionFactor);
-                float3 atmosphereLight = max(_BurtMainLightColorOuterSpace.rgb, 0.0f) * max(_BurtAtmosphereSunIntensity, 0.0f) * mainLightOcclusion;
+                // XRender's AtmosphereCommon applies outer-space main-light
+                // illuminance and occlusion to SkyView. The legacy BRP
+                // SunIntensity/SkyTint controls belong to the analytic fallback
+                // and direct celestial terms, not the physical LUT.
+                float3 atmosphereLight = _BurtMainLightColorOuterSpace.rgb;
                 float cosTheta = dot(viewDirAtmosphere, lightDirWS);
+                // PhysicalSky.hlsl evaluates its strict disk boundary directly
+                // in world space. Keep this independent from the SkyView basis
+                // transform so the edge follows the source comparison exactly.
+                float physicalSkyViewDotLight = dot(
+                    viewDirWS,
+                    SafeNormalize(_BurtAtmosphereSunDirection.xyz, float3(0.0f, 1.0f, 0.0f)));
                 float viewUp = viewDirAtmosphere.y;
                 float up01 = saturate(viewUp * 0.5f + 0.5f);
 
-                float atmosphereHeight = max(_BurtAtmospherePlanetParams.y, 1.0f);
-                float rayleighScaleHeight = max(_BurtAtmospherePlanetParams.z, 0.1f);
-                float mieScaleHeight = max(_BurtAtmospherePlanetParams.w, 0.1f);
+                float atmosphereHeight = max(_BurtAtmospherePlanetParams.y, 0.1f);
+                float rayleighScaleHeight = max(_BurtAtmospherePlanetParams.z, 0.001f);
+                float mieScaleHeight = max(_BurtAtmospherePlanetParams.w, 0.001f);
                 float rayleighAir = EstimateAirMass(viewUp, rayleighScaleHeight, atmosphereHeight);
                 float mieAir = EstimateAirMass(viewUp, mieScaleHeight, atmosphereHeight);
 
@@ -152,29 +217,28 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 float3 horizonColor = lerp(horizonBaseColor, horizonSunsetColor, saturate(1.0f - lightDirWS.y) * horizonSunsetInfluence);
                 float3 baseSky = lerp(horizonColor * horizonIntensity, zenithColor, pow(up01, horizonFalloff));
 
-                float3 rayleighBeta = max(_BurtAtmosphereRayleighScatteringCoefficient.rgb, 0.0f) * (rayleighIntensity * 13.6f);
-                float3 mieBeta = max(_BurtAtmosphereMieScatteringCoefficient.rgb, 0.0f) * (mieIntensity / 0.12f) * 4.8f;
+                float3 rayleighBeta = max(_BurtAtmosphereRayleighScatteringCoefficient.rgb, 0.0f) * 13.6f;
+                float3 mieBeta = max(_BurtAtmosphereMieScatteringCoefficient.rgb, 0.0f) * 4.8f;
                 float3 ozoneExtinction = max(_BurtAtmosphereOzoneAbsorptionCoefficient.rgb, 0.0f) * 10.0f;
-                float3 transmittance = exp(-(rayleighBeta * rayleighAir + (mieBeta + max(_BurtAtmosphereMieAbsorptionCoefficient.rgb, 0.0f) * (mieIntensity / 0.12f) * 4.8f) * mieAir + ozoneExtinction * saturate(mieAir * 0.35f)) * 0.45f);
+                float3 transmittance = exp(-(rayleighBeta * rayleighAir + (mieBeta + max(_BurtAtmosphereMieAbsorptionCoefficient.rgb, 0.0f) * 4.8f) * mieAir + ozoneExtinction * saturate(mieAir * 0.35f)) * 0.45f);
                 float3 inScatter = rayleighBeta * RayleighPhase(cosTheta) * rayleighAir;
                 inScatter += mieBeta * MiePhase(cosTheta, _BurtAtmosphereMieAnisotropy) * mieAir;
 
                 float sunHaloSize = max(_BurtAtmosphereSunParams.z, 0.05f);
                 float sunHaloIntensity = max(_BurtAtmosphereSunParams.w, 0.0f);
                 float sunHaloPower = max(1.0f, 12.0f / sunHaloSize);
-                // XRender converts the authored full angular diameter to a half-angle,
-                // divides outer-space illuminance by the corresponding cone solid angle,
-                // then softens the outer half of the disk to avoid bloom/TAA flicker.
+                // The package AtmosphereCommon analytic fallback softens the
+                // outer half of the solid-angle-normalized disk. The project's
+                // active PhysicalSky override uses physicalSunDiskMask below.
                 float sunDiskCosHalfApex = saturate(_BurtAtmosphereSunDiskLuminanceAndCosHalfApex.w);
                 float sunDiskCosRange = max(1.0f - sunDiskCosHalfApex, 1.0e-7f);
                 float sunDisk = cosTheta > sunDiskCosHalfApex
                     ? saturate(2.0f * (cosTheta - sunDiskCosHalfApex) / sunDiskCosRange)
                     : 0.0f;
                 float sunHalo = pow(saturate(cosTheta), sunHaloPower) * mieIntensity * 0.18f;
-                // XRender rejects the direct solar term when the view ray intersects
-                // the planet. Apply the same visibility before all analytic, LUT and
-                // debug branches so the disk and its authored halo cannot shine through
-                // the ground or the planet limb, including for cameras in space.
+                // Preserve package AtmosphereCommon planet rejection for the
+                // analytic fallback. PhysicalSky's active LUT path deliberately
+                // bypasses this value.
                 float planetVisibility = BurtAtmospherePlanetVisibility(viewDirAtmosphere, _BurtAtmospherePlanetParams);
                 sunDisk *= planetVisibility;
                 sunHalo *= planetVisibility;
@@ -183,29 +247,33 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 float3 sunDiskContribution = min(
                     sunDisk
                         * max(_BurtAtmosphereSunDiskLuminanceAndCosHalfApex.rgb, 0.0f)
-                        * max(_BurtAtmosphereStylizedSunDiskColorScale.rgb, 0.0f),
+                        * max(_BurtAtmosphereSunIntensity, 0.0f)
+                        * max(_BurtAtmosphereSunParams.y, 0.0f),
                     64000.0f) * mainLightOcclusion;
+                sunDiskContribution *= BurtAtmosphereWeatherSunVisibility();
                 float3 sunHaloContribution = sunHalo * sunHaloIntensity
                     * max(_BurtAtmosphereStylizedSunDiskColorScale.rgb, 0.0f)
                     * lightColor * exposureSafeSun * mainLightOcclusion;
                 float3 physicalSkyBackground = baseSky * (0.16f + rayleighIntensity * 0.18f);
                 physicalSkyBackground += inScatter * skyTint * lightColor * exposureSafeSun * mainLightOcclusion;
                 float3 directSunContribution = sunDiskContribution + sunHaloContribution;
+                // The project's PhysicalSky override uses a constant-luminance
+                // hard disk. It deliberately omits atmosphere transmittance,
+                // planet testing, limb darkening and main-light occlusion.
+                float3 physicalSunDiskContribution =
+                    BurtAtmosphereEvaluatePhysicalSkySunDisk(
+                        physicalSkyViewDotLight,
+                        _BurtAtmosphereSunDiskLuminanceAndCosHalfApex,
+                        _BurtInvPreExposure);
 
                 float groundBlend = SmoothRange(groundBlendStart, groundBlendEnd, viewUp);
                 physicalSkyBackground = lerp(physicalSkyBackground, groundColor * groundContribution, groundBlend);
                 // XRender grades integrated sky scattering independently from the
                 // direct solar term. Preserve the analytic path's previous ground
                 // attenuation while applying the RGB factor only to the background.
-                float3 skyColor = physicalSkyBackground * max(_BurtAtmosphereSkyLuminanceFactor.rgb, 0.0f)
-                    + directSunContribution * (1.0f - groundBlend);
-                float3 stylizedSky = BurtAtmosphereEvaluateStylizedSky(
-                    viewDirAtmosphere,
-                    lightDirWS,
-                    _BurtAtmospherePlanetParams,
-                    groundColor,
-                    _BurtAtmosphereGroundParams.xyz,
-                    mainLightOcclusion) + directSunContribution;
+                float3 skyColor = physicalSkyBackground
+                    * max(_BurtAtmosphereSkyLuminanceFactor.rgb, 0.0f);
+                float3 skyDirectSunContribution = directSunContribution * (1.0f - groundBlend);
                 float3 lutSky = 0.0f;
                 float3 lutMultiple = 0.0f;
                 float3 lutTransmittance = 1.0f;
@@ -218,41 +286,72 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                     // SkyView is the physically integrated sky radiance. Keep it direct rather
                     // than blending the legacy heuristic sky, then add the separate solar term
                     // (the same SkyView + SunDisk composition used by XRender's combine pass).
-                    // The disk/halo is attenuated toward the light but SkyView itself is not.
-                    float3 sunTransmittance = BurtAtmosphereSampleTransmittance(lightDirWS.y, _BurtAtmospherePlanetParams);
-                    directSunContribution = (sunDiskContribution + sunHaloContribution) * sunTransmittance;
-                    skyColor = lutSky * atmosphereLight * max(_BurtAtmosphereSkyTint.rgb, 0.0f) * max(_BurtAtmosphereSkyLuminanceFactor.rgb, 0.0f) + directSunContribution;
-                    stylizedSky = BurtAtmosphereEvaluateStylizedSky(
+                    // PhysicalSky compiles this term out of sky capture, while
+                    // the main-camera combine adds it without transmittance.
+                    directSunContribution = physicalSunDiskContribution;
+                    skyDirectSunContribution = directSunContribution;
+                    skyColor = lutSky
+                        * atmosphereLight
+                        * _BurtAtmosphereSkyLuminanceFactor.rgb
+                        * mainLightOcclusion;
+                    transmittance = 1.0f;
+                    // XRender's project PhysicalSky has no BRP exposure
+                    // compensation control. It performs only frame
+                    // pre-exposure after composing the LUT sky and hard disk.
+                    exposureScale = 1.0f;
+                }
+                else
+                {
+                    // The project's active PhysicalSky.hlsl receives XRender's
+                    // stylized constants but never references them. Retain BRP's
+                    // historical authored-sky blend only for the analytic fallback.
+                    float3 stylizedSky = BurtAtmosphereEvaluateStylizedSky(
                         viewDirAtmosphere,
                         lightDirWS,
                         _BurtAtmospherePlanetParams,
                         groundColor,
                         _BurtAtmosphereGroundParams.xyz,
-                        mainLightOcclusion) + directSunContribution;
-                    transmittance = 1.0f;
+                        mainLightOcclusion);
+                    float stylizedSkyBlend = saturate(_BurtAtmosphereStylizedParams.x);
+                    skyColor = lerp(skyColor, stylizedSky, stylizedSkyBlend);
+                    skyDirectSunContribution = lerp(
+                        skyDirectSunContribution,
+                        directSunContribution,
+                        stylizedSkyBlend);
                 }
 
-                skyColor = lerp(skyColor, stylizedSky, saturate(_BurtAtmosphereStylizedParams.x));
-                float3 moonDirection = SafeNormalize(
-                    mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, _BurtAtmosphereMoonDirection.xyz),
-                    float3(0.0f, 0.0f, -1.0f));
-                float3 moonUp = SafeNormalize(
-                    mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, _BurtAtmosphereMoonUp.xyz),
-                    float3(0.0f, 1.0f, 0.0f));
-                float3 moonRight = SafeNormalize(
-                    mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, _BurtAtmosphereMoonRight.xyz),
-                    float3(1.0f, 0.0f, 0.0f));
-                float3 moonTransmittance = _BurtAtmosphereUseLuts > 0.5f
-                    ? BurtAtmosphereSampleTransmittance(viewUp, _BurtAtmospherePlanetParams)
-                    : 1.0f;
-                skyColor += BurtAtmosphereEvaluateMoon(
+                skyColor += BurtAtmosphereEvaluateWeatherSkyClouds(
                     viewDirAtmosphere,
                     lightDirWS,
-                    moonDirection,
-                    moonUp,
-                    moonRight,
-                    moonTransmittance,
-                    _BurtAtmospherePlanetParams);
+                    meshUv0);
+                // XRender desaturates only the atmosphere + weather-cloud term
+                // here. Sun, moon, stars and panoramic clouds remain separate.
+                skyColor = BurtAtmosphereApplyPhysicalSkyDesaturation(skyColor);
+                #if defined(_ATMOSPHERE_COMBINE_IS_SKY_CAPTURE)
+                skyDirectSunContribution = 0.0f;
+                #endif
+                skyColor += skyDirectSunContribution;
+                // XRender compiles both expensive celestial paths only in its
+                // _PHYSICAL_SKY_IS_NIGHT permutation (_TodCurve > 0.5).
+                #if defined(_PHYSICAL_SKY_IS_NIGHT) && !defined(_ATMOSPHERE_COMBINE_IS_SKY_CAPTURE)
+                    skyColor += BurtAtmosphereEvaluateMoon(
+                        viewDirWS,
+                        _BurtAtmosphereSunDirection.xyz,
+                        _BurtAtmosphereMoonUp.xyz,
+                        _BurtAtmosphereMoonRight.xyz,
+                        meshUv0);
+                    // The sky-capture pass below deliberately has no equivalent
+                    // moon/star calls, matching _ATMOSPHERE_COMBINE_IS_SKY_CAPTURE.
+                    skyColor += BurtAtmosphereEvaluateStars(
+                        viewDirWS,
+                        positionWS,
+                        _BurtAtmosphereMoonUp.xyz,
+                        _BurtAtmosphereMoonRight.xyz,
+                        meshUv0);
+                #endif
+                skyColor += BurtAtmosphereEvaluatePanoramicClouds(
+                    mainLightOcclusion,
+                    meshUv1);
 
                 if (_BurtAtmosphereDebugMode > 0.5f && _BurtAtmosphereDebugMode < 1.5f)
                 {
@@ -280,12 +379,12 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
                     if (_BurtAtmosphereDebugMode < 10.5f)
                     {
-                        float3 diskDebug = sunDisk.xxx;
-                        if (_BurtAtmosphereUseLuts > 0.5f)
-                        {
-                            diskDebug *= BurtAtmosphereSampleTransmittance(lightDirWS.y, _BurtAtmospherePlanetParams);
-                        }
-                        return saturate(diskDebug * 12.0f);
+                        float diskDebug = _BurtAtmosphereUseLuts > 0.5f
+                            ? BurtAtmospherePhysicalSkySunDiskVisibility(
+                                physicalSkyViewDotLight,
+                                sunDiskCosHalfApex)
+                            : sunDisk;
+                        return saturate(diskDebug.xxx * 12.0f);
                     }
 
                     if (_BurtAtmosphereDebugMode < 11.5f)
@@ -313,7 +412,12 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                     if (_BurtAtmosphereDebugMode < 15.5f)
                     {
                         return _BurtAtmosphereUseLuts > 0.5f
-                            ? max(lutSky * atmosphereLight * max(_BurtAtmosphereSkyTint.rgb, 0.0f) * max(_BurtAtmosphereSkyLuminanceFactor.rgb, 0.0f), 0.0f)
+                            ? max(
+                                lutSky
+                                    * atmosphereLight
+                                    * _BurtAtmosphereSkyLuminanceFactor.rgb
+                                    * mainLightOcclusion,
+                                0.0f)
                             : 0.0f;
                     }
 
@@ -331,47 +435,53 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                     return max(horizontalDebug, 0.0f);
                 }
 
-                return max(skyColor * transmittance * exposureScale, 0.0f);
+                return skyColor * transmittance * exposureScale;
             }
 
             bool IsSkyPixel(float rawDepth)
             {
                 #if defined(UNITY_REVERSED_Z)
-                    return rawDepth <= 0.00001f;
+                    // Match XRender's DeviceDepth == FarDepthValue contract exactly.
+                    return rawDepth == 0.0f;
                 #else
-                    return rawDepth >= 0.99999f;
+                    return rawDepth == 1.0f;
                 #endif
-            }
-
-            float4 BuildClipPosition(float2 screenUV)
-            {
-                float2 clipXY = screenUV * 2.0f - 1.0f;
-                #if UNITY_UV_STARTS_AT_TOP
-                    clipXY.y = -clipXY.y;
-                #endif
-
-                #if defined(UNITY_REVERSED_Z)
-                    float clipZ = 0.0f;
-                #else
-                    float clipZ = 1.0f;
-                #endif
-
-                return float4(clipXY, clipZ, 1.0f);
             }
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, input.ScreenUV);
+                float2 screenUV = input.PositionCS.xy / _ScreenParams.xy;
+                #if defined(_ATMOSPHERE_COMBINE_IS_SKY_CAPTURE)
+                    #if defined(UNITY_REVERSED_Z)
+                    float rawDepth = 0.0f;
+                    #else
+                    float rawDepth = 1.0f;
+                    #endif
+                #else
+                float rawDepth = SAMPLE_DEPTH_TEXTURE(_BurtCameraDepthTexture, screenUV);
+                #endif
                 if (!IsSkyPixel(rawDepth))
                 {
-                    discard;
+                    // XRender returns black with alpha one. Its RGB destination
+                    // factor is SrcAlpha, so existing scene color is preserved.
+                    return float4(0.0f, 0.0f, 0.0f, 1.0f);
                 }
 
-                float4 clip = BuildClipPosition(input.ScreenUV);
-                float4 farWS = mul(_BurtAtmosphereInverseViewProjection, clip);
-                farWS.xyz /= max(abs(farWS.w), 1.0e-6f);
-                float3 viewDirWS = SafeNormalize(farWS.xyz - _BurtAtmosphereCameraPositionWS, float3(0.0f, 0.0f, 1.0f));
-                return float4(BurtApplyPreExposure(EvaluateAtmosphere(viewDirWS)), 1.0f);
+                float3 viewDirWS = SafeNormalize(
+                    input.PositionWS - _BurtAtmosphereCameraPositionWS,
+                    float3(0.0f, 0.0f, 1.0f));
+                float3 skyLuminance = EvaluateAtmosphere(
+                    viewDirWS,
+                    input.PositionWS,
+                    input.MeshUv0,
+                    input.MeshUv1);
+                #if defined(_ATMOSPHERE_COMBINE_IS_SKY_CAPTURE)
+                return float4(skyLuminance, 1.0f);
+                #else
+                return float4(
+                    BurtApplyPreExposure(skyLuminance),
+                    1.0f);
+                #endif
             }
             ENDHLSL
         }
@@ -383,6 +493,8 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
             Cull Off
             ZWrite Off
             ZTest Always
+            // Preserve the source camera alpha already present in the destination.
+            ColorMask RGB
 
             HLSLPROGRAM
             #pragma target 3.5
@@ -392,6 +504,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/BurtAtmosphereLut.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightShaftOcclusion.hlsl"
 
             sampler2D _BurtCameraColorTexture;
             UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -420,7 +533,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
             float4 _BurtAtmosphereExposureParams;
             float4 _BurtAtmosphereAerialPerspectiveParams;
             float4 _BurtAtmosphereAerialPerspectiveTint;
-            float4 _BurtAtmosphereAerialPerspectiveFadeParams;
+            float4 _BurtAtmosphereAerialPerspectiveFadeParams; // x=XRender start depth, y=optional smooth-start end, z=max opacity, w=affects sky
             float4 _BurtAtmosphereFogLutDistanceParams;
             float4x4 _BurtAtmosphereInverseViewProjection;
             float3 _BurtAtmosphereCameraPositionWS;
@@ -465,9 +578,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             float MiePhase(float cosTheta, float g)
             {
-                float g2 = g * g;
-                float denom = max(0.05f, pow(abs(1.0f + g2 - 2.0f * g * cosTheta), 1.5f));
-                return (1.0f / (4.0f * PI)) * ((1.0f - g2) / denom);
+                return BurtAtmosphereHenyeyGreensteinPhase(cosTheta, g);
             }
 
             float3 NormalizeLightColor(float3 lightColor)
@@ -479,9 +590,9 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
             bool IsSkyPixel(float rawDepth)
             {
                 #if defined(UNITY_REVERSED_Z)
-                    return rawDepth <= 0.00001f;
+                    return rawDepth == 0.0f;
                 #else
-                    return rawDepth >= 0.99999f;
+                    return rawDepth == 1.0f;
                 #endif
             }
 
@@ -538,8 +649,8 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 float heightFalloff = _BurtAtmosphereAerialPerspectiveParams.z;
                 float samplingDistanceScale = max(_BurtAtmosphereFogLutDistanceParams.z, 0.0f);
                 float luminanceScale = max(_BurtAtmosphereFogLutDistanceParams.w, 0.0f);
-                float nearFadeStart = _BurtAtmosphereAerialPerspectiveFadeParams.x;
-                float nearFadeEnd = max(_BurtAtmosphereAerialPerspectiveFadeParams.y, nearFadeStart + 0.001f);
+                float startDepth = _BurtAtmosphereAerialPerspectiveFadeParams.x;
+                float smoothStartEnd = max(_BurtAtmosphereAerialPerspectiveFadeParams.y, startDepth + 0.001f);
                 float maxOpacity = saturate(_BurtAtmosphereAerialPerspectiveFadeParams.z);
                 float affectsSkyPixels = _BurtAtmosphereAerialPerspectiveFadeParams.w;
                 bool skyPixel = IsSkyPixel(rawDepth);
@@ -550,7 +661,10 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 // the atmosphere and are evaluated when this pass is placed after sky.
                 if ((!aerialDebug && _BurtAtmosphereDebugMode > 0.5f)
                     || (skyPixel && (cameraInsideAtmosphere || affectsSkyPixels < 0.5f))
-                    || _BurtAtmosphereAerialPerspectiveParams.w < 0.5f)
+                    || _BurtAtmosphereAerialPerspectiveParams.w < 0.5f
+                    // AEvaluateAtmosphereFog treats a zero luminance scale as
+                    // disabling both scattering and extinction.
+                    || (_BurtAtmosphereUseLuts > 0.5f && luminanceScale <= 0.0f))
                 {
                     return float4(sourceColor, 1.0f);
                 }
@@ -579,24 +693,27 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
                 float distanceRatio = max(distanceWS, 0.0f) * samplingDistanceScale / distanceScale;
                 float distanceFade = saturate(1.0f - exp(-distanceRatio * max(intensity, 0.0f) * 4.0f));
-                float nearFade = smoothstep(nearFadeStart, nearFadeEnd, distanceWS);
+                float nearFade = smoothstep(startDepth, smoothStartEnd, distanceWS);
 
                 float opacityGate = saturate(nearFade * maxOpacity);
                 float fogAmount = saturate(distanceFade * opacityGate * heightFade);
-                float3 rayleighExtinction = max(_BurtAtmosphereRayleighScatteringCoefficient.rgb, 0.0f) * (max(_BurtAtmosphereRayleighIntensity, 0.0f) * 13.6f);
-                float3 mieExtinction = (max(_BurtAtmosphereMieScatteringCoefficient.rgb, 0.0f) + max(_BurtAtmosphereMieAbsorptionCoefficient.rgb, 0.0f)) * (max(_BurtAtmosphereMieIntensity, 0.0f) / 0.12f) * 4.8f;
+                float3 rayleighExtinction = max(_BurtAtmosphereRayleighScatteringCoefficient.rgb, 0.0f) * 13.6f;
+                float3 mieExtinction = (max(_BurtAtmosphereMieScatteringCoefficient.rgb, 0.0f) + max(_BurtAtmosphereMieAbsorptionCoefficient.rgb, 0.0f)) * 4.8f;
                 float3 ozoneExtinction = max(_BurtAtmosphereOzoneAbsorptionCoefficient.rgb, 0.0f) * 10.0f;
                 float3 transmittance = exp(-(rayleighExtinction + mieExtinction + ozoneExtinction) * fogAmount);
                 float scatterFade = saturate(fogAmount * 1.5f);
                 float3 inScatter = EvaluateAerialInscatter(viewDirWS, scatterFade, heightFade) * luminanceScale;
                 float3 aerialTint = max(_BurtAtmosphereAerialPerspectiveTint.rgb, 0.0f) * max(_BurtAtmosphereSkyTint.rgb, 0.0f);
+                float lightShaftOcclusion = BurtSampleLightShaftOcclusion(input.ScreenUV);
                 float3 color;
                 if (_BurtAtmosphereUseLuts > 0.5f)
                 {
-                    // The LUT represents only the ray segment after NearFadeStart,
-                    // matching XRender's atmosphere fog volume convention.
-                    float fogDistanceRatio = max(distanceWS - nearFadeStart, 0.0f)
-                        * max(_BurtAtmosphereFogLutDistanceParams.x, 0.000001f)
+                    // The LUT represents only the ray segment after XRender's
+                    // Atmosphere Fog Start Distance.
+                    float worldToKilometers = max(_BurtAtmosphereFogLutDistanceParams.x, 0.000001f);
+                    float fogDistanceKm = distanceWS * worldToKilometers;
+                    float startDepthKm = startDepth * worldToKilometers;
+                    float fogDistanceRatio = max(fogDistanceKm - startDepthKm, 0.0f)
                         * samplingDistanceScale
                         / max(_BurtAtmosphereFogLutDistanceParams.y, 0.001f);
                     float2 fogScreenUv = input.ScreenUV;
@@ -606,26 +723,38 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                     float4 fogLut = BurtAtmosphereSampleFog(fogScreenUv, fogDistanceRatio);
                     // XRender fades the first half froxel to zero. Without this
                     // intrinsic LUT weight, zero-distance opaque pixels can pick up
-                    // the first 3D-LUT texel before the artistic Near Fade begins.
-                    const float fogLutDepth = 16.0f;
-                    float fogLutNonLinearSlice = saturate(sqrt(max(fogDistanceRatio, 0.0f))) * fogLutDepth;
-                    float fogLutStartWeight = saturate(fogLutNonLinearSlice * fogLutNonLinearSlice * 2.0f);
-                    float lutWeight = saturate(opacityGate * heightFade * fogLutStartWeight);
+                    // the first 3D-LUT texel before Start Depth.
+                    float fogLutStartWeight = BurtAtmosphereFogStartWeight(fogDistanceRatio);
+                    // XRender's physical consumer applies only the intrinsic
+                    // first-froxel fade. Smooth start, opacity cap and height
+                    // fade belong to BRP's analytic compatibility path.
+                    float lutWeight = fogLutStartWeight;
                     fogAmount = lutWeight;
                     transmittance = lerp(1.0f.xxx, fogLut.aaa, lutWeight);
-                    float3 atmosphereLight = max(_BurtMainLightColorOuterSpace.rgb, 0.0f) * max(_BurtAtmosphereSunIntensity, 0.0f) * saturate(_BurtMainLightOcclusionFactor);
-                    // The physical LUT follows XRender's parameter isolation:
-                    // density is baked into RGB/alpha, sampling scale selects
-                    // distance, and luminance scale alone grades in-scattering.
-                    // Aerial Tint remains an explicit BRP sampling-side extension.
-                    inScatter = fogLut.rgb * atmosphereLight * max(_BurtAtmosphereAerialPerspectiveTint.rgb, 0.0f) * luminanceScale * lutWeight;
+                    float3 atmosphereLight = max(_BurtMainLightColorOuterSpace.rgb, 0.0f)
+                        * saturate(_BurtMainLightOcclusionFactor);
+                    // Fog RGB is integrated for unit illuminance. XRender adds
+                    // the outer-space main light, environment occlusion and
+                    // fog luminance scale exactly once at lookup time.
+                    inScatter = fogLut.rgb * atmosphereLight * luminanceScale * lutWeight;
                     // Physical aerial perspective is a direct extinction-plus-inscattering composite.
-                    color = sourceColor * transmittance + BurtApplyPreExposure(inScatter);
+                    color = sourceColor * transmittance
+                        + BurtApplyPreExposure(inScatter) * lightShaftOcclusion;
+                    // The intrinsic first-froxel weight is only the LUT ramp-in.
+                    // The final physical fog opacity is extinction derived from
+                    // the sampled transmittance, which is what the Fog Amount
+                    // and Summary debug views promise to visualize.
+                    fogAmount = saturate(1.0f - dot(transmittance, (1.0f / 3.0f).xxx));
                 }
                 else
                 {
-                    float3 foggedColor = lerp(sourceColor, aerialTint, fogAmount);
-                    color = foggedColor * transmittance + BurtApplyPreExposure(inScatter);
+                    float3 sourceContribution =
+                        sourceColor * (1.0f - fogAmount) * transmittance;
+                    float3 scatteringContribution =
+                        aerialTint * fogAmount * transmittance
+                        + BurtApplyPreExposure(inScatter);
+                    color = sourceContribution
+                        + scatteringContribution * lightShaftOcclusion;
                 }
 
                 if (_BurtAtmosphereDebugMode > 3.5f && _BurtAtmosphereDebugMode < 4.5f)
@@ -635,7 +764,10 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
                 if (_BurtAtmosphereDebugMode > 4.5f && _BurtAtmosphereDebugMode < 5.5f)
                 {
-                    return float4(saturate(fogAmount * aerialTint + inScatter), 1.0f);
+                    float3 debugInscatter = _BurtAtmosphereUseLuts > 0.5f
+                        ? inScatter
+                        : fogAmount * aerialTint + inScatter;
+                    return float4(saturate(debugInscatter), 1.0f);
                 }
 
                 if (_BurtAtmosphereDebugMode > 5.5f && _BurtAtmosphereDebugMode < 6.5f)
@@ -664,15 +796,26 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             Cull Off
             ZWrite Off
-            ZTest Always
+            ZTest LEqual
+            Blend One SrcAlpha, Zero One
 
             HLSLPROGRAM
             #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile _ _ATMOSPHERE_COMBINE_IS_SKY_CAPTURE
+            #pragma multi_compile _ _PHYSICAL_SKY_IS_NIGHT
 
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/BurtAtmosphereLut.hlsl"
+
+            #ifndef UNITY_RAW_FAR_CLIP_VALUE
+                #if defined(UNITY_REVERSED_Z)
+                    #define UNITY_RAW_FAR_CLIP_VALUE 0.0f
+                #else
+                    #define UNITY_RAW_FAR_CLIP_VALUE 1.0f
+                #endif
+            #endif
 
             float4 _BurtMainLightDirection;
             float4 _BurtMainLightColor;
@@ -697,27 +840,62 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
             float4 _BurtAtmosphereGroundParams;
             float4 _BurtAtmosphereExposureParams;
             float4x4 _BurtAtmosphereWorldToSkyViewLocal;
+            float4x4 _BurtAtmosphereInverseViewProjection;
+            float4x4 _BurtAtmosphereSkyMeshViewProjection;
+            float _BurtAtmosphereProceduralSky;
+            float3 _BurtAtmosphereCameraPositionWS;
             float _BurtAtmosphereDebugMode;
-            float _BurtAtmosphereCubemapFace;
 
             static const float PI = 3.14159265359f;
 
             struct Attributes
             {
+                float3 PositionOS : POSITION;
+                float2 MeshUv0 : TEXCOORD0;
+                float2 MeshUv1 : TEXCOORD1;
                 uint VertexID : SV_VertexID;
             };
 
             struct Varyings
             {
                 float4 PositionCS : SV_POSITION;
-                float2 UV : TEXCOORD0;
+                float3 PositionWS : TEXCOORD0;
+                float2 MeshUv0 : TEXCOORD1;
+                float2 MeshUv1 : TEXCOORD2;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.PositionCS = float4((input.VertexID == 2 ? 3.0f : -1.0f), (input.VertexID == 1 ? 3.0f : -1.0f), 0.0f, 1.0f);
-                output.UV = float2((input.VertexID == 2 ? 2.0f : 0.0f), (input.VertexID == 1 ? 2.0f : 0.0f));
+                if (_BurtAtmosphereProceduralSky > 0.5f)
+                {
+                    float2 triangleUv = float2(
+                        (input.VertexID << 1) & 2,
+                        input.VertexID & 2);
+                    output.PositionCS = float4(
+                        triangleUv * 2.0f - 1.0f,
+                        UNITY_RAW_FAR_CLIP_VALUE,
+                        1.0f);
+                    float4 farPositionWS = mul(
+                        _BurtAtmosphereInverseViewProjection,
+                        output.PositionCS);
+                    farPositionWS.xyz /= max(abs(farPositionWS.w), 1.0e-6f);
+                    float3 cameraToFar = farPositionWS.xyz - _BurtAtmosphereCameraPositionWS;
+                    cameraToFar *= rsqrt(max(dot(cameraToFar, cameraToFar), 1.0e-8f));
+                    output.PositionWS = _BurtAtmosphereCameraPositionWS
+                        + cameraToFar * 19930.0f;
+                    output.MeshUv0 = 0.0f;
+                    output.MeshUv1 = 0.0f;
+                    return output;
+                }
+
+                output.PositionWS = mul(unity_ObjectToWorld, float4(input.PositionOS, 1.0f)).xyz;
+                output.PositionCS = mul(
+                    _BurtAtmosphereSkyMeshViewProjection,
+                    float4(output.PositionWS, 1.0f));
+                output.PositionCS.z = UNITY_RAW_FAR_CLIP_VALUE * output.PositionCS.w;
+                output.MeshUv0 = input.MeshUv0;
+                output.MeshUv1 = input.MeshUv1;
                 return output;
             }
 
@@ -734,9 +912,7 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
 
             float MiePhase(float cosTheta, float g)
             {
-                float g2 = g * g;
-                float denom = max(0.05f, pow(abs(1.0f + g2 - 2.0f * g * cosTheta), 1.5f));
-                return (1.0f / (4.0f * PI)) * ((1.0f - g2) / denom);
+                return BurtAtmosphereHenyeyGreensteinPhase(cosTheta, g);
             }
 
             float EstimateAirMass(float viewUp, float scaleHeight, float atmosphereHeight)
@@ -760,32 +936,23 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 return t * t * (3.0f - 2.0f * t);
             }
 
-            float3 AtmosphereFaceUVToDirection(float face, float2 uv)
-            {
-                float2 st = uv * 2.0f - 1.0f;
-                st.y = -st.y;
-                if (face < 0.5f) return SafeNormalize(float3(1.0f, st.y, -st.x), float3(1.0f, 0.0f, 0.0f));
-                if (face < 1.5f) return SafeNormalize(float3(-1.0f, st.y, st.x), float3(-1.0f, 0.0f, 0.0f));
-                if (face < 2.5f) return SafeNormalize(float3(st.x, 1.0f, -st.y), float3(0.0f, 1.0f, 0.0f));
-                if (face < 3.5f) return SafeNormalize(float3(st.x, -1.0f, st.y), float3(0.0f, -1.0f, 0.0f));
-                if (face < 4.5f) return SafeNormalize(float3(st.x, st.y, 1.0f), float3(0.0f, 0.0f, 1.0f));
-                return SafeNormalize(float3(-st.x, st.y, -1.0f), float3(0.0f, 0.0f, -1.0f));
-            }
-
-            float3 EvaluateAtmosphere(float3 viewDirWS)
+            float3 EvaluateAtmosphere(
+                float3 viewDirWS,
+                float2 meshUv0,
+                float2 meshUv1)
             {
                 float3 viewDirAtmosphere = mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, viewDirWS);
                 float3 lightDirWS = SafeNormalize(mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, _BurtAtmosphereSunDirection.xyz), float3(0.0f, 1.0f, 0.0f));
                 float3 lightColor = NormalizeLightColor(max(_BurtMainLightColorOuterSpace.rgb, 0.0f));
                 float mainLightOcclusion = saturate(_BurtMainLightOcclusionFactor);
-                float3 atmosphereLight = max(_BurtMainLightColorOuterSpace.rgb, 0.0f) * max(_BurtAtmosphereSunIntensity, 0.0f) * mainLightOcclusion;
+                float3 atmosphereLight = _BurtMainLightColorOuterSpace.rgb;
                 float cosTheta = dot(viewDirAtmosphere, lightDirWS);
                 float viewUp = viewDirAtmosphere.y;
                 float up01 = saturate(viewUp * 0.5f + 0.5f);
 
-                float atmosphereHeight = max(_BurtAtmospherePlanetParams.y, 1.0f);
-                float rayleighScaleHeight = max(_BurtAtmospherePlanetParams.z, 0.1f);
-                float mieScaleHeight = max(_BurtAtmospherePlanetParams.w, 0.1f);
+                float atmosphereHeight = max(_BurtAtmospherePlanetParams.y, 0.1f);
+                float rayleighScaleHeight = max(_BurtAtmospherePlanetParams.z, 0.001f);
+                float mieScaleHeight = max(_BurtAtmospherePlanetParams.w, 0.001f);
                 float rayleighAir = EstimateAirMass(viewUp, rayleighScaleHeight, atmosphereHeight);
                 float mieAir = EstimateAirMass(viewUp, mieScaleHeight, atmosphereHeight);
 
@@ -805,10 +972,10 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 float3 horizonColor = lerp(horizonBaseColor, horizonSunsetColor, saturate(1.0f - lightDirWS.y) * horizonSunsetInfluence);
                 float3 baseSky = lerp(horizonColor * horizonIntensity, zenithColor, pow(up01, horizonFalloff));
 
-                float3 rayleighBeta = max(_BurtAtmosphereRayleighScatteringCoefficient.rgb, 0.0f) * (rayleighIntensity * 13.6f);
-                float3 mieBeta = max(_BurtAtmosphereMieScatteringCoefficient.rgb, 0.0f) * (mieIntensity / 0.12f) * 4.8f;
+                float3 rayleighBeta = max(_BurtAtmosphereRayleighScatteringCoefficient.rgb, 0.0f) * 13.6f;
+                float3 mieBeta = max(_BurtAtmosphereMieScatteringCoefficient.rgb, 0.0f) * 4.8f;
                 float3 ozoneExtinction = max(_BurtAtmosphereOzoneAbsorptionCoefficient.rgb, 0.0f) * 10.0f;
-                float3 transmittance = exp(-(rayleighBeta * rayleighAir + (mieBeta + max(_BurtAtmosphereMieAbsorptionCoefficient.rgb, 0.0f) * (mieIntensity / 0.12f) * 4.8f) * mieAir + ozoneExtinction * saturate(mieAir * 0.35f)) * 0.45f);
+                float3 transmittance = exp(-(rayleighBeta * rayleighAir + (mieBeta + max(_BurtAtmosphereMieAbsorptionCoefficient.rgb, 0.0f) * 4.8f) * mieAir + ozoneExtinction * saturate(mieAir * 0.35f)) * 0.45f);
                 float3 inScatter = rayleighBeta * RayleighPhase(cosTheta) * rayleighAir;
                 inScatter += mieBeta * MiePhase(cosTheta, _BurtAtmosphereMieAnisotropy) * mieAir;
 
@@ -820,50 +987,63 @@ Shader "Hidden/BurtRP/AtmosphereScattering"
                 float groundBlend = SmoothRange(groundBlendStart, groundBlendEnd, viewUp);
                 skyColor = lerp(skyColor, groundColor * groundContribution, groundBlend);
                 skyColor *= max(_BurtAtmosphereSkyLuminanceFactor.rgb, 0.0f);
-                float3 stylizedSky = BurtAtmosphereEvaluateStylizedSky(
-                    viewDirAtmosphere,
-                    lightDirWS,
-                    _BurtAtmospherePlanetParams,
-                    groundColor,
-                    _BurtAtmosphereGroundParams.xyz,
-                    mainLightOcclusion);
                 if (_BurtAtmosphereUseLuts > 0.5f)
                 {
                     float3 lutSky = BurtAtmosphereSampleSkyView(viewDirAtmosphere, _BurtAtmospherePlanetParams);
                     // XRender's sky-capture permutation excludes the direct sun disk.
                     // Preserve only the integrated SkyView radiance for IBL; direct solar
                     // lighting already arrives through the main-light path.
-                    skyColor = lutSky * atmosphereLight * max(_BurtAtmosphereSkyTint.rgb, 0.0f) * max(_BurtAtmosphereSkyLuminanceFactor.rgb, 0.0f);
+                    skyColor = lutSky
+                        * atmosphereLight
+                        * _BurtAtmosphereSkyLuminanceFactor.rgb
+                        * mainLightOcclusion;
                     transmittance = 1.0f;
                 }
-                skyColor = lerp(skyColor, stylizedSky, saturate(_BurtAtmosphereStylizedParams.x));
-                float3 moonDirection = SafeNormalize(
-                    mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, _BurtAtmosphereMoonDirection.xyz),
-                    float3(0.0f, 0.0f, -1.0f));
-                float3 moonUp = SafeNormalize(
-                    mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, _BurtAtmosphereMoonUp.xyz),
-                    float3(0.0f, 1.0f, 0.0f));
-                float3 moonRight = SafeNormalize(
-                    mul((float3x3)_BurtAtmosphereWorldToSkyViewLocal, _BurtAtmosphereMoonRight.xyz),
-                    float3(1.0f, 0.0f, 0.0f));
-                float3 moonTransmittance = _BurtAtmosphereUseLuts > 0.5f
-                    ? BurtAtmosphereSampleTransmittance(viewUp, _BurtAtmospherePlanetParams)
-                    : 1.0f;
-                skyColor += BurtAtmosphereEvaluateMoon(
+                else
+                {
+                    // XRender's project PhysicalSky capture does not consume its
+                    // uploaded stylized-sky fields. This remains an analytic-only
+                    // compatibility control in BRP.
+                    float3 stylizedSky = BurtAtmosphereEvaluateStylizedSky(
+                        viewDirAtmosphere,
+                        lightDirWS,
+                        _BurtAtmospherePlanetParams,
+                        groundColor,
+                        _BurtAtmosphereGroundParams.xyz,
+                        mainLightOcclusion);
+                    skyColor = lerp(
+                        skyColor,
+                        stylizedSky,
+                        saturate(_BurtAtmosphereStylizedParams.x));
+                }
+                skyColor += BurtAtmosphereEvaluateWeatherSkyClouds(
                     viewDirAtmosphere,
                     lightDirWS,
-                    moonDirection,
-                    moonUp,
-                    moonRight,
-                    moonTransmittance,
-                    _BurtAtmospherePlanetParams);
-                return max(skyColor * transmittance * exposureScale, 0.0f);
+                    meshUv0);
+                skyColor = BurtAtmosphereApplyPhysicalSkyDesaturation(skyColor);
+                // XRender's sky-capture permutation compiles out the sun disk,
+                // moon and stars. Only integrated sky, weather clouds and
+                // panoramic clouds are allowed to feed diffuse/specular IBL.
+                skyColor += BurtAtmosphereEvaluatePanoramicClouds(
+                    mainLightOcclusion,
+                    meshUv1);
+                // This pass never applies Burt pre-exposure. ARGBHalf therefore
+                // stores the same scene-linear domain produced by XRender after
+                // its explicit GetOneOverPreExposureValue cancellation.
+                return skyColor * transmittance * exposureScale;
             }
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float3 viewDirWS = AtmosphereFaceUVToDirection(_BurtAtmosphereCubemapFace, input.UV);
-                return float4(EvaluateAtmosphere(viewDirWS), 1.0f);
+                float3 viewDirWS = SafeNormalize(
+                    input.PositionWS - _BurtAtmosphereCameraPositionWS,
+                    float3(0.0f, 0.0f, 1.0f));
+                return float4(
+                    EvaluateAtmosphere(
+                        viewDirWS,
+                        input.MeshUv0,
+                        input.MeshUv1),
+                    1.0f);
             }
             ENDHLSL
         }

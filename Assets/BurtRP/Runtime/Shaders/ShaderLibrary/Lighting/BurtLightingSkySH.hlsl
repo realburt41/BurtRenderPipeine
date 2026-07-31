@@ -148,6 +148,7 @@ float3 BurtEvaluateAmbientSH9(float3 normalWS)
     return max(SHIrradiance, float3(0.0f, 0.0f, 0.0f));
 }
 
+#if !defined(BURT_LIGHTING_SKY_SH_IRRADIANCE_ONLY)
 float BurtLambert(float3 NormalWS, float3 LightDirectionWS)
 {
     return saturate(dot(NormalWS, LightDirectionWS));
@@ -169,6 +170,7 @@ float3 BurtEvaluateAmbient(float3 BaseColor, float3 AmbientColor)
 {
     return BurtEvaluateAmbientOccluded(BaseColor, AmbientColor, 1.0f);
 }
+#endif
 
 float3 BurtSampleIndirectDiffuseIrradiance(float3 NormalWS)
 {

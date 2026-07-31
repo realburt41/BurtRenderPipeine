@@ -48,6 +48,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int CameraDepthTextureId = Shader.PropertyToID(CameraDepthTextureShaderName); // 把 shader 名称转换成整数 ID，CommandBuffer 使用整数 ID 会更稳定也更高效。
 
+        public const string LightShaftOcclusionName = "LightShaftOcclusion";
+
+        public const string LightShaftOcclusionTextureShaderName = "_BurtLightShaftOcclusionTexture";
+
+        public static readonly int LightShaftOcclusionTextureId = Shader.PropertyToID(LightShaftOcclusionTextureShaderName);
+
         public const string DeferredStencilTextureShaderName = "_BurtDeferredStencilTexture";
 
         public static readonly int DeferredStencilTextureId = Shader.PropertyToID(DeferredStencilTextureShaderName);
@@ -967,6 +973,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string ClusterLightListBufferName = "ClusterLightListBuffer"; // Per-cluster light index list buffer used by clustered deferred lighting.
 
         public const string ClusterLightOffsetBufferName = "ClusterLightOffsetBuffer"; // Per-cluster offset/count buffer used by clustered deferred lighting.
+
+        public const string PunctualTileIdBufferName = "PunctualTileIdBuffer"; // Compact packed XY tile ids consumed by deferred punctual tile draws.
 
         private const string UnnamedRenderTargetName = "UnnamedRenderTarget"; // 定义空资源名的兜底名称，避免 Dictionary 接收 null 或空字符串。
 

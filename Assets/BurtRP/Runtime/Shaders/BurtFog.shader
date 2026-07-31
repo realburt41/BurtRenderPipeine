@@ -20,6 +20,7 @@ Shader "Hidden/BurtRP/Fog"
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/BurtAtmosphereLut.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightShaftOcclusion.hlsl"
 
             sampler2D _BurtCameraColorTexture;
             UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
@@ -106,13 +107,6 @@ Shader "Hidden/BurtRP/Fog"
                 return positionWS.xyz;
             }
 
-            float HenyeyGreensteinPhase(float cosTheta, float g)
-            {
-                float g2 = g * g;
-                float denom = max(0.05f, pow(abs(1.0f + g2 - 2.0f * g * cosTheta), 1.5f));
-                return (1.0f - g2) / (4.0f * PI * denom);
-            }
-
             float CalcLineIntegral(float falloff, float rayDeltaY, float mediumDensity)
             {
                 float scaledFalloff = max(-127.0f, falloff * rayDeltaY);
@@ -189,7 +183,11 @@ Shader "Hidden/BurtRP/Fog"
                 float maxOpacity = saturate(_BurtFogParams.w);
                 float mediumDensity = fogDensity * exp2(-max(-127.0f, heightFalloff * (startY - fogHeight)));
                 float opticalDepth = CalcLineIntegral(heightFalloff, rayDeltaY, mediumDensity) * rayLength;
-                float transmittance = lerp(1.0f, exp2(-max(opticalDepth, 0.0f)), maxOpacity);
+                // XRender caps final opacity by clamping transmittance, rather
+                // than scaling the optical depth response by MaxOpacity.
+                float transmittance = max(
+                    saturate(exp2(-max(opticalDepth, 0.0f))),
+                    1.0f - maxOpacity);
                 float fogAmount = saturate(1.0f - transmittance);
                 float aerialInteraction = _BurtFogAerialInteractionParams.x;
                 if (aerialInteraction > 0.5f && aerialInteraction < 1.5f)
@@ -229,7 +227,11 @@ Shader "Hidden/BurtRP/Fog"
                 // environment occlusion is applied explicitly once below.
                 float3 lightColor = NormalizeLightColor(max(_BurtMainLightColorOuterSpace.rgb * _BurtMainLightAtmosphereTransmittance.rgb, 0.0f));
                 float lDotV = dot(lightDirWS, viewDirWS);
-                float phase = HenyeyGreensteinPhase(lDotV, _BurtFogScatteringParams.z);
+                // Match XRender Height Fog and the transparent consumer: Schlick
+                // uses the PBRT phase convention (-L.V).
+                float phase = BurtAtmosphereSchlickPhase(
+                    _BurtFogScatteringParams.z,
+                    -lDotV);
                 float directional = max(_BurtFogScatteringParams.x, 0.0f) * phase * 4.0f;
                 float ambient = max(_BurtFogScatteringParams.y, 0.0f);
                 float mainLightOcclusion = saturate(_BurtMainLightOcclusionFactor);
@@ -254,8 +256,12 @@ Shader "Hidden/BurtRP/Fog"
                 }
 
                 float3 fogColor = BurtApplyPreExposure(evaluatedFogColor);
+                float lightShaftOcclusion = BurtSampleLightShaftOcclusion(input.ScreenUV);
 
-                return float4(lerp(sourceColor, fogColor, fogAmount), 1.0f);
+                return float4(
+                    sourceColor * transmittance
+                    + fogColor * fogAmount * lightShaftOcclusion,
+                    1.0f);
             }
             ENDHLSL
         }

@@ -882,6 +882,7 @@ void BurtGISceneVoxelBuildLighting(uint3 dispatchThreadId)
 
     float4 radiance = _BurtGISceneVoxelRadianceReadTexture.Load(int4((int)dispatchThreadId.x, (int)dispatchThreadId.y, (int)dispatchThreadId.z, 0));
     float4 geometry = _BurtGISceneVoxelGeometryReadTexture.Load(int4((int)dispatchThreadId.x, (int)dispatchThreadId.y, (int)dispatchThreadId.z, 0));
+    float3 prelitRadiance = max(_BurtGISceneVoxelLightingTexture[dispatchThreadId].rgb, 0.0);
     float occupancy = saturate(geometry.a);
     if (occupancy <= 0.001 || radiance.a <= 0.001)
     {
@@ -929,7 +930,8 @@ void BurtGISceneVoxelBuildLighting(uint3 dispatchThreadId)
     float3 directLighting = (normalBoost.xxx + mainLightRadiance + additionalLightRadiance) *
         (max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.z, 0.0) * oneOverPreExposure);
     const float xgiSecondaryBounceSkyScale = 0.2;
-    float3 boostedDiffuseColor = BurtGISceneVoxelRecoverBoostedDiffuseColor(radiance.rgb);
+    float3 storedDiffuseRadiance = max(radiance.rgb - prelitRadiance, 0.0);
+    float3 boostedDiffuseColor = BurtGISceneVoxelRecoverBoostedDiffuseColor(storedDiffuseRadiance);
     float3 indirectLighting = skyTint * boostedDiffuseColor * (max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.w, 0.0) * xgiSecondaryBounceSkyScale);
     float3 radianceCacheIrradiance = 0.0;
     if (_BurtGISceneVoxelRadianceCacheParams.x > 0.5 &&
@@ -938,7 +940,10 @@ void BurtGISceneVoxelBuildLighting(uint3 dispatchThreadId)
         indirectLighting = radianceCacheIrradiance * boostedDiffuseColor *
             (max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.w, 0.0));
     }
-    float3 lighting = max(radiance.rgb, 0.0) * directLighting + indirectLighting * radiance.a;
+    float3 lighting =
+        prelitRadiance +
+        boostedDiffuseColor * directLighting +
+        indirectLighting * radiance.a;
 
     float grey = dot(lighting, float3(0.299, 0.587, 0.114));
     float3 adjustedLighting = lerp(grey.xxx, lighting, saturate(_BurtGISceneVoxelLightingParams.y));

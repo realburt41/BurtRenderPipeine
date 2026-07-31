@@ -226,6 +226,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteBuffer(BurtRenderGraphResourceRegistry.ClusterLightOffsetBufferName);
         }
 
+        public BurtRenderBufferHandle ReadPunctualTileIdBuffer()
+        {
+            return ReadBuffer(BurtRenderGraphResourceRegistry.PunctualTileIdBufferName);
+        }
+
+        public BurtRenderBufferHandle WritePunctualTileIdBuffer()
+        {
+            return WriteBuffer(BurtRenderGraphResourceRegistry.PunctualTileIdBufferName);
+        }
+
         public BurtRenderBufferHandle ReadBurtGIScreenProbeIndirectArgsBuffer()
         {
             return ReadBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIndirectArgsBufferName);

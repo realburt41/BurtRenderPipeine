@@ -20,6 +20,8 @@ Shader "Hidden/BurtRP/BurtGI"
             Texture2D _BurtGIHistoryDepthNormalTexture;
             Texture2D _BurtGIBackfaceDiffuseIndirectHistoryTexture;
             Texture2D _BurtGIRoughSpecularIndirectHistoryTexture;
+            Texture2D _BurtGIBackfaceDiffuseIndirectTexture;
+            Texture2D _BurtGIRoughSpecularIndirectTexture;
             Texture2D _BurtGIPreviousHistoryTexture;
             Texture2D _BurtGIPreviousHistoryDepthNormalTexture;
             Texture2D _BurtGICameraColorCopyTexture;
@@ -417,11 +419,10 @@ Shader "Hidden/BurtRP/BurtGI"
                 return BurtGIClampRadiance(lerp(sourceRadiance, diffuseTintedRadiance, tintWeight));
             }
 
-            float3 BurtGIEstimateSampleDiffuseRadiance(BurtPBRMaterialData sampleMaterialData, float3 sampleNormalWS, float3 sampleEmission)
+            float3 BurtGIEstimateSampleDiffuseRadiance(BurtPBRMaterialData sampleMaterialData, float3 sampleNormalWS)
             {
                 float3 diffuseIrradiance = BurtSampleIndirectDiffuseIrradiance(sampleNormalWS);
                 float3 diffuseRadiance = max(sampleMaterialData.DiffuseColor, 0.0f) * max(diffuseIrradiance, 0.0f);
-                diffuseRadiance += max(sampleEmission, 0.0f);
                 return BurtGIClampRadiance(diffuseRadiance);
             }
 
@@ -509,7 +510,13 @@ Shader "Hidden/BurtRP/BurtGI"
                     float3 sampleDiffuse = max(sampleMaterialData.DiffuseColor, 0.0f);
                     float sampleDiffuseLuma = dot(sampleDiffuse, lumaWeights);
                     float sampleChroma = BurtGIComputeDiffuseChroma(sampleDiffuse);
-                    float colorSourceWeight = smoothstep(0.05f, 0.26f, sampleChroma) * smoothstep(0.025f, 0.14f, sampleDiffuseLuma);
+                    float3 sampleEmission = max(sampleEncodedGBuffer.GBuffer4.rgb, 0.0f);
+                    float sampleEmissionLuma = dot(sampleEmission, lumaWeights);
+                    float sampleEmissionChroma = BurtGIComputeDiffuseChroma(sampleEmission);
+                    float diffuseColorSourceWeight = smoothstep(0.05f, 0.26f, sampleChroma) * smoothstep(0.025f, 0.14f, sampleDiffuseLuma);
+                    float emissionSourceWeight = smoothstep(0.01f, 0.12f, sampleEmissionLuma) *
+                        lerp(0.65f, 1.0f, smoothstep(0.025f, 0.2f, sampleEmissionChroma));
+                    float colorSourceWeight = max(diffuseColorSourceWeight, emissionSourceWeight);
                     if (colorSourceWeight <= 0.0001f)
                     {
                         continue;
@@ -519,23 +526,22 @@ Shader "Hidden/BurtRP/BurtGI"
                     float3 sampleNormalWS = BurtGISampleNormalWS(sampleUV);
                     float sampleEdgeFactor = BurtGIEdgeFactor(sampleUV, sampleRawDepth, sampleNormalWS);
                     float sampleEdgeGate = 1.0f - smoothstep(0.22f, 0.72f, sampleEdgeFactor);
-                    float planeSeparationRatio = abs(dot(deltaWS, normalWS)) / max(distanceWS, 0.0001f);
-                    float planeGate = 1.0f - smoothstep(0.10f, 0.32f, planeSeparationRatio);
-                    float normalSimilarity = saturate(dot(normalWS, sampleNormalWS));
-                    float normalSimilarityGate = smoothstep(0.18f, 0.72f, normalSimilarity);
                     float receiverFacing = smoothstep(-0.08f, 0.32f, dot(normalWS, toSampleWS));
                     float sourceFacing = smoothstep(-0.18f, 0.42f, dot(sampleNormalWS, -toSampleWS));
                     float distanceWeight = 1.0f - smoothstep(radius * 0.08f, radius * 2.45f, distanceWS);
-                    float sourceWeight = max(BurtGIComputeDiffuseSourceWeight(sampleMaterialData), colorSourceWeight * 0.72f);
+                    float sourceWeight = max(
+                        BurtGIComputeDiffuseSourceWeight(sampleMaterialData),
+                        max(colorSourceWeight * 0.72f, saturate(sampleEmissionLuma)));
                     float sampleWeight = ringWeight * colorSourceWeight * receiverFacing * sourceFacing * distanceWeight * sourceWeight;
-                    sampleWeight *= centerEdgeGate * sampleEdgeGate * planeGate * normalSimilarityGate;
+                    sampleWeight *= centerEdgeGate * sampleEdgeGate;
                     if (sampleWeight <= 0.0001f)
                     {
                         continue;
                     }
 
-                    float3 sampleRadiance = BurtGIEstimateSampleDiffuseRadiance(sampleMaterialData, sampleNormalWS, sampleEncodedGBuffer.GBuffer4.rgb);
-                    sampleRadiance = BurtGITintRadianceByDiffuseAlbedo(sampleRadiance, sampleMaterialData);
+                    float3 sampleDiffuseRadiance = BurtGIEstimateSampleDiffuseRadiance(sampleMaterialData, sampleNormalWS);
+                    sampleDiffuseRadiance = BurtGITintRadianceByDiffuseAlbedo(sampleDiffuseRadiance, sampleMaterialData);
+                    float3 sampleRadiance = sampleDiffuseRadiance * BurtGIComputeDiffuseSourceWeight(sampleMaterialData) + sampleEmission;
                     radianceSum += sampleRadiance * sampleWeight;
                     weightSum += sampleWeight;
                 }
@@ -704,11 +710,6 @@ Shader "Hidden/BurtRP/BurtGI"
                     float3 sampleDirectionFromCenterWS = deltaWS / distanceWS;
                     float3 sampleToCenterWS = -deltaWS / max(distanceWS, 0.0001f);
                     float3 sampleNormalWS = BurtGISampleNormalWS(sampleUV);
-                    float normalSimilarity = saturate(dot(normalWS, sampleNormalWS));
-                    float normalDifferent = 1.0f - smoothstep(0.9f, 0.985f, normalSimilarity);
-                    float planeSeparationRatio = abs(dot(deltaWS, normalWS)) / max(distanceWS, 0.0001f);
-                    float planeSeparated = smoothstep(lerp(0.04f, 0.08f, leakGuard), lerp(0.14f, 0.22f, leakGuard), planeSeparationRatio);
-                    float coplanarGate = 1.0f - max(normalDifferent, planeSeparated);
                     float sampleLinearDepth = LinearEyeDepth(sampleRawDepth);
                     float depthError = abs(probeLinearDepth - sampleLinearDepth);
                     float guardedThickness = thickness * lerp(1.0f, 0.55f, leakGuard * edgeFactor);
@@ -717,8 +718,7 @@ Shader "Hidden/BurtRP/BurtGI"
                     float normalFacingWeight = smoothstep(0.06f, 0.28f, saturate(dot(normalWS, sampleDirectionFromCenterWS)));
                     float edgeNormalWeightAmount = saturate(normalWeightAmount + leakGuard * edgeFactor * 0.35f);
                     float sampleNormalWeight = lerp(1.0f, saturate(dot(sampleNormalWS, sampleToCenterWS)), edgeNormalWeightAmount);
-                    float surfaceCone = smoothstep(lerp(0.12f, 0.45f, saturate(_BurtGIParams4.z)), 1.0f, saturate(dot(normalWS, sampleNormalWS)));
-                    float weight = depthWeight * distanceWeight * normalFacingWeight * sampleNormalWeight * lerp(1.0f, surfaceCone, leakGuard) * coplanarGate;
+                    float weight = depthWeight * distanceWeight * normalFacingWeight * sampleNormalWeight;
                     if (weight <= 0.0001f)
                     {
                         continue;
@@ -726,9 +726,11 @@ Shader "Hidden/BurtRP/BurtGI"
 
                     BurtEncodedGBuffer sampleEncodedGBuffer = BurtSampleEncodedGBuffer(sampleUV);
                     BurtPBRMaterialData sampleMaterialData = BurtPreparePBRMaterialData(BurtDecodeDeferredGBuffer(sampleEncodedGBuffer, sampleUV));
-                    float3 sampleRadiance = BurtGIEstimateSampleDiffuseRadiance(sampleMaterialData, sampleNormalWS, sampleEncodedGBuffer.GBuffer4.rgb);
-                    sampleRadiance = BurtGITintRadianceByDiffuseAlbedo(sampleRadiance, sampleMaterialData);
-                    sampleRadiance *= BurtGIComputeDiffuseSourceWeight(sampleMaterialData);
+                    float3 sampleDiffuseRadiance = BurtGIEstimateSampleDiffuseRadiance(sampleMaterialData, sampleNormalWS);
+                    sampleDiffuseRadiance = BurtGITintRadianceByDiffuseAlbedo(sampleDiffuseRadiance, sampleMaterialData);
+                    float3 sampleRadiance =
+                        sampleDiffuseRadiance * BurtGIComputeDiffuseSourceWeight(sampleMaterialData) +
+                        max(sampleEncodedGBuffer.GBuffer4.rgb, 0.0f);
                     tracedRadiance += sampleRadiance * weight;
                     totalWeight += weight;
                 }
@@ -744,9 +746,10 @@ Shader "Hidden/BurtRP/BurtGI"
                 screenHitEnergy = saturate(screenHitEnergy + nearFieldEnergy);
                 float skyFallbackWeight = 1.0f - screenHitEnergy;
                 float3 skyDiffuse = BurtSampleIndirectDiffuseIrradiance(normalWS) * _BurtGIParams1.y * skyFallbackWeight;
-                float3 diffuseOcclusion = BurtGTAOMultiBounce(materialData.Occlusion, materialData.BaseColor);
-                float3 indirectDiffuse = materialData.DiffuseColor * (screenIrradiance * screenHitEnergy + skyDiffuse) * diffuseOcclusion * distanceFade;
-                return float4(max(indirectDiffuse, 0.0f), hitRatio);
+                // XRender parity: DiffuseIndirectTexture stores incident diffuse lighting (Fc).
+                // Receiver DiffuseColor and material AO are applied exactly once by deferred lighting.
+                float3 indirectDiffuseLighting = (screenIrradiance * screenHitEnergy + skyDiffuse) * BURT_INV_PI * distanceFade;
+                return float4(max(indirectDiffuseLighting, 0.0f), hitRatio);
             }
 
             struct BurtGIScreenProbeOutput
@@ -3251,7 +3254,10 @@ Shader "Hidden/BurtRP/BurtGI"
                     confidence = saturate(max(confidence, radianceCacheConfidence * radianceCacheFill * 0.75f));
                 }
                 float fillWeight = applyStrength * confidence * lerp(1.0f, 0.45f, hitRatio);
-                float3 integratedGI = lerp(filtered.rgb, max(probeIrradiance.rgb, 0.0f), fillWeight);
+                // XRender writes DiffuseLighting * Fd_Lambert to DiffuseIndirect.
+                // Keep screen trace and screen-probe fill in the same pre-material-lighting space.
+                float3 probeDiffuseLighting = max(probeIrradiance.rgb, 0.0f) * BURT_INV_PI;
+                float3 integratedGI = lerp(filtered.rgb, probeDiffuseLighting, fillWeight);
                 return float4(max(integratedGI, 0.0f), saturate(max(hitRatio, probeConfidence.g * fillWeight)));
             }
 
@@ -3859,7 +3865,7 @@ Shader "Hidden/BurtRP/BurtGI"
                 }
 
                 float outputStrength = max(_BurtGIIrradianceFieldParams.x, 0.0f);
-                float3 indirectDiffuse = max(irradiance, 0.0f) * outputStrength;
+                float3 indirectDiffuse = max(irradiance, 0.0f) * BURT_INV_PI * outputStrength;
                 output.Diffuse = float4(max(indirectDiffuse, 0.0f), 0.0f);
 
                 return output;
@@ -4258,7 +4264,9 @@ Shader "Hidden/BurtRP/BurtGI"
                     float xgiBackfaceTraceConfidence = saturate(max(screenProbeBackfaceConfidence, max(backfaceTraceHit, screenProbeHitDistanceConfidence.w)));
                     float environmentFill = saturate((0.45f - xgiBackfaceTraceConfidence) * 2.2222223f);
                     backfaceIrradiance = lerp(backfaceIrradiance, max(environmentBackfaceIrradiance, 0.0f), environmentFill * 0.35f);
-                    float3 twoSidedDiffuseLighting = backfaceIrradiance * BURT_INV_PI * materialData.DiffuseColor;
+                    // XRender stores pre-material two-sided diffuse lighting in the backface channel.
+                    // Thin-walled transmission color and material AO are applied by deferred lighting.
+                    float3 twoSidedDiffuseLighting = backfaceIrradiance * BURT_INV_PI;
                     float backfaceBentVisibility = saturate(dot(-normalWS, unitBentNormalWS) * 0.5f + 0.5f);
                     float unweightedBackfaceBentOcclusion = bentNormalValid > 0.5f
                         ? lerp(1.0f, saturate(0.5f + backfaceBentVisibility * 0.5f) * saturate(0.4f + bentAO * 0.6f), saturate(1.0f - bentAO))
@@ -4279,7 +4287,8 @@ Shader "Hidden/BurtRP/BurtGI"
                 float clearCoatMask = saturate(BurtGetClearCoatMask(gbufferData));
                 if (roughSpecularChannelEnabled && roughSpecularMaterialWeight > 0.0001f)
                 {
-                    float3 roughSpecular = diffuseGI * BURT_INV_PI;
+                    // DiffuseIndirect already contains XRender's Fd_Lambert factor.
+                    float3 roughSpecular = diffuseGI;
                     float roughBentOcclusion = 1.0f;
                     bool shouldSampleScreenProbeSpecular = (roughSpecularDiffuseLerp < 1.0f && roughSpecularTraceAlpha < 1.0f) || clearCoatMask > 0.0001f;
                     if (shouldSampleScreenProbeSpecular)
@@ -5175,6 +5184,33 @@ Shader "Hidden/BurtRP/BurtGI"
                 if (debugMode > 19.5f && debugMode < 20.5f)
                 {
                     return BurtGIDebugSceneVoxelOccupancy(screenUV);
+                }
+
+                float3 diffuseIndirect = max(finalBurtGI.rgb, 0.0f) * _BurtGIParams1.x;
+                float3 backfaceDiffuseIndirect = _BurtGIIndirectChannelParams.x > 0.5f
+                    ? max(tex2D(_BurtGIBackfaceDiffuseIndirectTexture, screenUV).rgb, 0.0f) * _BurtGIParams1.x
+                    : 0.0f;
+                float3 roughSpecularIndirect = _BurtGIIndirectChannelParams.y > 0.5f
+                    ? max(tex2D(_BurtGIRoughSpecularIndirectTexture, screenUV).rgb, 0.0f)
+                    : 0.0f;
+                if (debugMode > 20.5f && debugMode < 21.5f)
+                {
+                    return float4(diffuseIndirect + backfaceDiffuseIndirect + roughSpecularIndirect, 1.0f);
+                }
+
+                if (debugMode > 21.5f && debugMode < 22.5f)
+                {
+                    return float4(diffuseIndirect, 1.0f);
+                }
+
+                if (debugMode > 22.5f && debugMode < 23.5f)
+                {
+                    return float4(backfaceDiffuseIndirect, 1.0f);
+                }
+
+                if (debugMode > 23.5f && debugMode < 24.5f)
+                {
+                    return float4(roughSpecularIndirect, 1.0f);
                 }
 
                 float2 quadrantUV = frac(screenUV * 2.0f);

@@ -12,6 +12,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         Deferred = 1 // 使用 Deferred 实验路径，当前阶段只接入 GBuffer 资源生命周期并临时复用 Forward 输出。
     }
 
+    public enum BurtScreenSpaceSubsurfaceQuality
+    {
+        High = 0,
+        Medium = 1,
+        Low = 2
+    }
+
     public enum BurtGBufferDebugViewMode // 定义 Deferred GBuffer 调试视图要显示哪一种内容。
     {
         Disabled = 0, // 关闭 GBuffer 调试视图，保持正常渲染结果。
@@ -57,6 +64,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         StencilShadingModel = 35
     }
 
+    [System.Serializable]
+    public sealed class BurtRenderPipelineRuntimeResources
+    {
+        [Header("Deferred Special Debug Passes")]
+        [SerializeField] private Shader deferredLightingDebugProbeShader;
+        [SerializeField] private Shader deferredLightingDebugShadowShader;
+        [SerializeField] private Shader debugGBufferShader;
+        [SerializeField] private Shader debugTextureShader;
+
+        public Shader DebugGBufferShader => debugGBufferShader;
+        public Shader DebugTextureShader => debugTextureShader;
+
+        public Shader ResolveDeferredShadingDebugShader(string shaderName)
+        {
+            switch (shaderName)
+            {
+                case "Hidden/BurtRP/DeferredLightingDebugProbe":
+                    return deferredLightingDebugProbeShader;
+                case "Hidden/BurtRP/DeferredLightingDebugShadow":
+                    return deferredLightingDebugShadowShader;
+                default:
+                    return null;
+            }
+        }
+    }
+
     [CreateAssetMenu(menuName = "Rendering/Burt Render Pipeline Asset", fileName = "BurtRenderPipelineAsset")] // 让 Unity 可以通过 Create 菜单创建 BurtRenderPipelineAsset。
     public sealed class BurtRenderPipelineAsset : RenderPipelineAsset // 定义 BurtRP 的管线资产，Unity Graphics Settings 会引用它来创建管线实例。
     {
@@ -67,6 +100,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         [TitleGroup("Pipeline - 管线")] // 使用 Odin 给管线级配置建立独立分组，方便后续继续放 Renderer Mode、MSAA 等核心开关。
         [SerializeField] private BurtRendererMode rendererMode = BurtRendererMode.Forward; // 定义当前管线使用的渲染路径，默认 Forward，避免新增 Deferred 代码后改变现有画面。
+
+        [TitleGroup("Pipeline - Async Compute")]
+        [SerializeField, LabelText("Enable Async Compute")] private bool enableAsyncCompute = false;
+
+        [TitleGroup("Pipeline - Async Compute")]
+        [SerializeField, LabelText("Atmosphere LUT")] private bool enableAtmosphereLutAsyncCompute = true;
+
+        [TitleGroup("Pipeline - Runtime Resources")]
+        [SerializeField, InlineProperty, HideLabel]
+        private BurtRenderPipelineRuntimeResources runtimeResources = new BurtRenderPipelineRuntimeResources();
 
         [SerializeField] private Color clearColor = new Color(0.02f, 0.02f, 0.025f, 1f); // 定义默认清屏颜色，并暴露到 Inspector 供你调整。
 
@@ -108,6 +151,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [TitleGroup("Deferred - 屏幕空间次表面 5S")]
         [ShowIf(nameof(IsDeferredRendererMode))]
         [SerializeField, LabelText("启用 5S")] private bool enableScreenSpaceSubsurface = true;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, LabelText("半分辨率工作域")] private bool screenSpaceSubsurfaceHalfResolution;
+
+        [TitleGroup("Deferred - 屏幕空间次表面 5S")]
+        [ShowIf(nameof(IsDeferredRendererMode))]
+        [SerializeField, LabelText("质量档位")] private BurtScreenSpaceSubsurfaceQuality screenSpaceSubsurfaceQuality = BurtScreenSpaceSubsurfaceQuality.High;
 
         [TitleGroup("Deferred - 屏幕空间次表面 5S")]
         [ShowIf(nameof(IsDeferredRendererMode))]
@@ -196,6 +247,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         public BurtRendererMode RendererMode => rendererMode; // 暴露当前渲染路径给 BurtRenderPipeline 和 RenderGraph 资源注册逻辑使用。
 
+        public bool EnableAsyncCompute => enableAsyncCompute;
+
+        public bool EnableAtmosphereLutAsyncCompute => enableAtmosphereLutAsyncCompute;
+
+        public BurtRenderPipelineRuntimeResources RuntimeResources => runtimeResources;
+
         public bool EnableDepthPrepass => enableDepthPrepass; // 暴露 Depth Prepass 开关给 Graph Assembler 使用。
 
         public bool EnableDepthDebugView => enableDepthDebugView; // 暴露深度可视化开关给 Graph Assembler 使用。
@@ -218,6 +275,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public RayTracingShader XGIRadianceCacheHardwareRayTracingShader => ResolveXGIRadianceCacheHardwareRayTracingShader();
 
         public bool EnableScreenSpaceSubsurface => enableScreenSpaceSubsurface;
+
+        public bool ScreenSpaceSubsurfaceHalfResolution => screenSpaceSubsurfaceHalfResolution;
+
+        public BurtScreenSpaceSubsurfaceQuality ScreenSpaceSubsurfaceQuality => screenSpaceSubsurfaceQuality;
 
         public BurtSubsurfaceProfile ScreenSpaceSubsurfaceProfile => screenSpaceSubsurfaceProfile;
 
@@ -423,6 +484,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         protected override void OnValidate() // 重写 RenderPipelineAsset 的 OnValidate，避免隐藏基类同名函数产生 CS0114 警告。
         {
             base.OnValidate(); // 先执行 Unity 管线资产自己的校验逻辑，保持 RenderPipelineAsset 内部刷新行为不丢失。
+            if (runtimeResources == null)
+            {
+                runtimeResources = new BurtRenderPipelineRuntimeResources();
+            }
             EnsurePostProcessSettings(); // 确保后处理设置对象存在，避免旧资产在 Inspector 中显示为空。
             EnsureScreenSpaceSubsurfaceProfileList();
             if (screenSpaceSubsurfaceProfiles.Count > BurtSubsurfaceProfilePalette.MaxProfiles - 1)

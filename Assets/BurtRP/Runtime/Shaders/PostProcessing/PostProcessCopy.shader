@@ -1055,6 +1055,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             Texture2D<float> _BurtTAAPrevUseCountTexture;
             sampler2D _BurtTAAMetadataTexture;
             sampler2D _BurtTAAParallaxRejectionTexture;
+            sampler2D _BurtTAADilatedHistoryRejectionTexture;
             Texture2D<float> _BurtTAAStencilMaskTexture;
             Texture2D _BurtGBuffer0;
             SamplerState sampler_PointClamp;
@@ -1074,6 +1075,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float4 _BurtTAAUpscaleParams;
             float4 _BurtTAAStencilTexelSize;
             float _BurtTAAHasGBuffer;
+            float _BurtTAAHasDilatedHistoryRejection;
             float _BurtShadingDebugEnabled;
             float _BurtShadingDebugMode;
 
@@ -1237,6 +1239,21 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float BurtTaaTemporalContrast(float filteredCurrentLuma, float filteredHistoryLuma)
             {
                 return saturate(abs(filteredCurrentLuma - filteredHistoryLuma) / max(max(filteredCurrentLuma, filteredHistoryLuma), 0.2));
+            }
+
+            float BurtTaaShadingRejection(float3 currentWorking, float3 historyWorking)
+            {
+                float3 colorDelta = abs(currentWorking - historyWorking);
+                float lumaScale = max(max(abs(currentWorking.x), abs(historyWorking.x)), 0.04);
+                float relativeLumaDelta = colorDelta.x / lumaScale;
+                float relativeChromaDelta = length(colorDelta.yz) / max(lumaScale, 0.1);
+                float vectorDelta = length(colorDelta) /
+                    max(length(currentWorking) + length(historyWorking), 0.15);
+
+                float lumaRejection = smoothstep(0.04, 0.28, relativeLumaDelta);
+                float chromaRejection = smoothstep(0.05, 0.30, relativeChromaDelta);
+                float vectorRejection = smoothstep(0.08, 0.35, vectorDelta);
+                return saturate(max(vectorRejection, max(lumaRejection, chromaRejection)));
             }
 
             float BurtTaaAntiFlickerStandardDeviationBoost(float temporalContrast, float velocityPixelLength)
@@ -1466,7 +1483,11 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float historyValidity = tex2D(_BurtTAAParallaxRejectionTexture, uv).r;
                 float historyUseCount = BurtTaaLoadPrevUseCount(historyUv);
                 float historyCoverage = saturate(1.0 - abs(historyUseCount - 1.0));
-                float finalRejection = saturate(historyValidity * finalHistoryAvailability);
+                float geometricHistoryValidity = saturate(
+                    historyValidity *
+                    depthContinuity *
+                    historyCoverage *
+                    finalHistoryAvailability);
                 uint stencil = BurtTaaLoadStencil(uv);
                 float4 taaMetadata = tex2D(_BurtTAAMetadataTexture, uv);
                 float outOfBoundsBreak = saturate(1.0 - inBounds);
@@ -1481,12 +1502,23 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float stencilResponsive = ((stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0) * surfaceWeight;
                 float responsiveStrength = max(stencilResponsive, taaMetadata.g);
                 float responsiveMask = responsiveStrength * finalHistoryAvailability;
+                float responsiveHistoryRejection = max(stencilResponsive, taaMetadata.g * 0.75);
 
                 float3 moment1 = neighborhoodSum * (1.0 / 9.0);
                 float3 moment2 = neighborhoodSumSq * (1.0 / 9.0);
                 float3 standardDeviation = sqrt(abs(moment2 - moment1 * moment1));
                 float temporalContrast = BurtTaaTemporalContrast(BurtTaaWorkingLuma(currentFilteredWorking), BurtTaaWorkingLuma(historyWorking));
-                float antiFlickerSdBoost = BurtTaaAntiFlickerStandardDeviationBoost(temporalContrast, motionPixels);
+                float shadingRejection = BurtTaaShadingRejection(currentWorking, historyWorking);
+                float dilatedHistoryRejection = _BurtTAAHasDilatedHistoryRejection > 0.5
+                    ? saturate(tex2D(_BurtTAADilatedHistoryRejectionTexture, uv).r)
+                    : shadingRejection;
+                float finalRejection = _BurtTAAHasDilatedHistoryRejection > 0.5
+                    ? saturate(historyValidity * (1.0 - dilatedHistoryRejection) * finalHistoryAvailability)
+                    : saturate(geometricHistoryValidity * (1.0 - shadingRejection) * (1.0 - responsiveHistoryRejection));
+                float antiFlickerHistoryGate = smoothstep(0.85, 1.0, finalRejection) * (1.0 - responsiveStrength);
+                float antiFlickerSdBoost =
+                    BurtTaaAntiFlickerStandardDeviationBoost(temporalContrast, motionPixels) *
+                    antiFlickerHistoryGate;
                 float standardDeviationFactor = 1.5 + antiFlickerSdBoost;
                 float3 clampMin = moment1 - standardDeviation * standardDeviationFactor;
                 float3 clampMax = moment1 + standardDeviation * standardDeviationFactor;
@@ -1505,7 +1537,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 1e-4)));
                 float xrenderBaseBlend = max(0.05, lumaContrast);
                 float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
-                currentBlend = lerp(currentBlend, 0.25, responsiveMask);
+                currentBlend = max(currentBlend, 0.25 * responsiveMask);
                 currentBlend = saturate(currentBlend);
                 currentBlend = lerp(1.0, currentBlend, finalHistoryAvailability);
 
@@ -1542,7 +1574,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     if (debugMode == 332) return float4(BurtTaaRawVelocityDebugColor(tex2D(_BurtTAARawVelocityTexture, uv)), 1.0);
                     if (debugMode == 333) return float4(finalRejection.xxx, 1.0);
                     if (debugMode == 334) return float4(depthContinuity.xxx, 1.0);
-                    if (debugMode == 335) return float4(lumaContrast.xxx, 1.0);
+                    if (debugMode == 335) return float4(shadingRejection.xxx, 1.0);
                     if (debugMode == 336) return float4(clipWeight.xxx, 1.0);
                     if (debugMode == 337) return float4(depthContinuity, historyValidity, min(depthContinuity, historyValidity), 1.0);
                     if (debugMode == 338) return float4(normalWeight.xxx, 1.0);
@@ -1580,13 +1612,16 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     }
                     if (debugMode == 365)
                     {
-                        float strongestRejectDebug = max(max(depthBreak, parallaxBreak), max(velocityBreak, clampBreak));
+                        float strongestRejectDebug = max(
+                            max(depthBreak, parallaxBreak),
+                            max(max(velocityBreak, clampBreak), shadingRejection));
                         float3 reasonColor = float3(0.035, 0.035, 0.035) * (1.0 - strongestRejectDebug);
                         reasonColor += depthBreak * float3(1.0, 0.05, 0.02);
                         reasonColor += parallaxBreak * float3(0.05, 1.0, 0.08);
                         reasonColor += coverageBreak * float3(1.0, 0.80, 0.05);
                         reasonColor += velocityBreak * float3(0.10, 0.35, 1.0);
                         reasonColor += clampBreak * float3(0.95, 0.0, 0.95);
+                        reasonColor += shadingRejection * float3(1.0, 0.25, 0.65);
                         reasonColor += outOfBoundsBreak * float3(0.0, 0.85, 1.0);
                         return float4(saturate(reasonColor), 1.0);
                     }
@@ -2047,12 +2082,12 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                         float weight = wx * wy * (pixelInBounds ? 1.0 : 0.0) * inBounds;
                         int2 safePixel = clamp(pixel, int2(0, 0), textureSize - 1);
                         float previousUseCount = max(0.0, _BurtTAAPrevUseCountTexture.Load(int3(safePixel, 0)));
-                        float historyGhostingRejection = saturate(1.0 - abs(previousUseCount - 1.0));
+                            float historyGhostingRejection = saturate(1.0 - 2.0 * abs(previousUseCount - 1.0));
                         float previousRawDepth = tex2D(_BurtTAADepthHistoryTexture, (float2(safePixel) + 0.5) * _BurtTAATexelSize.xy).r;
                         float previousLinearDepth = BurtTaaLinearDepth(previousRawDepth);
                         float depthDelta = abs(currentLinearDepth - previousLinearDepth);
-                        float depthRejection = saturate(2.0 - 4.0 * depthDelta / previousLinearDepth);
-                        float tapRejection = max(historyGhostingRejection, depthRejection);
+                            float depthRejection = saturate(2.0 - 12.0 * depthDelta / previousLinearDepth);
+                            float tapRejection = min(historyGhostingRejection, depthRejection);
                         finalRejection += tapRejection * weight;
                         historyGhosting += historyGhostingRejection * weight;
                         depthRejectionSum += depthRejection * weight;

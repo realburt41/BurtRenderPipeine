@@ -164,6 +164,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
         public float ClusterLightFarPlane { get; private set; }
         public float ClusterLightInvDepthRange { get; private set; }
         public Vector4 ClusterLightWorldToViewZ { get; private set; }
+        public bool PunctualTileDrawUploaded { get; private set; }
+        public int PunctualTileDrawTotalTileCount { get; private set; }
+        public int PunctualTileDrawHitTileCount { get; private set; }
+        public int[] PunctualTileDrawBinOffsets { get; } = new int[BurtTiledLightData.PunctualTileBinCount];
+        public int[] PunctualTileDrawBinCounts { get; } = new int[BurtTiledLightData.PunctualTileBinCount];
+
+        public bool ShouldUsePunctualTileDraw =>
+            PunctualTileDrawUploaded &&
+            PunctualTileDrawTotalTileCount > 0 &&
+            PunctualTileDrawHitTileCount > 0 &&
+            (float)PunctualTileDrawHitTileCount / PunctualTileDrawTotalTileCount <
+                BurtTiledLightData.PunctualTileFullscreenFallbackThreshold;
 
         public string AdditionalLightShadingPath
         {
@@ -467,6 +479,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             ClusterLightWorldToViewZ = worldToViewZ;
         }
 
+        public void SetPunctualTileDrawState(
+            bool uploaded,
+            int totalTileCount,
+            int hitTileCount,
+            int[] binOffsets,
+            int[] binCounts)
+        {
+            PunctualTileDrawUploaded = uploaded;
+            PunctualTileDrawTotalTileCount = uploaded ? Mathf.Max(0, totalTileCount) : 0;
+            PunctualTileDrawHitTileCount = uploaded
+                ? Mathf.Clamp(hitTileCount, 0, PunctualTileDrawTotalTileCount)
+                : 0;
+
+            for (var binIndex = 0; binIndex < BurtTiledLightData.PunctualTileBinCount; binIndex++)
+            {
+                PunctualTileDrawBinOffsets[binIndex] =
+                    uploaded && binOffsets != null && binIndex < binOffsets.Length
+                        ? Mathf.Max(0, binOffsets[binIndex])
+                        : 0;
+                PunctualTileDrawBinCounts[binIndex] =
+                    uploaded && binCounts != null && binIndex < binCounts.Length
+                        ? Mathf.Max(0, binCounts[binIndex])
+                        : 0;
+            }
+        }
+
         public static BurtLightingData Default() // 创建一个即使没有剔除结果也可用的默认灯光数据。
         {
             var data = new BurtLightingData(); // 创建灯光数据对象。
@@ -529,6 +567,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
             ResetAdditionalLightShadowDiagnostics();
             SetTileLightDebugState(false, false, "Disabled", 0, 0, 0, 0, 0, 0, 0, 0, 0f);
             SetClusterLightState(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0f, 0, 0, 0f, 1f, Vector4.zero);
+            SetPunctualTileDrawState(false, 0, 0, null, null);
             TileLightDebugCountSnapshotLength = 0;
             ClusterLightDebugCountSnapshotLength = 0;
 

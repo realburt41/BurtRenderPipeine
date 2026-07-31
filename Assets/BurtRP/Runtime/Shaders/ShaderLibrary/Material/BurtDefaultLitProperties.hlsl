@@ -15,6 +15,7 @@ CBUFFER_START(UnityPerMaterial)
     float _AlphaClip;
     float _Cutoff;
     float _Surface;
+    float _BlendMode;
     float _Refraction;
     float _IOR;
     float _RefractionStage;

@@ -224,7 +224,7 @@ namespace Burt.RenderPipeline
                 interaction = AtmosphereFogInteraction.Additive;
             }
 
-            var aerialFadeStart = aerialCanRun ? atmosphereSettings.AerialPerspectiveNearFadeStart : 0f;
+            var aerialStartDepth = aerialCanRun ? atmosphereSettings.AerialPerspectiveStartDepth : 0f;
             var aerialFadeEnd = aerialCanRun ? atmosphereSettings.AerialPerspectiveNearFadeEnd : 1f;
 
             return new BurtFogSettings(
@@ -241,7 +241,7 @@ namespace Burt.RenderPipeline
                 fog.anisotropy.value,
                 requestedInteraction,
                 interaction,
-                aerialFadeStart,
+                aerialStartDepth,
                 aerialFadeEnd,
                 new BurtAtmosphereHorizontalFogSettings(
                     fog.useAtmosphereHorizontalScattering.value,
@@ -251,6 +251,37 @@ namespace Burt.RenderPipeline
                     fog.atmosphereMieScale.value,
                     fog.atmosphereMultipleScatteringTint.value,
                     fog.atmosphereMultipleScatteringScale.value));
+        }
+
+        internal static float ResolveEffectiveStartDistance(
+            BurtRenderRequest request,
+            Camera camera,
+            BurtFogSettings settings)
+        {
+            var effectiveStartDistance = settings.StartDistance;
+            if (request == null ||
+                camera == null ||
+                BurtAtmosphereUtility.IsMobileAtmospherePlatform ||
+                !BurtVolumetricFogUtility.ShouldUseVolumetricFog(request))
+            {
+                return effectiveStartDistance;
+            }
+
+            var volumetricFogSettings = BurtVolumetricFogUtility.ResolveSettings();
+            if (!volumetricFogSettings.Enabled)
+            {
+                return effectiveStartDistance;
+            }
+
+            // XRender's PC Height Fog starts no earlier than the boundary between
+            // the first and second VF lighting models (material slice 128).
+            // This keeps the analytic Height Fog out of VF's near-field feature
+            // region while preserving the intended far-field overlap.
+            var featureBoundaryDepth =
+                BurtVolumetricFogIntegratedUtility.ResolveFeatureBoundaryDepth(
+                    camera,
+                    volumetricFogSettings.VisibleDistance);
+            return Mathf.Max(effectiveStartDistance, featureBoundaryDepth);
         }
 
         public static void UploadTransparentGlobals(CommandBuffer cmd, BurtRenderRequest request)
@@ -268,13 +299,17 @@ namespace Burt.RenderPipeline
                 return;
             }
 
+            var effectiveStartDistance = ResolveEffectiveStartDistance(
+                request,
+                request != null ? request.Camera : null,
+                settings);
             cmd.SetGlobalVector(TransparentHeightFogParamsId, new Vector4(
                 settings.Height,
                 settings.Density,
                 settings.HeightFalloff,
                 settings.MaxOpacity));
             cmd.SetGlobalVector(TransparentHeightFogDistanceParamsId, new Vector4(
-                settings.StartDistance,
+                effectiveStartDistance,
                 settings.CutoffDistance,
                 0f,
                 0f));
@@ -331,6 +366,14 @@ namespace Burt.RenderPipeline
                 Mathf.Max(0f, outerSpaceLight.b) * horizontalLightScale,
                 0f));
             cmd.SetGlobalFloat(TransparentHeightFogMainLightOcclusionId, Mathf.Clamp01(atmosphereSettings.MainLightOcclusion));
+        }
+
+        public static void ResetTransparentGlobals(CommandBuffer cmd)
+        {
+            if (cmd != null)
+            {
+                cmd.SetGlobalFloat(TransparentHeightFogEnabledId, 0f);
+            }
         }
 
         public static string FormatDebugState(BurtRenderRequest request)

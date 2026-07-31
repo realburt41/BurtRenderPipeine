@@ -149,7 +149,7 @@ Shader "Hidden/BurtRP/DebugGBuffer"
 
                 if (debugMode == 9)
                 {
-                    return float4(saturate(gbufferData.Emission), 1.0f);
+                    return float4(max(gbufferData.Emission, float3(0.0f, 0.0f, 0.0f)), 1.0f);
                 }
 
                 if (debugMode == 10)

@@ -354,17 +354,12 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
     float3 DiffuseIndirect = BurtSampleDeferredGIDiffuseIndirect(ScreenUV);
     float3 BackfaceDiffuseIndirect = BurtSampleDeferredGIBackfaceDiffuseIndirect(ScreenUV);
     float3 RoughSpecularIndirect = BurtSampleDeferredGIRoughSpecularIndirect(ScreenUV);
-    float TranslucencyVolumeDiffuseConfidence = 0.0f;
-    float XGIScreenRatioMask = BurtResolveDeferredGIXGIScreenRatioMask(ScreenUV);
-    float3 TranslucencyVolumeDiffuseIndirect = BurtResolveDeferredGITranslucencyVolumeDiffuseLite(ScreenUV, GBufferData, TranslucencyVolumeDiffuseConfidence);
-    float3 TranslucencyVolumeIndirect = BurtResolveDeferredGITranslucencyVolumeLite(ScreenUV, GBufferData, ViewDirectionWS);
-    TranslucencyVolumeDiffuseIndirect *= XGIScreenRatioMask;
-    TranslucencyVolumeIndirect *= XGIScreenRatioMask;
-    TranslucencyVolumeDiffuseConfidence *= XGIScreenRatioMask;
+    // XRender parity: Translucency Volume is sampled only by MATERIAL_USE_TRANSPARENT.
+    // Deferred lighting shades opaque receivers, so mixing the froxel volume here creates
+    // low-frequency light patches on skin, hair and foliage.
     float3 MaterialShortRangeAO = BurtResolveDeferredGIMaterialShortRangeAO(GBufferData);
     float EnergyPreservation = saturate(Components.EnergyPreservation);
     float3 XGIDiffuseColor = BurtResolveDeferredGIXGIDiffuseColor(Components.DiffuseColor);
-    DiffuseIndirect = lerp(DiffuseIndirect, TranslucencyVolumeDiffuseIndirect, saturate(TranslucencyVolumeDiffuseConfidence));
     DiffuseIndirect *= BurtResolveDeferredGIXGICharacterIntensity(GBufferData);
     DiffuseIndirect *= MaterialShortRangeAO;
     DiffuseIndirect *= XGIDiffuseColor * EnergyPreservation;
@@ -373,11 +368,6 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
     BackfaceTransmissionIndirect *= BurtDeferredGIBackfaceTransmissionColor(GBufferData, Components);
     BackfaceTransmissionIndirect *= MaterialShortRangeAO;
     BackfaceTransmissionIndirect *= EnergyPreservation;
-    BackfaceDiffuseIndirect *= XGIDiffuseColor * MaterialShortRangeAO;
-    BackfaceDiffuseIndirect *= EnergyPreservation;
-    TranslucencyVolumeIndirect *= MaterialShortRangeAO;
-    TranslucencyVolumeIndirect *= EnergyPreservation;
-    DiffuseIndirect += BackfaceDiffuseIndirect * BackfaceDiffuseBlend;
 
     float3 SubsurfaceIndirectTransmission = max(Components.SubsurfaceIndirectTransmission, float3(0.0f, 0.0f, 0.0f));
     float3 SubsurfaceIndirectTransmissionForLighting = SubsurfaceIndirectTransmission;
@@ -388,7 +378,7 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
         SubsurfaceIndirectTransmissionForLighting = float3(0.0f, 0.0f, 0.0f);
     }
 #endif
-    Components.SubsurfaceIndirectTransmission = SubsurfaceIndirectTransmission + BackfaceTransmissionIndirect + TranslucencyVolumeIndirect;
+    Components.SubsurfaceIndirectTransmission = SubsurfaceIndirectTransmission + BackfaceTransmissionIndirect;
     Components.IndirectDiffuse += DiffuseIndirect;
     if (_BurtGIApplyIndirectParams.w >= 0.5f && any(RoughSpecularIndirect > 0.0001f))
     {
@@ -396,7 +386,7 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
         Components.IndirectSpecular = lerp(RoughSpecularIndirect, Components.IndirectSpecular, SmoothReflectionFade);
     }
     Components.SubsurfaceIndirect = Components.IndirectDiffuse;
-    Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular + SubsurfaceIndirectTransmissionForLighting + BackfaceTransmissionIndirect + TranslucencyVolumeIndirect;
+    Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular + SubsurfaceIndirectTransmissionForLighting + BackfaceTransmissionIndirect;
     Components.Lighting = Components.DirectLighting + Components.IndirectLighting;
 }
 #endif

@@ -23,6 +23,9 @@ struct BurtEasyFogVaryings
     float ViewDepth : TEXCOORD2;
     float CameraFade : TEXCOORD3;
     float3 PositionWS : TEXCOORD4;
+#if defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
+    float4 TransparentFog : TEXCOORD5;
+#endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -121,6 +124,13 @@ BurtEasyFogVaryings BurtEasyFogVert(BurtEasyFogAttributes input)
     output.ViewDepth = max(-mul(UNITY_MATRIX_V, positionWS).z, 0.0f);
     output.CameraFade = BurtEasyFogCameraFade();
     output.PositionWS = positionWS.xyz;
+#if defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
+    float2 transparentFogScreenUV = saturate(
+        output.ScreenPos.xy / max(output.ScreenPos.w, BURT_EPSILON));
+    output.TransparentFog = BurtEvaluateTransparentFog(
+        transparentFogScreenUV,
+        output.PositionWS);
+#endif
     return output;
 }
 
@@ -139,11 +149,22 @@ float4 BurtEasyFogFrag(BurtEasyFogVaryings input) : SV_Target
     clip(opacity - 0.0001f);
 
     float3 fogColor = _BaseColorTink.rgb * max(_EmissiveIntensity, 0.0f);
+#if !defined(BURT_IGNORE_FOG)
+#if defined(BURT_TRANSPARENT_VERTEX_FOG)
+    float3 premultipliedFogColor = BurtBlendPremultipliedTransparentFog(
+        fogColor * opacity,
+        opacity,
+        input.TransparentFog);
+#else
     float3 premultipliedFogColor = BurtApplyPremultipliedTransparentFog(
         fogColor * opacity,
         opacity,
         screenUV,
         input.PositionWS);
+#endif
+#else
+    float3 premultipliedFogColor = fogColor * opacity;
+#endif
     return float4(BurtApplyPreExposure(premultipliedFogColor), opacity);
 }
 

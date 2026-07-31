@@ -32,10 +32,13 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         sampler2D _BurtScreenSpaceSubsurfaceBaseColorTexture;
         sampler2D _BurtScreenSpaceSubsurfaceEmissionTexture;
         float4 _BurtSSSScreenSize;
+        float4 _BurtSSSFullScreenSize;
+        float _BurtSSSHalfResolution;
+        float4 _BurtSSSQualityParams;
         float4 _BurtSSSProjectionParams; // x=XRender SSS scale (m00 / kernel size * 0.5), y=projection m00, z=kernel size, w=unused
         float4 _BurtSSSFrameParams; // x=frame index, y=wrapped frame index, z=stable sampling, w=debug sampling.
         float _BurtSSSDebugMode;
-        float4 _BurtSSSHistoryDebugParams; // x=valid, y=age, z=max samples, w=variance target.
+        float4 _BurtSSSHistoryDebugParams; // x=valid, y=age, z=max samples, w=residual-variance target.
         float4 _BurtSSSParams; // x=radiusPx, y=depthSigma, z=normalSigma, w=minStrength
         float4 _BurtSSSParams2; // x=blend, y=distanceScale, z=boundaryBleed, w=tintStrength
         float4 _BurtSSSSurfaceAlbedo; // rgb=profile surface albedo
@@ -136,8 +139,49 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         int2 BurtSSSClampPixel(float2 uv)
         {
-            float2 pixel = floor(saturate(uv) * _BurtSSSScreenSize.xy - 0.5f);
+            float2 pixel = floor(saturate(uv) * _BurtSSSScreenSize.xy);
             return (int2)clamp(pixel, float2(0.0f, 0.0f), _BurtSSSScreenSize.xy - 1.0f);
+        }
+
+        float2 BurtSSSResolveFullUV(float2 workUV)
+        {
+            if (_BurtSSSHalfResolution <= 0.5f)
+            {
+                return saturate(workUV);
+            }
+
+            int2 workPixel = BurtSSSClampPixel(workUV);
+            int2 fullSize = max((int2)_BurtSSSFullScreenSize.xy, int2(1, 1));
+            int2 baseFullPixel = min(workPixel * 2, fullSize - 1);
+            int2 closestPixel = baseFullPixel;
+            float2 closestUV = ((float2)closestPixel + 0.5f) * _BurtSSSFullScreenSize.zw;
+            float closestDepth = BurtSampleDeferredRawDepth(closestUV);
+
+            [unroll]
+            for (int offsetIndex = 1; offsetIndex < 4; offsetIndex++)
+            {
+                int2 offset = int2(offsetIndex & 1, offsetIndex >> 1);
+                int2 candidatePixel = baseFullPixel + offset;
+                if (any(candidatePixel >= fullSize))
+                {
+                    continue;
+                }
+
+                float2 candidateUV = ((float2)candidatePixel + 0.5f) * _BurtSSSFullScreenSize.zw;
+                float candidateDepth = BurtSampleDeferredRawDepth(candidateUV);
+            #if defined(UNITY_REVERSED_Z)
+                bool candidateIsCloser = candidateDepth > closestDepth;
+            #else
+                bool candidateIsCloser = candidateDepth < closestDepth;
+            #endif
+                if (candidateIsCloser)
+                {
+                    closestDepth = candidateDepth;
+                    closestPixel = candidatePixel;
+                }
+            }
+
+            return ((float2)closestPixel + 0.5f) * _BurtSSSFullScreenSize.zw;
         }
 
         float BurtSSSLoadProfileIDAndType(float2 uv)
@@ -148,7 +192,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         float BurtSSSLoadProfileIDAndTypePoint(float2 uv)
         {
-            int2 pixel = (int2)floor(uv * _BurtSSSScreenSize.xy - 0.5f);
+            int2 pixel = (int2)floor(uv * _BurtSSSScreenSize.xy);
             int2 screenSize = max((int2)_BurtSSSScreenSize.xy, int2(1, 1));
             if (pixel.x < 0 || pixel.y < 0 || pixel.x >= screenSize.x || pixel.y >= screenSize.y)
             {
@@ -160,7 +204,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         float BurtSSSLoadMaterialEncodedProfileIDAndType(float2 uv)
         {
-            return tex2D(_BurtScreenSpaceSubsurfaceBaseColorTexture, uv).a;
+            return tex2D(_BurtSSSMaskTexture, uv).r;
         }
 
         bool BurtSSSUseProfileParamLut()
@@ -367,10 +411,11 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         BurtSSSSurface BurtSSSLoadSurface(float2 uv)
         {
-            BurtEncodedGBuffer encoded = BurtSampleEncodedGBuffer(uv);
-            BurtGBufferData data = BurtDecodeDeferredGBuffer(encoded, uv);
+            float2 surfaceUV = BurtSSSResolveFullUV(uv);
+            BurtEncodedGBuffer encoded = BurtSampleEncodedGBuffer(surfaceUV);
+            BurtGBufferData data = BurtDecodeDeferredGBuffer(encoded, surfaceUV);
             BurtSSSSurface surface;
-            surface.RawDepth = BurtSampleDeferredRawDepth(uv);
+            surface.RawDepth = BurtSampleDeferredRawDepth(surfaceUV);
             surface.LinearEyeDepth = BurtSSSIsSkyDepth(surface.RawDepth) ? 0.0f : LinearEyeDepth(surface.RawDepth);
             surface.Strength = BurtGetSubsurfaceStrength(data);
             surface.Thickness = BurtGetSubsurfaceThickness(data);
@@ -1012,23 +1057,8 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         float4 FragMask(Varyings input) : SV_Target
         {
-            float4 gbuffer2 = BURT_SAMPLE_TEXTURE2D_POINT_CLAMP(_BurtGBuffer2, input.ScreenUV);
-            float packedShadingModelID;
-            float strength = BurtDecodeMetallicAndShadingModelFromGBuffer(gbuffer2.r, packedShadingModelID);
-            float shadingModelID = BurtSampleDeferredShadingModelID(input.ScreenUV);
-            uint profileIDFromMaterial;
-            uint profileTypeFromMaterial;
-            BurtSSSDecodeProfileIDAndType(BurtSSSLoadMaterialEncodedProfileIDAndType(input.ScreenUV), profileIDFromMaterial, profileTypeFromMaterial);
-            float profileIndex = (float)clamp((int)profileIDFromMaterial, 0, 7);
-            BurtSSSProfile profile = BurtSSSLoadProfile(profileIndex);
-            uint effectiveProfileType = 0u;
-            effectiveProfileType |= (profileTypeFromMaterial & BURT_SSS_PROFILE_TYPE_SEPARABLE);
-            effectiveProfileType |= strength > profile.Params.w ? (profileTypeFromMaterial & BURT_SSS_PROFILE_TYPE_BURLEY) : 0u;
-            float valid = BurtIsSubsurfaceShadingModel(shadingModelID) &&
-                (effectiveProfileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u
-                    ? 1.0f
-                    : 0.0f;
-            return float4(valid, valid, valid, 1.0f);
+            float encodedProfileIDAndType = tex2D(_BurtScreenSpaceSubsurfaceBaseColorTexture, input.ScreenUV).a;
+            return float4(encodedProfileIDAndType, encodedProfileIDAndType, encodedProfileIDAndType, 1.0f);
         }
 
         float4 BurtSSSEvaluateCombineColor(float2 uv)
@@ -1036,16 +1066,31 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             float4 originalLit = tex2D(_BurtSSSSourceTexture, uv);
             float4 setup = BurtSSSLoadSetup(uv);
             float setupMask = setup.r;
+            uint fullProfileIndex;
+            uint fullProfileType;
+            BurtSSSDecodeProfileIDAndType(BurtSSSLoadMaterialEncodedProfileIDAndType(uv), fullProfileIndex, fullProfileType);
             uint profileIndex;
             uint profileType;
             BurtSSSDecodeProfileIDAndType(BurtSSSLoadProfileIDAndType(uv), profileIndex, profileType);
-            if (setupMask <= 0.0f || (profileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) == 0u)
+            BurtSSSProfile profile = BurtSSSLoadProfile((float)profileIndex);
+            bool validFullProfile = (fullProfileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u;
+            bool representativeMatches = fullProfileIndex == profileIndex && (fullProfileType & profileType) != 0u;
+            float currentRawDepth = BurtSampleDeferredRawDepth(uv);
+            float representativeRawDepth = BurtSampleDeferredRawDepth(BurtSSSResolveFullUV(uv));
+            float currentLinearDepth = BurtSSSIsSkyDepth(currentRawDepth) ? 0.0f : LinearEyeDepth(currentRawDepth);
+            float representativeLinearDepth = BurtSSSIsSkyDepth(representativeRawDepth) ? 0.0f : LinearEyeDepth(representativeRawDepth);
+            float upsampleDepthWindow = max(profile.Params.y * max(currentLinearDepth, 0.05f), 0.0001f);
+            bool representativeDepthMatches = abs(currentLinearDepth - representativeLinearDepth) <= upsampleDepthWindow;
+            if (setupMask <= 0.0f ||
+                !validFullProfile ||
+                !representativeMatches ||
+                !representativeDepthMatches ||
+                (profileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) == 0u)
             {
                 return float4(originalLit.rgb, 1.0f);
             }
 
             float4 subsurfaceColor = tex2D(_BurtSSSBlurTexture, uv);
-            BurtSSSProfile profile = BurtSSSLoadProfile((float)profileIndex);
             BurtSSSXRenderCombineData combine = BurtSSSEvaluateXRenderCombineData(uv, originalLit, subsurfaceColor, profile, profileType, setupMask);
             return float4(combine.FinalColor, 1.0f);
         }
@@ -1195,7 +1240,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
                 float4 history = tex2D(_BurtSSSHistoryDebugTexture, uv);
                 float historyValid = saturate(_BurtSSSHistoryDebugParams.x);
                 float historyAge = saturate(_BurtSSSHistoryDebugParams.y / 64.0f) * historyValid;
-                return float4(historyValid, historyAge, saturate(history.a / max(_BurtSSSHistoryDebugParams.w * 16.0f, 0.000001f)), 1.0f);
+                return float4(historyValid, historyAge, saturate(history.b / max(_BurtSSSHistoryDebugParams.w * 16.0f, 0.000001f)), 1.0f);
             }
 
             return float4(setup.r, setup.r, setup.r, 1.0f);
@@ -1309,10 +1354,18 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         Pass
         {
-            Name "Burt Screen Space Subsurface Mask"
+            Name "Burt Screen Space Subsurface PreSetup Profile Mask"
             Cull Off
             ZWrite Off
             ZTest Always
+
+            Stencil
+            {
+                Ref [_BurtDeferredStencilSubsurfaceRef]
+                ReadMask [_BurtDeferredStencilShadingModelMask]
+                Comp Equal
+                Pass Keep
+            }
 
             HLSLPROGRAM
             #pragma vertex Vert

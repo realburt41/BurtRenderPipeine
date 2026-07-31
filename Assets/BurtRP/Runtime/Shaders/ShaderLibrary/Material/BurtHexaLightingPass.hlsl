@@ -28,6 +28,9 @@ struct BurtHexaVaryings
     float2 UV0 : TEXCOORD3;
     float4 Color : TEXCOORD4;
     float4 ScreenPos : TEXCOORD5;
+#if defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
+    float4 TransparentFog : TEXCOORD6;
+#endif
     UNITY_VERTEX_OUTPUT_STEREO
 };
 
@@ -92,6 +95,13 @@ BurtHexaVaryings Vert(BurtHexaAttributes input)
     output.UV0 = input.UV0;
     output.Color = input.Color;
     output.ScreenPos = ComputeScreenPos(output.PositionCS);
+#if defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
+    float2 transparentFogScreenUV = saturate(
+        output.ScreenPos.xy / max(output.ScreenPos.w, BURT_EPSILON));
+    output.TransparentFog = BurtEvaluateTransparentFog(
+        transparentFogScreenUV,
+        output.PositionWS);
+#endif
     return output;
 }
 
@@ -113,11 +123,22 @@ float4 Frag(BurtHexaVaryings input) : SV_Target
     float3 lighting = BurtEvaluateHexaLighting(data, mainLight, input.PositionWS, input.NormalWS, input.TangentWS);
     float alpha = saturate(positiveAxesSample.a * _OverallAlpha);
     float2 screenUV = saturate(input.ScreenPos.xy / max(input.ScreenPos.w, BURT_EPSILON));
+#if !defined(BURT_IGNORE_FOG)
+#if defined(BURT_TRANSPARENT_VERTEX_FOG)
+    float3 premultipliedLighting = BurtBlendPremultipliedTransparentFog(
+        lighting * alpha,
+        alpha,
+        input.TransparentFog);
+#else
     float3 premultipliedLighting = BurtApplyPremultipliedTransparentFog(
         lighting * alpha,
         alpha,
         screenUV,
         input.PositionWS);
+#endif
+#else
+    float3 premultipliedLighting = lighting * alpha;
+#endif
     return float4(BurtApplyPreExposure(premultipliedLighting), alpha);
 }
 

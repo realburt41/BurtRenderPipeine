@@ -18,12 +18,18 @@ namespace Burt.RenderPipeline
         Black
     }
 
+    public enum BurtSkyLightCaptureUpdateMode
+    {
+        OnDemand,
+        EveryFrame
+    }
+
     [ExecuteAlways]
     [DisallowMultipleComponent]
     [AddComponentMenu("Rendering/Burt Sky Light")]
     public sealed class BurtSkyLight : MonoBehaviour
     {
-        [Tooltip("RenderSettings keeps the current ambient/reflection path, SpecifiedCubemap explicitly overrides sky diffuse/specular with the assigned cubemap, ConstantColor only drives diffuse fallback, CapturedScene is reserved.")]
+        [Tooltip("RenderSettings keeps the current ambient/reflection path, SpecifiedCubemap explicitly overrides sky diffuse/specular with the assigned cubemap, ConstantColor only drives diffuse fallback, and CapturedScene captures the current atmosphere from this component's world position like XRender's real-time SkyLight capture.")]
         public BurtSkyLightSourceType sourceType = BurtSkyLightSourceType.RenderSettings;
         [Tooltip("Global multiplier applied to both diffuse and specular SkyLight outputs.")]
         [Min(0f)] public float intensity = 1f;
@@ -49,16 +55,22 @@ namespace Burt.RenderPipeline
         public BurtSkyLightLowerHemisphereMode lowerHemisphereMode = BurtSkyLightLowerHemisphereMode.Preserve;
         [Tooltip("Color used by SolidColor lower hemisphere mode. Alpha blends between the original sky and this color.")]
         public Color lowerHemisphereColor = Color.black;
+        [Tooltip("Used only by CapturedScene. EveryFrame matches XRender Real Time Capture. OnDemand captures on enable/validation and when Request Atmosphere Capture is invoked.")]
+        public BurtSkyLightCaptureUpdateMode captureUpdateMode = BurtSkyLightCaptureUpdateMode.EveryFrame;
 
         private static readonly List<BurtSkyLight> ActiveSkyLights = new List<BurtSkyLight>();
+        [System.NonSerialized] private int captureRequestVersion;
 
         internal float EffectiveDiffuseIntensity => Mathf.Max(0f, intensity) * Mathf.Max(0f, diffuseIntensity);
         internal float EffectiveSpecularIntensity => Mathf.Max(0f, intensity) * Mathf.Max(0f, specularIntensity);
         internal Color SafeTint => new Color(Mathf.Max(0f, tint.r), Mathf.Max(0f, tint.g), Mathf.Max(0f, tint.b), 1f);
+        internal bool CaptureEveryFrame => captureUpdateMode == BurtSkyLightCaptureUpdateMode.EveryFrame;
+        internal int CaptureRequestVersion => captureRequestVersion;
 
         private void OnEnable()
         {
             Register(this);
+            RequestAtmosphereCapture();
         }
 
         private void OnDisable()
@@ -69,6 +81,24 @@ namespace Burt.RenderPipeline
         private void OnDestroy()
         {
             Unregister(this);
+        }
+
+        private void OnValidate()
+        {
+            RequestAtmosphereCapture();
+        }
+
+        [ContextMenu("Request Atmosphere Capture")]
+        public void RequestAtmosphereCapture()
+        {
+            unchecked
+            {
+                captureRequestVersion++;
+                if (captureRequestVersion == 0)
+                {
+                    captureRequestVersion = 1;
+                }
+            }
         }
 
         internal static bool TryGetActive(out BurtSkyLight skyLight)

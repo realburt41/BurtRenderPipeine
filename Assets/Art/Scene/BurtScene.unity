@@ -1302,7 +1302,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 694810778}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 1b4d505e2cf2493389eb61a0de536c91, type: 3}
   m_Name: 
@@ -1475,6 +1475,8 @@ MonoBehaviour:
   clearMode: 0
   clearColor: {r: 0.3679245, g: 0.3679245, b: 0.3679245, a: 1}
   antialiasingMode: 1
+  renderScale: 1
+  enableAsyncCompute: 1
   syncClearSettingsToUnityCamera: 1
 --- !u!114 &785301927
 MonoBehaviour:
@@ -2020,7 +2022,7 @@ Transform:
   m_GameObject: {fileID: 1167614073}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -6.823, y: 0.159, z: 0.496}
+  m_LocalPosition: {x: -6.823, y: 0.178, z: 0.496}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2068,6 +2070,7 @@ MonoBehaviour:
   constantColor: {r: 0, g: 0, b: 0, a: 1}
   lowerHemisphereMode: 0
   lowerHemisphereColor: {r: 0, g: 0, b: 0, a: 1}
+  captureUpdateMode: 1
 --- !u!4 &1241686899
 Transform:
   m_ObjectHideFlags: 0

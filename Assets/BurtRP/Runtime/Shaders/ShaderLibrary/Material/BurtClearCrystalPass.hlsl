@@ -42,6 +42,9 @@ struct BurtClearCrystalVaryings
     float3 NormalWS : TEXCOORD2;
     float4 TangentWS : TEXCOORD3;
     float2 UV0 : TEXCOORD4;
+#if defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
+    float4 TransparentFog : TEXCOORD5;
+#endif
 };
 
 struct BurtClearCrystalMaterialData
@@ -73,6 +76,13 @@ BurtClearCrystalVaryings VertClearCrystal(BurtClearCrystalAttributes input)
     output.PositionCS = UnityObjectToClipPos(input.PositionOS);
     output.ScreenPos = ComputeScreenPos(output.PositionCS);
     output.PositionWS = mul(unity_ObjectToWorld, input.PositionOS).xyz;
+#if defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
+    float2 transparentFogScreenUV = saturate(
+        output.ScreenPos.xy / max(output.ScreenPos.w, BURT_EPSILON));
+    output.TransparentFog = BurtEvaluateTransparentFog(
+        transparentFogScreenUV,
+        output.PositionWS);
+#endif
     output.NormalWS = BurtSafeNormalize(UnityObjectToWorldNormal(input.NormalOS));
     output.TangentWS = BurtObjectToWorldTangent(input.TangentOS);
     output.UV0 = input.UV0;
@@ -471,10 +481,16 @@ float4 FragClearCrystal(BurtClearCrystalVaryings input, fixed facing : VFACE) : 
     float3 finalColor = pbr.Lighting + materialData.EmissionColor + transmission;
     float outputAlpha = surfaceData.Alpha;
     BurtClearCrystalApplyRefraction(input, materialData, finalColor, outputAlpha);
+#if !defined(BURT_IGNORE_FOG)
+#if defined(BURT_TRANSPARENT_VERTEX_FOG)
+    finalColor = BurtBlendTransparentFog(finalColor, input.TransparentFog);
+#else
     finalColor = BurtApplyTransparentFog(
         finalColor,
         BurtClearCrystalScreenUV(input),
         input.PositionWS);
+#endif
+#endif
     return float4(BurtApplyPreExposure(finalColor), outputAlpha);
 }
 

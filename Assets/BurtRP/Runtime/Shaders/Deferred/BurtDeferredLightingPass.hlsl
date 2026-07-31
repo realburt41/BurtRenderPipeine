@@ -5,8 +5,9 @@
 #define BURT_USE_ADDITIONAL_LIGHT_BUFFER 1
 #define BURT_USE_TILED_LIGHTING 1
 
-// Normal deferred lighting must not compile shading-debug code. The dedicated
-// Hidden/BurtRP/DeferredLightingDebug* shaders define BURT_COMPILE_SHADING_DEBUG.
+// The production deferred shader compiles a single optional XRender-style
+// shading-debug variant. Dedicated probe/shadow diagnostics remain lightweight
+// standalone passes because they are not lighting-result selection.
 #ifndef BURT_COMPILE_SHADING_DEBUG
 #define BURT_COMPILE_SHADING_DEBUG 0
 #endif
@@ -27,51 +28,13 @@
 #define BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG 0
 #endif
 
-#if BURT_ENABLE_SHADING_DEBUG && defined(BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING)
-    #if defined(BURT_DEFERRED_LIGHTING_DEBUG_DETAIL)
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 1
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 1
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 0
-    #elif defined(BURT_DEFERRED_LIGHTING_DEBUG_ADDITIONAL)
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 1
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 0
-    #elif defined(BURT_DEFERRED_LIGHTING_DEBUG_INDIRECT)
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 1
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 0
-    #elif defined(BURT_DEFERRED_LIGHTING_DEBUG_FINAL)
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 1
-    #else
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_MAIN 1
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DETAIL 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_DIRECT 1
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_ADDITIONAL 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_INDIRECT 0
-        #define BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_FINAL 0
-    #endif
-#endif
-
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelMacros.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtDeferred.hlsl"
 #define BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS 1
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingResult.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
 
 Texture2D<float> _BurtScreenSpaceAmbientOcclusionTexture;
@@ -429,17 +392,12 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
     float3 DiffuseIndirect = BurtSampleDeferredGIDiffuseIndirect(ScreenUV);
     float3 BackfaceDiffuseIndirect = BurtSampleDeferredGIBackfaceDiffuseIndirect(ScreenUV);
     float3 RoughSpecularIndirect = BurtSampleDeferredGIRoughSpecularIndirect(ScreenUV);
-    float TranslucencyVolumeDiffuseConfidence = 0.0f;
-    float XGIScreenRatioMask = BurtResolveDeferredGIXGIScreenRatioMask(ScreenUV);
-    float3 TranslucencyVolumeDiffuseIndirect = BurtResolveDeferredGITranslucencyVolumeDiffuseLite(ScreenUV, GBufferData, TranslucencyVolumeDiffuseConfidence);
-    float3 TranslucencyVolumeIndirect = BurtResolveDeferredGITranslucencyVolumeLite(ScreenUV, GBufferData, ViewDirectionWS);
-    TranslucencyVolumeDiffuseIndirect *= XGIScreenRatioMask;
-    TranslucencyVolumeIndirect *= XGIScreenRatioMask;
-    TranslucencyVolumeDiffuseConfidence *= XGIScreenRatioMask;
+    // XRender parity: Translucency Volume is sampled only by MATERIAL_USE_TRANSPARENT.
+    // Deferred lighting shades opaque receivers, so mixing the froxel volume here creates
+    // low-frequency light patches on skin, hair and foliage.
     float3 MaterialShortRangeAO = BurtResolveDeferredGIMaterialShortRangeAO(GBufferData);
     float EnergyPreservation = saturate(Components.EnergyPreservation);
     float3 XGIDiffuseColor = BurtResolveDeferredGIXGIDiffuseColor(Components.DiffuseColor);
-    DiffuseIndirect = lerp(DiffuseIndirect, TranslucencyVolumeDiffuseIndirect, saturate(TranslucencyVolumeDiffuseConfidence));
     DiffuseIndirect *= BurtResolveDeferredGIXGICharacterIntensity(GBufferData);
     DiffuseIndirect *= MaterialShortRangeAO;
     DiffuseIndirect *= XGIDiffuseColor * EnergyPreservation;
@@ -448,11 +406,6 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
     BackfaceTransmissionIndirect *= BurtDeferredGIBackfaceTransmissionColor(GBufferData, Components);
     BackfaceTransmissionIndirect *= MaterialShortRangeAO;
     BackfaceTransmissionIndirect *= EnergyPreservation;
-    BackfaceDiffuseIndirect *= XGIDiffuseColor * MaterialShortRangeAO;
-    BackfaceDiffuseIndirect *= EnergyPreservation;
-    TranslucencyVolumeIndirect *= MaterialShortRangeAO;
-    TranslucencyVolumeIndirect *= EnergyPreservation;
-    DiffuseIndirect += BackfaceDiffuseIndirect * BackfaceDiffuseBlend;
 
     float3 SubsurfaceIndirectTransmission = max(Components.SubsurfaceIndirectTransmission, float3(0.0f, 0.0f, 0.0f));
     float3 SubsurfaceIndirectTransmissionForLighting = SubsurfaceIndirectTransmission;
@@ -463,7 +416,7 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
         SubsurfaceIndirectTransmissionForLighting = float3(0.0f, 0.0f, 0.0f);
     }
 #endif
-    Components.SubsurfaceIndirectTransmission = SubsurfaceIndirectTransmission + BackfaceTransmissionIndirect + TranslucencyVolumeIndirect;
+    Components.SubsurfaceIndirectTransmission = SubsurfaceIndirectTransmission + BackfaceTransmissionIndirect;
     Components.IndirectDiffuse += DiffuseIndirect;
     if (_BurtGIApplyIndirectParams.w >= 0.5f && any(RoughSpecularIndirect > 0.0001f))
     {
@@ -471,7 +424,7 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
         Components.IndirectSpecular = lerp(RoughSpecularIndirect, Components.IndirectSpecular, SmoothReflectionFade);
     }
     Components.SubsurfaceIndirect = Components.IndirectDiffuse;
-    Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular + SubsurfaceIndirectTransmissionForLighting + BackfaceTransmissionIndirect + TranslucencyVolumeIndirect;
+    Components.IndirectLighting = Components.IndirectDiffuse + Components.IndirectSpecular + SubsurfaceIndirectTransmissionForLighting + BackfaceTransmissionIndirect;
     Components.Lighting = Components.DirectLighting + Components.IndirectLighting;
 }
 
@@ -509,6 +462,25 @@ BurtPBRShadingComponents BurtEvaluateDeferredLightingShadingModelComponents(
     float3 ShadowPositionWS,
     float2 ScreenUV)
 {
+#if defined(BURT_DEFERRED_LIGHTING_EXCLUDE_ADDITIONAL)
+    // Base deferred stage mirrors XRender's DeferredLightingNoPunctual pass.
+    // Keep main-light and indirect evaluation here; punctual/additional lights
+    // are accumulated by BurtDeferredAdditionalLightingPass.
+    #if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
+    return BurtEvaluateHairShadingComponentsFromGBuffer(GBufferData, MainLight, ViewDirectionWS);
+    #elif defined(BURT_DEFERRED_SHADING_MODEL_FUR)
+    return BurtEvaluateFurShadingComponentsFromGBuffer(GBufferData, MainLight, ViewDirectionWS);
+    #else
+        #if defined(BURT_DEFERRED_SHADING_MODEL_DEFAULT_LIT) && BURT_ENABLE_EYE_SHADING
+    if (BurtIsActiveEyeShadingModel(GBufferData.ShadingModelID))
+    {
+        return BurtEvaluateEyeShadingComponentsFromGBuffer(GBufferData, MainLight, ViewDirectionWS);
+    }
+        #endif
+
+    return BurtEvaluatePBRShadingComponentsFromGBuffer(GBufferData, MainLight, ViewDirectionWS);
+    #endif
+#else
 #if defined(BURT_DEFERRED_SHADING_MODEL_HAIR)
     return BurtEvaluateHairShadingComponentsFromGBuffer(GBufferData, MainLight, ViewDirectionWS, PositionWS, ShadowPositionWS, ScreenUV);
 #elif defined(BURT_DEFERRED_SHADING_MODEL_FUR)
@@ -523,14 +495,11 @@ BurtPBRShadingComponents BurtEvaluateDeferredLightingShadingModelComponents(
 
     return BurtEvaluatePBRShadingComponentsFromGBuffer(GBufferData, MainLight, ViewDirectionWS, PositionWS, ShadowPositionWS, ScreenUV);
 #endif
+#endif
 }
 
 #if BURT_ENABLE_SHADING_DEBUG
 #include "Assets/BurtRP/Runtime/Shaders/Deferred/BurtDeferredLightingDebug.hlsl"
-#endif
-
-#ifndef BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_SHADED_COMPONENTS
-#define BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_SHADED_COMPONENTS 1
 #endif
 
 float4 Frag(Varyings input) : SV_Target
@@ -577,11 +546,11 @@ float4 Frag(Varyings input) : SV_Target
 #endif
 
     BurtPBRShadingComponents PBRComponents = (BurtPBRShadingComponents)0;
+    BurtLightingResult LightingResult = (BurtLightingResult)0;
     float3 FinalColor = float3(0.0f, 0.0f, 0.0f);
     float3 FinalPreExposedColor = float3(0.0f, 0.0f, 0.0f);
     float OutputAlpha = 1.0f;
 
-#if !BURT_ENABLE_SHADING_DEBUG || BURT_DEFERRED_LIGHTING_DEBUG_NEEDS_SHADED_COMPONENTS
     PBRComponents = BurtEvaluateDeferredLightingShadingModelComponents(
         ShadingGBufferData,
         MainLight,
@@ -591,25 +560,21 @@ float4 Frag(Varyings input) : SV_Target
         ScreenUV);
     BurtApplyDeferredGIIndirect(ScreenUV, ShadingGBufferData, ViewDirectionWS, PBRComponents);
 
-    FinalColor = PBRComponents.Lighting + GBufferData.Emission;
+    LightingResult = BurtCreateLightingResult(
+        PBRComponents,
+        GBufferData.Emission,
+        ShadingGBufferData.Occlusion);
+    FinalColor = LightingResult.FinalLighting;
     FinalPreExposedColor = BurtApplyPreExposure(FinalColor);
     OutputAlpha = BurtEvaluateDeferredOutputAlpha(PBRComponents);
-#endif
 
 #if BURT_ENABLE_SHADING_DEBUG
     return BurtEvaluateDeferredLightingDebugOutput(
         GBufferData,
-        ShadingGBufferData,
         PBRComponents,
-        FinalColor,
+        LightingResult,
         FinalPreExposedColor,
-        OutputAlpha,
-        ViewDirectionWS,
-        PositionWS,
-        ShadowPositionWS,
-        ShadowNormalWS,
-        PerObjectShadowObjectIndex,
-        ScreenUV);
+        OutputAlpha);
 #endif
 
     return float4(FinalPreExposedColor, OutputAlpha);

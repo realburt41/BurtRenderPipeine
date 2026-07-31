@@ -790,6 +790,7 @@ float3 BurtEvaluateGIProbeVolumeIrradiance(float3 PositionWS, float3 NormalWS, f
     return BurtTrySampleGIProbeVolumeIrradiance(PositionWS, NormalWS, ViewDirectionWS, Irradiance) ? Irradiance : 0.0f;
 }
 
+#if !defined(BURT_GI_PROBE_VOLUME_DEBUG_ONLY)
 bool BurtTryEvaluateGIProbeVolumeIndirectDiffuse(
     BurtPBRMaterialData MaterialData,
     float3 PositionWS,
@@ -808,5 +809,6 @@ bool BurtTryEvaluateGIProbeVolumeIndirectDiffuse(
     Diffuse = MaterialData.DiffuseColor * Irradiance * BurtGTAOMultiBounce(MaterialData.Occlusion, MaterialData.BaseColor) * saturate(EnergyPreservation);
     return true;
 }
+#endif
 
 #endif

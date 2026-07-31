@@ -8,6 +8,7 @@
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/BurtAtmosphereHorizontalScattering.hlsl"
 
 RWTexture3D<float4> _BurtVolumetricFogIntegratedOutput;
 RWTexture3D<float4> _BurtVolumetricFogMaterialOutput;
@@ -21,7 +22,6 @@ Texture2D<float> _BurtVolumetricFogCameraDepthTexture;
 RWTexture2D<float> _BurtVolumetricFogConservativeDepthOutput;
 Texture2D<float> _BurtVolumetricFogConservativeDepthTexture;
 Texture2D<float> _BurtVolumetricFogPreviousConservativeDepthTexture;
-Texture2D<float4> _BurtVolumetricFogHorizontalScatteringLut;
 Texture3D<float4> _BurtVolumetricFogTranslucencyVolume0;
 Texture3D<float4> _BurtVolumetricFogTranslucencyVolume1;
 
@@ -60,7 +60,6 @@ float4 _BurtVolumetricFogIntegratedHorizontalLightColor;
 float4 _BurtVolumetricFogIntegratedHorizontalRayleighTintScale;
 float4 _BurtVolumetricFogIntegratedHorizontalMieTintScale;
 float4 _BurtVolumetricFogIntegratedHorizontalMultipleTintScale;
-float4 _BurtVolumetricFogIntegratedSkyLuminanceFactor;
 float4 _BurtVolumetricFogTranslucencyGIParams; // x=use current filtered translucency GI
 float4 _BurtGITranslucencyVolumeGridSize; // xyz=grid size, w=material intensity scale
 float4 _BurtGITranslucencyVolumeGridZParams; // x=log scale, y=log bias, z=slice scale
@@ -466,13 +465,7 @@ void InjectLocalVolume(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 float3 BurtVFSampleHorizontalScattering(float component)
 {
-    float3 scattering = _BurtVolumetricFogHorizontalScatteringLut.SampleLevel(
-        sampler_LinearClamp,
-        float2((component + 0.5f) / 3.0f, 0.5f),
-        0.0f).rgb;
-    return component < 1.5f
-        ? scattering * max(_BurtVolumetricFogIntegratedSkyLuminanceFactor.rgb, 0.0f)
-        : scattering;
+    return BurtAtmosphereLoadHorizontalScattering(component);
 }
 
 void BurtVFEvaluateHorizontalLightingTerms(

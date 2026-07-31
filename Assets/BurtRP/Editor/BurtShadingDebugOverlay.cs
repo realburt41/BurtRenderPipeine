@@ -293,6 +293,14 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "BurtGI Overlay";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationComposite:
                     return "BurtGI Composite";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationCombinedIndirect:
+                    return "BurtGI Only (All Channels)";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiffuseIndirect:
+                    return "BurtGI Only - Diffuse";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationBackfaceDiffuseIndirect:
+                    return "BurtGI Only - Backface Diffuse";
+                case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRoughSpecularIndirect:
+                    return "BurtGI Only - Rough Specular";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalConfidence:
                     return "BurtGI Temporal Confidence";
                 case BurtShadingDebugMode.ScreenSpaceGlobalIlluminationTemporalRejection:
@@ -827,6 +835,10 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
 
         public static readonly BurtShadingDebugGroup ScreenSpaceGlobalIllumination = new BurtShadingDebugGroup("Screen Space Global Illumination", "BurtGI", new[]
         {
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationCombinedIndirect,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationDiffuseIndirect,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationBackfaceDiffuseIndirect,
+            BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRoughSpecularIndirect,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationRaw,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationFinal,
             BurtShadingDebugMode.ScreenSpaceGlobalIlluminationHitRatio,
@@ -1596,10 +1608,15 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             EditorGUILayout.LabelField("Atmosphere State", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("Enabled", snapshot.Enabled.ToString());
             EditorGUILayout.LabelField("Scattering", "Rayleigh " + Format(snapshot.RayleighIntensity) + "   Mie " + Format(snapshot.MieIntensity) + "   g " + Format(snapshot.MieAnisotropy));
+            EditorGUILayout.LabelField("Effective Rayleigh km^-1", FormatColor(snapshot.EffectiveRayleighScatteringCoefficient));
+            EditorGUILayout.LabelField("Effective Mie Extinction km^-1", FormatColor(snapshot.EffectiveMieExtinctionCoefficient));
+            EditorGUILayout.LabelField("Effective Ozone km^-1", FormatColor(snapshot.EffectiveOzoneAbsorptionCoefficient));
+            EditorGUILayout.LabelField("Density Exp Scale km^-1", "Rayleigh " + Format(snapshot.EffectiveRayleighDensityExpScale) + "   Mie " + Format(snapshot.EffectiveMieDensityExpScale));
+            EditorGUILayout.LabelField("Ozone Piecewise Profile", FormatVector(snapshot.EffectiveOzoneDensityProfile));
             EditorGUILayout.LabelField("Scale Height", "Rayleigh " + Format(snapshot.RayleighScaleHeight) + "km   Mie " + Format(snapshot.MieScaleHeight) + "km");
             EditorGUILayout.LabelField("Planet", "Radius " + Format(snapshot.PlanetRadius) + "km   Atmosphere " + Format(snapshot.AtmosphereHeight) + "km");
             EditorGUILayout.LabelField("Sun", snapshot.SunSource + "   Intensity " + Format(snapshot.SunIntensity) + "   Clamp " + Format(snapshot.TonemapSafeSunIntensity));
-            EditorGUILayout.LabelField("Sun Disk", "Angular Diameter " + Format(snapshot.SunDiskSize) + " deg   Intensity " + Format(snapshot.SunDiskIntensity));
+            EditorGUILayout.LabelField("Sun Disk", "Angular Diameter " + Format(snapshot.SunDiskSize) + " deg   Legacy Fallback Intensity " + Format(snapshot.SunDiskIntensity));
             EditorGUILayout.LabelField("Sun Halo", "Size " + Format(snapshot.SunHaloSize) + "   Intensity " + Format(snapshot.SunHaloIntensity));
             EditorGUILayout.LabelField("Horizon", "Intensity " + Format(snapshot.HorizonIntensity) + "   Falloff " + Format(snapshot.HorizonFalloff) + "   Sunset " + Format(snapshot.HorizonSunsetInfluence));
             EditorGUILayout.LabelField("Horizon Color", FormatColor(snapshot.HorizonColor));
@@ -1609,7 +1626,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             EditorGUILayout.LabelField("Exposure EV", Format(snapshot.ExposureCompensation));
             EditorGUILayout.LabelField("Aerial", snapshot.AerialPerspectiveEnabled + "   " + snapshot.AerialPerspectivePlacement + "   " + snapshot.FogInteraction);
             EditorGUILayout.LabelField("Aerial Fallback Shape", "Intensity " + Format(snapshot.AerialPerspectiveIntensity) + "   Distance " + Format(snapshot.AerialPerspectiveDistance));
-            EditorGUILayout.LabelField("Aerial Fade", Format(snapshot.AerialPerspectiveNearFadeStart) + " / " + Format(snapshot.AerialPerspectiveNearFadeEnd) + "   Max " + Format(snapshot.AerialPerspectiveMaxOpacity));
+            EditorGUILayout.LabelField("Aerial Start", Format(snapshot.AerialPerspectiveStartDepth) + " -> " + Format(snapshot.AerialPerspectiveNearFadeEnd) + "   Max " + Format(snapshot.AerialPerspectiveMaxOpacity));
             EditorGUILayout.LabelField("Formula", snapshot.SkyFormula + " / " + snapshot.AerialFormula);
 
             if (GUILayout.Button("Copy Atmosphere Readout"))
@@ -1624,15 +1641,17 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 "Burt Atmosphere Readout\n" +
                 "Enabled: " + snapshot.Enabled + "\n" +
                 "Scattering: rayleigh=" + Format(snapshot.RayleighIntensity) + " mie=" + Format(snapshot.MieIntensity) + " g=" + Format(snapshot.MieAnisotropy) + "\n" +
+                "EffectiveKmInv: rayleigh=" + FormatColor(snapshot.EffectiveRayleighScatteringCoefficient) + " mieScatter=" + FormatColor(snapshot.EffectiveMieScatteringCoefficient) + " mieAbsorb=" + FormatColor(snapshot.EffectiveMieAbsorptionCoefficient) + " mieExtinction=" + FormatColor(snapshot.EffectiveMieExtinctionCoefficient) + " ozone=" + FormatColor(snapshot.EffectiveOzoneAbsorptionCoefficient) + "\n" +
+                "DensityProfile: rayleighExpScale=" + Format(snapshot.EffectiveRayleighDensityExpScale) + " mieExpScale=" + Format(snapshot.EffectiveMieDensityExpScale) + " ozoneLinearConstant01=" + FormatVector(snapshot.EffectiveOzoneDensityProfile) + "\n" +
                 "ScaleHeightKm: rayleigh=" + Format(snapshot.RayleighScaleHeight) + " mie=" + Format(snapshot.MieScaleHeight) + "\n" +
                 "PlanetKm: radius=" + Format(snapshot.PlanetRadius) + " atmosphereHeight=" + Format(snapshot.AtmosphereHeight) + "\n" +
                 "Sun: source=" + snapshot.SunSource + " intensity=" + Format(snapshot.SunIntensity) + " clamp=" + Format(snapshot.TonemapSafeSunIntensity) + " customDirection=" + FormatVector(snapshot.CustomSunDirection) + "\n" +
-                "SunDisk: angularDiameterDeg=" + Format(snapshot.SunDiskSize) + " intensity=" + Format(snapshot.SunDiskIntensity) + "\n" +
+                "SunDisk: angularDiameterDeg=" + Format(snapshot.SunDiskSize) + " legacyFallbackIntensity=" + Format(snapshot.SunDiskIntensity) + "\n" +
                 "SunHalo: size=" + Format(snapshot.SunHaloSize) + " intensity=" + Format(snapshot.SunHaloIntensity) + "\n" +
                 "Art: horizonIntensity=" + Format(snapshot.HorizonIntensity) + " horizonFalloff=" + Format(snapshot.HorizonFalloff) + " horizonSunsetInfluence=" + Format(snapshot.HorizonSunsetInfluence) + " ground=" + Format(snapshot.GroundContribution) + " groundBlend=" + Format(snapshot.GroundBlendStart) + "/" + Format(snapshot.GroundBlendEnd) + " exposureEV=" + Format(snapshot.ExposureCompensation) + "\n" +
                 "Tint: sky=" + FormatColor(snapshot.SkyTint) + " horizon=" + FormatColor(snapshot.HorizonColor) + " sunset=" + FormatColor(snapshot.HorizonSunsetColor) + " ground=" + FormatColor(snapshot.GroundColor) + " aerial=" + FormatColor(snapshot.AerialPerspectiveTint) + "\n" +
                 "Aerial: enabled=" + snapshot.AerialPerspectiveEnabled + " fallbackIntensity=" + Format(snapshot.AerialPerspectiveIntensity) + " fallbackDistance=" + Format(snapshot.AerialPerspectiveDistance) + " heightFalloff=" + Format(snapshot.AerialPerspectiveHeightFalloff) + "\n" +
-                "AerialFade: near=" + Format(snapshot.AerialPerspectiveNearFadeStart) + "/" + Format(snapshot.AerialPerspectiveNearFadeEnd) + " maxOpacity=" + Format(snapshot.AerialPerspectiveMaxOpacity) + "\n" +
+                "AerialStart: depth=" + Format(snapshot.AerialPerspectiveStartDepth) + " smoothEnd=" + Format(snapshot.AerialPerspectiveNearFadeEnd) + " maxOpacity=" + Format(snapshot.AerialPerspectiveMaxOpacity) + "\n" +
                 "AerialRouting: placement=" + snapshot.AerialPerspectivePlacement + " fogInteraction=" + snapshot.FogInteraction + "\n" +
                 "Formula: sky=" + snapshot.SkyFormula + " aerial=" + snapshot.AerialFormula;
         }
@@ -1774,6 +1793,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
         private static string FormatVector(Vector3 value)
         {
             return "(" + Format(value.x) + ", " + Format(value.y) + ", " + Format(value.z) + ")";
+        }
+
+        private static string FormatVector(Vector4 value)
+        {
+            return "(" + Format(value.x) + ", " + Format(value.y) + ", " + Format(value.z) + ", " + Format(value.w) + ")";
         }
 
         private static string FormatFrameAge(int age)

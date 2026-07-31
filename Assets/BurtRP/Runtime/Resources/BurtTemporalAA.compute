@@ -29,6 +29,7 @@ Texture2D<float> _BurtTAAHistoryRejectionTexture;
 Texture2D<float> _BurtTAADilatedHistoryRejectionTexture;
 Texture2D<uint> _BurtTAAPrevUseCountUintTexture;
 Texture2D<float> _BurtTAAStencilMaskTexture;
+Texture2D<float4> _BurtTAADilateMaskTexture;
 Texture2D<float4> _BurtTAAUHistoryGuideTexture;
 Texture2D<float4> _BurtTAAUReprojectedGuideTexture;
 Texture2D<float4> _BurtTAAUShadingRejectionTexture;
@@ -37,6 +38,7 @@ Texture2D<float4> _BurtTAAUUpdatedHistoryTexture;
 RWTexture2D<float4> _BurtTAAResolveTexture;
 RWTexture2D<float4> _BurtTemporalAAOutputTexture;
 RWTexture2D<float2> _BurtTAADilatedVelocityTexture;
+RWTexture2D<float4> _BurtTAADilateMaskOutputTexture;
 RWTexture2D<float> _BurtTAAClosestDepthOutputTexture;
 RWTexture2D<uint> _BurtTAAPrevUseCountOutputTexture;
 RWTexture2D<float> _BurtTAAParallaxRejectionOutputTexture;
@@ -122,6 +124,24 @@ float3 BurtTaaFromWorkingPerceptualSpace(float3 color)
 float BurtTaaTemporalContrast(float filteredCurrentLuma, float filteredHistoryLuma)
 {
     return saturate(abs(filteredCurrentLuma - filteredHistoryLuma) / max(max(filteredCurrentLuma, filteredHistoryLuma), 0.2));
+}
+
+float BurtTaaShadingRejection(float3 currentWorking, float3 historyWorking)
+{
+    float3 colorDelta = abs(currentWorking - historyWorking);
+    float lumaScale = max(max(abs(currentWorking.x), abs(historyWorking.x)), 0.04);
+    float relativeLumaDelta = colorDelta.x / lumaScale;
+    float relativeChromaDelta = length(colorDelta.yz) / max(lumaScale, 0.1);
+    float vectorDelta = length(colorDelta) /
+        max(length(currentWorking) + length(historyWorking), 0.15);
+
+    // Keep small exposure/noise changes stable, but make genuine shading or
+    // material changes converge to a full history reset instead of retaining
+    // most of the old color for several frames.
+    float lumaRejection = smoothstep(0.04, 0.28, relativeLumaDelta);
+    float chromaRejection = smoothstep(0.05, 0.30, relativeChromaDelta);
+    float vectorRejection = smoothstep(0.08, 0.35, vectorDelta);
+    return saturate(max(vectorRejection, max(lumaRejection, chromaRejection)));
 }
 
 float BurtTaaAntiFlickerStandardDeviationBoost(float temporalContrast, float velocityPixelLength)
@@ -475,6 +495,13 @@ void DilateVelocityAACS(uint3 id : SV_DispatchThreadID)
     BurtTaaSelectClosestDepthTap(pixel, int2(0, 1), centerDepth, centerDeviceZError, closestDepth, closestOffset);
     BurtTaaSelectClosestDepthTap(pixel, int2(-1, 1), centerDepth, centerDeviceZError, closestDepth, closestOffset);
 
+    float centerStaticAvailable = 0.0;
+    float2 centerVelocity = BurtTaaComputeStaticVelocity(uv, centerDepth, centerStaticAvailable);
+    float4 centerObjectVelocity = _BurtTAARawVelocityTexture.Load(int3(pixel, 0));
+    float centerStencilObjectMotion = (BurtTaaLoadStencilMask(uv) & BURT_DEFERRED_STENCIL_OBJECT_MOTION_BIT) != 0u ? 1.0 : 0.0;
+    float centerObjectVelocityValid = centerStencilObjectMotion * step(0.75, centerObjectVelocity.w) * centerObjectVelocity.z;
+    centerVelocity = lerp(centerVelocity, centerObjectVelocity.xy, centerObjectVelocityValid);
+
     float staticAvailable = 0.0;
     float2 finalVelocity = BurtTaaComputeStaticVelocity(uv, closestDepth, staticAvailable);
     int2 closestPixel = clamp(pixel + closestOffset, int2(0, 0), textureSize - 1);
@@ -487,7 +514,20 @@ void DilateVelocityAACS(uint3 id : SV_DispatchThreadID)
     float2 historyUv = uv - finalVelocity;
 
     BurtTaaScatterPrevUseCount(historyUv);
+    float2 velocityDeltaPixels = abs((finalVelocity - centerVelocity) * _BurtTAATexelSize.zw);
+    float reprojectionEdgeConfidence = saturate(1.1 - dot(velocityDeltaPixels, float2(1.1, 1.1)));
+    float hasReprojectionOffset = any(closestOffset != int2(0, 0)) ? 1.0 : 0.0;
+    float reprojectionConfidence = hasReprojectionOffset > 0.0 ? reprojectionEdgeConfidence : 1.0;
+    float inBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
+    float offscreenBit = inBounds > 0.5 ? 0.0 : (1.0 / 255.0);
     _BurtTAADilatedVelocityTexture[pixel] = finalVelocity;
+    // Decimate mask: R=state bits, G=reprojection confidence, B=parallax validity, A=closest-depth offset.
+    // G follows XRender semantics: 1 is stable and 0 is a velocity/depth-edge reprojection.
+    _BurtTAADilateMaskOutputTexture[pixel] = float4(
+        offscreenBit,
+        reprojectionConfidence,
+        0.0,
+        hasReprojectionOffset);
     _BurtTAAClosestDepthOutputTexture[pixel] = closestDepth;
 }
 
@@ -507,8 +547,6 @@ void DecimateHistoryAACS(uint3 id : SV_DispatchThreadID)
     float inBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
     float currentRawDepth = _BurtTAAClosestDepthTexture.Load(int3(pixel, 0));
     float currentLinearDepth = max(BurtTaaLinearEyeDepth(currentRawDepth), 1e-4);
-    float previousRawDepth = BurtTaaSampleHistoryDepthBilinear(historyUv);
-    float previousLinearDepth = max(BurtTaaLinearEyeDepth(previousRawDepth), 1e-4);
     float2 samplePosition = historyUv * (float2)textureSize - 0.5;
     int2 basePixel = int2(floor(samplePosition));
     float2 blend = saturate(samplePosition - basePixel);
@@ -527,14 +565,31 @@ void DecimateHistoryAACS(uint3 id : SV_DispatchThreadID)
             float weight = wx * wy * inBounds * (validPixel ? 1.0 : 0.0);
             int2 safePixel = clamp(usePixel, int2(0, 0), textureSize - 1);
             uint previousUseCount = _BurtTAAPrevUseCountUintTexture.Load(int3(safePixel, 0));
-            float historyGhostingRejection = saturate(1.0 - abs(previousUseCount * BURT_TAA_INV_USE_COUNT_QUANTIZATION - 1.0));
+            float historyGhostingRejection = saturate(1.0 - 2.0 * abs(previousUseCount * BURT_TAA_INV_USE_COUNT_QUANTIZATION - 1.0));
+            float previousRawDepth = BurtTaaLoadHistoryDepth(safePixel);
+            float previousLinearDepth = max(BurtTaaLinearEyeDepth(previousRawDepth), 1e-4);
             float depthDelta = abs(currentLinearDepth - previousLinearDepth);
-            float depthRejection = saturate(2.0 - 4.0 * depthDelta / previousLinearDepth);
-            finalRejection += max(historyGhostingRejection, depthRejection) * weight;
+            float depthRejection = saturate(2.0 - 12.0 * depthDelta / previousLinearDepth);
+            // Both values are history-validity signals despite their legacy
+            // "Rejection" names. Requiring both prevents a valid use count from
+            // cancelling a depth disocclusion (and vice versa).
+#if defined(SHADER_API_METAL)
+            // The uint scatter is disabled on Metal, so depth is the only
+            // reliable validity source on that backend.
+            float tapHistoryValidity = depthRejection;
+#else
+            float tapHistoryValidity = min(historyGhostingRejection, depthRejection);
+#endif
+            finalRejection += tapHistoryValidity * weight;
         }
     }
 
-    _BurtTAAParallaxRejectionOutputTexture[pixel] = saturate(finalRejection);
+    finalRejection = saturate(finalRejection);
+    float4 decimateMask = _BurtTAADilateMaskOutputTexture[pixel];
+    decimateMask.r = inBounds > 0.5 ? 0.0 : (1.0 / 255.0);
+    decimateMask.b = finalRejection;
+    _BurtTAADilateMaskOutputTexture[pixel] = decimateMask;
+    _BurtTAAParallaxRejectionOutputTexture[pixel] = finalRejection;
 }
 
 [numthreads(8, 8, 1)]
@@ -553,14 +608,14 @@ void BuildHistoryRejectionAACS(uint3 id : SV_DispatchThreadID)
     float inBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
     float3 currentWorking = BurtTaaToWorkingPerceptualSpace(BurtTaaLoadCurrentRaw(pixel).rgb);
     float3 historyWorking = BurtTaaToWorkingPerceptualSpace(BurtTaaSampleHistoryCatmullRom(saturate(historyUv)));
-    float colorDelta = length(currentWorking - historyWorking);
-    float colorEnergy = max(length(currentWorking) + length(historyWorking), 0.15);
-    float shadingRejection = saturate(colorDelta / colorEnergy);
+    float shadingRejection = BurtTaaShadingRejection(currentWorking, historyWorking);
     float parallaxRejection = 1.0 - saturate(_BurtTAAParallaxRejectionTexture.Load(int3(pixel, 0)));
     uint stencil = BurtTaaLoadStencilMask(uv);
     float stencilResponsive = (stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0;
     float metadataResponsive = saturate(_BurtTAAMetadataTexture.Load(int3(pixel, 0)).g);
-    float responsiveRejection = max(stencilResponsive, metadataResponsive) * 0.75;
+    // An explicit material responsive flag is authoritative and resets
+    // history. Automatically inferred motion/edge responsiveness stays softer.
+    float responsiveRejection = max(stencilResponsive, metadataResponsive * 0.75);
     float outOfBoundsRejection = 1.0 - inBounds;
     _BurtTAAHistoryRejectionOutputTexture[pixel] = saturate(max(max(parallaxRejection, shadingRejection), max(responsiveRejection, outOfBoundsRejection)));
 }
@@ -576,9 +631,6 @@ void DilateHistoryRejectionAACS(uint3 id : SV_DispatchThreadID)
     }
 
     float rejection = _BurtTAAHistoryRejectionTexture.Load(int3(pixel, 0));
-    float responsive = saturate(_BurtTAAMetadataTexture.Load(int3(pixel, 0)).g);
-    float2 uv = (float2(pixel) + 0.5) * _BurtTAATexelSize.xy;
-    responsive = max(responsive, (BurtTaaLoadStencilMask(uv) & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0);
 
     [unroll]
     for (int y = -1; y <= 1; y++)
@@ -587,14 +639,7 @@ void DilateHistoryRejectionAACS(uint3 id : SV_DispatchThreadID)
         for (int x = -1; x <= 1; x++)
         {
             int2 samplePixel = BurtTaaClampPixel(pixel + int2(x, y));
-            float2 sampleUv = (float2(samplePixel) + 0.5) * _BurtTAATexelSize.xy;
-            float sampleResponsive = max(
-                saturate(_BurtTAAMetadataTexture.Load(int3(samplePixel, 0)).g),
-                (BurtTaaLoadStencilMask(sampleUv) & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0);
-            if (max(responsive, sampleResponsive) > 0.0)
-            {
-                rejection = max(rejection, _BurtTAAHistoryRejectionTexture.Load(int3(samplePixel, 0)));
-            }
+            rejection = max(rejection, _BurtTAAHistoryRejectionTexture.Load(int3(samplePixel, 0)));
         }
     }
 
@@ -659,7 +704,9 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
     float3 standardDeviation = sqrt(abs(moment2 - moment1 * moment1));
     float temporalContrast = BurtTaaTemporalContrast(currentFilteredWorking.x, historyWorking.x);
     float velocityPixelLength = length(velocityData * _BurtTAATexelSize.zw);
-    float standardDeviationFactor = 1.5 + BurtTaaAntiFlickerStandardDeviationBoost(temporalContrast, velocityPixelLength);
+    float antiFlickerHistoryGate = smoothstep(0.85, 1.0, finalRejection) * (1.0 - responsiveMask);
+    float standardDeviationFactor = 1.5 +
+        BurtTaaAntiFlickerStandardDeviationBoost(temporalContrast, velocityPixelLength) * antiFlickerHistoryGate;
     float3 clampMin = moment1 - standardDeviation * standardDeviationFactor;
     float3 clampMax = moment1 + standardDeviation * standardDeviationFactor;
     float3 boxCenter = 0.5 * (clampMax + clampMin);
@@ -674,7 +721,9 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
     float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 1e-4)));
     float xrenderBaseBlend = max(0.05, lumaContrast);
     float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
-    currentBlend = lerp(currentBlend, 0.25, responsiveMask * finalHistoryAvailability);
+    // Responsive AA may only increase the current-frame weight. It must never
+    // reintroduce history after depth, coverage, or shading rejected it.
+    currentBlend = max(currentBlend, 0.25 * responsiveMask * finalHistoryAvailability);
     currentBlend = saturate(currentBlend);
 
     float3 resolvedWorking = lerp(clippedHistoryWorking, currentFilteredWorking, currentBlend);
@@ -761,7 +810,7 @@ void ResolveTemporalAAUpscaleAACS(uint3 id : SV_DispatchThreadID)
     float3 history = BurtTaaSampleHistoryCatmullRom(saturate(historyUv));
     float motionPixels = length(velocity * _BurtTAAHistoryTexelSize.zw);
     float currentBlend = lerp(1.0, 0.08, finalRejection);
-    currentBlend = lerp(currentBlend, 0.3, responsive * historyAvailable);
+    currentBlend = max(currentBlend, 0.3 * responsive * historyAvailable);
     currentBlend = max(currentBlend, saturate(motionPixels * 0.04));
     float3 resolved = lerp(history, current, saturate(currentBlend));
     _BurtTemporalAAOutputTexture[pixel] = float4(BurtTaaSanitizeRawColor(resolved, current), saturate(rawCurrent.a));
@@ -769,7 +818,7 @@ void ResolveTemporalAAUpscaleAACS(uint3 id : SV_DispatchThreadID)
 
 float4 BurtTaaSampleHistoryGuideLinear(float2 uv)
 {
-    int2 textureSize = BurtTaaTextureSize();
+    int2 textureSize = max(int2(_BurtTAAUGuideTexelSize.zw), int2(1, 1));
     float2 samplePosition = saturate(uv) * (float2)textureSize - 0.5;
     int2 basePixel = int2(floor(samplePosition));
     float2 blend = saturate(samplePosition - basePixel);
@@ -788,6 +837,37 @@ float4 BurtTaaSampleHistoryGuideLinear(float2 uv)
         }
     }
 
+    return result;
+}
+
+float4 BurtTaaSampleHistoryGuideCatmullRom(float2 uv)
+{
+    int2 textureSize = max(int2(_BurtTAAUGuideTexelSize.zw), int2(1, 1));
+    float2 samplePosition = saturate(uv) * (float2)textureSize;
+    float2 texPos1 = floor(samplePosition - 0.5) + 0.5;
+    int2 basePixel = int2(texPos1 - 0.5);
+    float2 f = samplePosition - texPos1;
+    float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    float2 w3 = f * f * (-0.5 + 0.5 * f);
+    float4 result = 0.0;
+
+    [unroll]
+    for (int y = 0; y < 4; y++)
+    {
+        float weightY = y == 0 ? w0.y : (y == 1 ? w1.y : (y == 2 ? w2.y : w3.y));
+        [unroll]
+        for (int x = 0; x < 4; x++)
+        {
+            float weightX = x == 0 ? w0.x : (x == 1 ? w1.x : (x == 2 ? w2.x : w3.x));
+            int2 samplePixel = clamp(basePixel + int2(x - 1, y - 1), int2(0, 0), textureSize - 1);
+            result += _BurtTAAUHistoryGuideTexture.Load(int3(samplePixel, 0)) * (weightX * weightY);
+        }
+    }
+
+    result.rgb = BurtTaaSanitizeRawColor(result.rgb);
+    result.a = saturate(result.a);
     return result;
 }
 
@@ -841,27 +921,38 @@ float BurtTaaHdrWeight(float3 color)
     return rcp(dot(max(color, 0.0), float3(1.0, 2.0, 1.0)) + 4.0);
 }
 
-float4 BurtTaaReconstructCurrentForHistory(float2 historyUv, out float3 currentMin, out float3 currentMax)
+float BurtTaaComputeUpscaleSampleWeight(float upscaleFactor, float2 pixelDelta, float minimalContribution)
+{
+    float upscaleFactorSquared = upscaleFactor * upscaleFactor;
+    float distanceSquared = saturate(upscaleFactorSquared * dot(pixelDelta, pixelDelta));
+    return saturate((0.9 * distanceSquared - 1.9) * distanceSquared + 1.0 + minimalContribution);
+}
+
+float4 BurtTaaReconstructCurrentForHistory(
+    float2 historyUv,
+    float kernelInputToHistoryFactor,
+    out float3 currentMin,
+    out float3 currentMax)
 {
     int2 inputSize = BurtTaaTextureSize();
     float2 inputPixelPosition = historyUv * (float2)inputSize - 0.5 + _BurtTAAJitter.zw;
-    int2 topLeft = int2(floor(inputPixelPosition)) - 1;
+    int2 centerPixel = int2(round(inputPixelPosition));
     float4 accumulated = 0.0;
     float accumulatedWeight = 0.0;
     currentMin = float3(65504.0, 65504.0, 65504.0);
     currentMax = 0.0;
 
     [unroll]
-    for (int y = 0; y < 4; y++)
+    for (int y = -1; y <= 1; y++)
     {
         [unroll]
-        for (int x = 0; x < 4; x++)
+        for (int x = -1; x <= 1; x++)
         {
-            int2 samplePixel = clamp(topLeft + int2(x, y), int2(0, 0), inputSize - 1);
+            int2 samplePixel = clamp(centerPixel + int2(x, y), int2(0, 0), inputSize - 1);
             float4 sampleColor = BurtTaaLoadCurrentRaw(samplePixel);
-            float2 distanceValue = (float2)samplePixel - inputPixelPosition;
-            float kernelWeight = BurtTaaMitchellWeight(distanceValue.x) * BurtTaaMitchellWeight(distanceValue.y);
-            float sampleWeight = kernelWeight * BurtTaaHdrWeight(sampleColor.rgb);
+            float2 pixelDelta = (float2)samplePixel - inputPixelPosition;
+            float spatialWeight = BurtTaaComputeUpscaleSampleWeight(kernelInputToHistoryFactor, pixelDelta, 0.005);
+            float sampleWeight = spatialWeight * BurtTaaHdrWeight(sampleColor.rgb);
             accumulated += sampleColor * sampleWeight;
             accumulatedWeight += sampleWeight;
             currentMin = min(currentMin, sampleColor.rgb);
@@ -869,9 +960,9 @@ float4 BurtTaaReconstructCurrentForHistory(float2 historyUv, out float3 currentM
         }
     }
 
-    int2 centerPixel = clamp(int2(round(inputPixelPosition)), int2(0, 0), inputSize - 1);
-    float4 center = BurtTaaLoadCurrentRaw(centerPixel);
-    float4 reconstructed = abs(accumulatedWeight) > 1e-5 ? accumulated / accumulatedWeight : center;
+    int2 safeCenterPixel = clamp(centerPixel, int2(0, 0), inputSize - 1);
+    float4 center = BurtTaaLoadCurrentRaw(safeCenterPixel);
+    float4 reconstructed = accumulatedWeight > 1e-5 ? accumulated / accumulatedWeight : center;
     reconstructed.rgb = clamp(BurtTaaSanitizeRawColor(reconstructed.rgb, center.rgb), currentMin, currentMax);
     reconstructed.a = saturate(center.a);
     return reconstructed;
@@ -932,7 +1023,7 @@ void ReprojectTAAUHistoryGuideAACS(uint3 id : SV_DispatchThreadID)
     float inBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
     float historyAvailable = _BurtTAAParams.z * inBounds;
     float4 guide = historyAvailable > 0.0
-        ? BurtTaaSampleHistoryGuideLinear(historyUv)
+        ? BurtTaaSampleHistoryGuideCatmullRom(historyUv)
         : 0.0;
     guide.rgb = BurtTaaApplyHistoryExposureCorrection(guide.rgb);
     guide.a = historyAvailable > 0.0 ? saturate(guide.a) : 1.0;
@@ -952,28 +1043,55 @@ void RejectTAAUShadingAACS(uint3 id : SV_DispatchThreadID)
     float2 uv = (float2(pixel) + 0.5) * _BurtTAATexelSize.xy;
     float3 current = BurtTaaLoadCurrentRaw(pixel).rgb;
     float4 previousGuide = _BurtTAAUReprojectedGuideTexture.Load(int3(pixel, 0));
-    float3 currentWorking = BurtTaaToWorkingPerceptualSpace(current);
     float3 historyWorking = BurtTaaToWorkingPerceptualSpace(previousGuide.rgb);
-    float colorDelta = length(currentWorking - historyWorking);
-    float colorEnergy = max(length(currentWorking) + length(historyWorking), 0.15);
-    float shadingRejection = saturate(colorDelta / colorEnergy);
-    float parallaxValidity = saturate(_BurtTAAParallaxRejectionTexture.Load(int3(pixel, 0)));
+    float3 neighborhoodMin = float3(65504.0, 65504.0, 65504.0);
+    float3 neighborhoodMax = float3(-65504.0, -65504.0, -65504.0);
+
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            float3 sampleWorking = BurtTaaToWorkingPerceptualSpace(BurtTaaLoadCurrentRaw(pixel + int2(x, y)).rgb);
+            neighborhoodMin = min(neighborhoodMin, sampleWorking);
+            neighborhoodMax = max(neighborhoodMax, sampleWorking);
+        }
+    }
+
+    float3 boxCenter = 0.5 * (neighborhoodMin + neighborhoodMax);
+    float3 boxExtents = max(0.5 * (neighborhoodMax - neighborhoodMin), float3(1e-5, 1e-5, 1e-5));
+    float3 historyOffset = historyWorking - boxCenter;
+    float3 clampUnitVector = abs(historyOffset) / boxExtents;
+    float clampUnit = max(max(clampUnitVector.x, clampUnitVector.y), clampUnitVector.z);
+    float historyClip = saturate(rcp(max(clampUnit, 1.0)));
+
+    float4 decimateMask = _BurtTAADilateMaskTexture.Load(int3(pixel, 0));
+    uint decimateBits = (uint)round(saturate(decimateMask.r) * 255.0);
+    float offscreen = (decimateBits & 1u) != 0u ? 1.0 : 0.0;
+    float reprojectionConfidence = saturate(decimateMask.g);
+    float parallaxValidity = saturate(decimateMask.b);
     float dilatedRejection = saturate(_BurtTAADilatedHistoryRejectionTexture.Load(int3(pixel, 0)));
     uint stencil = BurtTaaLoadStencilMask(uv);
     float responsive = max(
         (stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0,
         saturate(_BurtTAAMetadataTexture.Load(int3(pixel, 0)).g));
     float historyAvailable = _BurtTAAParams.z;
-    float disoccluded = max(1.0 - parallaxValidity, 1.0 - historyAvailable);
-    float historyKeep = saturate(historyAvailable * parallaxValidity * (1.0 - dilatedRejection) * (1.0 - shadingRejection));
-    historyKeep *= lerp(1.0, 0.25, responsive);
-    float guideBlend = max(1.0 - historyKeep, responsive * 0.25);
-    float3 guide = lerp(previousGuide.rgb, current, saturate(guideBlend));
-    float uncertainty = saturate(lerp(previousGuide.a, max(shadingRejection, disoccluded), max(0.125, guideBlend)));
+    float disoccluded = max(offscreen, max(1.0 - parallaxValidity, 1.0 - historyAvailable));
+    float historyKeep = saturate(historyAvailable * parallaxValidity * (1.0 - dilatedRejection));
+    float inputReprojectionConfidence = responsive > 0.0 ? 0.0 : reprojectionConfidence;
+    float disableHistoryClamp = disoccluded > 0.5
+        ? 0.0
+        : min(min(0.99, inputReprojectionConfidence), min(saturate(previousGuide.a), historyClip));
+    float guideHistoryWeight = min(historyClip, historyKeep);
+    guideHistoryWeight = responsive > 0.0 ? min(guideHistoryWeight, 0.25) : guideHistoryWeight;
+    guideHistoryWeight = disoccluded > 0.5 ? 0.0 : guideHistoryWeight;
+    float3 guide = lerp(current, previousGuide.rgb, saturate(guideHistoryWeight));
     uint bitMask = (disoccluded > 0.5 ? 1u : 0u) | (responsive > 0.0 ? 2u : 0u);
 
-    _BurtTAAUHistoryGuideOutputTexture[pixel] = float4(BurtTaaSanitizeRawColor(guide, current), uncertainty);
-    _BurtTAAUShadingRejectionOutputTexture[pixel] = float4(historyKeep, responsive, shadingRejection, bitMask * (1.0 / 255.0));
+    // Rejection: R=history retention, G=disable clamp, B=history clip, A=state bits.
+    _BurtTAAUHistoryGuideOutputTexture[pixel] = float4(BurtTaaSanitizeRawColor(guide, current), inputReprojectionConfidence);
+    _BurtTAAUShadingRejectionOutputTexture[pixel] = float4(historyKeep, disableHistoryClamp, historyClip, bitMask * (1.0 / 255.0));
 }
 
 [numthreads(8, 8, 1)]
@@ -987,32 +1105,49 @@ void UpdateTAAUHistoryAACS(uint3 id : SV_DispatchThreadID)
     }
 
     float2 uv = (float2(pixel) + 0.5) * _BurtTAAHistoryTexelSize.xy;
-    float3 currentMin;
-    float3 currentMax;
-    float4 current = BurtTaaReconstructCurrentForHistory(uv, currentMin, currentMax);
-    float2 velocity = BurtTaaSampleVelocityLinear(uv);
+    float2 inputPixelCenter = uv * _BurtTAATexelSize.zw + _BurtTAAJitter.zw;
+    int2 inputPixel = BurtTaaClampPixel(int2(floor(inputPixelCenter)));
+    float4 rejection = _BurtTAAUShadingRejectionTexture.Load(int3(inputPixel, 0));
+    float historyKeep = saturate(rejection.x * _BurtTAAParams.z);
+    uint bitMask = (uint)round(saturate(rejection.w) * 255.0);
+    float responsive = (bitMask & 2u) != 0u ? 1.0 : 0.0;
+    float disoccluded = (bitMask & 1u) != 0u ? 1.0 : 0.0;
+    float2 velocity = _BurtTAAVelocityTexture.Load(int3(inputPixel, 0));
     float2 historyUv = uv - velocity;
     float inBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
     float historyAvailable = _BurtTAAParams.z * inBounds;
-    float4 rejection = BurtTaaSampleTAAURejectionLinear(uv);
-    float historyKeep = saturate(rejection.x * historyAvailable);
-    uint bitMask = (uint)round(saturate(rejection.w) * 255.0);
-    float responsive = max(rejection.y, (bitMask & 2u) != 0u ? 1.0 : 0.0);
-    float disoccluded = (bitMask & 1u) != 0u ? 1.0 : 0.0;
+    float2 inputPixelPosition = inputPixelCenter - 0.5;
+    float2 inputPixelAlignmentDelta = inputPixelPosition - round(inputPixelPosition);
+    float inputToHistoryFactor = max(
+        _BurtTAAHistoryTexelSize.z / max(_BurtTAATexelSize.z, 1.0),
+        _BurtTAAHistoryTexelSize.w / max(_BurtTAATexelSize.w, 1.0));
+    float coarseAlignment = BurtTaaComputeUpscaleSampleWeight(1.0, inputPixelAlignmentDelta, 0.0);
+    float idealAlignment = BurtTaaComputeUpscaleSampleWeight(inputToHistoryFactor, inputPixelAlignmentDelta, 0.0);
+    float refining = historyKeep > 0.8125 && responsive < 0.5 && disoccluded < 0.5 && inBounds > 0.5 ? 1.0 : 0.0;
+    float kernelInputToHistoryFactor = lerp(1.0, inputToHistoryFactor, refining);
+    float3 currentMin;
+    float3 currentMax;
+    float4 current = BurtTaaReconstructCurrentForHistory(uv, kernelInputToHistoryFactor, currentMin, currentMax);
+    historyKeep *= inBounds;
 
     float3 previous = current.rgb;
-    if (historyAvailable > 0.0)
+    if (historyAvailable > 0.0 && historyKeep > 0.0)
     {
         previous = BurtTaaSampleHistoryCatmullRom(historyUv);
     }
-    float3 clampPadding = max(currentMax - currentMin, 0.0) * lerp(0.08, 0.2, rejection.z);
-    previous = clamp(previous, currentMin - clampPadding, currentMax + clampPadding);
+    float3 clampedPrevious = clamp(previous, currentMin, currentMax);
+    float disableHistoryClamp = saturate(rejection.y);
+    float clampedHistoryWeight = BurtTaaHdrWeight(clampedPrevious);
+    float unclampedHistoryWeight = BurtTaaHdrWeight(previous);
+    float clampBlendWeight = lerp(clampedHistoryWeight, unclampedHistoryWeight, disableHistoryClamp);
+    previous = lerp(clampedPrevious, previous, saturate(disableHistoryClamp * unclampedHistoryWeight / max(clampBlendWeight, 1e-5)));
 
     float sampleHysteresis = saturate(_BurtTAAUHistoryParams.y);
     float theoreticalBlend = saturate(_BurtTAAUHistoryParams.z);
-    float currentBlend = max(sampleHysteresis, theoreticalBlend);
+    float alignment = lerp(coarseAlignment, idealAlignment, refining);
+    float currentBlend = max(sampleHysteresis * max(alignment, 0.05), theoreticalBlend);
     currentBlend = max(currentBlend, 1.0 - historyKeep);
-    currentBlend = max(currentBlend, responsive * 0.25);
+    currentBlend = max(currentBlend, responsive * (1.0 - refining) * 0.25);
     currentBlend = max(currentBlend, saturate(length(velocity * _BurtTAAUOutputTexelSize.zw) * 0.08));
     currentBlend = max(currentBlend, disoccluded);
     currentBlend = historyAvailable > 0.0 ? saturate(currentBlend) : 1.0;
@@ -1034,6 +1169,36 @@ void ResolveTAAUHistoryAACS(uint3 id : SV_DispatchThreadID)
     }
 
     float2 uv = (float2(pixel) + 0.5) * _BurtTAAUOutputTexelSize.xy;
-    float3 resolved = BurtTaaSampleUpdatedHistoryCatmullRom(uv);
-    _BurtTemporalAAOutputTexture[pixel] = float4(resolved, 1.0);
+    int2 historySize = BurtTaaHistoryTextureSize();
+    float2 historyPixelPosition = uv * (float2)historySize - 0.5;
+    int2 topLeft = int2(floor(historyPixelPosition)) - 1;
+    float4 accumulated = 0.0;
+    float accumulatedWeight = 0.0;
+    float3 neighborhoodMin = float3(65504.0, 65504.0, 65504.0);
+    float3 neighborhoodMax = 0.0;
+    float4 center = _BurtTAAUUpdatedHistoryTexture.Load(int3(clamp(int2(round(historyPixelPosition)), int2(0, 0), historySize - 1), 0));
+
+    [unroll]
+    for (int y = 0; y < 4; y++)
+    {
+        [unroll]
+        for (int x = 0; x < 4; x++)
+        {
+            int2 samplePixel = clamp(topLeft + int2(x, y), int2(0, 0), historySize - 1);
+            float4 sampleColor = _BurtTAAUUpdatedHistoryTexture.Load(int3(samplePixel, 0));
+            sampleColor.rgb = BurtTaaSanitizeRawColor(sampleColor.rgb, center.rgb);
+            float2 pixelDelta = (float2)samplePixel - historyPixelPosition;
+            float kernelWeight = BurtTaaMitchellWeight(pixelDelta.x) * BurtTaaMitchellWeight(pixelDelta.y);
+            float sampleWeight = kernelWeight * BurtTaaHdrWeight(sampleColor.rgb);
+            accumulated += sampleColor * sampleWeight;
+            accumulatedWeight += sampleWeight;
+            neighborhoodMin = min(neighborhoodMin, sampleColor.rgb);
+            neighborhoodMax = max(neighborhoodMax, sampleColor.rgb);
+        }
+    }
+
+    float4 resolved = abs(accumulatedWeight) > 1e-5 ? accumulated / accumulatedWeight : center;
+    resolved.rgb = clamp(BurtTaaSanitizeRawColor(resolved.rgb, center.rgb), neighborhoodMin, neighborhoodMax);
+    resolved.a = saturate(resolved.a);
+    _BurtTemporalAAOutputTexture[pixel] = resolved;
 }

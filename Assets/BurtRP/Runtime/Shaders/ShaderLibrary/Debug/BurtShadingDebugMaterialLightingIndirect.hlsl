@@ -24,6 +24,7 @@ bool BurtTryEvaluateMaterialLightingIndirectShadingDebug(BurtSurfaceData surface
         return true;
     }
 
+#if BURT_SHADING_DEBUG_MATERIAL_INCLUDE_LIGHTING_GI_PROBE
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_GI_PROBE_IRRADIANCE))
     {
         debugColor = max(data.GIProbeIrradiance, float3(0.0f, 0.0f, 0.0f));
@@ -41,6 +42,7 @@ bool BurtTryEvaluateMaterialLightingIndirectShadingDebug(BurtSurfaceData surface
         debugColor = data.GIProbeSkyVisibility.xxx;
         return true;
     }
+#endif
 
     if (BurtIsSameShadingDebugMode(_BurtShadingDebugMode, BURT_SHADING_DEBUG_MODE_AMBIENT_OCCLUSION))
     {

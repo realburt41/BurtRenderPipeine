@@ -73,6 +73,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty refraction;
         private MaterialProperty zWrite;
         private MaterialProperty responsiveAA;
+        private MaterialProperty ignoreFog;
         private MaterialProperty cull;
         private MaterialProperty doubleSidedNormalMode;
         private MaterialProperty transparentSortPriority;
@@ -139,6 +140,7 @@ namespace Burt.RenderPipeline.Editor
             refraction = Find("_Refraction");
             zWrite = Find("_ZWrite");
             responsiveAA = Find("_ResponsiveAA");
+            ignoreFog = Find("_IgnoreFog");
             cull = Find("_Cull");
             doubleSidedNormalMode = Find("_DoubleSidedNormalMode");
             transparentSortPriority = Find("_TransparentSortPriority");
@@ -183,6 +185,7 @@ namespace Burt.RenderPipeline.Editor
             DrawProperty(refraction);
             DrawProperty(zWrite);
             DrawProperty(responsiveAA);
+            DrawProperty(ignoreFog);
             DrawProperty(cull);
             DrawProperty(doubleSidedNormalMode);
             DrawProperty(transparentSortPriority);
@@ -368,6 +371,14 @@ namespace Burt.RenderPipeline.Editor
             }
 
             BurtShaderGUIUtility.ApplyAlphaClipKeyword(material);
+            if (material.HasProperty("_IgnoreFog") && material.GetFloat("_IgnoreFog") >= 0.5f)
+            {
+                material.EnableKeyword("BURT_IGNORE_FOG");
+            }
+            else
+            {
+                material.DisableKeyword("BURT_IGNORE_FOG");
+            }
             material.SetOverrideTag("RenderType", "Transparent");
             material.SetOverrideTag("Queue", "Transparent");
             int priority = material.HasProperty("_TransparentSortPriority")

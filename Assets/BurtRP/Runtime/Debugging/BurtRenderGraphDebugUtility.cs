@@ -271,11 +271,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.AppendLine(); // 结束第二行调试状态。
 
             builder.Append("  Atmosphere=").Append(BurtAtmosphereUtility.FormatDebugState());
+            builder.Append(" AtmosphereResourcesRequested=").Append(BurtAtmosphereUtility.ShouldUseAtmosphereResources(request));
             builder.Append(" AtmospherePassRequested=").Append(BurtAtmosphereUtility.ShouldUseAtmosphere(request));
             builder.Append(" AerialPerspectivePassRequested=").Append(BurtAtmosphereUtility.ShouldUseAerialPerspective(request));
             builder.Append(" AtmosphereGate=").Append(BurtAtmosphereUtility.FormatRequestGate(request));
             builder.AppendLine();
+            builder.Append("  AtmosphereAsync=").Append(BurtAtmosphereUtility.FormatAtmosphereAsyncComputeGate(request, asset));
+            builder.AppendLine();
             builder.Append("  AtmosphereLut=").Append(BurtAtmosphereLutUtility.FormatDebugState());
+            builder.Append(" AtmosphereCombine=").Append(BurtDrawAtmospherePass.FormatCombineTopologyState());
             builder.Append(" AtmosphereReflection=").Append(BurtAtmosphereReflectionUtility.FormatDebugState());
             builder.AppendLine();
             builder.Append("  AtmosphereAerialPass=").Append(BurtAtmosphereUtility.FormatAerialPassState(request));

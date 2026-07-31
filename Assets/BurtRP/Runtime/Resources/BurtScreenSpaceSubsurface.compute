@@ -11,15 +11,10 @@
 #define BURT_SSS_SHARED_TILE_AREA (BURT_SSS_SHARED_TILE_SIZE * BURT_SSS_SHARED_TILE_SIZE)
 #define BURT_SSS_SHARED_FILL_COUNT ((BURT_SSS_SHARED_TILE_AREA + BURT_SSS_TILE_SIZE * BURT_SSS_TILE_SIZE - 1) / (BURT_SSS_TILE_SIZE * BURT_SSS_TILE_SIZE))
 #define BURT_SSS_PROFILE_COUNT 8
-#define BURT_SSS_BURLEY_MIN_SAMPLE_COUNT 48
-#define BURT_SSS_BURLEY_STABLE_SAMPLE_COUNT 64
-#define BURT_SSS_BURLEY_DEBUG_SAMPLE_COUNT 64
 #define BURT_SSS_BURLEY_MAX_SAMPLE_COUNT 64
-#define BURT_SSS_BURLEY_INV_MAX_SAMPLE_COUNT (1.0 / BURT_SSS_BURLEY_MAX_SAMPLE_COUNT)
 #define BURT_SSS_HISTORY_VARIANCE_TARGET 0.0001
 #define BURT_SSS_PI 3.14159265359
 #define BURT_SSS_TWO_PI 6.28318530718
-#define BURT_SSS_SUBSURFACE_KERNEL_SIZE 3.0
 #define BURT_SSS_DEFAULT_RADIUS_PIXELS 3.25
 #define BURT_SSS_UNITY_CM_2_MM 10.0
 #define BURT_SSS_UNITY_M_2_CM 100.0
@@ -52,6 +47,9 @@ RWStructuredBuffer<uint> _BurtSSSBurleyArgsBuffer;
 RWStructuredBuffer<uint> _BurtSSSBurleyGroupBuffer;
 
 float4 _BurtSSSScreenSize;
+float4 _BurtSSSFullScreenSize;
+float4 _BurtSSSQualityParams; // x=min samples, y=max samples, z=kernel size, w=normal weighting.
+float _BurtSSSHalfResolution;
 float4 _BurtSSSParams;
 float4 _BurtSSSParams2;
 float4 _BurtSSSSurfaceAlbedo;
@@ -59,7 +57,7 @@ float4 _BurtSSSMeanFreePath;
 float4 _BurtSSSProfileTint;
 float4 _BurtSSSBoundaryColorBleed;
 float4 _BurtSSSFrameParams; // x=frame index, y=wrapped frame index, z=stable sampling, w=debug sampling.
-float4 _BurtSSSHistoryParams; // x=history valid, y=current-frame blend, zw=current TAA jitter in UV space.
+float4 _BurtSSSHistoryParams; // x=history valid, y=statistics EMA weight, zw=current TAA jitter in UV space.
 float4 _BurtSSSProjectionParams; // x=XRender SSS scale (m00 / kernel size * 0.5), y=projection m00, z=kernel size, w=unused.
 float _BurtSSSProfileCount;
 float _BurtSubsurfaceProfileParamLutEnabled;
@@ -124,7 +122,10 @@ struct BurtSSSProfile
 
 struct BurtSSSHistoryState
 {
-    float4 Params; // rgb=resolved diffuse lighting, a=temporal variance.
+    // Matches XRender's statistical history:
+    // r=normalized sample-count EMA, g=variance/sample statistic,
+    // b=luminance-residual variance, a=luminance-residual mean.
+    float4 Params;
     bool Valid;
 };
 
@@ -132,6 +133,51 @@ int2 BurtSSSClampPixel(int2 pixel)
 {
     int2 size = max((int2)_BurtSSSScreenSize.xy, int2(1, 1));
     return clamp(pixel, int2(0, 0), size - 1);
+}
+
+int2 BurtSSSClampFullPixel(int2 pixel)
+{
+    int2 size = max((int2)_BurtSSSFullScreenSize.xy, int2(1, 1));
+    return clamp(pixel, int2(0, 0), size - 1);
+}
+
+int2 BurtSSSResolveFullPixel(int2 workPixel)
+{
+    int2 clampedWorkPixel = BurtSSSClampPixel(workPixel);
+    if (_BurtSSSHalfResolution <= 0.5)
+    {
+        return BurtSSSClampFullPixel(clampedWorkPixel);
+    }
+
+    int2 fullSize = max((int2)_BurtSSSFullScreenSize.xy, int2(1, 1));
+    int2 baseFullPixel = min(clampedWorkPixel * 2, fullSize - 1);
+    int2 closestPixel = baseFullPixel;
+    float closestDepth = _BurtCameraDepthTexture.Load(int3(closestPixel, 0));
+
+    [unroll]
+    for (int offsetIndex = 1; offsetIndex < 4; offsetIndex++)
+    {
+        int2 offset = int2(offsetIndex & 1, offsetIndex >> 1);
+        int2 candidatePixel = baseFullPixel + offset;
+        if (any(candidatePixel >= fullSize))
+        {
+            continue;
+        }
+
+        float candidateDepth = _BurtCameraDepthTexture.Load(int3(candidatePixel, 0));
+    #if defined(UNITY_REVERSED_Z)
+        bool candidateIsCloser = candidateDepth > closestDepth;
+    #else
+        bool candidateIsCloser = candidateDepth < closestDepth;
+    #endif
+        if (candidateIsCloser)
+        {
+            closestDepth = candidateDepth;
+            closestPixel = candidatePixel;
+        }
+    }
+
+    return closestPixel;
 }
 
 bool BurtSSSInPixelBounds(int2 pixel)
@@ -156,8 +202,8 @@ bool BurtSSSIsSkyDepth(float rawDepth)
 
 bool BurtSSSProjectHistoryUVWithVelocity(int2 pixel, float2 screenUV, out float2 historyUV)
 {
-    int2 clampedPixel = BurtSSSClampPixel(pixel);
-    float4 velocityData = _BurtSSSVelocityTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0));
+    int2 fullPixel = BurtSSSResolveFullPixel(pixel);
+    float4 velocityData = _BurtSSSVelocityTexture.Load(int3(fullPixel.x, fullPixel.y, 0));
     historyUV = screenUV + velocityData.xy;
     return velocityData.z > 0.5 && !any(historyUV < 0.0) && !any(historyUV > 1.0);
 }
@@ -305,21 +351,13 @@ float BurtSSSLoadProfileIDAndType(int2 pixel)
 
 float BurtSSSLoadMaterialEncodedProfileIDAndType(int2 pixel)
 {
-    int2 clampedPixel = BurtSSSClampPixel(pixel);
-    return _BurtScreenSpaceSubsurfaceBaseColorTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0)).a;
+    int2 fullPixel = BurtSSSResolveFullPixel(pixel);
+    return _BurtSSSMaskTexture.Load(int3(fullPixel.x, fullPixel.y, 0));
 }
 
 bool BurtSSSPassesStencilMask(int2 pixel)
 {
-    int2 clampedPixel = BurtSSSClampPixel(pixel);
-    uint stencilValue = BurtSSSLoadDeferredStencil(clampedPixel);
-    uint shadingModelStencil = stencilValue & BURT_DEFERRED_STENCIL_SHADING_MODEL_MASK;
-    if (shadingModelStencil != 0u)
-    {
-        return shadingModelStencil == BURT_DEFERRED_STENCIL_SUBSURFACE_REF;
-    }
-
-    return _BurtSSSMaskTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0)) > 0.5;
+    return BurtSSSLoadMaterialEncodedProfileIDAndType(pixel) > 0.0;
 }
 
 bool BurtSSSUseProfileParamLut()
@@ -362,17 +400,17 @@ BurtSSSProfile BurtSSSLoadProfile(float profileIndex)
 
 BurtSSSSurface BurtSSSLoadGBufferSurface(int2 pixel)
 {
-    int2 clampedPixel = BurtSSSClampPixel(pixel);
-    float4 gbuffer0 = _BurtGBuffer0.Load(int3(clampedPixel.x, clampedPixel.y, 0));
-    float4 gbuffer2 = _BurtGBuffer2.Load(int3(clampedPixel.x, clampedPixel.y, 0));
-    float4 gbuffer3 = _BurtGBuffer3.Load(int3(clampedPixel.x, clampedPixel.y, 0));
-    float4 gbuffer5 = _BurtGBuffer5.Load(int3(clampedPixel.x, clampedPixel.y, 0));
+    int2 fullPixel = BurtSSSResolveFullPixel(pixel);
+    float4 gbuffer0 = _BurtGBuffer0.Load(int3(fullPixel.x, fullPixel.y, 0));
+    float4 gbuffer2 = _BurtGBuffer2.Load(int3(fullPixel.x, fullPixel.y, 0));
+    float4 gbuffer3 = _BurtGBuffer3.Load(int3(fullPixel.x, fullPixel.y, 0));
+    float4 gbuffer5 = _BurtGBuffer5.Load(int3(fullPixel.x, fullPixel.y, 0));
     float shadingModelID;
     float materialChannel;
-    shadingModelID = BurtSSSResolveShadingModelID(clampedPixel, gbuffer2.r, materialChannel);
+    shadingModelID = BurtSSSResolveShadingModelID(fullPixel, gbuffer2.r, materialChannel);
 
     BurtSSSSurface surface;
-    surface.RawDepth = _BurtCameraDepthTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0));
+    surface.RawDepth = _BurtCameraDepthTexture.Load(int3(fullPixel.x, fullPixel.y, 0));
     surface.LinearEyeDepth = BurtSSSIsSkyDepth(surface.RawDepth) ? 0.0 : BurtSSSLinearEyeDepth(surface.RawDepth);
     surface.NormalWS = BurtSSSDecodeNormalWS888(gbuffer0.rgb);
     surface.Strength = materialChannel;
@@ -417,14 +455,14 @@ float3 BurtSSSSplitDiffuseLighting(float4 litColor)
 
 float3 BurtSSSLoadPreExposedEmission(int2 pixel)
 {
-    int2 clampedPixel = BurtSSSClampPixel(pixel);
-    return max(_BurtScreenSpaceSubsurfaceEmissionTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0)).rgb, float3(0.0, 0.0, 0.0)) * max(_BurtPreExposure, 0.0);
+    int2 fullPixel = BurtSSSResolveFullPixel(pixel);
+    return max(_BurtScreenSpaceSubsurfaceEmissionTexture.Load(int3(fullPixel.x, fullPixel.y, 0)).rgb, float3(0.0, 0.0, 0.0)) * max(_BurtPreExposure, 0.0);
 }
 
 float3 BurtSSSLoadBaseColor(int2 pixel)
 {
-    int2 clampedPixel = BurtSSSClampPixel(pixel);
-    return max(_BurtScreenSpaceSubsurfaceBaseColorTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0)).rgb, float3(0.0, 0.0, 0.0));
+    int2 fullPixel = BurtSSSResolveFullPixel(pixel);
+    return max(_BurtScreenSpaceSubsurfaceBaseColorTexture.Load(int3(fullPixel.x, fullPixel.y, 0)).rgb, float3(0.0, 0.0, 0.0));
 }
 
 float3 BurtSSSDecodeDiffuseLighting(float3 diffuseWithBaseColor, float3 baseColor)
@@ -558,7 +596,8 @@ float4 BurtSSSLoadSetupDiffuseDepth(int2 pixel)
         return float4(0.0, 0.0, 0.0, 0.0);
     }
 
-    float4 source = _BurtSSSSourceTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0));
+    int2 fullPixel = BurtSSSResolveFullPixel(clampedPixel);
+    float4 source = _BurtSSSSourceTexture.Load(int3(fullPixel.x, fullPixel.y, 0));
     float3 baseColor;
     float3 emission;
     float3 diffuseWithBaseColor;
@@ -566,22 +605,29 @@ float4 BurtSSSLoadSetupDiffuseDepth(int2 pixel)
     float3 specularLight;
     BurtSSSDecodeLightingComponents(clampedPixel, source, baseColor, emission, diffuseWithBaseColor, diffuse, specularLight);
 
-    float rawDepth = _BurtCameraDepthTexture.Load(int3(clampedPixel.x, clampedPixel.y, 0));
+    float rawDepth = _BurtCameraDepthTexture.Load(int3(fullPixel.x, fullPixel.y, 0));
     float linearEyeDepth = BurtSSSIsSkyDepth(rawDepth) ? 0.0 : BurtSSSLinearEyeDepth(rawDepth);
     float2 uv = ((float2)clampedPixel + 0.5) * _BurtSSSScreenSize.zw;
     return float4(diffuse, BurtSSSResolveSetupDepth(uv, linearEyeDepth, profileTypeFromTexture));
 }
 
-float4 BurtSSSSampleHistoryBilinear(float2 uv)
+float4 BurtSSSSampleHistoryPoint(float2 uv)
+{
+    float2 screenSize = max(_BurtSSSScreenSize.xy, float2(1.0, 1.0));
+    int2 historyPixel = BurtSSSClampPixel((int2)(saturate(uv) * screenSize));
+    return _BurtSSSHistoryTexture.Load(int3(historyPixel, 0));
+}
+
+float3 BurtSSSSampleControlDiffuseBilinear(float2 uv)
 {
     float2 screenSize = max(_BurtSSSScreenSize.xy, float2(1.0, 1.0));
     float2 samplePosition = saturate(uv) * screenSize - 0.5;
     int2 pixel00 = (int2)floor(samplePosition);
     float2 t = frac(samplePosition);
-    float4 c00 = _BurtSSSHistoryTexture.Load(int3(BurtSSSClampPixel(pixel00), 0));
-    float4 c10 = _BurtSSSHistoryTexture.Load(int3(BurtSSSClampPixel(pixel00 + int2(1, 0)), 0));
-    float4 c01 = _BurtSSSHistoryTexture.Load(int3(BurtSSSClampPixel(pixel00 + int2(0, 1)), 0));
-    float4 c11 = _BurtSSSHistoryTexture.Load(int3(BurtSSSClampPixel(pixel00 + int2(1, 1)), 0));
+    float3 c00 = _BurtSSSTempTexture[BurtSSSClampPixel(pixel00)].rgb;
+    float3 c10 = _BurtSSSTempTexture[BurtSSSClampPixel(pixel00 + int2(1, 0))].rgb;
+    float3 c01 = _BurtSSSTempTexture[BurtSSSClampPixel(pixel00 + int2(0, 1))].rgb;
+    float3 c11 = _BurtSSSTempTexture[BurtSSSClampPixel(pixel00 + int2(1, 1))].rgb;
     return lerp(lerp(c00, c10, t.x), lerp(c01, c11, t.x), t.y);
 }
 
@@ -603,27 +649,28 @@ BurtSSSHistoryState BurtSSSFetchHistoryState(int2 pixel, BurtSSSSurface center)
         return state;
     }
 
-    state.Params = BurtSSSSampleHistoryBilinear(historyUV);
+    state.Params = BurtSSSSampleHistoryPoint(historyUV);
     state.Valid = true;
     return state;
 }
 
 int BurtSSSResolveAdaptiveBurleySampleCount(BurtSSSSurface center, BurtSSSProfile profile, BurtSSSHistoryState history)
 {
+    int minSampleCount = clamp((int)round(_BurtSSSQualityParams.x), 1, BURT_SSS_BURLEY_MAX_SAMPLE_COUNT);
+    int maxSampleCount = clamp((int)round(_BurtSSSQualityParams.y), minSampleCount, BURT_SSS_BURLEY_MAX_SAMPLE_COUNT);
     if (!history.Valid)
     {
         if (BurtSSSUseStableSampling())
         {
-            return BurtSSSUseDebugSampling() ? BURT_SSS_BURLEY_DEBUG_SAMPLE_COUNT : BURT_SSS_BURLEY_STABLE_SAMPLE_COUNT;
+            return maxSampleCount;
         }
 
-        return BURT_SSS_BURLEY_MIN_SAMPLE_COUNT;
+        return minSampleCount;
     }
 
-    float variance = max(history.Params.a, 0.0);
-    float adaptiveFactor = saturate(sqrt(variance / max(BURT_SSS_HISTORY_VARIANCE_TARGET * 64.0, 0.000001)));
-    int adaptiveSamples = (int)round(lerp((float)BURT_SSS_BURLEY_MIN_SAMPLE_COUNT, (float)BURT_SSS_BURLEY_MAX_SAMPLE_COUNT, adaptiveFactor));
-    return clamp(adaptiveSamples, BURT_SSS_BURLEY_MIN_SAMPLE_COUNT, BURT_SSS_BURLEY_MAX_SAMPLE_COUNT);
+    float variance = max(history.Params.b, 0.0);
+    int adaptiveSamples = (int)(variance / BURT_SSS_HISTORY_VARIANCE_TARGET);
+    return clamp(adaptiveSamples, minSampleCount, maxSampleCount);
 }
 
 void BurtSSSFillBurleyShared(int2 groupPixel, uint groupIndex)
@@ -642,7 +689,8 @@ void BurtSSSFillBurleyShared(int2 groupPixel, uint groupIndex)
         int2 sharedLocal = int2((int)(sharedIndex % BURT_SSS_SHARED_TILE_SIZE), (int)(sharedIndex / BURT_SSS_SHARED_TILE_SIZE));
         int2 sharedPixel = BurtSSSClampPixel(sharedCorner + sharedLocal);
         BurtSSSSharedDiffuseDepth[sharedIndex] = BurtSSSLoadSetupDiffuseDepth(sharedPixel);
-        BurtSSSSharedNormalWS[sharedIndex] = BurtSSSDecodeNormalWS888(_BurtGBuffer0.Load(int3(sharedPixel.x, sharedPixel.y, 0)).rgb);
+        int2 fullPixel = BurtSSSResolveFullPixel(sharedPixel);
+        BurtSSSSharedNormalWS[sharedIndex] = BurtSSSDecodeNormalWS888(_BurtGBuffer0.Load(int3(fullPixel.x, fullPixel.y, 0)).rgb);
     }
 }
 
@@ -668,20 +716,41 @@ void BurtSSSLoadBurleySample(int2 samplePixel, int2 groupPixel, out float4 diffu
 
     int2 clampedPixel = BurtSSSClampPixel(samplePixel);
     diffuseDepth = BurtSSSLoadSetupDiffuseDepth(clampedPixel);
-    normalWS = BurtSSSDecodeNormalWS888(_BurtGBuffer0.Load(int3(clampedPixel.x, clampedPixel.y, 0)).rgb);
+    int2 fullPixel = BurtSSSResolveFullPixel(clampedPixel);
+    normalWS = BurtSSSDecodeNormalWS888(_BurtGBuffer0.Load(int3(fullPixel.x, fullPixel.y, 0)).rgb);
 }
 
-float BurtSSSEvaluateTemporalVariance(float3 currentDiffuse, float3 referenceDiffuse)
+float BurtSSSEvaluateLuminanceResidual(float3 currentDiffuse, float3 controlDiffuse)
 {
-    float3 encodedCurrent = pow(max(currentDiffuse, float3(0.0, 0.0, 0.0)), 1.0 / 2.2);
-    float3 encodedReference = pow(max(referenceDiffuse, float3(0.0, 0.0, 0.0)), 1.0 / 2.2);
-    float3 residual = encodedCurrent - encodedReference;
-    float lumaResidual = dot(residual, BURT_SSS_LUMINANCE);
-    float3 chromaResidual = residual - float3(lumaResidual, lumaResidual, lumaResidual);
-    return lumaResidual * lumaResidual + dot(chromaResidual, chromaResidual) * 0.02;
+    float3 encodedCurrent = pow(abs(currentDiffuse), 1.0 / 2.2);
+    float3 encodedControl = pow(abs(controlDiffuse), 1.0 / 2.2);
+    return dot(encodedCurrent, BURT_SSS_LUMINANCE) - dot(encodedControl, BURT_SSS_LUMINANCE);
 }
 
-void BurtSSSWriteHistory(int2 pixel, float3 diffuse, float variance, float valid)
+float4 BurtSSSUpdateHistoryStatistics(
+    float3 currentDiffuse,
+    float3 controlDiffuse,
+    BurtSSSHistoryState history,
+    int sampleCount)
+{
+    float weight = history.Valid ? saturate(_BurtSSSHistoryParams.y) : 1.0;
+    float residual = BurtSSSEvaluateLuminanceResidual(currentDiffuse, controlDiffuse);
+    float previousMean = history.Params.a;
+    float delta = residual - previousMean;
+
+    float4 result;
+    result.a = lerp(previousMean, residual, weight);
+    result.b = (1.0 - weight) * max(history.Params.b, 0.0) +
+        weight * (1.0 - weight) * delta * delta;
+    result.g = max(history.Params.b, 0.0) * sampleCount;
+    result.r = lerp(
+        history.Params.r,
+        (float)sampleCount / max(_BurtSSSQualityParams.y, 1.0),
+        weight);
+    return result;
+}
+
+void BurtSSSWriteHistory(int2 pixel, float4 statistics, float valid)
 {
     if (valid <= 0.0)
     {
@@ -689,7 +758,7 @@ void BurtSSSWriteHistory(int2 pixel, float3 diffuse, float variance, float valid
         return;
     }
 
-    _BurtSSSHistoryOutputTexture[pixel] = float4(max(diffuse, float3(0.0, 0.0, 0.0)), max(variance, 0.0));
+    _BurtSSSHistoryOutputTexture[pixel] = statistics;
 }
 
 float BurtSSSResolveWorldUnitScale(BurtSSSProfile profile)
@@ -729,7 +798,7 @@ float2 BurtSSSCalculateBurleyScale(float centerSceneDepth, BurtSSSProfile profil
     float projectionScale = max(_BurtSSSProjectionParams.x, 0.0001);
     float depthInMillimeters = max(centerSceneDepth * BURT_SSS_UNITY_M_2_CM * BURT_SSS_UNITY_CM_2_MM, 0.0001);
     float2 scale = float2(worldUnitScale, worldUnitScale) * (projectionScale / depthInMillimeters);
-    scale *= BURT_SSS_SUBSURFACE_KERNEL_SIZE;
+    scale *= max(_BurtSSSQualityParams.z, 0.01);
     scale.y *= _BurtSSSScreenSize.x * _BurtSSSScreenSize.w;
     return scale;
 }
@@ -775,7 +844,8 @@ float3 BurtSSSAccumulateBurley(
     float3 radianceAccumulated = float3(0.0, 0.0, 0.0);
     float3 weightingFactor = float3(0.0, 0.0, 0.0);
     uint2 seedPixel = (uint2)max(pixel, int2(0, 0));
-    uint seedStart = BurtSSSRand3DPCG16(int3((int)seedPixel.x, (int)seedPixel.y, 17)).x;
+    int seedFrame = BurtSSSUseStableSampling() ? 17 : (int)_BurtSSSFrameParams.x;
+    uint seedStart = BurtSSSRand3DPCG16(int3((int)seedPixel.x, (int)seedPixel.y, seedFrame)).x;
 
     [loop]
     for (int i = 0; i < BURT_SSS_BURLEY_MAX_SAMPLE_COUNT; i++)
@@ -800,7 +870,10 @@ float3 BurtSSSAccumulateBurley(
         BurtSSSLoadBurleySample(clampedPixel, groupPixel, sampleDiffuseDepth, sampleNormalWS);
         float3 sampleDiffuse = sampleDiffuseDepth.rgb;
         float sampleSceneDepth = sampleDiffuseDepth.a;
-        float normalWeight = sqrt(saturate(dot(center.NormalWS, sampleNormalWS) * 0.5 + 0.5));
+        float normalWeight = lerp(
+            1.0,
+            sqrt(saturate(dot(center.NormalWS, sampleNormalWS) * 0.5 + 0.5)),
+            saturate(_BurtSSSQualityParams.w));
         float depthDelta = (sampleSceneDepth - centerSceneDepth) * BURT_SSS_UNITY_M_2_MM / BurtSSSResolveWorldUnitScale(profile);
         float sampledRadius = sqrt(radiusInProfileUnits * radiusInProfileUnits + depthDelta * depthDelta);
         float3 diffusionProfile = BurtSSSDiffuseProfile(diffuseMeanFreePath, inverseSearchLightScale, sampledRadius);
@@ -817,32 +890,6 @@ float3 BurtSSSAccumulateBurley(
         : radianceAccumulated / max(weightingFactor, float3(0.0001, 0.0001, 0.0001)) * (1.0 / 0.99995);
     burleyDiffuse = lerp(burleyDiffuse, originalDiffuse, centerSampleWeight);
     return max(burleyDiffuse, float3(0.0, 0.0, 0.0));
-}
-
-float3 BurtSSSTemporalResolveDiffuse(
-    float3 original,
-    float3 current,
-    BurtSSSHistoryState history,
-    float strength,
-    int sampleCount,
-    out float variance)
-{
-    float3 currentDiffuse = max(current, float3(0.0, 0.0, 0.0));
-    variance = BurtSSSEvaluateTemporalVariance(currentDiffuse, original);
-    if (!history.Valid)
-    {
-        return currentDiffuse;
-    }
-
-    float historyVariance = max(history.Params.a, 0.0);
-    float currentWeight = saturate(_BurtSSSHistoryParams.y);
-    float sampleConfidence = saturate((float)sampleCount * BURT_SSS_BURLEY_INV_MAX_SAMPLE_COUNT);
-    float varianceGate = saturate(sqrt(historyVariance / max(BURT_SSS_HISTORY_VARIANCE_TARGET * 16.0, 0.000001)));
-    currentWeight = lerp(currentWeight * 0.45, currentWeight, max(sampleConfidence, varianceGate));
-    currentWeight = clamp(currentWeight, 0.03, 0.22);
-
-    variance = lerp(historyVariance, variance, currentWeight);
-    return currentDiffuse;
 }
 
 [numthreads(1, 1, 1)]
@@ -880,7 +927,6 @@ void SetupMainCS(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex :
         uint profileIndexFromMaterial;
         uint profileTypeFromMaterial;
         BurtSSSDecodeProfileIDAndType(materialEncodedProfileIDAndType, profileIndexFromMaterial, profileTypeFromMaterial);
-        bool materialHasBurleyProfile = (profileTypeFromMaterial & BURT_SSS_PROFILE_TYPE_BURLEY) != 0u;
         bool materialHasScreenSpaceProfile = (profileTypeFromMaterial & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u;
         bool validMaterialSurface = surface.Valid > 0.0 && stencilMatched && materialHasScreenSpaceProfile;
         uint effectiveProfileType = BURT_SSS_PROFILE_TYPE_NONE;
@@ -899,7 +945,8 @@ void SetupMainCS(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex :
 
         if (validSurface)
         {
-            float4 source = _BurtSSSSourceTexture.Load(int3(pixel.x, pixel.y, 0));
+            int2 fullPixel = BurtSSSResolveFullPixel(pixel);
+            float4 source = _BurtSSSSourceTexture.Load(int3(fullPixel.x, fullPixel.y, 0));
             float3 baseColor;
             float3 emission;
             float3 diffuseWithBaseColor;
@@ -974,7 +1021,8 @@ void SetupMainNoBurleyGroupsCS(uint3 dispatchThreadID : SV_DispatchThreadID)
 
         if (validSurface)
         {
-            float4 source = _BurtSSSSourceTexture.Load(int3(pixel.x, pixel.y, 0));
+            int2 fullPixel = BurtSSSResolveFullPixel(pixel);
+            float4 source = _BurtSSSSourceTexture.Load(int3(fullPixel.x, fullPixel.y, 0));
             float3 baseColor;
             float3 emission;
             float3 diffuseWithBaseColor;
@@ -1020,7 +1068,7 @@ void BurleySinglePass(uint3 indirectGroupID : SV_GroupID, uint groupIndex : SV_G
 
     if (center.Valid <= 0.0 || (center.ProfileType & BURT_SSS_PROFILE_TYPE_BURLEY) == 0u)
     {
-        BurtSSSWriteHistory(pixel, originalDiffuse, 0.0, 0.0);
+        BurtSSSWriteHistory(pixel, float4(0.0, 0.0, 0.0, 0.0), 0.0);
         return;
     }
 
@@ -1028,9 +1076,10 @@ void BurleySinglePass(uint3 indirectGroupID : SV_GroupID, uint groupIndex : SV_G
     BurtSSSHistoryState history = BurtSSSFetchHistoryState(pixel, center);
     int sampleCount = BurtSSSResolveAdaptiveBurleySampleCount(center, profile, history);
     float3 blurred = BurtSSSAccumulateBurley(center, profile, originalDiffuse, pixel, groupPixel, sampleCount);
-    float variance;
-    blurred = BurtSSSTemporalResolveDiffuse(originalDiffuse, blurred, history, center.Strength, sampleCount, variance);
+    float2 controlUV = ((float2)pixel + 0.5) * _BurtSSSScreenSize.zw - _BurtSSSHistoryParams.zw;
+    float3 controlDiffuse = BurtSSSSampleControlDiffuseBilinear(controlUV);
+    float4 historyStatistics = BurtSSSUpdateHistoryStatistics(blurred, controlDiffuse, history, sampleCount);
 
     _BurtSSSBlurTexture[pixel] = float4(blurred, 1.0);
-    BurtSSSWriteHistory(pixel, blurred, variance, center.Valid);
+    BurtSSSWriteHistory(pixel, historyStatistics, center.Valid);
 }

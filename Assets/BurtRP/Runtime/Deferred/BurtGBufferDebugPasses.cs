@@ -87,8 +87,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                 case BurtShadingDebugMode.DiffuseColor: // 便宜的 diffuseColor 调试直接复用 GBuffer 重建结果。
                 case BurtShadingDebugMode.GBufferDiffuseColor: // Overlay 选择 GBuffer Diffuse Color 时。
                     return BurtGBufferDebugViewMode.DiffuseColor; // 显示从真实 GBuffer 重建 PBRMaterialData 后的 diffuseColor。
+                case BurtShadingDebugMode.Emission:
+                    return BurtGBufferDebugViewMode.Emission;
                 case BurtShadingDebugMode.GBufferHairStrandDirection: // Overlay 选择 Hair strand direction 时。
                     return BurtGBufferDebugViewMode.HairStrandDirection; // 显示 Hair 复用 GBuffer0.rgb 存储的 strand direction。
+                case BurtShadingDebugMode.HairScatter:
                 case BurtShadingDebugMode.GBufferHairScatter: // Overlay 选择 Hair scatter 时。
                     return BurtGBufferDebugViewMode.HairScatter; // 显示 Hair 复用 GBuffer2.r material channel 存储的 scatter。
                 case BurtShadingDebugMode.GBufferHairShift: // Overlay 选择 Hair longitudinal shift scale 时。
@@ -100,6 +103,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                 case BurtShadingDebugMode.GBufferSubsurfaceThickness:
                     return BurtGBufferDebugViewMode.SubsurfaceThickness;
                 case BurtShadingDebugMode.GBufferSubsurfaceProfileIndex:
+                case BurtShadingDebugMode.SubsurfaceProfileId:
                     return BurtGBufferDebugViewMode.SubsurfaceProfileIndex;
                 case BurtShadingDebugMode.GBufferFoliageTransmissionColor:
                     return BurtGBufferDebugViewMode.FoliageTransmissionColor;
@@ -190,7 +194,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
                 return; // 任意目标无效时直接跳过，避免绑定或采样错误资源。
             }
 
-            var material = GetDebugGBufferMaterial(); // 获取或创建 GBuffer 调试材质。
+            var material = GetDebugGBufferMaterial(context.Asset); // 获取或创建 GBuffer 调试材质。
 
             if (material == null) // 如果 shader 缺失或材质创建失败，就不能执行调试绘制。
             {
@@ -242,14 +246,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
             return cameraColorTarget.IsValid && cameraDepthTarget.IsValid && gbuffer0Target.IsValid && gbuffer1Target.IsValid && gbuffer2Target.IsValid && gbuffer3Target.IsValid && gbuffer4Target.IsValid && gbuffer5Target.IsValid; // 只有全部目标有效时才允许绘制调试视图。
         }
 
-        private Material GetDebugGBufferMaterial() // 获取或创建 GBuffer 调试材质。
+        private Material GetDebugGBufferMaterial(BurtRenderPipelineAsset asset) // 获取或创建 GBuffer 调试材质。
         {
             if (debugGBufferMaterial != null) // 如果之前已经创建过材质，就复用它。
             {
                 return debugGBufferMaterial; // 返回缓存材质，避免每帧创建新对象。
             }
 
-            var shader = Shader.Find(DebugGBufferShaderName); // 按约定名称查找 GBuffer 调试 shader。
+            var shader = asset != null && asset.RuntimeResources != null
+                ? asset.RuntimeResources.DebugGBufferShader
+                : null;
+            if (shader == null)
+            {
+                shader = Shader.Find(DebugGBufferShaderName); // 仅作为旧资产尚未绑定 Runtime Resources 时的编辑器兼容回退。
+            }
 
             if (shader == null) // 如果 shader 查找失败，说明 shader 文件还没导入或名称不一致。
             {

@@ -20,6 +20,7 @@ Shader "Hidden/BurtRP/VolumetricFog"
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/BurtAtmosphereLut.hlsl"
+            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightShaftOcclusion.hlsl"
             // BurtShadows owns the guarded _BurtMainLightDirection declaration; do not predefine its guard here.
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
 
@@ -431,7 +432,9 @@ Shader "Hidden/BurtRP/VolumetricFog"
                     }
 
                     return float4(
-                        sourceColor * integratedFog.a + BurtApplyPreExposure(integratedFog.rgb),
+                        sourceColor * integratedFog.a
+                        + BurtApplyPreExposure(integratedFog.rgb)
+                        * BurtSampleLightShaftOcclusion(input.ScreenUV),
                         1.0f);
                 }
 
@@ -567,7 +570,11 @@ Shader "Hidden/BurtRP/VolumetricFog"
                     return float4(saturate((float)stepCount / 96.0f).xxx, 1.0f);
                 }
 
-                return float4(sourceColor * transmittance + BurtApplyPreExposure(scattering), 1.0f);
+                return float4(
+                    sourceColor * transmittance
+                    + BurtApplyPreExposure(scattering)
+                    * BurtSampleLightShaftOcclusion(input.ScreenUV),
+                    1.0f);
             }
             ENDHLSL
         }

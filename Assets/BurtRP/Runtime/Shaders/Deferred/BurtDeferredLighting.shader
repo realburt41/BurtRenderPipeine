@@ -20,6 +20,24 @@ Shader "Hidden/BurtRP/DeferredLighting"
         Tags { "RenderPipeline" = "BurtRenderPipeline" }
 
         HLSLINCLUDE
+            // XRender DeferredLightingNoPunctual equivalent: punctual/additional
+            // lights are evaluated by the dedicated additive stage.
+            #define BURT_DEFERRED_LIGHTING_EXCLUDE_ADDITIONAL 1
+            // XRender-style deferred debug: the production lighting pass owns one
+            // optional debug variant and selects the displayed result at runtime.
+            // The debug path reuses the production shading result; it is not a
+            // second Hidden debug-lighting shader or a second lighting loop.
+            #pragma shader_feature_local_fragment _ BURT_USE_DEBUG_MODE_DEFERRED
+            #if defined(BURT_USE_DEBUG_MODE_DEFERRED)
+                #define BURT_COMPILE_SHADING_DEBUG 1
+                #define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING 1
+                #define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF 1
+                #define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION 1
+                // D3D11's optimizer was the timeout hotspot in the former large
+                // Hidden debug shaders. Limit this to the debug variant; normal
+                // production lighting remains fully optimized.
+                #pragma skip_optimizations d3d11
+            #endif
             // 顶点输入只需要系统生成的顶点 ID。
             struct Attributes
             {

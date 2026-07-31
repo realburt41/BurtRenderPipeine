@@ -45,6 +45,7 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty cull;
         private MaterialProperty zWrite;
         private MaterialProperty responsiveAA;
+        private MaterialProperty ignoreFog;
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
@@ -77,6 +78,14 @@ namespace Burt.RenderPipeline.Editor
             material.SetShaderPassEnabled("BurtForward", true);
             material.SetShaderPassEnabled("BurtTransparentMotionVectors", true);
             material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
+            if (material.HasProperty("_IgnoreFog") && material.GetFloat("_IgnoreFog") >= 0.5f)
+            {
+                material.EnableKeyword("BURT_IGNORE_FOG");
+            }
+            else
+            {
+                material.DisableKeyword("BURT_IGNORE_FOG");
+            }
         }
 
         private void CacheProperties()
@@ -94,6 +103,7 @@ namespace Burt.RenderPipeline.Editor
             cull = Find("_Cull");
             zWrite = Find("_ZWrite");
             responsiveAA = Find("_ResponsiveAA");
+            ignoreFog = Find("_IgnoreFog");
         }
 
         private MaterialProperty Find(string propertyName)
@@ -122,6 +132,7 @@ namespace Burt.RenderPipeline.Editor
                 }
             }
 
+            BurtShaderGUIUtility.DrawProperty(materialEditor, ignoreFog);
             BurtShaderGUIUtility.EndSection();
         }
 

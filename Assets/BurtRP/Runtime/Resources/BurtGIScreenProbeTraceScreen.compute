@@ -69,6 +69,7 @@ Texture2D<float4> _BurtGIScreenProbeHitDistanceTexture;
 Texture2D<float4> _BurtGIScreenProbeHistoryRadianceTexture;
 Texture2D<float4> _BurtGIScreenProbeHistoryTraceRadianceTexture;
 Texture2D<float> _BurtGIScreenProbeHistoryScreenDepthTexture;
+Texture2D<float4> _BurtGIPreviousSceneColorTexture;
 Texture2D<float> _BurtHiZDepthTexture;
 float _BurtGISceneVoxelOctreeValid;
 
@@ -103,6 +104,7 @@ float4 _BurtGIScreenProbeImportancePDFParams;
 float4 _BurtGIScreenProbeImportanceLightPDFParams;
 float4 _BurtGIScreenProbeImportanceLightPDFParams1;
 float4 _BurtGIScreenProbeHistoryParams;
+float4 _BurtGIPreviousSceneColorParams; // x=valid, y=previous-to-current pre-exposure, zw=inv size.
 float4 _BurtGIScreenProbeTemporalParams;
 float4 _BurtGIScreenProbeReprojectionParams;
 float4 _BurtGIScreenProbeFilterParams; // x=spatial passes, y=half kernel, z=fixup borders, w=placement jitter index.
@@ -658,6 +660,18 @@ bool BurtGIScreenProbeTryHiZScreenTraceRadiance(
         float3 historyScreenTraceRadiance = historyTraceLuma > 0.0001
             ? historyTraceRadiance.rgb
             : historyProbeRadiance.rgb;
+        uint previousSceneColorWidth;
+        uint previousSceneColorHeight;
+        _BurtGIPreviousSceneColorTexture.GetDimensions(previousSceneColorWidth, previousSceneColorHeight);
+        uint2 previousSceneColorSize = max(uint2(previousSceneColorWidth, previousSceneColorHeight), 1u);
+        uint2 previousSceneColorCoord = min(
+            (uint2)floor(saturate(hitHistoryUV) * (float2)previousSceneColorSize),
+            previousSceneColorSize - 1u);
+        float3 previousSceneColorRadiance = max(
+            _BurtGIPreviousSceneColorTexture.Load(int3(previousSceneColorCoord, 0)).rgb *
+            max(_BurtGIPreviousSceneColorParams.y, 0.0),
+            0.0);
+        float previousSceneColorValid = saturate(_BurtGIPreviousSceneColorParams.x);
 
         float4 hitNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(hitProbeCoord, 0));
         float3 hitNormalWS = BurtGIScreenProbeDecodeNormalWS(hitNormal);
@@ -673,7 +687,8 @@ bool BurtGIScreenProbeTryHiZScreenTraceRadiance(
         {
             bestHit = hit;
             float3 currentScreenTraceRadiance = max(hitRadiance.rgb, hitIrradiance.rgb * 0.65);
-            screenTraceRadiance = lerp(currentScreenTraceRadiance, max(historyScreenTraceRadiance, 0.0), historyRadianceValid) * directionalEnergy;
+            float3 probeHistoryFallback = lerp(currentScreenTraceRadiance, max(historyScreenTraceRadiance, 0.0), historyRadianceValid);
+            screenTraceRadiance = lerp(probeHistoryFallback, previousSceneColorRadiance, previousSceneColorValid) * directionalEnergy;
             screenTraceConfidence = candidateConfidence * screenTraceStrength;
             screenTraceDistance = sampleDistance;
         }

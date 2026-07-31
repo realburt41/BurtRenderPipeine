@@ -303,9 +303,13 @@ void SceneVoxelPopulateScreenProbesLiteCS(uint3 dispatchThreadId : SV_DispatchTh
     float blendedNormalLengthSq = dot(blendedNormalWS, blendedNormalWS);
     blendedNormalWS = blendedNormalLengthSq > 0.0001 ? blendedNormalWS * rsqrt(blendedNormalLengthSq) : normalWS;
     float3 blendedRadiance = (max(existingRadiance.rgb, 0.0) * sourceConfidence + radiance * screenWeight) / totalWeight;
+    float4 existingPrelitRadiance = _BurtGISceneVoxelLightingTexture[voxelCoord];
+    float3 blendedPrelitRadiance =
+        (max(existingPrelitRadiance.rgb, 0.0) * sourceConfidence + radiance * screenWeight) / totalWeight;
     float blendedConfidence = saturate(min(sourceSampleCount + confidence, maxSampleCount) / maxSampleCount);
     _BurtGISceneVoxelRadianceTexture[voxelCoord] = float4(blendedRadiance, blendedConfidence);
     _BurtGISceneVoxelGeometryTexture[voxelCoord] = float4(blendedNormalWS * 0.5 + 0.5, blendedConfidence);
+    _BurtGISceneVoxelLightingTexture[voxelCoord] = float4(blendedPrelitRadiance, blendedConfidence);
 }
 [numthreads(64, 1, 1)]
 void SceneVoxelVoxelizeTrianglesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -354,15 +358,18 @@ void SceneVoxelVoxelizeTrianglesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             uint3 voxelCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
             float4 previousRadiance = _BurtGISceneVoxelRadianceTexture[voxelCoord];
             float4 previousGeometry = _BurtGISceneVoxelGeometryTexture[voxelCoord];
+            float4 previousPrelitRadiance = _BurtGISceneVoxelLightingTexture[voxelCoord];
             float previousConfidence = saturate(max(previousRadiance.a, previousGeometry.a));
             float writeWeight = 1.0 / max(1.0 + previousConfidence, 1.0);
             float3 blendedRadiance = lerp(max(previousRadiance.rgb, 0.0), radiance, writeWeight);
+            float3 blendedPrelitRadiance = lerp(max(previousPrelitRadiance.rgb, 0.0), materialEmission, writeWeight);
             float3 previousNormalWS = previousGeometry.xyz * 2.0 - 1.0;
             float previousNormalLengthSq = dot(previousNormalWS, previousNormalWS);
             previousNormalWS = previousNormalLengthSq > 0.0001 ? previousNormalWS * rsqrt(previousNormalLengthSq) : normalWS;
             float3 blendedNormalWS = BurtGISceneVoxelSafeNormalize(lerp(previousNormalWS, normalWS, writeWeight), normalWS);
             _BurtGISceneVoxelRadianceTexture[voxelCoord] = float4(blendedRadiance, 1.0);
             _BurtGISceneVoxelGeometryTexture[voxelCoord] = float4(blendedNormalWS * 0.5 + 0.5, 1.0);
+            _BurtGISceneVoxelLightingTexture[voxelCoord] = float4(blendedPrelitRadiance, 1.0);
         }
     }
 }

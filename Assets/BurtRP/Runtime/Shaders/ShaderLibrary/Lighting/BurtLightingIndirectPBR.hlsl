@@ -82,6 +82,13 @@ float3 Specular;
     float3 SubsurfaceIndirectTransmission;
 };
 
+BurtIndirectPBRComponents BurtCreateZeroPBRIndirectComponents()
+{
+    BurtIndirectPBRComponents Components = (BurtIndirectPBRComponents)0;
+    Components.SpecularEnergyCompensation = float3(1.0f, 1.0f, 1.0f);
+    return Components;
+}
+
 #if BURT_ENABLE_SUBSURFACE_SHADING && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_SUBSURFACE))
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingSubsurface.hlsl"
 #else

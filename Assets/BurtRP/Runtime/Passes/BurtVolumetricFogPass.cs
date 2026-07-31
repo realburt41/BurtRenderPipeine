@@ -48,6 +48,10 @@ namespace Burt.RenderPipeline
 
             builder.ReadCameraColor();
             builder.ReadCameraDepth();
+            if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftOcclusion(builder.Request))
+            {
+                builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.LightShaftOcclusionName);
+            }
             builder.ReadLightingGlobals();
             builder.ReadShadowGlobals();
             if (builder.ResourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName))
@@ -117,6 +121,7 @@ namespace Burt.RenderPipeline
             UploadMaterialProperties(drawMaterial, camera, request, settings, translucencyGIEnabled);
 
             var cmd = CommandBufferPool.Get(Name);
+            BurtLightShaftOcclusionUtility.BindForOpaqueFog(cmd, context);
             cmd.SetGlobalTexture(TranslucencyVolume0Id, translucencyVolume0);
             cmd.SetGlobalTexture(TranslucencyVolume1Id, translucencyVolume1);
             cmd.SetGlobalVector(TranslucencyGIParamsId, new Vector4(translucencyGIEnabled ? 1f : 0f, 0f, 0f, 0f));
@@ -301,11 +306,15 @@ namespace Burt.RenderPipeline
             }
 
             var shader = Shader.Find(BurtVolumetricFogUtility.ShaderName);
-            if (shader == null)
+            if (shader == null ||
+                !shader.isSupported ||
+                shader.passCount < 1)
             {
                 if (!hasLoggedMissingShader)
                 {
-                    Debug.LogWarning("BurtRP could not find shader: " + BurtVolumetricFogUtility.ShaderName);
+                    Debug.LogWarning(
+                        "BurtRP cannot use shader: " +
+                        BurtVolumetricFogUtility.ShaderName);
                     hasLoggedMissingShader = true;
                 }
 

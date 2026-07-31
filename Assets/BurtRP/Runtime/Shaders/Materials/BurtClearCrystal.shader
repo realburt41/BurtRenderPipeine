@@ -61,6 +61,7 @@ Shader "BurtRP/Clear Crystal"
         [Toggle] _Refraction ("Refraction", Float) = 1
         [Toggle] _ZWrite ("Transparent ZWrite", Float) = 1
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 1
+        [ToggleUI] _IgnoreFog ("Ignore Global Fog", Float) = 0
         [Enum(Off,0,Front,1,Back,2)] _Cull ("Cull", Float) = 0
         [Enum(None,0,Flip,1,Mirror,2)] _DoubleSidedNormalMode ("Double Sided Normal Mode", Float) = 1
         [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (-1, -1, -1, 0)
@@ -126,8 +127,10 @@ Shader "BurtRP/Clear Crystal"
             #pragma vertex VertClearCrystal
             #pragma fragment FragClearCrystal
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma shader_feature_local _ BURT_IGNORE_FOG
             #pragma multi_compile_instancing
             #pragma target 3.5
+            #define BURT_TRANSPARENT_VERTEX_FOG 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtClearCrystalPass.hlsl"
             ENDHLSL
         }

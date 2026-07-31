@@ -9,11 +9,8 @@ namespace Burt.RenderPipeline.Editor
 {
     internal sealed class BurtShadingDebugShaderVariantStripper : IPreprocessShaders
     {
-        private const string MainKeyword = "BURT_SHADING_DEBUG";
-        private const string LightingKeyword = "BURT_FORWARD_SHADING_DEBUG_LIGHTING";
-        private const string BrdfKeyword = "BURT_FORWARD_SHADING_DEBUG_BRDF";
-        private const string ShadowKeyword = "BURT_FORWARD_SHADING_DEBUG_SHADOW";
-        private const string TransmissionKeyword = "BURT_FORWARD_SHADING_DEBUG_TRANSMISSION";
+        private const string ForwardKeyword = "BURT_USE_DEBUG_MODE_FORWARD";
+        private const string DeferredKeyword = "BURT_USE_DEBUG_MODE_DEFERRED";
 
         public int callbackOrder => 0;
 
@@ -44,11 +41,8 @@ namespace Burt.RenderPipeline.Editor
             {
                 switch (keywords[index].name)
                 {
-                    case MainKeyword:
-                    case LightingKeyword:
-                    case BrdfKeyword:
-                    case ShadowKeyword:
-                    case TransmissionKeyword:
+                    case ForwardKeyword:
+                    case DeferredKeyword:
                         return true;
                 }
             }

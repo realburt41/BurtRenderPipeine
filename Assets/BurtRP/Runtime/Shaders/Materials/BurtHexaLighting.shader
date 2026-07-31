@@ -18,6 +18,7 @@ Shader "BurtRP/Hexa Lighting"
         [Enum(Off,0,Front,1,Back,2)] _Cull ("Cull", Float) = 2
         [Toggle] _ZWrite ("ZWrite", Float) = 0
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 1
+        [ToggleUI] _IgnoreFog ("Ignore Global Fog", Float) = 0
     }
 
     SubShader
@@ -37,7 +38,9 @@ Shader "BurtRP/Hexa Lighting"
             #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma shader_feature_local _ BURT_IGNORE_FOG
             #pragma multi_compile_instancing
+            #define BURT_TRANSPARENT_VERTEX_FOG 1
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtHexaLightingPass.hlsl"
             ENDHLSL
         }

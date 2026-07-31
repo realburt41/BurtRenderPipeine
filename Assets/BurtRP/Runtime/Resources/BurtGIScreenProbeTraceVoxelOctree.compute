@@ -1,5 +1,6 @@
 #pragma kernel ScreenProbeTraceVoxelOctreeCS
 
+// Standalone Resources kernel for the ScreenProbe voxel-octree trace stage.
 #define BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_BASE_ONLY 1
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
 #define BURT_GI_SCREEN_PROBE_PLACEMENT_THREADGROUP_SIZE 8

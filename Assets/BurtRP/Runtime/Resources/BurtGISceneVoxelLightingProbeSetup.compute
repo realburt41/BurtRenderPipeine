@@ -135,23 +135,6 @@ bool BurtGIVoxelProbeClipmapValid(uint validMask, uint clipmapIndex)
 {
     return ((validMask >> clipmapIndex) & 1u) != 0u;
 }
-uint BurtGIVoxelProbeClipmapFromArgs(uint threadIndex)
-{
-    uint clipmapIndex = 0u;
-    if (BurtGIVoxelProbeClipmapValid((uint)max(VoxelProbeClipmapValidMask, 0), 4u) && VoxelProbeArgsBufferParams[4] <= threadIndex)
-    {
-        clipmapIndex = 4u;
-    }
-    if (clipmapIndex + 2u < BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET && VoxelProbeArgsBufferParams[clipmapIndex + 2u] <= threadIndex)
-    {
-        clipmapIndex += 2u;
-    }
-    if (clipmapIndex + 1u < BURT_GI_XGI_PROBE_ALLOCATOR_OFFSET && VoxelProbeArgsBufferParams[clipmapIndex + 1u] <= threadIndex)
-    {
-        clipmapIndex += 1u;
-    }
-    return clipmapIndex;
-}
 float4 BurtGIProbeClipmapCenterExtent(uint clipmapIndex)
 {
     return clipmapIndex < 6u ? _BurtGISceneVoxelClipmapCenterExtent[clipmapIndex] : _BurtGISceneVoxelCenterExtent;

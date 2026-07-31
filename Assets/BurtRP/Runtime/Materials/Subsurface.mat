@@ -43,6 +43,18 @@ Material:
         m_Texture: {fileID: 2800000, guid: 8255c37b45148bf46b799caabcc28103, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _SkinnedDecalPluginModel_DecalAlbedo:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SkinnedDecalPluginModel_DecalMOHR:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SkinnedDecalPluginModel_DecalNormal:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _SubsurfaceThicknessMap:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -50,9 +62,13 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
+    - _BlendMode: 0
     - _BurtGBufferStencilReadMask: 224
     - _BurtGBufferStencilRef: 64
     - _BurtGBufferStencilWriteMask: 224
+    - _BurtSkinnedDecalEntryDebug: 0
+    - _BurtSkinnedDecalProjectionDebug: 0
+    - _BurtSkinnedDecalUseMeshPosition: 0
     - _Cull: 2
     - _Cutoff: 0.5
     - _DoubleSidedEnable: 0
@@ -63,6 +79,8 @@ Material:
     - _NormalScale: 0.334
     - _OcclusionStrength: 1
     - _ResponsiveAA: 0
+    - _SkinnedDecalEnabled: 0
+    - _SkinnedDecalPluginModel_DecalCount: 1
     - _Smoothness: 1
     - _SrcBlend: 1
     - _Subsurface3SCurvatureBias: 0.534
@@ -80,4 +98,29 @@ Material:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _DoubleSidedNormalModeConstants: {r: 1, g: 1, b: 1, a: 0}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - _SkinnedDecalPluginModel_DecalArrayIndexSize1: {r: 0, g: 1, b: 0, a: 1}
+    - _SkinnedDecalPluginModel_DecalArraySizeIndex2: {r: 0, g: 1, b: 0, a: 1}
+    - _SkinnedDecalPluginModel_DecalArraySizeIndex3: {r: 0, g: 1, b: 0, a: 1}
+    - _SkinnedDecalPluginModel_DecalArraySizeIndex4: {r: 0, g: 1, b: 0, a: 1}
+    - _SkinnedDecalPluginModel_DecalArraySizeIndex5: {r: 0, g: 1, b: 0, a: 1}
+    - _SkinnedDecalPluginModel_DecalBasisX1: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalBasisX2: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalBasisX3: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalBasisX4: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalBasisX5: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalBasisY1: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalBasisY2: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalBasisY3: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalBasisY4: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalBasisY5: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalPosition1: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalPosition2: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalPosition3: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalPosition4: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalPosition5: {r: 0, g: 0, b: 0, a: 0}
+    - _SkinnedDecalPluginModel_DecalTint1: {r: 1, g: 1, b: 1, a: 1}
+    - _SkinnedDecalPluginModel_DecalTint2: {r: 1, g: 1, b: 1, a: 1}
+    - _SkinnedDecalPluginModel_DecalTint3: {r: 1, g: 1, b: 1, a: 1}
+    - _SkinnedDecalPluginModel_DecalTint4: {r: 1, g: 1, b: 1, a: 1}
+    - _SkinnedDecalPluginModel_DecalTint5: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

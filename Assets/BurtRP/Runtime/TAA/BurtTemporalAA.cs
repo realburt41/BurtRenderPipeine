@@ -157,15 +157,24 @@ namespace Burt.RenderPipeline
 
     internal readonly struct BurtTemporalAAHistoryTextures
     {
-        public RenderTexture Color { get; }
+        public RenderTexture PreviousColor { get; }
+        public RenderTexture CurrentColor { get; }
         public RenderTexture Depth { get; }
-        public RenderTexture Guide { get; }
+        public RenderTexture PreviousGuide { get; }
+        public RenderTexture CurrentGuide { get; }
 
-        public BurtTemporalAAHistoryTextures(RenderTexture color, RenderTexture depth, RenderTexture guide)
+        public BurtTemporalAAHistoryTextures(
+            RenderTexture previousColor,
+            RenderTexture currentColor,
+            RenderTexture depth,
+            RenderTexture previousGuide,
+            RenderTexture currentGuide)
         {
-            Color = color;
+            PreviousColor = previousColor;
+            CurrentColor = currentColor;
             Depth = depth;
-            Guide = guide;
+            PreviousGuide = previousGuide;
+            CurrentGuide = currentGuide;
         }
     }
 
@@ -218,7 +227,7 @@ namespace Burt.RenderPipeline
         private const int TAAUMaxHistoryDimension = 6144;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
-        private const int HistoryLayoutVersion = 33;
+        private const int HistoryLayoutVersion = 36;
 
         private sealed class CameraState
         {
@@ -248,8 +257,10 @@ namespace Burt.RenderPipeline
             public Matrix4x4 PreviousNonJitteredProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousViewMatrix = Matrix4x4.identity;
             public RenderTexture ColorHistory;
+            public RenderTexture CurrentColorHistory;
             public RenderTexture DepthHistory;
             public RenderTexture GuideHistory;
+            public RenderTexture CurrentGuideHistory;
             public RenderTextureDescriptor ColorDescriptor;
             public RenderTextureDescriptor DepthDescriptor;
             public RenderTextureDescriptor GuideDescriptor;
@@ -378,7 +389,9 @@ namespace Burt.RenderPipeline
             var historyExposureCorrection = currentPreExposure / Mathf.Max(previousPreExposure, 0.0001f);
             var colorDescriptor = CreateColorHistoryDescriptor(camera);
             var depthDescriptor = CreateScalarHistoryDescriptor(camera);
-            var colorMatches = state.ColorHistory != null && Matches(state.ColorDescriptor, colorDescriptor);
+            var colorMatches = state.ColorHistory != null &&
+                state.CurrentColorHistory != null &&
+                Matches(state.ColorDescriptor, colorDescriptor);
             var depthMatches = state.DepthHistory != null && Matches(state.DepthDescriptor, depthDescriptor);
             var layoutMatches = state.HistoryLayoutVersion == HistoryLayoutVersion;
             var descriptorsMatch = colorMatches && depthMatches && layoutMatches;
@@ -585,7 +598,7 @@ namespace Burt.RenderPipeline
             historyValid = false;
             if (camera == null)
             {
-                return new BurtTemporalAAHistoryTextures(null, null, null);
+                return new BurtTemporalAAHistoryTextures(null, null, null, null, null);
             }
 
             var state = GetOrCreateState(camera.GetInstanceID());
@@ -595,11 +608,15 @@ namespace Burt.RenderPipeline
             var guideDescriptor = CreateGuideHistoryDescriptor(camera);
             var needsGuideHistory = ShouldUseOutputResolutionHistory(camera);
 
-            if (state.ColorHistory == null || !Matches(state.ColorDescriptor, colorDescriptor))
+            if (state.ColorHistory == null ||
+                state.CurrentColorHistory == null ||
+                !Matches(state.ColorDescriptor, colorDescriptor))
             {
                 ReleaseTexture(state.ColorHistory);
+                ReleaseTexture(state.CurrentColorHistory);
                 state.ColorDescriptor = colorDescriptor;
-                state.ColorHistory = CreateHistoryTexture(colorDescriptor, "Burt TAA Color History " + camera.GetInstanceID(), FilterMode.Bilinear);
+                state.ColorHistory = CreateHistoryTexture(colorDescriptor, "Burt TAA Previous Color History " + camera.GetInstanceID(), FilterMode.Bilinear);
+                state.CurrentColorHistory = CreateHistoryTexture(colorDescriptor, "Burt TAA Current Color History " + camera.GetInstanceID(), FilterMode.Bilinear);
                 state.HasValidHistory = false;
                 state.FirstValidFrameIndex = 0;
                 SetAllocationInvalidationReason(state, "HistoryAllocated");
@@ -615,11 +632,16 @@ namespace Burt.RenderPipeline
                 SetAllocationInvalidationReason(state, "DepthHistoryAllocated");
             }
 
-            if (needsGuideHistory && (state.GuideHistory == null || !Matches(state.GuideDescriptor, guideDescriptor)))
+            if (needsGuideHistory &&
+                (state.GuideHistory == null ||
+                 state.CurrentGuideHistory == null ||
+                 !Matches(state.GuideDescriptor, guideDescriptor)))
             {
                 ReleaseTexture(state.GuideHistory);
+                ReleaseTexture(state.CurrentGuideHistory);
                 state.GuideDescriptor = guideDescriptor;
-                state.GuideHistory = CreateHistoryTexture(guideDescriptor, "Burt TAAU Guide History " + camera.GetInstanceID(), FilterMode.Bilinear);
+                state.GuideHistory = CreateHistoryTexture(guideDescriptor, "Burt TAAU Previous Guide History " + camera.GetInstanceID(), FilterMode.Bilinear);
+                state.CurrentGuideHistory = CreateHistoryTexture(guideDescriptor, "Burt TAAU Current Guide History " + camera.GetInstanceID(), FilterMode.Bilinear);
                 state.HasValidHistory = false;
                 state.FirstValidFrameIndex = 0;
                 SetAllocationInvalidationReason(state, "GuideHistoryAllocated");
@@ -627,17 +649,24 @@ namespace Burt.RenderPipeline
             else if (!needsGuideHistory && state.GuideHistory != null)
             {
                 ReleaseTexture(state.GuideHistory);
+                ReleaseTexture(state.CurrentGuideHistory);
                 state.GuideHistory = null;
+                state.CurrentGuideHistory = null;
                 state.GuideDescriptor = default;
             }
 
             historyValid = state.HasValidHistory;
-            return new BurtTemporalAAHistoryTextures(state.ColorHistory, state.DepthHistory, state.GuideHistory);
+            return new BurtTemporalAAHistoryTextures(
+                state.ColorHistory,
+                state.CurrentColorHistory,
+                state.DepthHistory,
+                state.GuideHistory,
+                state.CurrentGuideHistory);
         }
 
         public static RenderTexture EnsureHistoryTexture(Camera camera, out bool historyValid)
         {
-            return EnsureHistoryTextures(camera, out historyValid).Color;
+            return EnsureHistoryTextures(camera, out historyValid).PreviousColor;
         }
 
         public static void MarkHistoryValid(Camera camera)
@@ -651,6 +680,12 @@ namespace Burt.RenderPipeline
             if (!state.HasValidHistory)
             {
                 state.FirstValidFrameIndex = state.FrameIndex;
+            }
+
+            Swap(ref state.ColorHistory, ref state.CurrentColorHistory);
+            if (state.GuideHistory != null && state.CurrentGuideHistory != null)
+            {
+                Swap(ref state.GuideHistory, ref state.CurrentGuideHistory);
             }
 
             state.HasValidHistory = true;
@@ -685,7 +720,7 @@ namespace Burt.RenderPipeline
 
             var colorDescriptor = CreateColorHistoryDescriptor(camera);
             var depthDescriptor = CreateScalarHistoryDescriptor(camera);
-            var hasColor = state.ColorHistory != null;
+            var hasColor = state.ColorHistory != null && state.CurrentColorHistory != null;
             var hasDepth = state.DepthHistory != null;
             var historyAge = state.HasValidHistory && state.FirstValidFrameIndex > 0 ? Mathf.Max(0, state.FrameIndex - state.FirstValidFrameIndex + 1) : 0;
             var hasUsableHistory = state.HasValidHistory && hasColor;
@@ -762,6 +797,7 @@ namespace Burt.RenderPipeline
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
             descriptor.autoGenerateMips = false;
+            descriptor.enableRandomWrite = ShouldUseOutputResolutionHistory(camera);
             return descriptor;
         }
 
@@ -779,6 +815,13 @@ namespace Burt.RenderPipeline
             return descriptor;
         }
 
+        private static void Swap<T>(ref T previous, ref T current)
+        {
+            var temporary = previous;
+            previous = current;
+            current = temporary;
+        }
+
         private static RenderTextureDescriptor CreateGuideHistoryDescriptor(Camera camera)
         {
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
@@ -788,6 +831,7 @@ namespace Burt.RenderPipeline
             descriptor.useMipMap = false;
             descriptor.autoGenerateMips = false;
             descriptor.sRGB = false;
+            descriptor.enableRandomWrite = true;
             return descriptor;
         }
 
@@ -1110,11 +1154,15 @@ namespace Burt.RenderPipeline
             }
 
             ReleaseTexture(state.ColorHistory);
+            ReleaseTexture(state.CurrentColorHistory);
             ReleaseTexture(state.DepthHistory);
             ReleaseTexture(state.GuideHistory);
+            ReleaseTexture(state.CurrentGuideHistory);
             state.ColorHistory = null;
+            state.CurrentColorHistory = null;
             state.DepthHistory = null;
             state.GuideHistory = null;
+            state.CurrentGuideHistory = null;
             state.HistoryLayoutVersion = 0;
             state.HasValidHistory = false;
             state.FirstValidFrameIndex = 0;
