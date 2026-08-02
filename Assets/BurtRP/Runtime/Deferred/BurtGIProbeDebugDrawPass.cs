@@ -171,7 +171,7 @@ namespace Burt.RenderPipeline
                 }
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
             stats.Status = stats.ProbeInstanceCount > 0 || stats.VirtualOffsetInstanceCount > 0 ? "OK" : "NoVisibleInstances";
             lastStats = stats;

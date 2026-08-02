@@ -22,11 +22,10 @@ namespace Burt.RenderPipeline
 
             var camera = BurtHiZDepthPassUtility.ResolveCamera(context);
             var descriptor = BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(camera);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.HiZDepthTextureId, descriptor, FilterMode.Point);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.HiZDepthTextureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -71,7 +70,7 @@ namespace Burt.RenderPipeline
             var camera = BurtHiZDepthPassUtility.ResolveCamera(context);
             var descriptor = BurtRenderTargetDescriptorUtility.CreateHiZDepthDescriptor(camera);
             var mipCount = BurtRenderTargetDescriptorUtility.CalculateMipCount(descriptor.width, descriptor.height);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
 
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.HiZDepthTextureId, hiZDepthTarget.Identifier);
@@ -100,8 +99,7 @@ namespace Burt.RenderPipeline
             }
 
             RestoreCameraTargets(cmd, context, descriptor.width, descriptor.height);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private static Vector4 CreateTexelSize(int width, int height)
@@ -173,10 +171,9 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.HiZDepthTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -229,7 +226,7 @@ namespace Burt.RenderPipeline
             var mipCount = BurtRenderTargetDescriptorUtility.CalculateMipCount(descriptor.width, descriptor.height);
             var maxMip = Mathf.Max(0, mipCount - 1);
             var selectedMip = Mathf.Clamp(context.Asset.HiZDebugMip, 0, maxMip);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             cmd.SetViewport(new Rect(0f, 0f, Mathf.Max(1, cameraColorDescriptor.width), Mathf.Max(1, cameraColorDescriptor.height)));
@@ -239,8 +236,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalFloat(HiZDebugMaxMipId, maxMip);
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         public static bool ShouldUseHiZDebugView(BurtRenderPipelineAsset asset)

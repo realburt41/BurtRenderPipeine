@@ -79,7 +79,7 @@ namespace Burt.RenderPipeline
             var flipY = BurtFinalBlitUtility.ResolveFinalBlitYFlip(context.Request);
             var shaderPass = source == BurtDebugTextureSource.HiZDepth ? 1 : 0;
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColor.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(
                 cmd,
@@ -87,8 +87,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(DebugTextureId, sourceTarget.Identifier);
             cmd.SetGlobalVector(DebugParamsId, new Vector4(scale, flipY, linearize, mip));
             cmd.DrawProcedural(Matrix4x4.identity, debugMaterial, shaderPass, MeshTopology.Triangles, 3, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private bool TryGetSource(BurtRenderGraphContext context, out BurtRenderTargetHandle target)

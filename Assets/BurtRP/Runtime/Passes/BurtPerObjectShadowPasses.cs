@@ -291,9 +291,9 @@ namespace Burt.RenderPipeline
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
         }
 
-        public static void ResetShadowCasterState(BurtRenderGraphContext context, ScriptableRenderContext renderContext, Camera camera)
+        public static void ResetShadowCasterState(BurtRenderGraphContext context, Camera camera)
         {
-            var cmd = CommandBufferPool.Get("Burt Reset Per Object Shadow Caster State");
+            var cmd = context.AcquireCommandBuffer("Burt Reset Per Object Shadow Caster State");
             cmd.SetGlobalDepthBias(0f, 0f);
             cmd.SetGlobalFloat(CastingPunctualLightShadowId, 0f);
             cmd.SetGlobalFloat(MainLightShadowDepthBiasId, 0f);
@@ -305,12 +305,11 @@ namespace Burt.RenderPipeline
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.FlushCommandBuffer();
 
             if (camera != null && !BurtDrawingSettingsUtility.IsTemporalAAEnabled(context))
             {
-                renderContext.SetupCameraProperties(camera);
+                context.ScriptableContext.SetupCameraProperties(camera);
             }
         }
 
@@ -731,22 +730,20 @@ namespace Burt.RenderPipeline
             var preparedData = BurtPerObjectShadowUtility.Prepare(context.Request);
             if (preparedData.SliceCount <= 0)
             {
-                var clearCmd = CommandBufferPool.Get(Name + " Clear Globals");
+                var clearCmd = context.AcquireCommandBuffer(Name + " Clear Globals");
                 BurtPerObjectShadowUtility.UploadPerObjectShadowReceiverGlobals(clearCmd, null, atlasTarget, preparedData);
-                context.ScriptableContext.ExecuteCommandBuffer(clearCmd);
-                CommandBufferPool.Release(clearCmd);
+                context.ExecuteAndReleaseCommandBuffer(clearCmd);
                 return;
             }
 
             var descriptor = BurtPerObjectShadowUtility.CreateAtlasDescriptor(preparedData);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.PerObjectShadowAtlasId, descriptor, FilterMode.Bilinear);
             BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, atlasTarget);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
             BurtPerObjectShadowUtility.BindPerObjectShadowAtlasIfValid(cmd, atlasTarget);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -777,19 +774,19 @@ namespace Burt.RenderPipeline
             var atlasTarget = context.PerObjectShadowAtlasTarget;
             if (camera == null || !atlasTarget.IsValid)
             {
-                DisablePerObjectShadowReceiverGlobals(context.ScriptableContext);
+                DisablePerObjectShadowReceiverGlobals(context);
                 return;
             }
 
             var preparedData = BurtPerObjectShadowUtility.Prepare(request);
             if (preparedData.SliceCount <= 0)
             {
-                DisablePerObjectShadowReceiverGlobals(context.ScriptableContext, atlasTarget, preparedData);
+                DisablePerObjectShadowReceiverGlobals(context, atlasTarget, preparedData);
                 return;
             }
 
             var mainLightDirection = BurtPerObjectShadowUtility.ResolveMainLightDirection(request);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             try
             {
                 cmd.SetGlobalInt(BurtPerObjectShadowUtility.PerObjectShadowObjectIndexId, 0);
@@ -797,8 +794,6 @@ namespace Burt.RenderPipeline
                 BurtRenderTargetDescriptorUtility.SetViewport(cmd, preparedData.AtlasWidth, preparedData.AtlasHeight);
                 cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
                 BurtPerObjectShadowUtility.UploadPerObjectShadowReceiverGlobals(cmd, null, atlasTarget, preparedData);
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                cmd.Clear();
 
                 for (var sliceIndex = 0; sliceIndex < preparedData.SliceCount; sliceIndex++)
                 {
@@ -813,26 +808,21 @@ namespace Burt.RenderPipeline
                         slice.ViewMatrix,
                         0f,
                         0f);
-                    context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                    cmd.Clear();
 
-                    DrawSliceRenderers(cmd, context.ScriptableContext, slice, camera);
+                    DrawSliceRenderers(cmd, slice, camera);
 
                     cmd.DisableScissorRect();
-                    context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                    cmd.Clear();
                 }
             }
             finally
             {
-                CommandBufferPool.Release(cmd);
-                BurtPerObjectShadowUtility.ResetShadowCasterState(context, context.ScriptableContext, camera);
+                BurtPerObjectShadowUtility.ResetShadowCasterState(context, camera);
             }
 
-            UploadPerObjectShadowReceiverGlobals(context.ScriptableContext, atlasTarget, preparedData);
+            UploadPerObjectShadowReceiverGlobals(context, atlasTarget, preparedData);
         }
 
-        private static void DrawSliceRenderers(CommandBuffer cmd, ScriptableRenderContext renderContext, PerObjectShadowSlice slice, Camera camera)
+        private static void DrawSliceRenderers(CommandBuffer cmd, PerObjectShadowSlice slice, Camera camera)
         {
             if (slice == null)
             {
@@ -883,44 +873,36 @@ namespace Burt.RenderPipeline
                     true);
             }
 
-            renderContext.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
         }
 
         private static void UploadPerObjectShadowReceiverGlobals(
-            ScriptableRenderContext renderContext,
+            BurtRenderGraphContext context,
             BurtRenderTargetHandle atlasTarget,
             PerObjectShadowPrepareData preparedData)
         {
             if (preparedData == null || preparedData.SliceCount <= 0 || !atlasTarget.IsValid)
             {
-                DisablePerObjectShadowReceiverGlobals(renderContext);
+                DisablePerObjectShadowReceiverGlobals(context);
                 return;
             }
 
-            var cmd = CommandBufferPool.Get("Burt Upload Per Object Shadow Receiver");
+            var cmd = context.AcquireCommandBuffer("Burt Upload Per Object Shadow Receiver");
             BurtPerObjectShadowUtility.UploadPerObjectShadowReceiverGlobals(cmd, null, atlasTarget, preparedData);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
         }
 
-        private static void DisablePerObjectShadowReceiverGlobals(ScriptableRenderContext renderContext)
+        private static void DisablePerObjectShadowReceiverGlobals(BurtRenderGraphContext context)
         {
-            var cmd = CommandBufferPool.Get("Burt Disable Per Object Shadow Receiver");
+            var cmd = context.AcquireCommandBuffer("Burt Disable Per Object Shadow Receiver");
             BurtPerObjectShadowUtility.ClearPerObjectShadowReceiverGlobals(cmd);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
         }
 
         private static void DisablePerObjectShadowReceiverGlobals(
-            ScriptableRenderContext renderContext,
+            BurtRenderGraphContext context,
             BurtRenderTargetHandle atlasTarget,
             PerObjectShadowPrepareData preparedData)
         {
-            var cmd = CommandBufferPool.Get("Burt Disable Per Object Shadow Receiver");
+            var cmd = context.AcquireCommandBuffer("Burt Disable Per Object Shadow Receiver");
             BurtPerObjectShadowUtility.UploadPerObjectShadowReceiverGlobals(cmd, null, atlasTarget, preparedData);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
         }
     }
 
@@ -976,13 +958,12 @@ namespace Burt.RenderPipeline
             material.SetFloat(ShadowDebugExposureId, 1f);
             material.SetFloat(ShadowDebugYFlipId, BurtFinalBlitUtility.ResolveFinalBlitYFlip(context.Request));
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.PerObjectShadowAtlasId, atlasTarget.Identifier);
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private Material GetDebugShadowMaterial()
@@ -1037,10 +1018,9 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.PerObjectShadowAtlasId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 }

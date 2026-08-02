@@ -511,6 +511,7 @@ BurtHairDirectComponents BurtEvaluateHairDirectLightingComponents(BurtGBufferDat
     return BurtAddHairDirectComponents(DirectComponents, BurtEvaluateHairAdditionalDirectLightingComponents(GBufferData, GeometryData, PositionWS, ScreenUV));
 }
 
+#if !defined(BURT_PBR_DIRECT_ONLY)
 float3 BurtEvaluateHairIndirectDiffuse(BurtGBufferData GBufferData, float3 HairNormalWS)
 {
     // First-step Hair has no deep opacity/dual scattering data; use view-facing strand normal as A soft colored fill direction.
@@ -857,4 +858,5 @@ BurtPBRShadingComponents BurtEvaluateHairShadingComponentsFromGBuffer(BurtGBuffe
     return Components;
 }
 
+#endif
 #endif

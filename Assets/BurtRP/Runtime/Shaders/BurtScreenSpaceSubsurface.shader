@@ -34,7 +34,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         float4 _BurtSSSScreenSize;
         float4 _BurtSSSFullScreenSize;
         float _BurtSSSHalfResolution;
-        float4 _BurtSSSQualityParams;
+        float4 _BurtSSSQualityParams; // w enables normal bilateral weighting (Low=0, Medium/High=1).
         float4 _BurtSSSProjectionParams; // x=XRender SSS scale (m00 / kernel size * 0.5), y=projection m00, z=kernel size, w=unused
         float4 _BurtSSSFrameParams; // x=frame index, y=wrapped frame index, z=stable sampling, w=debug sampling.
         float _BurtSSSDebugMode;
@@ -736,8 +736,13 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             float sameSample = inBounds * sameProfile * hasScreenSpaceProfile;
             float3 sampleColor = sameSample > 0.5f ? sampleSource.rgb : centerSource.rgb;
             float sampleAlpha = BurtSSSSeparableSampleAlpha(centerSceneDepth, sampleDepth);
+            float3 sampleNormalWS = BurtDecodeNormalWS888FromGBuffer(
+                BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer0, sampleUV, 0.0f).rgb);
+            float normalWeight = saturate(dot(center.NormalWS, sampleNormalWS));
+            normalWeight = pow(normalWeight, max(profile.Params.z * 24.0f, 1.0f));
+            normalWeight = lerp(1.0f, normalWeight, sameSample * saturate(_BurtSSSQualityParams.w));
             float3 colorTint = sameSample > 0.5f ? float3(1.0f, 1.0f, 1.0f) : max(profile.BoundaryColorBleed.rgb, float3(0.0f, 0.0f, 0.0f));
-            float3 weightedKernel = sampleAlpha * kernelWeight;
+            float3 weightedKernel = sampleAlpha * normalWeight * kernelWeight;
             sumColor += sampleColor * colorTint * weightedKernel;
             sumWeight += weightedKernel;
         }
@@ -1057,7 +1062,18 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         float4 FragMask(Varyings input) : SV_Target
         {
-            float encodedProfileIDAndType = tex2D(_BurtScreenSpaceSubsurfaceBaseColorTexture, input.ScreenUV).a;
+            BurtEncodedGBuffer encoded = BurtSampleEncodedGBuffer(input.ScreenUV);
+            BurtGBufferData data = BurtDecodeDeferredGBuffer(encoded, input.ScreenUV);
+            float encodedProfileIDAndType = 0.0f;
+            float scatteringMode = BurtGetSubsurfaceScatteringMode(data);
+            if (BurtIsSubsurfaceShadingModel(data.ShadingModelID) && !BurtIsSubsurface3SPreIntegratedMode(scatteringMode))
+            {
+                float profileID = BurtClampSubsurfaceProfileIndex(BurtGetSubsurfaceProfileIndex(data));
+                float profileType = BurtIsSubsurface4SSeparableMode(scatteringMode)
+                    ? BURT_SSS_PROFILE_TYPE_SEPARABLE_FLOAT
+                    : BURT_SSS_PROFILE_TYPE_BURLEY_FLOAT;
+                encodedProfileIDAndType = (profileType + profileID) / 255.0f;
+            }
             return float4(encodedProfileIDAndType, encodedProfileIDAndType, encodedProfileIDAndType, 1.0f);
         }
 

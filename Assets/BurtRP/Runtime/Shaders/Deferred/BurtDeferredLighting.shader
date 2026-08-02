@@ -23,6 +23,13 @@ Shader "Hidden/BurtRP/DeferredLighting"
             // XRender DeferredLightingNoPunctual equivalent: punctual/additional
             // lights are evaluated by the dedicated additive stage.
             #define BURT_DEFERRED_LIGHTING_EXCLUDE_ADDITIONAL 1
+            // Match XRender's no-punctual stage at preprocessing time. The
+            // default deferred variant must not carry the additional-light
+            // buffers, tiled lists, or their light loops.
+            #define BURT_EXCLUDE_ADDITIONAL_LIGHTING 1
+            #define BURT_SHADOWS_MAIN_ONLY 1
+            #define BURT_DEFERRED_MAIN_LIGHT_PCSS_VARIANT 1
+            #pragma shader_feature_local_fragment _ BURT_MAIN_LIGHT_SHADOW_PCSS
             // XRender-style deferred debug: the production lighting pass owns one
             // optional debug variant and selects the displayed result at runtime.
             // The debug path reuses the production shading result; it is not a

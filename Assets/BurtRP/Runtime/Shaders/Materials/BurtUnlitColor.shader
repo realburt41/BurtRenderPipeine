@@ -9,6 +9,7 @@ Shader "BurtRP/UnlitColor"
         [HideInInspector] _BaseMap ("Base Map", 2D) = "white" {}
         [HideInInspector] _AlphaClip ("Alpha Clip", Float) = 0
         [HideInInspector] _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
+        [HideInInspector] _BurtGIVoxelizeEmissionMode ("GI Voxelize Emission Mode", Float) = 1
         [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
         [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
@@ -19,6 +20,7 @@ Shader "BurtRP/UnlitColor"
     {
         // 给 SubShader 打标签，RenderType 表示这是不透明物体，RenderPipeline 标记这是 BurtRP shader。
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelize"
 
         // 定义深度预写 Pass，只写深度，不写颜色。
         Pass

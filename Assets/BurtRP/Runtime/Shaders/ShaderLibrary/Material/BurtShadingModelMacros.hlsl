@@ -206,7 +206,8 @@
         #define BURT_ENABLE_FABRIC_SHADING 0
         #define BURT_ENABLE_FOLIAGE_SHADING 0
         #define BURT_ENABLE_FUR_SHADING 0
-        #define BURT_ENABLE_EYE_SHADING 1
+        // XRender parity: Eye is Forward-only and must not enlarge Deferred Default Lit.
+        #define BURT_ENABLE_EYE_SHADING 0
     #endif
 #endif
 
@@ -279,6 +280,19 @@
         #define BURT_ENABLE_EYE_SHADING 1
     #endif
 #endif
+
+// XRender-style compile-time shading capabilities. These describe the lobes
+// that can exist in the selected model, so shared lighting code can remove
+// model-specific data and helpers before the shader optimizer sees them.
+#define BURT_MODEL_HAS_CLEAR_COAT BURT_ENABLE_CLEAR_COAT_SHADING
+#define BURT_MODEL_HAS_SUBSURFACE BURT_ENABLE_SUBSURFACE_SHADING
+#define BURT_MODEL_HAS_FABRIC BURT_ENABLE_FABRIC_SHADING
+#define BURT_MODEL_HAS_FOLIAGE BURT_ENABLE_FOLIAGE_SHADING
+#define BURT_MODEL_HAS_HAIR BURT_ENABLE_HAIR_SHADING
+#define BURT_MODEL_HAS_FUR BURT_ENABLE_FUR_SHADING
+#define BURT_MODEL_HAS_EYE BURT_ENABLE_EYE_SHADING
+#define BURT_MODEL_HAS_TRANSMISSION (BURT_MODEL_HAS_SUBSURFACE || BURT_MODEL_HAS_FOLIAGE)
+#define BURT_MODEL_HAS_CUSTOM_INDIRECT (BURT_MODEL_HAS_CLEAR_COAT || BURT_MODEL_HAS_SUBSURFACE || BURT_MODEL_HAS_FABRIC || BURT_MODEL_HAS_FOLIAGE)
 
 #if BURT_STATIC_SHADING_MODEL
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_DEFAULT_LIT) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK) || defined(BURT_DEFERRED_SHADING_MODEL_DEFAULT_LIT)

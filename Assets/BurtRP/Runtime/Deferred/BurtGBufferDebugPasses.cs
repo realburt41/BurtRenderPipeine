@@ -203,7 +203,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
 
             var debugMode = BurtGBufferDebugViewUtility.ResolveShaderDebugMode(context.Asset); // 把资产或 Overlay 的最终模式转换成 shader 可读取的整数值。
             var debugYFlip = BurtFinalBlitUtility.ResolveFinalBlitYFlip(context.Request); // GBuffer debug writes directly to CameraColor, so match the final display path.
-            var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取一个 CommandBuffer，并用 Pass 名称作为调试标记。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier); // 绑定 CameraColor 作为输出目标，调试图只覆盖颜色不写深度。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
@@ -219,8 +219,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 GBuffer Deb
             cmd.SetGlobalFloat(DebugYFlipId, debugYFlip); // Upload the display flip used by other direct-to-CameraColor debug views.
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，把 GBuffer 调试结果写入 CameraColor。
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd); // 把调试绘制命令提交给 Unity SRP 上下文。
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 放回池中，避免每帧产生额外 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 在 Pass 边界统一提交调试绘制。
         }
 
         private static bool TryGetRequiredTargets( // 安全读取 GBuffer 调试需要的全部渲染目标。

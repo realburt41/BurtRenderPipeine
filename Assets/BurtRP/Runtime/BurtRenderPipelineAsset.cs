@@ -12,6 +12,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         Deferred = 1 // 使用 Deferred 实验路径，当前阶段只接入 GBuffer 资源生命周期并临时复用 Forward 输出。
     }
 
+    public enum BurtRenderGraphProfilingMode
+    {
+        Off = 0,
+        CameraAndStage = 1,
+        CameraStageAndPass = 2
+    }
+
+    public enum BurtSubmitStrategy
+    {
+        PerCamera = 0,
+        EndOfFrameWhenSafe = 1,
+    }
+
     public enum BurtScreenSpaceSubsurfaceQuality
     {
         High = 0,
@@ -210,6 +223,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         [SerializeField] private bool enableRenderGraphDebug = false; // 定义 RenderGraph 调试捕获开关，默认关闭，避免每帧生成长文本。
 
+        [SerializeField] private BurtRenderGraphProfilingMode renderGraphProfilingMode = BurtRenderGraphProfilingMode.CameraAndStage;
+
+        [SerializeField] private BurtSubmitStrategy submitStrategy = BurtSubmitStrategy.PerCamera;
+
         [SerializeField] private bool enableRenderGraphDebugConsoleLog = false; // 定义是否把捕获到的 RenderGraph Debug 继续输出到 Console；默认关闭，优先走剪切板按钮。
 
         [Header("Camera Debug")] // 把相机相关调试开关单独分组，避免和阴影、深度等其他模块混在一起。
@@ -315,6 +332,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public bool EnableUnsupportedShaderDebug => enableUnsupportedShaderDebug; // 暴露不支持 Shader 调试开关给 Graph Assembler 使用。
 
         public bool EnableRenderGraphDebug => enableRenderGraphDebug; // 暴露 RenderGraph 调试开关给 BurtCameraRenderer 使用。
+
+        public BurtRenderGraphProfilingMode RenderGraphProfilingMode => renderGraphProfilingMode;
+
+        public BurtSubmitStrategy SubmitStrategy => submitStrategy;
 
         public bool EnableRenderGraphDebugConsoleLog => enableRenderGraphDebugConsoleLog; // 暴露 RenderGraph Console 输出开关，让渲染器决定是否继续打印长日志。
 

@@ -1,9 +1,26 @@
+using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
 
 // 定义 Burt 自己的渲染管线命名空间，和其他 BurtRP 运行时代码保持一致。
 namespace Burt.RenderPipeline
 {
+    public enum BurtNonCameraRenderStage
+    {
+        BeforeCameras = 0,
+        AfterCameras = 1,
+    }
+
+    public interface IBurtNonCameraRenderRequest
+    {
+        string Name { get; }
+        BurtNonCameraRenderStage Stage { get; }
+        int SortOrder { get; }
+        bool IsValid { get; }
+        void Execute(ScriptableRenderContext context, BurtRenderPipelineAsset asset);
+    }
+
     // 定义 BurtRP 的渲染请求类型。
     public enum BurtRenderRequestType
     {
@@ -35,6 +52,9 @@ namespace Burt.RenderPipeline
     // BurtRenderRequest 表示“一次渲染任务”的上下文数据。
     public class BurtRenderRequest
     {
+        private const int MaxPooledRequestCount = 32;
+        private static readonly Stack<BurtRenderRequest> RequestPool = new Stack<BurtRenderRequest>();
+        private static readonly ProfilerMarker CullMarker = new ProfilerMarker("BRP.Camera.Cull");
         // 保存当前渲染请求的类型。
         public BurtRenderRequestType Type { get; private set; }
 
@@ -149,7 +169,7 @@ namespace Burt.RenderPipeline
             }
 
             // 创建一个新的请求对象。
-            var request = new BurtRenderRequest();
+            var request = Acquire();
 
             // 先解析相机角色，后续 request 类型、排序和调试都复用这个结果，保证同一帧内分类一致。
             request.CameraRole = BurtCameraUtility.ResolveCameraRole(camera, cameraData);
@@ -189,10 +209,43 @@ namespace Burt.RenderPipeline
             return request;
         }
 
+        internal static void Release(BurtRenderRequest request)
+        {
+            if (request == null || !request.IsValid || RequestPool.Count >= MaxPooledRequestCount)
+            {
+                return;
+            }
+
+            request.Type = BurtRenderRequestType.Unknown;
+            request.Camera = null;
+            request.CameraData = null;
+            request.CameraRole = BurtCameraRole.Base;
+            request.StackId = 0;
+            request.OverlayClearsColor = false;
+            request.OverlayClearsDepth = false;
+            request.CullingResults = default;
+            request.LightingData = null;
+            request.TemporalAA = BurtTemporalAARequestState.Disabled;
+            request.TargetIdentifier = default;
+            request.SortLayer = 0;
+            request.IsValid = false;
+            request.GraphAssembler = null;
+            request.MainLightShadowCascadeCache.Clear();
+            request.cachedResolvedMainLightShadowAsset = null;
+            request.cachedResolvedMainLightShadowData = null;
+            RequestPool.Push(request);
+        }
+
+        private static BurtRenderRequest Acquire()
+        {
+            return RequestPool.Count > 0 ? RequestPool.Pop() : new BurtRenderRequest();
+        }
+
         public bool TryCull(
             ScriptableRenderContext context,
             BurtRenderPipelineAsset asset)
         {
+            using var cullScope = CullMarker.Auto();
             if (!IsValid || Camera == null)
             {
                 return false;

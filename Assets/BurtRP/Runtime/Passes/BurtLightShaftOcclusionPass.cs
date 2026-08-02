@@ -152,7 +152,7 @@ namespace Burt.RenderPipeline
                 height);
             cmd.ReleaseTemporaryRT(OcclusionTempTextureId);
             cmd.SetGlobalTexture(OcclusionTextureId, occlusionTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
             BurtLightShaftOcclusionUtility.MarkProduced(context.Request);
         }
@@ -252,7 +252,7 @@ namespace Burt.RenderPipeline
             BurtLightShaftOcclusionUtility.EndCameraRequest(
                 cmd,
                 context.Request);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
     }

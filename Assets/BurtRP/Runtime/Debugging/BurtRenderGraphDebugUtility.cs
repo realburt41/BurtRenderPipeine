@@ -2741,6 +2741,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                 builder.Append(" BurtGISceneVoxelCandidateRendererCount=").Append(BurtGISceneVoxelMeshRasterizerUtility.LastCandidateRendererCount);
                 builder.Append(" BurtGISceneVoxelCandidateTerrainCount=").Append(BurtGISceneVoxelMeshRasterizerUtility.LastCandidateTerrainCount);
                 builder.Append(" BurtGISceneVoxelMeshUpdateInterval=").Append(BurtGISceneVoxelMeshRasterizerUtility.UpdateInterval);
+                builder.Append(" BurtGISceneVoxelGpuRaster=").Append(BurtGISceneVoxelGpuRasterizerUtility.IsSupported ? "Ready(BurtGIVoxelize)" : "Fallback(CPU)");
+                builder.Append(" BurtGISceneVoxelGpuRendererCount=").Append(BurtGISceneVoxelGpuRasterizerUtility.LastDrawnRendererCount);
+                builder.Append(" BurtGISceneVoxelGpuMaterialPassCount=").Append(BurtGISceneVoxelGpuRasterizerUtility.LastDrawnMaterialPassCount);
+                builder.Append(" BurtGIAsyncCompute=").Append(BurtGIAsyncComputeUtility.ResolveStatus(request, asset));
                 var burtGIProbeVolumeActive = BurtGIProbeVolume.TryGetBestForCamera(request != null ? request.Camera : null, out var burtGIProbeVolume);
                 builder.Append(" BurtGIProbeVolumeActive=").Append(burtGIProbeVolumeActive);
                 builder.Append(" BurtGIProbeRuntimeInfo=").Append(BurtGIProbeVolumeUtility.GetDebugStatus(request != null ? request.Camera : null));

@@ -1,9 +1,28 @@
 ﻿using System.Collections.Generic; // 引入泛型集合命名空间，用来使用 Dictionary 和 HashSet 保存资源表与外部导入标记。
+using System;
 using UnityEngine; // 引入 UnityEngine 命名空间，用来使用 Shader.PropertyToID 生成临时 RT 的整数 ID。
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 RenderTargetIdentifier。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册表和其他 BurtRP 代码处在同一个模块里。
 {
+    public readonly struct BurtRenderTextureDescriptor
+    {
+        public BurtRenderTextureDescriptor(
+            RenderTextureDescriptor descriptor,
+            FilterMode filterMode = FilterMode.Bilinear,
+            string debugName = null)
+        {
+            Descriptor = descriptor;
+            FilterMode = filterMode;
+            DebugName = debugName;
+        }
+
+        public RenderTextureDescriptor Descriptor { get; }
+        public FilterMode FilterMode { get; }
+        public string DebugName { get; }
+        public bool IsValid => Descriptor.width > 0 && Descriptor.height > 0 && Descriptor.volumeDepth > 0;
+    }
+
     public sealed class BurtRenderGraphResourceRegistry // 定义 RenderGraph 资源注册表，用来集中保存当前图可访问的渲染资源。
     {
         public const string CameraColorName = "CameraColor"; // 定义 BurtRP 中间相机颜色目标的统一资源名，后续所有场景绘制都先写到这个临时颜色 RT。
@@ -982,15 +1001,33 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         private readonly Dictionary<string, BurtRenderTargetHandle> renderTargets = new Dictionary<string, BurtRenderTargetHandle>(); // 创建渲染目标字典，用资源名映射到渲染目标句柄。
 
+        private readonly Dictionary<string, BurtRenderResourceId> renderTargetIds = new Dictionary<string, BurtRenderResourceId>();
+
         private readonly HashSet<string> externalRenderTargets = new HashSet<string>(); // 记录由相机或外部系统提供的资源，Read-before-Write 校验会把它们视为已有生产者。
 
+        private readonly Dictionary<string, BurtRenderTextureDescriptor> renderTargetDescriptors = new Dictionary<string, BurtRenderTextureDescriptor>();
+
+        private readonly Dictionary<string, RenderTexture> allocatedRenderTextures = new Dictionary<string, RenderTexture>();
+
+        private readonly Dictionary<BurtRenderTexturePoolKey, Stack<RenderTexture>> availableRenderTexturePool = new Dictionary<BurtRenderTexturePoolKey, Stack<RenderTexture>>();
+
         private readonly Dictionary<string, BurtRenderBufferHandle> buffers = new Dictionary<string, BurtRenderBufferHandle>(); // Logical buffer registry for future tiled/cluster resources.
+
+        private readonly Dictionary<string, BurtRenderResourceId> bufferIds = new Dictionary<string, BurtRenderResourceId>();
 
         private readonly Dictionary<string, BurtRenderBufferDescriptor> bufferDescriptors = new Dictionary<string, BurtRenderBufferDescriptor>(); // Allocation descriptors for graph-owned GPU buffers.
 
         private readonly HashSet<string> externalBuffers = new HashSet<string>(); // Buffers imported from outside the graph are valid read sources.
 
         private readonly List<GraphicsBuffer> deferredBufferReleases = new List<GraphicsBuffer>(); // Buffers queued by release passes until ScriptableRenderContext.Submit has consumed draw commands.
+
+        private readonly Dictionary<BurtRenderBufferPoolKey, Stack<GraphicsBuffer>> availableBufferPool = new Dictionary<BurtRenderBufferPoolKey, Stack<GraphicsBuffer>>();
+        private readonly List<string> bufferReleaseScratch = new List<string>();
+        private readonly List<string> renderTextureReleaseScratch = new List<string>();
+
+        private int nextRenderTargetIndex;
+        private int nextBufferIndex;
+        private uint nextResourceVersion = 1;
 
         public IEnumerable<string> RenderTargetNames => renderTargets.Keys; // Exposes registered RT names for debug dumps without exposing the dictionary.
 
@@ -1000,17 +1037,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public IEnumerable<string> ExternalBufferNames => externalBuffers; // Exposes external buffer names for debug dumps.
 
+        public bool HasPendingBufferReleases
+        {
+            get
+            {
+                return deferredBufferReleases.Count > 0;
+            }
+        }
+
         public void Clear() // Clears graph resources before assembling the next RenderGraph request.
         {
-            FlushDeferredBufferReleases(); // Complete releases queued by the previous submitted request before reusing the registry.
+            RecycleAllInternalRenderTextures();
 
-            ReleaseAllInternalBuffers(); // Dispose any graph-owned buffers that survived because execution ended early.
+            RecycleAllInternalBuffers(); // Preserve descriptor-compatible buffers for later requests instead of destroying the pool every camera.
 
             renderTargets.Clear(); // Clear render targets registered by the previous request.
 
+            renderTargetIds.Clear();
+
             externalRenderTargets.Clear(); // Clear external render target markers for the next request.
 
+            renderTargetDescriptors.Clear();
+
+            allocatedRenderTextures.Clear();
+
             buffers.Clear(); // Clear logical buffer registrations alongside render targets.
+
+            bufferIds.Clear();
+
+            nextRenderTargetIndex = 0;
+            nextBufferIndex = 0;
 
             bufferDescriptors.Clear(); // Clear GPU buffer allocation descriptors.
 
@@ -1031,7 +1087,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         {
             var safeName = NormalizeResourceName(name); // 统一处理空资源名，保证资源表 key 可用且 Debug 输出稳定。
 
-            var handle = new BurtRenderTargetHandle(safeName, identifier); // 把资源名和 Unity 渲染目标标识包装成 BurtRenderTargetHandle。
+            ReleaseInternalRenderTargetIfNeeded(safeName);
+            renderTargetDescriptors.Remove(safeName);
+
+            var resourceId = new BurtRenderResourceId(
+                BurtRenderResourceType.RenderTarget,
+                renderTargetIds.TryGetValue(safeName, out var previousId) ? previousId.Index : nextRenderTargetIndex++,
+                NextResourceVersion());
+            renderTargetIds[safeName] = resourceId;
+
+            var handle = new BurtRenderTargetHandle(safeName, identifier, resourceId); // 把资源名和 Unity 渲染目标标识包装成 BurtRenderTargetHandle。
 
             renderTargets[safeName] = handle; // 把句柄写入资源表，如果同名资源已存在就覆盖旧值。
 
@@ -1069,6 +1134,117 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return externalRenderTargets.Contains(NormalizeResourceName(name)); // 外部资源可被读取而不需要图内写入生产者。
         }
 
+        public bool IsCurrent(BurtRenderTargetHandle handle)
+        {
+            return handle.IsValid &&
+                handle.ResourceId.IsValid &&
+                renderTargetIds.TryGetValue(NormalizeResourceName(handle.Name), out var currentId) &&
+                currentId.Index == handle.ResourceId.Index &&
+                currentId.Version == handle.ResourceId.Version;
+        }
+
+        public void SetRenderTargetDescriptor(
+            string name,
+            RenderTextureDescriptor descriptor,
+            FilterMode filterMode = FilterMode.Bilinear,
+            string debugName = null)
+        {
+            var safeName = NormalizeResourceName(name);
+            if (externalRenderTargets.Contains(safeName))
+            {
+                return;
+            }
+
+            var allocationDescriptor = new BurtRenderTextureDescriptor(descriptor, filterMode, debugName);
+            if (!allocationDescriptor.IsValid)
+            {
+                renderTargetDescriptors.Remove(safeName);
+                return;
+            }
+
+            if (allocatedRenderTextures.TryGetValue(safeName, out var allocatedTexture) &&
+                renderTargetDescriptors.TryGetValue(safeName, out var previousDescriptor) &&
+                !new BurtRenderTexturePoolKey(previousDescriptor).Equals(new BurtRenderTexturePoolKey(allocationDescriptor)))
+            {
+                ReturnRenderTextureToPool(allocatedTexture, previousDescriptor);
+                allocatedRenderTextures.Remove(safeName);
+            }
+
+            renderTargetDescriptors[safeName] = allocationDescriptor;
+        }
+
+        public BurtRenderTargetHandle AllocateRenderTarget(string name)
+        {
+            var safeName = NormalizeResourceName(name);
+            if (externalRenderTargets.Contains(safeName) ||
+                !renderTargetDescriptors.TryGetValue(safeName, out var allocationDescriptor) ||
+                !allocationDescriptor.IsValid)
+            {
+                return GetRenderTarget(safeName);
+            }
+
+            if (allocatedRenderTextures.TryGetValue(safeName, out var currentTexture) && currentTexture != null)
+            {
+                return GetRenderTarget(safeName);
+            }
+
+            var texture = TryTakePooledRenderTexture(allocationDescriptor);
+            if (texture == null)
+            {
+                texture = new RenderTexture(allocationDescriptor.Descriptor);
+            }
+
+            texture.name = string.IsNullOrEmpty(allocationDescriptor.DebugName) ? safeName : allocationDescriptor.DebugName;
+            texture.filterMode = allocationDescriptor.FilterMode;
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.hideFlags = HideFlags.HideAndDontSave;
+            if (!texture.IsCreated())
+            {
+                texture.Create();
+            }
+
+            allocatedRenderTextures[safeName] = texture;
+            var resourceId = renderTargetIds.TryGetValue(safeName, out var registeredId)
+                ? registeredId
+                : new BurtRenderResourceId(BurtRenderResourceType.RenderTarget, nextRenderTargetIndex++, NextResourceVersion());
+            renderTargetIds[safeName] = resourceId;
+            var handle = new BurtRenderTargetHandle(safeName, new RenderTargetIdentifier(texture), resourceId);
+            renderTargets[safeName] = handle;
+            externalRenderTargets.Remove(safeName);
+            return handle;
+        }
+
+        public void ReleaseRenderTarget(string name)
+        {
+            var safeName = NormalizeResourceName(name);
+            if (externalRenderTargets.Contains(safeName) ||
+                !allocatedRenderTextures.TryGetValue(safeName, out var texture))
+            {
+                return;
+            }
+
+            if (renderTargetDescriptors.TryGetValue(safeName, out var descriptor) && descriptor.IsValid)
+            {
+                ReturnRenderTextureToPool(texture, descriptor);
+            }
+            else
+            {
+                ReleaseRenderTextureObject(texture);
+            }
+
+            allocatedRenderTextures.Remove(safeName);
+        }
+
+        public bool IsRenderTargetAllocated(string name)
+        {
+            return allocatedRenderTextures.TryGetValue(NormalizeResourceName(name), out var texture) && texture != null;
+        }
+
+        public bool TryGetAllocatedRenderTexture(string name, out RenderTexture texture)
+        {
+            return allocatedRenderTextures.TryGetValue(NormalizeResourceName(name), out texture) && texture != null;
+        }
+
         public BurtRenderBufferHandle RegisterBuffer(string name) // Registers a logical buffer resource without allocating a GPU buffer yet.
         {
             return RegisterBuffer(name, default, false, null);
@@ -1098,7 +1274,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             var safeName = NormalizeBufferName(name);
             ReleaseInternalBufferIfNeeded(safeName);
 
-            var handle = new BurtRenderBufferHandle(safeName, externalBuffer);
+            var resourceId = new BurtRenderResourceId(
+                BurtRenderResourceType.Buffer,
+                bufferIds.TryGetValue(safeName, out var previousId) ? previousId.Index : nextBufferIndex++,
+                NextResourceVersion());
+            bufferIds[safeName] = resourceId;
+            var handle = new BurtRenderBufferHandle(safeName, externalBuffer, resourceId);
             buffers[safeName] = handle;
 
             if (descriptor.IsValid)
@@ -1144,6 +1325,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return bufferDescriptors.TryGetValue(NormalizeBufferName(name), out var descriptor) && descriptor.IsValid;
         }
 
+        public bool IsCurrent(BurtRenderBufferHandle handle)
+        {
+            return handle.IsValid &&
+                handle.ResourceId.IsValid &&
+                bufferIds.TryGetValue(NormalizeBufferName(handle.Name), out var currentId) &&
+                currentId.Index == handle.ResourceId.Index &&
+                currentId.Version == handle.ResourceId.Version;
+        }
+
         public bool IsBufferAllocated(string name) // Checks whether the registry currently holds a live GPU buffer object.
         {
             return buffers.TryGetValue(NormalizeBufferName(name), out var handle) && handle.HasBuffer;
@@ -1165,12 +1355,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
             ReleaseInternalBufferIfNeeded(safeName);
 
-            var buffer = new GraphicsBuffer(descriptor.Target, descriptor.Count, descriptor.Stride)
+            var buffer = TryTakePooledBuffer(descriptor);
+            if (buffer == null)
             {
-                name = string.IsNullOrEmpty(descriptor.DebugName) ? safeName : descriptor.DebugName
-            };
+                buffer = new GraphicsBuffer(descriptor.Target, descriptor.Count, descriptor.Stride);
+            }
 
-            var handle = new BurtRenderBufferHandle(safeName, buffer);
+            buffer.name = string.IsNullOrEmpty(descriptor.DebugName) ? safeName : descriptor.DebugName;
+
+            var resourceId = bufferIds.TryGetValue(safeName, out var registeredId)
+                ? registeredId
+                : new BurtRenderResourceId(BurtRenderResourceType.Buffer, nextBufferIndex++, NextResourceVersion());
+            bufferIds[safeName] = resourceId;
+            var handle = new BurtRenderBufferHandle(safeName, buffer, resourceId);
             buffers[safeName] = handle;
             externalBuffers.Remove(safeName);
 
@@ -1185,12 +1382,35 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
                 return;
             }
 
-            QueueInternalBufferReleaseIfNeeded(safeName);
+            if (buffers.TryGetValue(safeName, out var allocatedHandle) &&
+                allocatedHandle.HasBuffer &&
+                bufferDescriptors.TryGetValue(safeName, out var descriptor) &&
+                descriptor.IsValid)
+            {
+                ReturnBufferToPool(allocatedHandle.Buffer, descriptor);
+            }
+            else
+            {
+                QueueInternalBufferReleaseIfNeeded(safeName);
+            }
 
             if (buffers.ContainsKey(safeName))
             {
-                buffers[safeName] = new BurtRenderBufferHandle(safeName);
+                var resourceId = bufferIds.TryGetValue(safeName, out var registeredId)
+                    ? registeredId
+                    : BurtRenderResourceId.Invalid;
+                buffers[safeName] = new BurtRenderBufferHandle(safeName, null, resourceId);
             }
+        }
+
+        private uint NextResourceVersion()
+        {
+            if (nextResourceVersion == 0)
+            {
+                nextResourceVersion = 1;
+            }
+
+            return nextResourceVersion++;
         }
 
         public void FlushDeferredBufferReleases()
@@ -1201,6 +1421,70 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             }
 
             deferredBufferReleases.Clear();
+        }
+
+        public void DisposeResources()
+        {
+            FlushDeferredBufferReleases();
+
+            foreach (var pooledTextures in availableRenderTexturePool.Values)
+            {
+                while (pooledTextures.Count > 0)
+                {
+                    ReleaseRenderTextureObject(pooledTextures.Pop());
+                }
+            }
+
+            availableRenderTexturePool.Clear();
+            renderTextureReleaseScratch.Clear();
+            foreach (var pair in allocatedRenderTextures)
+            {
+                if (!externalRenderTargets.Contains(pair.Key))
+                {
+                    ReleaseRenderTextureObject(pair.Value);
+                    renderTextureReleaseScratch.Add(pair.Key);
+                }
+            }
+
+            for (var textureIndex = 0; textureIndex < renderTextureReleaseScratch.Count; textureIndex++)
+            {
+                allocatedRenderTextures.Remove(renderTextureReleaseScratch[textureIndex]);
+            }
+
+            renderTextureReleaseScratch.Clear();
+
+            foreach (var pooledBuffers in availableBufferPool.Values)
+            {
+                while (pooledBuffers.Count > 0)
+                {
+                    ReleaseBufferObject(pooledBuffers.Pop());
+                }
+            }
+
+            availableBufferPool.Clear();
+
+            bufferReleaseScratch.Clear();
+            foreach (var pair in buffers)
+            {
+                if (externalBuffers.Contains(pair.Key) || !pair.Value.HasBuffer)
+                {
+                    continue;
+                }
+
+                ReleaseBufferObject(pair.Value.Buffer);
+                bufferReleaseScratch.Add(pair.Key);
+            }
+
+            for (var bufferIndex = 0; bufferIndex < bufferReleaseScratch.Count; bufferIndex++)
+            {
+                var bufferName = bufferReleaseScratch[bufferIndex];
+                var resourceId = bufferIds.TryGetValue(bufferName, out var registeredId)
+                    ? registeredId
+                    : BurtRenderResourceId.Invalid;
+                buffers[bufferName] = new BurtRenderBufferHandle(bufferName, null, resourceId);
+            }
+
+            bufferReleaseScratch.Clear();
         }
 
         public bool ContainsBuffer(string name) // Checks whether a logical buffer is registered in the current graph.
@@ -2808,7 +3092,86 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(PerObjectShadowAtlasName);
         }
 
-        private void ReleaseAllInternalBuffers() // Releases graph-owned buffers before the registry is reset.
+        private void RecycleAllInternalRenderTextures()
+        {
+            foreach (var pair in allocatedRenderTextures)
+            {
+                if (externalRenderTargets.Contains(pair.Key))
+                {
+                    continue;
+                }
+
+                if (renderTargetDescriptors.TryGetValue(pair.Key, out var descriptor) && descriptor.IsValid)
+                {
+                    ReturnRenderTextureToPool(pair.Value, descriptor);
+                }
+                else
+                {
+                    ReleaseRenderTextureObject(pair.Value);
+                }
+            }
+        }
+
+        private void ReleaseInternalRenderTargetIfNeeded(string safeName)
+        {
+            if (externalRenderTargets.Contains(safeName) ||
+                !allocatedRenderTextures.TryGetValue(safeName, out var texture))
+            {
+                return;
+            }
+
+            if (renderTargetDescriptors.TryGetValue(safeName, out var descriptor) && descriptor.IsValid)
+            {
+                ReturnRenderTextureToPool(texture, descriptor);
+            }
+            else
+            {
+                ReleaseRenderTextureObject(texture);
+            }
+
+            allocatedRenderTextures.Remove(safeName);
+        }
+
+        private RenderTexture TryTakePooledRenderTexture(BurtRenderTextureDescriptor descriptor)
+        {
+            var key = new BurtRenderTexturePoolKey(descriptor);
+            if (!availableRenderTexturePool.TryGetValue(key, out var pooledTextures) || pooledTextures.Count == 0)
+            {
+                return null;
+            }
+
+            return pooledTextures.Pop();
+        }
+
+        private void ReturnRenderTextureToPool(RenderTexture texture, BurtRenderTextureDescriptor descriptor)
+        {
+            if (texture == null)
+            {
+                return;
+            }
+
+            var key = new BurtRenderTexturePoolKey(descriptor);
+            if (!availableRenderTexturePool.TryGetValue(key, out var pooledTextures))
+            {
+                pooledTextures = new Stack<RenderTexture>();
+                availableRenderTexturePool.Add(key, pooledTextures);
+            }
+
+            pooledTextures.Push(texture);
+        }
+
+        private static void ReleaseRenderTextureObject(RenderTexture texture)
+        {
+            if (texture == null)
+            {
+                return;
+            }
+
+            texture.Release();
+            CoreUtils.Destroy(texture);
+        }
+
+        private void RecycleAllInternalBuffers() // Returns surviving graph-owned buffers to the descriptor pool before the registry is reset.
         {
             foreach (var pair in buffers)
             {
@@ -2817,7 +3180,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
                     continue;
                 }
 
-                ReleaseBufferObject(pair.Value.Buffer);
+                if (!pair.Value.HasBuffer)
+                {
+                    continue;
+                }
+
+                if (bufferDescriptors.TryGetValue(pair.Key, out var descriptor) && descriptor.IsValid)
+                {
+                    ReturnBufferToPool(pair.Value.Buffer, descriptor);
+                }
+                else
+                {
+                    QueueBufferReleaseObject(pair.Value.Buffer);
+                }
             }
         }
 
@@ -2857,6 +3232,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             deferredBufferReleases.Add(buffer);
         }
 
+        private GraphicsBuffer TryTakePooledBuffer(BurtRenderBufferDescriptor descriptor)
+        {
+            var key = new BurtRenderBufferPoolKey(descriptor);
+            if (!availableBufferPool.TryGetValue(key, out var pooledBuffers) || pooledBuffers.Count == 0)
+            {
+                return null;
+            }
+
+            return pooledBuffers.Pop();
+        }
+
+        private void ReturnBufferToPool(GraphicsBuffer buffer, BurtRenderBufferDescriptor descriptor)
+        {
+            if (buffer == null)
+            {
+                return;
+            }
+
+            var key = new BurtRenderBufferPoolKey(descriptor);
+            if (!availableBufferPool.TryGetValue(key, out var pooledBuffers))
+            {
+                pooledBuffers = new Stack<GraphicsBuffer>();
+                availableBufferPool.Add(key, pooledBuffers);
+            }
+
+            pooledBuffers.Push(buffer);
+        }
+
         private static void ReleaseBufferObject(GraphicsBuffer buffer) // Keeps GraphicsBuffer disposal guarded and centralized.
         {
             if (buffer == null)
@@ -2870,6 +3273,139 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         private static bool IsBufferCompatible(GraphicsBuffer buffer, BurtRenderBufferDescriptor descriptor) // Avoids reallocating when a reused buffer still matches the descriptor.
         {
             return buffer != null && buffer.count == descriptor.Count && buffer.stride == descriptor.Stride;
+        }
+
+        private readonly struct BurtRenderTexturePoolKey : IEquatable<BurtRenderTexturePoolKey>
+        {
+            public BurtRenderTexturePoolKey(BurtRenderTextureDescriptor allocationDescriptor)
+            {
+                var descriptor = allocationDescriptor.Descriptor;
+                Width = descriptor.width;
+                Height = descriptor.height;
+                VolumeDepth = descriptor.volumeDepth;
+                MsaaSamples = descriptor.msaaSamples;
+                MipCount = descriptor.mipCount;
+                DepthBufferBits = descriptor.depthBufferBits;
+                GraphicsFormat = descriptor.graphicsFormat;
+                DepthStencilFormat = descriptor.depthStencilFormat;
+                Dimension = descriptor.dimension;
+                EnableRandomWrite = descriptor.enableRandomWrite;
+                UseMipMap = descriptor.useMipMap;
+                AutoGenerateMips = descriptor.autoGenerateMips;
+                Memoryless = descriptor.memoryless;
+                VrUsage = descriptor.vrUsage;
+                ShadowSamplingMode = descriptor.shadowSamplingMode;
+                BindMs = descriptor.bindMS;
+                UseDynamicScale = descriptor.useDynamicScale;
+                FilterMode = allocationDescriptor.FilterMode;
+            }
+
+            private int Width { get; }
+            private int Height { get; }
+            private int VolumeDepth { get; }
+            private int MsaaSamples { get; }
+            private int MipCount { get; }
+            private int DepthBufferBits { get; }
+            private UnityEngine.Experimental.Rendering.GraphicsFormat GraphicsFormat { get; }
+            private UnityEngine.Experimental.Rendering.GraphicsFormat DepthStencilFormat { get; }
+            private UnityEngine.Rendering.TextureDimension Dimension { get; }
+            private bool EnableRandomWrite { get; }
+            private bool UseMipMap { get; }
+            private bool AutoGenerateMips { get; }
+            private RenderTextureMemoryless Memoryless { get; }
+            private VRTextureUsage VrUsage { get; }
+            private ShadowSamplingMode ShadowSamplingMode { get; }
+            private bool BindMs { get; }
+            private bool UseDynamicScale { get; }
+            private FilterMode FilterMode { get; }
+
+            public bool Equals(BurtRenderTexturePoolKey other)
+            {
+                return Width == other.Width &&
+                    Height == other.Height &&
+                    VolumeDepth == other.VolumeDepth &&
+                    MsaaSamples == other.MsaaSamples &&
+                    MipCount == other.MipCount &&
+                    DepthBufferBits == other.DepthBufferBits &&
+                    GraphicsFormat == other.GraphicsFormat &&
+                    DepthStencilFormat == other.DepthStencilFormat &&
+                    Dimension == other.Dimension &&
+                    EnableRandomWrite == other.EnableRandomWrite &&
+                    UseMipMap == other.UseMipMap &&
+                    AutoGenerateMips == other.AutoGenerateMips &&
+                    Memoryless == other.Memoryless &&
+                    VrUsage == other.VrUsage &&
+                    ShadowSamplingMode == other.ShadowSamplingMode &&
+                    BindMs == other.BindMs &&
+                    UseDynamicScale == other.UseDynamicScale &&
+                    FilterMode == other.FilterMode;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is BurtRenderTexturePoolKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    var hashCode = Width;
+                    hashCode = (hashCode * 397) ^ Height;
+                    hashCode = (hashCode * 397) ^ VolumeDepth;
+                    hashCode = (hashCode * 397) ^ MsaaSamples;
+                    hashCode = (hashCode * 397) ^ MipCount;
+                    hashCode = (hashCode * 397) ^ DepthBufferBits;
+                    hashCode = (hashCode * 397) ^ (int)GraphicsFormat;
+                    hashCode = (hashCode * 397) ^ (int)DepthStencilFormat;
+                    hashCode = (hashCode * 397) ^ (int)Dimension;
+                    hashCode = (hashCode * 397) ^ EnableRandomWrite.GetHashCode();
+                    hashCode = (hashCode * 397) ^ UseMipMap.GetHashCode();
+                    hashCode = (hashCode * 397) ^ AutoGenerateMips.GetHashCode();
+                    hashCode = (hashCode * 397) ^ (int)Memoryless;
+                    hashCode = (hashCode * 397) ^ (int)VrUsage;
+                    hashCode = (hashCode * 397) ^ (int)ShadowSamplingMode;
+                    hashCode = (hashCode * 397) ^ BindMs.GetHashCode();
+                    hashCode = (hashCode * 397) ^ UseDynamicScale.GetHashCode();
+                    hashCode = (hashCode * 397) ^ (int)FilterMode;
+                    return hashCode;
+                }
+            }
+        }
+
+        private readonly struct BurtRenderBufferPoolKey : IEquatable<BurtRenderBufferPoolKey>
+        {
+            public BurtRenderBufferPoolKey(BurtRenderBufferDescriptor descriptor)
+            {
+                Count = descriptor.Count;
+                Stride = descriptor.Stride;
+                Target = descriptor.Target;
+            }
+
+            private int Count { get; }
+            private int Stride { get; }
+            private GraphicsBuffer.Target Target { get; }
+
+            public bool Equals(BurtRenderBufferPoolKey other)
+            {
+                return Count == other.Count && Stride == other.Stride && Target == other.Target;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is BurtRenderBufferPoolKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    var hashCode = Count;
+                    hashCode = (hashCode * 397) ^ Stride;
+                    hashCode = (hashCode * 397) ^ (int)Target;
+                    return hashCode;
+                }
+            }
         }
 
         private static string NormalizeResourceName(string name) // 归一化资源名，避免 null 或空字符串破坏资源表和依赖校验。

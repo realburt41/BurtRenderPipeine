@@ -63,6 +63,7 @@ Shader "BurtRP/InteriorMapping"
     SubShader
     {
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelize"
 
         Pass
         {

@@ -882,7 +882,7 @@ namespace Burt.RenderPipeline
             bool includeListData,
             int maxLightsPerTile)
         {
-            var cmd = CommandBufferPool.Get("Burt Upload Tile Light Globals");
+            var cmd = context.AcquireCommandBuffer("Burt Upload Tile Light Globals");
             var tileListUsable = uploaded && includeListData;
             var additionalLightCount = context != null && context.Request != null && context.Request.LightingData != null
                 ? context.Request.LightingData.AdditionalLightCount
@@ -908,8 +908,7 @@ namespace Burt.RenderPipeline
                 cmd.SetGlobalBuffer(BurtTiledLightData.TileLightOffsetBufferId, offsetBuffer.Buffer);
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private static void UploadClusterGlobals(
@@ -929,7 +928,7 @@ namespace Burt.RenderPipeline
             var farPlane = camera != null ? Mathf.Max(camera.farClipPlane, nearPlane + 0.0001f) : 1f;
             var invDepthRange = BurtTiledLightData.CalculateClusterInvLogDepthRange(nearPlane, farPlane);
             var clusterListUsable = uploaded && includeClusterData;
-            var cmd = CommandBufferPool.Get("Burt Upload Cluster Light Globals");
+            var cmd = context.AcquireCommandBuffer("Burt Upload Cluster Light Globals");
             cmd.SetGlobalFloat(BurtTiledLightData.ClusterLightBufferEnabledId, clusterListUsable ? 1f : 0f);
             cmd.SetGlobalVector(BurtTiledLightData.ClusterLightGridParamsId, new Vector4(layout.TileCountX, layout.TileCountY, layout.DepthSliceCount, maxLightsPerCluster));
             cmd.SetGlobalVector(BurtTiledLightData.ClusterLightDepthParamsId, new Vector4(nearPlane, farPlane, invDepthRange, layout.DepthSliceCount));
@@ -956,8 +955,7 @@ namespace Burt.RenderPipeline
                 }
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private static void UploadDisabledGlobals(BurtRenderGraphContext context)
@@ -967,7 +965,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get("Burt Disable Tile Light Globals");
+            var cmd = context.AcquireCommandBuffer("Burt Disable Tile Light Globals");
             cmd.SetGlobalFloat(BurtTiledLightData.TileLightCountBufferEnabledId, 0f);
             cmd.SetGlobalVector(BurtTiledLightData.TileLightGridParamsId, Vector4.zero);
             cmd.SetGlobalVector(BurtTiledLightData.TileLightDebugStatsId, Vector4.zero);
@@ -975,8 +973,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalVector(BurtTiledLightData.ClusterLightGridParamsId, Vector4.zero);
             cmd.SetGlobalVector(BurtTiledLightData.ClusterLightDepthParamsId, Vector4.zero);
             cmd.SetGlobalVector(BurtTiledLightData.ClusterLightWorldToViewZId, Vector4.zero);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private static Vector4 CreateWorldToViewZRow(Camera camera)
@@ -1822,7 +1819,7 @@ namespace Burt.RenderPipeline
             var additionalCount = lightingData != null ? lightingData.AdditionalLightCount : 0;
             var hasCpuDebugTexture = BurtTileLightDebugViewUtility.UseCpuDebugColorTextureFallback && TryUpdateDebugColorTexture(lightingData, layout, debugMode, maxLightsPerTile);
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColor.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalBuffer(BurtTiledLightData.TileLightCountBufferId, countBuffer.Buffer);
@@ -1848,19 +1845,17 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalVector(BurtTiledLightData.TileLightDebugStatsId, new Vector4(0f, maxCount, averageCount, additionalCount));
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalFloat(BurtTiledLightData.TileLightCountBufferEnabledId, 0f);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private static void ClearDiagnostic(BurtRenderGraphContext context, BurtRenderTargetHandle cameraColor, Color color)
         {
-            var cmd = CommandBufferPool.Get("Burt Debug Tile Light List Missing Resource");
+            var cmd = context.AcquireCommandBuffer("Burt Debug Tile Light List Missing Resource");
             cmd.SetRenderTarget(cameraColor.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.ClearRenderTarget(false, true, color);
             cmd.SetGlobalFloat(BurtTiledLightData.TileLightCountBufferEnabledId, 0f);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private static BurtTileLightLayout ResolveLayout(BurtRenderGraphContext context, BurtLightingData lightingData)
@@ -2100,13 +2095,12 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColor.Identifier, cameraDepth.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.DrawMesh(solidMesh, Matrix4x4.identity, material, 0, 0);
             cmd.DrawMesh(lineMesh, Matrix4x4.identity, material, 0, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private bool TryBuildMeshes(Camera camera, BurtLightingData lightingData, BurtShadingDebugMode mode)

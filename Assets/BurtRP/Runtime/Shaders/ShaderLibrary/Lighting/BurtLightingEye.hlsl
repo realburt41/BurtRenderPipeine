@@ -163,6 +163,7 @@ BurtDirectPBRComponents BurtEvaluateEyeAdditionalDirectLightingFromCore(BurtPBRS
 #endif
 }
 
+#if !defined(BURT_PBR_DIRECT_ONLY)
 BurtPBRShadingComponents BurtEvaluateEyeShadingComponentsFromGBuffer(BurtGBufferData GBufferData, BurtLight MainLight, float3 ViewDirectionWS)
 {
     BurtPBRShadingCoreData CoreData = BurtPreparePBRShadingCoreData(GBufferData, ViewDirectionWS);
@@ -201,4 +202,5 @@ BurtPBRShadingComponents BurtEvaluateEyeShadingComponentsFromGBuffer(BurtGBuffer
     return BurtComposePBRShadingComponentsWithAdditional(CoreData, DirectComponents, IndirectComponents, AdditionalDirectComponents);
 }
 
+#endif
 #endif

@@ -39,15 +39,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera); // 创建和 CameraColor 匹配的后处理颜色 RT 描述。
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取 CommandBuffer，并用当前 Pass 名称命名。
+            context.ResourceRegistry.SetRenderTargetDescriptor(BurtRenderGraphResourceRegistry.PostProcessColorName, descriptor, FilterMode.Bilinear, "Burt Post Process Color");
+            postProcessColorTarget = context.ResourceRegistry.AllocateRenderTarget(BurtRenderGraphResourceRegistry.PostProcessColorName);
 
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.PostProcessColorTextureId, descriptor, FilterMode.Bilinear); // 申请 PostProcessColor 临时 RT，后续 No-op Copy 会先写入它。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流，让 RenderDoc 保持连续的 Pass 录制结构。
 
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.PostProcessColorTextureId, postProcessColorTarget.Identifier); // 把 PostProcessColor 暴露为全局纹理，方便调试或后续效果链采样。
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把申请 RT 的命令提交给 Unity 渲染上下文。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 共享命令流由 RenderGraph 在 Pass 边界统一提交；独立执行时仍兼容本地缓冲。
         }
     }
 
@@ -449,7 +448,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var bloomMipCount = PostProcessUtility.ResolveBloomMipCount(context.Request, context.Asset); // 按当前相机尺寸和 Volume 上限计算实际 mip 数。
             var bloomDebugView = PostProcessUtility.ResolveBloomDebugView(bloomSettings); // Shading Debug 的 Bloom Prefilter 会覆盖 Volume 内的 Bloom debug 下拉。
 
-            var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取 CommandBuffer，并用 Pass 名称命名。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流，避免后处理被拆成孤立提交。
             PreExposureUtility.UploadGlobals(cmd, preExposureState);
             if (AutoExposureUtility.ShouldCapture(exposureSettings, context.Request.Camera))
             {
@@ -552,9 +551,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             ReleaseBloom(cmd, bloomMipCount, useBloomDebug && bloomDebugView == BloomDebugView.Prefilter); // 释放 Bloom 临时 mip，命令会随同一个 CommandBuffer 一起提交。
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把两段拷贝命令一次性提交给 Unity 渲染上下文。
-
-            CommandBufferPool.Release(cmd); // 释放 CommandBuffer，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 共享命令流在 Pass 结束时统一提交。
 
             PostProcessUtility.LogPostProcessExecuted(context, tonemappingMode, postExposureMultiplier, preExposureState, useColorAdjustments, useVignette, vignetteSettings, bloomSettings, bloomMipCount); // 如果用户开启了后处理调试日志，就输出本次后处理执行信息。
         }
@@ -663,6 +660,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 }
 
                 var useTemporalAAUpscale = ShouldUseTemporalAAUpscale(context.Request, context.Asset);
+                if (useTemporalAAUpscale && context.ResourceRegistry != null)
+                {
+                    var temporalAAOutputDescriptor = BurtRenderTargetDescriptorUtility.CreateOutputPostProcessColorDescriptor(context.Request.Camera);
+                    temporalAAOutputDescriptor.enableRandomWrite = SystemInfo.supportsComputeShaders;
+                    context.ResourceRegistry.SetRenderTargetDescriptor(BurtRenderGraphResourceRegistry.TemporalAAOutputName, temporalAAOutputDescriptor, FilterMode.Bilinear, "Burt Temporal AA Output");
+                    temporalAAOutputTarget = context.ResourceRegistry.AllocateRenderTarget(BurtRenderGraphResourceRegistry.TemporalAAOutputName);
+                }
+
                 if ((!useTemporalAAUpscale && !postProcessColorTarget.IsValid) ||
                     (useTemporalAAUpscale && !temporalAAOutputTarget.IsValid))
                 {
@@ -687,7 +692,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
                 var exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
                 var preExposureState = PreExposureUtility.ResolveForFrame(exposureSettings);
-                var cmd = CommandBufferPool.Get(Name);
+                var cmd = context.AcquireCommandBuffer(Name);
                 PreExposureUtility.UploadGlobals(cmd, preExposureState);
                 if (useTemporalAA &&
                     PreExposureUtility.ShouldInvalidateTemporalAAHistory(context.Request.Camera, preExposureState, out var preExposureInvalidationReason))
@@ -698,8 +703,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 if (temporalAADebugRequested && !useTemporalAA)
                 {
                     ExecuteTemporalAADebugUnavailable(cmd, context.Request.Camera, postProcessColorTarget);
-                    context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                    CommandBufferPool.Release(cmd);
+                    context.ExecuteAndReleaseCommandBuffer(cmd);
                     return;
                 }
 
@@ -721,8 +725,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                         PostProcessShaderPass.PlainCopy);
                 }
 
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
 
@@ -762,7 +765,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var cmd = CommandBufferPool.Get(Name);
+                var cmd = context.AcquireCommandBuffer(Name);
                 DisablePostProcessEffects(cmd);
                 DrawFinalPostProcessPass(
                     cmd,
@@ -771,8 +774,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     context.PostProcessColorTarget.Identifier,
                     context.CameraColorTarget.Identifier,
                     PostProcessShaderPass.TemporalAACopy);
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
 
@@ -815,10 +817,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var cmd = CommandBufferPool.Get(Name);
+                var cmd = context.AcquireCommandBuffer(Name);
                 ExecuteDiaphragmDepthOfField(cmd, context.Request.Camera, context.CameraColorTarget, context.CameraDepthTarget, context.PostProcessColorTarget, material, settings);
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
 
@@ -864,10 +865,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var cmd = CommandBufferPool.Get(Name);
+                var cmd = context.AcquireCommandBuffer(Name);
                 ExecuteLensFlare(cmd, context.Request.Camera, context.CameraColorTarget, context.CameraDepthTarget, context.HiZDepthTarget, material, settings);
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
 
@@ -916,11 +916,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 var exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
                 var preExposureState = PreExposureUtility.ResolveForFrame(exposureSettings);
                 var bloomDebugView = PostProcessUtility.ResolveBloomDebugView(bloomSettings);
-                var cmd = CommandBufferPool.Get(Name);
+                var cmd = context.AcquireCommandBuffer(Name);
                 PreExposureUtility.UploadGlobals(cmd, preExposureState);
                 ExecuteBloom(cmd, context.Request.Camera, cameraColorTarget, material, bloomSettings, bloomDebugView, bloomMipCount, preExposureState.ResidualPostExposure);
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
 
@@ -962,14 +961,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var cmd = CommandBufferPool.Get(Name);
+                var cmd = context.AcquireCommandBuffer(Name);
                 if (ExecuteSMAA(cmd, context.Request.Camera, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, settings))
                 {
                     DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
                 }
 
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
 
@@ -1011,12 +1009,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var cmd = CommandBufferPool.Get(Name);
+                var cmd = context.AcquireCommandBuffer(Name);
                 SetFXAAGlobals(cmd, settings);
                 DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, PostProcessShaderPass.FXAA);
                 DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
 
@@ -1058,12 +1055,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var cmd = CommandBufferPool.Get(Name);
+                var cmd = context.AcquireCommandBuffer(Name);
                 SetRCASGlobals(cmd, settings);
                 DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, PostProcessShaderPass.RCAS);
                 DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
 
@@ -1633,12 +1629,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             cmd.GetTemporaryRT(TemporalAAMetadataTextureId, metadataDescriptor, FilterMode.Point);
             cmd.GetTemporaryRT(TemporalAAResolveTextureId, resolveDescriptor, FilterMode.Bilinear);
-            if (useTemporalAAUpscale)
-            {
-                var temporalAAOutputDescriptor = outputDescriptor;
-                temporalAAOutputDescriptor.enableRandomWrite = SystemInfo.supportsComputeShaders;
-                cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.TemporalAAOutputTextureId, temporalAAOutputDescriptor, FilterMode.Bilinear);
-            }
             cmd.GetTemporaryRT(TemporalAAParallaxRejectionTextureId, parallaxDescriptor, FilterMode.Bilinear);
             if (useTemporalAAComputeDilateDecimate)
             {
@@ -2407,8 +2397,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             SetTemporalAAViewport(cmd, width, height);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
+            context.FlushCommandBuffer();
 
             var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
             var drawingSettings = new DrawingSettings(new ShaderTagId("BurtMotionVectors"), sortingSettings)
@@ -2456,8 +2445,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             // camera matrices as the preceding object-vector draw. Fullscreen passes may have
             // changed command-buffer matrices before we get here.
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
+            context.FlushCommandBuffer();
 
             var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
             var drawingSettings = new DrawingSettings(new ShaderTagId("BurtResponsiveAAMask"), sortingSettings)
@@ -2504,8 +2492,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             SetTemporalAAViewport(cmd, width, height);
             BurtFurBlurPassUtility.UploadMotionVectorGlobals(cmd, context.Request, width, height);
             BurtMultipassRenderer.DrawAll(cmd, context, BurtMultipassShaderPass.MotionVectors, RenderQueueRange.opaque);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
             return true;
         }
 
@@ -2933,8 +2919,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 return; // 未启用时直接跳过，不释放未申请的资源。
             }
 
-            var renderContext = context.ScriptableContext; // 从上下文中取出 Unity SRP 渲染上下文。
-
             var postProcessColorTarget = context.PostProcessColorTarget; // 从资源表中读取 PostProcessColor 句柄。
 
             if (!postProcessColorTarget.IsValid) // 如果句柄无效，说明当前图没有注册后处理中间 RT。
@@ -2942,13 +2926,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 return; // 直接跳过，避免释放不存在的临时 RT。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取 CommandBuffer，并用当前 Pass 名称命名。
-
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.PostProcessColorTextureId); // 释放前面申请的 PostProcessColor 临时 RT，避免资源泄漏到下一帧或下一个 request。
-
-            renderContext.ExecuteCommandBuffer(cmd); // 把释放命令提交给 Unity 渲染上下文。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.PostProcessColorName);
         }
     }
 
@@ -2972,10 +2950,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.TemporalAAOutputTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.TemporalAAOutputName);
         }
     }
 }

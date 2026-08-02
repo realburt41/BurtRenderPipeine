@@ -1,16 +1,35 @@
+using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine.Rendering; // 引入 Unity 渲染命名空间，用来使用 ScriptableRenderContext。
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下文类和其他 BurtRP 代码处在同一个模块里。
 {
     public sealed class BurtRenderGraphContext // 定义 RenderGraph 执行上下文，用来打包一次图执行需要的公共数据和资源表。
     {
-        public ScriptableRenderContext ScriptableContext { get; } // 保存 Unity SRP 的渲染上下文，Pass 通过它提交绘制命令。
+        private const int MaxPooledContextCount = 8;
+        private static readonly Stack<BurtRenderGraphContext> ContextPool = new Stack<BurtRenderGraphContext>();
+        private readonly List<ProfilingSampler> activeProfilingSamplers = new List<ProfilingSampler>();
 
-        public BurtRenderRequest Request { get; } // 保存当前正在执行的渲染请求，Pass 通过它读取 Camera、CullingResults 等任务数据。
+        public ScriptableRenderContext ScriptableContext { get; private set; } // 保存 Unity SRP 的渲染上下文，Pass 通过它提交绘制命令。
 
-        public BurtRenderPipelineAsset Asset { get; } // 保存当前管线资产，Pass 通过它读取默认清屏色等全局配置。
+        private CommandBuffer graphCommandBuffer;
+        private bool commandBufferHasCommands;
+        private bool graphCommandBufferHasCommands;
+        // Profiling markers are commands too, but marker-only buffers should not become empty
+        // BRP.RenderGraph/Shared submissions in RenderDoc.
+        private bool commandBufferHasWork;
+        private bool graphCommandBufferHasWork;
+        private bool profilingScopesOpenOnCommandBuffer;
 
-        public BurtRenderGraphResourceRegistry ResourceRegistry { get; } // 保存当前 RenderGraph 的资源注册表，Pass 通过它读取图资源。
+        public CommandBuffer CommandBuffer { get; private set; } // Current graph or async-pass command buffer used by migrated passes and profiling markers.
+
+        public bool HasSharedCommandBuffer => CommandBuffer != null;
+
+        public BurtRenderRequest Request { get; private set; } // 保存当前正在执行的渲染请求，Pass 通过它读取 Camera、CullingResults 等任务数据。
+
+        public BurtRenderPipelineAsset Asset { get; private set; } // 保存当前管线资产，Pass 通过它读取默认清屏色等全局配置。
+
+        public BurtRenderGraphResourceRegistry ResourceRegistry { get; private set; } // 保存当前 RenderGraph 的资源注册表，Pass 通过它读取图资源。
 
         public BurtRenderTargetHandle CameraColorTarget // 定义读取 CameraColor 的快捷属性，方便 Pass 不直接操作资源名。
         {
@@ -1184,28 +1203,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
 
         public BurtRenderTargetHandle ScreenSpaceSubsurfaceBaseColorTarget
         {
-            get
-            {
-                if (ResourceRegistry == null)
-                {
-                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBaseColorName);
-                }
-
-                return ResourceRegistry.GetScreenSpaceSubsurfaceBaseColor();
-            }
+            get { return GBuffer1Target; }
         }
 
         public BurtRenderTargetHandle ScreenSpaceSubsurfaceEmissionTarget
         {
-            get
-            {
-                if (ResourceRegistry == null)
-                {
-                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceEmissionName);
-                }
-
-                return ResourceRegistry.GetScreenSpaceSubsurfaceEmission();
-            }
+            get { return GBuffer4Target; }
         }
 
         public BurtRenderTargetHandle ScreenSpaceSubsurfaceSetupTarget
@@ -1509,7 +1512,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
 
         public BurtRenderBufferHandle BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBuffer => GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapSortedProbeTraceTileDataBufferName);
 
-        public BurtRequestRenderOptions RenderOptions { get; } // 保存当前 request 的栈级执行选项，Pass 可以通过它判断 RT 生命周期策略。
+        public BurtRequestRenderOptions RenderOptions { get; private set; } // 保存当前 request 的栈级执行选项，Pass 可以通过它判断 RT 生命周期策略。
+
+        private BurtRenderGraphContext()
+        {
+        }
 
         public BurtRenderGraphContext( // 保留旧构造函数，让没有显式传入执行选项的调用方继续走单 request 生命周期。
             ScriptableRenderContext scriptableContext, // 接收 Unity SRP 传入的渲染上下文。
@@ -1526,6 +1533,68 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             BurtRenderPipelineAsset asset, // 接收 BurtRP 管线资产配置。
             BurtRenderGraphResourceRegistry resourceRegistry, // 接收当前 RenderGraph 的资源注册表。
             BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RenderTarget 生命周期选项。
+            : this(scriptableContext, request, asset, resourceRegistry, renderOptions, null)
+        {
+        }
+
+        public BurtRenderGraphContext(
+            ScriptableRenderContext scriptableContext,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            BurtRenderGraphResourceRegistry resourceRegistry,
+            BurtRequestRenderOptions renderOptions,
+            CommandBuffer commandBuffer)
+        {
+            Initialize(scriptableContext, request, asset, resourceRegistry, renderOptions, commandBuffer);
+        }
+
+        public static BurtRenderGraphContext Acquire(
+            ScriptableRenderContext scriptableContext,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            BurtRenderGraphResourceRegistry resourceRegistry,
+            BurtRequestRenderOptions renderOptions,
+            CommandBuffer commandBuffer)
+        {
+            var context = ContextPool.Count > 0 ? ContextPool.Pop() : new BurtRenderGraphContext();
+            context.Initialize(scriptableContext, request, asset, resourceRegistry, renderOptions, commandBuffer);
+            return context;
+        }
+
+        public static void Release(BurtRenderGraphContext context)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            context.DiscardCommandBuffer();
+            context.ScriptableContext = default;
+            context.Request = null;
+            context.Asset = null;
+            context.ResourceRegistry = null;
+            context.RenderOptions = null;
+            context.CommandBuffer = null;
+            context.graphCommandBuffer = null;
+            context.commandBufferHasCommands = false;
+            context.graphCommandBufferHasCommands = false;
+            context.commandBufferHasWork = false;
+            context.graphCommandBufferHasWork = false;
+            context.profilingScopesOpenOnCommandBuffer = false;
+            context.activeProfilingSamplers.Clear();
+            if (ContextPool.Count < MaxPooledContextCount)
+            {
+                ContextPool.Push(context);
+            }
+        }
+
+        private void Initialize(
+            ScriptableRenderContext scriptableContext,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            BurtRenderGraphResourceRegistry resourceRegistry,
+            BurtRequestRenderOptions renderOptions,
+            CommandBuffer commandBuffer)
         {
             ScriptableContext = scriptableContext; // 把 Unity SRP 渲染上下文保存到 ScriptableContext 属性里。
 
@@ -1536,6 +1605,227 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             ResourceRegistry = resourceRegistry; // 把 RenderGraph 的资源注册表保存到 ResourceRegistry 属性里。
 
             RenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // 保存执行选项，传入空值时回退到旧单 request 生命周期。
+
+            CommandBuffer = commandBuffer;
+            graphCommandBuffer = commandBuffer;
+            commandBufferHasCommands = false;
+            graphCommandBufferHasCommands = false;
+            commandBufferHasWork = false;
+            graphCommandBufferHasWork = false;
+            profilingScopesOpenOnCommandBuffer = false;
+            activeProfilingSamplers.Clear();
+        }
+
+        internal void BeginAsyncPass(CommandBuffer asyncCommandBuffer)
+        {
+            if (CommandBuffer != graphCommandBuffer)
+            {
+                return;
+            }
+
+            graphCommandBufferHasCommands = commandBufferHasCommands;
+            graphCommandBufferHasWork = commandBufferHasWork;
+            CommandBuffer = asyncCommandBuffer;
+            commandBufferHasCommands = false;
+            commandBufferHasWork = false;
+            ReopenActiveProfilingScopes();
+        }
+
+        internal void EndAsyncPass()
+        {
+            if (CommandBuffer == graphCommandBuffer)
+            {
+                return;
+            }
+
+            CommandBuffer = graphCommandBuffer;
+            commandBufferHasCommands = graphCommandBufferHasCommands;
+            commandBufferHasWork = graphCommandBufferHasWork;
+            ReopenActiveProfilingScopes();
+        }
+
+        public void FlushCommandBuffer()
+        {
+            FlushCommandBuffer(true);
+        }
+
+        internal void FlushCommandBuffer(bool preserveProfilingScopes)
+        {
+            if (CommandBuffer == null || !commandBufferHasCommands)
+            {
+                return;
+            }
+
+            CloseActiveProfilingScopes();
+            if (commandBufferHasWork)
+            {
+                ScriptableContext.ExecuteCommandBuffer(CommandBuffer);
+            }
+
+            CommandBuffer.Clear();
+            commandBufferHasCommands = false;
+            commandBufferHasWork = false;
+            if (preserveProfilingScopes)
+            {
+                ReopenActiveProfilingScopes();
+            }
+        }
+
+        internal void ExecuteCurrentCommandBufferAsync(ComputeQueueType queueType)
+        {
+            if (CommandBuffer == null || !commandBufferHasCommands)
+            {
+                return;
+            }
+
+            CloseActiveProfilingScopes();
+            if (commandBufferHasWork)
+            {
+                ScriptableContext.ExecuteCommandBufferAsync(CommandBuffer, queueType);
+            }
+
+            CommandBuffer.Clear();
+            commandBufferHasCommands = false;
+            commandBufferHasWork = false;
+        }
+
+        public void DiscardCommandBuffer()
+        {
+            CommandBuffer?.Clear();
+            commandBufferHasCommands = false;
+            graphCommandBufferHasCommands = false;
+            commandBufferHasWork = false;
+            graphCommandBufferHasWork = false;
+            profilingScopesOpenOnCommandBuffer = false;
+            activeProfilingSamplers.Clear();
+        }
+
+        public CommandBuffer AcquireCommandBuffer(string name)
+        {
+            if (CommandBuffer != null)
+            {
+                ReopenActiveProfilingScopes();
+                commandBufferHasCommands = true;
+                commandBufferHasWork = true;
+                return CommandBuffer;
+            }
+
+            return CommandBufferPool.Get(string.IsNullOrEmpty(name) ? "BRP.Pass" : name);
+        }
+
+        /// <summary>
+        /// Releases a pass command buffer only when it is a legacy/local buffer.
+        /// Migrated passes receive the graph-owned shared buffer from
+        /// <see cref="AcquireCommandBuffer"/>, which must stay alive until the graph finishes.
+        /// </summary>
+        public void ReleaseCommandBuffer(CommandBuffer commandBuffer)
+        {
+            if (commandBuffer == null || commandBuffer == CommandBuffer)
+            {
+                return;
+            }
+
+            commandBuffer.Clear();
+            CommandBufferPool.Release(commandBuffer);
+        }
+
+        internal void MarkCommandBufferHasCommands()
+        {
+            if (CommandBuffer != null)
+            {
+                commandBufferHasCommands = true;
+                commandBufferHasWork = true;
+            }
+        }
+
+        internal void BeginProfilingScope(ProfilingSampler sampler)
+        {
+            if (sampler == null || CommandBuffer == null)
+            {
+                return;
+            }
+
+            ReopenActiveProfilingScopes();
+            sampler.Begin(CommandBuffer);
+            activeProfilingSamplers.Add(sampler);
+            commandBufferHasCommands = true;
+            profilingScopesOpenOnCommandBuffer = true;
+        }
+
+        internal void EndProfilingScope(ProfilingSampler sampler)
+        {
+            if (sampler == null || CommandBuffer == null || activeProfilingSamplers.Count == 0)
+            {
+                return;
+            }
+
+            ReopenActiveProfilingScopes();
+            var lastIndex = activeProfilingSamplers.Count - 1;
+            var openedSampler = activeProfilingSamplers[lastIndex];
+            activeProfilingSamplers.RemoveAt(lastIndex);
+            openedSampler.End(CommandBuffer);
+            commandBufferHasCommands = true;
+            profilingScopesOpenOnCommandBuffer = activeProfilingSamplers.Count > 0;
+        }
+
+        public void ExecuteLegacyCommandBuffer(CommandBuffer commandBuffer)
+        {
+            if (commandBuffer == null || commandBuffer == CommandBuffer)
+            {
+                return;
+            }
+
+            FlushCommandBuffer(false);
+            ScriptableContext.ExecuteCommandBuffer(commandBuffer);
+            ReopenActiveProfilingScopes();
+        }
+
+        public void ExecuteAndReleaseCommandBuffer(CommandBuffer commandBuffer)
+        {
+            if (commandBuffer == null || commandBuffer == CommandBuffer)
+            {
+                return;
+            }
+
+            try
+            {
+                ExecuteLegacyCommandBuffer(commandBuffer);
+            }
+            finally
+            {
+                ReleaseCommandBuffer(commandBuffer);
+            }
+        }
+
+        private void CloseActiveProfilingScopes()
+        {
+            if (CommandBuffer == null || !profilingScopesOpenOnCommandBuffer)
+            {
+                return;
+            }
+
+            for (var scopeIndex = activeProfilingSamplers.Count - 1; scopeIndex >= 0; scopeIndex--)
+            {
+                activeProfilingSamplers[scopeIndex].End(CommandBuffer);
+            }
+
+            profilingScopesOpenOnCommandBuffer = false;
+        }
+
+        private void ReopenActiveProfilingScopes()
+        {
+            if (CommandBuffer == null || activeProfilingSamplers.Count == 0 || profilingScopesOpenOnCommandBuffer)
+            {
+                return;
+            }
+
+            for (var scopeIndex = 0; scopeIndex < activeProfilingSamplers.Count; scopeIndex++)
+            {
+                activeProfilingSamplers[scopeIndex].Begin(CommandBuffer);
+            }
+
+            commandBufferHasCommands = true;
+            profilingScopesOpenOnCommandBuffer = true;
         }
     }
 }

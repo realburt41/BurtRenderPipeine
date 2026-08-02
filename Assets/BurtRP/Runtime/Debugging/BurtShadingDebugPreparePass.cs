@@ -21,7 +21,7 @@ namespace Burt.RenderPipeline
 
             var cmd = CommandBufferPool.Get(Name);
             BurtShadingDebugSettings.RecordGlobalShaderProperties(cmd, context.Request);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
     }

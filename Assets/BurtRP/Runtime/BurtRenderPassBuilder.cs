@@ -55,7 +55,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             var passKind = pass != null ? pass.Kind : BurtRenderPassKindUtility.InferKind(passName);
             var hasSideEffects = pass == null || pass.HasSideEffects;
             var allowCulling = pass != null && pass.AllowCulling;
-            return new BurtRenderPassResourceUsage(passIndex, passName, passKind, hasSideEffects, allowCulling);
+            return new BurtRenderPassResourceUsage(
+                passIndex,
+                passName,
+                passKind,
+                hasSideEffects,
+                allowCulling,
+                pass != null && pass.EnableAsyncCompute);
         }
 
         public BurtRenderTargetHandle ReadRenderTarget(string name) // 定义声明读取某个渲染目标资源的函数。
@@ -1488,7 +1494,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
 
         public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceBaseColor()
         {
-            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBaseColorName);
+            return ReadGBuffer1();
         }
 
         public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceBaseColor()
@@ -1498,7 +1504,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
 
         public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceEmission()
         {
-            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceEmissionName);
+            return ReadGBuffer4();
         }
 
         public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceEmission()

@@ -103,6 +103,7 @@ Shader "BurtRP/Subsurface"
     {
         // Marks this shader as a BurtRP opaque shader so materials are easy to identify.
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelize"
 
         Pass
         {
@@ -324,6 +325,7 @@ Shader "BurtRP/Subsurface"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma shader_feature_local _ BURT_MATERIAL_TRANSPARENT
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED

@@ -18,6 +18,7 @@ namespace Burt.RenderPipeline
             var request = context.Request;
             var settings = BurtAtmosphereUtility.ResolveSettings();
             var sunDirection4 = BurtDrawAtmospherePass.ResolveSunDirection(request, settings);
+            context.FlushCommandBuffer(false);
             BurtAtmosphereLutUtility.DispatchAsync(
                 context.ScriptableContext,
                 request.Camera,
@@ -414,7 +415,7 @@ namespace Burt.RenderPipeline
 
             lastDrawUsedProceduralFallback = useProceduralFallback;
             lastDrawUsedCustomMaterial = settings.PhysicalSkyMaterial != null;
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
 
@@ -457,7 +458,7 @@ namespace Burt.RenderPipeline
                 new Vector3(sunDirection4.x, sunDirection4.y, sunDirection4.z));
             UploadMaterialProperties(drawMaterial, camera, request, settings);
             UploadPreparedMaterialGlobals(cmd, drawMaterial, camera);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
 
             unchecked
@@ -1092,7 +1093,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, 1, MeshTopology.Triangles, 3, 1);
             cmd.ReleaseTemporaryRT(AerialSourceColorTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
     }

@@ -91,6 +91,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         {
             var drawingSettings = new DrawingSettings(BurtForward, sortingSettings); // 只匹配 BurtForward，让主渲染路径严格由 BurtRP 自己的 shader pass 驱动。
 
+            drawingSettings.SetShaderPassName(1, BurtForwardOnly); // Forward-only 模型也必须能在纯 Forward 管线与透明队列中被找到。
+
             drawingSettings.perObjectData = ForwardPerObjectData; // 让 Unity 在 DrawRenderers 时真正上传 SH、Reflection Probe 等 per-object 间接光数据。
 
             return drawingSettings; // 返回配置好的前向绘制设置，供调用方 Pass 使用。
@@ -156,15 +158,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(commandBufferName); // 用当前 Pass 名创建临时命令缓冲，Frame Debugger 里能看到这次目标恢复。
+            var cmd = context.AcquireCommandBuffer(commandBufferName); // 录制到图级共享命令流，保持 Camera/Pass 的 RenderDoc 层级连续。
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 同时绑定颜色和深度，让 ZTest/ZWrite 对后续 DrawRenderers 生效。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null); // 恢复 viewport，避免前序 RT 改过尺寸后影响绘制。
             RestoreCameraMatricesForMainDraw(context, cmd);
             BindMainLightShadowMapIfValid(context, cmd); // DrawRenderers 可能在 Deferred Lighting 之后执行，重新绑定当前 request 的 shadow map 避免读到旧全局纹理。
             BindAdditionalLightShadowAtlasIfValid(context, cmd);
             BindPerObjectShadowAtlasIfValid(context, cmd);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd); // 立即提交目标绑定，后面的 DrawRenderers 会使用这个状态。
-            CommandBufferPool.Release(cmd); // 释放临时命令缓冲，避免每帧 GC。
+            context.FlushCommandBuffer(); // DrawRenderers 不是 CommandBuffer 命令，必须先提交目标和矩阵状态。
             return true;
         }
 
@@ -926,7 +927,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateMainLightShadowMapDescriptor(shadowData); // 根据主光阴影数据创建 shadow map RT 描述。
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(Name); // 使用图级共享命令缓冲，减少 RenderDoc 中的碎片提交。
 
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.MainLightShadowMapId, descriptor, FilterMode.Bilinear); // 使用双线性过滤，让硬件阴影采样器能平滑比较边缘，避免点采样放大阴影条带。
 
@@ -935,11 +936,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth()); // Match Unity shadow compare semantics: empty atlas pixels must remain lit for BurtRP's current sampler state.
 
-            BurtMainLightShadowMatrixUtility.BindMainLightShadowMapIfValid(cmd, shadowMapTarget); // 把主光阴影图暴露成全局纹理，后续 Lit shader 会通过它采样阴影。
-
-            renderContext.ExecuteCommandBuffer(cmd); // 把申请、绑定和清理 shadow map 的命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            // Do not publish the texture as an SRV while it is still the active depth attachment.
+            // The caster pass completes all DSV writes before receiver globals bind the map.
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 独立调用仍兼容；共享命令由 RenderGraph 在 Pass 末尾统一提交。
         }
     }
 
@@ -1000,7 +999,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             if (!BurtMainLightShadowMatrixUtility.TryGetMainLightShadowCascadeCache(request, shadowData, out var cascadeCache))
             {
-                DisableMainLightShadowReceiverGlobals(renderContext);
+                DisableMainLightShadowReceiverGlobals(context);
                 return;
             }
 
@@ -1012,7 +1011,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var worldToShadowMatrices = cascadeCache.WorldToShadowMatrices;
             var cascadeSpheres = cascadeCache.CascadeSpheres;
             var cascadeAtlasRects = cascadeCache.CascadeAtlasRects;
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
 
             try
             {
@@ -1027,9 +1026,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
                 cmd.SetGlobalDepthBias(1f, 2.5f);
                 SetShadowCasterCameraGlobals(cmd, camera);
-                BurtMainLightShadowMatrixUtility.UploadMainLightShadowReceiverGlobals(cmd, null, shadowMapTarget, worldToShadowMatrices, cascadeSpheres, cascadeAtlasRects, cascadeCount, tileResolution, shadowData);
-                renderContext.ExecuteCommandBuffer(cmd);
-                cmd.Clear();
+                // Receiver globals include an SRV binding for this same texture. Delay that
+                // binding until every DrawShadows call has finished writing the depth atlas.
+                context.FlushCommandBuffer();
 
                 for (var cascadeIndex = 0; cascadeIndex < cascadeCount; cascadeIndex++)
                 {
@@ -1049,8 +1048,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                     cmd.SetGlobalFloat(MainLightShadowNormalBiasId, normalBias);
                     cmd.SetGlobalVector(UnityShadowBiasId, new Vector4(depthBias, normalBias, 0f, 0f));
                     BurtMainLightShadowMatrixUtility.SetMainLightWorldToShadow(cmd, worldToShadowMatrices[cascadeIndex]);
-                    renderContext.ExecuteCommandBuffer(cmd);
-                    cmd.Clear();
+                    context.FlushCommandBuffer();
 
                     if (BurtShadowRenderTargetUtility.HasShadowCasters(request.CullingResults, shadowData.MainLightIndex))
                     {
@@ -1063,12 +1061,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
             finally
             {
-                CommandBufferPool.Release(cmd);
-                ResetMainLightShadowCasterState(context, renderContext, camera);
+                ResetMainLightShadowCasterState(context, camera);
             }
 
             UploadMainLightShadowReceiverGlobals(
-                renderContext,
+                context,
                 shadowMapTarget,
                 worldToShadowMatrices,
                 cascadeSpheres,
@@ -1079,7 +1076,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         }
 
         private static void UploadMainLightShadowReceiverGlobals(
-            ScriptableRenderContext renderContext,
+            BurtRenderGraphContext context,
             BurtRenderTargetHandle shadowMapTarget,
             Matrix4x4[] worldToShadowMatrices,
             Vector4[] cascadeSpheres,
@@ -1090,19 +1087,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         {
             if (shadowData == null || !shadowMapTarget.IsValid)
             {
-                DisableMainLightShadowReceiverGlobals(renderContext);
+                DisableMainLightShadowReceiverGlobals(context);
                 return;
             }
 
-            var cmd = CommandBufferPool.Get("Burt Upload Main Light Shadow Receiver");
+            var cmd = context.AcquireCommandBuffer("Burt Upload Main Light Shadow Receiver");
             BurtMainLightShadowMatrixUtility.UploadMainLightShadowReceiverGlobals(cmd, null, shadowMapTarget, worldToShadowMatrices, cascadeSpheres, cascadeAtlasRects, cascadeCount, tileResolution, shadowData);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
         }
 
-        private static void ResetMainLightShadowCasterState(BurtRenderGraphContext context, ScriptableRenderContext renderContext, Camera camera)
+        private static void ResetMainLightShadowCasterState(BurtRenderGraphContext context, Camera camera)
         {
-            var cmd = CommandBufferPool.Get("Burt Reset Main Light Shadow Caster State");
+            var cmd = context.AcquireCommandBuffer("Burt Reset Main Light Shadow Caster State");
             cmd.SetGlobalDepthBias(0f, 0f);
             cmd.SetGlobalFloat(CastingPunctualLightShadowId, 0f);
             cmd.SetGlobalFloat(MainLightShadowDepthBiasId, 0f);
@@ -1112,23 +1107,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             cmd.SetGlobalVector(ShadowCasterLightPositionId, Vector4.zero);
             cmd.SetGlobalVector(UnityShadowBiasId, Vector4.zero);
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
+
+            // DrawShadows leaves the shadow atlas bound as the active depth attachment.
+            // D3D11 cannot bind that same resource as an SRV until it has first been
+            // removed from the DSV slot, even though all shadow draw calls have ended.
+            // Restore the camera attachments before publishing the atlas to receivers.
+            var cameraColorTarget = context != null ? context.CameraColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraColorName);
+            var cameraDepthTarget = context != null ? context.CameraDepthTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.CameraDepthName);
+            if (cameraColorTarget.IsValid && cameraDepthTarget.IsValid)
+            {
+                cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier);
+            }
+
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.FlushCommandBuffer();
 
             if (camera != null && !BurtDrawingSettingsUtility.IsTemporalAAEnabled(context))
             {
-                renderContext.SetupCameraProperties(camera);
+                context.ScriptableContext.SetupCameraProperties(camera);
             }
         }
 
-        private static void DisableMainLightShadowReceiverGlobals(ScriptableRenderContext renderContext)
+        private static void DisableMainLightShadowReceiverGlobals(BurtRenderGraphContext context)
         {
-            var cmd = CommandBufferPool.Get("Burt Disable Main Light Shadow Receiver");
+            var cmd = context.AcquireCommandBuffer("Burt Disable Main Light Shadow Receiver");
             BurtMainLightShadowMatrixUtility.ClearMainLightShadowReceiverGlobals(cmd);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
         }
 
         private static Vector3 ResolveMainLightDirection(BurtRenderRequest request)
@@ -1985,15 +1989,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateAdditionalLightShadowAtlasDescriptor(lightingData);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.AdditionalLightShadowAtlasId, descriptor, FilterMode.Bilinear);
             BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, atlasTarget);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.ClearRenderTarget(true, false, Color.clear, BurtShadowRenderTargetUtility.ResolveMainLightShadowClearDepth());
             BurtAdditionalLightShadowUtility.BindAdditionalLightShadowAtlasIfValid(cmd, atlasTarget);
             BurtAdditionalLightShadowUtility.ClearAdditionalLightShadowReceiverGlobals(cmd);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private static void MarkCandidateShadowSlots(BurtLightingData lightingData, BurtAdditionalLightShadowStatus status)
@@ -2058,13 +2061,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             if (!BurtAdditionalLightShadowUtility.TryPrepareAdditionalLightShadowAtlas(request, out var lightingData))
             {
-                DisableAdditionalLightShadowReceiverGlobals(context.ScriptableContext);
+                DisableAdditionalLightShadowReceiverGlobals(context);
                 return;
             }
 
             var atlasResolution = Mathf.Max(1, lightingData.AdditionalLightShadowAtlasResolution);
             var tileResolution = Mathf.Max(1, lightingData.AdditionalLightShadowTileResolution);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             try
             {
                 BurtShadowRenderTargetUtility.SetDepthOnlyShadowRenderTarget(cmd, atlasTarget);
@@ -2073,8 +2076,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 cmd.SetGlobalDepthBias(0f, 0f);
                 SetWorldToCameraAndCameraToWorldMatrices(cmd, camera.worldToCameraMatrix);
                 BurtAdditionalLightShadowUtility.UploadAdditionalLightShadowReceiverGlobals(cmd, null, atlasTarget, lightingData);
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                cmd.Clear();
+                context.FlushCommandBuffer();
 
                 var activeSliceCount = Mathf.Clamp(lightingData.AdditionalLightShadowActiveSliceCount, 0, BurtLightingData.MaxAdditionalLightShadowSlices);
                 for (var sliceIndex = 0; sliceIndex < activeSliceCount; sliceIndex++)
@@ -2109,8 +2111,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                     cmd.SetGlobalFloat(MainLightShadowNormalBiasId, normalBias);
                     cmd.SetGlobalVector(UnityShadowBiasId, new Vector4(depthBias, normalBias, 0f, 0f));
                     SetKeyword(cmd, CastingPunctualLightShadowKeyword, true);
-                    context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                    cmd.Clear();
+                    context.FlushCommandBuffer();
 
                     var visibleLightIndex = lightingData.AdditionalLightShadowVisibleLightIndices[lightIndex];
                     if (BurtShadowRenderTargetUtility.HasShadowCasters(request.CullingResults, visibleLightIndex))
@@ -2121,17 +2122,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                     }
 
                     cmd.DisableScissorRect();
-                    context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                    cmd.Clear();
+                    context.FlushCommandBuffer();
                 }
             }
             finally
             {
-                CommandBufferPool.Release(cmd);
-                ResetAdditionalLightShadowCasterState(context, context.ScriptableContext, camera);
+                ResetAdditionalLightShadowCasterState(context, camera);
             }
 
-            UploadAdditionalLightShadowReceiverGlobals(context.ScriptableContext, atlasTarget, lightingData);
+            UploadAdditionalLightShadowReceiverGlobals(context, atlasTarget, lightingData);
         }
 
         private static bool IsPointAdditionalLightShadow(BurtLightingData lightingData, int lightIndex)
@@ -2193,23 +2192,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             }
         }
 
-        private static void UploadAdditionalLightShadowReceiverGlobals(ScriptableRenderContext renderContext, BurtRenderTargetHandle atlasTarget, BurtLightingData lightingData)
+        private static void UploadAdditionalLightShadowReceiverGlobals(BurtRenderGraphContext context, BurtRenderTargetHandle atlasTarget, BurtLightingData lightingData)
         {
             if (lightingData == null || !atlasTarget.IsValid)
             {
-                DisableAdditionalLightShadowReceiverGlobals(renderContext);
+                DisableAdditionalLightShadowReceiverGlobals(context);
                 return;
             }
 
-            var cmd = CommandBufferPool.Get("Burt Upload Additional Light Shadow Receiver");
+            var cmd = context.AcquireCommandBuffer("Burt Upload Additional Light Shadow Receiver");
             BurtAdditionalLightShadowUtility.UploadAdditionalLightShadowReceiverGlobals(cmd, null, atlasTarget, lightingData);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
         }
 
-        private static void ResetAdditionalLightShadowCasterState(BurtRenderGraphContext context, ScriptableRenderContext renderContext, Camera camera)
+        private static void ResetAdditionalLightShadowCasterState(BurtRenderGraphContext context, Camera camera)
         {
-            var cmd = CommandBufferPool.Get("Burt Reset Additional Light Shadow Caster State");
+            var cmd = context.AcquireCommandBuffer("Burt Reset Additional Light Shadow Caster State");
             cmd.DisableScissorRect();
             cmd.SetGlobalDepthBias(0f, 0f);
             cmd.SetGlobalFloat(CastingPunctualLightShadowId, 0f);
@@ -2222,21 +2219,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.FlushCommandBuffer();
 
             if (camera != null && !BurtDrawingSettingsUtility.IsTemporalAAEnabled(context))
             {
-                renderContext.SetupCameraProperties(camera);
+                context.ScriptableContext.SetupCameraProperties(camera);
             }
         }
 
-        private static void DisableAdditionalLightShadowReceiverGlobals(ScriptableRenderContext renderContext)
+        private static void DisableAdditionalLightShadowReceiverGlobals(BurtRenderGraphContext context)
         {
-            var cmd = CommandBufferPool.Get("Burt Disable Additional Light Shadow Receiver");
+            var cmd = context.AcquireCommandBuffer("Burt Disable Additional Light Shadow Receiver");
             BurtAdditionalLightShadowUtility.ClearAdditionalLightShadowReceiverGlobals(cmd);
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
         }
 
         private static void SetKeyword(CommandBuffer cmd, string keyword, bool enabled)
@@ -2284,10 +2278,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.AdditionalLightShadowAtlasId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -2329,7 +2322,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var cascadeCount = hasMainLightShadow ? cascadeCache.CascadeCount : 0;
             var tileResolution = hasMainLightShadow ? cascadeCache.TileResolution : 0;
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             BurtAtmosphereLutUtility.ResetFallbackGlobals(cmd);
             BurtFogUtility.ResetTransparentGlobals(cmd);
             BurtVolumetricFogIntegratedUtility.BeginCameraRequest(
@@ -2366,8 +2359,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             BurtAdditionalLightShadowUtility.UploadAdditionalLightShadowReceiverGlobals(cmd, null, lightingData);
             BurtPerObjectShadowUtility.ClearPerObjectShadowReceiverGlobals(cmd);
 
-            renderContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private static void UploadAdditionalLightBuffer(CommandBuffer cmd, BurtRenderGraphContext context, BurtLightingData lightingData)
@@ -2574,14 +2566,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 return; // 直接跳过，避免把 Unity 内部预览画到错误目标。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 重新绑定目标，防止前序内部预览状态影响 DrawRenderers。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用图级命令流，并在 DrawRenderers 前建立目标状态。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 使用 BurtRP 当前 request 的颜色和深度目标。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
 
-            renderContext.ExecuteCommandBuffer(cmd); // 提交绑定命令。
-
-            CommandBufferPool.Release(cmd); // 释放 CommandBuffer，避免每帧分配。
+            context.FlushCommandBuffer(); // 目标绑定必须先于下面的 DrawRenderers 进入 ScriptableRenderContext。
 
             DrawPreviewRenderers(renderContext, request, camera, RenderQueueRange.opaque, SortingCriteria.CommonOpaque); // 先绘制不透明预览物体。
 
@@ -2692,14 +2682,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(distortionTarget.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.ClearRenderTarget(false, true, InvalidDistortionClearColor);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.FlushCommandBuffer();
 
             var sortingSettings = new SortingSettings(camera);
             sortingSettings.criteria = SortingCriteria.CommonTransparent;
@@ -2723,6 +2712,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             builder.ReadShadowGlobals(); // 声明透明前向着色会读取阴影矩阵、强度、texel size 等阴影全局状态。
 
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTranslucencyVolume(builder.Request, builder.Asset))
+            {
+                builder.ReadBurtGITranslucencyVolumeFilter0();
+                builder.ReadBurtGITranslucencyVolumeFilter1();
+            }
+
             if (BurtShadowUtility.ShouldUseMainLightShadow(builder.Request, builder.Asset)) // 如果当前 request 真的生成主光阴影图，就把 shadow map 声明为透明着色输入。
             {
                 builder.ReadMainLightShadowMap(); // 声明透明前向着色会采样 MainLightShadowMap。
@@ -2744,11 +2739,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             var camera = request.Camera; // 从 request 中取出当前相机，用来创建排序设置。
 
-            var transparentFogCmd = CommandBufferPool.Get(Name + " Transparent Fog Globals");
+            var transparentFogCmd = context.AcquireCommandBuffer(Name + " Transparent Fog Globals");
             BurtVolumetricFogIntegratedUtility.BindForTransparentFog(transparentFogCmd, camera, request);
             BurtAtmosphereLutUtility.EnsureAndBindForTransparentFog(transparentFogCmd, camera, request);
-            renderContext.ExecuteCommandBuffer(transparentFogCmd);
-            CommandBufferPool.Release(transparentFogCmd);
+            context.FlushCommandBuffer();
 
             var sortingSettings = new SortingSettings(camera); // 创建排序设置，Unity 会根据相机信息计算透明排序参数。
 
@@ -2808,15 +2802,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 return; // 没有有效 override material 时直接结束，避免 DrawRenderers 报错。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从命令缓冲池获取一个以当前 Pass 命名的 CommandBuffer。
+            var cmd = context.AcquireCommandBuffer(Name); // 使用图级共享命令流，保持错误材质绘制位于当前 Pass 事件内。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 在绘制不支持 shader 前重新绑定当前 request 的颜色和深度目标。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把渲染目标绑定命令提交给 Unity 渲染上下文。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回 Unity 池，避免每帧分配。
+            context.FlushCommandBuffer(); // DrawRenderers 前提交目标、viewport 和矩阵状态。
 
             var sortingSettings = new SortingSettings(camera); // 基于当前相机创建排序设置。
 
@@ -2914,7 +2906,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             material.SetFloat(DepthDebugYFlipId, depthDebugYFlip); // 把预翻转开关传给深度调试 shader，防止最终屏幕里的调试图上下颠倒。
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(Name); // 录制到图级共享命令缓冲。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier); // 只绑定 CameraColor，因为这个全屏调试 Pass 不需要写入深度。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
@@ -2923,9 +2915,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制一个全屏三角形，让 shader 把深度纹理转成灰度图。
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把调试绘制命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 共享命令由图执行器在 Pass 结束时统一提交。
         }
 
         private Material GetDebugDepthMaterial() // 定义获取深度调试材质的内部辅助函数。
@@ -3008,13 +2998,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             material.SetFloat(ShadowDebugExposureId, exposure); // 把曝光倍率传给 shader，便于放大或压暗 shadow map 深度显示。
             var debugYFlip = ResolveMainLightShadowDebugYFlip(context.Request); // ????????? shadow map ???? Y ?????
             material.SetFloat(ShadowDebugYFlipId, debugYFlip); // 把解析后的 Y 翻转开关传给调试 shader，让 shader 只负责执行一次采样方向修正。
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(Name); // 录制到图级共享命令缓冲。
             cmd.SetRenderTarget(cameraColorTarget.Identifier); // 绑定 CameraColor 作为绘制目标，因为调试视图只覆盖颜色不写深度。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.MainLightShadowMapId, shadowMapTarget.Identifier); // 确保 shader 采样的是当前 request 的主光 shadow map。
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，让 shader 把 shadow map 转成灰度图。
-            renderContext.ExecuteCommandBuffer(cmd); // 提交调试绘制命令给 ScriptableRenderContext。
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 共享命令由图执行器在 Pass 结束时统一提交。
         }
 
         private static float ResolveMainLightShadowDebugYFlip(BurtRenderRequest request)
@@ -3078,13 +3067,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 return; // 直接结束这个 Pass，避免释放不存在的临时 RT。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(Name); // 使用图级共享命令缓冲记录资源释放。
 
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.MainLightShadowMapId); // 释放前面申请的主光阴影图临时 RT，避免资源泄漏到下一个 request。
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把释放 RT 的命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 共享命令由图执行器在 Pass 结束时统一提交。
         }
     }
 

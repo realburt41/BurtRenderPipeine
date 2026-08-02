@@ -1,11 +1,16 @@
 using System; // 引入基础命名空间，用来捕获 Configure 阶段异常并写入诊断信息。
 using System.Collections.Generic; // Uses List for passes, resource declarations, and validation messages.
+using System.Text;
+using Unity.Profiling;
+using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和其他 BurtRP 代码处在同一个模块里。
 {
     public sealed class BurtRenderGraph // 定义 BurtRP 的最小渲染图类，当前阶段负责保存 Pass、资源表和资源读写声明。
     {
+        private static readonly ProfilerMarker ConfigureGraphMarker = new ProfilerMarker("BRP.RenderGraph.Configure");
+        private static readonly ProfilerMarker ExecuteGraphMarker = new ProfilerMarker("BRP.RenderGraph.Execute");
         private readonly List<BurtRenderPass> passes = new List<BurtRenderPass>(); // 创建一个可复用的 Pass 列表，避免每帧重复分配 List。
 
         private readonly List<BurtRenderPassResourceUsage> resourceUsages = new List<BurtRenderPassResourceUsage>(); // 创建一个可复用的资源使用记录列表，用来保存每个 Pass 的读写声明。
@@ -14,12 +19,368 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
         private readonly BurtRenderGraphResourceRegistry resources = new BurtRenderGraphResourceRegistry(); // 创建一个可复用的资源注册表，用来保存当前图里的渲染目标资源。
 
+        private BurtRenderGraphProfilingMode profilingMode = BurtRenderGraphProfilingMode.CameraAndStage;
+        private BurtRenderGraphCompilationMode compilationMode = BurtRenderGraphCompilationMode.Lightweight;
+        private readonly BurtRenderGraphCompiler compiler = new BurtRenderGraphCompiler();
+        private BurtRenderGraphCompileResult compileResult;
+        private bool isExecutingEmergencyCleanup;
+
+    internal enum BurtRenderGraphCompilationMode
+    {
+        Lightweight = 0,
+        Full = 1,
+    }
+
+    public sealed class BurtRenderGraphCompileResult
+    {
+        public BurtRenderGraphCompileResult(
+            int passCount,
+            bool[] executePasses,
+            List<int>[] dependencies,
+            List<BurtRenderGraphResourceLifetime> resourceLifetimes,
+            int dependencyCount,
+            int culledPassCount)
+        {
+            PassCount = passCount;
+            ExecutePasses = executePasses;
+            Dependencies = dependencies;
+            ResourceLifetimes = resourceLifetimes;
+            DependencyCount = dependencyCount;
+            CulledPassCount = culledPassCount;
+        }
+
+        public int PassCount { get; }
+        public bool[] ExecutePasses { get; }
+        public List<int>[] Dependencies { get; }
+        public List<BurtRenderGraphResourceLifetime> ResourceLifetimes { get; }
+        public int DependencyCount { get; }
+        public int CulledPassCount { get; }
+
+        public bool ShouldExecute(int passIndex)
+        {
+            return passIndex < 0 || passIndex >= PassCount || ExecutePasses[passIndex];
+        }
+    }
+
+    public sealed class BurtRenderGraphResourceLifetime
+    {
+        public BurtRenderGraphResourceLifetime(string resourceKey, int firstPass, int lastPass, int aliasSlot)
+        {
+            ResourceKey = resourceKey;
+            FirstPass = firstPass;
+            LastPass = lastPass;
+            AliasSlot = aliasSlot;
+        }
+
+        public string ResourceKey { get; }
+        public int FirstPass { get; }
+        public int LastPass { get; }
+        public int AliasSlot { get; }
+    }
+
+    public sealed class BurtRenderGraphCompiler
+    {
+        private bool[] executePasses = Array.Empty<bool>();
+        private List<int>[] dependencies = Array.Empty<List<int>>();
+        private readonly Dictionary<string, int> lastWriters = new Dictionary<string, int>(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<int>> outstandingReaders = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Vector2Int> lifetimeRanges = new Dictionary<string, Vector2Int>(StringComparer.Ordinal);
+        private readonly HashSet<string> requiredResources = new HashSet<string>(StringComparer.Ordinal);
+        private readonly List<string> reads = new List<string>();
+        private readonly List<string> writes = new List<string>();
+
+        public BurtRenderGraphCompileResult Compile(
+            IReadOnlyList<BurtRenderPass> passes,
+            IReadOnlyList<BurtRenderPassResourceUsage> usages,
+            BurtRenderGraphResourceRegistry resources)
+        {
+            var passCount = passes != null ? passes.Count : 0;
+            EnsurePassCapacity(passCount);
+            lastWriters.Clear();
+            lifetimeRanges.Clear();
+            foreach (var readerList in outstandingReaders.Values)
+            {
+                readerList.Clear();
+            }
+
+            var dependencyCount = 0;
+
+            for (var passIndex = 0; passIndex < passCount; passIndex++)
+            {
+                dependencies[passIndex].Clear();
+                var usage = passIndex < usages.Count ? usages[passIndex] : null;
+                if (usage == null)
+                {
+                    continue;
+                }
+
+                CollectReadKeys(usage, reads);
+                CollectWriteKeys(usage, writes);
+                for (var readIndex = 0; readIndex < reads.Count; readIndex++)
+                {
+                    var key = reads[readIndex];
+                    TouchLifetime(lifetimeRanges, key, passIndex);
+                    if (lastWriters.TryGetValue(key, out var writer))
+                    {
+                        dependencyCount += AddDependency(dependencies[passIndex], writer);
+                    }
+
+                    if (!outstandingReaders.TryGetValue(key, out var readers))
+                    {
+                        readers = new List<int>();
+                        outstandingReaders.Add(key, readers);
+                    }
+
+                    if (!readers.Contains(passIndex))
+                    {
+                        readers.Add(passIndex);
+                    }
+                }
+
+                for (var writeIndex = 0; writeIndex < writes.Count; writeIndex++)
+                {
+                    var key = writes[writeIndex];
+                    TouchLifetime(lifetimeRanges, key, passIndex);
+                    if (lastWriters.TryGetValue(key, out var writer))
+                    {
+                        dependencyCount += AddDependency(dependencies[passIndex], writer);
+                    }
+
+                    if (outstandingReaders.TryGetValue(key, out var readers))
+                    {
+                        for (var readerIndex = 0; readerIndex < readers.Count; readerIndex++)
+                        {
+                            dependencyCount += AddDependency(dependencies[passIndex], readers[readerIndex]);
+                        }
+
+                        readers.Clear();
+                    }
+
+                    lastWriters[key] = passIndex;
+                }
+            }
+
+            CompileCullingMask(passCount, usages, resources);
+            var culledPassCount = 0;
+            for (var passIndex = 0; passIndex < passCount; passIndex++)
+            {
+                if (!executePasses[passIndex])
+                {
+                    culledPassCount++;
+                }
+            }
+
+            var lifetimes = BuildLifetimes(lifetimeRanges);
+            return new BurtRenderGraphCompileResult(passCount, executePasses, dependencies, lifetimes, dependencyCount, culledPassCount);
+        }
+
+        private void CompileCullingMask(
+            int passCount,
+            IReadOnlyList<BurtRenderPassResourceUsage> usages,
+            BurtRenderGraphResourceRegistry resources)
+        {
+            requiredResources.Clear();
+            for (var passIndex = passCount - 1; passIndex >= 0; passIndex--)
+            {
+                var usage = passIndex < usages.Count ? usages[passIndex] : null;
+                if (usage == null)
+                {
+                    executePasses[passIndex] = true;
+                    continue;
+                }
+
+                CollectWriteKeys(usage, writes);
+                var isRequired = usage.HasSideEffects || !usage.AllowCulling || HasTerminalWrite(usage, resources);
+                for (var writeIndex = 0; !isRequired && writeIndex < writes.Count; writeIndex++)
+                {
+                    isRequired = requiredResources.Contains(writes[writeIndex]);
+                }
+
+                executePasses[passIndex] = isRequired;
+                if (!isRequired)
+                {
+                    continue;
+                }
+
+                for (var writeIndex = 0; writeIndex < writes.Count; writeIndex++)
+                {
+                    requiredResources.Remove(writes[writeIndex]);
+                }
+
+                CollectReadKeys(usage, reads);
+                for (var readIndex = 0; readIndex < reads.Count; readIndex++)
+                {
+                    requiredResources.Add(reads[readIndex]);
+                }
+            }
+
+        }
+
+        private void EnsurePassCapacity(int passCount)
+        {
+            if (executePasses.Length < passCount)
+            {
+                var capacity = Math.Max(passCount, Math.Max(16, executePasses.Length * 2));
+                Array.Resize(ref executePasses, capacity);
+                var previousLength = dependencies.Length;
+                Array.Resize(ref dependencies, capacity);
+                for (var passIndex = previousLength; passIndex < capacity; passIndex++)
+                {
+                    dependencies[passIndex] = new List<int>(4);
+                }
+            }
+        }
+
+        private static bool HasTerminalWrite(BurtRenderPassResourceUsage usage, BurtRenderGraphResourceRegistry resources)
+        {
+            if (usage.AllowUnconsumedWriteResources.Count > 0)
+            {
+                return true;
+            }
+
+            for (var index = 0; index < usage.WriteRenderTargets.Count; index++)
+            {
+                if (resources != null && resources.IsExternalRenderTarget(usage.WriteRenderTargets[index].Name))
+                {
+                    return true;
+                }
+            }
+
+            for (var index = 0; index < usage.WriteBuffers.Count; index++)
+            {
+                if (resources != null && resources.IsExternalBuffer(usage.WriteBuffers[index].Name))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void CollectReadKeys(BurtRenderPassResourceUsage usage, List<string> keys)
+        {
+            keys.Clear();
+            for (var index = 0; index < usage.ReadRenderTargets.Count; index++)
+            {
+                AddUnique(keys, CreateKey("RT", usage.ReadRenderTargets[index].Name));
+            }
+
+            for (var index = 0; index < usage.ReadBuffers.Count; index++)
+            {
+                AddUnique(keys, CreateKey("BUF", usage.ReadBuffers[index].Name));
+            }
+
+            for (var index = 0; index < usage.ReadGlobalResources.Count; index++)
+            {
+                AddUnique(keys, CreateKey("GLOBAL", usage.ReadGlobalResources[index]));
+            }
+
+        }
+
+        private static void CollectWriteKeys(BurtRenderPassResourceUsage usage, List<string> keys)
+        {
+            keys.Clear();
+            for (var index = 0; index < usage.WriteRenderTargets.Count; index++)
+            {
+                AddUnique(keys, CreateKey("RT", usage.WriteRenderTargets[index].Name));
+            }
+
+            for (var index = 0; index < usage.WriteBuffers.Count; index++)
+            {
+                AddUnique(keys, CreateKey("BUF", usage.WriteBuffers[index].Name));
+            }
+
+            for (var index = 0; index < usage.WriteGlobalResources.Count; index++)
+            {
+                AddUnique(keys, CreateKey("GLOBAL", usage.WriteGlobalResources[index]));
+            }
+
+        }
+
+        private static string CreateKey(string type, string name)
+        {
+            return type + ":" + (string.IsNullOrEmpty(name) ? "<unnamed>" : name);
+        }
+
+        private static void AddUnique(List<string> keys, string key)
+        {
+            if (!keys.Contains(key))
+            {
+                keys.Add(key);
+            }
+        }
+
+        private static int AddDependency(List<int> dependencies, int dependency)
+        {
+            if (dependency < 0 || dependencies.Contains(dependency))
+            {
+                return 0;
+            }
+
+            dependencies.Add(dependency);
+            return 1;
+        }
+
+        private static void TouchLifetime(Dictionary<string, Vector2Int> ranges, string key, int passIndex)
+        {
+            if (ranges.TryGetValue(key, out var range))
+            {
+                ranges[key] = new Vector2Int(Math.Min(range.x, passIndex), Math.Max(range.y, passIndex));
+            }
+            else
+            {
+                ranges.Add(key, new Vector2Int(passIndex, passIndex));
+            }
+        }
+
+        private static List<BurtRenderGraphResourceLifetime> BuildLifetimes(Dictionary<string, Vector2Int> ranges)
+        {
+            var sorted = new List<KeyValuePair<string, Vector2Int>>(ranges);
+            sorted.Sort((left, right) =>
+            {
+                var firstCompare = left.Value.x.CompareTo(right.Value.x);
+                return firstCompare != 0 ? firstCompare : string.CompareOrdinal(left.Key, right.Key);
+            });
+
+            var slotEndPasses = new List<int>();
+            var lifetimes = new List<BurtRenderGraphResourceLifetime>(sorted.Count);
+            for (var index = 0; index < sorted.Count; index++)
+            {
+                var item = sorted[index];
+                var aliasSlot = -1;
+                if (item.Key.StartsWith("BUF:", StringComparison.Ordinal))
+                {
+                    for (var slot = 0; slot < slotEndPasses.Count; slot++)
+                    {
+                        if (slotEndPasses[slot] < item.Value.x)
+                        {
+                            aliasSlot = slot;
+                            slotEndPasses[slot] = item.Value.y;
+                            break;
+                        }
+                    }
+
+                    if (aliasSlot < 0)
+                    {
+                        aliasSlot = slotEndPasses.Count;
+                        slotEndPasses.Add(item.Value.y);
+                    }
+                }
+
+                lifetimes.Add(new BurtRenderGraphResourceLifetime(item.Key, item.Value.x, item.Value.y, aliasSlot));
+            }
+
+            return lifetimes;
+        }
+    }
+
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private const int MaxCachedProfilingSamplerCount = 1024;
         private readonly Dictionary<string, ProfilingSampler> profilingSamplers = new Dictionary<string, ProfilingSampler>(StringComparer.Ordinal);
-        private readonly Dictionary<string, BurtRenderGraphProfilingMarkerPass> beginProfilingPasses = new Dictionary<string, BurtRenderGraphProfilingMarkerPass>(StringComparer.Ordinal);
-        private readonly Dictionary<string, BurtRenderGraphProfilingMarkerPass> endProfilingPasses = new Dictionary<string, BurtRenderGraphProfilingMarkerPass>(StringComparer.Ordinal);
         private readonly List<string> profilingAssemblyScopeStack = new List<string>();
-        private readonly List<BurtRenderGraphProfilingMarkerPass> activeProfilingScopes = new List<BurtRenderGraphProfilingMarkerPass>();
+        private readonly List<BurtRenderGraphProfilingEvent> profilingEvents = new List<BurtRenderGraphProfilingEvent>();
+        private readonly List<BurtRenderGraphProfilingEvent> activeProfilingScopes = new List<BurtRenderGraphProfilingEvent>();
+        private readonly ProfilingSampler overflowProfilingSampler = new ProfilingSampler("BRP.Profiling/Overflow");
 #endif
 
         public int PassCount => passes.Count; // 暴露当前图里有多少个 Pass，方便后面调试或判断图是否为空。
@@ -29,6 +390,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
         public IReadOnlyList<BurtRenderPassResourceUsage> ResourceUsages => resourceUsages; // 暴露只读资源使用记录，方便后面调试或做依赖分析。
 
         public IReadOnlyList<string> ValidationMessages => validationMessages; // 暴露只读校验消息，供调试工具集中输出 RenderGraph 问题。
+        public bool RequiresImmediateSubmit => resources.HasPendingBufferReleases;
 
         public void Clear() // 定义清空函数，每次组装新 request 前都要调用。
         {
@@ -39,25 +401,51 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             validationMessages.Clear(); // 清空上一轮图校验消息，避免不同相机或 request 互相污染。
 
             resources.Clear(); // 清空上一轮 request 注册的资源，避免 CameraColor 和 CameraDepth 等资源残留到下一次渲染。
+            compileResult = null;
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             profilingAssemblyScopeStack.Clear();
+            profilingEvents.Clear();
             activeProfilingScopes.Clear();
 #endif
+        }
+
+        public void SetProfilingMode(BurtRenderGraphProfilingMode mode)
+        {
+            profilingMode = mode;
+        }
+
+        internal void SetCompilationMode(BurtRenderGraphCompilationMode mode)
+        {
+            compilationMode = mode;
         }
 
         public void BeginProfilingScope(string name)
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (profilingMode == BurtRenderGraphProfilingMode.Off)
+            {
+                return;
+            }
+
             var safeName = NormalizeProfilingName(name, "BRP.Stage/Unnamed");
             profilingAssemblyScopeStack.Add(safeName);
-            AddPass(GetOrCreateProfilingMarkerPass(safeName, true));
+            profilingEvents.Add(new BurtRenderGraphProfilingEvent(
+                passes.Count,
+                safeName,
+                GetOrCreateProfilingSampler(safeName),
+                true));
 #endif
         }
 
         public void EndProfilingScope(string name)
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (profilingMode == BurtRenderGraphProfilingMode.Off)
+            {
+                return;
+            }
+
             var safeName = NormalizeProfilingName(name, "BRP.Stage/Unnamed");
             if (profilingAssemblyScopeStack.Count == 0)
             {
@@ -74,7 +462,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 safeName = openedName;
             }
 
-            AddPass(GetOrCreateProfilingMarkerPass(safeName, false));
+            profilingEvents.Add(new BurtRenderGraphProfilingEvent(
+                passes.Count,
+                safeName,
+                GetOrCreateProfilingSampler(safeName),
+                false));
 #endif
         }
 
@@ -561,9 +953,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 return; // 直接结束执行，避免后面访问空对象。
             }
 
-            ConfigurePasses(context); // 在真正执行前收集所有 Pass 的资源读写声明，并把当前上下文传给配置阶段。
+            if (RequiresFullCompilation())
+            {
+                using (ConfigureGraphMarker.Auto())
+                {
+                    ConfigurePasses(context); // 在真正执行前收集所有 Pass 的资源读写声明，并把当前上下文传给配置阶段。
+                    ValidateConfiguredGraph(); // 对配置结果做轻量校验，只记录问题，不重排 Pass，也不改变 RenderTarget 绑定逻辑。
+                    compileResult = compiler.Compile(passes, resourceUsages, resources);
+                    AddValidationMessage("RenderGraph Compiler: dependencies=" + compileResult.DependencyCount +
+                        ", culled=" + compileResult.CulledPassCount +
+                        ", lifetimes=" + compileResult.ResourceLifetimes.Count + ".");
+                }
+            }
+            else
+            {
+                resourceUsages.Clear();
+                compileResult = null;
+            }
 
-            ValidateConfiguredGraph(); // 对配置结果做轻量校验，只记录问题，不重排 Pass，也不改变 RenderTarget 绑定逻辑。
+            using var executeGraphScope = ExecuteGraphMarker.Auto();
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (profilingAssemblyScopeStack.Count > 0)
@@ -571,42 +979,55 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 AddValidationMessage("RenderGraph 存在未闭合 Profiling scope: " + profilingAssemblyScopeStack[profilingAssemblyScopeStack.Count - 1]);
             }
 
-            var profilingCommandBuffer = CommandBufferPool.Get("BRP.RenderGraph/Profiling");
-            var profileIndividualPasses = context.Asset != null && context.Asset.EnableRenderGraphDebug;
+            if (profilingMode == BurtRenderGraphProfilingMode.Off)
+            {
+                ExecutePassesWithoutProfiling(context);
+                context.FlushCommandBuffer(false);
+                return;
+            }
+
+            var ownsProfilingCommandBuffer = !context.HasSharedCommandBuffer;
+            var profilingCommandBuffer = context.CommandBuffer ?? CommandBufferPool.Get("BRP.RenderGraph/Profiling");
+            var profileIndividualPasses = profilingMode == BurtRenderGraphProfilingMode.CameraStageAndPass;
             activeProfilingScopes.Clear();
             try
             {
-                for (var passIndex = 0; passIndex < passes.Count; passIndex++)
+                var profilingEventIndex = 0;
+                for (var passIndex = 0; passIndex <= passes.Count; passIndex++)
                 {
-                    var pass = passes[passIndex];
-                    if (pass == null)
+                    while (profilingEventIndex < profilingEvents.Count &&
+                        profilingEvents[profilingEventIndex].PassIndex == passIndex)
                     {
-                        continue;
+                        ExecuteProfilingEvent(context, profilingCommandBuffer, profilingEvents[profilingEventIndex]);
+                        profilingEventIndex++;
                     }
 
-                    if (pass is BurtRenderGraphProfilingMarkerPass markerPass)
+                    if (passIndex == passes.Count)
                     {
-                        ExecuteProfilingMarker(context, profilingCommandBuffer, markerPass);
+                        break;
+                    }
+
+                    var pass = passes[passIndex];
+                    if (pass == null || !ShouldExecutePass(passIndex))
+                    {
                         continue;
                     }
 
                     if (!profileIndividualPasses)
                     {
-                        pass.Execute(context);
+                        ExecutePass(context, pass);
                         continue;
                     }
 
                     var passSampler = GetOrCreateProfilingSampler("BRP.Pass/" + GetPassName(pass));
-                    passSampler.Begin(profilingCommandBuffer);
-                    ExecuteAndClearProfilingCommands(context, profilingCommandBuffer);
+                    BeginProfilingScope(context, profilingCommandBuffer, passSampler);
                     try
                     {
-                        pass.Execute(context);
+                        ExecutePass(context, pass);
                     }
                     finally
                     {
-                        passSampler.End(profilingCommandBuffer);
-                        ExecuteAndClearProfilingCommands(context, profilingCommandBuffer);
+                        EndProfilingScope(context, profilingCommandBuffer, passSampler);
                     }
                 }
             }
@@ -614,79 +1035,223 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             {
                 for (var scopeIndex = activeProfilingScopes.Count - 1; scopeIndex >= 0; scopeIndex--)
                 {
-                    activeProfilingScopes[scopeIndex].Sampler.End(profilingCommandBuffer);
-                    ExecuteAndClearProfilingCommands(context, profilingCommandBuffer);
+                    EndProfilingScope(context, profilingCommandBuffer, activeProfilingScopes[scopeIndex].Sampler);
                 }
 
                 activeProfilingScopes.Clear();
-                profilingCommandBuffer.Clear();
-                CommandBufferPool.Release(profilingCommandBuffer);
-            }
-#else
-            for (var passIndex = 0; passIndex < passes.Count; passIndex++) // 从前到后遍历当前图里的所有 Pass。
-            {
-                var pass = passes[passIndex]; // 取出当前索引对应的 Pass。
-
-                if (pass == null) // 如果当前 Pass 是空，说明列表里存在异常数据。
+                if (ownsProfilingCommandBuffer)
                 {
-                    continue; // 跳过这个空 Pass，继续执行后面的 Pass。
+                    profilingCommandBuffer.Clear();
+                    CommandBufferPool.Release(profilingCommandBuffer);
                 }
-
-                pass.Execute(context); // Execute the current pass without changing its internal command buffer behavior.
             }
+
+            context.FlushCommandBuffer(false);
+#else
+            ExecutePassesWithoutProfiling(context);
+            context.FlushCommandBuffer(false);
 #endif
         }
 
+        private void ExecutePassesWithoutProfiling(BurtRenderGraphContext context)
+        {
+            for (var passIndex = 0; passIndex < passes.Count; passIndex++)
+            {
+                var pass = passes[passIndex];
+                if (pass != null && ShouldExecutePass(passIndex))
+                {
+                    ExecutePass(context, pass);
+                }
+            }
+        }
+
+        private bool ShouldExecutePass(int passIndex)
+        {
+            return compileResult == null || compileResult.ShouldExecute(passIndex);
+        }
+
+        private bool RequiresFullCompilation()
+        {
+            if (compilationMode == BurtRenderGraphCompilationMode.Full)
+            {
+                return true;
+            }
+
+            for (var passIndex = 0; passIndex < passes.Count; passIndex++)
+            {
+                var pass = passes[passIndex];
+                if (pass != null && pass.AllowCulling)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void ExecutePass(BurtRenderGraphContext context, BurtRenderPass pass)
+        {
+            try
+            {
+                if (CanExecuteAsync(context, pass))
+                {
+                    ExecuteAsyncPass(context, pass);
+                }
+                else
+                {
+                    pass.Execute(context);
+                }
+            }
+            catch
+            {
+                context.DiscardCommandBuffer();
+                if (!isExecutingEmergencyCleanup)
+                {
+                    ExecuteEmergencyCleanup(context, passes.IndexOf(pass) + 1);
+                }
+                throw;
+            }
+        }
+
+        private static bool CanExecuteAsync(BurtRenderGraphContext context, BurtRenderPass pass)
+        {
+            return pass != null &&
+                pass.EnableAsyncCompute &&
+                context != null &&
+                context.Asset != null &&
+                context.Asset.EnableAsyncCompute &&
+                (context.Request == null ||
+                    context.Request.CameraData == null ||
+                    context.Request.CameraData.EnableAsyncCompute) &&
+                SystemInfo.supportsAsyncCompute &&
+                SystemInfo.supportsGraphicsFence &&
+                context.HasSharedCommandBuffer;
+        }
+
+        private static void ExecuteAsyncPass(BurtRenderGraphContext context, BurtRenderPass pass)
+        {
+            var graphicsToAsyncFence = context.CommandBuffer.CreateGraphicsFence(
+                GraphicsFenceType.AsyncQueueSynchronisation,
+                SynchronisationStageFlags.PixelProcessing);
+            context.MarkCommandBufferHasCommands();
+            context.FlushCommandBuffer(false);
+            var asyncCommandBuffer = CommandBufferPool.Get("BRP.Async/" + GetPassName(pass));
+            asyncCommandBuffer.SetExecutionFlags(CommandBufferExecutionFlags.AsyncCompute);
+            asyncCommandBuffer.WaitOnAsyncGraphicsFence(graphicsToAsyncFence);
+            context.BeginAsyncPass(asyncCommandBuffer);
+            try
+            {
+                pass.Execute(context);
+                var fence = asyncCommandBuffer.CreateGraphicsFence(
+                    GraphicsFenceType.AsyncQueueSynchronisation,
+                    SynchronisationStageFlags.ComputeProcessing);
+                context.MarkCommandBufferHasCommands();
+                context.ExecuteCurrentCommandBufferAsync(ComputeQueueType.Default);
+                context.EndAsyncPass();
+                context.CommandBuffer.WaitOnAsyncGraphicsFence(fence);
+                context.MarkCommandBufferHasCommands();
+            }
+            finally
+            {
+                context.EndAsyncPass();
+                asyncCommandBuffer.Clear();
+                CommandBufferPool.Release(asyncCommandBuffer);
+            }
+        }
+
+        private void ExecuteEmergencyCleanup(BurtRenderGraphContext context, int firstPassIndex)
+        {
+            isExecutingEmergencyCleanup = true;
+            try
+            {
+                for (var passIndex = Math.Max(0, firstPassIndex); passIndex < passes.Count; passIndex++)
+                {
+                    var cleanupPass = passes[passIndex];
+                    if (cleanupPass == null || cleanupPass.Kind != BurtRenderPassKind.Release)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        cleanupPass.Execute(context);
+                        context.FlushCommandBuffer();
+                    }
+                    catch (Exception cleanupException)
+                    {
+                        context.DiscardCommandBuffer();
+                        AddValidationMessage("Emergency cleanup failed for " + GetPassName(cleanupPass) +
+                            ": " + cleanupException.GetType().Name + " - " + cleanupException.Message);
+                    }
+                }
+            }
+            finally
+            {
+                isExecutingEmergencyCleanup = false;
+            }
+        }
+
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-        private void ExecuteProfilingMarker(
+        private void ExecuteProfilingEvent(
             BurtRenderGraphContext context,
             CommandBuffer commandBuffer,
-            BurtRenderGraphProfilingMarkerPass markerPass)
+            BurtRenderGraphProfilingEvent profilingEvent)
         {
-            if (markerPass.IsBegin)
+            if (profilingEvent.IsBegin)
             {
-                markerPass.Sampler.Begin(commandBuffer);
-                activeProfilingScopes.Add(markerPass);
+                BeginProfilingScope(context, commandBuffer, profilingEvent.Sampler);
+                activeProfilingScopes.Add(profilingEvent);
             }
             else
             {
                 if (activeProfilingScopes.Count == 0)
                 {
-                    AddValidationMessage("执行 Profiling End 时没有活动 Scope: " + markerPass.ScopeName);
+                    AddValidationMessage("执行 Profiling End 时没有活动 Scope: " + profilingEvent.ScopeName);
                     return;
                 }
 
                 var lastIndex = activeProfilingScopes.Count - 1;
-                var openedPass = activeProfilingScopes[lastIndex];
+                var openedEvent = activeProfilingScopes[lastIndex];
                 activeProfilingScopes.RemoveAt(lastIndex);
-                if (!string.Equals(openedPass.ScopeName, markerPass.ScopeName, StringComparison.Ordinal))
+                if (!string.Equals(openedEvent.ScopeName, profilingEvent.ScopeName, StringComparison.Ordinal))
                 {
-                    AddValidationMessage("执行 Profiling Scope 顺序不匹配: expected " + openedPass.ScopeName + ", actual " + markerPass.ScopeName);
+                    AddValidationMessage("执行 Profiling Scope 顺序不匹配: expected " + openedEvent.ScopeName + ", actual " + profilingEvent.ScopeName);
                 }
 
-                openedPass.Sampler.End(commandBuffer);
+                EndProfilingScope(context, commandBuffer, openedEvent.Sampler);
             }
-
-            ExecuteAndClearProfilingCommands(context, commandBuffer);
         }
 
-        private static void ExecuteAndClearProfilingCommands(BurtRenderGraphContext context, CommandBuffer commandBuffer)
+        private static void BeginProfilingScope(
+            BurtRenderGraphContext context,
+            CommandBuffer commandBuffer,
+            ProfilingSampler sampler)
         {
+            if (commandBuffer == context.CommandBuffer)
+            {
+                context.BeginProfilingScope(sampler);
+                return;
+            }
+
+            sampler.Begin(commandBuffer);
             context.ScriptableContext.ExecuteCommandBuffer(commandBuffer);
             commandBuffer.Clear();
         }
 
-        private BurtRenderGraphProfilingMarkerPass GetOrCreateProfilingMarkerPass(string name, bool isBegin)
+        private static void EndProfilingScope(
+            BurtRenderGraphContext context,
+            CommandBuffer commandBuffer,
+            ProfilingSampler sampler)
         {
-            var cache = isBegin ? beginProfilingPasses : endProfilingPasses;
-            if (cache.TryGetValue(name, out var markerPass))
+            if (commandBuffer == context.CommandBuffer)
             {
-                return markerPass;
+                context.EndProfilingScope(sampler);
+                return;
             }
 
-            markerPass = new BurtRenderGraphProfilingMarkerPass(name, GetOrCreateProfilingSampler(name), isBegin);
-            cache.Add(name, markerPass);
-            return markerPass;
+            sampler.End(commandBuffer);
+            context.ScriptableContext.ExecuteCommandBuffer(commandBuffer);
+            commandBuffer.Clear();
         }
 
         private ProfilingSampler GetOrCreateProfilingSampler(string name)
@@ -695,6 +1260,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             if (profilingSamplers.TryGetValue(safeName, out var sampler))
             {
                 return sampler;
+            }
+
+            if (profilingSamplers.Count >= MaxCachedProfilingSamplerCount)
+            {
+                return overflowProfilingSampler;
             }
 
             sampler = new ProfilingSampler(safeName);
@@ -717,7 +1287,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             BurtRenderRequest request, // 接收当前渲染请求，用来输出 Request 和 Camera 信息。
             BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RT 生命周期选项。
         {
-            return BurtRenderGraphDebugUtility.BuildDump(request, passes.Count, resourceUsages, validationMessages, resources, renderOptions); // 把 request、Pass、资源声明、校验和 RT 生命周期选项交给统一工具格式化。
+            return AppendCompilerDebugInfo(BurtRenderGraphDebugUtility.BuildDump(request, passes.Count, resourceUsages, validationMessages, resources, renderOptions)); // 把 request、Pass、资源声明、校验和 RT 生命周期选项交给统一工具格式化。
         }
 
         public void FlushDeferredResourceReleases()
@@ -725,12 +1295,70 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             resources.FlushDeferredBufferReleases();
         }
 
+        public void DisposeResources()
+        {
+            resources.DisposeResources();
+        }
+
         public string DumpDebugInfo( // 定义带管线资产状态的 RenderGraph 调试文本入口。
             BurtRenderRequest request, // 接收当前渲染请求，用来输出 Request 和 Camera 信息。
             BurtRenderPipelineAsset asset, // 接收当前 BurtRP 管线资产，用来输出 Renderer Mode 和 Debug View 状态。
             BurtRequestRenderOptions renderOptions) // 接收当前 request 的栈级 RT 生命周期选项。
         {
-            return BurtRenderGraphDebugUtility.BuildDump(request, passes.Count, resourceUsages, validationMessages, resources, renderOptions, asset); // 把 request、资源声明、RT 生命周期和资产调试状态交给统一工具格式化。
+            return AppendCompilerDebugInfo(BurtRenderGraphDebugUtility.BuildDump(request, passes.Count, resourceUsages, validationMessages, resources, renderOptions, asset)); // 把 request、资源声明、RT 生命周期和资产调试状态交给统一工具格式化。
+        }
+
+        private string AppendCompilerDebugInfo(string debugInfo)
+        {
+            if (compileResult == null)
+            {
+                return debugInfo;
+            }
+
+            var builder = new StringBuilder(debugInfo ?? string.Empty);
+            builder.AppendLine();
+            builder.AppendLine("RenderGraph Compiler");
+            builder.Append("Dependencies: ").Append(compileResult.DependencyCount)
+                .Append(", Culled Passes: ").Append(compileResult.CulledPassCount)
+                .Append(", Resource Lifetimes: ").Append(compileResult.ResourceLifetimes.Count)
+                .AppendLine();
+            for (var passIndex = 0; passIndex < compileResult.PassCount; passIndex++)
+            {
+                var dependencies = compileResult.Dependencies[passIndex];
+                if (dependencies == null || dependencies.Count == 0)
+                {
+                    continue;
+                }
+
+                builder.Append('#').Append(passIndex).Append(" <- ");
+                for (var dependencyIndex = 0; dependencyIndex < dependencies.Count; dependencyIndex++)
+                {
+                    if (dependencyIndex > 0)
+                    {
+                        builder.Append(", ");
+                    }
+
+                    builder.Append('#').Append(dependencies[dependencyIndex]);
+                }
+
+                builder.AppendLine();
+            }
+
+            builder.AppendLine("Resource Lifetimes");
+            for (var lifetimeIndex = 0; lifetimeIndex < compileResult.ResourceLifetimes.Count; lifetimeIndex++)
+            {
+                var lifetime = compileResult.ResourceLifetimes[lifetimeIndex];
+                builder.Append(lifetime.ResourceKey)
+                    .Append(" [").Append(lifetime.FirstPass).Append("..").Append(lifetime.LastPass).Append(']');
+                if (lifetime.AliasSlot >= 0)
+                {
+                    builder.Append(" buffer-alias-slot=").Append(lifetime.AliasSlot);
+                }
+
+                builder.AppendLine();
+            }
+
+            return builder.ToString();
         }
 
         private void ConfigurePasses(BurtRenderGraphContext context) // 定义资源声明收集函数，用来调用每个 Pass 的 Configure，并给 Builder 提供当前上下文。
@@ -762,7 +1390,52 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     AddValidationMessage("Pass #" + passIndex + " (" + GetPassName(pass) + ") Configure 抛出异常，已继续收集后续 Pass。"); // 写入图级别摘要。
                 }
 
+                ValidateResourceHandleVersions(builder.Usage);
                 resourceUsages.Add(builder.Usage); // 把当前 Pass 的资源使用记录保存到 RenderGraph。
+            }
+        }
+
+        private void ValidateResourceHandleVersions(BurtRenderPassResourceUsage usage)
+        {
+            if (usage == null)
+            {
+                return;
+            }
+
+            for (var index = 0; index < usage.ReadRenderTargets.Count; index++)
+            {
+                ValidateRenderTargetVersion(usage, usage.ReadRenderTargets[index]);
+            }
+
+            for (var index = 0; index < usage.WriteRenderTargets.Count; index++)
+            {
+                ValidateRenderTargetVersion(usage, usage.WriteRenderTargets[index]);
+            }
+
+            for (var index = 0; index < usage.ReadBuffers.Count; index++)
+            {
+                ValidateBufferVersion(usage, usage.ReadBuffers[index]);
+            }
+
+            for (var index = 0; index < usage.WriteBuffers.Count; index++)
+            {
+                ValidateBufferVersion(usage, usage.WriteBuffers[index]);
+            }
+        }
+
+        private void ValidateRenderTargetVersion(BurtRenderPassResourceUsage usage, BurtRenderTargetHandle handle)
+        {
+            if (handle.ResourceId.IsValid && !resources.IsCurrent(handle))
+            {
+                usage.AddValidationMessage("Stale RenderTarget handle: " + handle.Name + " v" + handle.Version);
+            }
+        }
+
+        private void ValidateBufferVersion(BurtRenderPassResourceUsage usage, BurtRenderBufferHandle handle)
+        {
+            if (handle.ResourceId.IsValid && !resources.IsCurrent(handle))
+            {
+                usage.AddValidationMessage("Stale Buffer handle: " + handle.Name + " v" + handle.Version);
             }
         }
 
@@ -793,25 +1466,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
     }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-    internal sealed class BurtRenderGraphProfilingMarkerPass : BurtRenderPass
+    internal readonly struct BurtRenderGraphProfilingEvent
     {
-        public BurtRenderGraphProfilingMarkerPass(string scopeName, ProfilingSampler sampler, bool isBegin)
+        public BurtRenderGraphProfilingEvent(int passIndex, string scopeName, ProfilingSampler sampler, bool isBegin)
         {
+            PassIndex = passIndex;
             ScopeName = scopeName;
             Sampler = sampler;
             IsBegin = isBegin;
         }
 
+        public int PassIndex { get; }
         public string ScopeName { get; }
         public ProfilingSampler Sampler { get; }
         public bool IsBegin { get; }
-        public override string Name => IsBegin ? "Begin " + ScopeName : "End " + ScopeName;
-        public override BurtRenderPassKind Kind => BurtRenderPassKind.Debug;
-
-        public override void Execute(BurtRenderGraphContext context)
-        {
-            // BurtRenderGraph executes marker passes with its shared profiling command buffer.
-        }
     }
 #endif
 }

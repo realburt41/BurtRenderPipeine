@@ -122,7 +122,7 @@ namespace Burt.RenderPipeline
 
             var fullDescriptor = BurtRenderTargetDescriptorUtility.CreateScreenSpaceShadowDescriptor(camera);
             var traceDescriptor = BurtRenderTargetDescriptorUtility.CreateScreenSpaceShadowDescriptor(camera, settings.DownsampleFactor);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(shadowTarget.Identifier);
             cmd.SetViewport(new Rect(0f, 0f, Mathf.Max(1, traceDescriptor.width), Mathf.Max(1, traceDescriptor.height)));
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
@@ -137,8 +137,7 @@ namespace Burt.RenderPipeline
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, TracePassIndex, MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalTexture(ScreenSpaceShadowTextureId, shadowTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private static bool TryGetTargets(
@@ -321,7 +320,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             var camera = context.Request != null ? context.Request.Camera : null;
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
@@ -338,8 +337,7 @@ namespace Burt.RenderPipeline
             }
 
             cmd.DrawProcedural(Matrix4x4.identity, material, DebugPassIndex, MeshTopology.Triangles, 3, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private Material GetScreenSpaceShadowMaterial()
@@ -533,6 +531,14 @@ namespace Burt.RenderPipeline
                 return BurtScreenSpaceShadowSettings.Disabled;
             }
 
+            // Screen-space shadow is a main-light shadow refinement, not an independent
+            // replacement. Keep the xrender contract: when the main shadow is not prepared,
+            // do not leave a second shadow producer active and mask the main shadow toggle.
+            if (!BurtShadowUtility.ShouldUseMainLightShadow(request, asset))
+            {
+                return BurtScreenSpaceShadowSettings.Disabled;
+            }
+
             var lightingData = request.LightingData;
             if (lightingData == null || !lightingData.HasMainLight)
             {
@@ -597,13 +603,12 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(passName);
+            var cmd = context.AcquireCommandBuffer(passName);
             cmd.GetTemporaryRT(textureId, descriptor, filterMode);
             cmd.SetRenderTarget(target.Identifier);
             cmd.ClearRenderTarget(false, true, Color.white);
             cmd.SetGlobalTexture(textureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         public static void Release(BurtRenderGraphContext context, string passName, int textureId)
@@ -613,10 +618,9 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(passName);
+            var cmd = context.AcquireCommandBuffer(passName);
             cmd.ReleaseTemporaryRT(textureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 }

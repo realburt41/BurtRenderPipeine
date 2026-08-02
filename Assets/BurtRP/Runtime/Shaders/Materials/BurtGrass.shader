@@ -61,6 +61,7 @@ Shader "BurtRP/Grass"
     SubShader
     {
         Tags { "RenderType" = "TransparentCutout" "RenderPipeline" = "BurtRenderPipeline" }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelize"
 
         Pass
         {

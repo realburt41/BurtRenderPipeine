@@ -30,6 +30,8 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private SerializedProperty postProcessSettings; // 缓存后处理框架设置字段，具体效果参数会从 Global Volume 读取。
         private SerializedProperty postProcessVolumeLayerMask; // 缓存后处理 Volume 查询层字段，Global Volume 需要通过它参与后处理。
         private SerializedProperty enableUnsupportedShaderDebug; // 缓存不支持 Shader 可视化调试字段。
+        private SerializedProperty renderGraphProfilingMode;
+        private SerializedProperty submitStrategy;
         private SerializedProperty enableRenderGraphDebug; // 缓存 RenderGraph 调试日志字段。
         private SerializedProperty enableRenderGraphDebugConsoleLog; // 缓存 RenderGraph 长日志 Console 输出字段。
 
@@ -56,6 +58,8 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private static readonly GUIContent PostProcessSettingsLabel = new("Post Process Settings", "后处理框架设置，具体效果参数从 Global Volume 读取。"); // 定义后处理设置显示文本。
         private static readonly GUIContent PostProcessVolumeLayerMaskLabel = new("Post Process Volume Layer Mask", "后处理 Global Volume 查询层，Tonemapping 等效果参数从匹配的 Volume Profile 读取。"); // 定义后处理 Volume 层显示文本。
         private static readonly GUIContent UnsupportedShaderDebugLabel = new("Unsupported Shader Debug", "用 Unity 错误材质标记非 BurtRP Shader，方便发现错误材质。"); // 定义不支持 Shader 调试显示文本。
+        private static readonly GUIContent RenderGraphProfilingModeLabel = new("RenderGraph Profiling", "Off 关闭 GPU Marker；CameraAndStage 适合常驻；CameraStageAndPass 用于 RenderDoc 精细抓帧。");
+        private static readonly GUIContent SubmitStrategyLabel = new("Submit Strategy", "PerCamera 最稳健；EndOfFrameWhenSafe 会在无待释放图级 Buffer 时合并到帧末 Submit，否则自动回退。");
         private static readonly GUIContent RenderGraphDebugLabel = new("RenderGraph Debug Capture", "缓存最近一次 RenderGraph 调试信息，供下方按钮复制到剪切板。"); // 定义 RenderGraph 捕获显示文本。
         private static readonly GUIContent RenderGraphDebugConsoleLogLabel = new("RenderGraph Console Log", "把捕获到的完整 RenderGraph Debug 继续输出到 Console；默认关闭以避免刷屏。"); // 定义 RenderGraph Console 输出显示文本。
         private static readonly GUIContent CameraSortDebugLabel = new("Camera Sort Debug Log", "输出相机 request 排序列表，多相机调试时使用。"); // 定义相机排序调试显示文本。
@@ -86,6 +90,8 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             postProcessSettings = FindProperty(nameof(postProcessSettings)); // 绑定后处理设置，让现有自定义 Inspector 也能显示新配置。
             postProcessVolumeLayerMask = FindProperty(nameof(postProcessVolumeLayerMask)); // 绑定后处理 Volume 查询层，让 Global Volume 可以按 LayerMask 过滤。
             enableUnsupportedShaderDebug = FindProperty(nameof(enableUnsupportedShaderDebug)); // 绑定不支持 Shader 调试开关。
+            renderGraphProfilingMode = FindProperty(nameof(renderGraphProfilingMode));
+            submitStrategy = FindProperty(nameof(submitStrategy));
             enableRenderGraphDebug = FindProperty(nameof(enableRenderGraphDebug)); // 绑定 RenderGraph 调试开关。
             enableRenderGraphDebugConsoleLog = FindProperty(nameof(enableRenderGraphDebugConsoleLog)); // 绑定 RenderGraph Console 输出开关。
 
@@ -186,6 +192,8 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         {
             DrawSectionHeader("Debug / 调试"); // 显示调试分组标题。
             DrawProperty(enableUnsupportedShaderDebug, UnsupportedShaderDebugLabel); // 绘制不支持 Shader 调试开关。
+            DrawProperty(renderGraphProfilingMode, RenderGraphProfilingModeLabel);
+            DrawProperty(submitStrategy, SubmitStrategyLabel);
             DrawProperty(enableRenderGraphDebug, RenderGraphDebugLabel); // 绘制 RenderGraph 调试开关。
             using (new EditorGUI.DisabledScope(enableRenderGraphDebug == null || !enableRenderGraphDebug.boolValue)) // 只有开启捕获时，Console 长日志开关才有意义。
             {

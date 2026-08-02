@@ -7,6 +7,8 @@
 #define BURT_DEFERRED_LIGHTING_SINGLE_SHADING_MODEL 1
 #define BURT_USE_ADDITIONAL_LIGHT_BUFFER 1
 #define BURT_USE_TILED_LIGHTING 1
+#define BURT_PBR_DIRECT_ONLY 1
+#define BURT_SHADOWS_ADDITIONAL_ONLY 1
 #define BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG 0
 #define BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG 0
 
@@ -125,7 +127,9 @@ BurtDeferredAdditionalLightingComponents BurtEvaluateDeferredAdditionalLighting(
 
     Components.Diffuse = AdditionalDirect.Diffuse;
     Components.Specular = AdditionalDirect.Specular;
+#if BURT_MODEL_HAS_TRANSMISSION
     Components.Transmission = AdditionalDirect.Transmission;
+#endif
 #endif
 
     return Components;

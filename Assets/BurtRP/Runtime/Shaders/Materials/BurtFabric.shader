@@ -44,6 +44,7 @@ Shader "BurtRP/Fabric"
     SubShader
     {
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelize"
 
         Pass
         {
@@ -203,6 +204,7 @@ Shader "BurtRP/Fabric"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma shader_feature_local _ BURT_MATERIAL_TRANSPARENT
             #pragma shader_feature_local _ BURT_TRANSPARENT_VERTEX_FOG
             #pragma shader_feature_local _ BURT_IGNORE_FOG
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP

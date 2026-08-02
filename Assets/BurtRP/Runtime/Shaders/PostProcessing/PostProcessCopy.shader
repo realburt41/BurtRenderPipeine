@@ -1508,7 +1508,10 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float3 moment2 = neighborhoodSumSq * (1.0 / 9.0);
                 float3 standardDeviation = sqrt(abs(moment2 - moment1 * moment1));
                 float temporalContrast = BurtTaaTemporalContrast(BurtTaaWorkingLuma(currentFilteredWorking), BurtTaaWorkingLuma(historyWorking));
-                float shadingRejection = BurtTaaShadingRejection(currentWorking, historyWorking);
+                // Compare history against the same projection-filtered current
+                // signal used by the resolve. A raw jittered center sample
+                // falsely rejects stable sub-pixel edges on alternate frames.
+                float shadingRejection = BurtTaaShadingRejection(currentFilteredWorking, historyWorking);
                 float dilatedHistoryRejection = _BurtTAAHasDilatedHistoryRejection > 0.5
                     ? saturate(tex2D(_BurtTAADilatedHistoryRejectionTexture, uv).r)
                     : shadingRejection;

@@ -86,6 +86,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
 
         public bool AllowCulling { get; } // Metadata only for now; the graph still executes every pass.
 
+        public bool EnableAsyncCompute { get; }
+
         public IReadOnlyList<BurtRenderTargetHandle> ReadRenderTargets => readRenderTargets; // 暴露只读的读取资源列表，避免外部直接修改内部 List。
 
         public IReadOnlyList<BurtRenderTargetHandle> WriteRenderTargets => writeRenderTargets; // 暴露只读的写入资源列表，避免外部直接修改内部 List。
@@ -127,7 +129,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             string passName,
             BurtRenderPassKind passKind,
             bool hasSideEffects,
-            bool allowCulling)
+            bool allowCulling,
+            bool enableAsyncCompute = false)
         {
             PassIndex = passIndex; // Store the graph order for stable debug labels.
 
@@ -138,6 +141,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
             HasSideEffects = hasSideEffects; // Store conservative side-effect metadata.
 
             AllowCulling = allowCulling; // Store culling intent without changing scheduling behavior.
+
+            EnableAsyncCompute = enableAsyncCompute;
         }
 
         public void AddReadRenderTarget(BurtRenderTargetHandle handle) // 定义记录读取渲染目标的函数。

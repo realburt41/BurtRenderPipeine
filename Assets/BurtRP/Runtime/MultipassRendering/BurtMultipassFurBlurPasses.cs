@@ -29,11 +29,11 @@ namespace Burt.RenderPipeline
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, descriptor, FilterMode.Point);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -62,11 +62,11 @@ namespace Burt.RenderPipeline
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId, descriptor, FilterMode.Point);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -95,11 +95,11 @@ namespace Burt.RenderPipeline
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurColorDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurColorTextureId, descriptor, FilterMode.Bilinear);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurColorTextureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -133,11 +133,11 @@ namespace Burt.RenderPipeline
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurTemporalDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, descriptor, FilterMode.Bilinear);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -166,11 +166,11 @@ namespace Burt.RenderPipeline
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurVelocityDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId, descriptor, FilterMode.Bilinear);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -207,7 +207,7 @@ namespace Burt.RenderPipeline
             var camera = context.Request != null ? context.Request.Camera : null;
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
             var drawMaterial = GetMaterial();
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(propertyTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             if (drawMaterial != null)
@@ -220,8 +220,8 @@ namespace Burt.RenderPipeline
                 cmd.ClearRenderTarget(false, true, BurtFurBlurPassUtility.FurBlurPropertyClearColor);
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private Material GetMaterial()
@@ -254,12 +254,12 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(velocityTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.ClearRenderTarget(false, true, Color.clear);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -289,14 +289,14 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.BeginSample(Name);
             cmd.SetRenderTarget(propertyTarget.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             BurtMultipassRenderer.DrawAll(cmd, context, BurtMultipassShaderPass.FurBlurProperty, RenderQueueRange.opaque);
             cmd.EndSample(Name);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -328,15 +328,15 @@ namespace Burt.RenderPipeline
 
             var camera = context.Request != null ? context.Request.Camera : null;
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurVelocityDescriptor(camera);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.BeginSample(Name);
             cmd.SetRenderTarget(velocityTarget.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             BurtFurBlurPassUtility.UploadMotionVectorGlobals(cmd, context.Request, descriptor.width, descriptor.height);
             BurtMultipassRenderer.DrawAll(cmd, context, BurtMultipassShaderPass.FurBlurVelocity, RenderQueueRange.opaque);
             cmd.EndSample(Name);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -396,14 +396,14 @@ namespace Burt.RenderPipeline
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(context.Request != null ? context.Request.Camera : null);
             var settings = BurtFurBlurPassUtility.ResolveSettings();
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(target.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, source.Identifier);
             BurtFurBlurPassUtility.UploadCommonGlobals(cmd, context.Request, descriptor.width, descriptor.height, settings, false, false, 0);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, DilatePassIndex, MeshTopology.Triangles, 3, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private Material GetMaterial()
@@ -451,11 +451,11 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
             cmd.DispatchCompute(shader, kernel, 1, 1, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private ComputeShader GetComputeShader()
@@ -506,7 +506,7 @@ namespace Burt.RenderPipeline
             var groupsY = Mathf.CeilToInt(Mathf.Max(1, descriptor.height) / (float)BurtFurBlurPassUtility.TileThreadSize);
             var settings = BurtFurBlurPassUtility.ResolveSettings();
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, property.Identifier);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileDataBufferId, tiles.Buffer);
@@ -514,8 +514,8 @@ namespace Burt.RenderPipeline
             cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.TileParamsId, BurtFurBlurPassUtility.CreateTileParamsVector(camera));
             cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ParamsId, new Vector4(settings.RadiusCm, settings.DepthThresholdEye, settings.DirectionDilationThreshold, settings.ThetaFeedback));
             cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private bool TryGetTargets(
@@ -581,12 +581,12 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
             cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.TileParamsId, BurtFurBlurPassUtility.CreateTileParamsVector(context.Request != null ? context.Request.Camera : null));
             cmd.DispatchCompute(shader, kernel, 1, 1, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private ComputeShader GetComputeShader()
@@ -650,7 +650,7 @@ namespace Burt.RenderPipeline
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
             var settings = BurtFurBlurPassUtility.ResolveSettings();
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId, source.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtFurBlurPassUtility.PropertyRWTextureId, target.Identifier);
             cmd.SetComputeBufferParam(shader, kernel, BurtFurBlurPassUtility.TileArgsBufferId, args.Buffer);
@@ -659,8 +659,8 @@ namespace Burt.RenderPipeline
             cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.TileParamsId, BurtFurBlurPassUtility.CreateTileParamsVector(camera));
             cmd.SetComputeVectorParam(shader, BurtFurBlurPassUtility.ParamsId, new Vector4(settings.RadiusCm, settings.DepthThresholdEye, settings.DirectionDilationThreshold, settings.ThetaFeedback));
             cmd.DispatchCompute(shader, kernel, args.Buffer, 0);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private bool TryGetTargets(
@@ -737,7 +737,7 @@ namespace Burt.RenderPipeline
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(camera);
             var history = BurtFurBlurHistoryUtility.EnsureHistoryTextures(context.Request, out var historyValid);
             var settings = BurtFurBlurPassUtility.ResolveSettings();
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(propertyTempTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, propertyTarget.Identifier);
@@ -745,8 +745,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtFurBlurPassUtility.PropertyHistoryTextureId, history.Property != null ? new RenderTargetIdentifier(history.Property) : propertyTarget.Identifier);
             BurtFurBlurPassUtility.UploadCommonGlobals(cmd, context.Request, descriptor.width, descriptor.height, settings, historyValid, historyValid, history.HistoryAge);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, ThetaTemporalPassIndex, MeshTopology.Triangles, 3, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private Material GetMaterial()
@@ -812,7 +812,7 @@ namespace Burt.RenderPipeline
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurColorDescriptor(context.Request != null ? context.Request.Camera : null);
             var settings = BurtFurBlurPassUtility.ResolveSettings();
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(colorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(context.Request, context.Asset))
@@ -832,8 +832,8 @@ namespace Burt.RenderPipeline
             {
                 cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, BlurPassIndex, MeshTopology.Triangles, 3, 1);
             }
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private Material GetMaterial()
@@ -921,7 +921,7 @@ namespace Burt.RenderPipeline
             var colorHistoryValid = status.HasHistory && history.Color != null;
             var propertyHistoryValid = status.HasPropertyHistory && history.Property != null;
             var settings = BurtFurBlurPassUtility.ResolveSettings();
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(temporalTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             if (BurtFurBlurPassUtility.ShouldUseTiledBlurDraw(context.Request, context.Asset))
@@ -944,8 +944,8 @@ namespace Burt.RenderPipeline
             {
                 cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, TemporalPassIndex, MeshTopology.Triangles, 3, 1);
             }
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private Material GetMaterial()
@@ -1008,11 +1008,11 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.CopyTexture(colorSourceTarget.Identifier, new RenderTargetIdentifier(history.Color));
             cmd.CopyTexture(propertyTarget.Identifier, new RenderTargetIdentifier(history.Property));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             BurtFurBlurHistoryUtility.MarkHistoryValid(context.Request != null ? context.Request.Camera : null);
         }
     }
@@ -1076,15 +1076,15 @@ namespace Burt.RenderPipeline
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             var compositeSource = BurtFurBlurPassUtility.ShouldUseFurBlurColorTemporal(context.Request, context.Asset) ? temporalTarget : colorTarget;
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, compositeSource.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, propertyTarget.Identifier);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, CompositePassIndex, MeshTopology.Triangles, 3, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private Material GetMaterial()
@@ -1155,7 +1155,7 @@ namespace Burt.RenderPipeline
             var status = BurtFurBlurHistoryUtility.GetHistoryStatus(camera);
             var history = BurtFurBlurHistoryUtility.GetPendingHistoryTextures(context.Request);
             var settings = BurtFurBlurPassUtility.ResolveSettings();
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, propertyTarget.Identifier);
@@ -1168,8 +1168,8 @@ namespace Burt.RenderPipeline
             BurtFurBlurPassUtility.UploadCommonGlobals(cmd, context.Request, descriptor.width, descriptor.height, settings, status.HasHistory, status.HasPropertyHistory, status.HistoryAge);
             cmd.SetGlobalInt(BurtFurBlurPassUtility.DebugModeId, BurtFurBlurPassUtility.ResolveFurBlurShaderDebugMode());
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, DebugPassIndex, MeshTopology.Triangles, 3, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private Material GetMaterial()
@@ -1207,10 +1207,10 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -1238,10 +1238,10 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -1269,10 +1269,10 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurColorTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -1300,10 +1300,10 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -1331,10 +1331,10 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 

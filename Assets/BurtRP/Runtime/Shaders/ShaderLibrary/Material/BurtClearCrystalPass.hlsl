@@ -14,6 +14,7 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtTransparentAtmosphereFog.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtForwardTranslucencyVolume.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtClearCrystalProperties.hlsl"
 
 sampler2D _BurtOpaqueCameraColorTexture;
@@ -479,6 +480,7 @@ float4 FragClearCrystal(BurtClearCrystalVaryings input, fixed facing : VFACE) : 
         viewDirectionWS,
         transmissionThickness);
     float3 finalColor = pbr.Lighting + materialData.EmissionColor + transmission;
+    finalColor += BurtSampleForwardTranslucencyVolume(input.PositionWS, materialData.NormalWS, surfaceData.BaseColor.rgb);
     float outputAlpha = surfaceData.Alpha;
     BurtClearCrystalApplyRefraction(input, materialData, finalColor, outputAlpha);
 #if !defined(BURT_IGNORE_FOG)

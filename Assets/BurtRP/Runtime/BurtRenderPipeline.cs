@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 
 // 引入 UnityEngine 命名空间，用来使用 Camera。
+using Unity.Profiling;
 using UnityEngine;
 
 // 引入 UnityEngine.Rendering 命名空间，用来使用 RenderPipeline 和 ScriptableRenderContext。
@@ -15,6 +16,10 @@ namespace Burt.RenderPipeline
     {
         // 保存管线配置资产。
         private readonly BurtRenderPipelineAsset asset;
+
+        private static readonly ProfilerMarker FrameMarker = new ProfilerMarker("BRP.Frame");
+        private static readonly ProfilerMarker PrepareRequestsMarker = new ProfilerMarker("BRP.PrepareRequests");
+        private static readonly ProfilerMarker FrameSubmitMarker = new ProfilerMarker("BRP.Frame.Submit");
 
         private static readonly int PreIntegratedFGTextureId = Shader.PropertyToID("_BurtPreIntegratedFG"); // 缓存预积分 FG LUT 全局纹理 ID，供 PBR IBL 和能量补偿采样。
         private static readonly int PreIntegratedFGEnabledId = Shader.PropertyToID("_BurtPreIntegratedFGEnabled"); // 缓存 LUT 是否有效的开关，未绑定时 shader 会回退到解析近似。
@@ -30,6 +35,9 @@ namespace Burt.RenderPipeline
 
         private readonly List<BurtRenderRequest> requests = new(); // 缓存当前帧创建出的所有有效 request，后续先排序再执行。
 
+        private readonly List<IBurtNonCameraRenderRequest> nonCameraRequests = new();
+        private readonly List<IBurtNonCameraRenderRequest> executingNonCameraRequests = new();
+
         private readonly List<Camera> legacyCameraList = new(); // 复用旧 Camera[] 入口需要的列表，避免每帧分配。
 
         private readonly BurtRenderFrame renderFrame = new(); // 缓存当前帧的 Frame/Stack 分组快照；现阶段只用于诊断，不改变渲染顺序。
@@ -39,6 +47,17 @@ namespace Burt.RenderPipeline
 
         public BurtAvatarDecalPositionMapManager AvatarDecalPositionMapManager => avatarDecalPositionMapManager;
         public BurtAvatarDecalManager AvatarDecalManager => avatarDecalManager;
+
+        public bool EnqueueNonCameraRequest(IBurtNonCameraRenderRequest request)
+        {
+            if (request == null || !request.IsValid)
+            {
+                return false;
+            }
+
+            nonCameraRequests.Add(request);
+            return true;
+        }
 
         public BurtRenderPipeline(BurtRenderPipelineAsset asset)
         {
@@ -80,6 +99,7 @@ namespace Burt.RenderPipeline
 
         protected override void Dispose(bool disposing)
         {
+            cameraRenderer.Dispose();
             avatarDecalManager.ReleaseAll();
             avatarDecalPositionMapManager.ReleaseAll();
             if (Current == this)
@@ -105,7 +125,10 @@ namespace Burt.RenderPipeline
         // 渲染 List<Camera> 的共享逻辑。
         private void RenderCameras(ScriptableRenderContext context, List<Camera> cameras)
         {
+            using var frameScope = FrameMarker.Auto();
             var safeCameras = cameras ?? legacyCameraList;
+            var submitAtEndOfFrame = asset != null && asset.SubmitStrategy == BurtSubmitStrategy.EndOfFrameWhenSafe;
+            var frameSubmitted = false;
             BeginContextRendering(context, safeCameras);
             try
             {
@@ -113,33 +136,120 @@ namespace Burt.RenderPipeline
                 requests.Clear();
                 avatarDecalPositionMapManager.ExecutePending(context);
                 avatarDecalManager.ExecutePending(context);
+                ExecuteNonCameraRequests(context, BurtNonCameraRenderStage.BeforeCameras);
 
-                // 遍历 Unity 传入的相机列表。
-                foreach (var camera in safeCameras)
+                using (PrepareRequestsMarker.Auto())
                 {
-                    // 准备阶段只收集调度元数据；真正 Cull 会在 BeginCameraRendering 之后执行。
-                    var request = BurtRenderRequest.PrepareCameraRequest(camera, asset);
-
-                    // 如果 request 无效，就不加入列表。
-                    if (!request.IsValid)
+                    // 遍历 Unity 传入的相机列表。
+                    foreach (var camera in safeCameras)
                     {
-                        // 跳过当前相机。
-                        continue;
+                        // 准备阶段只收集调度元数据；真正 Cull 会在 BeginCameraRendering 之后执行。
+                        var request = BurtRenderRequest.PrepareCameraRequest(camera, asset);
+
+                        // 如果 request 无效，就不加入列表。
+                        if (!request.IsValid)
+                        {
+                            // 跳过当前相机。
+                            continue;
+                        }
+
+                        request.SetGraphAssembler(ResolveGraphAssembler(request)); // 根据管线资产和 request 类型给当前 request 指定对应渲染图组装器。
+
+                        // 把有效 request 加入列表。
+                        requests.Add(request);
                     }
-
-                    request.SetGraphAssembler(ResolveGraphAssembler(request)); // 根据管线资产和 request 类型给当前 request 指定对应渲染图组装器。
-
-                    // 把有效 request 加入列表。
-                    requests.Add(request);
                 }
 
                 // 执行所有 request。
                 ExecuteRequests(context);
+                ExecuteNonCameraRequests(context, BurtNonCameraRenderStage.AfterCameras);
+                if (submitAtEndOfFrame)
+                {
+                    using (FrameSubmitMarker.Auto())
+                    {
+                        context.Submit();
+                    }
+
+                    frameSubmitted = true;
+                    cameraRenderer.FlushDeferredResourceReleases();
+                }
             }
             finally
             {
+                if (submitAtEndOfFrame && !frameSubmitted)
+                {
+                    try
+                    {
+                        using (FrameSubmitMarker.Auto())
+                        {
+                            context.Submit();
+                        }
+
+                        cameraRenderer.FlushDeferredResourceReleases();
+                    }
+                    catch (System.Exception submitException)
+                    {
+                        Debug.LogException(submitException);
+                    }
+                }
+
+                for (var requestIndex = 0; requestIndex < requests.Count; requestIndex++)
+                {
+                    BurtRenderRequest.Release(requests[requestIndex]);
+                }
+
+                requests.Clear();
                 EndContextRendering(context, safeCameras);
             }
+        }
+
+        private void ExecuteNonCameraRequests(
+            ScriptableRenderContext context,
+            BurtNonCameraRenderStage stage)
+        {
+            executingNonCameraRequests.Clear();
+            for (var requestIndex = nonCameraRequests.Count - 1; requestIndex >= 0; requestIndex--)
+            {
+                var request = nonCameraRequests[requestIndex];
+                if (request == null || !request.IsValid)
+                {
+                    nonCameraRequests.RemoveAt(requestIndex);
+                    continue;
+                }
+
+                if (request.Stage != stage)
+                {
+                    continue;
+                }
+
+                executingNonCameraRequests.Add(request);
+                nonCameraRequests.RemoveAt(requestIndex);
+            }
+
+            executingNonCameraRequests.Sort((left, right) =>
+            {
+                var orderCompare = left.SortOrder.CompareTo(right.SortOrder);
+                return orderCompare != 0
+                    ? orderCompare
+                    : string.CompareOrdinal(left.Name, right.Name);
+            });
+
+            for (var requestIndex = 0; requestIndex < executingNonCameraRequests.Count; requestIndex++)
+            {
+                var request = executingNonCameraRequests[requestIndex];
+                try
+                {
+                    request.Execute(context, asset);
+                }
+                catch (System.Exception exception)
+                {
+                    Debug.LogError("Burt non-camera render request failed: " +
+                        (string.IsNullOrEmpty(request.Name) ? "<unnamed>" : request.Name));
+                    Debug.LogException(exception);
+                }
+            }
+
+            executingNonCameraRequests.Clear();
         }
 
         // 绑定 PBR 预积分 FG LUT，保证 Lit shader 能读取资产上的间接高光查找表。
@@ -328,7 +438,8 @@ namespace Burt.RenderPipeline
                 }
 
                 // 把当前 request 和栈级 RT 生命周期选项交给 BurtCameraRenderer 执行。
-                cameraRenderer.Render(context, request, asset, renderOptions);
+                var submitImmediately = asset == null || asset.SubmitStrategy == BurtSubmitStrategy.PerCamera;
+                cameraRenderer.Render(context, request, asset, renderOptions, submitImmediately);
             }
             finally
             {

@@ -343,13 +343,12 @@ void FilterProbeRadianceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     BurtGIFilterProbeRadiance(dispatchThreadId);
 }
 
-void BurtGICalculateProbeIrradiance(uint3 dispatchThreadId, uint3 groupThreadId)
+void BurtGICalculateProbeIrradiance(uint3 groupId, uint3 groupThreadId)
 {
-    uint probeTraceIndex = dispatchThreadId.z;
-    if (probeTraceIndex >= _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer[0])
-    {
-        return;
-    }
+    // The indirect dispatch is (1, 1, NumProbesToTrace), so the probe index is
+    // uniform for the whole thread group. Keeping this group-uniform is required
+    // by D3D11 because this function synchronizes group-shared memory below.
+    uint probeTraceIndex = groupId.z;
 
     uint radianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapRadianceProbeResolution);
     uint finalIrradianceProbeResolution = max(1u, _BurtGIRadianceCacheClipMapFinalIrradianceProbeResolution);
@@ -395,7 +394,7 @@ void BurtGICalculateProbeIrradiance(uint3 dispatchThreadId, uint3 groupThreadId)
 
     GroupMemoryBarrierWithGroupSync();
 
-    uint2 finalProbeTexelCoord = dispatchThreadId.xy;
+    uint2 finalProbeTexelCoord = groupThreadId.xy;
     if (finalProbeTexelCoord.x >= finalIrradianceProbeResolution || finalProbeTexelCoord.y >= finalIrradianceProbeResolution)
     {
         return;
@@ -441,15 +440,15 @@ void BurtGICalculateProbeIrradiance(uint3 dispatchThreadId, uint3 groupThreadId)
 [numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
 void CalculateProbeIrradiance(
     uint3 groupThreadId : SV_GroupThreadID,
-    uint3 dispatchThreadId : SV_DispatchThreadID)
+    uint3 groupId : SV_GroupID)
 {
-    BurtGICalculateProbeIrradiance(dispatchThreadId, groupThreadId);
+    BurtGICalculateProbeIrradiance(groupId, groupThreadId);
 }
 
 [numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
 void CalculateProbeIrradianceCS(
     uint3 groupThreadId : SV_GroupThreadID,
-    uint3 dispatchThreadId : SV_DispatchThreadID)
+    uint3 groupId : SV_GroupID)
 {
-    BurtGICalculateProbeIrradiance(dispatchThreadId, groupThreadId);
+    BurtGICalculateProbeIrradiance(groupId, groupThreadId);
 }

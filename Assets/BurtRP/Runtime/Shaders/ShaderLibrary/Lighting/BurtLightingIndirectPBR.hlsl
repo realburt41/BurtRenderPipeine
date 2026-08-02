@@ -122,24 +122,14 @@ BurtIndirectPBRComponents BurtApplyFabricIndirectPBRComponents(
 }
 #endif
 
+#if BURT_MODEL_HAS_CLEAR_COAT && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT))
 BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData BaseMaterialData);
-
-#if BURT_ENABLE_CLEAR_COAT_SHADING && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT))
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingClearCoat.hlsl"
-#else
-BurtIndirectPBRComponents BurtApplyClearCoatIndirectPBRComponents(
-    BurtIndirectPBRComponents Components,
-    BurtPBRMaterialData MaterialData,
-    BurtPBRGeometryData GeometryData,
-    BurtPBRGeometryData ClearCoatGeometryData)
-{
-    return Components;
-}
 #endif
 
-
-// Evaluates split indirect PBR lighting from prepared material/geometry data.
-BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData MaterialData, BurtPBRGeometryData GeometryData, BurtPBRGeometryData ClearCoatGeometryData, BurtPBREnergyTerms EnergyTerms)
+// Evaluates the common indirect base. Model-specific layers are appended only
+// by variants that own those capabilities, matching XRender's SM selectors.
+BurtIndirectPBRComponents BurtEvaluateIndirectPBRBaseComponents(BurtPBRMaterialData MaterialData, BurtPBRGeometryData GeometryData, BurtPBREnergyTerms EnergyTerms)
 {
     BurtIndirectPBRComponents Components;
     Components.Diffuse = BurtEvaluateIndirectDiffusePBR(MaterialData, GeometryData.NormalWS, EnergyTerms.EnergyPreservation);
@@ -150,14 +140,27 @@ BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData 
 
     Components = BurtApplyFabricIndirectPBRComponents(Components, MaterialData, GeometryData);
     Components = BurtApplySubsurfaceIndirectPBRComponents(Components, MaterialData, GeometryData);
-    Components = BurtApplyClearCoatIndirectPBRComponents(Components, MaterialData, GeometryData, ClearCoatGeometryData);
 
     return Components;
 }
 
+#if BURT_MODEL_HAS_CLEAR_COAT && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT))
+// Clear Coat owns the only four-geometry overload; non-coat variants never
+// parse or lower the extra top-layer path.
+BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData MaterialData, BurtPBRGeometryData GeometryData, BurtPBRGeometryData ClearCoatGeometryData, BurtPBREnergyTerms EnergyTerms)
+{
+    BurtIndirectPBRComponents Components = BurtEvaluateIndirectPBRBaseComponents(MaterialData, GeometryData, EnergyTerms);
+    return BurtApplyClearCoatIndirectPBRComponents(Components, MaterialData, GeometryData, ClearCoatGeometryData);
+}
+#endif
+
 BurtIndirectPBRComponents BurtEvaluateIndirectPBRComponents(BurtPBRMaterialData MaterialData, BurtPBRGeometryData GeometryData, BurtPBREnergyTerms EnergyTerms)
 {
-    return BurtEvaluateIndirectPBRComponents(MaterialData, GeometryData, GeometryData, EnergyTerms);
+    BurtIndirectPBRComponents Components = BurtEvaluateIndirectPBRBaseComponents(MaterialData, GeometryData, EnergyTerms);
+#if BURT_MODEL_HAS_CLEAR_COAT && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT))
+    Components = BurtApplyClearCoatIndirectPBRComponents(Components, MaterialData, GeometryData, GeometryData);
+#endif
+    return Components;
 }
 
 

@@ -2,10 +2,16 @@
 #define BURT_LIGHTING_RESULT_INCLUDED
 
 // Stable lighting output shared by production composition and shading debug.
-// Keep this independent from BRDF-only diagnostic fields so debug display code
-// reads the exact channels that are used to build the final production color.
+// XRender keeps diagnostic channels out of production result structs. Mirror
+// that behavior here: normal deferred variants only carry the final value,
+// while the explicitly requested debug variant retains channel breakdowns.
+#ifndef BURT_LIGHTING_RESULT_INCLUDE_DEBUG_CHANNELS
+#define BURT_LIGHTING_RESULT_INCLUDE_DEBUG_CHANNELS 0
+#endif
+
 struct BurtLightingResult
 {
+#if BURT_LIGHTING_RESULT_INCLUDE_DEBUG_CHANNELS
     float3 DirectDiffuse;
     float3 DirectSpecular;
     float3 DirectTransmission;
@@ -22,8 +28,11 @@ struct BurtLightingResult
 
     float3 Emission;
     float3 Lighting;
+#endif
     float3 FinalLighting;
+#if BURT_LIGHTING_RESULT_INCLUDE_DEBUG_CHANNELS
     float AmbientOcclusion;
+#endif
 };
 
 BurtLightingResult BurtCreateLightingResult(
@@ -32,6 +41,7 @@ BurtLightingResult BurtCreateLightingResult(
     float AmbientOcclusion)
 {
     BurtLightingResult Result = (BurtLightingResult)0;
+#if BURT_LIGHTING_RESULT_INCLUDE_DEBUG_CHANNELS
     Result.DirectDiffuse = Components.DirectDiffuse;
     Result.DirectSpecular = Components.DirectSpecular;
     Result.DirectTransmission = Components.DirectTransmission;
@@ -50,6 +60,9 @@ BurtLightingResult BurtCreateLightingResult(
     Result.Lighting = Components.Lighting;
     Result.FinalLighting = Result.Lighting + Result.Emission;
     Result.AmbientOcclusion = AmbientOcclusion;
+#else
+    Result.FinalLighting = Components.Lighting + Emission;
+#endif
     return Result;
 }
 

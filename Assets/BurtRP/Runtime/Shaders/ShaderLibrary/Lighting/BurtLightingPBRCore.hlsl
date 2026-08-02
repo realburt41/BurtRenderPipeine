@@ -23,17 +23,16 @@ float DirectSpecularPerceptualRoughness;
 
     BurtPBREnergyTerms EnergyTerms;
 
+#if BURT_MODEL_HAS_CLEAR_COAT
     float3 ClearCoatNormalWS;
-
     BurtPBRGeometryData ClearCoatGeometryData;
-
     BurtSpecularAATerms ClearCoatSpecularAATerms;
-
     float ClearCoatDirectSpecularPerceptualRoughness;
-
     float3 ClearCoatDirectSpecularEnergyCompensation;
+#endif
 };
 
+#if BURT_MODEL_HAS_CLEAR_COAT
 BurtPBRShadingCoreData BurtResetClearCoatTopLayerCoreData(BurtPBRShadingCoreData CoreData)
 {
     CoreData.ClearCoatSpecularAATerms = CoreData.SpecularAATerms;
@@ -41,13 +40,14 @@ BurtPBRShadingCoreData BurtResetClearCoatTopLayerCoreData(BurtPBRShadingCoreData
     CoreData.ClearCoatDirectSpecularEnergyCompensation = CoreData.EnergyTerms.DirectSpecularEnergyCompensation;
     return CoreData;
 }
+#endif
 
 #if BURT_ENABLE_CLEAR_COAT_SHADING && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_CLEAR_COAT))
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingPBRCoreClearCoat.hlsl"
 #else
 BurtPBRShadingCoreData BurtApplyClearCoatTopLayerCoreData(BurtPBRShadingCoreData CoreData)
 {
-    return BurtResetClearCoatTopLayerCoreData(CoreData);
+    return CoreData;
 }
 #endif
 
@@ -65,9 +65,11 @@ BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtPBRMaterialData Materia
     CoreData.DirectSpecularPerceptualRoughness = CoreData.SpecularAATerms.FilteredPerceptualRoughness;
 
     CoreData.EnergyTerms = BurtPreparePBREnergyTerms(MaterialData, GeometryData, CoreData.DirectSpecularPerceptualRoughness);
+#if BURT_MODEL_HAS_CLEAR_COAT
     CoreData.ClearCoatNormalWS = GeometryData.NormalWS;
     CoreData.ClearCoatGeometryData = GeometryData;
     CoreData = BurtApplyClearCoatTopLayerCoreData(CoreData);
+#endif
 
     return CoreData;
 }
@@ -92,18 +94,22 @@ BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtSurfaceData SurfaceData
 BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtSurfaceData SurfaceData, float3 NormalWS, float3 ClearCoatNormalWS, float3 ViewDirectionWS)
 {
     BurtPBRShadingCoreData CoreData = BurtPreparePBRShadingCoreData(SurfaceData, NormalWS, ViewDirectionWS);
+#if BURT_MODEL_HAS_CLEAR_COAT
     CoreData.ClearCoatNormalWS = BurtSafeNormalize(ClearCoatNormalWS);
     CoreData.ClearCoatGeometryData = BurtPreparePBRGeometryData(CoreData.ClearCoatNormalWS, ViewDirectionWS);
     CoreData = BurtApplyClearCoatTopLayerCoreData(CoreData);
+#endif
     return CoreData;
 }
 
 BurtPBRShadingCoreData BurtPreparePBRShadingCoreData(BurtSurfaceData SurfaceData, float3 NormalWS, float4 TangentWS, float3 ClearCoatNormalWS, float3 ViewDirectionWS)
 {
     BurtPBRShadingCoreData CoreData = BurtPreparePBRShadingCoreData(SurfaceData, NormalWS, TangentWS, ViewDirectionWS);
+#if BURT_MODEL_HAS_CLEAR_COAT
     CoreData.ClearCoatNormalWS = BurtSafeNormalize(ClearCoatNormalWS);
     CoreData.ClearCoatGeometryData = BurtPreparePBRGeometryData(CoreData.ClearCoatNormalWS, TangentWS, ViewDirectionWS);
     CoreData = BurtApplyClearCoatTopLayerCoreData(CoreData);
+#endif
     return CoreData;
 }
 
@@ -246,6 +252,7 @@ void BurtResolveSubsurfaceDeferredPostprocessTransmission(
 {
 }
 
+#if !defined(BURT_PBR_DIRECT_ONLY)
 BurtPBRShadingComponents BurtApplySubsurfacePBRShadingComponents(
     BurtPBRShadingComponents Components,
     BurtPBRShadingCoreData CoreData,
@@ -253,20 +260,30 @@ BurtPBRShadingComponents BurtApplySubsurfacePBRShadingComponents(
     BurtIndirectPBRComponents IndirectComponents)
 {
 #if BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG
-    Components.SubsurfaceProfileIndex = CoreData.MaterialData.SubsurfaceProfileIndex;
+    Components.SubsurfaceProfileIndex = 0.0f;
     Components.SubsurfaceTransmission = float3(0.0f, 0.0f, 0.0f);
+    #if BURT_MODEL_HAS_TRANSMISSION
     Components.SubsurfaceDirectTransmission = DirectComponents.Transmission;
     Components.SubsurfaceTransmissionBRDF = DirectComponents.TransmissionBRDF;
     Components.SubsurfaceTransmissionLobe = DirectComponents.TransmissionLobe;
     Components.SubsurfaceTransmissionPhase = DirectComponents.TransmissionPhase;
     Components.SubsurfaceTransmissionShadow = DirectComponents.TransmissionShadow;
     Components.SubsurfaceTransmissionThickness = DirectComponents.TransmissionThickness;
+    #else
+    Components.SubsurfaceDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+    Components.SubsurfaceTransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
+    Components.SubsurfaceTransmissionLobe = 0.0f;
+    Components.SubsurfaceTransmissionPhase = 0.0f;
+    Components.SubsurfaceTransmissionShadow = 1.0f;
+    Components.SubsurfaceTransmissionThickness = 0.0f;
+    #endif
     Components.SubsurfaceKernelWeight = float3(0.0f, 0.0f, 0.0f);
 #endif
     Components.SubsurfaceIndirect = IndirectComponents.SubsurfaceIndirect;
     Components.SubsurfaceIndirectTransmission = IndirectComponents.SubsurfaceIndirectTransmission;
     return Components;
 }
+#endif
 #endif
 
 #if BURT_ENABLE_FOLIAGE_SHADING && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_FOLIAGE))
@@ -314,14 +331,16 @@ BurtDirectPBRComponents BurtCreateZeroPBRDirectComponents()
     BurtDirectPBRComponents Components;
     Components.Diffuse = float3(0.0f, 0.0f, 0.0f);
     Components.Specular = float3(0.0f, 0.0f, 0.0f);
+#if BURT_MODEL_HAS_TRANSMISSION
     Components.Transmission = float3(0.0f, 0.0f, 0.0f);
-    Components.EnergyPreservation = 1.0f;
     Components.TransmissionBRDF = float3(0.0f, 0.0f, 0.0f);
     Components.TransmissionThroughput = float3(0.0f, 0.0f, 0.0f);
     Components.TransmissionLobe = 0.0f;
     Components.TransmissionPhase = 0.0f;
     Components.TransmissionShadow = 1.0f;
     Components.TransmissionThickness = 0.0f;
+#endif
+    Components.EnergyPreservation = 1.0f;
     Components.BrdfTerms.NDotL = 0.0f;
     Components.BrdfTerms.NDotV = 0.0f;
     Components.BrdfTerms.NDotH = 0.0f;
@@ -342,6 +361,7 @@ BurtDirectPBRComponents BurtAddPBRDirectComponents(BurtDirectPBRComponents BaseC
 {
     BaseComponents.Diffuse += AddedComponents.Diffuse;
     BaseComponents.Specular += AddedComponents.Specular;
+#if BURT_MODEL_HAS_TRANSMISSION
     BaseComponents.Transmission += AddedComponents.Transmission;
     BaseComponents.TransmissionBRDF += AddedComponents.TransmissionBRDF;
     BaseComponents.TransmissionThroughput = max(BaseComponents.TransmissionThroughput, AddedComponents.TransmissionThroughput);
@@ -349,9 +369,11 @@ BurtDirectPBRComponents BurtAddPBRDirectComponents(BurtDirectPBRComponents BaseC
     BaseComponents.TransmissionPhase = max(BaseComponents.TransmissionPhase, AddedComponents.TransmissionPhase);
     BaseComponents.TransmissionShadow = min(BaseComponents.TransmissionShadow, AddedComponents.TransmissionShadow);
     BaseComponents.TransmissionThickness = max(BaseComponents.TransmissionThickness, AddedComponents.TransmissionThickness);
+#endif
     return BaseComponents;
 }
 
+#if !defined(BURT_EXCLUDE_ADDITIONAL_LIGHTING)
 BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRShadingCoreData CoreData, float3 PositionWS)
 {
     BurtDirectPBRComponents AdditionalDirectComponents = BurtCreateZeroPBRDirectComponents();
@@ -567,11 +589,62 @@ BurtDirectPBRComponents BurtEvaluatePBRDirectLightingFromCore(BurtPBRShadingCore
     BurtDirectPBRComponents DirectComponents = BurtEvaluatePBRDirectFromCore(CoreData, MainLight);
     return BurtAddPBRDirectComponents(DirectComponents, BurtEvaluatePBRAdditionalDirectLightingFromCore(CoreData, PositionWS, ShadowPositionWS, ScreenUV));
 }
+#else
+BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRShadingCoreData CoreData, float3 PositionWS)
+{
+    return BurtCreateZeroPBRDirectComponents();
+}
 
+BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRShadingCoreData CoreData, float3 PositionWS, float3 ShadowPositionWS)
+{
+    return BurtCreateZeroPBRDirectComponents();
+}
+
+BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRShadingCoreData CoreData, float3 PositionWS, float2 ScreenUV)
+{
+    return BurtCreateZeroPBRDirectComponents();
+}
+
+BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRShadingCoreData CoreData, float3 PositionWS, float3 ShadowPositionWS, float2 ScreenUV)
+{
+    return BurtCreateZeroPBRDirectComponents();
+}
+
+BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(BurtPBRShadingCoreData CoreData, float3 PositionWS)
+{
+    return BurtCreateZeroPBRDirectComponents();
+}
+
+BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCore(BurtPBRShadingCoreData CoreData, float3 PositionWS, float2 ScreenUV)
+{
+    return BurtCreateZeroPBRDirectComponents();
+}
+
+BurtDirectPBRComponents BurtEvaluatePBRDirectLightingFromCore(BurtPBRShadingCoreData CoreData, BurtLight MainLight, float3 PositionWS)
+{
+    return BurtEvaluatePBRDirectFromCore(CoreData, MainLight);
+}
+
+BurtDirectPBRComponents BurtEvaluatePBRDirectLightingFromCore(BurtPBRShadingCoreData CoreData, BurtLight MainLight, float3 PositionWS, float2 ScreenUV)
+{
+    return BurtEvaluatePBRDirectFromCore(CoreData, MainLight);
+}
+
+BurtDirectPBRComponents BurtEvaluatePBRDirectLightingFromCore(BurtPBRShadingCoreData CoreData, BurtLight MainLight, float3 PositionWS, float3 ShadowPositionWS, float2 ScreenUV)
+{
+    return BurtEvaluatePBRDirectFromCore(CoreData, MainLight);
+}
+#endif
+
+#if !defined(BURT_PBR_DIRECT_ONLY)
 // Indirect stage: evaluates SH Diffuse and reflection-probe/sky Specular.
 BurtIndirectPBRComponents BurtEvaluatePBRIndirectFromCore(BurtPBRShadingCoreData CoreData)
 {
+#if BURT_MODEL_HAS_CLEAR_COAT
     BurtIndirectPBRComponents Components = BurtEvaluateIndirectPBRComponents(CoreData.MaterialData, CoreData.GeometryData, CoreData.ClearCoatGeometryData, CoreData.EnergyTerms);
+#else
+    BurtIndirectPBRComponents Components = BurtEvaluateIndirectPBRComponents(CoreData.MaterialData, CoreData.GeometryData, CoreData.EnergyTerms);
+#endif
     return Components;
 }
 
@@ -626,7 +699,11 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     Components.IndirectSpecularEnergyCompensation = DebugIndirectSpecularEnergyCompensation;
 #endif
     float3 ResolvedDirectDiffuse = DirectComponents.Diffuse;
+#if BURT_MODEL_HAS_TRANSMISSION
     float3 ResolvedDirectTransmission = DirectComponents.Transmission;
+#else
+    float3 ResolvedDirectTransmission = float3(0.0f, 0.0f, 0.0f);
+#endif
     float3 ResolvedIndirectDiffuse = IndirectComponents.Diffuse;
     float3 ResolvedIndirectTransmission = IndirectComponents.SubsurfaceIndirectTransmission;
     BurtResolveSubsurfaceDeferredPostprocessTransmission(
@@ -668,7 +745,11 @@ BurtPBRShadingComponents BurtComposePBRShadingComponents(BurtPBRShadingCoreData 
     Components.HairScatter = 0.0f;
 #endif
 #if BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG
+    #if BURT_MODEL_HAS_CLEAR_COAT
     Components.ClearCoatMask = CoreData.MaterialData.ClearCoatMask;
+    #else
+    Components.ClearCoatMask = 0.0f;
+    #endif
 #endif
     Components = BurtApplySubsurfacePBRShadingComponents(Components, CoreData, DirectComponents, IndirectComponents);
     Components = BurtApplyFoliagePBRShadingComponents(Components, CoreData, DirectComponents);
@@ -879,6 +960,7 @@ BurtPBRShadingComponents BurtEvaluatePBRShadingComponentsFromGBuffer(BurtEncoded
     BurtGBufferData GBufferData = BurtDecodeGBuffer(EncodedGBuffer);
     return BurtEvaluatePBRShadingComponentsFromGBuffer(GBufferData, MainLight, ViewDirectionWS, PositionWS, ScreenUV);
 }
+#endif
 
 
 #endif

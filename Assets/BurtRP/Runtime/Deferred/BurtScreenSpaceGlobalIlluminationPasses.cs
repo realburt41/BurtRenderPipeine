@@ -1987,7 +1987,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(
                 new[]
                 {
@@ -2011,8 +2011,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGIScreenProbeScreenDepthTextureId, screenDepthTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeWorldNormalTextureId, worldNormalTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeWorldPositionTextureId, worldPositionTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryDispatchPlacementUniformCompute(
@@ -2040,7 +2040,7 @@ namespace Burt.RenderPipeline
             var placementJitterIndex = screenProbeSettings.FixedJitterIndex >= 0
                 ? -(screenProbeSettings.FixedJitterIndex + 1f)
                 : Mathf.Max(0, Time.frameCount);
-            var cmd = CommandBufferPool.Get("Burt ScreenProbe Placement Uniform Compute");
+            var cmd = context.AcquireCommandBuffer("Burt ScreenProbe Placement Uniform Compute");
             cmd.SetComputeTextureParam(shader, kernel, CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, GBuffer0Id, gbuffer0Target.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, GBuffer2Id, gbuffer2Target.Identifier);
@@ -2065,8 +2065,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGIScreenProbeScreenDepthTextureId, screenDepthTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeWorldNormalTextureId, worldNormalTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeWorldPositionTextureId, worldPositionTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -2196,7 +2196,7 @@ namespace Burt.RenderPipeline
 
             var headerTarget = context.BurtGIScreenProbeAdaptiveProbeHeaderTarget;
             var indicesTarget = context.BurtGIScreenProbeAdaptiveProbeIndicesTarget;
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             var hasCommandBufferWork = false;
             if (headerTarget.IsValid || indicesTarget.IsValid)
             {
@@ -2236,10 +2236,10 @@ namespace Burt.RenderPipeline
             hasCommandBufferWork |= TryAppendAdaptivePlacementCompute(context, cmd);
             if (hasCommandBufferWork)
             {
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                context.ExecuteLegacyCommandBuffer(cmd);
             }
 
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryAppendAdaptivePlacementCompute(BurtRenderGraphContext context, CommandBuffer cmd)
@@ -2478,7 +2478,7 @@ namespace Burt.RenderPipeline
             var lightSampleResolutionXY = 2;
             var maxAdaptiveProbes = Mathf.Max(1, context.BurtGIScreenProbeAdaptiveProbeDataBuffer.Buffer.count);
 
-            var cmd = CommandBufferPool.Get(Name + " Compute");
+            var cmd = context.AcquireCommandBuffer(Name + " Compute");
             cmd.SetComputeVectorParam(shader, BurtGIScreenProbeGridParamsId, new Vector4(
                 screenProbeWidth,
                 screenProbeHeight,
@@ -2498,8 +2498,8 @@ namespace Burt.RenderPipeline
             cmd.SetComputeBufferParam(shader, kernel, BurtGIScreenProbeIndirectArgsBufferId, buffer.Buffer);
             cmd.SetComputeBufferParam(shader, kernel, BurtGIScreenProbeAdaptiveProbeNumBufferId, context.BurtGIScreenProbeAdaptiveProbeNumBuffer.Buffer);
             cmd.DispatchCompute(shader, kernel, 1, 1, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -2622,7 +2622,7 @@ namespace Burt.RenderPipeline
             var groupsX = Mathf.Max(1, (width + tileSize - 1) / tileSize);
             var groupsY = Mathf.Max(1, (height + tileSize - 1) / tileSize);
 
-            var cmd = CommandBufferPool.Get(Name + " Compute");
+            var cmd = context.AcquireCommandBuffer(Name + " Compute");
             cmd.SetComputeTextureParam(shader, kernel, CameraDepthTextureId, context.CameraDepthTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, GBuffer0Id, context.GBuffer0Target.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, GBuffer2Id, context.GBuffer2Target.Identifier);
@@ -2636,13 +2636,13 @@ namespace Burt.RenderPipeline
                 settings.EnableRoughSpecular ? 1f : 0f,
                 settings.ScreenProbeMaxRoughnessToEvaluateRoughSpecular));
             cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool ShouldRun(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
-            return BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileData(request, asset);
+            return BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileClassification(request, asset);
         }
 
         private static bool HasInputs(BurtRenderGraphContext context)
@@ -2760,15 +2760,15 @@ namespace Burt.RenderPipeline
                 settings.EnableRoughSpecular ? 1f : 0f,
                 settings.ScreenProbeMaxRoughnessToEvaluateRoughSpecular);
 
-            var cmd = CommandBufferPool.Get(Name + " Compute");
+            var cmd = context.AcquireCommandBuffer(Name + " Compute");
             cmd.SetRenderTarget(classificationTarget.Identifier);
             cmd.ClearRenderTarget(false, true, Color.clear);
             BindKernel(cmd, shader, diffuseKernel, classificationTarget, tileDataDiffuseBuffer, tileDataAllBuffer, paramsValue);
             BindKernel(cmd, shader, allKernel, classificationTarget, tileDataDiffuseBuffer, tileDataAllBuffer, paramsValue);
             cmd.DispatchCompute(shader, diffuseKernel, indirectArgsBuffer.Buffer, DiffuseIndirectArgsOffset);
             cmd.DispatchCompute(shader, allKernel, indirectArgsBuffer.Buffer, AllIndirectArgsOffset);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static void BindKernel(
@@ -2830,6 +2830,7 @@ namespace Burt.RenderPipeline
     internal sealed class BurtScreenSpaceGlobalIlluminationScreenProbeIntegrateSimpleSHPass : BurtScreenSpaceGlobalIlluminationPass
     {
         private const string ComputeShaderResourcePath = "BurtGIScreenProbeIntegrateSimpleSH";
+        private const string DirectKernelName = "ScreenProbeIntegrateSimpleSHCS";
         private const string DiffuseKernelName = "ScreenProbeIntegrateSimpleSHDiffuseCS";
         private const string AllKernelName = "ScreenProbeIntegrateSimpleSHAllCS";
         private const uint DiffuseIndirectArgsOffset = 0u;
@@ -2838,6 +2839,7 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGIScreenProbeIntegrateSimpleSHParams1Id = Shader.PropertyToID("_BurtGIScreenProbeIntegrateSimpleSHParams1");
         private static ComputeShader computeShader;
         private static bool hasLoggedMissingComputeShader;
+        private static bool hasLoggedMissingDirectKernel;
         private static bool hasLoggedMissingDiffuseKernel;
         private static bool hasLoggedMissingAllKernel;
 
@@ -2864,9 +2866,12 @@ namespace Burt.RenderPipeline
             builder.ReadBurtGIScreenProbeRadianceOct();
             builder.ReadBurtGIScreenProbeRadianceSHAmbient();
             builder.ReadBurtGIScreenProbeRadianceSHDirectional();
-            builder.ReadBurtGIScreenProbeIntegrateTileIndirectArgsBuffer();
-            builder.ReadBurtGIScreenProbeIntegrateTileDataDiffuseBuffer();
-            builder.ReadBurtGIScreenProbeIntegrateTileDataAllBuffer();
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileClassification(builder.Request, builder.Asset))
+            {
+                builder.ReadBurtGIScreenProbeIntegrateTileIndirectArgsBuffer();
+                builder.ReadBurtGIScreenProbeIntegrateTileDataDiffuseBuffer();
+                builder.ReadBurtGIScreenProbeIntegrateTileDataAllBuffer();
+            }
             builder.WriteBurtGIBackfaceDiffuseIndirect();
             builder.WriteBurtGIRoughSpecularIndirect();
         }
@@ -2897,6 +2902,7 @@ namespace Burt.RenderPipeline
             var indirectArgsBuffer = context.BurtGIScreenProbeIntegrateTileIndirectArgsBuffer;
             var tileDataDiffuseBuffer = context.BurtGIScreenProbeIntegrateTileDataDiffuseBuffer;
             var tileDataAllBuffer = context.BurtGIScreenProbeIntegrateTileDataAllBuffer;
+            var useTileClassification = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileClassification(context.Request, context.Asset);
             if (!burtGITarget.IsValid ||
                 !cameraDepthTarget.IsValid ||
                 !gbuffer0Target.IsValid ||
@@ -2913,16 +2919,22 @@ namespace Burt.RenderPipeline
                 !radianceSHDirectionalTarget.IsValid ||
                 !backfaceDiffuseTarget.IsValid ||
                 !roughSpecularTarget.IsValid ||
-                !indirectArgsBuffer.HasBuffer ||
-                !tileDataDiffuseBuffer.HasBuffer ||
-                !tileDataAllBuffer.HasBuffer)
+                (useTileClassification &&
+                    (!indirectArgsBuffer.HasBuffer ||
+                     !tileDataDiffuseBuffer.HasBuffer ||
+                     !tileDataAllBuffer.HasBuffer)))
             {
                 return;
             }
 
             var shader = GetComputeShader();
-            if (!TryFindKernel(shader, DiffuseKernelName, ref hasLoggedMissingDiffuseKernel, out var diffuseKernel) ||
-                !TryFindKernel(shader, AllKernelName, ref hasLoggedMissingAllKernel, out var allKernel))
+            var directKernel = -1;
+            var diffuseKernel = -1;
+            var allKernel = -1;
+            if (useTileClassification
+                ? (!TryFindKernel(shader, DiffuseKernelName, ref hasLoggedMissingDiffuseKernel, out diffuseKernel) ||
+                   !TryFindKernel(shader, AllKernelName, ref hasLoggedMissingAllKernel, out allKernel))
+                : !TryFindKernel(shader, DirectKernelName, ref hasLoggedMissingDirectKernel, out directKernel))
             {
                 return;
             }
@@ -2964,7 +2976,7 @@ namespace Burt.RenderPipeline
                 settings.ShortRangeAO ? settings.ShortRangeAOWeight : 0f,
                 screenProbeSettings.IrradianceFormat == ScreenProbeIrradianceFormat.Octahedral ? 1f : 0f);
 
-            var cmd = CommandBufferPool.Get(Name + " Compute");
+            var cmd = context.AcquireCommandBuffer(Name + " Compute");
             cmd.SetRenderTarget(
                 new[]
                 {
@@ -2974,77 +2986,31 @@ namespace Burt.RenderPipeline
                 },
                 new RenderTargetIdentifier(BuiltinRenderTextureType.None));
             cmd.ClearRenderTarget(false, true, Color.clear);
-            BindKernel(
-                cmd,
-                shader,
-                diffuseKernel,
-                cameraDepthTarget,
-                gbuffer0Target,
-                gbuffer1Target,
-                gbuffer2Target,
-                gbuffer3Target,
-                burtGITarget,
-                hitDistanceTarget,
-                bentNormalTarget,
-                worldNormalTarget,
-                worldPositionTarget,
-                irradianceOctTarget,
-                radianceOctTarget,
-                radianceSHAmbientTarget,
-                radianceSHDirectionalTarget,
-                backfaceDiffuseTarget,
-                roughSpecularTarget,
-                tileDataDiffuseBuffer,
-                tileDataAllBuffer,
-                paramsValue,
-                params1Value,
-                descriptor,
-                screenProbeSettings,
-                screenProbeWidth,
-                screenProbeHeight,
-                atlasProbeHeight,
-                inverseViewProjectionMatrix,
-                cameraPosition);
-            BindKernel(
-                cmd,
-                shader,
-                allKernel,
-                cameraDepthTarget,
-                gbuffer0Target,
-                gbuffer1Target,
-                gbuffer2Target,
-                gbuffer3Target,
-                burtGITarget,
-                hitDistanceTarget,
-                bentNormalTarget,
-                worldNormalTarget,
-                worldPositionTarget,
-                irradianceOctTarget,
-                radianceOctTarget,
-                radianceSHAmbientTarget,
-                radianceSHDirectionalTarget,
-                backfaceDiffuseTarget,
-                roughSpecularTarget,
-                tileDataDiffuseBuffer,
-                tileDataAllBuffer,
-                paramsValue,
-                params1Value,
-                descriptor,
-                screenProbeSettings,
-                screenProbeWidth,
-                screenProbeHeight,
-                atlasProbeHeight,
-                inverseViewProjectionMatrix,
-                cameraPosition);
-            cmd.DispatchCompute(shader, diffuseKernel, indirectArgsBuffer.Buffer, DiffuseIndirectArgsOffset);
-            cmd.DispatchCompute(shader, allKernel, indirectArgsBuffer.Buffer, AllIndirectArgsOffset);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            if (useTileClassification)
+            {
+                BindKernel(cmd, shader, diffuseKernel, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, burtGITarget, hitDistanceTarget, bentNormalTarget, worldNormalTarget, worldPositionTarget, irradianceOctTarget, radianceOctTarget, radianceSHAmbientTarget, radianceSHDirectionalTarget, backfaceDiffuseTarget, roughSpecularTarget, tileDataDiffuseBuffer, tileDataAllBuffer, paramsValue, params1Value, descriptor, screenProbeSettings, screenProbeWidth, screenProbeHeight, atlasProbeHeight, inverseViewProjectionMatrix, cameraPosition);
+                BindKernel(cmd, shader, allKernel, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, burtGITarget, hitDistanceTarget, bentNormalTarget, worldNormalTarget, worldPositionTarget, irradianceOctTarget, radianceOctTarget, radianceSHAmbientTarget, radianceSHDirectionalTarget, backfaceDiffuseTarget, roughSpecularTarget, tileDataDiffuseBuffer, tileDataAllBuffer, paramsValue, params1Value, descriptor, screenProbeSettings, screenProbeWidth, screenProbeHeight, atlasProbeHeight, inverseViewProjectionMatrix, cameraPosition);
+                cmd.DispatchCompute(shader, diffuseKernel, indirectArgsBuffer.Buffer, DiffuseIndirectArgsOffset);
+                cmd.DispatchCompute(shader, allKernel, indirectArgsBuffer.Buffer, AllIndirectArgsOffset);
+            }
+            else
+            {
+                BindKernel(cmd, shader, directKernel, cameraDepthTarget, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, burtGITarget, hitDistanceTarget, bentNormalTarget, worldNormalTarget, worldPositionTarget, irradianceOctTarget, radianceOctTarget, radianceSHAmbientTarget, radianceSHDirectionalTarget, backfaceDiffuseTarget, roughSpecularTarget, tileDataDiffuseBuffer, tileDataAllBuffer, paramsValue, params1Value, descriptor, screenProbeSettings, screenProbeWidth, screenProbeHeight, atlasProbeHeight, inverseViewProjectionMatrix, cameraPosition);
+                var threadGroupSize = Mathf.Max(1, BurtScreenSpaceGlobalIlluminationPassUtility.ScreenProbeIntegrateTileSize);
+                cmd.DispatchCompute(
+                    shader,
+                    directKernel,
+                    Mathf.Max(1, (descriptor.width + threadGroupSize - 1) / threadGroupSize),
+                    Mathf.Max(1, (descriptor.height + threadGroupSize - 1) / threadGroupSize),
+                    1);
+            }
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool ShouldRun(BurtRenderRequest request, BurtRenderPipelineAsset asset)
         {
-            return BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateSimpleSH(request, asset);
+            return BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileData(request, asset);
         }
 
         private static void BindKernel(
@@ -3095,8 +3061,11 @@ namespace Burt.RenderPipeline
             cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceSHDirectionalTextureId, radianceSHDirectionalTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectTextureId, backfaceDiffuseTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectTextureId, roughSpecularTarget.Identifier);
-            cmd.SetComputeBufferParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataDiffuseBufferId, tileDataDiffuseBuffer.Buffer);
-            cmd.SetComputeBufferParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataAllBufferId, tileDataAllBuffer.Buffer);
+            if (tileDataDiffuseBuffer.HasBuffer && tileDataAllBuffer.HasBuffer)
+            {
+                cmd.SetComputeBufferParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataDiffuseBufferId, tileDataDiffuseBuffer.Buffer);
+                cmd.SetComputeBufferParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataAllBufferId, tileDataAllBuffer.Buffer);
+            }
             cmd.SetComputeVectorParam(shader, BurtGIScreenProbeIntegrateSimpleSHParamsId, paramsValue);
             cmd.SetComputeVectorParam(shader, BurtGIScreenProbeIntegrateSimpleSHParams1Id, params1Value);
             cmd.SetComputeVectorParam(shader, BurtGISourceTexelSizeId, new Vector4(
@@ -3206,7 +3175,7 @@ namespace Burt.RenderPipeline
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
-            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateSimpleSH(builder.Request, builder.Asset))
+            if (!BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileData(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -3229,7 +3198,7 @@ namespace Burt.RenderPipeline
         public override void Execute(BurtRenderGraphContext context)
         {
             if (context == null ||
-                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateSimpleSH(context.Request, context.Asset))
+                !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileData(context.Request, context.Asset))
             {
                 return;
             }
@@ -3311,7 +3280,7 @@ namespace Burt.RenderPipeline
             var groupsY = (height + ThreadGroupSize - 1) / ThreadGroupSize;
             var useCountAllocated = SupportsIndirectUseCountTexture();
             var useCountValid = historyValid && useCountAllocated;
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtGIDiffuseIndirectOutputTextureId, outputDescriptor, FilterMode.Bilinear);
             cmd.GetTemporaryRT(BurtGIBackfaceDiffuseIndirectOutputTextureId, outputDescriptor, FilterMode.Bilinear);
             cmd.GetTemporaryRT(BurtGIRoughSpecularIndirectOutputTextureId, outputDescriptor, FilterMode.Bilinear);
@@ -3427,8 +3396,8 @@ namespace Burt.RenderPipeline
                 cmd.ReleaseTemporaryRT(BurtGIIndirectUseCountTextureId);
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static float ResolveMaxFramesAccumulated(BurtScreenSpaceGlobalIlluminationSettings settings)
@@ -3630,7 +3599,7 @@ namespace Burt.RenderPipeline
             var maxAdaptiveProbes = Mathf.Max(1, context.BurtGIScreenProbeAdaptiveProbeDataBuffer.Buffer.count);
             var screenProbeHistory = BurtScreenSpaceGlobalIlluminationScreenProbeHistoryUtility.GetHistoryTextures(context.Request, settings, out var screenProbeHistoryValid);
 
-            var cmd = CommandBufferPool.Get(Name + " Compute");
+            var cmd = context.AcquireCommandBuffer(Name + " Compute");
             BurtIndirectLightingUtility.UploadSkyReflectionForTracing(cmd, context.Request);
             BurtLocalSkyProbeUtility.BindCompute(cmd, shader, compactKernel, camera);
             BindCompactInputs(cmd, shader, compactKernel, context, texelCountBuffer, texelDataBuffer, screenProbeHistory, screenProbeHistoryValid);
@@ -3644,8 +3613,8 @@ namespace Burt.RenderPipeline
             BindGenArgsInputs(cmd, shader, genArgsKernel, texelCountBuffer, compactIndirectArgsBuffer, threadCountXBuffer);
             cmd.SetComputeIntParam(shader, BurtGIScreenProbeTraceCompactGroupSizeId, ScreenProbeTraceCompactThreadGroupSize);
             cmd.DispatchCompute(shader, genArgsKernel, 1, 1, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static void ClearCompactBuffers(
@@ -4183,7 +4152,7 @@ namespace Burt.RenderPipeline
             var camera = context.Request != null ? context.Request.Camera : null;
             var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context.Request, context.Asset);
             var clipMapState = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapState(camera, settings);
-            var cmd = CommandBufferPool.Get(passName);
+            var cmd = context.AcquireCommandBuffer(passName);
             BindTexture(cmd, BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapIndirectionTextureId, context.BurtGIRadianceCacheClipMapIndirectionTarget);
             BindTexture(cmd, BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapDepthProbeAtlasTextureId, context.BurtGIRadianceCacheClipMapDepthProbeAtlasTarget);
             BindTexture(cmd, BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapRadianceProbeAtlasTextureId, context.BurtGIRadianceCacheClipMapRadianceProbeAtlasTarget);
@@ -4199,8 +4168,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalVectorArray(BurtGIRadianceCacheClipMapProbeCoordToWorldCenterId, clipMapState.ProbeCoordToWorldCenter);
             cmd.SetGlobalVectorArray(BurtGIRadianceCacheClipMapClipmapCenterExtentId, clipMapState.ClipmapCenterExtent);
             cmd.SetGlobalVectorArray(BurtGIRadianceCacheClipMapClipmapParamsId, clipMapState.ClipmapParams);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
 
             if (!clearCounters)
             {
@@ -4256,7 +4225,7 @@ namespace Burt.RenderPipeline
             var sceneVoxelBuildShader = GetSceneVoxelBuildComputeShader();
             if (TryFindRadianceCacheClipMapComputeKernel(sceneVoxelBuildShader, "SceneVoxelReprojectHistoryCS", out var sceneVoxelBuildKernel))
             {
-                var sceneVoxelBuildCmd = CommandBufferPool.Get(passName + " Reproject Scene Voxel History");
+                var sceneVoxelBuildCmd = context.AcquireCommandBuffer(passName + " Reproject Scene Voxel History");
                 BindComputeTexture(sceneVoxelBuildCmd, sceneVoxelBuildShader, sceneVoxelBuildKernel, BurtGISceneVoxelRadianceTextureId, context.BurtGISceneVoxelRadianceTarget);
                 BindComputeTexture(sceneVoxelBuildCmd, sceneVoxelBuildShader, sceneVoxelBuildKernel, BurtGISceneVoxelGeometryTextureId, context.BurtGISceneVoxelGeometryTarget);
                 BindComputeTexture(sceneVoxelBuildCmd, sceneVoxelBuildShader, sceneVoxelBuildKernel, BurtGISceneVoxelLightingTextureId, context.BurtGISceneVoxelLightingTarget);
@@ -4267,8 +4236,8 @@ namespace Burt.RenderPipeline
                 sceneVoxelBuildCmd.SetComputeVectorParam(sceneVoxelBuildShader, BurtGISceneVoxelHistoryCurrentCenterExtentId, history.CurrentCenterExtent);
                 sceneVoxelBuildCmd.SetComputeVectorParam(sceneVoxelBuildShader, BurtGISceneVoxelHistoryParamsId, new Vector4(history.HistoryExposureCorrection, 0f, 0f, 0f));
                 sceneVoxelBuildCmd.DispatchCompute(sceneVoxelBuildShader, sceneVoxelBuildKernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-                context.ScriptableContext.ExecuteCommandBuffer(sceneVoxelBuildCmd);
-                CommandBufferPool.Release(sceneVoxelBuildCmd);
+                context.ExecuteLegacyCommandBuffer(sceneVoxelBuildCmd);
+                context.ReleaseCommandBuffer(sceneVoxelBuildCmd);
                 return true;
             }
 
@@ -4303,6 +4272,19 @@ namespace Burt.RenderPipeline
                 DivRoundUpSceneVoxelResolution(sceneVoxelResolution, clearGroupSize),
                 0,
                 0);
+            var camera = context.Request != null ? context.Request.Camera : null;
+            var globalIlluminationSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(context.Request, context.Asset);
+            var gpuVoxelized = BurtGISceneVoxelGpuRasterizerUtility.Rasterize(
+                context,
+                passName + " Clipmap " + resources.Level,
+                camera,
+                centerExtent,
+                sceneVoxelResolution,
+                new RenderTargetIdentifier(resources.Radiance),
+                new RenderTargetIdentifier(resources.Geometry),
+                new RenderTargetIdentifier(resources.Lighting),
+                globalIlluminationSettings);
+            built &= gpuVoxelized || triangleCount > 0;
             if (triangleCount > 0)
             {
                 built &= TryDispatchPersistentSceneVoxelClipmapBuildCompute(
@@ -4418,7 +4400,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Generate Scene Voxel Clipmap SDF " + resources.Level);
+            var cmd = context.AcquireCommandBuffer(passName + " Generate Scene Voxel Clipmap SDF " + resources.Level);
             var dispatched = BurtXGISdfGenDispatchUtility.TryDispatchGenerateFromOccupancy(
                 cmd,
                 shader,
@@ -4427,7 +4409,7 @@ namespace Burt.RenderPipeline
                 0);
             if (dispatched)
             {
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                context.ExecuteLegacyCommandBuffer(cmd);
                 resources.SdfStatus = "Ready(" + resources.SdfContext.ResolveStatusLabel() + ")";
             }
             else
@@ -4435,7 +4417,7 @@ namespace Burt.RenderPipeline
                 resources.SdfStatus = "DispatchFailed(" + resources.SdfContext.ResolveStatusLabel() + ")";
             }
 
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return dispatched;
         }
 
@@ -4464,6 +4446,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(passName + " Build Scene Voxel Clipmap " + resources.Level);
+            var useAsyncCompute = BurtGIAsyncComputeUtility.Begin(context, cmd);
             switch (kernelName)
             {
                 case "SceneVoxelClearLiteCS":
@@ -4488,13 +4471,13 @@ namespace Burt.RenderPipeline
                     cmd.SetComputeIntParam(shader, BurtGISceneVoxelOccupancyMipSourceMipId, sourceMip);
                     break;
                 default:
-                    CommandBufferPool.Release(cmd);
+                    context.ReleaseCommandBuffer(cmd);
                     return false;
             }
 
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            BurtGIAsyncComputeUtility.Execute(context, cmd, useAsyncCompute);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -4521,6 +4504,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(passName + " Build Scene Voxel Clipmap Lighting " + resources.Level);
+            var useAsyncCompute = BurtGIAsyncComputeUtility.Begin(context, cmd);
             cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelRadianceReadTextureId, resources.Radiance);
             cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelGeometryReadTextureId, resources.Geometry);
             cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelOccupancyMipReadTextureId, resources.OccupancyMip);
@@ -4545,8 +4529,8 @@ namespace Burt.RenderPipeline
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.SetComputeVectorParam(shader, BurtGISceneVoxelCenterExtentId, centerExtent);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            BurtGIAsyncComputeUtility.Execute(context, cmd, useAsyncCompute);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -4580,7 +4564,7 @@ namespace Burt.RenderPipeline
             resources.ProbeArgsBuffer.SetData(ZeroSceneVoxelProbeDispatchArgs, 0, 0, ZeroSceneVoxelProbeDispatchArgs.Length);
             resources.ProbeArgsParamsBuffer.SetData(ZeroSceneVoxelProbeArgsParams, 0, 0, ZeroSceneVoxelProbeArgsParams.Length);
 
-            var cmd = CommandBufferPool.Get(passName + " Build Scene Voxel Clipmap Probe Trace " + resources.Level);
+            var cmd = context.AcquireCommandBuffer(passName + " Build Scene Voxel Clipmap Probe Trace " + resources.Level);
 
             BindPersistentSceneVoxelProbeCommon(cmd, setupShader, placementKernel, context, resources, centerExtent, probeIndexOffset);
             cmd.SetComputeTextureParam(setupShader, placementKernel, ProbePlaceProbePageTableId, resources.ProbePageTable);
@@ -4628,8 +4612,8 @@ namespace Burt.RenderPipeline
             cmd.SetComputeBufferParam(traceShader, traceKernel, VoxelProbeArgsBufferParamsId, resources.ProbeArgsParamsBuffer);
             cmd.DispatchCompute(traceShader, traceKernel, resources.ProbeArgsBuffer, 0u);
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -4717,11 +4701,12 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(passName + " Build Scene Voxel Clipmap Octree " + resources.Level);
+            var useAsyncCompute = BurtGIAsyncComputeUtility.Begin(context, cmd);
             cmd.SetComputeTextureParam(shader, kernel, BurtGISceneVoxelGeometryReadTextureId, resources.Geometry);
             BurtGISceneVoxelOctreeUtility.BindCompute(cmd, shader, kernel, resources.Octree);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            BurtGIAsyncComputeUtility.Execute(context, cmd, useAsyncCompute);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6214,10 +6199,11 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(passName + " Scene Voxel Build Compute");
+            var useAsyncCompute = BurtGIAsyncComputeUtility.Begin(context, cmd);
             BindSceneVoxelBuildComputeTextures(cmd, shader, kernel, kernelName, context, targetMip, sourceMip);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            BurtGIAsyncComputeUtility.Execute(context, cmd, useAsyncCompute);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6337,6 +6323,7 @@ namespace Burt.RenderPipeline
             }
 
             var cmd = CommandBufferPool.Get(passName + " Scene Voxel Lighting Compute");
+            var useAsyncCompute = BurtGIAsyncComputeUtility.Begin(context, cmd);
             BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelRadianceReadTextureId, context.BurtGISceneVoxelRadianceTarget);
             BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelGeometryReadTextureId, context.BurtGISceneVoxelGeometryTarget);
             BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelOccupancyMipReadTextureId, context.BurtGISceneVoxelOccupancyMipTarget);
@@ -6350,8 +6337,8 @@ namespace Burt.RenderPipeline
             BurtGIXGILightGridUtility.BindCompute(cmd, shader, kernel, context.Request != null ? context.Request.Camera : null);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            BurtGIAsyncComputeUtility.Execute(context, cmd, useAsyncCompute);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6377,12 +6364,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Scene Voxel Octree Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Scene Voxel Octree Compute");
             BindComputeTexture(cmd, shader, kernel, BurtGISceneVoxelGeometryReadTextureId, context.BurtGISceneVoxelGeometryTarget);
             BurtGISceneVoxelOctreeUtility.BindCompute(cmd, shader, kernel);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6477,7 +6464,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Init Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Init Compute");
             if (kernelName == "InitClipMapCS" || kernelName == "ClearProbeIndirectionCS")
             {
                 cmd.SetComputeTextureParam(shader, kernel, BurtGIRadianceCacheClipMapIndirectionTextureId, context.BurtGIRadianceCacheClipMapIndirectionTarget.Identifier);
@@ -6486,8 +6473,8 @@ namespace Burt.RenderPipeline
             BindClipMapInitComputeBuffers(cmd, shader, kernel, kernelName, context);
             UploadClipMapComputeParams(cmd, shader, context, history);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6512,12 +6499,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Setup Args Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Setup Args Compute");
             BindClipMapSetupArgsComputeBuffers(cmd, shader, kernel, kernelName, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6545,12 +6532,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Mark Screen Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Mark Screen Compute");
             BindClipMapMarkScreenComputeResources(cmd, shader, kernel, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6581,12 +6568,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Mark Scene Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Mark Scene Compute");
             BindClipMapMarkSceneComputeResources(cmd, shader, kernel, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6614,12 +6601,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Update Cache Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Update Cache Compute");
             BindClipMapUpdateCacheComputeResources(cmd, shader, kernel, context, history);
             UploadClipMapComputeParams(cmd, shader, context, history);
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6653,7 +6640,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " HashGrid Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " HashGrid Compute");
             BindRadianceCacheHashGridComputeResources(cmd, shader, kernel, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             if (indirect)
@@ -6665,8 +6652,8 @@ namespace Burt.RenderPipeline
                 cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6699,7 +6686,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Trace From Probes Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Trace From Probes Compute");
             BurtGISceneVoxelClipmapStateUtility.BindTraceFallbackCompute(cmd, shader, kernel);
             BurtIndirectLightingUtility.UploadSkyReflectionForTracing(cmd, context.Request);
             BindClipMapComputeTextures(cmd, shader, kernel, kernelName, context, default);
@@ -6709,8 +6696,8 @@ namespace Burt.RenderPipeline
             BindSceneVoxelClipmapInputs(cmd, shader, kernel, kernelName, context);
             UploadClipMapComputeParams(cmd, shader, context, default, true);
             cmd.DispatchCompute(shader, kernel, indirectArgsBuffer.Buffer, indirectArgsOffset);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6731,7 +6718,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Allocate Traces Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Allocate Traces Compute");
             BindClipMapAllocateTracesComputeResources(cmd, shader, kernel, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             var camera = context.Request != null ? context.Request.Camera : null;
@@ -6743,8 +6730,8 @@ namespace Burt.RenderPipeline
                 DivRoundUpInt(descriptor.width, RadianceCacheClipMapAllocateProbeTracesThreadGroupSize),
                 DivRoundUpInt(descriptor.height, RadianceCacheClipMapAllocateProbeTracesThreadGroupSize),
                 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6764,12 +6751,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Setup Trace Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Setup Trace Compute");
             BindClipMapSetupTraceComputeResources(cmd, shader, kernel, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, 1, 1, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6790,12 +6777,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Sort Trace Tiles Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Sort Trace Tiles Compute");
             BindClipMapSortTraceTilesComputeResources(cmd, shader, kernel, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, context.BurtGIRadianceCacheClipMapSortProbeTraceTilesIndirectArgsBuffer.Buffer, 0u);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6863,7 +6850,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Trace Utility Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Trace Utility Compute");
             BindClipMapTraceUtilityComputeResources(cmd, shader, kernel, kernelName, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             if (indirect)
@@ -6875,8 +6862,8 @@ namespace Burt.RenderPipeline
                 cmd.DispatchCompute(shader, kernel, Mathf.Max(1, groupsX), Mathf.Max(1, groupsY), Mathf.Max(1, groupsZ));
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6922,12 +6909,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Prepare Probe Occlusion Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Prepare Probe Occlusion Compute");
             BindClipMapPrepareProbeOcclusionComputeResources(cmd, shader, kernel, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, context.BurtGIRadianceCacheClipMapPrepareProbeOcclusionIndirectArgsBuffer.Buffer, 0u);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -6951,12 +6938,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Filter Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Filter Compute");
             BindClipMapFilterComputeResources(cmd, shader, kernel, kernelName, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, indirectArgsBuffer.Buffer, 0u);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -7005,12 +6992,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Fixup Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Fixup Compute");
             BindClipMapFixupComputeResources(cmd, shader, kernel, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, context.BurtGIRadianceCacheClipMapFixupProbeBordersIndirectArgsBuffer.Buffer, 0u);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -7031,13 +7018,13 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Generate Trace Tiles Compute");
+            var cmd = context.AcquireCommandBuffer(passName + " Generate Trace Tiles Compute");
             BurtIndirectLightingUtility.UploadSkyReflectionForTracing(cmd, context.Request);
             BindClipMapGenerateTraceTilesComputeResources(cmd, shader, kernel, context);
             UploadClipMapComputeParams(cmd, shader, context, default);
             cmd.DispatchCompute(shader, kernel, context.BurtGIRadianceCacheClipMapGenerateProbeTraceTilesIndirectArgsBuffer.Buffer, 0u);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -7178,15 +7165,15 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Restore Atlas History");
+            var cmd = context.AcquireCommandBuffer(passName + " Restore Atlas History");
             cmd.CopyTexture(new RenderTargetIdentifier(history.DepthProbeAtlas), context.BurtGIRadianceCacheClipMapDepthProbeAtlasTarget.Identifier);
             cmd.CopyTexture(new RenderTargetIdentifier(history.RadianceProbeAtlas), context.BurtGIRadianceCacheClipMapRadianceProbeAtlasTarget.Identifier);
             cmd.CopyTexture(new RenderTargetIdentifier(history.FinalRadianceAtlas), context.BurtGIRadianceCacheClipMapFinalRadianceAtlasTarget.Identifier);
             cmd.CopyTexture(new RenderTargetIdentifier(history.FinalIrradianceAtlas), context.BurtGIRadianceCacheClipMapFinalIrradianceAtlasTarget.Identifier);
             cmd.CopyTexture(new RenderTargetIdentifier(history.ProbeOcclusionAtlas), context.BurtGIRadianceCacheClipMapProbeOcclusionAtlasTarget.Identifier);
             cmd.CopyTexture(new RenderTargetIdentifier(history.ProbeSkyAOAtlas), context.BurtGIRadianceCacheClipMapProbeSkyAOAtlasTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         protected static void CopyClipMapHistory(BurtRenderGraphContext context, string passName)
@@ -7225,7 +7212,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Copy History");
+            var cmd = context.AcquireCommandBuffer(passName + " Copy History");
             cmd.CopyTexture(context.BurtGIRadianceCacheClipMapIndirectionTarget.Identifier, new RenderTargetIdentifier(history.Indirection));
             cmd.CopyTexture(context.BurtGIRadianceCacheClipMapDepthProbeAtlasTarget.Identifier, new RenderTargetIdentifier(history.DepthProbeAtlas));
             cmd.CopyTexture(context.BurtGIRadianceCacheClipMapRadianceProbeAtlasTarget.Identifier, new RenderTargetIdentifier(history.RadianceProbeAtlas));
@@ -7233,8 +7220,8 @@ namespace Burt.RenderPipeline
             cmd.CopyTexture(context.BurtGIRadianceCacheClipMapFinalIrradianceAtlasTarget.Identifier, new RenderTargetIdentifier(history.FinalIrradianceAtlas));
             cmd.CopyTexture(context.BurtGIRadianceCacheClipMapProbeOcclusionAtlasTarget.Identifier, new RenderTargetIdentifier(history.ProbeOcclusionAtlas));
             cmd.CopyTexture(context.BurtGIRadianceCacheClipMapProbeSkyAOAtlasTarget.Identifier, new RenderTargetIdentifier(history.ProbeSkyAOAtlas));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             BurtRadianceCacheClipMapHistoryUtility.MarkHistoryValid(camera);
         }
 
@@ -7258,7 +7245,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Restore Scene Voxel History");
+            var cmd = context.AcquireCommandBuffer(passName + " Restore Scene Voxel History");
             if (!BurtScreenSpaceGlobalIlluminationPass.TryCopyTexture3DFloat4(cmd, new RenderTargetIdentifier(history.Radiance), context.BurtGISceneVoxelRadianceTarget.Identifier, history.Radiance.width, history.Radiance.height, history.Radiance.volumeDepth))
             {
                 cmd.CopyTexture(new RenderTargetIdentifier(history.Radiance), context.BurtGISceneVoxelRadianceTarget.Identifier);
@@ -7279,8 +7266,8 @@ namespace Burt.RenderPipeline
                 cmd.CopyTexture(new RenderTargetIdentifier(history.Lighting), context.BurtGISceneVoxelLightingTarget.Identifier);
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         protected static bool RestoreSceneVoxelVolume(BurtRenderGraphContext context, string passName)
@@ -7300,7 +7287,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Restore Scene Voxel Volume");
+            var cmd = context.AcquireCommandBuffer(passName + " Restore Scene Voxel Volume");
             if (!BurtScreenSpaceGlobalIlluminationPass.TryCopyTexture3DFloat4(cmd, new RenderTargetIdentifier(volume.radiance), context.BurtGISceneVoxelRadianceTarget.Identifier, volume.radiance.width, volume.radiance.height, volume.radiance.volumeDepth))
             {
                 cmd.CopyTexture(new RenderTargetIdentifier(volume.radiance), context.BurtGISceneVoxelRadianceTarget.Identifier);
@@ -7311,8 +7298,8 @@ namespace Burt.RenderPipeline
                 cmd.CopyTexture(new RenderTargetIdentifier(volume.geometry), context.BurtGISceneVoxelGeometryTarget.Identifier);
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -7335,7 +7322,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Copy Scene Voxel History");
+            var cmd = context.AcquireCommandBuffer(passName + " Copy Scene Voxel History");
             if (!BurtScreenSpaceGlobalIlluminationPass.TryCopyTexture3DFloat4(cmd, context.BurtGISceneVoxelRadianceTarget.Identifier, new RenderTargetIdentifier(history.Radiance), history.Radiance.width, history.Radiance.height, history.Radiance.volumeDepth))
             {
                 cmd.CopyTexture(context.BurtGISceneVoxelRadianceTarget.Identifier, new RenderTargetIdentifier(history.Radiance));
@@ -7356,8 +7343,8 @@ namespace Burt.RenderPipeline
                 cmd.CopyTexture(context.BurtGISceneVoxelLightingTarget.Identifier, new RenderTargetIdentifier(history.Lighting));
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             BurtGISceneVoxelHistoryUtility.MarkHistoryValid(context.Request != null ? context.Request.Camera : null);
         }
 
@@ -8220,7 +8207,19 @@ namespace Burt.RenderPipeline
 
             if (updateBaseSceneVoxel || updatePersistentClipmaps)
             {
-                var triangleCount = BurtGISceneVoxelMeshRasterizerUtility.UploadSceneTriangles(camera, globalIlluminationSettings);
+                var gpuVoxelizedBase = updateBaseSceneVoxel && BurtGISceneVoxelGpuRasterizerUtility.Rasterize(
+                    context,
+                    Name,
+                    camera,
+                    sceneVoxelCenterExtent,
+                    sceneVoxelResolution,
+                    context.BurtGISceneVoxelRadianceTarget.Identifier,
+                    context.BurtGISceneVoxelGeometryTarget.Identifier,
+                    context.BurtGISceneVoxelLightingTarget.Identifier,
+                    globalIlluminationSettings);
+                var triangleCount = gpuVoxelizedBase || BurtGISceneVoxelGpuRasterizerUtility.IsSupported
+                    ? BurtGISceneVoxelMeshRasterizerUtility.UploadFallbackSceneTriangles(camera, globalIlluminationSettings)
+                    : BurtGISceneVoxelMeshRasterizerUtility.UploadSceneTriangles(camera, globalIlluminationSettings);
                 if (updateBaseSceneVoxel && triangleCount > 0)
                 {
                     TryDispatchSceneVoxelBuildCompute(
@@ -8331,7 +8330,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(passName + " Generate Base Scene Voxel SDF");
+            var cmd = context.AcquireCommandBuffer(passName + " Generate Base Scene Voxel SDF");
             var dispatched = BurtXGISdfGenDispatchUtility.TryDispatchGenerateFromOccupancy(
                 cmd,
                 shader,
@@ -8340,7 +8339,7 @@ namespace Burt.RenderPipeline
                 0);
             if (dispatched)
             {
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                context.ExecuteLegacyCommandBuffer(cmd);
                 BurtGISceneVoxelClipmapStateUtility.SetBaseSdfStatus(camera, "Ready(" + sdfContext.ResolveStatusLabel() + ")");
             }
             else
@@ -8348,7 +8347,7 @@ namespace Burt.RenderPipeline
                 BurtGISceneVoxelClipmapStateUtility.SetBaseSdfStatus(camera, "DispatchFailed(" + sdfContext.ResolveStatusLabel() + ")");
             }
 
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return dispatched;
         }
     }
@@ -8492,7 +8491,7 @@ namespace Burt.RenderPipeline
             var mainLightDirection = lightingData != null ? lightingData.MainLightDirection : Vector3.up;
             var mainLightColor = lightingData != null && lightingData.HasMainLight ? lightingData.MainLightColor.linear : Color.black;
             var ambientRadiance = lightingData != null ? lightingData.AmbientLightColor.linear : missRadiance;
-            var cmd = CommandBufferPool.Get("Burt ScreenProbe RadianceCache ClipMap Trace From Probes Hardware Ray");
+            var cmd = context.AcquireCommandBuffer("Burt ScreenProbe RadianceCache ClipMap Trace From Probes Hardware Ray");
             BurtIndirectLightingUtility.UploadSkyReflectionForTracing(cmd, context.Request);
             cmd.SetRayTracingShaderPass(rayTracingShader, HardwareRayTracingPassName);
             cmd.SetRayTracingAccelerationStructure(rayTracingShader, HardwareRayTracingAccelerationStructureId, accelerationStructure);
@@ -8527,8 +8526,8 @@ namespace Burt.RenderPipeline
                 (uint)BurtScreenSpaceGlobalIlluminationPassUtility.RadianceCacheClipMapTraceTileSize1D,
                 (uint)sortedTileData.Buffer.count,
                 1u);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
     }
@@ -9038,7 +9037,7 @@ namespace Burt.RenderPipeline
             var maxProbeCount = Mathf.Max(1, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapMaxProbeCount(camera, screenProbeSettings));
             var traceBudget = Mathf.Max(1, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapTraceBudget(screenProbeSettings, maxProbeCount) * 4);
             var kernel = shader.FindKernel(KernelName);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIRadianceCacheStatsTextureId, target.Identifier);
             cmd.SetComputeBufferParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapPriorityHistogramBufferId, priorityHistogram.Buffer);
             cmd.SetComputeBufferParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapMaxUpdateBucketBufferId, maxUpdateBucket.Buffer);
@@ -9049,8 +9048,8 @@ namespace Burt.RenderPipeline
             cmd.SetComputeBufferParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferId, probeFreeListAllocator.Buffer);
             cmd.SetComputeVectorParam(shader, BurtGIRadianceCacheStatsParamsId, new Vector4(width, height, maxProbeCount, traceBudget));
             cmd.DispatchCompute(shader, kernel, Mathf.Max(1, (width + ThreadGroupSize - 1) / ThreadGroupSize), Mathf.Max(1, (height + ThreadGroupSize - 1) / ThreadGroupSize), 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static ComputeShader GetComputeShader()
@@ -9236,7 +9235,7 @@ namespace Burt.RenderPipeline
 
             var sourceDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
             var probeDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeDescriptor(camera, screenProbeSettings);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(
                 new[]
                 {
@@ -9262,8 +9261,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGIScreenProbeIrradianceTextureId, irradianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeConfidenceTextureId, confidenceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeHitDistanceTextureId, hitDistanceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryGetTargets(
@@ -9556,7 +9555,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(
                 new[]
                 {
@@ -9581,8 +9580,8 @@ namespace Burt.RenderPipeline
             cmd.DrawProcedural(Matrix4x4.identity, material, ScreenProbeTraceAtlasPassIndex, MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalTexture(BurtGIScreenProbeTraceRadianceTextureId, traceRadianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeTraceHitTextureId, traceHitTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryGetTargets(
@@ -9702,7 +9701,7 @@ namespace Burt.RenderPipeline
             var traceHeight = Mathf.Max(1, traceDescriptor.height);
             var maxAdaptiveProbes = Mathf.Max(1, context.BurtGIScreenProbeAdaptiveProbeDataBuffer.Buffer.count);
             var hiZDepthValid = context.HiZDepthTarget.IsValid && BurtHiZDepthPassUtility.ShouldUseHiZDepth(context.Request, context.Asset);
-            var cmd = CommandBufferPool.Get(Name + " Compact Compute");
+            var cmd = context.AcquireCommandBuffer(Name + " Compact Compute");
 
             BurtIndirectLightingUtility.UploadSkyReflectionForTracing(cmd, context.Request);
             UploadCompactTraceAtlasParams(cmd, clearShader, giSettings, settings, camera, probeWidth, probeHeight, traceWidth, traceHeight, maxAdaptiveProbes, hiZDepthValid);
@@ -9782,8 +9781,8 @@ namespace Burt.RenderPipeline
 
             cmd.SetGlobalTexture(BurtGIScreenProbeTraceRadianceTextureId, traceRadianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeTraceHitTextureId, traceHitTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -9938,7 +9937,7 @@ namespace Burt.RenderPipeline
                 giSettings.ScreenProbeFullSkylightLeakingDistance,
                 0.001f,
                 Mathf.Max(settings.TraceDistance, 0.001f));
-            var cmd = CommandBufferPool.Get("Burt ScreenProbe Trace Atlas Hardware Ray");
+            var cmd = context.AcquireCommandBuffer("Burt ScreenProbe Trace Atlas Hardware Ray");
             BurtIndirectLightingUtility.UploadSkyReflectionForTracing(cmd, context.Request);
             cmd.SetRenderTarget(new[] { traceRadianceTarget.Identifier, traceHitTarget.Identifier }, BuiltinRenderTextureType.None);
             cmd.ClearRenderTarget(false, true, Color.clear);
@@ -9997,8 +9996,8 @@ namespace Burt.RenderPipeline
                 1u);
             cmd.SetGlobalTexture(BurtGIScreenProbeTraceRadianceTextureId, traceRadianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeTraceHitTextureId, traceHitTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -10511,7 +10510,7 @@ namespace Burt.RenderPipeline
 
             var probeDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeDescriptor(camera, screenProbeSettings);
             var traceDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceDescriptor(camera, screenProbeSettings);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             if (!TryDispatchCompositeTracesCompute(
                     cmd,
                     camera,
@@ -10539,8 +10538,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGIScreenProbeFilteredIrradianceTextureId, compositeIrradianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeFilteredConfidenceTextureId, compositeConfidenceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeHitDistanceTextureId, compositeHitDistanceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryDispatchCompositeTracesCompute(
@@ -10788,7 +10787,7 @@ namespace Burt.RenderPipeline
                 ? -(screenProbeSettings.FixedJitterIndex + 1f)
                 : Mathf.Max(0, Time.frameCount);
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeVectorParam(shader, BurtGIScreenProbeGridParamsId, new Vector4(
                 probeWidth,
                 probeHeight,
@@ -10844,8 +10843,8 @@ namespace Burt.RenderPipeline
                 Mathf.CeilToInt(probeWidth / (float)DispatchThreadGroupSize),
                 Mathf.CeilToInt(probeHeight / (float)DispatchThreadGroupSize),
                 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static ComputeShader GetScreenProbeTraceCompactComputeShader()
@@ -10901,6 +10900,7 @@ namespace Burt.RenderPipeline
         private const string ScreenProbeUseCountComputeShaderResourcePath = "BurtGIScreenProbeTemporalUseCount";
         private const string ScreenProbeTemporalFilterKernelName = "ScreenProbeFilterTemporalCS";
         private const string ScreenProbeReprojectionKernelName = "ScreenProbeReprojectionCS";
+        private const string ScreenProbeDirectionalTemporalKernelName = "ScreenProbeDirectionalTemporalCS";
         private const string ScreenProbeSceneVelocityKernelName = "ScreenProbeSceneVelocityCS";
         private const string ScreenProbeClearUseCountKernelName = "ScreenProbeClearUseCountCS";
         private const string ScreenProbeUseCountScatterKernelName = "XGIScreenProbeUseCountScatterCS";
@@ -10939,6 +10939,8 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGIScreenProbeTemporalIrradianceWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeTemporalIrradianceWriteTexture");
         private static readonly int BurtGIScreenProbeTemporalConfidenceWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeTemporalConfidenceWriteTexture");
         private static readonly int BurtGIScreenProbeNumFramesAccumulatedWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeNumFramesAccumulatedWriteTexture");
+        private static readonly int BurtGIScreenProbeDirectionalTemporalWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeDirectionalTemporalWriteTexture");
+        private static readonly int BurtGIScreenProbeDirectionalTemporalTempTextureId = Shader.PropertyToID("_BurtGIScreenProbeDirectionalTemporalTempTexture");
         private static ComputeShader screenProbeUseCountComputeShader;
         private static bool hasLoggedMissingScreenProbeUseCountComputeShader;
         private static bool hasLoggedMissingScreenProbeUseCountKernel;
@@ -10960,6 +10962,7 @@ namespace Burt.RenderPipeline
             builder.ReadBurtGIScreenProbeWorldNormal();
             builder.ReadBurtGIScreenProbeBentNormal();
             builder.ReadBurtGIScreenProbeTraceRadiance();
+            builder.WriteBurtGIScreenProbeTraceRadiance();
             builder.ReadBurtGIScreenProbeTraceHit();
             builder.ReadBurtGIScreenProbeImportanceRayInfo();
             builder.WriteBurtGIScreenProbeTemporalRadiance();
@@ -11042,6 +11045,18 @@ namespace Burt.RenderPipeline
                 Mathf.Max(1, useCountDescriptor.height),
                 1f / Mathf.Max(1, useCountDescriptor.width),
                 useCountValid ? 1f : 0f));
+            TryDispatchScreenProbeDirectionalTemporalFilter(
+                cmd,
+                screenProbeSettings,
+                probeDescriptor,
+                traceDescriptor,
+                traceRadianceTarget,
+                traceHitTarget,
+                worldPositionTarget,
+                worldNormalTarget,
+                sceneVelocityId,
+                screenProbeHistory,
+                screenProbeHistoryValid);
             if (TryDispatchScreenProbeTemporalFilterCompute(
                     cmd,
                     context,
@@ -11079,8 +11094,8 @@ namespace Burt.RenderPipeline
 
                 cmd.ReleaseTemporaryRT(BurtGIScreenProbeUseCountTextureId);
                 cmd.ReleaseTemporaryRT(BurtGIScreenProbeNumFramesAccumulatedTextureId);
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteLegacyCommandBuffer(cmd);
+                context.ReleaseCommandBuffer(cmd);
                 return;
             }
 
@@ -11123,8 +11138,74 @@ namespace Burt.RenderPipeline
 
             cmd.ReleaseTemporaryRT(BurtGIScreenProbeUseCountTextureId);
             cmd.ReleaseTemporaryRT(BurtGIScreenProbeNumFramesAccumulatedTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
+        }
+
+        private static bool TryDispatchScreenProbeDirectionalTemporalFilter(
+            CommandBuffer cmd,
+            BurtScreenSpaceGlobalIlluminationScreenProbeSettings screenProbeSettings,
+            RenderTextureDescriptor probeDescriptor,
+            RenderTextureDescriptor traceDescriptor,
+            BurtRenderTargetHandle traceRadianceTarget,
+            BurtRenderTargetHandle traceHitTarget,
+            BurtRenderTargetHandle worldPositionTarget,
+            BurtRenderTargetHandle worldNormalTarget,
+            RenderTargetIdentifier sceneVelocityId,
+            BurtScreenSpaceGlobalIlluminationScreenProbeHistoryTextures history,
+            bool historyValid)
+        {
+            var shader = GetScreenProbeUseCountComputeShader();
+            if (!screenProbeSettings.TemporalFilter ||
+                !historyValid ||
+                history.TraceRadiance == null ||
+                !TryFindScreenProbeUseCountKernel(shader, ScreenProbeDirectionalTemporalKernelName, out var kernel))
+            {
+                return false;
+            }
+
+            traceDescriptor.depthBufferBits = 0;
+            traceDescriptor.msaaSamples = 1;
+            traceDescriptor.enableRandomWrite = true;
+            cmd.GetTemporaryRT(BurtGIScreenProbeDirectionalTemporalTempTextureId, traceDescriptor, FilterMode.Point);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeTraceRadianceTextureId, traceRadianceTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHistoryTraceRadianceTextureId, history.TraceRadiance);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeTraceHitTextureId, traceHitTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHistoryTraceHitTextureId, history.TraceHit != null ? (Texture)history.TraceHit : Texture2D.blackTexture);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldPositionTextureId, worldPositionTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldNormalTextureId, worldNormalTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHistoryWorldPositionTextureId, history.WorldPosition != null ? (Texture)history.WorldPosition : Texture2D.blackTexture);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHistoryWorldNormalTextureId, history.WorldNormal != null ? (Texture)history.WorldNormal : Texture2D.blackTexture);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeSceneVelocityTextureId, sceneVelocityId);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeDirectionalTemporalWriteTextureId, new RenderTargetIdentifier(BurtGIScreenProbeDirectionalTemporalTempTextureId));
+            cmd.SetComputeMatrixParam(shader, BurtGIScreenProbePreviousViewProjectionMatrixId, history.PreviousViewProjectionMatrix);
+            cmd.SetComputeVectorParam(shader, CameraWorldPositionId, Shader.GetGlobalVector(CameraWorldPositionId));
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeGridParamsId, new Vector4(
+                Mathf.Max(1, probeDescriptor.width),
+                Mathf.Max(1, probeDescriptor.height),
+                1f / Mathf.Max(1, probeDescriptor.width),
+                1f / Mathf.Max(1, probeDescriptor.height)));
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeTraceParamsId, new Vector4(
+                BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenProbeTracingOctahedronResolution(screenProbeSettings),
+                Mathf.Max(1, traceDescriptor.width),
+                Mathf.Max(1, traceDescriptor.height),
+                screenProbeSettings.TraceDistance));
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeTemporalParamsId, new Vector4(
+                screenProbeSettings.TemporalFilterHistoryWeight,
+                screenProbeSettings.TemporalReprojection ? 1f : 0f,
+                screenProbeSettings.HistoryDistanceThreshold,
+                1f));
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeReprojectionParamsId, new Vector4(
+                screenProbeSettings.ReprojectionDepthRejectParamsA,
+                screenProbeSettings.ReprojectionDepthRejectParamsB,
+                screenProbeSettings.ReprojectionMaxFramesAccumulated,
+                Mathf.Cos(screenProbeSettings.TemporalHistoryNormalThreshold * Mathf.Deg2Rad)));
+            var groupsX = Mathf.CeilToInt(Mathf.Max(1, traceDescriptor.width) / (float)ScreenProbeUseCountThreadGroupSize);
+            var groupsY = Mathf.CeilToInt(Mathf.Max(1, traceDescriptor.height) / (float)ScreenProbeUseCountThreadGroupSize);
+            cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
+            cmd.CopyTexture(new RenderTargetIdentifier(BurtGIScreenProbeDirectionalTemporalTempTextureId), traceRadianceTarget.Identifier);
+            cmd.ReleaseTemporaryRT(BurtGIScreenProbeDirectionalTemporalTempTextureId);
+            return true;
         }
 
         private static bool TryDispatchScreenProbeTemporalFilterCompute(
@@ -11330,7 +11411,7 @@ namespace Burt.RenderPipeline
 
             camera.depthTextureMode |= DepthTextureMode.MotionVectors | DepthTextureMode.Depth;
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             cmd.Clear();
 
             var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
@@ -11579,6 +11660,7 @@ namespace Burt.RenderPipeline
         private const int ScreenProbeSpatialFilterPassIndex = 11;
         private const string ScreenProbeSpatialFilterComputeShaderResourcePath = "BurtGIScreenProbeSpatialFilter";
         private const string ScreenProbeSpatialFilterKernelName = "ScreenProbeFilterSpatialCS";
+        private const string ScreenProbeDirectionalSpatialFilterKernelName = "ScreenProbeDirectionalSpatialCS";
         private const int ScreenProbeSpatialFilterThreadGroupSize = 8;
         private static readonly int BurtGIScreenProbeTraceParamsId = Shader.PropertyToID("_BurtGIScreenProbeTraceParams");
         private static readonly int BurtGIScreenProbeSpatialTemp0RadianceTextureId = Shader.PropertyToID("_BurtGIScreenProbeSpatialTemp0RadianceTexture");
@@ -11590,6 +11672,10 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGIScreenProbeFilteredRadianceWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeFilteredRadianceWriteTexture");
         private static readonly int BurtGIScreenProbeFilteredIrradianceWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeFilteredIrradianceWriteTexture");
         private static readonly int BurtGIScreenProbeFilteredConfidenceWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeFilteredConfidenceWriteTexture");
+        private static readonly int BurtGIScreenProbeDirectionalSpatialSourceTextureId = Shader.PropertyToID("_BurtGIScreenProbeDirectionalSpatialSourceTexture");
+        private static readonly int BurtGIScreenProbeDirectionalSpatialWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeDirectionalSpatialWriteTexture");
+        private static readonly int BurtGIScreenProbeDirectionalSpatialTemp0TextureId = Shader.PropertyToID("_BurtGIScreenProbeDirectionalSpatialTemp0Texture");
+        private static readonly int BurtGIScreenProbeDirectionalSpatialTemp1TextureId = Shader.PropertyToID("_BurtGIScreenProbeDirectionalSpatialTemp1Texture");
         private static ComputeShader screenProbeSpatialFilterComputeShader;
         private static bool hasLoggedMissingScreenProbeSpatialFilterComputeShader;
         private static bool hasLoggedMissingScreenProbeSpatialFilterKernel;
@@ -11611,6 +11697,8 @@ namespace Burt.RenderPipeline
             builder.ReadBurtGIScreenProbeWorldNormal();
             builder.ReadBurtGIScreenProbeHitDistance();
             builder.ReadBurtGIScreenProbeTraceHit();
+            builder.ReadBurtGIScreenProbeTraceRadiance();
+            builder.WriteBurtGIScreenProbeTraceRadiance();
             builder.WriteBurtGIScreenProbeFilteredRadiance();
             builder.WriteBurtGIScreenProbeFilteredIrradiance();
             builder.WriteBurtGIScreenProbeFilteredConfidence();
@@ -11650,7 +11738,7 @@ namespace Burt.RenderPipeline
 
             var probeDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeDescriptor(camera, screenProbeSettings);
             var traceDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceDescriptor(camera, screenProbeSettings);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             var useSpatialFilter = screenProbeSettings.SpatialFilter && screenProbeSettings.SpatialFilterHalfKernelSize > 0;
             var spatialPassCount = useSpatialFilter ? Mathf.Max(1, screenProbeSettings.SpatialFilterPasses) : 1;
             var needsTemp0 = spatialPassCount > 1;
@@ -11664,6 +11752,18 @@ namespace Burt.RenderPipeline
             {
                 AllocateSpatialFilterTemp(cmd, probeDescriptor, BurtGIScreenProbeSpatialTemp1RadianceTextureId, BurtGIScreenProbeSpatialTemp1IrradianceTextureId, BurtGIScreenProbeSpatialTemp1ConfidenceTextureId);
             }
+
+            TryDispatchScreenProbeDirectionalSpatialFilter(
+                cmd,
+                screenProbeSettings,
+                probeDescriptor,
+                traceDescriptor,
+                context.BurtGIScreenProbeTraceRadianceTarget,
+                traceHitTarget,
+                worldPositionTarget,
+                worldNormalTarget,
+                hitDistanceTarget,
+                spatialPassCount);
 
             if (TryDispatchScreenProbeSpatialFilterCompute(
                     cmd,
@@ -11696,8 +11796,8 @@ namespace Burt.RenderPipeline
                     ReleaseSpatialFilterTemp(cmd, BurtGIScreenProbeSpatialTemp0RadianceTextureId, BurtGIScreenProbeSpatialTemp0IrradianceTextureId, BurtGIScreenProbeSpatialTemp0ConfidenceTextureId);
                 }
 
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteLegacyCommandBuffer(cmd);
+                context.ReleaseCommandBuffer(cmd);
                 return;
             }
 
@@ -11714,8 +11814,8 @@ namespace Burt.RenderPipeline
                     ReleaseSpatialFilterTemp(cmd, BurtGIScreenProbeSpatialTemp0RadianceTextureId, BurtGIScreenProbeSpatialTemp0IrradianceTextureId, BurtGIScreenProbeSpatialTemp0ConfidenceTextureId);
                 }
 
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteLegacyCommandBuffer(cmd);
+                context.ReleaseCommandBuffer(cmd);
                 return;
             }
 
@@ -11775,8 +11875,92 @@ namespace Burt.RenderPipeline
                 ReleaseSpatialFilterTemp(cmd, BurtGIScreenProbeSpatialTemp0RadianceTextureId, BurtGIScreenProbeSpatialTemp0IrradianceTextureId, BurtGIScreenProbeSpatialTemp0ConfidenceTextureId);
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
+        }
+
+        private static bool TryDispatchScreenProbeDirectionalSpatialFilter(
+            CommandBuffer cmd,
+            BurtScreenSpaceGlobalIlluminationScreenProbeSettings screenProbeSettings,
+            RenderTextureDescriptor probeDescriptor,
+            RenderTextureDescriptor traceDescriptor,
+            BurtRenderTargetHandle traceRadianceTarget,
+            BurtRenderTargetHandle traceHitTarget,
+            BurtRenderTargetHandle worldPositionTarget,
+            BurtRenderTargetHandle worldNormalTarget,
+            BurtRenderTargetHandle hitDistanceTarget,
+            int spatialPassCount)
+        {
+            var shader = GetScreenProbeSpatialFilterComputeShader();
+            if (!screenProbeSettings.SpatialFilter ||
+                screenProbeSettings.SpatialFilterHalfKernelSize <= 0 ||
+                !traceRadianceTarget.IsValid ||
+                !TryFindScreenProbeSpatialFilterKernel(shader, ScreenProbeDirectionalSpatialFilterKernelName, out var kernel))
+            {
+                return false;
+            }
+
+            traceDescriptor.depthBufferBits = 0;
+            traceDescriptor.msaaSamples = 1;
+            traceDescriptor.enableRandomWrite = true;
+            cmd.GetTemporaryRT(BurtGIScreenProbeDirectionalSpatialTemp0TextureId, traceDescriptor, FilterMode.Point);
+            if (spatialPassCount > 1)
+            {
+                cmd.GetTemporaryRT(BurtGIScreenProbeDirectionalSpatialTemp1TextureId, traceDescriptor, FilterMode.Point);
+            }
+
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeTraceHitTextureId, traceHitTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldPositionTextureId, worldPositionTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldNormalTextureId, worldNormalTarget.Identifier);
+            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHitDistanceTextureId, hitDistanceTarget.Identifier);
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeGridParamsId, new Vector4(
+                Mathf.Max(1, probeDescriptor.width),
+                Mathf.Max(1, probeDescriptor.height),
+                1f / Mathf.Max(1, probeDescriptor.width),
+                1f / Mathf.Max(1, probeDescriptor.height)));
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeFilterParamsId, new Vector4(
+                Mathf.Max(1, spatialPassCount),
+                screenProbeSettings.SpatialFilterHalfKernelSize,
+                screenProbeSettings.FixupBorders ? 1f : 0f,
+                0f));
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeSpatialFilterParamsId, new Vector4(
+                screenProbeSettings.SpatialFilterMaxRadianceHitAngle,
+                screenProbeSettings.SpatialFilterPositionWeightScale,
+                0f,
+                0f));
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeTraceParamsId, new Vector4(
+                BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenProbeTracingOctahedronResolution(screenProbeSettings),
+                Mathf.Max(1, traceDescriptor.width),
+                Mathf.Max(1, traceDescriptor.height),
+                screenProbeSettings.TraceDistance));
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeParamsId, new Vector4(
+                screenProbeSettings.SpacingPixels,
+                screenProbeSettings.TraceDistance,
+                screenProbeSettings.SampleCount,
+                screenProbeSettings.ApplyStrength));
+
+            var source = traceRadianceTarget.Identifier;
+            var groupsX = Mathf.CeilToInt(Mathf.Max(1, traceDescriptor.width) / (float)ScreenProbeSpatialFilterThreadGroupSize);
+            var groupsY = Mathf.CeilToInt(Mathf.Max(1, traceDescriptor.height) / (float)ScreenProbeSpatialFilterThreadGroupSize);
+            for (var passIndex = 0; passIndex < spatialPassCount; ++passIndex)
+            {
+                var outputId = passIndex % 2 == 0
+                    ? BurtGIScreenProbeDirectionalSpatialTemp0TextureId
+                    : BurtGIScreenProbeDirectionalSpatialTemp1TextureId;
+                var output = new RenderTargetIdentifier(outputId);
+                cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeDirectionalSpatialSourceTextureId, source);
+                cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeDirectionalSpatialWriteTextureId, output);
+                cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
+                source = output;
+            }
+
+            cmd.CopyTexture(source, traceRadianceTarget.Identifier);
+            if (spatialPassCount > 1)
+            {
+                cmd.ReleaseTemporaryRT(BurtGIScreenProbeDirectionalSpatialTemp1TextureId);
+            }
+            cmd.ReleaseTemporaryRT(BurtGIScreenProbeDirectionalSpatialTemp0TextureId);
+            return true;
         }
 
         private static void AllocateSpatialFilterTemp(
@@ -11894,24 +12078,29 @@ namespace Burt.RenderPipeline
 
         private static bool TryFindScreenProbeSpatialFilterKernel(ComputeShader shader, out int kernel)
         {
+            return TryFindScreenProbeSpatialFilterKernel(shader, ScreenProbeSpatialFilterKernelName, out kernel);
+        }
+
+        private static bool TryFindScreenProbeSpatialFilterKernel(ComputeShader shader, string kernelName, out int kernel)
+        {
             kernel = -1;
             if (shader == null)
             {
                 return false;
             }
 
-            if (!shader.HasKernel(ScreenProbeSpatialFilterKernelName))
+            if (!shader.HasKernel(kernelName))
             {
                 if (!hasLoggedMissingScreenProbeSpatialFilterKernel)
                 {
-                    Debug.LogWarning("BurtRP screen probe spatial filter compute shader missing kernel: " + ScreenProbeSpatialFilterKernelName);
+                    Debug.LogWarning("BurtRP screen probe spatial filter compute shader missing kernel: " + kernelName);
                     hasLoggedMissingScreenProbeSpatialFilterKernel = true;
                 }
 
                 return false;
             }
 
-            kernel = shader.FindKernel(ScreenProbeSpatialFilterKernelName);
+            kernel = shader.FindKernel(kernelName);
             return kernel >= 0;
         }
 
@@ -12072,7 +12261,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(
                 new[]
                 {
@@ -12099,8 +12288,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGIScreenProbeFixupRadianceTextureId, fixupRadianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeFixupIrradianceTextureId, fixupIrradianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeFixupConfidenceTextureId, fixupConfidenceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryGetTargets(
@@ -12208,7 +12397,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(
                 new[]
                 {
@@ -12226,8 +12415,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGIScreenProbeMipRadianceTextureId, mipRadianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeMipIrradianceTextureId, mipIrradianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeMipConfidenceTextureId, mipConfidenceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryGetTargets(
@@ -12329,7 +12518,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(
                 new[]
                 {
@@ -12353,8 +12542,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGIScreenProbeMip2RadianceTextureId, mip2RadianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeMip2IrradianceTextureId, mip2IrradianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeMip2ConfidenceTextureId, mip2ConfidenceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryGetTargets(
@@ -12456,7 +12645,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(
                 new[]
                 {
@@ -12480,8 +12669,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGIScreenProbeMip3RadianceTextureId, mip3RadianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeMip3IrradianceTextureId, mip3IrradianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeMip3ConfidenceTextureId, mip3ConfidenceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryGetTargets(
@@ -12621,7 +12810,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetGlobalTexture(BurtGIScreenProbeFixupRadianceTextureId, fixupRadianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeFixupIrradianceTextureId, fixupIrradianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeFixupConfidenceTextureId, fixupConfidenceTarget.Identifier);
@@ -12650,8 +12839,8 @@ namespace Burt.RenderPipeline
             cmd.DrawProcedural(Matrix4x4.identity, material, ScreenProbeIrradianceSHPassIndex, MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalTexture(BurtGIScreenProbeRadianceSHDirectionalTextureId, shDirectionalTarget.Identifier);
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryExecuteCompute(
@@ -12705,7 +12894,7 @@ namespace Burt.RenderPipeline
             var screenProbeHeight = Mathf.Max(1, probeDescriptor.height);
             var tileCapacity = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenProbeAdaptiveProbeIndexTileCapacity(screenProbeSettings);
             var maxAdaptiveProbes = Mathf.Max(1, context.BurtGIScreenProbeAdaptiveProbeDataBuffer.Buffer.count);
-            var cmd = CommandBufferPool.Get("Burt ScreenProbe Irradiance SH3 Compute");
+            var cmd = context.AcquireCommandBuffer("Burt ScreenProbe Irradiance SH3 Compute");
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeScreenDepthTextureId, context.BurtGIScreenProbeScreenDepthTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldNormalTextureId, context.BurtGIScreenProbeWorldNormalTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldPositionTextureId, context.BurtGIScreenProbeWorldPositionTarget.Identifier);
@@ -12753,8 +12942,8 @@ namespace Burt.RenderPipeline
                 1);
             cmd.SetGlobalTexture(BurtGIScreenProbeRadianceSHAmbientTextureId, shAmbientTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeRadianceSHDirectionalTextureId, shDirectionalTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -12964,7 +13153,7 @@ namespace Burt.RenderPipeline
                 irradianceOctDescriptor.height / BurtScreenSpaceGlobalIlluminationPassUtility.ScreenProbeIrradianceOctResolutionWithBorder);
             var tileCapacity = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenProbeAdaptiveProbeIndexTileCapacity(screenProbeSettings);
             var maxAdaptiveProbes = Mathf.Max(1, context.BurtGIScreenProbeAdaptiveProbeDataBuffer.Buffer.count);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeScreenDepthTextureId, screenDepthTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldNormalTextureId, worldNormalTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldPositionTextureId, worldPositionTarget.Identifier);
@@ -13024,8 +13213,8 @@ namespace Burt.RenderPipeline
             }
             cmd.SetGlobalTexture(BurtGIScreenProbeIrradianceOctTextureId, irradianceOctTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeRadianceOctTextureId, radianceOctTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static ComputeShader GetScreenProbeIrradianceOctComputeShader()
@@ -13288,7 +13477,7 @@ namespace Burt.RenderPipeline
                 : Mathf.Max(0, Time.frameCount);
             var inverseViewProjectionMatrix = (GL.GetGPUProjectionMatrix(camera.projectionMatrix, true) * camera.worldToCameraMatrix).inverse;
             var cameraPosition = camera.transform.position;
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeScreenDepthTextureId, screenDepthTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldNormalTextureId, worldNormalTarget.Identifier);
@@ -13317,8 +13506,8 @@ namespace Burt.RenderPipeline
             cmd.SetComputeVectorParam(shader, CameraWorldPositionId, new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1f));
             cmd.DispatchCompute(shader, kernel, screenProbeWidth, atlasProbeHeight, 1);
             cmd.SetGlobalTexture(BurtGIScreenProbeImportancePDFTextureId, importancePDFTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static ComputeShader GetScreenProbeImportancePDFComputeShader()
@@ -13485,7 +13674,7 @@ namespace Burt.RenderPipeline
             var placementJitterIndex = screenProbeSettings.FixedJitterIndex >= 0
                 ? -(screenProbeSettings.FixedJitterIndex + 1f)
                 : Mathf.Max(0, Time.frameCount);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeScreenDepthTextureId, screenDepthTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldNormalTextureId, worldNormalTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldPositionTextureId, worldPositionTarget.Identifier);
@@ -13529,8 +13718,8 @@ namespace Burt.RenderPipeline
             cmd.SetComputeVectorParam(shader, BurtGIScreenProbeHistoryParamsId, new Vector4(screenProbeHistory.HistoryExposureCorrection, 0f, 0f, 0f));
             cmd.DispatchCompute(shader, kernel, screenProbeWidth, atlasProbeHeight, 1);
             cmd.SetGlobalTexture(BurtGIScreenProbeImportanceLightPDFTextureId, importanceLightPDFTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static ComputeShader GetScreenProbeImportanceLightPDFComputeShader()
@@ -13685,7 +13874,7 @@ namespace Burt.RenderPipeline
                 screenProbeHeight,
                 Mathf.CeilToInt((screenProbeWidth * screenProbeHeight + maxAdaptiveProbes) / (float)screenProbeWidth));
             var tileCapacity = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenProbeAdaptiveProbeIndexTileCapacity(screenProbeSettings);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeScreenDepthTextureId, screenDepthTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldNormalTextureId, worldNormalTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldPositionTextureId, worldPositionTarget.Identifier);
@@ -13718,8 +13907,8 @@ namespace Burt.RenderPipeline
                 0f));
             cmd.DispatchCompute(shader, kernel, screenProbeWidth, atlasProbeHeight, 1);
             cmd.SetGlobalTexture(BurtGIScreenProbeImportanceRayInfoTextureId, importanceRayInfoTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static ComputeShader GetScreenProbeImportanceGenRaysComputeShader()
@@ -14229,7 +14418,7 @@ namespace Burt.RenderPipeline
                 : Mathf.Max(0, Time.frameCount);
             var useSpatialFilter = screenProbeSettings.SpatialFilter && screenProbeSettings.SpatialFilterHalfKernelSize > 0;
 
-            var cmd = CommandBufferPool.Get(passName);
+            var cmd = context.AcquireCommandBuffer(passName);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeFilteredRadianceTextureId, filteredRadianceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeFilteredIrradianceTextureId, filteredIrradianceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeFilteredConfidenceTextureId, filteredConfidenceTarget.Identifier);
@@ -14252,8 +14441,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGIScreenProbeFixupRadianceTextureId, fixupRadianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeFixupIrradianceTextureId, fixupIrradianceTarget.Identifier);
             cmd.SetGlobalTexture(BurtGIScreenProbeFixupConfidenceTextureId, fixupConfidenceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -14284,7 +14473,7 @@ namespace Burt.RenderPipeline
             var targetHeight = Mathf.Max(1, targetDescriptor.height);
             var groupsX = Mathf.CeilToInt(targetWidth / (float)ScreenProbeFilterGenerateMipComputeThreadGroupSize);
             var groupsY = Mathf.CeilToInt(targetHeight / (float)ScreenProbeFilterGenerateMipComputeThreadGroupSize);
-            var cmd = CommandBufferPool.Get(passName);
+            var cmd = context.AcquireCommandBuffer(passName);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeFixupRadianceTextureId, sourceRadianceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeFixupIrradianceTextureId, sourceIrradianceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeFixupConfidenceTextureId, sourceConfidenceTarget.Identifier);
@@ -14297,8 +14486,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(outputRadianceTextureId, targetRadianceTarget.Identifier);
             cmd.SetGlobalTexture(outputIrradianceTextureId, targetIrradianceTarget.Identifier);
             cmd.SetGlobalTexture(outputConfidenceTextureId, targetConfidenceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
 
@@ -14534,7 +14723,7 @@ namespace Burt.RenderPipeline
             }
 
             var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(rawTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, descriptor.width, descriptor.height);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
@@ -14544,8 +14733,8 @@ namespace Burt.RenderPipeline
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalTexture(BurtGIRawTextureId, rawTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryGetTargets(
@@ -14672,7 +14861,7 @@ namespace Burt.RenderPipeline
             var jitterOffset = ResolveTranslucencyVolumeJitterOffset(screenProbeSettings, Time.frameCount);
             var hiZDepthTarget = context.HiZDepthTarget;
             var hiZDepthValid = hiZDepthTarget.IsValid && BurtHiZDepthPassUtility.ShouldUseHiZDepth(context.Request, context.Asset);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, BurtHiZDepthTextureId, hiZDepthValid ? hiZDepthTarget.Identifier : new RenderTargetIdentifier(Texture2D.blackTexture));
             BindTranslucencySceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelGeometryReadTextureId, context.BurtGISceneVoxelGeometryTarget);
             BindTranslucencySceneVoxelTexture(cmd, shader, kernel, BurtGISceneVoxelOccupancyMipReadTextureId, context.BurtGISceneVoxelOccupancyMipTarget);
@@ -14726,8 +14915,8 @@ namespace Burt.RenderPipeline
                 Mathf.Max(1, (descriptor.width * Mathf.Clamp(screenProbeSettings.TranslucencyVolumeTracingOctahedronResolution, 1, 8) + 7) / 8),
                 Mathf.Max(1, (descriptor.height * Mathf.Clamp(screenProbeSettings.TranslucencyVolumeTracingOctahedronResolution, 1, 8) + 7) / 8),
                 Mathf.Max(1, descriptor.volumeDepth));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             BurtGITranslucencyVolumeRuntimeState.MarkTraceAtlasGenerated(
                 descriptor.width * Mathf.Clamp(screenProbeSettings.TranslucencyVolumeTracingOctahedronResolution, 1, 8),
                 descriptor.height * Mathf.Clamp(screenProbeSettings.TranslucencyVolumeTracingOctahedronResolution, 1, 8),
@@ -14946,7 +15135,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             var gridSize = new Vector4(
                 volumeDescriptor.width,
                 volumeDescriptor.height,
@@ -14996,8 +15185,8 @@ namespace Burt.RenderPipeline
                 filteredTraceRadianceTarget,
                 2);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceFilteredRadianceTextureId, filteredTraceRadianceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             BurtGITranslucencyVolumeRuntimeState.MarkTraceAtlasFiltered(
                 traceDescriptor.width,
                 traceDescriptor.height,
@@ -15050,15 +15239,15 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle filteredTraceRadianceTarget,
             RenderTextureDescriptor traceDescriptor)
         {
-            var cmd = CommandBufferPool.Get(Name + " Passthrough");
+            var cmd = context.AcquireCommandBuffer(Name + " Passthrough");
             if (!TryCopyTexture3DFloat4(cmd, rawTraceRadianceTarget.Identifier, filteredTraceRadianceTarget.Identifier, traceDescriptor.width, traceDescriptor.height, traceDescriptor.volumeDepth))
             {
                 cmd.CopyTexture(rawTraceRadianceTarget.Identifier, filteredTraceRadianceTarget.Identifier);
             }
 
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.BurtGITranslucencyVolumeTraceFilteredRadianceTextureId, filteredTraceRadianceTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             BurtGITranslucencyVolumeRuntimeState.MarkTraceAtlasFiltered(
                 traceDescriptor.width,
                 traceDescriptor.height,
@@ -15203,7 +15392,7 @@ namespace Burt.RenderPipeline
             var hiZDepthTarget = context.HiZDepthTarget;
             var hiZDepthValid = hiZDepthTarget.IsValid && BurtHiZDepthPassUtility.ShouldUseHiZDepth(context.Request, context.Asset);
             var fallbackVolumeTexture = BurtGITranslucencyVolumeFallbackUtility.BlackVolumeTexture;
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIApplyIndirectDiffuseTextureId, diffuseTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIApplyIndirectBackfaceDiffuseTextureId, backfaceTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeRadianceTextureId, screenProbeRadianceTarget.Identifier);
@@ -15253,8 +15442,8 @@ namespace Burt.RenderPipeline
                 Mathf.Max(1, (descriptor.width + 3) / 4),
                 Mathf.Max(1, (descriptor.height + 3) / 4),
                 Mathf.Max(1, (descriptor.volumeDepth + 3) / 4));
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             BurtGITranslucencyVolumeRuntimeState.MarkVolumeIntegrated(
                 descriptor.width,
                 descriptor.height,
@@ -15399,7 +15588,7 @@ namespace Burt.RenderPipeline
                 descriptor.height,
                 descriptor.volumeDepth,
                 BurtScreenSpaceGlobalIlluminationPassUtility.TranslucencyVolumeMaterialIntensityScale);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             var spatialFilterParams = new Vector4(
                 screenProbeSettings.TranslucencyVolumeSpatialFilterSampleCount,
                 screenProbeSettings.TranslucencyVolumeSpatialFilterStandardDeviation,
@@ -15445,8 +15634,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGITranslucencyVolume1TextureId, filter1Target.Identifier);
             cmd.SetGlobalVector(BurtGITranslucencyVolumeGridSizeId, gridSize);
             CopyFilteredVolumeHistory(cmd, context, filter0Target, filter1Target);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             BurtGITranslucencyVolumeRuntimeState.MarkFilteredVolumeAvailable();
         }
 
@@ -15507,7 +15696,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name + " Passthrough");
+            var cmd = context.AcquireCommandBuffer(Name + " Passthrough");
             var camera = context.Request != null ? context.Request.Camera : null;
             var screenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context.Request, context.Asset);
             var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationTranslucencyVolumeDescriptor(camera, screenProbeSettings);
@@ -15524,8 +15713,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtGITranslucencyVolume0TextureId, filter0Target.Identifier);
             cmd.SetGlobalTexture(BurtGITranslucencyVolume1TextureId, filter1Target.Identifier);
             CopyFilteredVolumeHistory(cmd, context, filter0Target, filter1Target);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
             BurtGITranslucencyVolumeRuntimeState.MarkFilteredVolumeAvailable();
         }
 
@@ -15758,7 +15947,7 @@ namespace Burt.RenderPipeline
             var halfWidth = Mathf.Max(1, halfDescriptor.width);
             var halfHeight = Mathf.Max(1, halfDescriptor.height);
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetComputeTextureParam(shader, kernel, CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, GBuffer0Id, gbuffer0Target.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeScreenDepthTextureId, screenProbeDepthTarget.Identifier);
@@ -15778,8 +15967,8 @@ namespace Burt.RenderPipeline
                 Mathf.Max(1, Mathf.CeilToInt(fullWidth / (float)ThreadGroupSize)),
                 Mathf.Max(1, Mathf.CeilToInt(fullHeight / (float)ThreadGroupSize)),
                 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static ComputeShader GetComputeShader()
@@ -15994,7 +16183,7 @@ namespace Burt.RenderPipeline
                 translucencyVolumeParams = new Vector4(1f, BurtScreenSpaceGlobalIlluminationPassUtility.TranslucencyVolumeApplyIntensityScale, 0.55f, 1f);
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             if (enabled)
             {
                 cmd.SetGlobalTexture(BurtGIApplyIndirectDiffuseTextureId, burtGITarget.Identifier);
@@ -16029,10 +16218,10 @@ namespace Burt.RenderPipeline
             UploadTranslucencyVolumeGlobals(context, cmd, volumeEnabled);
             if (context != null)
             {
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
+                context.ExecuteLegacyCommandBuffer(cmd);
             }
 
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static void UploadTranslucencyVolumeGlobals(BurtRenderGraphContext context, CommandBuffer cmd, bool enabled)
@@ -16694,7 +16883,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateSimpleSH(builder.Request, builder.Asset))
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileData(builder.Request, builder.Asset))
             {
                 return;
             }
@@ -16766,7 +16955,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateSimpleSH(context.Request, context.Asset))
+            if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileData(context.Request, context.Asset))
             {
                 return;
             }
@@ -16780,7 +16969,7 @@ namespace Burt.RenderPipeline
 
             var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
             var indirectHistory = BurtScreenSpaceGlobalIlluminationIndirectChannelHistoryUtility.EnsureHistoryTextures(context.Request, context.Asset, settings, out var indirectHistoryValid);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(
                 new[]
                 {
@@ -16816,8 +17005,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.BurtGIBackfaceDiffuseIndirectTextureId, backfaceDiffuseTarget.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.BurtGIRoughSpecularIndirectTextureId, roughSpecularTarget.Identifier);
             CopyIndirectChannelHistory(cmd, material, camera, settings, descriptor, backfaceDiffuseTarget, roughSpecularTarget, indirectHistory);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static void BindScreenProbeIndirectChannelInputs(
@@ -17179,7 +17368,7 @@ namespace Burt.RenderPipeline
             var spatialFinalIdentifier = new RenderTargetIdentifier(BurtGISpatialFinalTextureId);
             var temporalFinalIdentifier = new RenderTargetIdentifier(BurtGITemporalFinalTextureId);
             var depthNormalIdentifier = new RenderTargetIdentifier(BurtGIDepthNormalTextureId);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetGlobalTexture(BurtGIRawTextureId, rawTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             BindGBufferInputs(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target);
@@ -17407,8 +17596,8 @@ namespace Burt.RenderPipeline
             }
 
             cmd.SetGlobalTexture(BurtGITextureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryDispatchIrradianceFieldIntegrateCompute(
@@ -17866,14 +18055,14 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             BurtGIPreviousSceneColorHistoryUtility.Store(
                 cmd,
                 context.Request,
                 context.Asset,
                 cameraColorTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 
@@ -17916,7 +18105,7 @@ namespace Burt.RenderPipeline
 
             var burtGIDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
             var cameraColorDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtGICameraColorCopyTextureId, cameraColorDescriptor, FilterMode.Bilinear);
             cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(BurtGICameraColorCopyTextureId));
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
@@ -17929,8 +18118,8 @@ namespace Burt.RenderPipeline
             UploadSettings(cmd, settings);
             cmd.DrawProcedural(Matrix4x4.identity, material, 2, MeshTopology.Triangles, 3, 1);
             cmd.ReleaseTemporaryRT(BurtGICameraColorCopyTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static bool TryGetTargets(
@@ -18212,7 +18401,7 @@ namespace Burt.RenderPipeline
 
             var screenProbeSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context.Request, context.Asset);
             var descriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationDescriptor(camera, settings);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             var isOverlay = BurtScreenSpaceGlobalIlluminationPassUtility.IsScreenSpaceGlobalIlluminationOverlayDebugMode(BurtShadingDebugSettings.Mode);
             if (isOverlay)
             {
@@ -18312,8 +18501,8 @@ namespace Burt.RenderPipeline
                     cmd.ReleaseTemporaryRT(BurtGIDebugCameraColorCopyTextureId);
                 }
 
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteLegacyCommandBuffer(cmd);
+                context.ReleaseCommandBuffer(cmd);
                 return;
             }
 
@@ -18340,8 +18529,8 @@ namespace Burt.RenderPipeline
                     cmd.ReleaseTemporaryRT(BurtGIDebugCameraColorCopyTextureId);
                 }
 
-                context.ScriptableContext.ExecuteCommandBuffer(cmd);
-                CommandBufferPool.Release(cmd);
+                context.ExecuteLegacyCommandBuffer(cmd);
+                context.ReleaseCommandBuffer(cmd);
                 return;
             }
 
@@ -18407,8 +18596,8 @@ namespace Burt.RenderPipeline
                 cmd.ReleaseTemporaryRT(BurtGIDebugCameraColorCopyTextureId);
             }
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static ComputeShader GetXGISdfDebugComputeShader()
@@ -19303,7 +19492,7 @@ namespace Burt.RenderPipeline
             outputDescriptor.graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat;
             outputDescriptor.enableRandomWrite = true;
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(SourceTextureId, sourceDescriptor, FilterMode.Bilinear);
             cmd.GetTemporaryRT(OutputTextureId, outputDescriptor, FilterMode.Bilinear);
             var source = new RenderTargetIdentifier(SourceTextureId);
@@ -19321,8 +19510,8 @@ namespace Burt.RenderPipeline
             cmd.Blit(output, cameraColorTarget.Identifier);
             cmd.ReleaseTemporaryRT(OutputTextureId);
             cmd.ReleaseTemporaryRT(SourceTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         private static void UploadMetrics(CommandBuffer cmd, ComputeShader shader, BurtGIProbeRuntimeInfoMetrics metrics)
@@ -22210,6 +22399,253 @@ namespace Burt.RenderPipeline
         }
     }
 
+    internal static class BurtGIAsyncComputeUtility
+    {
+        public const string ContractName = "GraphicsToGIComputeToGraphicsFence";
+        public static string LastStatus { get; private set; } = "Unused";
+
+        public static bool Begin(BurtRenderGraphContext context, CommandBuffer asyncCommandBuffer)
+        {
+            if (!ShouldUse(context, out var reason))
+            {
+                LastStatus = "Synchronous(" + reason + ")";
+                return false;
+            }
+
+            var graphicsCommandBuffer = CommandBufferPool.Get("BurtGI Graphics To Async Fence");
+            var graphicsToComputeFence = graphicsCommandBuffer.CreateAsyncGraphicsFence();
+            context.ExecuteLegacyCommandBuffer(graphicsCommandBuffer);
+            context.ReleaseCommandBuffer(graphicsCommandBuffer);
+            asyncCommandBuffer.SetExecutionFlags(CommandBufferExecutionFlags.AsyncCompute);
+            asyncCommandBuffer.WaitOnAsyncGraphicsFence(graphicsToComputeFence);
+            return true;
+        }
+
+        public static void Execute(BurtRenderGraphContext context, CommandBuffer commandBuffer, bool async)
+        {
+            if (!async)
+            {
+                context.ExecuteLegacyCommandBuffer(commandBuffer);
+                return;
+            }
+
+            var computeToGraphicsFence = commandBuffer.CreateAsyncGraphicsFence();
+            context.ScriptableContext.ExecuteCommandBufferAsync(commandBuffer, ComputeQueueType.Background);
+            var waitCommandBuffer = CommandBufferPool.Get("BurtGI Async To Graphics Fence");
+            waitCommandBuffer.WaitOnAsyncGraphicsFence(computeToGraphicsFence);
+            context.ExecuteLegacyCommandBuffer(waitCommandBuffer);
+            context.ReleaseCommandBuffer(waitCommandBuffer);
+            LastStatus = "Scheduled(" + ContractName + ")";
+        }
+
+        public static string ResolveStatus(BurtRenderRequest request, BurtRenderPipelineAsset asset)
+        {
+            if (asset == null || !asset.EnableAsyncCompute)
+            {
+                return "Disabled(AssetOff)";
+            }
+            if (request != null && request.CameraData != null && !request.CameraData.EnableAsyncCompute)
+            {
+                return "Disabled(CameraOff)";
+            }
+            if (!SystemInfo.supportsAsyncCompute)
+            {
+                return "Disabled(Unsupported)";
+            }
+            if (!SystemInfo.supportsGraphicsFence)
+            {
+                return "Disabled(NoGraphicsFence)";
+            }
+            return "Ready(" + ContractName + ") Last=" + LastStatus;
+        }
+
+        private static bool ShouldUse(BurtRenderGraphContext context, out string reason)
+        {
+            if (context == null || context.Asset == null || context.Request == null)
+            {
+                reason = "InvalidContext";
+                return false;
+            }
+            if (!context.Asset.EnableAsyncCompute)
+            {
+                reason = "AssetOff";
+                return false;
+            }
+            if (context.Request.CameraData != null && !context.Request.CameraData.EnableAsyncCompute)
+            {
+                reason = "CameraOff";
+                return false;
+            }
+            if (!SystemInfo.supportsAsyncCompute)
+            {
+                reason = "Unsupported";
+                return false;
+            }
+            if (!SystemInfo.supportsGraphicsFence)
+            {
+                reason = "NoGraphicsFence";
+                return false;
+            }
+
+            reason = "Ready";
+            return true;
+        }
+    }
+
+    internal static class BurtGISceneVoxelGpuRasterizerUtility
+    {
+        private const string VoxelizeLightMode = "BurtGIVoxelize";
+        private static readonly int DummyTargetId = Shader.PropertyToID("_BurtGISceneVoxelRasterDummyTexture");
+        private static readonly int SceneVoxelCenterExtentId = Shader.PropertyToID("_BurtGISceneVoxelCenterExtent");
+        private static readonly int SceneVoxelLightingParamsId = Shader.PropertyToID("_BurtGISceneVoxelLightingParams");
+        private static readonly int SceneVoxelMaterialParamsId = Shader.PropertyToID("_BurtGISceneVoxelMaterialParams");
+        private static Renderer[] cachedRenderers;
+        private static int cachedRendererFrame = -1;
+
+        public static int LastDrawnRendererCount { get; private set; }
+        public static int LastDrawnMaterialPassCount { get; private set; }
+
+        public static bool IsSupported =>
+            SystemInfo.supportsComputeShaders &&
+            SystemInfo.supportsGeometryShaders &&
+            SystemInfo.supports3DTextures &&
+            SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.ARGBHalf);
+
+        public static bool Rasterize(
+            BurtRenderGraphContext context,
+            string passName,
+            Camera camera,
+            Vector4 centerExtent,
+            int resolution,
+            RenderTargetIdentifier radiance,
+            RenderTargetIdentifier geometry,
+            RenderTargetIdentifier lighting,
+            BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            if (!IsSupported || context == null || context.Request == null || camera == null || resolution <= 0)
+            {
+                return false;
+            }
+
+            var descriptor = new RenderTextureDescriptor(
+                Mathf.Max(1, resolution),
+                Mathf.Max(1, resolution),
+                RenderTextureFormat.R8,
+                0)
+            {
+                msaaSamples = 1,
+                sRGB = false,
+                useMipMap = false,
+                autoGenerateMips = false
+            };
+            var cmd = context.AcquireCommandBuffer(passName + " GPU BurtGIVoxelize");
+            cmd.GetTemporaryRT(DummyTargetId, descriptor, FilterMode.Point);
+            cmd.SetGlobalVector(SceneVoxelCenterExtentId, centerExtent);
+            cmd.SetGlobalVector(SceneVoxelLightingParamsId, new Vector4(
+                1f / Mathf.Clamp(settings.SceneVoxelDiffuseColorBoost, 1f, 4f),
+                1f - Mathf.Clamp01(settings.SceneVoxelAvoidBleeding),
+                settings.SceneVoxelDirectLightIntensity,
+                settings.SceneVoxelIndirectLightIntensity));
+            cmd.SetGlobalVector(SceneVoxelMaterialParamsId, new Vector4(
+                (int)settings.SceneVoxelMaterialBudget,
+                (int)settings.SceneVoxelMaterialGenerateMethod,
+                settings.SceneVoxelMaterialBudget != SceneVoxelMaterialMemoryBudget.None ? 1f : 0f,
+                16f));
+            cmd.SetRenderTarget(new RenderTargetIdentifier(DummyTargetId));
+            cmd.ClearRenderTarget(false, true, Color.clear);
+            cmd.SetViewport(new Rect(0f, 0f, resolution, resolution));
+            cmd.SetRandomWriteTarget(1, radiance);
+            cmd.SetRandomWriteTarget(2, geometry);
+            cmd.SetRandomWriteTarget(3, lighting);
+            RecordClipmapRenderers(cmd, camera, centerExtent);
+
+            cmd.ClearRandomWriteTargets();
+            cmd.ReleaseTemporaryRT(DummyTargetId);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
+            return true;
+        }
+
+        private static void RecordClipmapRenderers(CommandBuffer cmd, Camera camera, Vector4 centerExtent)
+        {
+            LastDrawnRendererCount = 0;
+            LastDrawnMaterialPassCount = 0;
+            var clipmapBounds = new Bounds(centerExtent, Vector3.one * Mathf.Max(centerExtent.w * 2f, 0.001f));
+            var renderers = GetFrameRenderers();
+            for (var rendererIndex = 0; rendererIndex < renderers.Length; ++rendererIndex)
+            {
+                var renderer = renderers[rendererIndex];
+                if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy ||
+                    (camera.cullingMask & (1 << renderer.gameObject.layer)) == 0 ||
+                    !clipmapBounds.Intersects(renderer.bounds))
+                {
+                    continue;
+                }
+
+                var materials = renderer.sharedMaterials;
+                if (materials == null || materials.Length == 0)
+                {
+                    continue;
+                }
+
+                var subMeshCount = ResolveSubMeshCount(renderer, materials.Length);
+                var rendererDrawn = false;
+                for (var materialIndex = 0; materialIndex < materials.Length && materialIndex < subMeshCount; ++materialIndex)
+                {
+                    var material = materials[materialIndex];
+                    if (material == null || material.renderQueue > (int)RenderQueue.GeometryLast)
+                    {
+                        continue;
+                    }
+
+                    var passIndex = material.FindPass(VoxelizeLightMode);
+                    if (passIndex < 0)
+                    {
+                        continue;
+                    }
+
+                    cmd.DrawRenderer(renderer, material, materialIndex, passIndex);
+                    rendererDrawn = true;
+                    LastDrawnMaterialPassCount++;
+                }
+
+                if (rendererDrawn)
+                {
+                    LastDrawnRendererCount++;
+                }
+            }
+        }
+
+        private static Renderer[] GetFrameRenderers()
+        {
+            if (cachedRenderers == null || cachedRendererFrame != Time.frameCount)
+            {
+                cachedRenderers = Object.FindObjectsOfType<Renderer>();
+                cachedRendererFrame = Time.frameCount;
+            }
+
+            return cachedRenderers;
+        }
+
+        private static int ResolveSubMeshCount(Renderer renderer, int fallback)
+        {
+            if (renderer is MeshRenderer meshRenderer)
+            {
+                var meshFilter = meshRenderer.GetComponent<MeshFilter>();
+                return meshFilter != null && meshFilter.sharedMesh != null
+                    ? Mathf.Max(1, meshFilter.sharedMesh.subMeshCount)
+                    : Mathf.Max(1, fallback);
+            }
+
+            if (renderer is SkinnedMeshRenderer skinnedMeshRenderer && skinnedMeshRenderer.sharedMesh != null)
+            {
+                return Mathf.Max(1, skinnedMeshRenderer.sharedMesh.subMeshCount);
+            }
+
+            return Mathf.Max(1, fallback);
+        }
+    }
+
     internal static class BurtGISceneVoxelMeshRasterizerUtility
     {
         private const int MaxTriangleCount = 131072;
@@ -22302,6 +22738,16 @@ namespace Burt.RenderPipeline
 
         public static int UploadSceneTriangles(Camera camera, BurtScreenSpaceGlobalIlluminationSettings settings)
         {
+            return UploadSceneTriangles(camera, settings, false);
+        }
+
+        public static int UploadFallbackSceneTriangles(Camera camera, BurtScreenSpaceGlobalIlluminationSettings settings)
+        {
+            return UploadSceneTriangles(camera, settings, true);
+        }
+
+        private static int UploadSceneTriangles(Camera camera, BurtScreenSpaceGlobalIlluminationSettings settings, bool fallbackOnly)
+        {
             ReleaseUpload();
             Triangles.Clear();
             Candidates.Clear();
@@ -22350,6 +22796,11 @@ namespace Burt.RenderPipeline
                 }
 
                 var renderer = candidate.Renderer;
+                if (fallbackOnly && HasGpuVoxelizePass(renderer))
+                {
+                    continue;
+                }
+
                 if (renderer is MeshRenderer meshRenderer)
                 {
                     var filter = meshRenderer.GetComponent<MeshFilter>();
@@ -22385,6 +22836,31 @@ namespace Burt.RenderPipeline
             uploadedTriangleCount = Triangles.Count;
             LastCollectedTriangleCount = uploadedTriangleCount;
             return uploadedTriangleCount;
+        }
+
+        private static bool HasGpuVoxelizePass(Renderer renderer)
+        {
+            if (renderer == null)
+            {
+                return false;
+            }
+
+            var materials = renderer.sharedMaterials;
+            if (materials == null || materials.Length == 0)
+            {
+                return false;
+            }
+
+            for (var materialIndex = 0; materialIndex < materials.Length; ++materialIndex)
+            {
+                var material = materials[materialIndex];
+                if (material == null || material.FindPass("BurtGIVoxelize") < 0)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static void CollectCandidateRenderers<T>(T[] renderers, Camera camera) where T : Renderer
@@ -28356,6 +28832,16 @@ namespace Burt.RenderPipeline
                 return "Disabled";
             }
 
+            if (settings.RadianceCacheType != ScreenProbeRadianceCacheType.ClipMap)
+            {
+                return "Disabled(CacheType=" + settings.RadianceCacheType + ")";
+            }
+
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                return "Disabled(ComputeShadersUnsupported)";
+            }
+
             var atlasResolutionInProbes = ResolveRadianceCacheClipMapProbeAtlasResolutionInProbes(camera, settings);
             var clipmapState = ResolveRadianceCacheClipMapState(camera, settings);
             var sceneVoxelVolumeDriven = BurtGISceneVoxelVolumeUtility.TryResolveRadianceCacheClipmap(camera, out _, out _);
@@ -28755,10 +29241,10 @@ namespace Burt.RenderPipeline
 
             var filter = settings.Blur ? "HitAwareSpatialBilateral" : "None";
             var screenProbeSettings = ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(request, asset);
-            var radianceCacheClipMap = screenProbeSettings.Enabled
+            var radianceCacheClipMap = screenProbeSettings.Enabled && screenProbeSettings.RadianceCacheType == ScreenProbeRadianceCacheType.ClipMap
                 ? ResolveRadianceCacheClipMapResourceContractLabel(request != null ? request.Camera : null, screenProbeSettings, asset)
-                : string.Empty;
-            var radianceCacheTracePath = screenProbeSettings.Enabled
+                : "Disabled(CacheType=" + screenProbeSettings.RadianceCacheType + ")";
+            var radianceCacheTracePath = screenProbeSettings.Enabled && screenProbeSettings.RadianceCacheType == ScreenProbeRadianceCacheType.ClipMap
                 ? ResolveRadianceCacheHardwareRayTracingStatusLabel(asset, screenProbeSettings)
                 : "Disabled";
             var radianceCacheProbeFilter = screenProbeSettings.RadianceCacheFilterProbes
@@ -28766,7 +29252,7 @@ namespace Burt.RenderPipeline
                 : "FilterProbeRadianceOffXRenderDefault>";
             var ScreenProbeTracingOctahedronResolution = ResolveScreenProbeTracingOctahedronResolution(screenProbeSettings);
             var screenProbe = screenProbeSettings.Enabled
-                ? ";ScreenProbe=PlacementUniform(ScreenDepth+WorldNormal+WorldPosition)->PlacementAdaptive=MultiCandidateEdgeAwareLite+FourCornerBilinearRejectLite(Header+Indices+ProbeNum+ProbeDataFineXYLevelPacked)->IndirectArgs=GPUSetup6DispatchTuplesUniformPlusAdaptive(CPUFallback)->ImportancePDF=EqualArea8BRDFTransferPDFLite->ImportanceLightPDF=ProbeHistoryRadianceBlendNormalizedLite->ImportanceGenRays=CombinedBRDFLightSortRefineRayInfoLite->RadianceCacheClipMap=Prepare>Init>Mark(DitheredClipmapSelectionTrilinearCornersPriorityCostLite)>UpdateCacheForUsedProbesPersistentIndirectionRemapDepthFinalAtlasMipRestoreLite>Trace(SelectMaxPriorityBucket>AllocateProbeTracesPriorityBucketDistanceCostBudgetLite>SetupProbeIndirectArgs>ClearProbePDFs>ComputeProbeWorldOffsetsXRender64CandidateDistanceStub>GenerateProbeTraceTilesUniformLevel1DistanceDownsampleLite>SetupTraceFromProbes[" + radianceCacheTracePath + "]>SortTraceTilesDirectionBinXRenderLite>TraceFromProbesConeMarchHashGridSceneCacheEquiAreaResampleLite)>Filter(FilterProbeRadianceNeighbor6DepthAngleLite>CalculateProbeIrradianceEquiAreaLite>PrepareProbeOcclusionMeanMeanSqAtlasLite>FixupBorderMip0Mip1Mip2XRenderLite)>UpdateState(" + radianceCacheClipMap + ")->TraceCompact=ComputeLiteProducerConsumer(PlacementValidTexels+AdaptiveProbeTexels->Count/Data->GenArgs->TraceAtlasCompactDispatch)->LiteProbeGrid(" + screenProbeSettings.SpacingPixels + "px)->TraceAtlas=EqualArea" + ScreenProbeTracingOctahedronResolution + "AdaptiveAtlasRowsHashGridBucketTilePingPongPackedMipAwareCacheLiteThenHiZScreenTraceRadianceLiteThenSceneVoxelLightingConeTraceLiteThenGridSceneTrace3x3RayCone(WorldPos+Normal+Depth,FallbackProbeRadiance)+ImportanceRayInfoSortRefineLite+ImportancePDFWeightLite->ScreenBentNormal=TraceAtlasShortRangeAOEncodedUnitAOXRenderHitVisibilityLite+BlueNoiseTemporalDitherLite+HierarchicalHiZScreenTraceShortRangeAOLite+TemporalHistory3x3PlaneDepthHemisphereRejectLite->RadianceCacheHashGrid=PersistentValueTileCountUpdateCellPingPongPackedTile+PrepareLite>PopulateCellsBucketTileLite>UpdateTilesGenIndirectArgsLite+UpdateTilesFromUpdateTileListIndirectMipCascadeLite>ResolveTraceRadianceLite>PurgeTilesLite(ValueHistoryRayMarchAgeConfidence+TraceAtlasSceneTraceCacheLite)->RadianceCachePost=" + radianceCacheClipMap + "->TemporalFilterPass(feedback=" + screenProbeSettings.TemporalFilterHistoryWeight.ToString("0.###") + ",HistoryRadiance/Irradiance/Confidence+Placement+WorldNormal+BentNormal2x2PlaneWeighted)->SpatialFilterPass(HitDistanceAware," + screenProbeSettings.SpatialFilterPasses + "x)->FixupBordersPass(" + (screenProbeSettings.FixupBorders ? "On" : "Copy") + ")->GenerateMip1>Mip2>Mip3(XRenderParent2x2BoxLite)->IrradianceComputeSH3Mip1Mip2Mip3LowFrequencyFill+OctAtlas8x8EqualAreaSharedReductionSHDiffuseTransfer+OctAtlas4CornerPlaneWeightedSampleLite(RasterFallback)->RadianceCacheApply=FinalAtlasLookupSphereParallaxMipConeFootprintDitheredClipmapSelectionProbeOcclusionVSMLite(WorldPos+Normal,Indirection+FinalAtlas+ProbeOcclusion,ProbeTMin)->UniformUpsamplePlaneWeightedLite->AdaptiveUpsampleTraceAtlasCandidateLite->IrradianceBlend(" + screenProbeSettings.ApplyStrength.ToString("0.###") + ")"
+                ? ";ScreenProbe=PlacementUniform(ScreenDepth+WorldNormal+WorldPosition)->PlacementAdaptive=MultiCandidateEdgeAwareLite+FourCornerBilinearRejectLite(Header+Indices+ProbeNum+ProbeDataFineXYLevelPacked)->IndirectArgs=GPUSetup6DispatchTuplesUniformPlusAdaptive(CPUFallback)->ImportancePDF=EqualArea8BRDFTransferPDFLite->ImportanceLightPDF=ProbeHistoryRadianceBlendNormalizedLite->ImportanceGenRays=CombinedBRDFLightSortRefineRayInfoLite->RadianceCacheClipMap=Prepare>Init>Mark(DitheredClipmapSelectionTrilinearCornersPriorityCostLite)>UpdateCacheForUsedProbesPersistentIndirectionRemapDepthFinalAtlasMipRestoreLite>Trace(SelectMaxPriorityBucket>AllocateProbeTracesPriorityBucketDistanceCostBudgetLite>SetupProbeIndirectArgs>ClearProbePDFs>ComputeProbeWorldOffsetsXRender64CandidateDistanceStub>GenerateProbeTraceTilesUniformLevel1DistanceDownsampleLite>SetupTraceFromProbes[" + radianceCacheTracePath + "]>SortTraceTilesDirectionBinXRenderLite>TraceFromProbesConeMarchHashGridSceneCacheEquiAreaResampleLite)>Filter(FilterProbeRadianceNeighbor6DepthAngleLite>CalculateProbeIrradianceEquiAreaLite>PrepareProbeOcclusionMeanMeanSqAtlasLite>FixupBorderMip0Mip1Mip2XRenderLite)>UpdateState(" + radianceCacheClipMap + ")->TraceCompact=ComputeLiteProducerConsumer(PlacementValidTexels+AdaptiveProbeTexels->Count/Data->GenArgs->TraceAtlasCompactDispatch)->LiteProbeGrid(" + screenProbeSettings.SpacingPixels + "px)->TraceAtlas=EqualArea" + ScreenProbeTracingOctahedronResolution + "AdaptiveAtlasRowsHashGridBucketTilePingPongPackedMipAwareCacheLiteThenHiZScreenTraceRadianceLiteThenSceneVoxelLightingConeTraceLiteThenGridSceneTrace3x3RayCone(WorldPos+Normal+Depth,FallbackProbeRadiance)+ImportanceRayInfoSortRefineLite+ImportancePDFWeightLite->ScreenBentNormal=TraceAtlasShortRangeAOEncodedUnitAOXRenderHitVisibilityLite+BlueNoiseTemporalDitherLite+HierarchicalHiZScreenTraceShortRangeAOLite+TemporalHistory3x3PlaneDepthHemisphereRejectLite->RadianceCacheHashGrid=PersistentValueTileCountUpdateCellPingPongPackedTile+PrepareLite>PopulateCellsBucketTileLite>UpdateTilesGenIndirectArgsLite+UpdateTilesFromUpdateTileListIndirectMipCascadeLite>ResolveTraceRadianceLite>PurgeTilesLite(ValueHistoryRayMarchAgeConfidence+TraceAtlasSceneTraceCacheLite)->RadianceCachePost=" + radianceCacheClipMap + "->TemporalFilterPass(DirectionalTraceAtlas2x2Reprojection+LowResAggregate,feedback=" + screenProbeSettings.TemporalFilterHistoryWeight.ToString("0.###") + ",HistoryRadiance/Irradiance/Confidence+Placement+WorldNormal+BentNormalPlaneWeighted)->SpatialFilterPass(DirectionalTraceAtlasSameDirectionHitAware+LowResAggregate," + screenProbeSettings.SpatialFilterPasses + "x)->FixupBordersPass(" + (screenProbeSettings.FixupBorders ? "On" : "Copy") + ")->GenerateMip1>Mip2>Mip3(XRenderParent2x2BoxLite)->IrradianceComputeSH3Mip1Mip2Mip3LowFrequencyFill+OctAtlas8x8EqualAreaSharedReductionSHDiffuseTransfer+OctAtlas4CornerPlaneWeightedSampleLite(RasterFallback)->RadianceCacheApply=FinalAtlasLookupSphereParallaxMipConeFootprintDitheredClipmapSelectionProbeOcclusionVSMLite(WorldPos+Normal,Indirection+FinalAtlas+ProbeOcclusion,ProbeTMin)->UniformUpsamplePlaneWeightedLite->AdaptiveUpsampleTraceAtlasCandidateLite->IrradianceBlend(" + screenProbeSettings.ApplyStrength.ToString("0.###") + ")"
                     .Replace("FilterProbeRadianceNeighbor6DepthAngleLite>", radianceCacheProbeFilter)
                     .Replace("ComputeProbeWorldOffsetsXRender64CandidateDistanceStub", "ComputeProbeWorldOffsetsXRender64CandidateSceneVoxelDistance")
                 : string.Empty;
@@ -28792,7 +29278,7 @@ namespace Burt.RenderPipeline
                 return "BurtGI=XGIIrradianceFieldGather;Baked=" + settings.IrradianceFieldBaked + ";XGIRef=RadianceCacheClipMap>FullResIrradianceIntegrate>ApplyIndirect;Covered=GBufferDepthWorldPositionAndSceneVoxelClipMapMark+ClipMapPersistentIndirection+FinalRadianceAtlas+ProbeOcclusionAtlasVSMWeightApply+ProbeSkyAOOcclusionVSMWeightApply+SceneVoxelRadianceCacheProbeOcclusionVSMWeightLite+WorldPositionNormalInterpolation+DiffuseMaterialOcclusionApply+BackfaceDiffuseIrradianceFieldMaterialMaskLite+RoughSpecularIrradianceFieldReflectionDirectionMaterialScaleLite+IndirectChannelConfidenceAlpha;DXR=ScreenProbeCompactQueueFourBounceDiffusePath(Fallback=ComputeTrace)+XGILightGrid6Clipmap32x32";
             }
 
-            return "BurtGI=ScreenSpaceDiffuseApprox;XGIRef=Prepare>SceneRepresent>ScreenProbe>RadianceCache>FinalGather>ShortRangeAO>ApplyIndirect;Covered=DiffuseIndirectApply+BackfaceDiffuseXRenderMaterialMaskLite+BackfaceDiffuseScreenProbeSHOctDirectionalIntegrateLite+BackfaceDiffuseTwoSidedBxDFBackNormalLite+BackfaceDiffuseDeferredAdditiveApplyLite+BackfaceDiffuseBentNormalVisibilityLite+BackfaceDiffuseTraceHitDistanceConfidenceGateLite+RoughSpecularMaterialBRDFWeightLite+RoughSpecularScreenProbeDirectionalIntegrateLite+RoughSpecularTraceAtlasDirectionalRoughMipLite+RoughSpecularDiffuseFallbackLerpLite+RoughSpecularXRenderDiffuseLerpTraceAlphaClearCoatLite+RoughSpecularBentNormalVisibilityLite+RoughSpecularTraceHitDistanceConfidenceGateLite+BackfaceRoughSpecularHistoryReprojectionLite+BackfaceRoughSpecularHistoryTonemapClampLite+TranslucencyVolume3DResourceContractLite+TranslucencyVolumeGenerateFromScreenGI3DLite+TranslucencyVolumeVoxelSceneTraceLite+TranslucencyVolumeScreenGIBackfaceConeTraceFallbackLite+TranslucencyVolumeDirectionalSH2BandApplyLite+TranslucencyVolumeTemporalHistory3DLite+TranslucencyVolumeWorldReprojectedHistoryUVZTrilinearLite+TranslucencyVolumeSpatialFilter3DAxisGaussianLite+TranslucencyVolumeApply3DSampleBackfaceFallbackLite+ScreenProbePlacementUniformLite+ScreenProbeUniformUpsamplePlaneWeightedLite+ScreenProbeAdaptivePlacementMultiLevelMultiCandidateEdgeAwareLite+ScreenProbeAdaptivePlacementFourCornerBilinearRejectLite+ScreenProbeAdaptiveFineCoordLevelPackedUpsampleLite+ScreenProbeIndirectArgsGPUSetupUniformPlusAdaptiveLite+ScreenProbeTraceCompactComputeLiteProducerConsumerUniformPlusAdaptive+ScreenProbeTraceAtlasAdaptiveRowsHashGridBucketTilePingPongPackedMipAwareCacheLite+ScreenProbeTraceAtlasHiZScreenTraceRadianceLite+ScreenProbeTraceAtlasSceneVoxelLightingConeTraceLite+ScreenProbeTraceAtlasSkyCubemapTransparentRayFallbackLite+SceneRepresentVoxelScreenProbePopulateRadianceGeometryOccupancyMipLightingConeTraceLite+ScreenProbeSceneTraceGrid3x3RayConeLite+ScreenProbeFullSceneTraceGridDistanceWeightedLite+ScreenProbeImportanceSamplingTransferPDFLite+ScreenProbeImportancePDFTraceWeightLite+ScreenProbeImportanceSamplingLightPDFHistoryRadianceBlendLite+ScreenProbeImportanceSamplingGenRaysSortRefineRayInfoLite+RadianceCacheClipMapResourceContract+RadianceCacheClipMapTraceBufferContract+RadianceCacheClipMapPersistentIndirectionRemapDepthFinalAtlasMipRestoreHistoryLite+RadianceCacheClipMapClearProbePDFsIndirectLite+RadianceCacheClipMapRadianceProbeSH_PDFBufferLite+RadianceCacheClipMapAllocateProbeTracesPriorityBucketDistanceCostBudgetLite+RadianceCacheClipMapTraceTileDistanceGatedXRenderLevelsLite+RadianceCacheClipMapTraceTileProbeSH_PDFFromEquiAreaAdaptiveLite+RadianceCacheClipMapSortTraceTilesDirectionBinXRenderLite+RadianceCacheClipMapTraceFromConeMarchHashGridSceneCacheEquiAreaResampleLite+RadianceCacheClipMapTraceFromConeMarchHashGridSceneCacheLite+RadianceCacheHashGridDebugCellMipStatsLite+RadianceCacheClipMapInitMarkComputeLite+RadianceCacheClipMapProbeOcclusionAtlasMeanMeanSqLite+RadianceCacheClipMapApplyProbeOcclusionVSMVisibilityLite+RadianceCacheClipMapFinalAtlasMip0Mip1Mip2XRenderLite+ScreenProbeLiteGrid+ScreenProbeHitDistanceChannel+ScreenProbeTraceAtlasLiteEqualArea8CompactDispatch+ScreenProbeAdaptiveUpsampleTraceAtlasCandidateLite+ScreenProbeBentNormalBlueNoiseHierarchicalHiZScreenTraceTemporalLite+ScreenProbeTemporalFilterPass2x2PlaneWeightedHistory+ScreenProbeSpatialFilterPass+ScreenProbeFixupBordersPass+ScreenProbeMipChain3LevelXRenderParent2x2BoxMainPathLowFrequencyFillLite+ScreenProbeIrradianceComputeSH3MipChainLowFrequencyFillOctLite+ScreenProbeIrradianceOctAtlasEqualAreaSharedReductionSHDiffuseTransfer4CornerPlaneWeightedSampleLite+ScreenProbeRadianceOctAtlasBordered4LevelMipRoughSpecularLite+ScreenProbeRadianceOctTonemapInterpolationLite+ShortRangeAOTraceAtlasHiZSlopeCompareMaxScreenFractionLite;DXR=ScreenProbeCompactQueueFourBounceDiffusePath(Fallback=ComputeTrace)+XGILightGrid6Clipmap32x32";
+            return "BurtGI=ScreenSpaceDiffuseApprox;XGIRef=Prepare>SceneRepresent>ScreenProbe>RadianceCache>FinalGather>ShortRangeAO>ApplyIndirect;Covered=DiffuseIndirectApply+BackfaceDiffuseXRenderMaterialMaskLite+BackfaceDiffuseScreenProbeSHOctDirectionalIntegrateLite+BackfaceDiffuseTwoSidedBxDFBackNormalLite+BackfaceDiffuseDeferredAdditiveApplyLite+BackfaceDiffuseBentNormalVisibilityLite+BackfaceDiffuseTraceHitDistanceConfidenceGateLite+RoughSpecularMaterialBRDFWeightLite+RoughSpecularScreenProbeDirectionalIntegrateLite+RoughSpecularTraceAtlasDirectionalRoughMipLite+RoughSpecularDiffuseFallbackLerpLite+RoughSpecularXRenderDiffuseLerpTraceAlphaClearCoatLite+RoughSpecularBentNormalVisibilityLite+RoughSpecularTraceHitDistanceConfidenceGateLite+BackfaceRoughSpecularHistoryReprojectionLite+BackfaceRoughSpecularHistoryTonemapClampLite+TranslucencyVolume3DResourceContractLite+TranslucencyVolumeGenerateFromScreenGI3DLite+TranslucencyVolumeVoxelSceneTraceLite+TranslucencyVolumeScreenGIBackfaceConeTraceFallbackLite+TranslucencyVolumeDirectionalSH2BandApplyLite+TranslucencyVolumeTemporalHistory3DLite+TranslucencyVolumeWorldReprojectedHistoryUVZTrilinearLite+TranslucencyVolumeSpatialFilter3DAxisGaussianLite+TranslucencyVolumeApply3DSampleBackfaceFallbackLite+TranslucencyVolumeForwardTransparentAndClearCrystalApplyLite+SceneVoxelGpuRasterizationStandardMaterialPassLite+SceneVoxelCpuFallbackUnsupportedMaterialsAndTerrain+SceneVoxelAsyncComputeFenceContractLite+ScreenProbePlacementUniformLite+ScreenProbeUniformUpsamplePlaneWeightedLite+ScreenProbeAdaptivePlacementMultiLevelMultiCandidateEdgeAwareLite+ScreenProbeAdaptivePlacementFourCornerBilinearRejectLite+ScreenProbeAdaptiveFineCoordLevelPackedUpsampleLite+ScreenProbeIndirectArgsGPUSetupUniformPlusAdaptiveLite+ScreenProbeTraceCompactComputeLiteProducerConsumerUniformPlusAdaptive+ScreenProbeTraceAtlasAdaptiveRowsHashGridBucketTilePingPongPackedMipAwareCacheLite+ScreenProbeTraceAtlasHiZScreenTraceRadianceLite+ScreenProbeTraceAtlasSceneVoxelLightingConeTraceLite+ScreenProbeTraceAtlasSkyCubemapTransparentRayFallbackLite+SceneRepresentVoxelScreenProbePopulateRadianceGeometryOccupancyMipLightingConeTraceLite+ScreenProbeSceneTraceGrid3x3RayConeLite+ScreenProbeFullSceneTraceGridDistanceWeightedLite+ScreenProbeImportanceSamplingTransferPDFLite+ScreenProbeImportancePDFTraceWeightLite+ScreenProbeImportanceSamplingLightPDFHistoryRadianceBlendLite+ScreenProbeImportanceSamplingGenRaysSortRefineRayInfoLite+RadianceCacheClipMapResourceContract+RadianceCacheClipMapTraceBufferContract+RadianceCacheClipMapPersistentIndirectionRemapDepthFinalAtlasMipRestoreHistoryLite+RadianceCacheClipMapClearProbePDFsIndirectLite+RadianceCacheClipMapRadianceProbeSH_PDFBufferLite+RadianceCacheClipMapAllocateProbeTracesPriorityBucketDistanceCostBudgetLite+RadianceCacheClipMapTraceTileDistanceGatedXRenderLevelsLite+RadianceCacheClipMapTraceTileProbeSH_PDFFromEquiAreaAdaptiveLite+RadianceCacheClipMapSortTraceTilesDirectionBinXRenderLite+RadianceCacheClipMapTraceFromConeMarchHashGridSceneCacheEquiAreaResampleLite+RadianceCacheClipMapTraceFromConeMarchHashGridSceneCacheLite+RadianceCacheHashGridDebugCellMipStatsLite+RadianceCacheClipMapInitMarkComputeLite+RadianceCacheClipMapProbeOcclusionAtlasMeanMeanSqLite+RadianceCacheClipMapApplyProbeOcclusionVSMVisibilityLite+RadianceCacheClipMapFinalAtlasMip0Mip1Mip2XRenderLite+ScreenProbeLiteGrid+ScreenProbeHitDistanceChannel+ScreenProbeTraceAtlasLiteEqualArea8CompactDispatch+ScreenProbeAdaptiveUpsampleTraceAtlasCandidateLite+ScreenProbeBentNormalBlueNoiseHierarchicalHiZScreenTraceTemporalLite+ScreenProbeDirectionalTraceAtlasTemporal2x2ReprojectionLite+ScreenProbeDirectionalTraceAtlasSpatialSameDirectionHitAwareLite+ScreenProbeTemporalFilterPass2x2PlaneWeightedHistory+ScreenProbeSpatialFilterPass+ScreenProbeFixupBordersPass+ScreenProbeMipChain3LevelXRenderParent2x2BoxMainPathLowFrequencyFillLite+ScreenProbeIrradianceComputeSH3MipChainLowFrequencyFillOctLite+ScreenProbeIrradianceOctAtlasEqualAreaSharedReductionSHDiffuseTransfer4CornerPlaneWeightedSampleLite+ScreenProbeRadianceOctAtlasBordered4LevelMipRoughSpecularLite+ScreenProbeRadianceOctTonemapInterpolationLite+ShortRangeAOTraceAtlasHiZSlopeCompareMaxScreenFractionLite;DXR=ScreenProbeCompactQueueFourBounceDiffusePath(Fallback=ComputeTrace)+XGILightGrid6Clipmap32x32";
         }
 
         public static string ResolveScreenSpaceGlobalIlluminationScreenProbeStageLabel(BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
@@ -28804,7 +29290,7 @@ namespace Burt.RenderPipeline
 
             var apply = settings.ApplyStrength > 0f ? "BlendIntoBurtGIFinal(strength=" + settings.ApplyStrength.ToString("0.###") + ")" : "DebugOnly";
             var ScreenProbeTracingOctahedronResolution = ResolveScreenProbeTracingOctahedronResolution(settings);
-            return "IrradianceFormat=" + settings.IrradianceFormat + ";IntegrateType=" + settings.IntegrateType + ";IntegrateMethod=" + settings.IntegrateMethod + ";PlacementUniform=ProbeGrid(ScreenDepthR+WorldNormal+WorldPosition);PlacementAdaptive=MultiCandidateEdgeAwareLite(HeaderR32U+IndicesR16U+ProbeNum+ProbeDataFineXY14Level4,TileCapacity=" + ResolveScreenProbeAdaptiveProbeIndexTileCapacity(settings) + ");IndirectArgs=GPUSetup6DispatchTuplesUniformPlusAdaptive(CPUUniformFallback);ImportancePDF=EqualArea8BRDFTransferPDFLite(RFloat);ImportanceLightPDF=ProbeHistoryRadianceBlendNormalizedRHalfLite;ImportanceGenRays=CombinedBRDFLightPDFSortRefineRayInfoR16UIntLite;RadianceCache=ClipMapResourceContract(Prepare>Init>Mark(DitheredClipmapSelectionTrilinearCornersLite)>UpdateCacheForUsedProbesPersistentIndirectionRemapDepthFinalAtlasMipRestoreLite>TraceSubpasses(DistanceGated20m40mXRenderLevelsLite+ConeMarchHashGridSceneCacheLite)>FilterSubpasses(FilterProbeRadianceNeighbor6DepthAngleLite+CalculateProbeIrradianceEquiAreaLite+PrepareProbeOcclusionMeanMeanSqAtlasLite+FixupBorderMip0Mip1Mip2XRenderLite)>UpdateState>Post,IndirectionR16U+DepthR16F+RadianceB10G11R11+FinalB10G11R11+ProbeOcclusionRG16F+StateBuffers+TraceIndirectArgs+TraceTileDataDistanceGatedScreenGIPDFEquiAreaAdaptiveLite,ApplyLookupSphereParallaxDitheredClipmapSelectionProbeOcclusionVSMLite)+HashGridLite(PersistentValueTileCountUpdateCellPingPongPackedTileCellDecayTimestamp,Prepare>PopulateCellsBucketTile>UpdateTilesGenIndirectArgs>UpdateTilesFromUpdateTileListIndirectMipCascade>ResolveTraceRadianceAgeConfidence>PurgeTilesPingPongPackedTileDecay,ValueTileBucketPackedCountVisibilityUpdateDebugMipStats,Cells=" + ResolveRadianceCacheHashGridCellCount() + ",CellSize=" + RadianceCacheHashGridCellSize.ToString("0.###") + ");TraceCompact=ComputeLiteProducerConsumer(Uniform+AdaptiveValidTraceTexels->TraceTexelCount+TraceTexelData+CompactIndirectArgs+ThreadCountX->TraceAtlasCompactDispatch);Prepare=ProbeGrid(" + settings.SpacingPixels + "px);Gather=RawGI" + Mathf.Min(settings.SampleCount, 8) + "TapMRT4(Radiance/Irradiance/Confidence/HitDistance);TraceAtlas=EqualArea" + ScreenProbeTracingOctahedronResolution + "AdaptiveAtlasRowsHashGridBucketTilePingPongPackedMipAwareCacheLite(ValueHistoryRayMarchAgeConfidence)+HiZScreenTraceRadianceLite+SceneVoxelLightingConeTraceLite+GridSceneTrace3x3RayConeLite(WorldPos+Normal+Depth,FallbackProbeRadiance,HitR)+ImportanceRayInfoSortRefineLite+ImportancePDFWeightLite;BentNormal=TraceAtlasShortRangeAOEncodedUnitAO+BlueNoiseTemporalDitherLite+HierarchicalHiZScreenTraceShortRangeAOLite+TemporalHistory3x3PlaneDepthHemisphereRejectLite;Temporal=DedicatedLowResTemporalPass2x2PlaneWeighted(feedback=" + settings.TemporalFilterHistoryWeight.ToString("0.###") + ",HistoryRadiance/Irradiance/Confidence+Placement+WorldNormal+BentNormal);Filter=DedicatedLowResSpatialPass(" + settings.SpatialFilterPasses + "x,HalfKernel=" + settings.SpatialFilterHalfKernelSize + ",HitDistanceEdgeConfidence);FixupBorders=DedicatedLowResPass(" + (settings.FixupBorders ? "On" : "CopyOnly") + ");GenerateMip=Mip1HalfResParent2x2Box+Mip2QuarterResParent2x2Box+Mip3EighthResParent2x2Box+ConfidenceWeightedLowFrequencyDownsampleLite;Irradiance=ComputeSH3MipChainLowFrequencyFillOctLite(Ambient+RGBDirectional9Coeff+RasterFallback+Mip1Mip2Mip3LowFrequencyFill)+OctAtlas8x8EqualAreaSharedReductionSHDiffuseTransfer(RGB+ConfidenceA+ApplyBlend);Apply=PlaneWeightedUniformUpsample+AdaptiveTraceAtlasCandidate+" + apply;
+            return "IrradianceFormat=" + settings.IrradianceFormat + ";IntegrateType=" + settings.IntegrateType + ";IntegrateMethod=" + settings.IntegrateMethod + ";PlacementUniform=ProbeGrid(ScreenDepthR+WorldNormal+WorldPosition);PlacementAdaptive=MultiCandidateEdgeAwareLite(HeaderR32U+IndicesR16U+ProbeNum+ProbeDataFineXY14Level4,TileCapacity=" + ResolveScreenProbeAdaptiveProbeIndexTileCapacity(settings) + ");IndirectArgs=GPUSetup6DispatchTuplesUniformPlusAdaptive(CPUUniformFallback);ImportancePDF=EqualArea8BRDFTransferPDFLite(RFloat);ImportanceLightPDF=ProbeHistoryRadianceBlendNormalizedRHalfLite;ImportanceGenRays=CombinedBRDFLightPDFSortRefineRayInfoR16UIntLite;RadianceCache=ClipMapResourceContract(Prepare>Init>Mark(DitheredClipmapSelectionTrilinearCornersLite)>UpdateCacheForUsedProbesPersistentIndirectionRemapDepthFinalAtlasMipRestoreLite>TraceSubpasses(DistanceGated20m40mXRenderLevelsLite+ConeMarchHashGridSceneCacheLite)>FilterSubpasses(FilterProbeRadianceNeighbor6DepthAngleLite+CalculateProbeIrradianceEquiAreaLite+PrepareProbeOcclusionMeanMeanSqAtlasLite+FixupBorderMip0Mip1Mip2XRenderLite)>UpdateState>Post,IndirectionR16U+DepthR16F+RadianceB10G11R11+FinalB10G11R11+ProbeOcclusionRG16F+StateBuffers+TraceIndirectArgs+TraceTileDataDistanceGatedScreenGIPDFEquiAreaAdaptiveLite,ApplyLookupSphereParallaxDitheredClipmapSelectionProbeOcclusionVSMLite)+HashGridLite(PersistentValueTileCountUpdateCellPingPongPackedTileCellDecayTimestamp,Prepare>PopulateCellsBucketTile>UpdateTilesGenIndirectArgs>UpdateTilesFromUpdateTileListIndirectMipCascade>ResolveTraceRadianceAgeConfidence>PurgeTilesPingPongPackedTileDecay,ValueTileBucketPackedCountVisibilityUpdateDebugMipStats,Cells=" + ResolveRadianceCacheHashGridCellCount() + ",CellSize=" + RadianceCacheHashGridCellSize.ToString("0.###") + ");TraceCompact=ComputeLiteProducerConsumer(Uniform+AdaptiveValidTraceTexels->TraceTexelCount+TraceTexelData+CompactIndirectArgs+ThreadCountX->TraceAtlasCompactDispatch);Prepare=ProbeGrid(" + settings.SpacingPixels + "px);Gather=RawGI" + Mathf.Min(settings.SampleCount, 8) + "TapMRT4(Radiance/Irradiance/Confidence/HitDistance);TraceAtlas=EqualArea" + ScreenProbeTracingOctahedronResolution + "AdaptiveAtlasRowsHashGridBucketTilePingPongPackedMipAwareCacheLite(ValueHistoryRayMarchAgeConfidence)+HiZScreenTraceRadianceLite+SceneVoxelLightingConeTraceLite+GridSceneTrace3x3RayConeLite(WorldPos+Normal+Depth,FallbackProbeRadiance,HitR)+ImportanceRayInfoSortRefineLite+ImportancePDFWeightLite;BentNormal=TraceAtlasShortRangeAOEncodedUnitAO+BlueNoiseTemporalDitherLite+HierarchicalHiZScreenTraceShortRangeAOLite+TemporalHistory3x3PlaneDepthHemisphereRejectLite;Temporal=DirectionalTraceAtlas2x2Reprojection+LowResAggregate(feedback=" + settings.TemporalFilterHistoryWeight.ToString("0.###") + ",HistoryRadiance/Irradiance/Confidence+Placement+WorldNormal+BentNormal);Filter=DirectionalTraceAtlasSameDirectionHitAware+LowResAggregate(" + settings.SpatialFilterPasses + "x,HalfKernel=" + settings.SpatialFilterHalfKernelSize + ",HitDistanceEdgeConfidence);FixupBorders=DedicatedLowResPass(" + (settings.FixupBorders ? "On" : "CopyOnly") + ");GenerateMip=Mip1HalfResParent2x2Box+Mip2QuarterResParent2x2Box+Mip3EighthResParent2x2Box+ConfidenceWeightedLowFrequencyDownsampleLite;Irradiance=ComputeSH3MipChainLowFrequencyFillOctLite(Ambient+RGBDirectional9Coeff+RasterFallback+Mip1Mip2Mip3LowFrequencyFill)+OctAtlas8x8EqualAreaSharedReductionSHDiffuseTransfer(RGB+ConfidenceA+ApplyBlend);Apply=PlaneWeightedUniformUpsample+AdaptiveTraceAtlasCandidate+" + apply;
         }
 
         public static string ResolveScreenSpaceGlobalIlluminationScreenProbeDebugLabel(BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
@@ -29609,7 +30095,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(passName);
+            var cmd = context.AcquireCommandBuffer(passName);
             cmd.GetTemporaryRT(textureId, descriptor, filterMode);
             if (descriptor.dimension != TextureDimension.Tex3D)
             {
@@ -29618,8 +30104,8 @@ namespace Burt.RenderPipeline
             }
 
             cmd.SetGlobalTexture(textureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         public static void Release(BurtRenderGraphContext context, string passName, int textureId)
@@ -29629,10 +30115,10 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(passName);
+            var cmd = context.AcquireCommandBuffer(passName);
             cmd.ReleaseTemporaryRT(textureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 }

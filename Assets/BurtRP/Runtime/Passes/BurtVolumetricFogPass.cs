@@ -137,6 +137,7 @@ namespace Burt.RenderPipeline
                 translucencyVolume0,
                 translucencyVolume1,
                 translucencyGIEnabled,
+                context.MainLightShadowMapTarget,
                 context.ClusterLightCountBuffer,
                 context.ClusterLightListBuffer,
                 context.ClusterLightOffsetBuffer);
@@ -149,7 +150,7 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, 0, MeshTopology.Triangles, 3, 1);
             cmd.ReleaseTemporaryRT(SourceColorTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
 

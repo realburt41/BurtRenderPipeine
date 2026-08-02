@@ -440,6 +440,7 @@ namespace Burt.RenderPipeline
         private static readonly int TranslucencyVolume0Id = Shader.PropertyToID("_BurtVolumetricFogTranslucencyVolume0");
         private static readonly int TranslucencyVolume1Id = Shader.PropertyToID("_BurtVolumetricFogTranslucencyVolume1");
         private static readonly int TranslucencyGIParamsId = Shader.PropertyToID("_BurtVolumetricFogTranslucencyGIParams");
+        private static readonly int MainLightShadowMapId = BurtRenderGraphResourceRegistry.MainLightShadowMapId;
 
         private static ComputeShader computeShader;
         private static int conservativeDepthKernel = -1;
@@ -503,6 +504,7 @@ namespace Burt.RenderPipeline
             RenderTargetIdentifier translucencyVolume0,
             RenderTargetIdentifier translucencyVolume1,
             bool translucencyGIEnabled,
+            BurtRenderTargetHandle mainLightShadowMap,
             BurtRenderBufferHandle clusterLightCountBuffer,
             BurtRenderBufferHandle clusterLightListBuffer,
             BurtRenderBufferHandle clusterLightOffsetBuffer)
@@ -753,6 +755,16 @@ namespace Burt.RenderPipeline
             cmd.SetComputeTextureParam(computeShader, lightingKernel, LightingHistoryId, lightingHistory);
             cmd.SetComputeTextureParam(computeShader, lightingKernel, LightingOutputId, lightingOutput);
             cmd.SetComputeTextureParam(computeShader, lightingKernel, MaterialTextureId, materialLut);
+            if (mainLightShadowMap.IsValid)
+            {
+                cmd.SetComputeTextureParam(computeShader, lightingKernel, MainLightShadowMapId, mainLightShadowMap.Identifier);
+            }
+            else
+            {
+                // Compute resources are kernel-local. Bind a harmless texture even when
+                // shadow strength is zero so Unity never dispatches with an unset slot.
+                cmd.SetComputeTextureParam(computeShader, lightingKernel, MainLightShadowMapId, Texture2D.whiteTexture);
+            }
             cmd.DispatchCompute(
                 computeShader,
                 lightingKernel,

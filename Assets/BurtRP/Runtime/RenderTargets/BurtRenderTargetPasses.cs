@@ -29,17 +29,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera); // 根据当前相机创建中间颜色 RT 描述。
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            context.ResourceRegistry.SetRenderTargetDescriptor(BurtRenderGraphResourceRegistry.CameraColorName, descriptor, FilterMode.Bilinear, "Burt Camera Color");
+            cameraColorTarget = context.ResourceRegistry.AllocateRenderTarget(BurtRenderGraphResourceRegistry.CameraColorName);
 
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.CameraColorTextureId, descriptor, FilterMode.Bilinear); // 申请一个临时颜色 RT，并绑定到 CameraColor 的全局 ID。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 的统一命令流。
 
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraColorTextureId, cameraColorTarget.Identifier); // 把 CameraColor 暴露成全局纹理，FinalBlit 和后续全屏 Pass 都可以采样它。
             cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.OpaqueCameraColorAvailableId, 0.0f);
             cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.RefractionAvailableId, 0.0f);
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把申请 RT 的命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 在 Pass 边界统一提交资源绑定命令。
         }
     }
 
@@ -63,12 +62,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(context.Request != null ? context.Request.Camera : null);
             descriptor.depthBufferBits = 0;
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.OpaqueCameraColorTextureId, descriptor, FilterMode.Bilinear);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.OpaqueCameraColorTextureId, opaqueCameraColorTarget.Identifier);
             cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.OpaqueCameraColorAvailableId, 0.0f);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -91,12 +89,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.Blit(cameraColorTarget.Identifier, opaqueCameraColorTarget.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.OpaqueCameraColorTextureId, opaqueCameraColorTarget.Identifier);
             cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.OpaqueCameraColorAvailableId, 1.0f);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -128,12 +125,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateRefractionDistortionDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.RefractionDistortionTextureId, descriptor, FilterMode.Point);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.RefractionDistortionTextureId, target.Identifier);
             cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.RefractionAvailableId, 0.0f);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -165,12 +161,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateRefractionSceneColorMipChainDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainId, descriptor, FilterMode.Trilinear);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainId, target.Identifier);
             BurtRefractionPassUtility.SetSceneColorMipGlobals(cmd, descriptor);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -204,13 +199,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateRefractionSceneColorMipChainDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.Blit(cameraColor.Identifier, mipChain.Identifier);
             cmd.GenerateMips(mipChain.Identifier);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainId, mipChain.Identifier);
             BurtRefractionPassUtility.SetSceneColorMipGlobals(cmd, descriptor);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -260,7 +254,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             }
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateRefractionSceneColorMipChainDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColor.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepth.Identifier);
@@ -269,8 +263,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.RefractionAvailableId, 1.0f);
             BurtRefractionPassUtility.SetSceneColorMipGlobals(cmd, descriptor);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, 0, MeshTopology.Triangles, 3, 1);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private Material GetMaterial()
@@ -320,12 +313,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.RefractionDistortionTextureId);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.RefractionSceneColorMipChainId);
             cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.RefractionAvailableId, 0.0f);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -718,15 +710,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraDepthDescriptor(camera); // 根据当前相机创建深度 RT 描述。
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            context.ResourceRegistry.SetRenderTargetDescriptor(BurtRenderGraphResourceRegistry.CameraDepthName, descriptor, FilterMode.Point, "Burt Camera Depth");
+            cameraDepthTarget = context.ResourceRegistry.AllocateRenderTarget(BurtRenderGraphResourceRegistry.CameraDepthName);
 
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.CameraDepthTextureId, descriptor, FilterMode.Point); // 申请一个临时深度 RT，并绑定到 CameraDepth 的全局 ID。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 的统一命令流。
 
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, cameraDepthTarget.Identifier); // 把 CameraDepth 暴露成全局纹理，方便后续 shader 或 pass 采样。
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把申请 RT 的命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 在 Pass 边界统一提交资源绑定命令。
         }
     }
 
@@ -759,15 +750,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 return; // 直接结束这个 Pass，避免后续绘制缺失深度缓冲语义。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流。
 
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier); // 同时绑定颜色目标和 BurtRP 自己的深度目标，让后续绘制真正写入独立 CameraDepth。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把 CommandBuffer 里的设置渲染目标命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 在 Pass 边界统一提交。
         }
     }
 
@@ -802,13 +791,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 return; // 直接跳过，避免绑定无效 RenderTargetIdentifier。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流。
 
             cmd.Blit(finalCameraTarget.Identifier, cameraColorTarget.Identifier); // 把已有最终颜色复制到 Overlay 的中间颜色 RT，作为不清颜色叠加的底图。
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把复制命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 在 Pass 边界统一提交。
         }
     }
 
@@ -872,13 +859,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var clearColor = BurtCameraClearUtility.ResolveClearColor(request, asset, clearMode); // 统一解析清屏颜色，保证 Skybox 和编辑器相机使用正确背景色。
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流。
 
             cmd.ClearRenderTarget(clearDepth, clearColorBuffer, clearColor); // 向 CommandBuffer 写入清理深度和颜色缓冲的命令。
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把清屏命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 在 Pass 边界统一提交。
         }
     }
 
@@ -937,7 +922,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 return; // 直接结束这个 Pass，避免向 CommandBuffer 提交无效绘制。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流。
 
             cmd.SetRenderTarget(finalCameraTarget.Identifier); // 绑定最终输出目标，后续全屏三角形会写到 request.TargetIdentifier。
             BurtRenderTargetDescriptorUtility.SetOutputTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
@@ -950,9 +935,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制一个全屏三角形，把中间颜色纹理采样并输出到最终目标。
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把 FinalBlit 绘制命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ExecuteAndReleaseCommandBuffer(cmd); // 在 Pass 边界统一提交。
         }
 
         private Material GetFinalBlitMaterial() // 定义获取 FinalBlit 材质的内部辅助函数。
@@ -995,8 +978,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
         public override void Execute(BurtRenderGraphContext context) // 实现 CameraColor 释放 Pass 的执行函数。
         {
-            var renderContext = context.ScriptableContext; // 从 GraphContext 中取出 Unity SRP 渲染上下文。
-
             var cameraColorTarget = context.CameraColorTarget; // 从 GraphContext 中取出 CameraColor 资源句柄。
 
             if (!cameraColorTarget.IsValid) // 如果 CameraColor 句柄无效，说明当前图没有申请过这个资源。
@@ -1004,13 +985,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 return; // 直接结束这个 Pass，避免释放不存在的临时 RT。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
-
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.CameraColorTextureId); // 释放前面申请的 CameraColor 临时 RT，避免资源泄漏。
-
-            renderContext.ExecuteCommandBuffer(cmd); // 把释放 RT 的命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.CameraColorName);
         }
     }
 
@@ -1031,11 +1006,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.OpaqueCameraColorTextureId);
             cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.OpaqueCameraColorAvailableId, 0.0f);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -1050,8 +1024,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
         public override void Execute(BurtRenderGraphContext context) // 实现 CameraDepth 释放 Pass 的执行函数。
         {
-            var renderContext = context.ScriptableContext; // 从 GraphContext 中取出 Unity SRP 渲染上下文。
-
             var cameraDepthTarget = context.CameraDepthTarget; // 从 GraphContext 中取出 CameraDepth 资源句柄。
 
             if (!cameraDepthTarget.IsValid) // 如果 CameraDepth 句柄无效，说明当前图没有申请过这个资源。
@@ -1059,13 +1031,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 return; // 直接结束这个 Pass，避免释放不存在的临时 RT。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
-
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.CameraDepthTextureId); // 释放前面申请的 CameraDepth 临时 RT，避免资源泄漏。
-
-            renderContext.ExecuteCommandBuffer(cmd); // 把释放 RT 的命令提交给 ScriptableRenderContext。
-
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.CameraDepthName);
         }
     }
 }

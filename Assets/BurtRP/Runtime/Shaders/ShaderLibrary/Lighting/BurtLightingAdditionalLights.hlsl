@@ -12,7 +12,7 @@ float4 _BurtMainLightColorOuterSpace;
 float4 _BurtMainLightAtmosphereTransmittance;
 float _BurtMainLightOcclusionFactor;
 
-
+#if !defined(BURT_EXCLUDE_ADDITIONAL_LIGHTING)
 #define BURT_MAX_ADDITIONAL_LIGHTS 8
 float _BurtAdditionalLightCount;
 float4 _BurtAdditionalLightPositionAndRange[BURT_MAX_ADDITIONAL_LIGHTS];
@@ -32,6 +32,9 @@ float _BurtAdditionalLightBufferEnabled;
 #define BURT_LIGHT_TYPE_POINT (1.0f)
 #define BURT_LIGHT_TYPE_SPOT (2.0f)
 float BurtSampleAdditionalLightShadow(int lightIndex, float3 positionWS, float3 lightDirectionWS, float3 normalWS, float3 lightPositionWS);
+#else
+#define BURT_MAX_ADDITIONAL_LIGHTS 0
+#endif
 
 
 struct BurtLight
@@ -69,6 +72,7 @@ BurtLight BurtCreateMainLight(float shadowAttenuation)
     return BurtCreateMainLight(shadowAttenuation, shadowAttenuation);
 }
 
+#if !defined(BURT_EXCLUDE_ADDITIONAL_LIGHTING)
 int BurtGetAdditionalLightCount()
 {
     return min((int)round(max(_BurtAdditionalLightCount, 0.0f)), BURT_MAX_ADDITIONAL_LIGHTS);
@@ -232,5 +236,52 @@ BurtLight BurtCreateAdditionalLightUnshadowed(int lightIndex, float3 positionWS)
 {
     return BurtCreateAdditionalLightInternal(lightIndex, positionWS, float3(0.0f, 0.0f, 0.0f), false);
 }
+#else
+int BurtGetAdditionalLightCount()
+{
+    return 0;
+}
+
+bool BurtHasAdditionalLights()
+{
+    return false;
+}
+
+BurtLight BurtCreateExcludedAdditionalLight()
+{
+    BurtLight light;
+    light.DirectionWS = float3(0.0f, 1.0f, 0.0f);
+    light.Color = float3(0.0f, 0.0f, 0.0f);
+    light.ShadowAttenuation = 1.0f;
+    light.TransmissionShadowAttenuation = 1.0f;
+    light.TransmissionThickness = -1.0f;
+    return light;
+}
+
+BurtLight BurtCreateAdditionalLight(int lightIndex, float3 positionWS, float3 normalWS)
+{
+    return BurtCreateExcludedAdditionalLight();
+}
+
+BurtLight BurtCreateAdditionalLight(int lightIndex, float3 positionWS, float3 normalWS, float3 shadowPositionWS)
+{
+    return BurtCreateExcludedAdditionalLight();
+}
+
+BurtLight BurtCreateAdditionalLight(int lightIndex, float3 positionWS)
+{
+    return BurtCreateExcludedAdditionalLight();
+}
+
+BurtLight BurtCreateAdditionalLightUnshadowed(int lightIndex, float3 positionWS, float3 normalWS)
+{
+    return BurtCreateExcludedAdditionalLight();
+}
+
+BurtLight BurtCreateAdditionalLightUnshadowed(int lightIndex, float3 positionWS)
+{
+    return BurtCreateExcludedAdditionalLight();
+}
+#endif
 
 #endif

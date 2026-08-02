@@ -24,11 +24,10 @@ namespace Burt.RenderPipeline
 
             var camera = context.Request != null ? context.Request.Camera : null;
             var descriptor = BurtRenderTargetDescriptorUtility.CreateDeferredLightingDepthDescriptor(camera);
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.DeferredLightingDepthTextureId, descriptor, FilterMode.Point);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.DeferredLightingDepthTextureId, target.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -68,14 +67,13 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(deferredLightingDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier);
             cmd.DrawProcedural(Matrix4x4.identity, material, CopyDepthPassIndex, MeshTopology.Triangles, 3, 1);
             cmd.SetGlobalTexture(CameraDepthId, deferredLightingDepthTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private Material GetDepthCopyMaterial()
@@ -124,7 +122,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             var cameraDepthTarget = context.CameraDepthTarget;
             if (cameraDepthTarget.IsValid)
             {
@@ -132,8 +130,7 @@ namespace Burt.RenderPipeline
             }
 
             cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.DeferredLightingDepthTextureId);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -158,12 +155,11 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.ClearRenderTarget(false, true, Color.clear);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }
 
@@ -184,6 +180,7 @@ namespace Burt.RenderPipeline
         private const string DeferredLightingDebugProbeShaderName = "Hidden/BurtRP/DeferredLightingDebugProbe";
         private const string DeferredLightingDebugShadowShaderName = "Hidden/BurtRP/DeferredLightingDebugShadow";
         private const string DeferredLightingDebugKeyword = "BURT_USE_DEBUG_MODE_DEFERRED";
+        private const string DeferredMainLightShadowPcssKeyword = "BURT_MAIN_LIGHT_SHADOW_PCSS";
 
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -369,7 +366,9 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            ConfigureDeferredMainLightShadowPcssKeyword(context, material);
+
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             cmd.SetGlobalTexture(GBuffer0Id, gbuffer0Target.Identifier);
@@ -401,8 +400,7 @@ namespace Burt.RenderPipeline
             BindSubsurfaceDiffuseLuminanceOutput(context, cmd, material);
             DrawDeferredLighting(context, cmd, material);
             cmd.SetGlobalTexture(CameraDepthId, cameraDepthTarget.Identifier);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ExecuteAndReleaseCommandBuffer(cmd);
         }
 
         private void DrawDeferredLighting(BurtRenderGraphContext context, CommandBuffer cmd, Material material)
@@ -1121,6 +1119,23 @@ namespace Burt.RenderPipeline
             }
 
             CoreUtils.SetKeyword(material, DeferredLightingDebugKeyword, enabled);
+        }
+
+        private void ConfigureDeferredMainLightShadowPcssKeyword(BurtRenderGraphContext context, Material material)
+        {
+            if (isAdditionalLightingStage || material == null || material.shader == null || material.shader.name != DeferredLightingShaderName)
+            {
+                return;
+            }
+
+            var shadowData = context != null
+                ? BurtShadowUtility.ResolveMainLightShadowData(context.Request, context.Asset)
+                : null;
+            var enabled = shadowData != null &&
+                          shadowData.HasMainLightShadow &&
+                          shadowData.IsMainLightShadowHard &&
+                          shadowData.EnableMainLightShadowPCSS;
+            CoreUtils.SetKeyword(material, DeferredMainLightShadowPcssKeyword, enabled);
         }
 
         private static string ResolveDeferredLightingDebugShaderName(BurtShadingDebugMode mode)

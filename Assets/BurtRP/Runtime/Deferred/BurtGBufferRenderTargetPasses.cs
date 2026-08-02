@@ -354,7 +354,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, BurtGBufferRenderTargetPassUtility.ResolveCamera(context));
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd); // 把 MRT 绑定命令提交给 Unity 渲染上下文。
+            context.ExecuteLegacyCommandBuffer(cmd); // 把 MRT 绑定命令提交给 Unity 渲染上下文。
 
             CommandBufferPool.Release(cmd); // 把 CommandBuffer 放回池子，避免每帧产生额外 GC。
         }
@@ -403,7 +403,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd); // 把清理和最终 MRT 绑定命令提交给 Unity 渲染上下文。
+            context.ExecuteLegacyCommandBuffer(cmd); // 把清理和最终 MRT 绑定命令提交给 Unity 渲染上下文。
 
             CommandBufferPool.Release(cmd); // 把 CommandBuffer 放回池子，避免每帧产生额外 GC。
         }
@@ -439,7 +439,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             cmd.SetRenderTarget(gbuffer0Target.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
-            context.ScriptableContext.ExecuteCommandBuffer(cmd);
+            context.ExecuteLegacyCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
 
             var sortingSettings = new SortingSettings(camera);
@@ -491,7 +491,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
-            renderContext.ExecuteCommandBuffer(cmd); // 把 MRT 绑定命令提交给 Unity 渲染上下文。
+            context.ExecuteLegacyCommandBuffer(cmd); // Preserve graph ordering before the legacy local command buffer is submitted.
 
             CommandBufferPool.Release(cmd); // 把 CommandBuffer 放回池子，避免每帧产生额外 GC。
 
@@ -505,14 +505,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             var drawScopeCmd = CommandBufferPool.Get(Name + " Draw Scope");
             drawScopeCmd.BeginSample(Name);
-            renderContext.ExecuteCommandBuffer(drawScopeCmd);
+            context.ExecuteLegacyCommandBuffer(drawScopeCmd);
             CommandBufferPool.Release(drawScopeCmd);
 
             renderContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings); // 使用剔除结果绘制所有支持 BurtGBuffer pass 的不透明物体。
 
             drawScopeCmd = CommandBufferPool.Get(Name + " Draw Scope");
             drawScopeCmd.EndSample(Name);
-            renderContext.ExecuteCommandBuffer(drawScopeCmd);
+            context.ExecuteLegacyCommandBuffer(drawScopeCmd);
             CommandBufferPool.Release(drawScopeCmd);
         }
     }
@@ -642,15 +642,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
                 return; // 直接返回，避免空引用。
             }
 
-            var cmd = CommandBufferPool.Get(passName); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(passName); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
             cmd.GetTemporaryRT(textureId, descriptor, FilterMode.Point); // 申请 GBuffer 临时 RT，使用 Point 过滤避免材质数据被线性插值。
 
             cmd.SetGlobalTexture(textureId, target.Identifier); // 把 GBuffer 暴露给 shader，后续 Deferred Lighting 或 Debug Pass 可以采样。
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd); // 把申请 RT 和绑定全局纹理的命令提交给 Unity 渲染上下文。
+            context.ExecuteLegacyCommandBuffer(cmd); // 把申请 RT 和绑定全局纹理的命令提交给 Unity 渲染上下文。
 
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ReleaseCommandBuffer(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
         }
 
         public static void ReleaseTemporaryRenderTarget( // 释放一个 GBuffer 临时 RT。
@@ -663,13 +663,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
                 return; // 直接返回，避免空引用。
             }
 
-            var cmd = CommandBufferPool.Get(passName); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
+            var cmd = context.AcquireCommandBuffer(passName); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称命名它。
 
             cmd.ReleaseTemporaryRT(textureId); // 释放前面申请的 GBuffer 临时 RT，避免资源泄漏到下一帧。
 
-            context.ScriptableContext.ExecuteCommandBuffer(cmd); // 把释放 RT 的命令提交给 Unity 渲染上下文。
+            context.ExecuteLegacyCommandBuffer(cmd); // 把释放 RT 的命令提交给 Unity 渲染上下文。
 
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
+            context.ReleaseCommandBuffer(cmd); // 把 CommandBuffer 释放回池子，避免每帧产生 GC。
         }
     }
 }

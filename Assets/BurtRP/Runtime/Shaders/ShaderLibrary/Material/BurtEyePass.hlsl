@@ -94,6 +94,20 @@ float3 BurtEyeSampleDirectionWS(float2 uv, float3 geometryNormalWS, float4 tange
     return BurtTransformTangentToWorld(directionTS, geometryNormalWS, tangentWS);
 }
 
+float BurtEyeFrontHemisphereMask(float3 geometryNormalWS)
+{
+    float3 frontDirectionOS = _IrisFrontDirectionOS.xyz;
+    frontDirectionOS = dot(frontDirectionOS, frontDirectionOS) > BURT_EPSILON
+        ? normalize(frontDirectionOS)
+        : float3(0.0f, 0.0f, 1.0f);
+
+    // Reverse the normal transform so the selected hemisphere follows the eye object,
+    // independent of its world rotation and non-uniform scale.
+    float3 geometryNormalOS = BurtSafeNormalize(mul(geometryNormalWS, (float3x3)unity_ObjectToWorld));
+    float frontFade = max(abs(_IrisFrontHemisphereFade), 1e-4f);
+    return smoothstep(-frontFade, frontFade, dot(geometryNormalOS, frontDirectionOS));
+}
+
 BurtEyeMaterialData BurtEvaluateEyeMaterialData(float2 baseUV, float3 geometryNormalWS, float4 tangentWS, float3 viewDirectionWS, float facing)
 {
     BurtEyeMaterialData data;
@@ -103,12 +117,14 @@ BurtEyeMaterialData BurtEvaluateEyeMaterialData(float2 baseUV, float3 geometryNo
     float irisMaskValue = 1.0f - (distance(eyeBallUV, float2(0.5f, 0.5f)) - _IrisRadius + irisEdgeWidth) / irisEdgeWidth;
     float irisMask = smoothstep(_IrisMaskBlurIntensity.x, _IrisMaskBlurIntensity.y, irisMaskValue);
 
+    float3 safeGeometryNormalWS = BurtSafeNormalize(geometryNormalWS);
+    irisMask *= BurtEyeFrontHemisphereMask(safeGeometryNormalWS);
+
     float2 heightUV = float2(_ScalebyCenter * _IrisRadius + 0.5f, 0.5f);
     float height1 = SAMPLE_TEXTURE2D(_MidPlaneHeightMap, sampler_LinearRepeat, baseUV).r;
     float height2 = SAMPLE_TEXTURE2D(_MidPlaneHeightMap, sampler_LinearRepeat, heightUV).r;
     float irisDepth = max(height1 - height2, 0.0f) * _IrisDepthScale;
 
-    float3 safeGeometryNormalWS = BurtSafeNormalize(geometryNormalWS);
     float3 eyeDirectionWS = BurtEyeSampleDirectionWS(baseUV, safeGeometryNormalWS, tangentWS, facing);
 
     float2 irisUV;
@@ -148,7 +164,7 @@ BurtEyeMaterialData BurtEvaluateEyeMaterialData(float2 baseUV, float3 geometryNo
     float causticBlend = pow(abs(irisConcavity * _IrisConcavityScale), max(_IrisConcavityPow, BURT_EPSILON)) * data.IrisMask;
     data.CausticNormalWS = BurtSafeNormalize(lerp(eyeDirectionWS, -data.IrisNormalWS, saturate(causticBlend)));
 
-    float3 emissiveColor = SAMPLE_TEXTURE2D(_EmissiveMap, sampler_LinearRepeat, irisMapUV).rgb * _EyeEmissiveColor.rgb;
+    float3 emissiveColor = SAMPLE_TEXTURE2D(_EmissiveMap, sampler_LinearRepeat, irisMapUV).rgb * _EyeEmissiveColor.rgb * data.IrisMask;
     float2 eyeCookieUV = BurtEyeScaleUVFromCircle(irisUV + _MatcapSizeOffset.yz, max(_MatcapSizeOffset.x, BURT_EPSILON));
     emissiveColor += SAMPLE_TEXTURE2D(_Matcap, sampler_LinearClamp, eyeCookieUV).rgb * _MatcapColor.rgb * data.IrisMask;
     data.EmissionColor = max(emissiveColor, float3(0.0f, 0.0f, 0.0f));

@@ -368,9 +368,6 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData GBufferData)
 #if BURT_ENABLE_CLEAR_COAT_SHADING
     MaterialData.ClearCoatMask = BurtGetClearCoatMask(GBufferData);
     MaterialData.ClearCoatRoughness = BurtGetClearCoatRoughness(GBufferData);
-#else
-    MaterialData.ClearCoatMask = 0.0f;
-    MaterialData.ClearCoatRoughness = 0.2f;
 #endif
 #if BURT_ENABLE_SUBSURFACE_SHADING
     MaterialData.SubsurfaceActive = BurtIsActiveSubsurfaceShadingModel(GBufferData.ShadingModelID) ? 1.0f : 0.0f;
@@ -381,15 +378,6 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData GBufferData)
     MaterialData.SubsurfaceScatteringMode = BurtGetSubsurfaceScatteringMode(GBufferData);
     MaterialData.Subsurface3SCurvature = saturate(GBufferData.Subsurface3SCurvature);
     MaterialData.SubsurfaceProfileIndex = BurtGetSubsurfaceProfileIndex(GBufferData);
-#else
-    MaterialData.SubsurfaceActive = 0.0f;
-    MaterialData.SubsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
-    MaterialData.SubsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
-    MaterialData.SubsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
-    MaterialData.SubsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
-    MaterialData.SubsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
-    MaterialData.Subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
-    MaterialData.SubsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
 #endif
 #if BURT_ENABLE_FABRIC_SHADING
     MaterialData.FabricActive = BurtIsActiveFabricShadingModel(GBufferData.ShadingModelID) ? 1.0f : 0.0f;
@@ -397,12 +385,6 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData GBufferData)
     MaterialData.FabricFuzzWeight = BurtGetFabricFuzzWeight(GBufferData);
     MaterialData.FabricFuzzRoughness = BurtGetFabricFuzzRoughness(GBufferData);
     MaterialData.FabricFuzzColor = BurtGetFabricFuzzColor(GBufferData);
-#else
-    MaterialData.FabricActive = 0.0f;
-    MaterialData.FabricIsSilk = 0.0f;
-    MaterialData.FabricFuzzWeight = 0.0f;
-    MaterialData.FabricFuzzRoughness = 0.75f;
-    MaterialData.FabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
 #endif
 #if BURT_ENABLE_FOLIAGE_SHADING
     MaterialData.FoliageActive = BurtIsActiveFoliageShadingModel(GBufferData.ShadingModelID) ? 1.0f : 0.0f;
@@ -415,17 +397,6 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData GBufferData)
     MaterialData.FoliageUseSpecularColor = BurtGetFoliageUseSpecularColor(GBufferData);
     MaterialData.FoliageScreenSpaceShadowIntensity = BurtGetFoliageScreenSpaceShadowIntensity(GBufferData);
     MaterialData.FoliageIsGrass = BurtGetFoliageIsGrass(GBufferData);
-#else
-    MaterialData.FoliageActive = 0.0f;
-    MaterialData.FoliageTransmissionColor = float3(0.0f, 0.0f, 0.0f);
-    MaterialData.FoliageTransmissionWeight = 0.0f;
-    MaterialData.FoliageThickness = 0.5f;
-    MaterialData.FoliageBackLight = 0.0f;
-    MaterialData.FoliageTransmissionNdotL = 0.5f;
-    MaterialData.FoliageSpecularScale = 0.0f;
-    MaterialData.FoliageUseSpecularColor = 0.0f;
-    MaterialData.FoliageScreenSpaceShadowIntensity = 0.0f;
-    MaterialData.FoliageIsGrass = 0.0f;
 #endif
 #if BURT_ACTIVE_SUBSURFACE_SHADING_MODEL
     MaterialData.Reflectance = BURT_SUBSURFACE_FIXED_REFLECTANCE;
@@ -464,12 +435,14 @@ BurtPBRMaterialData BurtPreparePBRMaterialData(BurtGBufferData GBufferData)
     MaterialData.DiffuseColor = DiffuseColorFromBaseColor(DiffuseBaseColor, MaterialData.Metallic);
     MaterialData.F0 = DielectricReflectanceToF0(MaterialData.BaseColor, MaterialData.Reflectance, MaterialData.Metallic);
     MaterialData.F90 = ApproximateF90(MaterialData.F0);
+#if BURT_MODEL_HAS_FOLIAGE
     if (MaterialData.FoliageActive > 0.5f)
     {
         MaterialData.F90 = MaterialData.FoliageUseSpecularColor > 0.5f
             ? saturate(MaterialData.BaseColor * MaterialData.FoliageSpecularScale)
             : saturate((MaterialData.BaseColor * 0.9f + 0.1f) * MaterialData.FoliageSpecularScale * 3.0f);
     }
+#endif
 
     return MaterialData;
 }

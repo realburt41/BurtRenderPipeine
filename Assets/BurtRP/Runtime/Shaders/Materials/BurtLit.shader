@@ -72,6 +72,7 @@ Shader "BurtRP/Lit"
     {
         // Marks this shader as a BurtRP opaque shader so materials are easy to identify.
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelize"
 
         // Defines the depth-only pass used by Burt Depth Prepass.
         Pass
@@ -394,6 +395,7 @@ Shader "BurtRP/Lit"
 
             // Declares the forward fragment shader entry point.
             #pragma fragment Frag
+            #pragma shader_feature_local _ BURT_MATERIAL_TRANSPARENT
             #pragma shader_feature_local _ BURT_TRANSPARENT_VERTEX_FOG
             #pragma shader_feature_local _ BURT_IGNORE_FOG
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP

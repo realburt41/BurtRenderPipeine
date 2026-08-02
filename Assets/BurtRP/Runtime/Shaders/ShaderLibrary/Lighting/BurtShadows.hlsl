@@ -4,21 +4,21 @@
 #include "UnityCG.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 
-Texture2D _BurtMainLightShadowMap;
-Texture2D _BurtAdditionalLightShadowAtlas;
-Texture2D _BurtPerObjectShadowAtlas;
-
 #if !defined(BURT_MAIN_LIGHT_DIRECTION_DECLARED)
 #define BURT_MAIN_LIGHT_DIRECTION_DECLARED
 float4 _BurtMainLightDirection;
 #endif
 
+#if !defined(BURT_SHADOWS_ADDITIONAL_ONLY)
+// Keep the texture-coupled comparison sampler here. The generic inline
+// sampler_LinearClampCompare does not inherit the shadow texture's backend
+// comparison state on D3D11, which can invert/reject every reversed-Z lookup.
+// UNITY_DECLARE_SHADOWMAP still expands to Texture2D on D3D11, so the raw
+// .Load diagnostics and PCSS blocker reads below remain available.
+UNITY_DECLARE_SHADOWMAP(_BurtMainLightShadowMap);
+Texture2D _BurtPerObjectShadowAtlas;
+
 #define BURT_MAIN_LIGHT_SHADOW_MAX_CASCADES 4
-#define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT 8
-#define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES 24
-#define BURT_ADDITIONAL_LIGHT_SHADOW_POINT_FACE_COUNT 6
-#define BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_POINT 1.0f
-#define BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_SPOT 2.0f
 #define BURT_PER_OBJECT_SHADOW_MAX_SLICES 8
 #define BURT_PER_OBJECT_SHADOW_PCF_SIZE 5.0f
 
@@ -44,16 +44,6 @@ float _BurtMainLightShadowSampleBias;
 float _BurtMainLightShadowSoftness;
 float4 _BurtMainLightShadowReceiverBiasParams;
 
-float4 _BurtAdditionalLightShadowData[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT];
-float4 _BurtAdditionalLightShadowLightParams[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT];
-float4 _BurtAdditionalLightShadowSliceAtlasRects[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
-float4 _BurtAdditionalLightShadowSliceRows0[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
-float4 _BurtAdditionalLightShadowSliceRows1[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
-float4 _BurtAdditionalLightShadowSliceRows2[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
-float4 _BurtAdditionalLightShadowSliceRows3[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
-float4 _BurtAdditionalLightShadowParams;
-float4 _BurtAdditionalLightShadowTexelSize;
-
 float4 _BurtPerObjectShadowRows0[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
 float4 _BurtPerObjectShadowRows1[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
 float4 _BurtPerObjectShadowRows2[BURT_PER_OBJECT_SHADOW_MAX_SLICES];
@@ -71,6 +61,40 @@ float4 _BurtMainLightShadowPCSSParams;
 #define BURT_MAIN_LIGHT_SHADOW_CENTER_SAMPLE_WEIGHT (2.0f)
 #define BURT_MAIN_LIGHT_SHADOW_MIN_PCSS_FILTER_RADIUS_TEXELS (0.35f)
 #define BURT_MAIN_LIGHT_SHADOW_TRANSITION_TEXEL_FLOOR (8.0f)
+
+#if !defined(BURT_DEFERRED_MAIN_LIGHT_PCSS_VARIANT) || defined(BURT_MAIN_LIGHT_SHADOW_PCSS)
+#define BURT_COMPILE_MAIN_LIGHT_PCSS 1
+#else
+#define BURT_COMPILE_MAIN_LIGHT_PCSS 0
+#endif
+#endif // !BURT_SHADOWS_ADDITIONAL_ONLY
+
+#if !defined(BURT_SHADOWS_MAIN_ONLY)
+Texture2D _BurtAdditionalLightShadowAtlas;
+
+#define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT 8
+#define BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES 24
+#define BURT_ADDITIONAL_LIGHT_SHADOW_POINT_FACE_COUNT 6
+#define BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_POINT 1.0f
+#define BURT_ADDITIONAL_LIGHT_SHADOW_TYPE_SPOT 2.0f
+
+float4 _BurtAdditionalLightShadowData[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT];
+float4 _BurtAdditionalLightShadowLightParams[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_COUNT];
+float4 _BurtAdditionalLightShadowSliceAtlasRects[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
+float4 _BurtAdditionalLightShadowSliceRows0[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
+float4 _BurtAdditionalLightShadowSliceRows1[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
+float4 _BurtAdditionalLightShadowSliceRows2[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
+float4 _BurtAdditionalLightShadowSliceRows3[BURT_ADDITIONAL_LIGHT_SHADOW_MAX_SLICES];
+float4 _BurtAdditionalLightShadowParams;
+float4 _BurtAdditionalLightShadowTexelSize;
+#endif // !BURT_SHADOWS_MAIN_ONLY
+
+float BurtApplyShadowStrength(float rawShadow, float strength)
+{
+    return lerp(1.0f, rawShadow, saturate(strength));
+}
+
+#if !defined(BURT_SHADOWS_ADDITIONAL_ONLY)
 struct BurtMainLightShadowInput
 {
     float4 ShadowCoord;
@@ -166,10 +190,12 @@ float4 BurtGetMainLightWorldToShadowRow1(int cascadeIndex)
 float BurtGetMainLightShadowMaxFilterRadiusTexels()
 {
     float baseRadius = _BurtMainLightShadowSoftness > 0.5f ? 1.5f : 0.0f;
+#if BURT_COMPILE_MAIN_LIGHT_PCSS
     if (_BurtMainLightShadowPCSSParams.x > 0.5f && _BurtMainLightShadowSoftness > 0.5f)
     {
         baseRadius = max(baseRadius, max(_BurtMainLightShadowPCSSParams.z, _BurtMainLightShadowPCSSParams.w));
     }
+#endif
 
     return max(baseRadius, 1.0f);
 }
@@ -484,7 +510,7 @@ float BurtCompareMainLightShadowDepth(float storedDepth, float receiverDepth)
 float BurtSampleMainLightShadowCompare(float3 projectedShadowCoord, int cascadeIndex)
 {
     projectedShadowCoord.xy = BurtClampMainLightShadowUVToCascade(projectedShadowCoord.xy, cascadeIndex);
-    return BURT_SAMPLE_SHADOW_CLAMP(_BurtMainLightShadowMap, projectedShadowCoord);
+    return UNITY_SAMPLE_SHADOW(_BurtMainLightShadowMap, projectedShadowCoord);
 }
 
 float BurtSampleMainLightShadowCompare(float3 projectedShadowCoord)
@@ -492,6 +518,7 @@ float BurtSampleMainLightShadowCompare(float3 projectedShadowCoord)
     return BurtSampleMainLightShadowCompare(projectedShadowCoord, 0);
 }
 
+#if BURT_COMPILE_MAIN_LIGHT_PCSS
 bool BurtTryEvaluateMainLightShadowPCSSBlockers(
     float3 projectedShadowCoord,
     int cascadeIndex,
@@ -542,6 +569,7 @@ bool BurtTryEvaluateMainLightShadowPCSSBlockers(
     averageBlockerDepth = blockerDepthSum / blockerWeightSum;
     return true;
 }
+#endif
 
 float2 BurtGetMainLightShadowReceiverPlaneDepthGradient(float3 projectedShadowCoord)
 {
@@ -583,6 +611,7 @@ float BurtSampleMainLightShadowPCF(float3 projectedShadowCoord, float radiusTexe
     return visibility / max(weightSum, 0.0001f);
 }
 
+#if BURT_COMPILE_MAIN_LIGHT_PCSS
 float BurtCalculateMainLightShadowPCSSRadiusTexels(float3 projectedShadowCoord, int cascadeIndex)
 {
     if (_BurtMainLightShadowPCSSParams.x <= 0.5f || _BurtMainLightShadowSoftness <= 0.5f)
@@ -619,6 +648,7 @@ float BurtCalculateMainLightShadowPCSSRadiusTexels(float3 projectedShadowCoord, 
 
     return penumbraRadius;
 }
+#endif
 
 float BurtSampleMainLightShadowPCSS(float3 projectedShadowCoord, int cascadeIndex)
 {
@@ -627,6 +657,7 @@ float BurtSampleMainLightShadowPCSS(float3 projectedShadowCoord, int cascadeInde
         return BurtSampleMainLightShadowCompare(projectedShadowCoord, cascadeIndex);
     }
 
+#if BURT_COMPILE_MAIN_LIGHT_PCSS
     if (_BurtMainLightShadowPCSSParams.x <= 0.5f)
     {
         return BurtSampleMainLightShadowPCF(projectedShadowCoord, 1.5f, cascadeIndex);
@@ -635,11 +666,9 @@ float BurtSampleMainLightShadowPCSS(float3 projectedShadowCoord, int cascadeInde
     float radiusTexels = BurtCalculateMainLightShadowPCSSRadiusTexels(projectedShadowCoord, cascadeIndex);
     radiusTexels = min(max(radiusTexels, BURT_MAIN_LIGHT_SHADOW_MIN_PCSS_FILTER_RADIUS_TEXELS), max(_BurtMainLightShadowPCSSParams.w, BURT_MAIN_LIGHT_SHADOW_MIN_PCSS_FILTER_RADIUS_TEXELS));
     return BurtSampleMainLightShadowPCF(projectedShadowCoord, radiusTexels, cascadeIndex);
-}
-
-float BurtApplyShadowStrength(float rawShadow, float strength)
-{
-    return lerp(1.0f, rawShadow, saturate(strength));
+#else
+    return BurtSampleMainLightShadowPCF(projectedShadowCoord, 1.5f, cascadeIndex);
+#endif
 }
 
 int BurtSelectMainLightShadowCascade(float3 positionWS)
@@ -1107,7 +1136,9 @@ float BurtSampleMainLightShadow(float4 shadowCoord)
 
     return BurtApplyShadowStrength(BurtSampleMainLightShadowRawVisibility(shadowCoord, 0), _BurtMainLightShadowStrength);
 }
+#endif // !BURT_SHADOWS_ADDITIONAL_ONLY
 
+#if !defined(BURT_SHADOWS_MAIN_ONLY)
 float4 BurtTransformWorldToAdditionalLightShadowSlice(float4 positionWS, int sliceIndex)
 {
     return float4(
@@ -1378,6 +1409,7 @@ float BurtSampleAdditionalLightShadow(int lightIndex, float3 positionWS, float3 
 
 
 #define BURT_ADDITIONAL_LIGHT_SHADOWS_INCLUDED 1
+#endif // !BURT_SHADOWS_MAIN_ONLY
 
 #if defined(BURT_INCLUDE_SHADOW_DEBUG)
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadowsDebug.hlsl"

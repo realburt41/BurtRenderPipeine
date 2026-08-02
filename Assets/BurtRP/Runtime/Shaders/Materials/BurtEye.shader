@@ -19,6 +19,8 @@ Shader "BurtRP/Eye"
         _IOR ("IOR", Float) = 1.33
         _IrisRadius ("Iris Radius", Range(0, 0.5)) = 0
         _IrisMaskBlurIntensity ("Iris Mask Blur", Vector) = (0, 1, 0.045, 0)
+        _IrisFrontDirectionOS ("Iris Front Direction (Object Space)", Vector) = (0, 0, 1, 0)
+        _IrisFrontHemisphereFade ("Iris Front Hemisphere Fade", Range(0, 0.5)) = 0.05
         _IrisConcavityScale ("Iris Caustic Scale", Range(0, 4)) = 0
         _IrisConcavityPow ("Iris Caustic Power", Range(0.1, 0.5)) = 0.1
 
@@ -68,6 +70,7 @@ Shader "BurtRP/Eye"
     SubShader
     {
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "BurtRenderPipeline" }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelize"
 
         Pass
         {
@@ -201,39 +204,6 @@ Shader "BurtRP/Eye"
 
         Pass
         {
-            Name "Burt Eye GBuffer"
-            Tags { "LightMode" = "BurtGBuffer" }
-            ZWrite Off
-            ZTest Equal
-            ColorMask 0 0
-            Cull [_Cull]
-
-            Stencil
-            {
-                Ref [_BurtGBufferStencilRef]
-                ReadMask [_BurtGBufferStencilReadMask]
-                WriteMask [_BurtGBufferStencilWriteMask]
-                Comp Always
-                Pass Replace
-            }
-
-            HLSLPROGRAM
-            #pragma vertex VertGBuffer
-            #pragma fragment FragGBuffer
-            #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
-            #pragma shader_feature_local_fragment _ _EMISSION
-            #pragma multi_compile_instancing
-            #pragma target 4.5
-
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEyeProperties.hlsl"
-
-            #define BURT_MATERIAL_SHADING_MODEL_EYE 1
-            #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtGBufferPass.hlsl"
-            ENDHLSL
-        }
-
-        Pass
-        {
             Name "BurtGI"
             Tags { "LightMode" = "RayTracing" }
 
@@ -249,7 +219,7 @@ Shader "BurtRP/Eye"
         Pass
         {
             Name "Burt Eye Forward"
-            Tags { "LightMode" = "BurtForward" }
+            Tags { "LightMode" = "BurtForwardOnly" }
             ZWrite [_ZWrite]
             ZTest [_ZTest]
             Cull [_Cull]

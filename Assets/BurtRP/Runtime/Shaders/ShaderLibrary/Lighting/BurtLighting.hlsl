@@ -10,9 +10,11 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Deferred/BurtGBuffer.hlsl"
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingAdditionalLights.hlsl"
+#if !defined(BURT_PBR_DIRECT_ONLY)
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingIndirect.hlsl"
+#endif
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingPBRCore.hlsl"
-#if BURT_ENABLE_FUR_SHADING && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_FUR))
+#if !defined(BURT_PBR_DIRECT_ONLY) && BURT_ENABLE_FUR_SHADING && (!defined(BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS) || defined(BURT_DEFERRED_SHADING_MODEL_FUR))
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingFur.hlsl"
 #endif
 

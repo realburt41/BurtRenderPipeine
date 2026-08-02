@@ -606,9 +606,24 @@ void BuildHistoryRejectionAACS(uint3 id : SV_DispatchThreadID)
     float2 velocity = _BurtTAAVelocityTexture.Load(int3(pixel, 0));
     float2 historyUv = uv - velocity;
     float inBounds = step(0.0, historyUv.x) * step(historyUv.x, 1.0) * step(0.0, historyUv.y) * step(historyUv.y, 1.0);
-    float3 currentWorking = BurtTaaToWorkingPerceptualSpace(BurtTaaLoadCurrentRaw(pixel).rgb);
+    // Match the signal accumulated by ResolveTemporalAACS. Comparing a single
+    // jittered center sample against temporally filtered history makes stable
+    // sub-pixel edges look like shading changes and rejects the samples needed
+    // to anti-alias them.
+    float3 currentFilteredWorking = 0.0;
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            float3 sampleWorking = BurtTaaToWorkingPerceptualSpace(
+                BurtTaaLoadCurrentRaw(pixel + int2(x, y)).rgb);
+            currentFilteredWorking += sampleWorking * BurtTaaCurrentSampleWeight(x, y);
+        }
+    }
     float3 historyWorking = BurtTaaToWorkingPerceptualSpace(BurtTaaSampleHistoryCatmullRom(saturate(historyUv)));
-    float shadingRejection = BurtTaaShadingRejection(currentWorking, historyWorking);
+    float shadingRejection = BurtTaaShadingRejection(currentFilteredWorking, historyWorking);
     float parallaxRejection = 1.0 - saturate(_BurtTAAParallaxRejectionTexture.Load(int3(pixel, 0)));
     uint stencil = BurtTaaLoadStencilMask(uv);
     float stencilResponsive = (stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0;
@@ -630,7 +645,8 @@ void DilateHistoryRejectionAACS(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    float rejection = _BurtTAAHistoryRejectionTexture.Load(int3(pixel, 0));
+    float centerRejection = _BurtTAAHistoryRejectionTexture.Load(int3(pixel, 0));
+    float neighborhoodRejection = centerRejection;
 
     [unroll]
     for (int y = -1; y <= 1; y++)
@@ -639,11 +655,18 @@ void DilateHistoryRejectionAACS(uint3 id : SV_DispatchThreadID)
         for (int x = -1; x <= 1; x++)
         {
             int2 samplePixel = BurtTaaClampPixel(pixel + int2(x, y));
-            rejection = max(rejection, _BurtTAAHistoryRejectionTexture.Load(int3(samplePixel, 0)));
+            neighborhoodRejection = max(
+                neighborhoodRejection,
+                _BurtTAAHistoryRejectionTexture.Load(int3(samplePixel, 0)));
         }
     }
 
-    _BurtTAADilatedHistoryRejectionOutputTexture[pixel] = saturate(rejection);
+    // Preserve a hard rejection at the pixel that detected a disocclusion or
+    // material change. The surrounding pixel is only a conservative guard
+    // band: copying the full 3x3 maximum there clears history on both sides of
+    // every moving edge and turns the jitter sequence into visible shimmer.
+    float guardBandRejection = 0.5 * smoothstep(0.5, 1.0, neighborhoodRejection);
+    _BurtTAADilatedHistoryRejectionOutputTexture[pixel] = saturate(max(centerRejection, guardBandRejection));
 }
 
 [numthreads(8, 8, 1)]

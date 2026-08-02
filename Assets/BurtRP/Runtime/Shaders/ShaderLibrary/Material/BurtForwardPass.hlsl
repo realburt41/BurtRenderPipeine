@@ -10,6 +10,7 @@
 #if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
 #define BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG 1
 #define BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG 1
+#define BURT_INCLUDE_SHADOW_DEBUG 1
 #else
 #define BURT_PBR_SHADING_COMPONENTS_INCLUDE_BRDF_DEBUG 0
 #define BURT_PBR_SHADING_COMPONENTS_INCLUDE_TRANSMISSION_DEBUG 0
@@ -24,7 +25,10 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtEmission.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
+#if defined(BURT_MATERIAL_TRANSPARENT)
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtTransparentAtmosphereFog.hlsl"
+#include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtForwardTranslucencyVolume.hlsl"
+#endif
 #if defined(BURT_ENABLE_SHADING_DEBUG) && BURT_ENABLE_SHADING_DEBUG
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Debug/BurtShadingDebugCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingAdditionalLightsDebug.hlsl"
@@ -97,7 +101,7 @@ struct Varyings
     float4 VertexColor : TEXCOORD7;
     float3 PositionOS : TEXCOORD8;
 #endif
-#if defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
+#if defined(BURT_MATERIAL_TRANSPARENT) && defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
     float4 TransparentFog : TEXCOORD10;
 #endif
 };
@@ -131,7 +135,7 @@ Varyings Vert(Attributes Input)
 
     float4 PositionWS = mul(unity_ObjectToWorld, PositionOS);
     Output.PositionWS = PositionWS.xyz;
-#if defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
+#if defined(BURT_MATERIAL_TRANSPARENT) && defined(BURT_TRANSPARENT_VERTEX_FOG) && !defined(BURT_IGNORE_FOG)
     float2 transparentFogScreenUV = saturate(
         Output.ScreenPos.xy / max(Output.ScreenPos.w, BURT_EPSILON));
     Output.TransparentFog = BurtEvaluateTransparentFog(
@@ -205,7 +209,7 @@ float3 BurtSampleForwardOpaqueCameraColor(float2 ScreenUV)
     return BurtRemovePreExposure(tex2D(_BurtOpaqueCameraColorTexture, ScreenUV).rgb);
 }
 
-#if BURT_FORWARD_ENABLE_REFRACTION
+#if defined(BURT_MATERIAL_TRANSPARENT) && BURT_FORWARD_ENABLE_REFRACTION
 float BurtGetForwardRefractionSqrtVarianceFromRoughness(float Roughness)
 {
     return saturate(Roughness * Roughness * 0.00173056f);
@@ -288,10 +292,6 @@ void BurtApplyForwardRefraction(Varyings Input, float3 NormalWS, BurtSurfaceData
     float refractionBlend = saturate(_Refraction) * depthFade;
     FinalColor = lerp(FinalColor, refractionComposite, refractionBlend);
     OutputAlpha = lerp(OutputAlpha, 1.0f, refractionBlend);
-}
-#else
-void BurtApplyForwardRefraction(Varyings Input, float3 NormalWS, BurtSurfaceData SurfaceData, inout float3 FinalColor, inout float OutputAlpha)
-{
 }
 #endif
 
@@ -411,38 +411,40 @@ float4 Frag(Varyings Input, fixed Facing : VFACE) : SV_Target
 
     PBRComponents = BurtEvaluateForwardShadingComponents(ShadingSurfaceData, MainLight, Input, NormalWS, ShadingDirectionWS, ViewDirectionWS, Facing);
     FinalColor = PBRComponents.Lighting + EmissionColor;
+#if defined(BURT_MATERIAL_TRANSPARENT)
+    FinalColor += BurtSampleForwardTranslucencyVolume(Input.PositionWS, NormalWS, ShadingSurfaceData.BaseColor.rgb);
+#if BURT_FORWARD_ENABLE_REFRACTION
     BurtApplyForwardRefraction(Input, NormalWS, SurfaceData, FinalColor, OutputAlpha);
-
-#if defined(BURT_MATERIAL_SUPPORTS_TRANSPARENT_FOG) && !defined(BURT_IGNORE_FOG)
-    if (_Surface > 0.5f)
-    {
-        float2 transparentFogScreenUV = BurtGetForwardScreenUV(Input);
-#if defined(BURT_TRANSPARENT_VERTEX_FOG)
-        float4 transparentFog = Input.TransparentFog;
-#else
-        float4 transparentFog = BurtEvaluateTransparentFog(
-            transparentFogScreenUV,
-            Input.PositionWS);
 #endif
-        if (_BlendMode > 1.5f)
-        {
-            FinalColor = BurtBlendPremultipliedTransparentFog(
-                FinalColor * OutputAlpha,
-                OutputAlpha,
-                transparentFog);
-        }
-        else if (_BlendMode > 0.5f)
-        {
-            FinalColor = BurtBlendAdditiveTransparentFog(
-                FinalColor,
-                transparentFog);
-        }
-        else
-        {
-            FinalColor = BurtBlendTransparentFog(
-                FinalColor,
-                transparentFog);
-        }
+#endif
+
+#if defined(BURT_MATERIAL_TRANSPARENT) && defined(BURT_MATERIAL_SUPPORTS_TRANSPARENT_FOG) && !defined(BURT_IGNORE_FOG)
+    float2 transparentFogScreenUV = BurtGetForwardScreenUV(Input);
+#if defined(BURT_TRANSPARENT_VERTEX_FOG)
+    float4 transparentFog = Input.TransparentFog;
+#else
+    float4 transparentFog = BurtEvaluateTransparentFog(
+        transparentFogScreenUV,
+        Input.PositionWS);
+#endif
+    if (_BlendMode > 1.5f)
+    {
+        FinalColor = BurtBlendPremultipliedTransparentFog(
+            FinalColor * OutputAlpha,
+            OutputAlpha,
+            transparentFog);
+    }
+    else if (_BlendMode > 0.5f)
+    {
+        FinalColor = BurtBlendAdditiveTransparentFog(
+            FinalColor,
+            transparentFog);
+    }
+    else
+    {
+        FinalColor = BurtBlendTransparentFog(
+            FinalColor,
+            transparentFog);
     }
 #endif
 

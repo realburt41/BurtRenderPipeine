@@ -16,29 +16,6 @@ BurtPBRMaterialData BurtCreateClearCoatMaterialData(BurtPBRMaterialData BaseMate
     ClearCoatMaterialData.LinearRoughness = PerceptualRoughnessToLinearRoughness(ClearCoatMaterialData.PerceptualRoughness);
     ClearCoatMaterialData.A2 = LinearRoughnessToA2(ClearCoatMaterialData.LinearRoughness);
     ClearCoatMaterialData.ClearCoatMask = 0.0f;
-    ClearCoatMaterialData.SubsurfaceActive = 0.0f;
-    ClearCoatMaterialData.SubsurfaceThickness = BURT_SUBSURFACE_DEFAULT_THICKNESS;
-    ClearCoatMaterialData.SubsurfacePower = BURT_SUBSURFACE_DEFAULT_POWER;
-    ClearCoatMaterialData.SubsurfaceDistortion = BURT_SUBSURFACE_DEFAULT_DISTORTION;
-    ClearCoatMaterialData.SubsurfaceAmbient = BURT_SUBSURFACE_DEFAULT_AMBIENT;
-    ClearCoatMaterialData.SubsurfaceScatteringMode = BURT_SUBSURFACE_DEFAULT_SCATTERING_MODE;
-    ClearCoatMaterialData.Subsurface3SCurvature = 1.0f - BURT_SUBSURFACE_DEFAULT_THICKNESS;
-    ClearCoatMaterialData.SubsurfaceProfileIndex = BURT_SUBSURFACE_DEFAULT_PROFILE_INDEX;
-    ClearCoatMaterialData.FabricActive = 0.0f;
-    ClearCoatMaterialData.FabricIsSilk = 0.0f;
-    ClearCoatMaterialData.FabricFuzzWeight = 0.0f;
-    ClearCoatMaterialData.FabricFuzzRoughness = 0.75f;
-    ClearCoatMaterialData.FabricFuzzColor = float3(1.0f, 1.0f, 1.0f);
-    ClearCoatMaterialData.FoliageActive = 0.0f;
-    ClearCoatMaterialData.FoliageTransmissionColor = float3(0.0f, 0.0f, 0.0f);
-    ClearCoatMaterialData.FoliageTransmissionWeight = 0.0f;
-    ClearCoatMaterialData.FoliageThickness = 0.5f;
-    ClearCoatMaterialData.FoliageBackLight = 0.0f;
-    ClearCoatMaterialData.FoliageTransmissionNdotL = 0.5f;
-    ClearCoatMaterialData.FoliageSpecularScale = 0.0f;
-    ClearCoatMaterialData.FoliageUseSpecularColor = 0.0f;
-    ClearCoatMaterialData.FoliageScreenSpaceShadowIntensity = 0.0f;
-    ClearCoatMaterialData.FoliageIsGrass = 0.0f;
     return ClearCoatMaterialData;
 }
 

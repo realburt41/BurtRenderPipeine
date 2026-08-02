@@ -354,8 +354,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass deferredFoliageAdditionalLightingPass = new BurtDeferredFoliageLightingPass(true);
         private readonly BurtRenderPass deferredFurAdditionalLightingPass = new BurtDeferredFurLightingPass(true);
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceSourcePass = new BurtAllocateScreenSpaceSubsurfaceSourcePass();
-        private readonly BurtRenderPass allocateScreenSpaceSubsurfaceBaseColorPass = new BurtAllocateScreenSpaceSubsurfaceBaseColorPass();
-        private readonly BurtRenderPass allocateScreenSpaceSubsurfaceEmissionPass = new BurtAllocateScreenSpaceSubsurfaceEmissionPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceSetupPass = new BurtAllocateScreenSpaceSubsurfaceSetupPass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceProfileIDAndTypePass = new BurtAllocateScreenSpaceSubsurfaceProfileIDAndTypePass();
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceMaskPass = new BurtAllocateScreenSpaceSubsurfaceMaskPass();
@@ -367,7 +365,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceBurleyArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName);
         private readonly BurtRenderPass allocateScreenSpaceSubsurfaceBurleyGroupBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName);
         private readonly BurtRenderPass screenSpaceSubsurfaceCopySourcePass = new BurtScreenSpaceSubsurfaceCopySourcePass();
-        private readonly BurtRenderPass screenSpaceSubsurfaceForwardPass = new BurtScreenSpaceSubsurfaceForwardPass();
         private readonly BurtRenderPass screenSpaceSubsurfaceBuildVelocityPass = new BurtScreenSpaceSubsurfaceBuildVelocityPass();
         private readonly BurtRenderPass screenSpaceSubsurfaceBuildMaskPass = new BurtScreenSpaceSubsurfaceBuildMaskPass();
         private readonly BurtRenderPass screenSpaceSubsurfaceInitBurleyArgsPass = new BurtScreenSpaceSubsurfaceInitBurleyArgsPass();
@@ -380,8 +377,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass screenSpaceSubsurfaceFinalCopyPass = new BurtScreenSpaceSubsurfaceFinalCopyPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceCombinePass = new BurtReleaseScreenSpaceSubsurfaceCombinePass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceSourcePass = new BurtReleaseScreenSpaceSubsurfaceSourcePass();
-        private readonly BurtRenderPass releaseScreenSpaceSubsurfaceBaseColorPass = new BurtReleaseScreenSpaceSubsurfaceBaseColorPass();
-        private readonly BurtRenderPass releaseScreenSpaceSubsurfaceEmissionPass = new BurtReleaseScreenSpaceSubsurfaceEmissionPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceSetupPass = new BurtReleaseScreenSpaceSubsurfaceSetupPass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceProfileIDAndTypePass = new BurtReleaseScreenSpaceSubsurfaceProfileIDAndTypePass();
         private readonly BurtRenderPass releaseScreenSpaceSubsurfaceMaskPass = new BurtReleaseScreenSpaceSubsurfaceMaskPass();
@@ -526,7 +521,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             var retainTranslucencyVolumeForVolumetricFog =
                 !preserveShadingDebugOutputBeforeSceneEffects &&
                 useLocalGBufferTargets &&
-                BurtVolumetricFogUtility.ShouldUseVolumetricFog(request) &&
                 BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTranslucencyVolume(request, asset);
             graph.BeginProfilingScope("BRP.Stage/Resources Lighting Shadows");
             AddCameraAllocationPasses(graph, safeRenderOptions); // 先申请 CameraColor 和 CameraDepth，确保 GBuffer MRT 可以使用独立深度。
@@ -677,12 +671,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             {
                 graph.AddPass(releaseLightShaftOcclusionPass);
             }
-            AddScreenSpaceGlobalIlluminationTranslucencyVolumeReleaseAfterVolumetricFog(
-                graph,
-                request,
-                asset,
-                safeRenderOptions,
-                retainTranslucencyVolumeForVolumetricFog);
             graph.EndProfilingScope("BRP.Stage/Sky Atmosphere Fog Reflections");
 
             graph.BeginProfilingScope("BRP.Stage/Transparent");
@@ -708,6 +696,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
             graph.EndProfilingScope("BRP.Stage/Transparent");
             }
+            AddScreenSpaceGlobalIlluminationTranslucencyVolumeReleaseAfterVolumetricFog(
+                graph,
+                request,
+                asset,
+                safeRenderOptions,
+                retainTranslucencyVolumeForVolumetricFog);
             graph.BeginProfilingScope("BRP.Stage/Editor Gizmos");
             AddPreImageEffectsGizmosPass(graph, request); // 编辑器里在后处理前恢复 PreImageEffects Gizmos。
             graph.EndProfilingScope("BRP.Stage/Editor Gizmos");
@@ -1483,8 +1477,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             var useScreenSpaceSubsurfaceSeparable = BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceSeparable(request, asset);
 
             graph.AddPass(allocateScreenSpaceSubsurfaceSourcePass);
-            graph.AddPass(allocateScreenSpaceSubsurfaceBaseColorPass);
-            graph.AddPass(allocateScreenSpaceSubsurfaceEmissionPass);
             graph.AddPass(allocateScreenSpaceSubsurfaceSetupPass);
             graph.AddPass(allocateScreenSpaceSubsurfaceProfileIDAndTypePass);
             if (useScreenSpaceSubsurfaceMaskTexture)
@@ -1504,7 +1496,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(screenSpaceSubsurfaceCopySourcePass);
-            graph.AddPass(screenSpaceSubsurfaceForwardPass);
             if (useScreenSpaceSubsurfaceBurley)
             {
                 graph.AddPass(screenSpaceSubsurfaceBuildVelocityPass);
@@ -1567,8 +1558,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(releaseScreenSpaceSubsurfaceVelocityPass);
             }
 
-            graph.AddPass(releaseScreenSpaceSubsurfaceEmissionPass);
-            graph.AddPass(releaseScreenSpaceSubsurfaceBaseColorPass);
             graph.AddPass(releaseScreenSpaceSubsurfaceSourcePass);
             if (useScreenSpaceSubsurfaceBurley)
             {

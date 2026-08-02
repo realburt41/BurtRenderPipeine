@@ -1947,6 +1947,7 @@ namespace Burt.RenderPipeline.Editor
                 material,
                 "BURT_TRANSPARENT_VERTEX_FOG",
                 transparent && material.HasProperty("_BlendMode") && !ignoreFog);
+            SetKeyword(material, "BURT_MATERIAL_TRANSPARENT", transparent);
             SetKeyword(material, "BURT_IGNORE_FOG", ignoreFog);
 
             if (material.HasProperty("_ZWrite"))

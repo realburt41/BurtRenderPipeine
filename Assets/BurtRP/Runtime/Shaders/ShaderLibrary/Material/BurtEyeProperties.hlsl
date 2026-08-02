@@ -26,6 +26,8 @@ CBUFFER_START(UnityPerMaterial)
     float _IOR;
     float _IrisRadius;
     float4 _IrisMaskBlurIntensity;
+    float4 _IrisFrontDirectionOS;
+    float _IrisFrontHemisphereFade;
     float _IrisConcavityScale;
     float _IrisConcavityPow;
     float _CorneaSpecular;

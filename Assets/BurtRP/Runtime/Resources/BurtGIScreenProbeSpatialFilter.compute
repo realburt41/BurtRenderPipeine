@@ -1,4 +1,5 @@
 #pragma kernel ScreenProbeFilterSpatialCS
+#pragma kernel ScreenProbeDirectionalSpatialCS
 
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
 #define BURT_GI_SCREEN_PROBE_PLACEMENT_THREADGROUP_SIZE 8
@@ -66,12 +67,14 @@ Texture2D<float4> _BurtGIScreenProbeTemporalRadianceTexture;
 Texture2D<float4> _BurtGIScreenProbeTemporalIrradianceTexture;
 Texture2D<float4> _BurtGIScreenProbeTemporalConfidenceTexture;
 Texture2D<float4> _BurtGIScreenProbeHitDistanceTexture;
+Texture2D<float4> _BurtGIScreenProbeDirectionalSpatialSourceTexture;
 float _BurtGISceneVoxelOctreeValid;
 
 RWTexture2D<float> _BurtGIScreenProbeTraceHitTexture;
 RWTexture2D<float4> _BurtGIScreenProbeFilteredRadianceWriteTexture;
 RWTexture2D<float4> _BurtGIScreenProbeFilteredIrradianceWriteTexture;
 RWTexture2D<float4> _BurtGIScreenProbeFilteredConfidenceWriteTexture;
+RWTexture2D<float4> _BurtGIScreenProbeDirectionalSpatialWriteTexture;
 
 
 
@@ -543,4 +546,88 @@ void ScreenProbeFilterSpatialCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     _BurtGIScreenProbeFilteredRadianceWriteTexture[probeCoord] = radiance;
     _BurtGIScreenProbeFilteredIrradianceWriteTexture[probeCoord] = irradiance;
     _BurtGIScreenProbeFilteredConfidenceWriteTexture[probeCoord] = confidence;
+}
+[numthreads(BURT_GI_SCREEN_PROBE_SPATIAL_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_SPATIAL_THREADGROUP_SIZE, 1)]
+void ScreenProbeDirectionalSpatialCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 atlasSize = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
+    uint2 atlasCoord = dispatchThreadId.xy;
+    if (any(atlasCoord >= atlasSize))
+    {
+        return;
+    }
+
+    float4 centerRadiance = _BurtGIScreenProbeDirectionalSpatialSourceTexture.Load(int3(atlasCoord, 0));
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 probeCoord = atlasCoord / traceResolution;
+    uint2 directionTexel = atlasCoord - probeCoord * traceResolution;
+    uint2 gridSize = max((uint2)_BurtGIScreenProbeGridParams.xy, uint2(1u, 1u));
+    if (_BurtGIScreenProbeFilterParams.x <= 0.0001f || any(probeCoord >= gridSize))
+    {
+        _BurtGIScreenProbeDirectionalSpatialWriteTexture[atlasCoord] = centerRadiance;
+        return;
+    }
+
+    float2 oct = ((float2(directionTexel) + 0.5f) / (float)traceResolution) * 2.0f - 1.0f;
+    float3 directionWS = float3(oct.x, 1.0f - abs(oct.x) - abs(oct.y), oct.y);
+    if (directionWS.y < 0.0f)
+    {
+        float2 directionSign = float2(directionWS.x >= 0.0f ? 1.0f : -1.0f, directionWS.z >= 0.0f ? 1.0f : -1.0f);
+        float2 folded = (1.0f - abs(directionWS.zx)) * directionSign;
+        directionWS.xz = folded;
+    }
+    directionWS = BurtGIScreenProbeTraceEarlySafeNormalize(directionWS, float3(0.0f, 1.0f, 0.0f));
+
+    float4 centerPositionData = _BurtGIScreenProbeWorldPositionTexture.Load(int3(probeCoord, 0));
+    float3 centerNormal = BurtGIScreenProbeDecodeNormalWS(_BurtGIScreenProbeWorldNormalTexture.Load(int3(probeCoord, 0)));
+    float4 centerHitData = _BurtGIScreenProbeHitDistanceTexture.Load(int3(probeCoord, 0));
+    float centerHitDistance = BurtGIDecodeScreenProbeHitDistanceForFiltering(centerHitData.r, centerHitData.z);
+    float centerHit = saturate(_BurtGIScreenProbeTraceHitTexture[atlasCoord]);
+    float4 radianceSum = centerRadiance;
+    float weightSum = 1.0f;
+    uint halfKernel = max(1u, (uint)round(max(_BurtGIScreenProbeFilterParams.y, 1.0f)));
+
+    [unroll(4)]
+    for (uint i = 0u; i < 4u; ++i)
+    {
+        int2 neighborProbeSigned = (int2)probeCoord + (int2)round(BurtGIScreenProbeDirection(i) * (float)halfKernel);
+        if (any(neighborProbeSigned < int2(0, 0)) || any(neighborProbeSigned >= (int2)gridSize))
+        {
+            continue;
+        }
+
+        uint2 neighborProbe = (uint2)neighborProbeSigned;
+        uint2 neighborAtlasCoord = min(neighborProbe * traceResolution + directionTexel, atlasSize - 1u);
+        float4 neighborPositionData = _BurtGIScreenProbeWorldPositionTexture.Load(int3(neighborProbe, 0));
+        float3 neighborNormal = BurtGIScreenProbeDecodeNormalWS(_BurtGIScreenProbeWorldNormalTexture.Load(int3(neighborProbe, 0)));
+        float normalWeight = saturate(dot(centerNormal, neighborNormal));
+        normalWeight *= normalWeight;
+        float planeDistance = abs(dot(neighborPositionData.xyz - centerPositionData.xyz, centerNormal));
+        float positionWeight = centerPositionData.a > 0.5f && neighborPositionData.a > 0.5f
+            ? exp2(-max(_BurtGIScreenProbeSpatialFilterParams.y, 0.001f) * planeDistance * planeDistance)
+            : 0.0f;
+        float4 neighborHitData = _BurtGIScreenProbeHitDistanceTexture.Load(int3(neighborProbe, 0));
+        float neighborHitDistance = BurtGIDecodeScreenProbeHitDistanceForFiltering(neighborHitData.r, neighborHitData.z);
+        float angleWeight = 1.0f;
+        if (centerHitDistance >= 0.0f && neighborHitDistance >= 0.0f)
+        {
+            float3 centerHitPosition = centerPositionData.xyz + directionWS * centerHitDistance;
+            float3 neighborHitPosition = neighborPositionData.xyz + directionWS * neighborHitDistance;
+            float3 hitDelta = neighborHitPosition - centerHitPosition;
+            float hitDeltaLength = length(hitDelta);
+            float hitAngle = hitDeltaLength > 0.0001f ? acos(saturate(dot(hitDelta / hitDeltaLength, directionWS))) : 0.0f;
+            angleWeight = 1.0f - saturate(hitAngle / max(_BurtGIScreenProbeSpatialFilterParams.x, 0.001f));
+        }
+
+        float neighborHit = saturate(_BurtGIScreenProbeTraceHitTexture[neighborAtlasCoord]);
+        float hitWeight = 1.0f - smoothstep(0.15f, 0.6f, abs(neighborHit - centerHit));
+        float weight = positionWeight * normalWeight * angleWeight * hitWeight;
+        radianceSum += _BurtGIScreenProbeDirectionalSpatialSourceTexture.Load(int3(neighborAtlasCoord, 0)) * weight;
+        weightSum += weight;
+    }
+
+    float4 result = radianceSum / max(weightSum, 0.0001f);
+    result.rgb = max(result.rgb, 0.0f);
+    result.a = saturate(result.a);
+    _BurtGIScreenProbeDirectionalSpatialWriteTexture[atlasCoord] = result;
 }

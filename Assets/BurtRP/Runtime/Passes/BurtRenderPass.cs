@@ -99,6 +99,8 @@
 
         public virtual bool AllowCulling => false; // Metadata only for now; execution order and pass count stay unchanged.
 
+        public virtual bool EnableAsyncCompute => false; // Opt-in only; passes must record through the graph context command buffer.
+
         public virtual void Configure(BurtRenderPassBuilder builder) // 定义 Pass 配置阶段入口，用来声明资源读写关系。
         {
         } // 默认实现为空，表示这个 Pass 暂时没有声明任何资源读写。

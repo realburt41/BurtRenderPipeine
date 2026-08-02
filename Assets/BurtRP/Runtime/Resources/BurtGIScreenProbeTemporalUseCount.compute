@@ -1,5 +1,6 @@
 #pragma kernel ScreenProbeFilterTemporalCS
 #pragma kernel ScreenProbeReprojectionCS
+#pragma kernel ScreenProbeDirectionalTemporalCS
 #pragma kernel ScreenProbeSceneVelocityCS
 #pragma kernel ScreenProbeClearUseCountCS
 #pragma kernel XGIScreenProbeUseCountScatterCS
@@ -78,6 +79,8 @@ Texture2D<float> _BurtGIScreenProbeHistoryScreenDepthTexture;
 Texture2D<float4> _BurtGIScreenProbeHistoryWorldPositionTexture;
 Texture2D<float4> _BurtGIScreenProbeHistoryWorldNormalTexture;
 Texture2D<float> _BurtGIScreenProbeHistoryTraceHitTexture;
+Texture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
+Texture2D<float4> _BurtGIScreenProbeHistoryTraceRadianceTexture;
 Texture2D<float4> _BurtGIScreenProbeSceneVelocityTexture;
 float _BurtGISceneVoxelOctreeValid;
 
@@ -88,6 +91,7 @@ RWTexture2D<float4> _BurtGIScreenProbeTemporalConfidenceWriteTexture;
 RWTexture2D<float> _BurtGIScreenProbeNumFramesAccumulatedWriteTexture;
 RWTexture2D<uint> _BurtGIScreenProbeUseCountTexture;
 RWTexture2D<float4> _BurtGIScreenProbeSceneVelocityOutputTexture;
+RWTexture2D<float4> _BurtGIScreenProbeDirectionalTemporalWriteTexture;
 
 
 
@@ -691,6 +695,93 @@ void ScreenProbeReprojectionCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     _BurtGIScreenProbeTemporalIrradianceWriteTexture[probeCoord] = irradiance;
     _BurtGIScreenProbeTemporalConfidenceWriteTexture[probeCoord] = confidence;
     _BurtGIScreenProbeNumFramesAccumulatedWriteTexture[probeCoord] = numFramesAccumulated;
+}
+[numthreads(BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, 1)]
+void ScreenProbeDirectionalTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 atlasSize = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
+    uint2 atlasCoord = dispatchThreadId.xy;
+    if (any(atlasCoord >= atlasSize))
+    {
+        return;
+    }
+
+    float4 currentRadiance = _BurtGIScreenProbeTraceRadianceTexture.Load(int3(atlasCoord, 0));
+    if (_BurtGIScreenProbeTemporalParams.y < 0.5f || _BurtGIScreenProbeTemporalParams.w < 0.5f)
+    {
+        _BurtGIScreenProbeDirectionalTemporalWriteTexture[atlasCoord] = currentRadiance;
+        return;
+    }
+
+    uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 probeCoord = atlasCoord / traceResolution;
+    uint2 directionTexel = atlasCoord - probeCoord * traceResolution;
+    uint2 gridSize = max((uint2)_BurtGIScreenProbeGridParams.xy, uint2(1u, 1u));
+    float4 historyRadiance = 0.0f;
+    float historyWeightSum = 0.0f;
+
+    if (all(probeCoord < gridSize))
+    {
+        float4 positionData = _BurtGIScreenProbeWorldPositionTexture.Load(int3(probeCoord, 0));
+        float4 normalData = _BurtGIScreenProbeWorldNormalTexture.Load(int3(probeCoord, 0));
+        float2 historyUV;
+        float projectedRawDepth;
+        if (positionData.a > 0.5f && normalData.a > 0.5f &&
+            BurtGIResolveScreenProbeHistoryUV(probeCoord, gridSize, positionData.xyz, historyUV, projectedRawDepth))
+        {
+            float2 historyProbeCoordFloat = saturate(historyUV) * (float2)gridSize - 0.5f;
+            int2 historyBaseCoord = (int2)floor(historyProbeCoordFloat);
+            float2 historyFraction = historyProbeCoordFloat - floor(historyProbeCoordFloat);
+            float4 plane = float4(BurtGIScreenProbeDecodeNormalWS(normalData), -dot(positionData.xyz, BurtGIScreenProbeDecodeNormalWS(normalData)));
+            [unroll]
+            for (int y = 0; y < 2; ++y)
+            {
+                [unroll]
+                for (int x = 0; x < 2; ++x)
+                {
+                    int2 historyProbe = historyBaseCoord + int2(x, y);
+                    if (any(historyProbe < int2(0, 0)) || any(historyProbe >= (int2)gridSize))
+                    {
+                        continue;
+                    }
+
+                    float4 historyPosition = _BurtGIScreenProbeHistoryWorldPositionTexture.Load(int3(historyProbe, 0));
+                    float4 historyNormal = _BurtGIScreenProbeHistoryWorldNormalTexture.Load(int3(historyProbe, 0));
+                    float normalWeight = historyNormal.a > 0.5f
+                        ? saturate((dot(BurtGIScreenProbeDecodeNormalWS(normalData), BurtGIScreenProbeDecodeNormalWS(historyNormal)) - _BurtGIScreenProbeReprojectionParams.w) /
+                            max(1.0f - _BurtGIScreenProbeReprojectionParams.w, 0.0001f))
+                        : 0.0f;
+                    float planeDistance = historyPosition.a > 0.5f ? abs(dot(float4(historyPosition.xyz, 1.0f), plane)) : 1e6f;
+                    float planeWeight = exp2(-1000.0f * planeDistance * planeDistance / max(dot(positionData.xyz - _BurtDeferredCameraWorldPosition.xyz, positionData.xyz - _BurtDeferredCameraWorldPosition.xyz), 0.01f));
+                    float2 bilinear = float2(x == 0 ? 1.0f - historyFraction.x : historyFraction.x, y == 0 ? 1.0f - historyFraction.y : historyFraction.y);
+                    float weight = bilinear.x * bilinear.y * normalWeight * planeWeight;
+                    uint2 historyAtlasCoord = (uint2)historyProbe * traceResolution + directionTexel;
+                    historyAtlasCoord = min(historyAtlasCoord, atlasSize - 1u);
+                    historyRadiance += _BurtGIScreenProbeHistoryTraceRadianceTexture.Load(int3(historyAtlasCoord, 0)) * weight;
+                    historyWeightSum += weight;
+                }
+            }
+        }
+    }
+    else
+    {
+        historyRadiance = _BurtGIScreenProbeHistoryTraceRadianceTexture.Load(int3(atlasCoord, 0));
+        historyWeightSum = 0.25f;
+    }
+
+    if (historyWeightSum > 0.0001f)
+    {
+        historyRadiance /= historyWeightSum;
+        float currentHit = saturate(_BurtGIScreenProbeTraceHitTexture[atlasCoord]);
+        float historyHit = saturate(_BurtGIScreenProbeHistoryTraceHitTexture.Load(int3(atlasCoord, 0)));
+        float hitWeight = 1.0f - smoothstep(0.15f, 0.6f, abs(currentHit - historyHit));
+        float temporalWeight = saturate(_BurtGIScreenProbeTemporalParams.x) * saturate(historyWeightSum) * hitWeight;
+        currentRadiance = lerp(currentRadiance, historyRadiance, temporalWeight);
+    }
+
+    currentRadiance.rgb = max(currentRadiance.rgb, 0.0f);
+    currentRadiance.a = saturate(currentRadiance.a);
+    _BurtGIScreenProbeDirectionalTemporalWriteTexture[atlasCoord] = currentRadiance;
 }
 [numthreads(BURT_GI_SCREEN_PROBE_USE_COUNT_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_USE_COUNT_THREADGROUP_SIZE, 1)]
 void ScreenProbeClearUseCountCS(uint3 dispatchThreadId : SV_DispatchThreadID)

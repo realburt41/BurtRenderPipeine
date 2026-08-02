@@ -23,6 +23,7 @@ void BurtResolveSubsurfaceDeferredPostprocessTransmission(
 #endif
 }
 
+#if !defined(BURT_PBR_DIRECT_ONLY)
 BurtPBRShadingComponents BurtApplySubsurfacePBRShadingComponents(
     BurtPBRShadingComponents Components,
     BurtPBRShadingCoreData CoreData,
@@ -55,5 +56,6 @@ BurtPBRShadingComponents BurtApplySubsurfacePBRShadingComponents(
 
     return Components;
 }
+#endif
 
 #endif // BURT_LIGHTING_PBR_CORE_SUBSURFACE_INCLUDED

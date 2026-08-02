@@ -53,6 +53,8 @@ namespace Burt.RenderPipeline.Editor
         private MaterialProperty irisColorRotateSpeed;
         private MaterialProperty irisRadius;
         private MaterialProperty irisMaskBlurIntensity;
+        private MaterialProperty irisFrontDirectionOS;
+        private MaterialProperty irisFrontHemisphereFade;
         private MaterialProperty irisConcavityScale;
         private MaterialProperty irisConcavityPow;
         private MaterialProperty scleraColor;
@@ -120,6 +122,8 @@ namespace Burt.RenderPipeline.Editor
             irisColorRotateSpeed = Find("_IrisColorRotateSpeed");
             irisRadius = Find("_IrisRadius");
             irisMaskBlurIntensity = Find("_IrisMaskBlurIntensity");
+            irisFrontDirectionOS = Find("_IrisFrontDirectionOS");
+            irisFrontHemisphereFade = Find("_IrisFrontHemisphereFade");
             irisConcavityScale = Find("_IrisConcavityScale");
             irisConcavityPow = Find("_IrisConcavityPow");
             scleraColor = Find("_ScleraColor");
@@ -174,7 +178,7 @@ namespace Burt.RenderPipeline.Editor
                         EditorGUILayout.TextField(CullLabel, ((CullMode)Mathf.RoundToInt(cull.floatValue)).ToString());
                     }
 
-                    EditorGUILayout.TextField(EnabledPassesLabel, "BurtDepthOnly, BurtMotionVectors, BurtDepthNormals, BurtGBuffer, ShadowCaster, BurtForward");
+                    EditorGUILayout.TextField(EnabledPassesLabel, "BurtDepthOnly, BurtMotionVectors, BurtDepthNormals, ShadowCaster, BurtForwardOnly");
                 }
             }
 
@@ -242,6 +246,8 @@ namespace Burt.RenderPipeline.Editor
             DrawProperty(irisColorRotateSpeed);
             DrawProperty(irisRadius);
             DrawProperty(irisMaskBlurIntensity);
+            DrawProperty(irisFrontDirectionOS);
+            DrawProperty(irisFrontHemisphereFade);
             DrawProperty(irisConcavityScale);
             DrawProperty(irisConcavityPow);
             BurtShaderGUIUtility.EndSection();
@@ -347,9 +353,10 @@ namespace Burt.RenderPipeline.Editor
             material.SetShaderPassEnabled("BurtMotionVectors", true);
             material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
             material.SetShaderPassEnabled("BurtDepthNormals", true);
-            material.SetShaderPassEnabled("BurtGBuffer", true);
+            material.SetShaderPassEnabled("BurtGBuffer", false);
             material.SetShaderPassEnabled("ShadowCaster", true);
-            material.SetShaderPassEnabled("BurtForward", true);
+            material.SetShaderPassEnabled("BurtForward", false);
+            material.SetShaderPassEnabled("BurtForwardOnly", true);
         }
 
         private static void ApplyGBufferStencilState(Material material)
