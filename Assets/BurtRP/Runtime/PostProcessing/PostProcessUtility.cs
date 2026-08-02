@@ -5,8 +5,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 {
     internal static class PostProcessUtility // 定义后处理工具类，用来集中判断后处理框架是否应该运行。
     {
-        public const float BloomPrefilterFireflyClamp = 64f;
-        public const int BloomGaussianMaxSamples = 64;
+        public const float BloomPrefilterFireflyClamp = 0f;
+        public const int BloomGaussianMaxSamples = 32;
+        public const int BloomGaussianSampleCapacity = 64;
         public const int BloomXRenderStageCountMax = 6;
 
         public static bool IsPostProcessSuppressedByShadingDebug()
@@ -47,6 +48,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                     return 2;
                 case BurtShadingDebugMode.AutoExposureHistogramRange:
                     return 3;
+                case BurtShadingDebugMode.ExposureHDRSceneIlluminance:
+                    return 1;
+                case BurtShadingDebugMode.ExposureHDRSceneLuminance:
+                    return 2;
+                case BurtShadingDebugMode.ExposureHDRExposedLuminance:
+                    return 3;
+                case BurtShadingDebugMode.ExposureHDRToneMappedLuminance:
+                    return 4;
+                case BurtShadingDebugMode.ExposureHDRLightMeter:
+                    return 5;
+                case BurtShadingDebugMode.ExposureHDRLocalExposure:
+                    return 6;
+                case BurtShadingDebugMode.ExposureHDRLuminanceContrast:
+                    return 7;
                 default:
                     return 0;
             }
@@ -115,6 +130,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             return descriptor;
         }
 
+        public static RenderTextureDescriptor CreateBloomInputRenderTextureDescriptor(Camera camera, int width, int height)
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            descriptor.width = Mathf.Max(1, width);
+            descriptor.height = Mathf.Max(1, height);
+            if (SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf))
+            {
+                descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            }
+
+            descriptor.sRGB = false;
+            return descriptor;
+        }
+
         public static int ResolveBloomSourceWidth(Camera camera)
         {
             if (camera == null)
@@ -122,7 +151,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return 1;
             }
 
-            return Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth);
+            return Mathf.Max(1, BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera).width);
         }
 
         public static int ResolveBloomSourceHeight(Camera camera)
@@ -132,15 +161,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return 1;
             }
 
-            return Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight);
+            return Mathf.Max(1, BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera).height);
         }
 
         public static int GetBloomMipWidth(Camera camera, int mipIndex)
         {
-            var width = Mathf.Max(1, ResolveBloomSourceWidth(camera) / 2);
-            for (var i = 0; i < mipIndex; i++)
+            var width = ResolveBloomSourceWidth(camera);
+            for (var i = 0; i <= Mathf.Max(0, mipIndex); i++)
             {
-                width = Mathf.Max(1, width / 2);
+                width = Mathf.Max(1, (width + 1) / 2);
             }
 
             return Mathf.Max(1, width);
@@ -148,10 +177,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
         public static int GetBloomMipHeight(Camera camera, int mipIndex)
         {
-            var height = Mathf.Max(1, ResolveBloomSourceHeight(camera) / 2);
-            for (var i = 0; i < mipIndex; i++)
+            var height = ResolveBloomSourceHeight(camera);
+            for (var i = 0; i <= Mathf.Max(0, mipIndex); i++)
             {
-                height = Mathf.Max(1, height / 2);
+                height = Mathf.Max(1, (height + 1) / 2);
             }
 
             return Mathf.Max(1, height);
@@ -159,8 +188,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
         public static long CalculateBloomMipPixelCount(Camera camera, int mipCount)
         {
+            if (mipCount <= 0)
+            {
+                return 0L;
+            }
+
             var pixelCount = 0L;
-            for (var i = 0; i < mipCount; i++)
+            for (var i = 0; i < BloomXRenderStageCountMax; i++)
             {
                 pixelCount += (long)GetBloomMipWidth(camera, i) * GetBloomMipHeight(camera, i);
             }
@@ -176,7 +210,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             }
 
             var builder = new System.Text.StringBuilder();
-            for (var i = 0; i < mipCount; i++)
+            for (var i = 0; i < BloomXRenderStageCountMax; i++)
             {
                 if (i > 0)
                 {
@@ -198,10 +232,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
             if (debugView >= BloomDebugView.Mip1 && debugView <= BloomDebugView.Mip5)
             {
-                return Mathf.Clamp((int)debugView - (int)BloomDebugView.Mip1 + 1, 0, Mathf.Max(0, mipCount - 1));
+                return Mathf.Clamp((int)debugView - (int)BloomDebugView.Mip1 + 1, 1, BloomXRenderStageCountMax - 1);
             }
 
-            return 0;
+            return debugView == BloomDebugView.Prefilter ? 0 : ResolveBloomFirstStageMipIndex(mipCount);
         }
 
         public static string FormatBloomDebugTarget(Camera camera, BloomDebugView debugView, int mipCount)
@@ -294,8 +328,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
         public static float CalculateBloomBlurKernelSizePercent(BloomSettings settings, int stageIndexFromSmallest)
         {
-            var scatter = Mathf.Clamp01(settings.Scatter);
-            return ResolveBloomStageSize(settings, stageIndexFromSmallest) * Mathf.Max(0f, settings.SizeScale) * Mathf.Lerp(0.5f, 4f, scatter);
+            return ResolveBloomStageSize(settings, stageIndexFromSmallest) * Mathf.Max(0f, settings.SizeScale);
+        }
+
+        public static int ResolveBloomFirstStageMipIndex(int stageCount)
+        {
+            return Mathf.Clamp(BloomXRenderStageCountMax - Mathf.Clamp(stageCount, 1, BloomXRenderStageCountMax), 0, BloomXRenderStageCountMax - 1);
         }
 
         public static float CalculateBloomBlurRadius(BloomSettings settings, int sourceWidth, int stageIndexFromSmallest)
@@ -335,7 +373,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                     builder.Append(';');
                 }
 
-                var mipIndex = mipCount - 1 - stageIndex;
+                var mipIndex = BloomXRenderStageCountMax - 1 - stageIndex;
                 var width = GetBloomMipWidth(camera, mipIndex);
                 var height = GetBloomMipHeight(camera, mipIndex);
                 var radius = CalculateBloomBlurRadius(settings, width, stageIndex);
@@ -374,7 +412,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
 
         public static float ResolveBloomPrefilterKnee(BloomSettings settings)
         {
-            return Mathf.Max(settings.Threshold * settings.SoftKnee, 0.0001f);
+            return 0f;
         }
 
         public static float ResolveBloomPrefilterSourceThreshold(BloomSettings settings, float postExposureMultiplier)
@@ -731,9 +769,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
             if (exposure.mode.value == ExposureMode.Automatic || exposure.mode.value == ExposureMode.AutomaticHistogram)
             {
                 var camera = request != null ? request.Camera : null;
-                return updateAutoExposure
-                    ? AutoExposureUtility.UpdateAfterCapture(camera, exposure, deltaTime)
-                    : AutoExposureUtility.ResolveSettings(camera, exposure);
+                return GpuExposureUtility.ResolveSettings(camera, exposure);
             }
 
             return new PhysicalExposureSettings(
@@ -1196,31 +1232,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return 0; // 返回 0，保持安全跳过。
             }
 
-            var width = GetBloomMipWidth(camera, 0); // Bloom mip0 使用半分辨率，并保持最小 1。
-            var height = GetBloomMipHeight(camera, 0); // Bloom mip0 使用半分辨率，并保持最小 1。
             var qualityMipCount = ResolveBloomQualityMipCount(settings.Quality); // 按 XRender Q1-Q5 映射到最多参与的 Bloom 阶段数。
             if (qualityMipCount <= 0) // 质量档关闭或无效时跳过 Bloom 链。
             {
                 return 0; // 返回 0 表示不申请 Bloom mip。
             }
 
-            var maxMipCount = Mathf.Min(Mathf.Clamp(settings.MaxMipCount, 1, 8), qualityMipCount); // 质量档决定目标阶段数，maxIterations 作为兼容上限继续生效。
-            var count = 0; // 记录实际可用 mip 数。
-
-            while (count < maxMipCount && width >= 1 && height >= 1) // 按分辨率逐级停止，避免申请 0 尺寸 RT。
-            {
-                count++; // 当前尺寸可用，纳入 mip 链。
-
-                if (width == 1 && height == 1) // 已经到 1x1 时不能继续下降。
-                {
-                    break; // 停止 mip 计算。
-                }
-
-                width = Mathf.Max(1, width / 2); // 下一层宽度减半，并保持最小 1。
-                height = Mathf.Max(1, height / 2); // 下一层高度减半，并保持最小 1。
-            }
-
-            return count; // 返回实际 mip 数。
+            return Mathf.Min(Mathf.Clamp(settings.MaxMipCount, 1, BloomXRenderStageCountMax), qualityMipCount); // XRender 从公共半分辨率 Scene Downsample 开始，质量档只决定六级链里从哪个 mip 开始做高斯。
         }
 
         private static int ResolveBloomQualityMipCount(BloomQuality quality) // 对齐 XRender Bloom Q1-Q5 到 stage/mip 数的映射。

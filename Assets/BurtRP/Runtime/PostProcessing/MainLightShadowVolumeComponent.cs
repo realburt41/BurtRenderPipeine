@@ -4,6 +4,24 @@ using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline
 {
+    public enum BurtMainLightShadowFilterMode
+    {
+        UseLightSettings = 0,
+        Hard = 1,
+        PCF3 = 3,
+        PCF5 = 5,
+        PCF7 = 7
+    }
+
+    [Serializable]
+    public sealed class BurtMainLightShadowFilterModeParameter : VolumeParameter<BurtMainLightShadowFilterMode>
+    {
+        public BurtMainLightShadowFilterModeParameter(BurtMainLightShadowFilterMode value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
     [Serializable]
     [VolumeComponentMenu("Rendering/Main Light Shadows")]
     [UnityEngine.Scripting.APIUpdating.MovedFromAttribute(true, "Burt.RenderPipeline", null, "BurtMainLightShadowVolumeComponent")]
@@ -29,8 +47,12 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter normalBias = new ClampedFloatParameter(BurtShadowData.DefaultMainLightShadowNormalBias, 0f, 10f);
         public ClampedFloatParameter sampleBias = new ClampedFloatParameter(BurtShadowData.DefaultMainLightShadowSampleBias, 0f, 0.1f);
 
-        [Title("PCSS")]
-        [InfoBox("PCSS replaces BurtRP hard shadow sampling with contact-hardening filtering. Set the main Directional Light to Hard Shadows, then enable PCSS here.")]
+        [Title("Filtering")]
+        [InfoBox("Use Light Settings follows the Directional Light: Hard uses one comparison sample and Soft uses XRender's optimized PCF 5x5 filter. Explicit PCF modes override the Light shadow type.")]
+        public BurtMainLightShadowFilterModeParameter filterMode = new BurtMainLightShadowFilterModeParameter(BurtMainLightShadowFilterMode.UseLightSettings);
+
+        [Title("Legacy PCSS Compatibility")]
+        [InfoBox("The active XRender main-light path is fixed-kernel PCF, not variable-radius PCSS. When Filter Mode is Use Light Settings, legacy PCSS Enabled maps to PCF 5x5; explicit Filter Mode takes priority.")]
         public BoolParameter pcssEnabled = new BoolParameter(false);
         public ClampedFloatParameter pcssLightSize = new ClampedFloatParameter(BurtShadowData.DefaultMainLightShadowPCSSLightSize, 0f, 64f);
         public ClampedFloatParameter pcssBlockerSearchRadius = new ClampedFloatParameter(BurtShadowData.DefaultMainLightShadowPCSSBlockerSearchRadius, 0f, 64f);
@@ -38,7 +60,7 @@ namespace Burt.RenderPipeline
 
         public bool HasAnyOverride()
         {
-            return active && (enabled.overrideState || resolution.overrideState || distance.overrideState || cascadeCount.overrideState || cascadeSplit1.overrideState || cascadeSplit2.overrideState || cascadeSplit3.overrideState || cascadeBlendDistance.overrideState || shadowFadeDistance.overrideState || depthBias.overrideState || normalBias.overrideState || sampleBias.overrideState || pcssEnabled.overrideState || pcssLightSize.overrideState || pcssBlockerSearchRadius.overrideState || pcssMaxFilterRadius.overrideState);
+            return active && (enabled.overrideState || resolution.overrideState || distance.overrideState || cascadeCount.overrideState || cascadeSplit1.overrideState || cascadeSplit2.overrideState || cascadeSplit3.overrideState || cascadeBlendDistance.overrideState || shadowFadeDistance.overrideState || depthBias.overrideState || normalBias.overrideState || sampleBias.overrideState || filterMode.overrideState || pcssEnabled.overrideState || pcssLightSize.overrideState || pcssBlockerSearchRadius.overrideState || pcssMaxFilterRadius.overrideState);
         }
     }
 }

@@ -26,7 +26,6 @@
 
 float _BurtDeferredSubsurfaceDiffuseLuminanceOutputEnabled;
 StructuredBuffer<uint> _BurtPunctualTileIds;
-float _BurtPunctualTileDrawEnabled;
 uint _BurtPunctualTileIdOffset;
 
 struct BurtDeferredAdditionalLightingComponents
@@ -51,13 +50,7 @@ struct BurtDeferredAdditionalVaryings
 BurtDeferredAdditionalVaryings Vert(BurtDeferredAdditionalAttributes Input)
 {
     BurtDeferredAdditionalVaryings Output;
-    if (_BurtPunctualTileDrawEnabled <= 0.5f)
-    {
-        Output.PositionCS = BurtGetFullScreenTriangleVertexPosition(Input.VertexID);
-        Output.ScreenUV = BurtGetFullScreenTriangleTexCoord(Input.VertexID);
-        return Output;
-    }
-
+#if defined(BURT_PUNCTUAL_TILE_DRAW)
     uint packedTileId = _BurtPunctualTileIds[_BurtPunctualTileIdOffset + Input.InstanceID];
     uint tileX = packedTileId & 0xffffu;
     uint tileY = (packedTileId >> 16) & 0xffffu;
@@ -77,6 +70,10 @@ BurtDeferredAdditionalVaryings Vert(BurtDeferredAdditionalAttributes Input)
     Output.ScreenUV = clusterUV;
 #if UNITY_UV_STARTS_AT_TOP
     Output.ScreenUV.y = 1.0f - Output.ScreenUV.y;
+#endif
+#else
+    Output.PositionCS = BurtGetFullScreenTriangleVertexPosition(Input.VertexID);
+    Output.ScreenUV = BurtGetFullScreenTriangleTexCoord(Input.VertexID);
 #endif
     return Output;
 }

@@ -99,9 +99,9 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ShadowCascadeIndex = 214, // 阴影调试：用颜色显示当前像素命中的主光 CSM cascade。
         ShadowCascadeBlend = 215, // 阴影调试：显示 cascade 边界混合权重，白色表示正在混合到下一级 cascade。
         ShadowDistanceFade = 216, // 阴影调试：显示最后一级 cascade 的远距离 fade，白色表示已经淡出到无阴影。
-        ShadowPCSSRadius = 217, // 阴影调试：显示当前像素估算出的 PCSS 半影半径。
+        ShadowPCSSRadius = 217, // 兼容名称：显示当前选择的 XRender 优化 PCF filter 对阴影图的覆盖。
         ShadowReceiverDepthDelta = 218, // 阴影调试：0.5 灰表示 receiver/shadow depth 基本对齐，亮表示 acne 压力，暗表示 bias 过强。
-        ShadowPCSSBlockerFraction = 225, // 阴影调试：显示 PCSS blocker search 命中的 blocker 样本占比。
+        ShadowPCSSBlockerFraction = 225, // 兼容名称：XRender 主方向光不做 PCSS blocker search，固定输出 0。
         AdditionalLighting = 219, // 光照调试：只显示追加光直接光，不包含主光、间接光和自发光。
         AdditionalDiffuse = 220, // 光照调试：只显示追加光漫反射，方便检查多光源 NdotL 和距离衰减。
         AdditionalSpecular = 221, // 光照调试：只显示追加光高光，方便检查多光源镜面贡献。
@@ -285,6 +285,13 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         AutoExposureLuminance = 384, // Auto exposure debug: log luminance heatmap from current CameraColor.
         AutoExposureMeteringWeight = 385, // Auto exposure debug: center-weighted metering mask used by lightweight histogram.
         AutoExposureHistogramRange = 386, // Auto exposure debug: current histogram EV range and out-of-range colors.
+        ExposureHDRSceneIlluminance = 520, // XRender Visualize HDR: un-pre-exposed scene illuminance in lux.
+        ExposureHDRSceneLuminance = 521, // XRender Visualize HDR: un-pre-exposed scene luminance in cd/m2.
+        ExposureHDRExposedLuminance = 522, // XRender Visualize HDR: luminance after current GPU exposure.
+        ExposureHDRToneMappedLuminance = 523, // XRender Visualize HDR: luminance after the selected tone curve.
+        ExposureHDRLightMeter = 524, // XRender Visualize HDR: histogram percentile / metering diagnostics.
+        ExposureHDRLocalExposure = 525, // XRender Visualize HDR: local exposure multiplier.
+        ExposureHDRLuminanceContrast = 526, // XRender Visualize HDR: local base/detail luminance contrast.
         ScreenSpaceAmbientOcclusionSurfaceStability = 387, // SSAO debug: current-frame depth/normal stability used to gate temporal history.
         ScreenSpaceAmbientOcclusionDiagnosticCompare = 388, // SSAO debug: quadrant compare for raw/final/history/difference with temporal gates.
         ScreenSpaceGlobalIlluminationRaw = 389, // BurtGI debug: raw screen-space diffuse GI before the depth/normal bilateral blur.

@@ -7,8 +7,8 @@ namespace Burt.RenderPipeline
     {
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int CameraColorTextureId = BurtRenderGraphResourceRegistry.CameraColorTextureId;
-        private static readonly int FogSourceColorTextureId = Shader.PropertyToID("_BurtFogSourceColorTexture");
         private static readonly int FogParamsId = Shader.PropertyToID("_BurtFogParams");
+        private static readonly int FogSecondLayerParamsId = Shader.PropertyToID("_BurtFogSecondLayerParams");
         private static readonly int FogDistanceParamsId = Shader.PropertyToID("_BurtFogDistanceParams");
         private static readonly int FogAlbedoId = Shader.PropertyToID("_BurtFogAlbedo");
         private static readonly int FogScatteringParamsId = Shader.PropertyToID("_BurtFogScatteringParams");
@@ -38,6 +38,8 @@ namespace Burt.RenderPipeline
 
             builder.ReadCameraColor();
             builder.ReadCameraDepth();
+            builder.WriteRenderTarget(BurtRenderGraphResourceRegistry.FogSourceColorName);
+            builder.AllowUnconsumedRenderTargetWrite(BurtRenderGraphResourceRegistry.FogSourceColorName);
             if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftOcclusion(builder.Request))
             {
                 builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.LightShaftOcclusionName);
@@ -80,20 +82,32 @@ namespace Burt.RenderPipeline
 
             UploadMaterialProperties(drawMaterial, camera, request, settings);
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             BurtLightShaftOcclusionUtility.BindForOpaqueFog(cmd, context);
             BurtAtmosphereLutUtility.EnsureAndBindForFog(cmd, drawMaterial, camera, request);
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
-            cmd.GetTemporaryRT(FogSourceColorTextureId, descriptor, FilterMode.Bilinear);
-            cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(FogSourceColorTextureId));
+            context.ResourceRegistry.SetRenderTargetDescriptor(
+                BurtRenderGraphResourceRegistry.FogSourceColorName,
+                descriptor,
+                FilterMode.Bilinear,
+                "Burt Fog Source Color");
+            var fogSourceTarget = context.ResourceRegistry.AllocateRenderTarget(
+                BurtRenderGraphResourceRegistry.FogSourceColorName);
+            if (!fogSourceTarget.IsValid)
+            {
+                context.ReleaseCommandBuffer(cmd);
+                return;
+            }
+
+            cmd.Blit(cameraColorTarget.Identifier, fogSourceTarget.Identifier);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.SetGlobalTexture(CameraColorTextureId, new RenderTargetIdentifier(FogSourceColorTextureId));
+            cmd.SetGlobalTexture(CameraColorTextureId, fogSourceTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, 0, MeshTopology.Triangles, 3, 1);
-            cmd.ReleaseTemporaryRT(FogSourceColorTextureId);
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
+            context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.FogSourceColorName);
         }
 
         private static void UploadMaterialProperties(Material targetMaterial, Camera camera, BurtRenderRequest request, BurtFogSettings settings)
@@ -103,6 +117,11 @@ namespace Burt.RenderPipeline
                 camera,
                 settings);
             targetMaterial.SetVector(FogParamsId, new Vector4(settings.Height, settings.Density, settings.HeightFalloff, settings.MaxOpacity));
+            targetMaterial.SetVector(FogSecondLayerParamsId, new Vector4(
+                settings.Height + settings.SecondLayerHeightOffset,
+                settings.SecondLayerDensity,
+                settings.SecondLayerHeightFalloff,
+                0f));
             targetMaterial.SetVector(FogDistanceParamsId, new Vector4(effectiveStartDistance, settings.CutoffDistance, 0f, 0f));
             targetMaterial.SetColor(FogAlbedoId, settings.Albedo);
             targetMaterial.SetVector(FogScatteringParamsId, new Vector4(

@@ -440,8 +440,12 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
     BurtDirectPBRComponents AdditionalDirectComponents = BurtCreateZeroPBRDirectComponents();
     int AdditionalLightCount = BurtGetAdditionalLightCount();
 
+    #if defined(BURT_PUNCTUAL_BIN_1_2)
+    [unroll(2)]
+    #else
     [loop]
-    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; LocalLightIndex++)
+    #endif
+    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_PUNCTUAL_LIGHT_LOOP_MAX; LocalLightIndex++)
     {
         if (LocalLightIndex >= Range.y)
         {
@@ -454,7 +458,11 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
             continue;
         }
 
+        #if defined(BURT_PUNCTUAL_BIN_UNSHADOWED)
+        BurtLight AdditionalLight = BurtCreateAdditionalLightUnshadowed((int)StoredLightIndex, PositionWS, CoreData.GeometryData.NormalWS);
+        #else
         BurtLight AdditionalLight = BurtCreateAdditionalLight((int)StoredLightIndex, PositionWS, CoreData.GeometryData.NormalWS);
+        #endif
         AdditionalDirectComponents = BurtAddPBRDirectComponents(AdditionalDirectComponents, BurtEvaluatePBRDirectFromCore(CoreData, AdditionalLight));
     }
 
@@ -482,8 +490,12 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
     BurtDirectPBRComponents AdditionalDirectComponents = BurtCreateZeroPBRDirectComponents();
     int AdditionalLightCount = BurtGetAdditionalLightCount();
 
+    #if defined(BURT_PUNCTUAL_BIN_1_2)
+    [unroll(2)]
+    #else
     [loop]
-    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; LocalLightIndex++)
+    #endif
+    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_PUNCTUAL_LIGHT_LOOP_MAX; LocalLightIndex++)
     {
         if (LocalLightIndex >= Range.y)
         {
@@ -496,7 +508,11 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingFromCore(BurtPBRS
             continue;
         }
 
+        #if defined(BURT_PUNCTUAL_BIN_UNSHADOWED)
+        BurtLight AdditionalLight = BurtCreateAdditionalLightUnshadowed((int)StoredLightIndex, PositionWS, CoreData.GeometryData.NormalWS);
+        #else
         BurtLight AdditionalLight = BurtCreateAdditionalLight((int)StoredLightIndex, PositionWS, CoreData.GeometryData.NormalWS, ShadowPositionWS);
+        #endif
         AdditionalDirectComponents = BurtAddPBRDirectComponents(AdditionalDirectComponents, BurtEvaluatePBRDirectFromCore(CoreData, AdditionalLight));
     }
 
@@ -548,8 +564,12 @@ BurtDirectPBRComponents BurtEvaluatePBRAdditionalDirectLightingUnshadowedFromCor
     BurtDirectPBRComponents AdditionalDirectComponents = BurtCreateZeroPBRDirectComponents();
     int AdditionalLightCount = BurtGetAdditionalLightCount();
 
+    #if defined(BURT_PUNCTUAL_BIN_1_2)
+    [unroll(2)]
+    #else
     [loop]
-    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; LocalLightIndex++)
+    #endif
+    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_PUNCTUAL_LIGHT_LOOP_MAX; LocalLightIndex++)
     {
         if (LocalLightIndex >= Range.y)
         {

@@ -25,7 +25,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.BeginSample(Name);
             var renderingLayerMask = multipassPass == BurtMultipassShaderPass.ShadowCaster
                 ? (int)BurtPerObjectShadow.MainLightRenderingLayerMask
@@ -38,7 +38,7 @@ namespace Burt.RenderPipeline
             BurtMultipassRenderer.DrawAll(cmd, context, multipassPass, renderQueueRange, renderingLayerMask);
             cmd.EndSample(Name);
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         protected abstract bool BindTargets(BurtRenderGraphContext context);
@@ -65,12 +65,12 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(Name + " Bind");
+            var cmd = context.AcquireCommandBuffer(Name + " Bind");
             cmd.SetRenderTarget(context.CameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
     }
@@ -104,7 +104,7 @@ namespace Burt.RenderPipeline
 
         protected override bool BindTargets(BurtRenderGraphContext context)
         {
-            return BurtDrawingSettingsUtility.BindCameraColorAndDepth(context, Name + " Bind");
+            return BurtDrawingSettingsUtility.BindCameraColorAndDepth(context, Name + " Bind", false);
         }
     }
 
@@ -133,7 +133,7 @@ namespace Burt.RenderPipeline
 
         protected override bool BindTargets(BurtRenderGraphContext context)
         {
-            return BurtDrawingSettingsUtility.BindCameraColorAndDepth(context, Name + " Bind");
+            return BurtDrawingSettingsUtility.BindCameraColorAndDepth(context, Name + " Bind", false);
         }
     }
 
@@ -162,7 +162,7 @@ namespace Burt.RenderPipeline
 
         protected override bool BindTargets(BurtRenderGraphContext context)
         {
-            return BurtDrawingSettingsUtility.BindCameraColorAndDepth(context, Name + " Bind");
+            return BurtDrawingSettingsUtility.BindCameraColorAndDepth(context, Name + " Bind", false);
         }
     }
 
@@ -208,7 +208,7 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            var cmd = CommandBufferPool.Get(Name + " Bind");
+            var cmd = context.AcquireCommandBuffer(Name + " Bind");
             BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(
                 cmd,
                 gbuffer0Target,
@@ -222,7 +222,7 @@ namespace Burt.RenderPipeline
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
             return true;
         }
     }

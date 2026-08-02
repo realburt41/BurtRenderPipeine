@@ -522,14 +522,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理设
 
     internal readonly struct BloomSettings // 定义 Bloom 的运行时参数包，让 Pass 不直接依赖 Volume 组件字段。
     {
-        public const float DefaultThreshold = 1.0f; // 默认只让 HDR 高光进入 Bloom。
-        public const float DefaultIntensity = 0.6f; // 默认强度保持可见但不过曝，便于第一版诊断。
+        public const float DefaultThreshold = 0.7f; // 对齐 XRender PC Bloom 默认阈值。
+        public const float DefaultIntensity = 0.675f; // 对齐 XRender PC Bloom 默认强度。
         public const float DefaultScatter = 0.65f; // 默认散布控制上采样叠加权重。
-        public const float DefaultSizeScale = 1f; // 默认保持旧 scatter 尺寸语义，新增参数只作为额外 XRender 风格尺寸倍率。
+        public const float DefaultSizeScale = 4f; // 对齐 XRender PC Bloom 默认尺寸倍率。
         public const BloomQuality DefaultQuality = BloomQuality.Q4; // 默认对齐当前 5-stage 行为，同时暴露 XRender 风格质量档。
         public const BloomDebugView DefaultDebugView = BloomDebugView.Disabled; // 默认不显示 Bloom 调试纹理。
         public const int DefaultMaxMipCount = 6; // 默认上限允许 Q5 使用 6 级；默认 Q4 仍保持当前 5-stage 视觉。
-        public const float DefaultSoftKnee = 0.5f; // 默认软阈值让高光进入 Bloom 时更平滑。
+        public const float DefaultSoftKnee = 0f; // XRender PC Bloom 使用硬阈值；保留字段仅用于旧序列化兼容。
         public const float DefaultFilter1Size = 0.3f; // 对齐 XRender PC Bloom Filter1 的默认直径百分比。
         public const float DefaultFilter2Size = 1f; // 对齐 XRender PC Bloom Filter2 的默认直径百分比。
         public const float DefaultFilter3Size = 2f; // 对齐 XRender PC Bloom Filter3 的默认直径百分比。

@@ -9,19 +9,36 @@ namespace Burt.RenderPipeline
         public readonly bool Enabled;
         public readonly float MaskDarkness;
         public readonly float DepthRange;
+        public readonly bool BloomEnabled;
+        public readonly float BloomScale;
+        public readonly float BloomThreshold;
+        public readonly float BloomMaxBrightness;
+        public readonly Color BloomTint;
 
         public BurtLightShaftOcclusionSettings(
             bool enabled,
             float maskDarkness,
-            float depthRange)
+            float depthRange,
+            bool bloomEnabled,
+            float bloomScale,
+            float bloomThreshold,
+            float bloomMaxBrightness,
+            Color bloomTint)
         {
             Enabled = enabled;
             MaskDarkness = Mathf.Clamp01(maskDarkness);
             DepthRange = Mathf.Clamp(depthRange, 1f, 5000f);
+            BloomEnabled = bloomEnabled;
+            BloomScale = Mathf.Clamp01(bloomScale);
+            BloomThreshold = Mathf.Clamp01(bloomThreshold);
+            BloomMaxBrightness = Mathf.Clamp(bloomMaxBrightness, 0f, 100f);
+            BloomTint = bloomTint;
         }
 
         public static BurtLightShaftOcclusionSettings Disabled =>
-            new BurtLightShaftOcclusionSettings(false, 1f, 1000f);
+            new BurtLightShaftOcclusionSettings(
+                false, 1f, 1000f,
+                false, 0f, 0f, 0f, Color.white);
     }
 
     internal static class BurtLightShaftOcclusionUtility
@@ -43,15 +60,20 @@ namespace Burt.RenderPipeline
         {
             var stack = VolumeManager.instance != null ? VolumeManager.instance.stack : null;
             var component = stack != null ? stack.GetComponent<LightShaftVolumeComponent>() : null;
-            if (component == null || !component.IsEnabled())
+            if (component == null || !component.active)
             {
                 return BurtLightShaftOcclusionSettings.Disabled;
             }
 
             return new BurtLightShaftOcclusionSettings(
-                true,
+                component.IsOcclusionEnabled(),
                 component.occlusionMaskDarkness.value,
-                component.occlusionDepthRange.value);
+                component.occlusionDepthRange.value,
+                component.IsBloomEnabled(),
+                component.bloomScale.value,
+                component.bloomThreshold.value,
+                component.bloomMaxBrightness.value,
+                component.bloomTint.value);
         }
 
         public static bool ShouldUseLightShaftOcclusion(BurtRenderRequest request)
@@ -60,7 +82,7 @@ namespace Burt.RenderPipeline
                 !request.IsValid ||
                 request.Camera == null ||
                 BurtAtmosphereUtility.IsMobileAtmospherePlatform ||
-                !IsRenderPathAvailable())
+                !IsOcclusionRenderPathAvailable())
             {
                 return false;
             }
@@ -80,7 +102,29 @@ namespace Burt.RenderPipeline
             return TryResolveTextureSpaceSunOrigin(request, out _);
         }
 
-        public static bool IsRenderPathAvailable()
+        public static bool ShouldUseLightShaftBloom(BurtRenderRequest request)
+        {
+            if (request == null ||
+                !request.IsValid ||
+                request.Camera == null ||
+                BurtAtmosphereUtility.IsMobileAtmospherePlatform ||
+                !IsBloomRenderPathAvailable())
+            {
+                return false;
+            }
+
+            if (request.Type == BurtRenderRequestType.Preview ||
+                request.Type == BurtRenderRequestType.Reflection ||
+                request.Type == BurtRenderRequestType.UICamera)
+            {
+                return false;
+            }
+
+            return ResolveSettings().BloomEnabled &&
+                TryResolveTextureSpaceSunOrigin(request, out _);
+        }
+
+        public static bool IsOcclusionRenderPathAvailable()
         {
             return SystemInfo.IsFormatSupported(
                     GraphicsFormat.R8_UNorm,
@@ -89,6 +133,32 @@ namespace Burt.RenderPipeline
                     GraphicsFormat.R8_UNorm,
                     FormatUsage.Sample) &&
                 TryGetSupportedShader(out _);
+        }
+
+        public static bool IsBloomRenderPathAvailable()
+        {
+            var format = ResolveBloomGraphicsFormat();
+            return format != GraphicsFormat.None &&
+                SystemInfo.IsFormatSupported(format, FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(format, FormatUsage.Sample) &&
+                TryGetSupportedShader(out _);
+        }
+
+        public static GraphicsFormat ResolveBloomGraphicsFormat()
+        {
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, FormatUsage.Sample))
+            {
+                return GraphicsFormat.B10G11R11_UFloatPack32;
+            }
+
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Sample))
+            {
+                return GraphicsFormat.R16G16B16A16_SFloat;
+            }
+
+            return GraphicsFormat.None;
         }
 
         internal static bool TryGetSupportedShader(out Shader shader)
@@ -101,7 +171,7 @@ namespace Burt.RenderPipeline
             shader = supportedShader;
             return shader != null &&
                 shader.isSupported &&
-                shader.passCount >= 3;
+                shader.passCount >= 5;
         }
 
         public static bool TryResolveTextureSpaceSunOrigin(

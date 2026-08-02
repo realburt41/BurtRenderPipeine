@@ -1,4 +1,5 @@
 #pragma kernel ScreenProbeFilterCompositeTraces
+#pragma kernel ScreenProbeDirectionalCompositeTraces
 
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
 #define BURT_GI_SCREEN_PROBE_PLACEMENT_THREADGROUP_SIZE 8
@@ -71,6 +72,11 @@ RWTexture2D<float4> _BurtGIScreenProbeRadianceWriteTexture;
 RWTexture2D<float4> _BurtGIScreenProbeIrradianceWriteTexture;
 RWTexture2D<float4> _BurtGIScreenProbeConfidenceWriteTexture;
 RWTexture2D<float4> _BurtGIScreenProbeHitDistanceWriteTexture;
+Texture2D<float4> _BurtGIScreenProbeCompositeTraceRadianceReadTexture;
+Texture2D<float> _BurtGIScreenProbeCompositeTraceHitReadTexture;
+Texture2D<uint> _BurtGIScreenProbeImportanceRayInfoTexture;
+RWTexture2D<float4> _BurtGIScreenProbeDirectionalCompositeRadianceWriteTexture;
+RWTexture2D<float> _BurtGIScreenProbeDirectionalCompositeHitWriteTexture;
 
 
 
@@ -369,6 +375,159 @@ bool BurtGIScreenProbeTraceCompactIsSkyDepth(float rawDepth)
 #else
     return rawDepth >= 0.99999f;
 #endif
+}
+
+uint BurtGIScreenProbeCompositeHash(uint3 value)
+{
+    uint hash = value.x * 0x9e3779b9u + value.y * 0x85ebca6bu + value.z * 0xc2b2ae35u;
+    hash ^= hash >> 16;
+    hash *= 0x7feb352du;
+    hash ^= hash >> 15;
+    hash *= 0x846ca68bu;
+    hash ^= hash >> 16;
+    return hash;
+}
+
+float2 BurtGIScreenProbeCompositeBlueNoise(uint2 coord, uint temporalIndex)
+{
+    uint hash0 = BurtGIScreenProbeCompositeHash(uint3(coord, temporalIndex));
+    uint hash1 = BurtGIScreenProbeCompositeHash(uint3(coord ^ uint2(0x9e37u, 0x7f4au), temporalIndex + 17u));
+    return float2(hash0 & 0x00ffffffu, hash1 & 0x00ffffffu) * (1.0f / 16777216.0f);
+}
+
+void BurtGIUnpackScreenProbeImportanceRayInfo(uint rayInfo, out uint2 texelCoord, out uint level)
+{
+    texelCoord.x = rayInfo & 0x3fu;
+    texelCoord.y = (rayInfo >> 6) & 0x3fu;
+    level = (rayInfo >> 12) & 0xfu;
+}
+
+uint2 BurtGIScreenProbeCompositeOctWrapBorder(uint2 texelCoord, uint resolution, uint borderSize)
+{
+    if (texelCoord.x < borderSize)
+    {
+        texelCoord.x = borderSize - 1u + borderSize - texelCoord.x;
+        texelCoord.y = resolution - 1u - texelCoord.y;
+    }
+    if (texelCoord.x >= resolution - borderSize)
+    {
+        texelCoord.x = (resolution - borderSize) - (texelCoord.x - (resolution - borderSize - 1u));
+        texelCoord.y = resolution - 1u - texelCoord.y;
+    }
+    if (texelCoord.y < borderSize)
+    {
+        texelCoord.y = borderSize - 1u + borderSize - texelCoord.y;
+        texelCoord.x = resolution - 1u - texelCoord.x;
+    }
+    if (texelCoord.y >= resolution - borderSize)
+    {
+        texelCoord.y = (resolution - borderSize) - (texelCoord.y - (resolution - borderSize - 1u));
+        texelCoord.x = resolution - 1u - texelCoord.x;
+    }
+    return texelCoord - borderSize;
+}
+
+groupshared uint BurtGIScreenProbeCompositeAccumulators[64][5];
+
+// XRender parity: importance-sampled trace texels must first be redistributed into
+// a stable 8x8 direction atlas. Temporal/spatial filtering and SH integration can
+// only treat matching texel coordinates as the same direction after this pass.
+[numthreads(8, 8, 1)]
+void ScreenProbeDirectionalCompositeTraces(
+    uint groupIndex : SV_GroupIndex,
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+    const uint gatherResolution = 8u;
+    uint traceResolution = max(1u, min(8u, (uint)_BurtGIScreenProbeTraceParams.x));
+    uint2 traceAtlasSize = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
+    uint2 atlasProbeCount = max(traceAtlasSize / traceResolution, uint2(1u, 1u));
+    if (any(groupId >= atlasProbeCount))
+    {
+        return;
+    }
+
+    BurtGIScreenProbeCompositeAccumulators[groupIndex][0] = 0u;
+    BurtGIScreenProbeCompositeAccumulators[groupIndex][1] = 0u;
+    BurtGIScreenProbeCompositeAccumulators[groupIndex][2] = 0u;
+    BurtGIScreenProbeCompositeAccumulators[groupIndex][3] = 0u;
+    BurtGIScreenProbeCompositeAccumulators[groupIndex][4] = 0u;
+    GroupMemoryBarrierWithGroupSync();
+
+    if (all(groupThreadId < traceResolution))
+    {
+        uint2 traceAtlasCoord = groupId * traceResolution + groupThreadId;
+        uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
+        uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
+        uint screenProbeIndex = groupId.y * screenProbeWidth + groupId.x;
+        bool isAdaptiveProbe = screenProbeIndex >= screenProbeWidth * screenProbeHeight;
+        uint2 sourceTraceTexelCoord = groupThreadId;
+        uint sourceTraceLevel = 0u;
+        if (!isAdaptiveProbe)
+        {
+            BurtGIUnpackScreenProbeImportanceRayInfo(
+                _BurtGIScreenProbeImportanceRayInfoTexture.Load(int3(traceAtlasCoord, 0)),
+                sourceTraceTexelCoord,
+                sourceTraceLevel);
+        }
+
+        uint maxImportanceTraceResolution = min(64u, max(traceResolution, traceResolution << 1u));
+        uint sourceMipSize = max(1u, maxImportanceTraceResolution >> min(sourceTraceLevel, 5u));
+        if (sourceTraceTexelCoord.x >= sourceMipSize || sourceTraceTexelCoord.y >= sourceMipSize)
+        {
+            sourceTraceTexelCoord = groupThreadId;
+            sourceMipSize = traceResolution;
+        }
+
+        uint temporalIndex = _BurtGIRadianceCacheClipMapFrameIndex & 7u;
+        float2 probeTexelCenter = BurtGIScreenProbeCompositeBlueNoise(groupId, temporalIndex);
+        float2 random = BurtGIScreenProbeCompositeBlueNoise(groupId, temporalIndex + 4u);
+        float2 gatherTexelCoord =
+            (float2(sourceTraceTexelCoord) + probeTexelCenter) * (float)gatherResolution / (float)sourceMipSize - 0.5f;
+        float2 gatherTexelFrac = frac(gatherTexelCoord);
+        int2 quantizedGatherTexelCoordInt =
+            (int2)floor(gatherTexelCoord) +
+            int2(gatherTexelFrac.x < random.x ? 0 : 1, gatherTexelFrac.y < random.y ? 0 : 1);
+        uint2 quantizedGatherTexelCoord = BurtGIScreenProbeCompositeOctWrapBorder(
+            (uint2)(quantizedGatherTexelCoordInt + int2(1, 1)),
+            gatherResolution + 2u,
+            1u);
+        uint accumulatorIndex = quantizedGatherTexelCoord.y * gatherResolution + quantizedGatherTexelCoord.x;
+
+        float sampleWeight = (float)gatherResolution / (float)sourceMipSize;
+        sampleWeight *= sampleWeight;
+        float maxRayIntensity = max(_BurtGIScreenProbeTraceModeParams.z, 0.01f);
+        float3 lighting = max(_BurtGIScreenProbeCompositeTraceRadianceReadTexture.Load(int3(traceAtlasCoord, 0)).rgb, 0.0f) * sampleWeight;
+        float maxLighting = max(lighting.r, max(lighting.g, lighting.b));
+        if (maxLighting > maxRayIntensity)
+        {
+            lighting *= maxRayIntensity / max(maxLighting, 0.0001f);
+        }
+
+        float maxValuePerThread = (float)0xffffffffu / 64.0f;
+        float lightingQuantizeScale = maxValuePerThread / maxRayIntensity;
+        uint3 quantizedLighting = (uint3)(lighting * lightingQuantizeScale);
+        uint quantizedHit = (uint)(saturate(_BurtGIScreenProbeCompositeTraceHitReadTexture.Load(int3(traceAtlasCoord, 0))) * maxValuePerThread);
+        InterlockedAdd(BurtGIScreenProbeCompositeAccumulators[accumulatorIndex][0], quantizedLighting.x);
+        InterlockedAdd(BurtGIScreenProbeCompositeAccumulators[accumulatorIndex][1], quantizedLighting.y);
+        InterlockedAdd(BurtGIScreenProbeCompositeAccumulators[accumulatorIndex][2], quantizedLighting.z);
+        BurtGIScreenProbeCompositeAccumulators[accumulatorIndex][3] = 1u;
+        InterlockedAdd(BurtGIScreenProbeCompositeAccumulators[accumulatorIndex][4], quantizedHit);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    uint2 outputAtlasCoord = groupId * gatherResolution + groupThreadId;
+    float invMaxValuePerThread = 64.0f / (float)0xffffffffu;
+    float3 outputLighting = float3(
+        BurtGIScreenProbeCompositeAccumulators[groupIndex][0],
+        BurtGIScreenProbeCompositeAccumulators[groupIndex][1],
+        BurtGIScreenProbeCompositeAccumulators[groupIndex][2]) *
+        (max(_BurtGIScreenProbeTraceModeParams.z, 0.01f) * invMaxValuePerThread);
+    bool hasSample = BurtGIScreenProbeCompositeAccumulators[groupIndex][3] != 0u;
+    float outputHit = saturate((float)BurtGIScreenProbeCompositeAccumulators[groupIndex][4] * invMaxValuePerThread);
+    _BurtGIScreenProbeDirectionalCompositeRadianceWriteTexture[outputAtlasCoord] =
+        hasSample ? float4(max(outputLighting, 0.0f), outputHit) : 0.0f;
+    _BurtGIScreenProbeDirectionalCompositeHitWriteTexture[outputAtlasCoord] = hasSample ? outputHit : 0.0f;
 }
 void BurtGICompositeScreenProbeTraceAtlasIntoCurrent(
     uint2 probeCoord,

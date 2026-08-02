@@ -30,6 +30,8 @@ namespace Burt.RenderPipeline
         private static readonly int UnityLightDirectionId = Shader.PropertyToID("_LightDirection");
         private static readonly int UnityLightPositionId = Shader.PropertyToID("_LightPosition");
         private static readonly int UnityShadowBiasId = Shader.PropertyToID("_ShadowBias");
+        private static readonly int ShadowCasterViewProjectionId = Shader.PropertyToID("_BurtShadowCasterViewProjection");
+        private static readonly int UseExplicitShadowCasterViewProjectionId = Shader.PropertyToID("_BurtUseExplicitShadowCasterViewProjection");
         private static readonly int UnityWorldToCameraId = Shader.PropertyToID("unity_WorldToCamera");
         private static readonly int UnityCameraToWorldId = Shader.PropertyToID("unity_CameraToWorld");
 
@@ -270,6 +272,7 @@ namespace Burt.RenderPipeline
             CommandBuffer cmd,
             Vector3 mainLightDirection,
             Matrix4x4 viewMatrix,
+            Matrix4x4 projectionMatrix,
             float depthBias,
             float normalBias)
         {
@@ -287,6 +290,10 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalFloat(MainLightShadowNormalBiasId, normalBias);
             cmd.SetGlobalVector(UnityShadowBiasId, new Vector4(depthBias, normalBias, 0f, 0f));
             cmd.SetGlobalDepthBias(0f, 0f);
+            cmd.SetGlobalMatrix(
+                ShadowCasterViewProjectionId,
+                BurtMainLightShadowMatrixUtility.CreateShadowCasterViewProjection(viewMatrix, projectionMatrix));
+            cmd.SetGlobalFloat(UseExplicitShadowCasterViewProjectionId, 1f);
             SetWorldToCameraAndCameraToWorldMatrices(cmd, viewMatrix);
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
         }
@@ -302,6 +309,8 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalVector(UnityLightPositionId, Vector4.zero);
             cmd.SetGlobalVector(ShadowCasterLightPositionId, Vector4.zero);
             cmd.SetGlobalVector(UnityShadowBiasId, Vector4.zero);
+            cmd.SetGlobalMatrix(ShadowCasterViewProjectionId, Matrix4x4.identity);
+            cmd.SetGlobalFloat(UseExplicitShadowCasterViewProjectionId, 0f);
             SetKeyword(cmd, CastingPunctualLightShadowKeyword, false);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
@@ -806,6 +815,7 @@ namespace Burt.RenderPipeline
                         cmd,
                         mainLightDirection,
                         slice.ViewMatrix,
+                        slice.ProjectionMatrix,
                         0f,
                         0f);
 

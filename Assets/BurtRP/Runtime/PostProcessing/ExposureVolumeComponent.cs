@@ -33,6 +33,8 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter autoHighPercent = new ClampedFloatParameter(PhysicalExposureSettings.DefaultAutoHighPercent, 0f, 100f);
         public ClampedFloatParameter autoHistogramMinEV100 = new ClampedFloatParameter(PhysicalExposureSettings.DefaultAutoHistogramMinEv100, -16f, 24f);
         public ClampedFloatParameter autoHistogramMaxEV100 = new ClampedFloatParameter(PhysicalExposureSettings.DefaultAutoHistogramMaxEv100, -16f, 24f);
+        [Tooltip("Optional exposure metering mask. White contributes fully; black is ignored. XRender's default mask is uniform white.")]
+        public TextureParameter meteringMask = new TextureParameter(null);
 
         public bool IsEnabled()
         {

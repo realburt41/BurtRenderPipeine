@@ -14,7 +14,6 @@
 
 #define BURT_TAA_USE_COUNT_QUANTIZATION 255.0
 #define BURT_TAA_INV_USE_COUNT_QUANTIZATION 0.00392156862745098
-#define BURT_TAA_ANTI_FLICKER_FACTOR 0.5
 
 Texture2D<float4> _BurtPostProcessSourceTexture;
 Texture2D<float4> _BurtTAAHistoryTexture;
@@ -121,11 +120,6 @@ float3 BurtTaaFromWorkingPerceptualSpace(float3 color)
     return max(BurtTaaFromWorkingSpace(BurtTaaFromPerceptualSpace(color)), 0.0);
 }
 
-float BurtTaaTemporalContrast(float filteredCurrentLuma, float filteredHistoryLuma)
-{
-    return saturate(abs(filteredCurrentLuma - filteredHistoryLuma) / max(max(filteredCurrentLuma, filteredHistoryLuma), 0.2));
-}
-
 float BurtTaaShadingRejection(float3 currentWorking, float3 historyWorking)
 {
     float3 colorDelta = abs(currentWorking - historyWorking);
@@ -142,16 +136,6 @@ float BurtTaaShadingRejection(float3 currentWorking, float3 historyWorking)
     float chromaRejection = smoothstep(0.05, 0.30, relativeChromaDelta);
     float vectorRejection = smoothstep(0.08, 0.35, vectorDelta);
     return saturate(max(vectorRejection, max(lumaRejection, chromaRejection)));
-}
-
-float BurtTaaAntiFlickerStandardDeviationBoost(float temporalContrast, float velocityPixelLength)
-{
-    const float maxFactorScale = 2.25;
-    const float minFactorScale = 0.8;
-    float maxTemporalContrast = 0.7 - lerp(0.0, 0.3, smoothstep(0.5, 1.0, BURT_TAA_ANTI_FLICKER_FACTOR));
-    float localizedAntiFlicker = lerp(BURT_TAA_ANTI_FLICKER_FACTOR * minFactorScale, BURT_TAA_ANTI_FLICKER_FACTOR * maxFactorScale, saturate(1.0 - 2.0 * velocityPixelLength));
-    float contrastWeight = smoothstep(0.05, maxTemporalContrast, temporalContrast);
-    return lerp(0.0, localizedAntiFlicker, contrastWeight);
 }
 
 int2 BurtTaaTextureSize()
@@ -565,20 +549,20 @@ void DecimateHistoryAACS(uint3 id : SV_DispatchThreadID)
             float weight = wx * wy * inBounds * (validPixel ? 1.0 : 0.0);
             int2 safePixel = clamp(usePixel, int2(0, 0), textureSize - 1);
             uint previousUseCount = _BurtTAAPrevUseCountUintTexture.Load(int3(safePixel, 0));
-            float historyGhostingRejection = saturate(1.0 - 2.0 * abs(previousUseCount * BURT_TAA_INV_USE_COUNT_QUANTIZATION - 1.0));
+            float historyGhostingRejection = saturate(1.0 - abs(previousUseCount * BURT_TAA_INV_USE_COUNT_QUANTIZATION - 1.0));
             float previousRawDepth = BurtTaaLoadHistoryDepth(safePixel);
             float previousLinearDepth = max(BurtTaaLinearEyeDepth(previousRawDepth), 1e-4);
             float depthDelta = abs(currentLinearDepth - previousLinearDepth);
-            float depthRejection = saturate(2.0 - 12.0 * depthDelta / previousLinearDepth);
-            // Both values are history-validity signals despite their legacy
-            // "Rejection" names. Requiring both prevents a valid use count from
-            // cancelling a depth disocclusion (and vice versa).
+            float depthRejection = saturate(2.0 - 4.0 * depthDelta / previousLinearDepth);
+            // Match XRender's decimate-history contract. These legacy
+            // "Rejection" values are history-validity signals; max keeps the
+            // feedback stable when jitter makes either depth or coverage noisy.
 #if defined(SHADER_API_METAL)
             // The uint scatter is disabled on Metal, so depth is the only
             // reliable validity source on that backend.
             float tapHistoryValidity = depthRejection;
 #else
-            float tapHistoryValidity = min(historyGhostingRejection, depthRejection);
+            float tapHistoryValidity = max(historyGhostingRejection, depthRejection);
 #endif
             finalRejection += tapHistoryValidity * weight;
         }
@@ -624,15 +608,11 @@ void BuildHistoryRejectionAACS(uint3 id : SV_DispatchThreadID)
     }
     float3 historyWorking = BurtTaaToWorkingPerceptualSpace(BurtTaaSampleHistoryCatmullRom(saturate(historyUv)));
     float shadingRejection = BurtTaaShadingRejection(currentFilteredWorking, historyWorking);
-    float parallaxRejection = 1.0 - saturate(_BurtTAAParallaxRejectionTexture.Load(int3(pixel, 0)));
-    uint stencil = BurtTaaLoadStencilMask(uv);
-    float stencilResponsive = (stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0;
-    float metadataResponsive = saturate(_BurtTAAMetadataTexture.Load(int3(pixel, 0)).g);
-    // An explicit material responsive flag is authoritative and resets
-    // history. Automatically inferred motion/edge responsiveness stays softer.
-    float responsiveRejection = max(stencilResponsive, metadataResponsive * 0.75);
     float outOfBoundsRejection = 1.0 - inBounds;
-    _BurtTAAHistoryRejectionOutputTexture[pixel] = saturate(max(max(parallaxRejection, shadingRejection), max(responsiveRejection, outOfBoundsRejection)));
+    // Parallax validity is multiplied once in ResolveTemporalAACS. Folding its
+    // inverse into this texture as well squares a noisy edge-validity signal.
+    // Responsive AA follows XRender and changes the current blend only.
+    _BurtTAAHistoryRejectionOutputTexture[pixel] = saturate(max(shadingRejection, outOfBoundsRejection));
 }
 
 [numthreads(8, 8, 1)]
@@ -715,21 +695,19 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
     float3 rawHistory = BurtTaaSampleHistoryCatmullRom(historyUv);
     float3 historyWorking = BurtTaaToWorkingPerceptualSpace(rawHistory);
     float historyValidity = _BurtTAAParallaxRejectionTexture.Load(int3(pixel, 0));
-    float historyRejection = _BurtTAADilatedHistoryRejectionTexture.Load(int3(pixel, 0));
-    float finalRejection = saturate(historyValidity * (1.0 - historyRejection) * finalHistoryAvailability);
+    // Match XRender native TAA: its CalcRejection directly consumes only the
+    // parallax/depth history-validity mask. Shading rejection belongs to TAAU.
+    float finalRejection = saturate(historyValidity * finalHistoryAvailability);
     uint stencil = BurtTaaLoadStencilMask(uv);
     float stencilResponsive = (stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0;
-    float metadataResponsive = saturate(_BurtTAAMetadataTexture.Load(int3(pixel, 0)).g);
-    float responsiveMask = max(stencilResponsive, metadataResponsive);
+    float responsiveMask = stencilResponsive;
 
     float3 moment1 = neighborhoodSum * (1.0 / 9.0);
     float3 moment2 = neighborhoodSumSq * (1.0 / 9.0);
     float3 standardDeviation = sqrt(abs(moment2 - moment1 * moment1));
-    float temporalContrast = BurtTaaTemporalContrast(currentFilteredWorking.x, historyWorking.x);
-    float velocityPixelLength = length(velocityData * _BurtTAATexelSize.zw);
-    float antiFlickerHistoryGate = smoothstep(0.85, 1.0, finalRejection) * (1.0 - responsiveMask);
-    float standardDeviationFactor = 1.5 +
-        BurtTaaAntiFlickerStandardDeviationBoost(temporalContrast, velocityPixelLength) * antiFlickerHistoryGate;
+    // XRender ships ACCUMULATE_CONFIG_ANTI_FLICKER_SD_BOOST disabled, so its
+    // native TAA always clips history against the fixed 1.5-sigma bound.
+    float standardDeviationFactor = 1.5;
     float3 clampMin = moment1 - standardDeviation * standardDeviationFactor;
     float3 clampMax = moment1 + standardDeviation * standardDeviationFactor;
     float3 boxCenter = 0.5 * (clampMax + clampMin);
@@ -744,9 +722,9 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
     float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 1e-4)));
     float xrenderBaseBlend = max(0.05, lumaContrast);
     float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
-    // Responsive AA may only increase the current-frame weight. It must never
-    // reintroduce history after depth, coverage, or shading rejected it.
-    currentBlend = max(currentBlend, 0.25 * responsiveMask * finalHistoryAvailability);
+    // Match XRender's explicit responsive branch: responsive pixels use a
+    // fixed 25% current-frame weight while their history UV remains in bounds.
+    currentBlend = lerp(currentBlend, 0.25, responsiveMask * finalHistoryAvailability);
     currentBlend = saturate(currentBlend);
 
     float3 resolvedWorking = lerp(clippedHistoryWorking, currentFilteredWorking, currentBlend);

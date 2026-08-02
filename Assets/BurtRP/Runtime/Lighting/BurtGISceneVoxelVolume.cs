@@ -1459,6 +1459,11 @@ namespace Burt.RenderPipeline
             BindProbeApplyClipmapGlobals(cmd, camera, false);
         }
 
+        internal static bool HasProbeApplyResources(Camera camera)
+        {
+            return TryResolveProbeApplyResources(camera, out _, out _);
+        }
+
         private static void BindProbeApplyClipmapGlobals(CommandBuffer cmd, Camera camera, bool enabled)
         {
             var clipmapParams = new Vector4[ClipmapCount];

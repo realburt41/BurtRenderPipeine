@@ -1552,16 +1552,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceCombineName);
         }
 
-        public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceHistory()
-        {
-            return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryName);
-        }
-
-        public BurtRenderTargetHandle WriteScreenSpaceSubsurfaceHistory()
-        {
-            return WriteRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryName);
-        }
-
         public BurtRenderTargetHandle ReadScreenSpaceSubsurfaceProfileIDAndType()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceProfileIDAndTypeName);

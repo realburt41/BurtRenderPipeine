@@ -111,7 +111,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(colorTarget.Identifier, depthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
@@ -172,7 +172,7 @@ namespace Burt.RenderPipeline
             }
 
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
             stats.Status = stats.ProbeInstanceCount > 0 || stats.VirtualOffsetInstanceCount > 0 ? "OK" : "NoVisibleInstances";
             lastStats = stats;
         }

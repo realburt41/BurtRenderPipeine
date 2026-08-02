@@ -4,6 +4,45 @@ using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline
 {
+    internal static class BurtFurBlurGraphTargetUtility
+    {
+        public static BurtRenderTargetHandle Allocate(
+            BurtRenderGraphContext context,
+            string resourceName,
+            int shaderPropertyId,
+            RenderTextureDescriptor descriptor,
+            FilterMode filterMode,
+            string debugName)
+        {
+            if (context == null || context.ResourceRegistry == null)
+            {
+                return BurtRenderTargetHandle.Invalid(resourceName);
+            }
+
+            context.ResourceRegistry.SetRenderTargetDescriptor(
+                resourceName,
+                descriptor,
+                filterMode,
+                debugName);
+            var target = context.ResourceRegistry.AllocateRenderTarget(resourceName);
+            if (!target.IsValid)
+            {
+                return target;
+            }
+
+            var cmd = context.AcquireCommandBuffer(debugName);
+            cmd.SetGlobalTexture(shaderPropertyId, target.Identifier);
+            context.ExecuteLegacyCommandBuffer(cmd);
+            context.ReleaseCommandBuffer(cmd);
+            return target;
+        }
+
+        public static void Release(BurtRenderGraphContext context, string resourceName)
+        {
+            context?.ResourceRegistry?.ReleaseRenderTarget(resourceName);
+        }
+    }
+
     internal sealed class BurtAllocateFurBlurPropertyPass : BurtRenderPass
     {
         public override string Name => "Burt Allocate Fur Blur Property";
@@ -22,18 +61,14 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            var target = context != null ? context.FurBlurPropertyTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyName);
-            if (!target.IsValid)
-            {
-                return;
-            }
-
-            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, descriptor, FilterMode.Point);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId, target.Identifier);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(context != null && context.Request != null ? context.Request.Camera : null);
+            BurtFurBlurGraphTargetUtility.Allocate(
+                context,
+                BurtRenderGraphResourceRegistry.FurBlurPropertyName,
+                BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId,
+                descriptor,
+                FilterMode.Point,
+                "Burt Fur Blur Property");
         }
     }
 
@@ -55,18 +90,14 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            var target = context != null ? context.FurBlurPropertyTempTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
-            if (!target.IsValid)
-            {
-                return;
-            }
-
-            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId, descriptor, FilterMode.Point);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId, target.Identifier);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurPropertyDescriptor(context != null && context.Request != null ? context.Request.Camera : null);
+            BurtFurBlurGraphTargetUtility.Allocate(
+                context,
+                BurtRenderGraphResourceRegistry.FurBlurPropertyTempName,
+                BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId,
+                descriptor,
+                FilterMode.Point,
+                "Burt Fur Blur Property Temp");
         }
     }
 
@@ -88,18 +119,14 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            var target = context != null ? context.FurBlurColorTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurColorName);
-            if (!target.IsValid)
-            {
-                return;
-            }
-
-            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurColorDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurColorTextureId, descriptor, FilterMode.Bilinear);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurColorTextureId, target.Identifier);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurColorDescriptor(context != null && context.Request != null ? context.Request.Camera : null);
+            BurtFurBlurGraphTargetUtility.Allocate(
+                context,
+                BurtRenderGraphResourceRegistry.FurBlurColorName,
+                BurtRenderGraphResourceRegistry.FurBlurColorTextureId,
+                descriptor,
+                FilterMode.Bilinear,
+                "Burt Fur Blur Color");
         }
     }
 
@@ -126,18 +153,14 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var target = context != null ? context.FurBlurTemporalTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurTemporalName);
-            if (!target.IsValid)
-            {
-                return;
-            }
-
-            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurTemporalDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, descriptor, FilterMode.Bilinear);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId, target.Identifier);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurTemporalDescriptor(context != null && context.Request != null ? context.Request.Camera : null);
+            BurtFurBlurGraphTargetUtility.Allocate(
+                context,
+                BurtRenderGraphResourceRegistry.FurBlurTemporalName,
+                BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId,
+                descriptor,
+                FilterMode.Bilinear,
+                "Burt Fur Blur Temporal");
         }
     }
 
@@ -159,18 +182,14 @@ namespace Burt.RenderPipeline
 
         public override void Execute(BurtRenderGraphContext context)
         {
-            var target = context != null ? context.FurBlurVelocityTarget : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.FurBlurVelocityName);
-            if (!target.IsValid)
-            {
-                return;
-            }
-
-            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurVelocityDescriptor(context.Request != null ? context.Request.Camera : null);
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.GetTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId, descriptor, FilterMode.Bilinear);
-            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId, target.Identifier);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateFurBlurVelocityDescriptor(context != null && context.Request != null ? context.Request.Camera : null);
+            BurtFurBlurGraphTargetUtility.Allocate(
+                context,
+                BurtRenderGraphResourceRegistry.FurBlurVelocityName,
+                BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId,
+                descriptor,
+                FilterMode.Bilinear,
+                "Burt Fur Blur Velocity");
         }
     }
 
@@ -354,6 +373,10 @@ namespace Burt.RenderPipeline
 
         public override string Name => writeTemp ? "Burt Fur Blur Property Dilate A" : "Burt Fur Blur Property Dilate B";
 
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
+
         public override BurtRenderPassKind Kind => BurtRenderPassKind.FullScreen;
 
         public override void Configure(BurtRenderPassBuilder builder)
@@ -420,6 +443,10 @@ namespace Burt.RenderPipeline
 
         public override string Name => "Burt Fur Blur Init Tile Args";
 
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
+
         public override BurtRenderPassKind Kind => BurtRenderPassKind.GlobalState;
 
         public override void Configure(BurtRenderPassBuilder builder)
@@ -471,6 +498,10 @@ namespace Burt.RenderPipeline
         private bool hasLoggedMissingKernel;
 
         public override string Name => "Burt Fur Blur Tiled Setup";
+
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
 
         public override BurtRenderPassKind Kind => BurtRenderPassKind.GlobalState;
 
@@ -549,6 +580,10 @@ namespace Burt.RenderPipeline
 
         public override string Name => "Burt Fur Blur Fill Tile Args";
 
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
+
         public override BurtRenderPassKind Kind => BurtRenderPassKind.GlobalState;
 
         public override void Configure(BurtRenderPassBuilder builder)
@@ -608,6 +643,10 @@ namespace Burt.RenderPipeline
         }
 
         public override string Name => writeTemp ? "Burt Fur Blur Tiled Dilate A" : "Burt Fur Blur Tiled Dilate B";
+
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
 
         public override BurtRenderPassKind Kind => BurtRenderPassKind.GlobalState;
 
@@ -699,6 +738,10 @@ namespace Burt.RenderPipeline
 
         public override string Name => "Burt Fur Blur Theta Temporal";
 
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
+
         public override BurtRenderPassKind Kind => BurtRenderPassKind.FullScreen;
 
         public override void Configure(BurtRenderPassBuilder builder)
@@ -763,6 +806,10 @@ namespace Burt.RenderPipeline
         private bool hasLoggedMissingShader;
 
         public override string Name => "Burt Fur Blur";
+
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
 
         public override BurtRenderPassKind Kind => BurtRenderPassKind.FullScreen;
 
@@ -850,6 +897,10 @@ namespace Burt.RenderPipeline
         private bool hasLoggedMissingShader;
 
         public override string Name => "Burt Fur Blur Temporal";
+
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
 
         public override BurtRenderPassKind Kind => BurtRenderPassKind.FullScreen;
 
@@ -1025,6 +1076,10 @@ namespace Burt.RenderPipeline
 
         public override string Name => "Burt Fur Blur Composite";
 
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
+
         public override BurtRenderPassKind Kind => BurtRenderPassKind.Copy;
 
         public override void Configure(BurtRenderPassBuilder builder)
@@ -1100,6 +1155,10 @@ namespace Burt.RenderPipeline
         private bool hasLoggedMissingShader;
 
         public override string Name => "Burt Fur Blur Debug";
+
+        public override bool HasSideEffects => false;
+
+        public override bool AllowCulling => true;
 
         public override BurtRenderPassKind Kind => BurtRenderPassKind.Debug;
 
@@ -1207,10 +1266,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurTemporalTextureId);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            BurtFurBlurGraphTargetUtility.Release(context, BurtRenderGraphResourceRegistry.FurBlurTemporalName);
         }
     }
 
@@ -1238,10 +1294,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurVelocityTextureId);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            BurtFurBlurGraphTargetUtility.Release(context, BurtRenderGraphResourceRegistry.FurBlurVelocityName);
         }
     }
 
@@ -1269,10 +1322,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurColorTextureId);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            BurtFurBlurGraphTargetUtility.Release(context, BurtRenderGraphResourceRegistry.FurBlurColorName);
         }
     }
 
@@ -1300,10 +1350,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurPropertyTempTextureId);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            BurtFurBlurGraphTargetUtility.Release(context, BurtRenderGraphResourceRegistry.FurBlurPropertyTempName);
         }
     }
 
@@ -1331,10 +1378,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = context.AcquireCommandBuffer(Name);
-            cmd.ReleaseTemporaryRT(BurtRenderGraphResourceRegistry.FurBlurPropertyTextureId);
-            context.ExecuteLegacyCommandBuffer(cmd);
-            context.ReleaseCommandBuffer(cmd);
+            BurtFurBlurGraphTargetUtility.Release(context, BurtRenderGraphResourceRegistry.FurBlurPropertyName);
         }
     }
 

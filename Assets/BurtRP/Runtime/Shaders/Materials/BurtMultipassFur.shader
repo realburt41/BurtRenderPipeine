@@ -99,7 +99,10 @@ Shader "BurtRP/Multipass Fur"
         Pass
         {
             Name "Burt Multipass Fur Responsive AA Mask"
-            Tags { "LightMode" = "BurtResponsiveAAMask" }
+            // Multipass fur is submitted explicitly by BurtMultipassRenderer. A dedicated
+            // LightMode prevents the regular responsive RendererList from drawing the base
+            // renderer once before the shell instances are submitted.
+            Tags { "LightMode" = "BurtMultipassResponsiveAAMask" }
             ZWrite Off
             ZTest Equal
             Cull [_Cull]
@@ -182,6 +185,7 @@ Shader "BurtRP/Multipass Fur"
             HLSLPROGRAM
             #pragma vertex VertMultipassFur
             #pragma fragment FragMultipassFurForward
+            #pragma multi_compile_fragment _ BURT_MAIN_LIGHT_PCF_3 BURT_MAIN_LIGHT_PCF_7
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_vertex _ BURT_MULTIPASS_FUR_USE_DIRECTION_MAP
             #pragma multi_compile_instancing
@@ -195,7 +199,10 @@ Shader "BurtRP/Multipass Fur"
         Pass
         {
             Name "Burt Multipass Fur Motion Vectors"
-            Tags { "LightMode" = "BurtMotionVectors" }
+            // The TAA and screen-probe paths submit every fur shell explicitly. Keep this pass
+            // out of the regular object-motion RendererList to avoid an invalid, duplicate
+            // base-renderer velocity draw.
+            Tags { "LightMode" = "BurtMultipassMotionVectors" }
             ZWrite Off
             ZTest Equal
             Cull [_Cull]

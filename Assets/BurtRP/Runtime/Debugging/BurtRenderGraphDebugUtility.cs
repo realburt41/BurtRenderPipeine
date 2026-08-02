@@ -533,8 +533,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" DepthBias=").Append(shadowData != null ? FormatFloat(shadowData.MainLightShadowDepthBias) : "0");
             builder.Append(" NormalBias=").Append(shadowData != null ? FormatFloat(shadowData.MainLightShadowNormalBias) : "0");
             builder.Append(" SampleBias=").Append(shadowData != null ? FormatFloat(shadowData.MainLightShadowSampleBias) : "0");
-            builder.Append(" SoftSampling=").Append(shadowData != null && (shadowData.IsMainLightShadowSoft || (shadowData.IsMainLightShadowHard && shadowData.EnableMainLightShadowPCSS)));
-            builder.Append(" PCSS=").Append(shadowData != null && shadowData.IsMainLightShadowHard && shadowData.EnableMainLightShadowPCSS);
+            builder.Append(" ShadowFilter=").Append(shadowData != null ? shadowData.ResolvedMainLightShadowFilterMode.ToString() : BurtMainLightShadowFilterMode.Hard.ToString());
+            builder.Append(" ShadowKernel=").Append(shadowData != null ? shadowData.MainLightShadowFilterKernelSize : 0);
+            builder.Append(" SoftSampling=").Append(shadowData != null && shadowData.UsesSoftMainLightShadowFilter);
+            builder.Append(" PCSSRequested=").Append(shadowData != null && shadowData.EnableMainLightShadowPCSS);
+            builder.Append(" PCSS=False");
+            builder.Append(" XRenderOptimizedPCF=").Append(shadowData != null && shadowData.HasMainLightShadow && shadowData.UsesSoftMainLightShadowFilter);
             builder.Append(" PCSSLightSize=").Append(shadowData != null ? FormatFloat(shadowData.MainLightShadowPCSSLightSize) : "0");
             builder.Append(" PCSSBlockerSearchRadius=").Append(shadowData != null ? FormatFloat(shadowData.MainLightShadowPCSSBlockerSearchRadius) : "0");
             builder.Append(" PCSSMaxFilterRadius=").Append(shadowData != null ? FormatFloat(shadowData.MainLightShadowPCSSMaxFilterRadius) : "0");
@@ -1732,7 +1736,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                         AppendDescriptorLine(builder, "BurtGIScreenProbeMip2Radiance", burtGIScreenProbeMip2Descriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeMip2RadianceName);
                         AppendDescriptorLine(builder, "BurtGIScreenProbeMip2Irradiance", burtGIScreenProbeMip2Descriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeMip2IrradianceName);
                         AppendDescriptorLine(builder, "BurtGIScreenProbeMip2Confidence", burtGIScreenProbeMip2Descriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeMip2ConfidenceName);
-                        AppendDescriptorLine(builder, "BurtGIScreenProbeRadianceSHAmbient", burtGIScreenProbeDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceSHAmbientName);
+                        var burtGIScreenProbeSHAmbientDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeSHAmbientDescriptor(camera, burtGIScreenProbeSettings);
+                        AppendDescriptorLine(builder, "BurtGIScreenProbeRadianceSHAmbient", burtGIScreenProbeSHAmbientDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceSHAmbientName);
                         var burtGIScreenProbeSHDirectionalDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeSHDirectionalDescriptor(camera, burtGIScreenProbeSettings);
                         AppendDescriptorLine(builder, "BurtGIScreenProbeRadianceSHDirectional", burtGIScreenProbeSHDirectionalDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeRadianceSHDirectionalName);
                         AppendDescriptorLine(builder, "BurtGIRadianceCacheClipMapIndirection", BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionDescriptor(camera, burtGIScreenProbeSettings), resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapIndirectionName);

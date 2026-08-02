@@ -1,3 +1,5 @@
+#pragma kernel BuildFurthestHiZMip0
+#pragma kernel BuildFurthestHiZMip
 #pragma kernel BuildConservativeDepth
 #pragma kernel BuildMaterialVolume
 #pragma kernel InjectLocalVolume
@@ -19,6 +21,9 @@ RWTexture3D<float4> _BurtVolumetricFogLightingOutput;
 Texture3D<float4> _BurtVolumetricFogLightingTexture;
 Texture3D<float4> _BurtVolumetricFogLightingHistory;
 Texture2D<float> _BurtVolumetricFogCameraDepthTexture;
+Texture2D<float> _BurtVolumetricFogFurthestHiZSource;
+RWTexture2D<float> _BurtVolumetricFogFurthestHiZOutput;
+Texture2D<float> _BurtVolumetricFogFurthestHiZTexture;
 RWTexture2D<float> _BurtVolumetricFogConservativeDepthOutput;
 Texture2D<float> _BurtVolumetricFogConservativeDepthTexture;
 Texture2D<float> _BurtVolumetricFogPreviousConservativeDepthTexture;
@@ -27,8 +32,10 @@ Texture3D<float4> _BurtVolumetricFogTranslucencyVolume1;
 
 float4 _BurtVolumetricFogIntegratedGridSize; // xyz=grid size, w=visible slice end
 float4 _BurtVolumetricFogConservativeDepthParams; // xy=source size, z=footprint margin, w=slice safety margin
+float4 _BurtVolumetricFogFurthestHiZBuildParams; // xy=source size, zw=destination mip size
+float4 _BurtVolumetricFogFurthestHiZParams; // xy=base size, z=mip count, w=available
 float4 _BurtVolumetricFogIntegratedGridZParams; // xyz=(B,O,S), w=total slice count
-float4 _BurtVolumetricFogIntegratedBuildParams; // x=visible distance, y=start distance, z=max opacity, w=jitter frame or -1
+float4 _BurtVolumetricFogIntegratedBuildParams; // x=visible distance, y=start distance, z=max opacity, w=16-frame jitter phase or -1
 float4 _BurtVolumetricFogIntegratedDensityParams; // x=height, y=density, z=height falloff, w=extinction scale
 float4 _BurtVolumetricFogIntegratedSecondDensityParams; // x=absolute height, y=density, z=height falloff
 float4 _BurtVolumetricFogMapWorldParams; // xy=world center XZ, zw=inverse coverage XZ
@@ -54,6 +61,7 @@ float3 _BurtVolumetricFogIntegratedCameraPositionWS;
 float4 _BurtVolumetricFogIntegratedMainLightDirection;
 float4 _BurtVolumetricFogIntegratedLegacyLightColorScale; // rgb=outer-space light * atmosphere transmittance, w=volumetric scale
 float _BurtVolumetricFogIntegratedMainLightOcclusion;
+float4 _BurtVolumetricFogIntegratedShadowParams; // x=far stylized shadow floor, y=shadow source mode
 float4 _BurtVolumetricFogIntegratedAtmosphereParams; // x=enabled, y=sun uses main light
 float4 _BurtVolumetricFogIntegratedHorizontalSunDirection;
 float4 _BurtVolumetricFogIntegratedHorizontalLightColor;
@@ -128,6 +136,92 @@ float BurtVFSelectFurthestDeviceDepth(float a, float b)
 }
 
 [numthreads(8, 8, 1)]
+void BuildFurthestHiZMip0(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 sourceSize = max((uint2)_BurtVolumetricFogFurthestHiZBuildParams.xy, uint2(1, 1));
+    uint2 destinationSize = max((uint2)_BurtVolumetricFogFurthestHiZBuildParams.zw, uint2(1, 1));
+    if (any(dispatchThreadId.xy >= destinationSize))
+    {
+        return;
+    }
+
+    uint2 sourceMin = min(
+        (uint2)floor((float2)dispatchThreadId.xy * (float2)sourceSize / (float2)destinationSize),
+        sourceSize - 1u);
+    uint2 sourceMax = min(
+        max(
+            sourceMin,
+            (uint2)ceil((float2)(dispatchThreadId.xy + 1u) * (float2)sourceSize / (float2)destinationSize) - 1u),
+        sourceSize - 1u);
+    float furthestDepth = BurtVFNearDeviceDepth();
+    [loop]
+    for (uint sourceY = sourceMin.y; sourceY <= sourceMax.y; sourceY++)
+    {
+        [loop]
+        for (uint sourceX = sourceMin.x; sourceX <= sourceMax.x; sourceX++)
+        {
+            float rawDepth = _BurtVolumetricFogCameraDepthTexture.Load(int3(sourceX, sourceY, 0));
+            furthestDepth = BurtVFSelectFurthestDeviceDepth(furthestDepth, rawDepth);
+        }
+    }
+
+    _BurtVolumetricFogFurthestHiZOutput[dispatchThreadId.xy] = furthestDepth;
+}
+
+[numthreads(8, 8, 1)]
+void BuildFurthestHiZMip(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 sourceSize = max((uint2)_BurtVolumetricFogFurthestHiZBuildParams.xy, uint2(1, 1));
+    uint2 destinationSize = max((uint2)_BurtVolumetricFogFurthestHiZBuildParams.zw, uint2(1, 1));
+    if (any(dispatchThreadId.xy >= destinationSize))
+    {
+        return;
+    }
+
+    uint2 sourceBase = dispatchThreadId.xy * 2u;
+    uint2 sourceMax = sourceSize - 1u;
+    float depth00 = _BurtVolumetricFogFurthestHiZSource.Load(int3(min(sourceBase, sourceMax), 0));
+    float depth10 = _BurtVolumetricFogFurthestHiZSource.Load(int3(min(sourceBase + uint2(1, 0), sourceMax), 0));
+    float depth01 = _BurtVolumetricFogFurthestHiZSource.Load(int3(min(sourceBase + uint2(0, 1), sourceMax), 0));
+    float depth11 = _BurtVolumetricFogFurthestHiZSource.Load(int3(min(sourceBase + uint2(1, 1), sourceMax), 0));
+    _BurtVolumetricFogFurthestHiZOutput[dispatchThreadId.xy] = BurtVFSelectFurthestDeviceDepth(
+        BurtVFSelectFurthestDeviceDepth(depth00, depth10),
+        BurtVFSelectFurthestDeviceDepth(depth01, depth11));
+}
+
+float BurtVFSampleFurthestHiZ(float2 tileMin, float2 tileMax)
+{
+    uint mipCount = max((uint)_BurtVolumetricFogFurthestHiZParams.z, 1u);
+    float2 baseSize = max(_BurtVolumetricFogFurthestHiZParams.xy, 1.0f);
+    float2 baseFootprint = max((tileMax - tileMin) * baseSize, 1.0f);
+    float largestFootprint = max(baseFootprint.x, baseFootprint.y);
+    uint mipLevel = (uint)clamp(
+        ceil(log2(max(largestFootprint / 4.0f, 1.0f))),
+        0.0f,
+        (float)(mipCount - 1u));
+    uint mipWidth;
+    uint mipHeight;
+    uint availableMipCount;
+    _BurtVolumetricFogFurthestHiZTexture.GetDimensions(mipLevel, mipWidth, mipHeight, availableMipCount);
+    uint2 mipSize = max(uint2(mipWidth, mipHeight), uint2(1, 1));
+    int2 sampleMin = clamp((int2)floor(tileMin * (float2)mipSize), int2(0, 0), (int2)mipSize - 1);
+    int2 sampleMax = clamp((int2)ceil(tileMax * (float2)mipSize) - 1, sampleMin, (int2)mipSize - 1);
+    float furthestDepth = BurtVFNearDeviceDepth();
+    [loop]
+    for (int sampleY = sampleMin.y; sampleY <= sampleMax.y; sampleY++)
+    {
+        [loop]
+        for (int sampleX = sampleMin.x; sampleX <= sampleMax.x; sampleX++)
+        {
+            float rawDepth = _BurtVolumetricFogFurthestHiZTexture.Load(int3(sampleX, sampleY, mipLevel));
+            furthestDepth = BurtVFSelectFurthestDeviceDepth(furthestDepth, rawDepth);
+        }
+    }
+
+    return furthestDepth;
+}
+
+[numthreads(8, 8, 1)]
 void BuildConservativeDepth(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint gridWidth = (uint)_BurtVolumetricFogIntegratedGridSize.x;
@@ -142,6 +236,15 @@ void BuildConservativeDepth(uint3 dispatchThreadId : SV_DispatchThreadID)
     float footprintMargin = max(_BurtVolumetricFogConservativeDepthParams.z, 0.0f);
     float2 tileMin = (float2(dispatchThreadId.xy) - footprintMargin) / gridSize;
     float2 tileMax = (float2(dispatchThreadId.xy) + 1.0f + footprintMargin) / gridSize;
+    tileMin = saturate(tileMin);
+    tileMax = saturate(tileMax);
+    if (_BurtVolumetricFogFurthestHiZParams.w > 0.5f)
+    {
+        _BurtVolumetricFogConservativeDepthOutput[dispatchThreadId.xy] =
+            BurtVFSampleFurthestHiZ(tileMin, tileMax);
+        return;
+    }
+
     int2 minPixel = clamp((int2)floor(tileMin * sourceSize), int2(0, 0), sourceSize - 1);
     int2 maxPixel = clamp((int2)ceil(tileMax * sourceSize) - 1, int2(0, 0), sourceSize - 1);
     float furthestDepth = BurtVFNearDeviceDepth();
@@ -351,7 +454,7 @@ float4 BurtVFBuildGlobalMaterial(float3 positionWS)
     return min(max(float4(scatteringCoefficient, absorption), 0.0f), 65504.0f);
 }
 
-[numthreads(4, 4, 4)]
+[numthreads(8, 8, 1)]
 void BuildMaterialVolume(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint3 materialGridSize = uint3(
@@ -733,7 +836,15 @@ float4 BurtVFEvaluateLightingVolumeSample(uint3 gridPosition, float3 sampleOffse
     float mainLightPhase = BurtVFHenyeyGreensteinPhase(
         dot(mainLightDirection, viewDirection),
         anisotropy);
-    float mainLightVisibility = BurtSampleMainLightVolumetricShadow(positionWS);
+    float mainLightVisibility = _BurtVolumetricFogIntegratedShadowParams.y < 1.5f
+        ? BurtSampleMainLightVolumetricShadowFiltered(positionWS)
+        : BurtSampleMainLightVolumetricShadow(positionWS);
+    if (gridPosition.z >= 128u)
+    {
+        mainLightVisibility = max(
+            mainLightVisibility,
+            saturate(_BurtVolumetricFogIntegratedShadowParams.x));
+    }
     float mainLightOcclusion = saturate(_BurtVolumetricFogIntegratedMainLightOcclusion);
     float2 screenUV = (float2(gridPosition.xy) + sampleOffset.xy)
         / max(_BurtVolumetricFogIntegratedGridSize.xy, 1.0f);
@@ -904,7 +1015,7 @@ bool BurtVFResolveHistoryUVW(
     return true;
 }
 
-[numthreads(4, 4, 4)]
+[numthreads(8, 8, 1)]
 void BuildLightingVolume(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint3 gridSize = (uint3)_BurtVolumetricFogIntegratedGridSize.xyz;

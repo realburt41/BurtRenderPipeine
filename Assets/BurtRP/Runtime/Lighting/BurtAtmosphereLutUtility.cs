@@ -395,13 +395,14 @@ namespace Burt.RenderPipeline
         }
 
         public static void DispatchAsync(
-            ScriptableRenderContext renderContext,
+            BurtRenderGraphContext context,
             Camera camera,
             BurtAtmosphereSettings settings,
             Vector3 sunDirection)
         {
             asyncAttemptCount++;
-            if (camera == null ||
+            if (context == null ||
+                camera == null ||
                 !SystemInfo.supportsComputeShaders ||
                 !SystemInfo.supportsAsyncCompute ||
                 !SystemInfo.supportsGraphicsFence)
@@ -437,37 +438,46 @@ namespace Burt.RenderPipeline
 
             // Serialize any previous async update and every earlier graphics
             // consumer before the persistent LUTs may be overwritten.
-            var graphicsCmd = CommandBufferPool.Get("Burt Atmosphere Async Begin");
+            var graphicsCmd = context.AcquireCommandBuffer("Burt Atmosphere Async Begin");
             CompleteAsync(graphicsCmd);
             var graphicsToComputeFence = graphicsCmd.CreateAsyncGraphicsFence();
-            renderContext.ExecuteCommandBuffer(graphicsCmd);
-            CommandBufferPool.Release(graphicsCmd);
+            context.MarkCommandBufferHasCommands();
+            context.FlushCommandBuffer(false);
 
-            var asyncCmd = CommandBufferPool.Get("Burt Atmosphere LUT Async Compute");
+            var asyncCmd = CommandBufferPool.Get("BRP.Async/Atmosphere LUT");
             asyncCmd.SetExecutionFlags(CommandBufferExecutionFlags.AsyncCompute);
-            asyncCmd.WaitOnAsyncGraphicsFence(graphicsToComputeFence);
-            var recordedDispatch = RecordResolvedLutUpdates(
-                asyncCmd,
-                camera,
-                settings,
-                updateState,
-                false);
-            if (recordedDispatch)
+            context.BeginAsyncPass(asyncCmd);
+            try
             {
-                pendingAsyncFence = asyncCmd.CreateAsyncGraphicsFence();
-                hasPendingAsyncFence = true;
-                pendingAsyncProducerCameraId = camera.GetInstanceID();
-                pendingAsyncProducerFrame = Time.frameCount;
-                asyncDispatchCount++;
-                lastAsyncStatus = "Submitted";
-                renderContext.ExecuteCommandBufferAsync(asyncCmd, ComputeQueueType.Background);
+                asyncCmd.WaitOnAsyncGraphicsFence(graphicsToComputeFence);
+                var recordedDispatch = RecordResolvedLutUpdates(
+                    asyncCmd,
+                    camera,
+                    settings,
+                    updateState,
+                    false);
+                if (recordedDispatch)
+                {
+                    pendingAsyncFence = asyncCmd.CreateAsyncGraphicsFence();
+                    hasPendingAsyncFence = true;
+                    pendingAsyncProducerCameraId = camera.GetInstanceID();
+                    pendingAsyncProducerFrame = Time.frameCount;
+                    asyncDispatchCount++;
+                    lastAsyncStatus = "Submitted";
+                    context.MarkCommandBufferHasCommands();
+                    context.ExecuteCurrentCommandBufferAsync(ComputeQueueType.Background);
+                }
+                else
+                {
+                    lastAsyncStatus = "SkippedRecordFailure";
+                }
             }
-            else
+            finally
             {
-                lastAsyncStatus = "SkippedRecordFailure";
+                context.EndAsyncPass();
+                asyncCmd.Clear();
+                CommandBufferPool.Release(asyncCmd);
             }
-
-            CommandBufferPool.Release(asyncCmd);
         }
 
         public static void CompleteAsync(CommandBuffer cmd)

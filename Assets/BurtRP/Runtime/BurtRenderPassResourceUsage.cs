@@ -84,7 +84,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
 
         public bool HasSideEffects { get; } // Conservative side-effect marker; not used for culling yet.
 
-        public bool AllowCulling { get; } // Metadata only for now; the graph still executes every pass.
+        public bool AllowCulling { get; } // True when the compiler may omit this pass if none of its outputs are live.
 
         public bool EnableAsyncCompute { get; }
 
@@ -140,7 +140,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源使用
 
             HasSideEffects = hasSideEffects; // Store conservative side-effect metadata.
 
-            AllowCulling = allowCulling; // Store culling intent without changing scheduling behavior.
+            AllowCulling = allowCulling; // Store the audited culling contract used by the graph compiler.
 
             EnableAsyncCompute = enableAsyncCompute;
         }

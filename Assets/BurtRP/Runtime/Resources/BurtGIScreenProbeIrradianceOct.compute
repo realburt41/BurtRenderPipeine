@@ -578,96 +578,13 @@ void BurtGISampleScreenProbeTraceAtlasComposite(
     out float compositeHit)
 {
     gatherResolution = max(1u, gatherResolution);
-    uint2 targetGatherTexelCoord = min((uint2)floor(saturate(gatherUV) * (float)gatherResolution), gatherResolution - 1u);
-    float maxRayIntensity = max(_BurtGIScreenProbeTraceModeParams.z, 0.01f);
-    uint screenProbeWidth = max(1u, (uint)_BurtGIScreenProbeGridParams.x);
-    uint screenProbeHeight = max(1u, (uint)_BurtGIScreenProbeGridParams.y);
-    uint maxAdaptiveProbeCount = max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w);
-    uint uniformProbeCount = BurtGIGetScreenProbeUniformCount(screenProbeWidth, screenProbeHeight);
-    uint screenProbeIndex = atlasScreenProbeCoord.y * screenProbeWidth + atlasScreenProbeCoord.x;
-    uint2 sourceScreenProbeCoord = 0u;
-    uint2 resolvedAtlasScreenProbeCoord = 0u;
-    bool validAtlasProbe = BurtGIResolveScreenProbeSourceAndAtlasCoord(
-        screenProbeIndex,
-        screenProbeWidth,
-        screenProbeHeight,
-        maxAdaptiveProbeCount,
-        sourceScreenProbeCoord,
-        resolvedAtlasScreenProbeCoord);
-    if (!validAtlasProbe)
-    {
-        compositeRadiance = 0.0f;
-        compositeHit = 0.0f;
-        return;
-    }
-
-    bool isAdaptiveProbe = screenProbeIndex >= uniformProbeCount;
-    uint maxImportanceTraceResolution = min(64u, max(traceResolution, traceResolution << 1u));
-    uint temporalIndex = _BurtGIRadianceCacheClipMapFrameIndex & 7u;
-    float2 probeTexelCenter = BurtGIScreenProbeBlueNoiseVec2(sourceScreenProbeCoord, temporalIndex);
-    float2 random = BurtGIScreenProbeBlueNoiseVec2(sourceScreenProbeCoord, temporalIndex + 4u);
-    float4 radianceSum = 0.0f;
-    float hitSum = 0.0f;
-    float weightSum = 0.0f;
-
-    [loop]
-    for (uint y = 0u; y < traceResolution; ++y)
-    {
-        [loop]
-        for (uint x = 0u; x < traceResolution; ++x)
-        {
-            uint2 traceTexelCoord = uint2(x, y);
-            uint2 traceAtlasCoord = atlasScreenProbeCoord * traceResolution + traceTexelCoord;
-            uint2 sourceTraceTexelCoord = traceTexelCoord;
-            uint sourceTraceLevel = 0u;
-            if (!isAdaptiveProbe)
-            {
-                uint rayInfo = _BurtGIScreenProbeImportanceRayInfoTexture[traceAtlasCoord];
-                BurtGIUnpackScreenProbeImportanceRayInfo(rayInfo, sourceTraceTexelCoord, sourceTraceLevel);
-            }
-
-            uint sourceMipSize = max(1u, maxImportanceTraceResolution >> min(sourceTraceLevel, 5u));
-            if (sourceTraceTexelCoord.x >= sourceMipSize || sourceTraceTexelCoord.y >= sourceMipSize)
-            {
-                sourceTraceTexelCoord = traceTexelCoord;
-                sourceTraceLevel = 0u;
-                sourceMipSize = traceResolution;
-            }
-
-            float2 gatherTexelCoord = (float2(sourceTraceTexelCoord) + probeTexelCenter) * (float)gatherResolution / (float)sourceMipSize - 0.5f;
-            float2 gatherTexelFrac = frac(gatherTexelCoord);
-            int2 quantizedGatherTexelCoordInt =
-                (int2)floor(gatherTexelCoord) +
-                int2(gatherTexelFrac.x < random.x ? 0 : 1, gatherTexelFrac.y < random.y ? 0 : 1);
-            uint2 quantizedGatherTexelCoord = BurtGIOctahedralMapWrapBorder(
-                (uint2)(quantizedGatherTexelCoordInt + int2(1, 1)),
-                gatherResolution + 2u,
-                1u);
-            if (!all(quantizedGatherTexelCoord == targetGatherTexelCoord))
-            {
-                continue;
-            }
-
-            float sampleWeight = (float)gatherResolution / (float)sourceMipSize;
-            sampleWeight *= sampleWeight;
-            float4 sampleRadiance = _BurtGIScreenProbeTraceRadianceTexture[traceAtlasCoord];
-            sampleRadiance.rgb = max(sampleRadiance.rgb, 0.0f);
-
-            float maxLighting = max(sampleRadiance.r, max(sampleRadiance.g, sampleRadiance.b));
-            if (maxLighting > maxRayIntensity)
-            {
-                sampleRadiance.rgb *= maxRayIntensity / maxLighting;
-            }
-
-            radianceSum.rgb += sampleRadiance.rgb * sampleWeight;
-            hitSum += saturate(_BurtGIScreenProbeTraceHitTexture[traceAtlasCoord]) * sampleWeight;
-            weightSum += sampleWeight;
-        }
-    }
-
-    compositeRadiance = float4(radianceSum.rgb, weightSum > 0.0001f ? saturate(hitSum / max(weightSum, 0.0001f)) : 0.0f);
-    compositeRadiance.rgb = max(compositeRadiance.rgb, 0.0f);
-    compositeHit = compositeRadiance.a;
+    traceResolution = max(1u, traceResolution);
+    uint2 gatherTexelCoord = min((uint2)floor(saturate(gatherUV) * (float)gatherResolution), gatherResolution - 1u);
+    uint2 fixedDirectionTexel = min(gatherTexelCoord * traceResolution / gatherResolution, traceResolution - 1u);
+    uint2 traceAtlasCoord = atlasScreenProbeCoord * traceResolution + fixedDirectionTexel;
+    compositeRadiance = _BurtGIScreenProbeTraceRadianceTexture[traceAtlasCoord];
+    compositeHit = saturate(_BurtGIScreenProbeTraceHitTexture[traceAtlasCoord]);
+    compositeRadiance = float4(max(compositeRadiance.rgb, 0.0f), compositeHit);
 }
 void BurtGIScreenProbeIrradianceOct(uint groupIndex, uint3 groupId, uint3 groupThreadId)
 {
@@ -705,32 +622,12 @@ void BurtGIScreenProbeIrradianceOct(uint groupIndex, uint3 groupId, uint3 groupT
         BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_BORDER_SIZE);
     float2 octUV = (float2(wrappedOctCoord) + 0.5) / (float)BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION;
     float3 irradianceDirection = BurtGIEquiAreaSphericalMapping(octUV).zxy;
-    uint2 mip1Size = max(uint2(1u, 1u), (uint2(screenProbeWidth, screenProbeHeight) + 1u) >> 1u);
-    uint2 mip2Size = max(uint2(1u, 1u), (uint2(screenProbeWidth, screenProbeHeight) + 3u) >> 2u);
-    uint2 mip3Size = max(uint2(1u, 1u), (uint2(screenProbeWidth, screenProbeHeight) + 7u) >> 3u);
-    uint2 mip1Coord = min(sourceScreenProbeCoord >> 1u, mip1Size - 1u);
-    uint2 mip2Coord = min(sourceScreenProbeCoord >> 2u, mip2Size - 1u);
-    uint2 mip3Coord = min(sourceScreenProbeCoord >> 3u, mip3Size - 1u);
-    float4 fixupIrradiance = _BurtGIScreenProbeFixupIrradianceTexture.Load(int3(sourceScreenProbeCoord, 0));
-    float4 fixupConfidence = _BurtGIScreenProbeFixupConfidenceTexture.Load(int3(sourceScreenProbeCoord, 0));
-    float4 mipIrradiance = _BurtGIScreenProbeMipIrradianceTexture.Load(int3(mip1Coord, 0));
-    float4 mipConfidence = _BurtGIScreenProbeMipConfidenceTexture.Load(int3(mip1Coord, 0));
-    float4 mip2Irradiance = _BurtGIScreenProbeMip2IrradianceTexture.Load(int3(mip2Coord, 0));
-    float4 mip2Confidence = _BurtGIScreenProbeMip2ConfidenceTexture.Load(int3(mip2Coord, 0));
-    float4 mip3Irradiance = _BurtGIScreenProbeMip3IrradianceTexture.Load(int3(mip3Coord, 0));
-    float4 mip3Confidence = _BurtGIScreenProbeMip3ConfidenceTexture.Load(int3(mip3Coord, 0));
-    float fixupIrradianceConfidence = saturate(min(fixupIrradiance.a, fixupConfidence.r));
-    float lowFrequencyConfidence = saturate(min(mipIrradiance.a, mipConfidence.r));
-    float veryLowFrequencyConfidence = saturate(min(mip2Irradiance.a, mip2Confidence.r));
-    float ultraLowFrequencyConfidence = saturate(min(mip3Irradiance.a, mip3Confidence.r));
-    float3 veryLowFrequency = lerp(max(mip2Irradiance.rgb, 0.0), max(mip3Irradiance.rgb, 0.0), ultraLowFrequencyConfidence * 0.65);
-    float3 lowFrequency = lerp(max(mipIrradiance.rgb, 0.0), veryLowFrequency, veryLowFrequencyConfidence * 0.75);
-    float3 fallbackRadiance = lerp(max(fixupIrradiance.rgb, 0.0), lowFrequency, saturate((1.0 - fixupIrradianceConfidence) * 0.65));
-    float fallbackConfidence = saturate(max(max(fixupIrradianceConfidence, lowFrequencyConfidence), max(veryLowFrequencyConfidence, ultraLowFrequencyConfidence)));
     uint2 gatherTexelCoord = groupThreadId.xy;
+    // The input gather atlas is 8x8. The 6x6 constant controls the projected
+    // irradiance-oct output only, matching XRender's two distinct resolutions.
     bool hasTraceSample =
-        gatherTexelCoord.x < BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION &&
-        gatherTexelCoord.y < BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION;
+        gatherTexelCoord.x < BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION &&
+        gatherTexelCoord.y < BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION;
     float4 basis0 = 0.0;
     float4 basis1 = 0.0;
     float basis2 = 0.0;
@@ -740,22 +637,21 @@ void BurtGIScreenProbeIrradianceOct(uint groupIndex, uint3 groupId, uint3 groupT
     float sampleWeight = 0.0;
     if (hasValidProbe && hasTraceSample)
     {
-        float2 gatherUV = (float2(gatherTexelCoord) + 0.5) / (float)BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION;
+        float2 gatherUV = (float2(gatherTexelCoord) + 0.5) / (float)BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION;
         float4 traceRadiance;
         float3 sampleDirection = BurtGIEquiAreaSphericalMapping(gatherUV).zxy;
         BurtGISampleScreenProbeTraceAtlasComposite(
             atlasScreenProbeCoord,
             gatherUV,
             traceResolution,
-            BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_RESOLUTION,
+            BURT_GI_SCREEN_PROBE_RADIANCE_OCT_RESOLUTION,
             traceRadiance,
             hit);
         radiance = traceRadiance.rgb;
-        float fallbackBlend = saturate((1.0 - hit) * fallbackConfidence);
-        radiance = lerp(radiance, max(radiance, fallbackRadiance), fallbackBlend * 0.85);
-        // XRender integrates TraceRadiance over every octahedral direction. A sky ray has no geometry hit,
-        // but still carries valid radiance and must not disappear from the irradiance integral.
-        traceConfidence = max(hit, fallbackConfidence * 0.35);
+        // Match XRender: every traced direction participates in the integral.
+        // Geometry hit is filtering/occlusion metadata, not radiance validity;
+        // sky misses can contain valid environment lighting.
+        traceConfidence = 1.0;
         sampleWeight = 1.0;
         basis0 = BurtGISHBasis3V0(sampleDirection);
         basis1 = BurtGISHBasis3V1(sampleDirection);

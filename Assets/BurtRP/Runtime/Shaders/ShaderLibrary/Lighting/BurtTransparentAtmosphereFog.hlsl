@@ -9,6 +9,7 @@ float4 _BurtTransparentAtmosphereFogDistanceParams; // x=world to km, y=sampling
 
 float _BurtTransparentHeightFogEnabled;
 float4 _BurtTransparentHeightFogParams; // x=height, y=density, z=height falloff, w=max opacity
+float4 _BurtTransparentHeightFogSecondLayerParams; // x=absolute height, y=density, z=height falloff
 float4 _BurtTransparentHeightFogDistanceParams; // x=start distance, y=cutoff distance
 float4 _BurtTransparentHeightFogAerialParams; // x=interaction, y=aerial fade start, z=aerial fade end
 float4 _BurtTransparentHeightFogAlbedo;
@@ -116,10 +117,20 @@ float4 BurtEvaluateTransparentHeightFog(float3 positionWS)
     float heightFalloff = max(_BurtTransparentHeightFogParams.z, 0.001f);
     float maxOpacity = saturate(_BurtTransparentHeightFogParams.w);
     float mediumDensity = fogDensity * exp2(-max(-127.0f, heightFalloff * (startHeight - fogHeight)));
-    float opticalDepth = BurtTransparentHeightFogCalcLineIntegral(
-        heightFalloff,
-        rayDeltaY,
-        mediumDensity) * rayLength;
+    float secondFogHeight = _BurtTransparentHeightFogSecondLayerParams.x;
+    float secondFogDensity = max(_BurtTransparentHeightFogSecondLayerParams.y, 0.0f);
+    float secondHeightFalloff = max(_BurtTransparentHeightFogSecondLayerParams.z, 0.0f);
+    float secondMediumDensity = secondFogDensity * exp2(
+        -max(-127.0f, secondHeightFalloff * (startHeight - secondFogHeight)));
+    float opticalDepth = (
+        BurtTransparentHeightFogCalcLineIntegral(
+            heightFalloff,
+            rayDeltaY,
+            mediumDensity)
+        + BurtTransparentHeightFogCalcLineIntegral(
+            secondHeightFalloff,
+            rayDeltaY,
+            secondMediumDensity)) * rayLength;
     // Match AEvaluateGlobalHeightFog: MaxOpacity is a final opacity cap,
     // expressed as a lower bound on transmittance.
     float transmittance = max(

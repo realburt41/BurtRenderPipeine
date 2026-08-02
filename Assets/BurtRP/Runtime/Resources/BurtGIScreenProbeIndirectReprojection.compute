@@ -1,4 +1,5 @@
 #pragma kernel ScreenProbeIndirectReprojectionCS
+#pragma kernel ScreenProbeIndirectCurrentFrameResolveCS
 #pragma kernel ScreenProbeIndirectSceneVelocityCS
 #pragma kernel ScreenProbeIndirectUseCountClearCS
 #pragma kernel ScreenProbeIndirectUseCountScatterCS
@@ -123,6 +124,15 @@ float BurtGIIndirectReprojectionLinearEyeDepth(float rawDepth)
     return rcp(max(_ZBufferParams.z * rawDepth + _ZBufferParams.w, 1.0e-6f));
 }
 
+bool BurtGIIndirectReprojectionIsSkyDepth(float rawDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return rawDepth <= 0.00001f;
+#else
+    return rawDepth >= 0.99999f;
+#endif
+}
+
 float2 BurtGIIndirectReprojectionHistoryUV(uint2 pixelCoord, float rawDepth, float2 outputSize)
 {
     float2 uv = ((float2)pixelCoord + 0.5f) / max(outputSize, 1.0f);
@@ -235,6 +245,118 @@ float4 BurtGIIndirectReprojectionFilteredNeighborhoodDiffuse(uint2 pixelCoord, u
 
     lightingIsValid = sampleCount > 0.0f;
     return lightingSum / max(sampleCount, 1.0f);
+}
+
+void BurtGIIndirectCurrentFrameResolveNeighborhood(
+    uint2 pixelCoord,
+    uint2 outputSize,
+    out float4 diffuse,
+    out float4 backface,
+    out float4 roughSpecular)
+{
+    diffuse = _BurtGIDiffuseIndirectCurrentTexture.Load(int3(pixelCoord, 0));
+    backface = _BurtGIBackfaceDiffuseIndirectCurrentTexture.Load(int3(pixelCoord, 0));
+    roughSpecular = _BurtGIRoughSpecularIndirectCurrentTexture.Load(int3(pixelCoord, 0));
+    if (BurtGIIndirectReprojectionLightingIsValid(diffuse.rgb))
+    {
+        return;
+    }
+
+    float centerRawDepth = _BurtCameraDepthTexture.Load(int3(pixelCoord, 0));
+    if (BurtGIIndirectReprojectionIsSkyDepth(centerRawDepth))
+    {
+        return;
+    }
+
+    float centerLinearDepth = BurtGIIndirectReprojectionLinearEyeDepth(centerRawDepth);
+    float3 centerNormal = BurtGIIndirectReprojectionDecodeNormalWS(_BurtGBuffer0.Load(int3(pixelCoord, 0)).rgb);
+    int2 maxCoord = (int2)outputSize - 1;
+    static const int2 directions[8] =
+    {
+        int2(-1,  0), int2(1,  0), int2( 0, -1), int2( 0, 1),
+        int2(-1, -1), int2(1, -1), int2(-1,  1), int2(1, 1),
+    };
+
+    float4 diffuseSum = 0.0f;
+    float4 backfaceSum = 0.0f;
+    float4 roughSpecularSum = 0.0f;
+    float weightSum = 0.0f;
+
+    // Invalid XRender-style upsample footprints can span half of a 16 px probe
+    // cell. Search the nearest valid ring, while rejecting samples across depth
+    // and normal discontinuities, so TAA-disabled SceneView still has a stable
+    // current-frame fallback without lighting bleeding across silhouettes.
+    [loop]
+    for (int radius = 1; radius <= 8; ++radius)
+    {
+        float ringWeightSum = 0.0f;
+        float4 ringDiffuseSum = 0.0f;
+        float4 ringBackfaceSum = 0.0f;
+        float4 ringRoughSpecularSum = 0.0f;
+
+        [unroll]
+        for (uint directionIndex = 0u; directionIndex < 8u; ++directionIndex)
+        {
+            int2 sampleCoord = clamp((int2)pixelCoord + directions[directionIndex] * radius, int2(0, 0), maxCoord);
+            float4 sampleDiffuse = _BurtGIDiffuseIndirectCurrentTexture.Load(int3(sampleCoord, 0));
+            if (!BurtGIIndirectReprojectionLightingIsValid(sampleDiffuse.rgb))
+            {
+                continue;
+            }
+
+            float sampleRawDepth = _BurtCameraDepthTexture.Load(int3(sampleCoord, 0));
+            float sampleLinearDepth = BurtGIIndirectReprojectionLinearEyeDepth(sampleRawDepth);
+            float relativeDepthDifference = abs(sampleLinearDepth - centerLinearDepth) / max(centerLinearDepth, 1.0e-3f);
+            float3 sampleNormal = BurtGIIndirectReprojectionDecodeNormalWS(_BurtGBuffer0.Load(int3(sampleCoord, 0)).rgb);
+            float normalAgreement = saturate(dot(centerNormal, sampleNormal));
+            float geometryWeight = exp2(-64.0f * relativeDepthDifference) * pow(normalAgreement, 8.0f);
+            if (geometryWeight <= 0.01f)
+            {
+                continue;
+            }
+
+            ringDiffuseSum += sampleDiffuse * geometryWeight;
+            ringBackfaceSum += _BurtGIBackfaceDiffuseIndirectCurrentTexture.Load(int3(sampleCoord, 0)) * geometryWeight;
+            ringRoughSpecularSum += _BurtGIRoughSpecularIndirectCurrentTexture.Load(int3(sampleCoord, 0)) * geometryWeight;
+            ringWeightSum += geometryWeight;
+        }
+
+        if (ringWeightSum > 0.0f)
+        {
+            diffuseSum = ringDiffuseSum;
+            backfaceSum = ringBackfaceSum;
+            roughSpecularSum = ringRoughSpecularSum;
+            weightSum = ringWeightSum;
+            break;
+        }
+    }
+
+    if (weightSum > 0.0f)
+    {
+        float inverseWeightSum = rcp(weightSum);
+        diffuse = diffuseSum * inverseWeightSum;
+        backface = backfaceSum * inverseWeightSum;
+        roughSpecular = roughSpecularSum * inverseWeightSum;
+    }
+}
+
+[numthreads(BURT_GI_REPROJECTION_THREAD_GROUP_SIZE, BURT_GI_REPROJECTION_THREAD_GROUP_SIZE, 1)]
+void ScreenProbeIndirectCurrentFrameResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 outputSize = max((uint2)_BurtGIIndirectReprojectionParams.xy, uint2(1u, 1u));
+    if (any(pixelCoord >= outputSize))
+    {
+        return;
+    }
+
+    float4 diffuse;
+    float4 backface;
+    float4 roughSpecular;
+    BurtGIIndirectCurrentFrameResolveNeighborhood(pixelCoord, outputSize, diffuse, backface, roughSpecular);
+    _BurtGIDiffuseIndirectOutputTexture[pixelCoord] = max(diffuse, 0.0f);
+    _BurtGIBackfaceDiffuseIndirectOutputTexture[pixelCoord] = max(backface, 0.0f);
+    _BurtGIRoughSpecularIndirectOutputTexture[pixelCoord] = max(roughSpecular, 0.0f);
 }
 
 void BurtGIIndirectReprojectionBilinearScatterUseCount(float2 historyUV, uint2 outputSize)

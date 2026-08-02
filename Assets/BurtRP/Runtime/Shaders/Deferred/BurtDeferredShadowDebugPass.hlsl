@@ -8,6 +8,7 @@
 #define BURT_USE_TILED_LIGHTING 1
 #define BURT_ENABLE_SHADING_DEBUG 1
 #define BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS 1
+#define BURT_INCLUDE_SHADOW_DEBUG 1
 
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtCommon.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtInput.hlsl"

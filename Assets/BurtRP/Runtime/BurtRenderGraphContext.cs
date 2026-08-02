@@ -9,6 +9,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
         private const int MaxPooledContextCount = 8;
         private static readonly Stack<BurtRenderGraphContext> ContextPool = new Stack<BurtRenderGraphContext>();
         private readonly List<ProfilingSampler> activeProfilingSamplers = new List<ProfilingSampler>();
+        private readonly List<ProfilingSampler> submittedProfilingSamplers = new List<ProfilingSampler>();
 
         public ScriptableRenderContext ScriptableContext { get; private set; } // 保存 Unity SRP 的渲染上下文，Pass 通过它提交绘制命令。
 
@@ -16,10 +17,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
         private bool commandBufferHasCommands;
         private bool graphCommandBufferHasCommands;
         // Profiling markers are commands too, but marker-only buffers should not become empty
-        // BRP.RenderGraph/Shared submissions in RenderDoc.
+        // physical submissions in RenderDoc.
         private bool commandBufferHasWork;
         private bool graphCommandBufferHasWork;
-        private bool profilingScopesOpenOnCommandBuffer;
+        // True while the current graphics/compute queue owns the logical profiling stack. The
+        // stack may remain open after its source CommandBuffer has been executed and cleared.
+        private bool profilingScopesBoundToCurrentQueue;
 
         public CommandBuffer CommandBuffer { get; private set; } // Current graph or async-pass command buffer used by migrated passes and profiling markers.
 
@@ -1289,19 +1292,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
         }
 
-        public BurtRenderTargetHandle ScreenSpaceSubsurfaceHistoryTarget
-        {
-            get
-            {
-                if (ResourceRegistry == null)
-                {
-                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceHistoryName);
-                }
-
-                return ResourceRegistry.GetScreenSpaceSubsurfaceHistory();
-            }
-        }
-
         public BurtRenderTargetHandle ScreenSpaceSubsurfaceVelocityTarget
         {
             get
@@ -1435,6 +1425,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
         public BurtRenderBufferHandle ScreenSpaceSubsurfaceBurleyArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName);
 
         public BurtRenderBufferHandle ScreenSpaceSubsurfaceBurleyGroupBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName);
+
+        public BurtRenderBufferHandle ScreenSpaceSubsurfaceSeparableArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSeparableArgsBufferName);
+
+        public BurtRenderBufferHandle ScreenSpaceSubsurfaceSeparableGroupBuffer => GetBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSeparableGroupBufferName);
 
         public BurtRenderBufferHandle FurBlurArgsBuffer => GetBuffer(BurtRenderGraphResourceRegistry.FurBlurArgsBufferName);
 
@@ -1580,8 +1574,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             context.graphCommandBufferHasCommands = false;
             context.commandBufferHasWork = false;
             context.graphCommandBufferHasWork = false;
-            context.profilingScopesOpenOnCommandBuffer = false;
+            context.profilingScopesBoundToCurrentQueue = false;
             context.activeProfilingSamplers.Clear();
+            context.submittedProfilingSamplers.Clear();
             if (ContextPool.Count < MaxPooledContextCount)
             {
                 ContextPool.Push(context);
@@ -1612,8 +1607,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             graphCommandBufferHasCommands = false;
             commandBufferHasWork = false;
             graphCommandBufferHasWork = false;
-            profilingScopesOpenOnCommandBuffer = false;
+            profilingScopesBoundToCurrentQueue = false;
             activeProfilingSamplers.Clear();
+            submittedProfilingSamplers.Clear();
         }
 
         internal void BeginAsyncPass(CommandBuffer asyncCommandBuffer)
@@ -1656,19 +1652,35 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 return;
             }
 
-            CloseActiveProfilingScopes();
-            if (commandBufferHasWork)
+            if (!preserveProfilingScopes)
+            {
+                CloseActiveProfilingScopes();
+            }
+
+            // A synchronous graphics submission does not end the RenderDoc annotation stack.
+            // Keep logical RenderGraph/Camera/Stage scopes open across ExecuteCommandBuffer and
+            // DrawRenderers, matching XRender's single request-level hierarchy. Marker-only
+            // commands are submitted only when they change the queue's visible scope stack.
+            var profilingStateChanged = preserveProfilingScopes
+                ? !SubmittedProfilingScopesMatchActive()
+                : submittedProfilingSamplers.Count > 0;
+            var shouldExecute = commandBufferHasWork || profilingStateChanged;
+            if (shouldExecute)
             {
                 ScriptableContext.ExecuteCommandBuffer(CommandBuffer);
+                if (preserveProfilingScopes)
+                {
+                    SynchronizeSubmittedProfilingScopesWithActive();
+                }
+                else
+                {
+                    submittedProfilingSamplers.Clear();
+                }
             }
 
             CommandBuffer.Clear();
             commandBufferHasCommands = false;
             commandBufferHasWork = false;
-            if (preserveProfilingScopes)
-            {
-                ReopenActiveProfilingScopes();
-            }
         }
 
         internal void ExecuteCurrentCommandBufferAsync(ComputeQueueType queueType)
@@ -1687,17 +1699,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             CommandBuffer.Clear();
             commandBufferHasCommands = false;
             commandBufferHasWork = false;
+            submittedProfilingSamplers.Clear();
         }
 
         public void DiscardCommandBuffer()
         {
             CommandBuffer?.Clear();
+            CloseSubmittedProfilingScopesAfterDiscard();
             commandBufferHasCommands = false;
             graphCommandBufferHasCommands = false;
             commandBufferHasWork = false;
             graphCommandBufferHasWork = false;
-            profilingScopesOpenOnCommandBuffer = false;
+            profilingScopesBoundToCurrentQueue = false;
             activeProfilingSamplers.Clear();
+            submittedProfilingSamplers.Clear();
         }
 
         public CommandBuffer AcquireCommandBuffer(string name)
@@ -1711,6 +1726,50 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
 
             return CommandBufferPool.Get(string.IsNullOrEmpty(name) ? "BRP.Pass" : name);
+        }
+
+        /// <summary>
+        /// Records a renderer list into the graph-owned command buffer so scene draws and
+        /// profiling markers share one ordered GPU command stream. The legacy DrawRenderers
+        /// fallback is only used when the context is executed without a graph command buffer.
+        /// </summary>
+        public void DrawRendererList(
+            CullingResults cullingResults,
+            ref DrawingSettings drawingSettings,
+            ref FilteringSettings filteringSettings)
+        {
+            if (CommandBuffer == null)
+            {
+                ScriptableContext.DrawRenderers(cullingResults, ref drawingSettings, ref filteringSettings);
+                return;
+            }
+
+            ReopenActiveProfilingScopes();
+            var rendererListParameters = new RendererListParams(cullingResults, drawingSettings, filteringSettings);
+            var rendererList = ScriptableContext.CreateRendererList(ref rendererListParameters);
+            CommandBuffer.DrawRendererList(rendererList);
+            commandBufferHasCommands = true;
+            commandBufferHasWork = true;
+        }
+
+        /// <summary>
+        /// Records a shadow renderer list into the graph-owned command buffer. Keeping the
+        /// caster state, draw, and reset in one stream guarantees that global matrices and
+        /// bias values are consumed before the reset commands execute.
+        /// </summary>
+        public void DrawShadowRendererList(ref ShadowDrawingSettings shadowDrawingSettings)
+        {
+            if (CommandBuffer == null)
+            {
+                ScriptableContext.DrawShadows(ref shadowDrawingSettings);
+                return;
+            }
+
+            ReopenActiveProfilingScopes();
+            var rendererList = ScriptableContext.CreateShadowRendererList(ref shadowDrawingSettings);
+            CommandBuffer.DrawRendererList(rendererList);
+            commandBufferHasCommands = true;
+            commandBufferHasWork = true;
         }
 
         /// <summary>
@@ -1749,7 +1808,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             sampler.Begin(CommandBuffer);
             activeProfilingSamplers.Add(sampler);
             commandBufferHasCommands = true;
-            profilingScopesOpenOnCommandBuffer = true;
+            profilingScopesBoundToCurrentQueue = true;
         }
 
         internal void EndProfilingScope(ProfilingSampler sampler)
@@ -1765,7 +1824,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             activeProfilingSamplers.RemoveAt(lastIndex);
             openedSampler.End(CommandBuffer);
             commandBufferHasCommands = true;
-            profilingScopesOpenOnCommandBuffer = activeProfilingSamplers.Count > 0;
+            profilingScopesBoundToCurrentQueue = activeProfilingSamplers.Count > 0;
         }
 
         public void ExecuteLegacyCommandBuffer(CommandBuffer commandBuffer)
@@ -1775,9 +1834,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 return;
             }
 
-            FlushCommandBuffer(false);
+            // Keep the logical RenderGraph scopes open while legacy commands execute so their
+            // GPU work remains nested under the current Camera/Stage/Pass in RenderDoc.
+            FlushCommandBuffer(true);
             ScriptableContext.ExecuteCommandBuffer(commandBuffer);
-            ReopenActiveProfilingScopes();
         }
 
         public void ExecuteAndReleaseCommandBuffer(CommandBuffer commandBuffer)
@@ -1799,7 +1859,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
 
         private void CloseActiveProfilingScopes()
         {
-            if (CommandBuffer == null || !profilingScopesOpenOnCommandBuffer)
+            if (CommandBuffer == null || !profilingScopesBoundToCurrentQueue)
             {
                 return;
             }
@@ -1809,12 +1869,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 activeProfilingSamplers[scopeIndex].End(CommandBuffer);
             }
 
-            profilingScopesOpenOnCommandBuffer = false;
+            profilingScopesBoundToCurrentQueue = false;
         }
 
         private void ReopenActiveProfilingScopes()
         {
-            if (CommandBuffer == null || activeProfilingSamplers.Count == 0 || profilingScopesOpenOnCommandBuffer)
+            if (CommandBuffer == null || activeProfilingSamplers.Count == 0 || profilingScopesBoundToCurrentQueue)
             {
                 return;
             }
@@ -1825,7 +1885,62 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             }
 
             commandBufferHasCommands = true;
-            profilingScopesOpenOnCommandBuffer = true;
+            profilingScopesBoundToCurrentQueue = true;
+        }
+
+        private bool SubmittedProfilingScopesMatchActive()
+        {
+            if (submittedProfilingSamplers.Count != activeProfilingSamplers.Count)
+            {
+                return false;
+            }
+
+            for (var scopeIndex = 0; scopeIndex < activeProfilingSamplers.Count; scopeIndex++)
+            {
+                if (!ReferenceEquals(submittedProfilingSamplers[scopeIndex], activeProfilingSamplers[scopeIndex]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void SynchronizeSubmittedProfilingScopesWithActive()
+        {
+            submittedProfilingSamplers.Clear();
+            for (var scopeIndex = 0; scopeIndex < activeProfilingSamplers.Count; scopeIndex++)
+            {
+                submittedProfilingSamplers.Add(activeProfilingSamplers[scopeIndex]);
+            }
+        }
+
+        private void CloseSubmittedProfilingScopesAfterDiscard()
+        {
+            if (submittedProfilingSamplers.Count == 0 || graphCommandBuffer == null)
+            {
+                return;
+            }
+
+            try
+            {
+                graphCommandBuffer.Clear();
+                for (var scopeIndex = submittedProfilingSamplers.Count - 1; scopeIndex >= 0; scopeIndex--)
+                {
+                    submittedProfilingSamplers[scopeIndex].End(graphCommandBuffer);
+                }
+
+                ScriptableContext.ExecuteCommandBuffer(graphCommandBuffer);
+            }
+            catch
+            {
+                // Discard is already running on an exception path. Never replace the original
+                // render failure with a secondary profiling-marker cleanup exception.
+            }
+            finally
+            {
+                graphCommandBuffer.Clear();
+            }
         }
     }
 }

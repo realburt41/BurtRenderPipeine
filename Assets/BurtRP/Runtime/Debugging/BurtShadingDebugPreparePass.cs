@@ -19,10 +19,10 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             BurtShadingDebugSettings.RecordGlobalShaderProperties(cmd, context.Request);
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
     }
 }

@@ -206,11 +206,11 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                 case BurtShadingDebugMode.ShadowDistanceFade:
                     return "Shadow Distance Fade"; // 显示最后一级 cascade 的远距离阴影淡出。
                 case BurtShadingDebugMode.ShadowPCSSRadius:
-                    return "Shadow PCSS Radius (Hard Only)"; // 显示 PCSS 估算出的半影半径，仅在 Hard Shadows + PCSS 下有意义。
+                    return "Shadow PCF Footprint"; // 显示当前 XRender 优化 PCF kernel 对阴影图的覆盖。
                 case BurtShadingDebugMode.ShadowReceiverDepthDelta:
                     return "Shadow Receiver Depth Delta"; // 显示 receiver depth 与 shadow map 深度差。
                 case BurtShadingDebugMode.ShadowPCSSBlockerFraction:
-                    return "Shadow PCSS Blockers (Hard Only)"; // 显示 blocker search 里命中的 blocker 占比，仅在 Hard Shadows + PCSS 下有意义。
+                    return "Shadow PCSS Blockers (Inactive)"; // XRender 主方向光路径不做 blocker search，该兼容调试项固定输出黑色。
                 case BurtShadingDebugMode.AmbientOcclusion:
                     return "Ambient Occlusion (Lighting)"; // 显示真正参与间接光遮蔽的 AO。
                 case BurtShadingDebugMode.Emission:
@@ -455,6 +455,20 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
                     return "Auto Exposure Metering Weight";
                 case BurtShadingDebugMode.AutoExposureHistogramRange:
                     return "Auto Exposure Histogram Range";
+                case BurtShadingDebugMode.ExposureHDRSceneIlluminance:
+                    return "Scene Illuminance";
+                case BurtShadingDebugMode.ExposureHDRSceneLuminance:
+                    return "Scene Luminance";
+                case BurtShadingDebugMode.ExposureHDRExposedLuminance:
+                    return "Exposed Luminance";
+                case BurtShadingDebugMode.ExposureHDRToneMappedLuminance:
+                    return "Tone Mapped Luminance";
+                case BurtShadingDebugMode.ExposureHDRLightMeter:
+                    return "Light Meter";
+                case BurtShadingDebugMode.ExposureHDRLocalExposure:
+                    return "Local Exposure";
+                case BurtShadingDebugMode.ExposureHDRLuminanceContrast:
+                    return "Luminance Contrast";
                 case BurtShadingDebugMode.ScreenSpaceReflectionRawHitMask:
                     return "SSR Raw Hit Mask";
                 case BurtShadingDebugMode.ScreenSpaceReflectionHitMask:
@@ -792,7 +806,7 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.ShadowCascadeIndex, // CSM cascade 命中颜色。
             BurtShadingDebugMode.ShadowCascadeBlend, // CSM cascade 边界混合权重。
             BurtShadingDebugMode.ShadowDistanceFade, // 最后一级 cascade 到无阴影的远距离 fade。
-            BurtShadingDebugMode.ShadowPCSSRadius, // 当前像素的 PCSS 半影半径。
+            BurtShadingDebugMode.ShadowPCSSRadius, // 兼容名称：当前选择的优化 PCF kernel footprint。
             BurtShadingDebugMode.ShadowReceiverDepthDelta, // receiver / shadow map 深度差，用来调 bias。
             BurtShadingDebugMode.ShadowPCSSBlockerFraction, // PCSS blocker search 命中的 blocker 占比。
             BurtShadingDebugMode.MainLightShadowReceiverDepth,
@@ -906,11 +920,15 @@ namespace Burt.RenderPipeline.Editor // 编辑器扩展放在 BurtRP Editor 命�
             BurtShadingDebugMode.BloomThresholdMask
         });
 
-        public static readonly BurtShadingDebugGroup AutoExposure = new BurtShadingDebugGroup("Auto Exposure", "Exposure", new[] // 自动曝光后处理调试。
+        public static readonly BurtShadingDebugGroup AutoExposure = new BurtShadingDebugGroup("Exposure HDR Debug View", "Exposure", new[] // 对齐 XRender Visualize HDR 的七个主模式。
         {
-            BurtShadingDebugMode.AutoExposureLuminance,
-            BurtShadingDebugMode.AutoExposureMeteringWeight,
-            BurtShadingDebugMode.AutoExposureHistogramRange
+            BurtShadingDebugMode.ExposureHDRSceneIlluminance,
+            BurtShadingDebugMode.ExposureHDRSceneLuminance,
+            BurtShadingDebugMode.ExposureHDRExposedLuminance,
+            BurtShadingDebugMode.ExposureHDRToneMappedLuminance,
+            BurtShadingDebugMode.ExposureHDRLightMeter,
+            BurtShadingDebugMode.ExposureHDRLocalExposure,
+            BurtShadingDebugMode.ExposureHDRLuminanceContrast
         });
 
         public static readonly BurtShadingDebugGroup Atmosphere = new BurtShadingDebugGroup("Atmosphere", "Atmosphere", new[]

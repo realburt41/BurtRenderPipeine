@@ -348,7 +348,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
                 return; // 资源缺失时直接跳过，避免绑定默认 RenderTargetIdentifier 导致画面不可控。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
+            var cmd = context.AcquireCommandBuffer(Name); // 录制到图级共享 CommandBuffer，保持 Pass 和 MRT 命令连续。
 
             BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target, gbufferObjectIndexTarget, cameraDepthTarget); // 把 GBuffer0/1/2/3/4 作为 MRT color attachments，把 CameraDepth 作为 depth attachment。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, BurtGBufferRenderTargetPassUtility.ResolveCamera(context));
@@ -356,7 +356,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             context.ExecuteLegacyCommandBuffer(cmd); // 把 MRT 绑定命令提交给 Unity 渲染上下文。
 
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 放回池子，避免每帧产生额外 GC。
+            context.ReleaseCommandBuffer(cmd); // 图级共享缓冲由 RenderGraph 持有；本地缓冲才真正归还池。
         }
     }
 
@@ -389,7 +389,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
                 return; // 资源缺失时直接跳过，避免清理无效目标。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
+            var cmd = context.AcquireCommandBuffer(Name); // 录制到图级共享 CommandBuffer，保持 Clear 和 Pass 连续。
 
             var camera = BurtGBufferRenderTargetPassUtility.ResolveCamera(context);
             BurtGBufferRenderTargetPassUtility.ClearSingleGBufferColor(cmd, gbuffer0Target, cameraDepthTarget, GBuffer0ClearColor, camera); // 单独清理 GBuffer0，给 normal 编码和 roughness 提供稳定默认值。
@@ -405,7 +405,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             context.ExecuteLegacyCommandBuffer(cmd); // 把清理和最终 MRT 绑定命令提交给 Unity 渲染上下文。
 
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 放回池子，避免每帧产生额外 GC。
+            context.ReleaseCommandBuffer(cmd); // 图级共享缓冲由 RenderGraph 持有；本地缓冲才真正归还池。
         }
     }
 
@@ -435,19 +435,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(gbuffer0Target.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
 
             var sortingSettings = new SortingSettings(camera);
             sortingSettings.criteria = SortingCriteria.CommonOpaque;
 
             var drawingSettings = BurtDrawingSettingsUtility.CreateDepthNormalsDrawingSettings(sortingSettings);
             var filteringSettings = new FilteringSettings(RenderQueueRange.opaque);
-            context.ScriptableContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings);
+            context.DrawRendererList(request.CullingResults, ref drawingSettings, ref filteringSettings);
         }
     }
 
@@ -485,7 +485,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
                 return; // 直接结束这个 Pass，避免后续 DrawRenderers 访问空相机。
             }
 
-            var cmd = CommandBufferPool.Get(Name); // 从 Unity 命令缓冲池获取一个 CommandBuffer，并用 Pass 名称标记它。
+            var cmd = context.AcquireCommandBuffer(Name); // GBuffer 状态和 RendererList 进入同一个图级命令流。
 
             BurtGBufferRenderTargetPassUtility.SetGBufferRenderTargets(cmd, gbuffer0Target, gbuffer1Target, gbuffer2Target, gbuffer3Target, gbuffer4Target, gbuffer5Target, gbufferObjectIndexTarget, cameraDepthTarget); // 绘制前重新绑定 GBuffer MRT，避免前一个 Pass 改过渲染目标。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
@@ -493,7 +493,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             context.ExecuteLegacyCommandBuffer(cmd); // Preserve graph ordering before the legacy local command buffer is submitted.
 
-            CommandBufferPool.Release(cmd); // 把 CommandBuffer 放回池子，避免每帧产生额外 GC。
+            context.ReleaseCommandBuffer(cmd); // 图级共享缓冲由 RenderGraph 持有；本地缓冲才真正归还池。
 
             var sortingSettings = new SortingSettings(camera); // 创建排序设置，Unity 会根据当前相机计算不透明排序参数。
 
@@ -503,17 +503,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
 
             var filteringSettings = new FilteringSettings(RenderQueueRange.opaque); // 创建过滤设置，只允许 opaque 渲染队列进入 GBuffer。
 
-            var drawScopeCmd = CommandBufferPool.Get(Name + " Draw Scope");
-            drawScopeCmd.BeginSample(Name);
-            context.ExecuteLegacyCommandBuffer(drawScopeCmd);
-            CommandBufferPool.Release(drawScopeCmd);
-
-            renderContext.DrawRenderers(request.CullingResults, ref drawingSettings, ref filteringSettings); // 使用剔除结果绘制所有支持 BurtGBuffer pass 的不透明物体。
-
-            drawScopeCmd = CommandBufferPool.Get(Name + " Draw Scope");
-            drawScopeCmd.EndSample(Name);
-            context.ExecuteLegacyCommandBuffer(drawScopeCmd);
-            CommandBufferPool.Release(drawScopeCmd);
+            context.DrawRendererList(request.CullingResults, ref drawingSettings, ref filteringSettings); // 把 GBuffer renderer list 录进图级命令流，使实际 Draw 保持在当前 Pass 标记内。
         }
     }
 

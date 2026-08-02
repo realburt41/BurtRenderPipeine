@@ -72,6 +72,15 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             // 声明 Tonemapping 前使用的线性曝光倍率，1 表示不改变亮度。
             float _BurtPostExposure;
+            sampler2D _BurtExposureTexture;
+            float _BurtUseExposureTexture;
+            float _BurtInvPreExposure;
+            sampler3D _BurtLocalExposureHistogramTexture;
+            sampler2D _BurtLocalExposureBlurredLogLuminanceTexture;
+            float _BurtUseLocalExposure;
+            float4 _BurtLocalExposureContrastParams;
+            float4 _BurtLocalExposureThresholdParams;
+            float4 _BurtLocalExposureGridParams;
 
             // 声明 UE/XRender Film Slope，默认 0.88，对齐 XRender TonemappingComponent。
             float _BurtFilmSlope;
@@ -498,12 +507,50 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return filmColor;
             }
 
+            float BurtResolveGlobalExposure()
+            {
+                float gpuExposure = tex2Dlod(_BurtExposureTexture, float4(0.25, 0.5, 0.0, 0.0)).x * max(_BurtInvPreExposure, 0.0);
+                return lerp(_BurtPostExposure, gpuExposure, saturate(_BurtUseExposureTexture));
+            }
+
+            float BurtResolveLocalExposure(float3 preExposedColor, float2 uv)
+            {
+                if (_BurtUseLocalExposure < 0.5)
+                    return 1.0;
+
+                float3 linearColor = max(preExposedColor * max(_BurtInvPreExposure, 0.0), 0.0);
+                float logLuminance = log2(max(dot(linearColor, 1.0.xxx / 3.0), exp2(_BurtLocalExposureGridParams.z)));
+                float histogramRange = max(_BurtLocalExposureGridParams.w - _BurtLocalExposureGridParams.z, 0.001);
+                float histogramPosition = saturate((logLuminance - _BurtLocalExposureGridParams.z) / histogramRange);
+                float3 histogramUv = float3(
+                    uv * _BurtLocalExposureGridParams.xy,
+                    (histogramPosition * 31.0 + 0.5) / 32.0);
+                float2 bilateralData = tex3Dlod(_BurtLocalExposureHistogramTexture, float4(histogramUv, 0.0)).xy;
+                float blurredLogLuminance = tex2Dlod(_BurtLocalExposureBlurredLogLuminanceTexture, float4(uv, 0.0, 0.0)).r;
+                float bilateralLogLuminance = bilateralData.y >= 0.001
+                    ? bilateralData.x / bilateralData.y
+                    : blurredLogLuminance;
+                float exposureScale = max(tex2Dlod(_BurtExposureTexture, float4(0.25, 0.5, 0.0, 0.0)).x, 0.0001);
+                float baseLogLuminance = lerp(bilateralLogLuminance, blurredLogLuminance, _BurtLocalExposureContrastParams.w) + log2(exposureScale);
+                float compensationScale = max(tex2Dlod(_BurtExposureTexture, float4(0.25, 0.5, 0.0, 0.0)).w, 0.0001);
+                float logMiddleGrey = log2(0.18 * compensationScale * max(_BurtLocalExposureThresholdParams.z, 0.0001));
+                float exposedLogLuminance = logLuminance + log2(exposureScale);
+                float detailLogLuminance = exposedLogLuminance - baseLogLuminance;
+                float baseCentered = baseLogLuminance - logMiddleGrey;
+                float contrastScale = baseCentered > 0.0 ? _BurtLocalExposureContrastParams.x : _BurtLocalExposureContrastParams.y;
+                float thresholdOffset;
+                if (baseCentered > 0.0)
+                    thresholdOffset = baseCentered - max(0.0, baseCentered - _BurtLocalExposureThresholdParams.x);
+                else
+                    thresholdOffset = baseCentered - min(0.0, baseCentered + _BurtLocalExposureThresholdParams.y);
+                baseCentered -= thresholdOffset;
+                float localLogLuminance = logMiddleGrey + thresholdOffset + baseCentered * contrastScale + detailLogLuminance * _BurtLocalExposureContrastParams.z;
+                return exp2(localLogLuminance - exposedLogLuminance);
+            }
+
             // 根据 c# 上传的模式选择具体 Tonemapping 曲线。
             float3 BurtApplyTonemapping(float3 color)
             {
-                // Apply exposure before any tone curve. Exposure remains valid even when tonemapping is disabled.
-                color *= _BurtPostExposure;
-
                 // 如果模式小于 0.5，就认为是 None，直接返回原始颜色。
                 if (_BurtTonemappingMode < 0.5)
                 {
@@ -703,13 +750,15 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             {
                 // 从当前源纹理采样颜色。
                 float4 color = tex2D(_BurtPostProcessSourceTexture, input.uv);
+                float globalExposure = BurtResolveGlobalExposure();
+                color.rgb *= BurtResolveLocalExposure(color.rgb, input.uv) * globalExposure;
 
                 // Bloom 在 Tonemapping 前合回 HDR 颜色，保证现有 Tonemapping 继续处理最终高光。
                 if (_BurtUseBloom > 0.5)
                 {
                     float4 bloom = tex2D(_BurtBloomTexture, input.uv);
                     bloom.rgb = BurtSafeBloomHdrColor(bloom.rgb);
-                    color.rgb += bloom.rgb * _BurtBloomIntensity;
+                    color.rgb += bloom.rgb * _BurtBloomIntensity * globalExposure;
                     if (_BurtUseBloomAlpha > 0.5)
                     {
                         color.a = max(color.a, saturate(bloom.a * max(_BurtBloomIntensity, 0.0)));
@@ -754,6 +803,11 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float _BurtBloomFireflyClamp;
             float _BurtUseBloomAlpha;
             float _BurtPostExposure;
+            float _BurtBloomExposureScale;
+            float _BurtPreExposure;
+            float _BurtInvPreExposure;
+            sampler2D _BurtExposureTexture;
+            float _BurtUseExposureTexture;
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -800,23 +854,17 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float3 ApplyBloomThreshold(float3 color)
             {
-                if (_BurtBloomBypassThreshold > 0.5)
-                {
-                    return color;
-                }
-
-                float brightness = BurtBloomPerceivedLuminance(color * _BurtPostExposure);
-                float knee = max(_BurtBloomThreshold * _BurtBloomSoftKnee, 0.0001);
-                float soft = clamp(brightness - _BurtBloomThreshold + knee, 0.0, 2.0 * knee);
-                soft = soft * soft / (4.0 * knee);
-                float contribution = max(soft, brightness - _BurtBloomThreshold);
-                contribution /= max(brightness, 0.0001);
-                return color * saturate(contribution);
+                float3 linearColor = color * max(_BurtInvPreExposure, 0.0);
+                float gpuExposure = tex2Dlod(_BurtExposureTexture, float4(0.25, 0.5, 0.0, 0.0)).x;
+                float exposureScale = lerp(_BurtBloomExposureScale, gpuExposure, saturate(_BurtUseExposureTexture));
+                float totalLuminance = BurtBloomPerceivedLuminance(linearColor) * max(exposureScale, 0.0);
+                float bloomAmount = saturate((totalLuminance - _BurtBloomThreshold) * 0.5);
+                return bloomAmount * linearColor * max(_BurtPreExposure, 0.0);
             }
 
             float3 SampleBloomPrefilter(float2 uv)
             {
-                return ApplyBloomThreshold(ClampBloomFirefly(SafeBloomHdrColor(tex2D(_BurtPostProcessSourceTexture, uv).rgb)));
+                return ApplyBloomThreshold(SafeBloomHdrColor(tex2D(_BurtPostProcessSourceTexture, uv).rgb));
             }
 
             float BloomAlphaFromColor(float3 color)
@@ -829,19 +877,10 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float2 texel = _BurtBloomTexelSize.xy;
                 float2 sourceUv = BurtBloomSourceUV(input.uv);
-                float3 color = SampleBloomPrefilter(sourceUv) * 4.0;
-                color += SampleBloomPrefilter(sourceUv + texel * float2(1.0, 0.0)) * 2.0;
-                color += SampleBloomPrefilter(sourceUv + texel * float2(-1.0, 0.0)) * 2.0;
-                color += SampleBloomPrefilter(sourceUv + texel * float2(0.0, 1.0)) * 2.0;
-                color += SampleBloomPrefilter(sourceUv + texel * float2(0.0, -1.0)) * 2.0;
-                color += SampleBloomPrefilter(sourceUv + texel * float2(1.0, 1.0));
-                color += SampleBloomPrefilter(sourceUv + texel * float2(-1.0, 1.0));
-                color += SampleBloomPrefilter(sourceUv + texel * float2(1.0, -1.0));
-                color += SampleBloomPrefilter(sourceUv + texel * float2(-1.0, -1.0));
-                color = max(color * (1.0 / 16.0), 0.0);
-                return float4(color, _BurtUseBloomAlpha > 0.5 ? BloomAlphaFromColor(color) : 1.0);
+                float4 sceneColor = tex2D(_BurtPostProcessSourceTexture, sourceUv);
+                float3 color = SampleBloomPrefilter(sourceUv);
+                return float4(max(color, 0.0), _BurtUseBloomAlpha > 0.5 ? sceneColor.a * max(_BurtInvPreExposure, 0.0) : 0.0);
             }
             ENDHLSL
         }
@@ -899,16 +938,11 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             {
                 float2 texel = _BurtBloomTexelSize.xy;
                 float2 sourceUv = BurtBloomSourceUV(input.uv);
-                float4 color = SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv)) * 4.0;
-                color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 0.0))) * 2.0;
-                color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 0.0))) * 2.0;
-                color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(0.0, 1.0))) * 2.0;
-                color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(0.0, -1.0))) * 2.0;
-                color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 1.0)));
-                color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)));
+                float4 color = SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)));
                 color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, -1.0)));
-                color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, -1.0)));
-                return float4(max(color.rgb * (1.0 / 16.0), 0.0), saturate(color.a * (1.0 / 16.0)));
+                color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(-1.0, 1.0)));
+                color += SafeBloomHdrSample(tex2D(_BurtPostProcessSourceTexture, sourceUv + texel * float2(1.0, 1.0)));
+                return float4(max(color.rgb * 0.25, 0.0), saturate(color.a * 0.25));
             }
             ENDHLSL
         }
@@ -1483,11 +1517,6 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float historyValidity = tex2D(_BurtTAAParallaxRejectionTexture, uv).r;
                 float historyUseCount = BurtTaaLoadPrevUseCount(historyUv);
                 float historyCoverage = saturate(1.0 - abs(historyUseCount - 1.0));
-                float geometricHistoryValidity = saturate(
-                    historyValidity *
-                    depthContinuity *
-                    historyCoverage *
-                    finalHistoryAvailability);
                 uint stencil = BurtTaaLoadStencil(uv);
                 float4 taaMetadata = tex2D(_BurtTAAMetadataTexture, uv);
                 float outOfBoundsBreak = saturate(1.0 - inBounds);
@@ -1500,9 +1529,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float motionPixels = length(velocityData * _BurtTAATexelSize.zw);
                 float surfaceWeight = BurtTaaValidSurfaceWeight(closestDepth);
                 float stencilResponsive = ((stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0) * surfaceWeight;
-                float responsiveStrength = max(stencilResponsive, taaMetadata.g);
+                float responsiveStrength = stencilResponsive;
                 float responsiveMask = responsiveStrength * finalHistoryAvailability;
-                float responsiveHistoryRejection = max(stencilResponsive, taaMetadata.g * 0.75);
 
                 float3 moment1 = neighborhoodSum * (1.0 / 9.0);
                 float3 moment2 = neighborhoodSumSq * (1.0 / 9.0);
@@ -1512,12 +1540,10 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 // signal used by the resolve. A raw jittered center sample
                 // falsely rejects stable sub-pixel edges on alternate frames.
                 float shadingRejection = BurtTaaShadingRejection(currentFilteredWorking, historyWorking);
-                float dilatedHistoryRejection = _BurtTAAHasDilatedHistoryRejection > 0.5
-                    ? saturate(tex2D(_BurtTAADilatedHistoryRejectionTexture, uv).r)
-                    : shadingRejection;
-                float finalRejection = _BurtTAAHasDilatedHistoryRejection > 0.5
-                    ? saturate(historyValidity * (1.0 - dilatedHistoryRejection) * finalHistoryAvailability)
-                    : saturate(geometricHistoryValidity * (1.0 - shadingRejection) * (1.0 - responsiveHistoryRejection));
+                // Native TAA follows XRender and uses the parallax validity as
+                // its sole rejection gate. Keep the additional values above for
+                // diagnostics without feeding their jitter back into the blend.
+                float finalRejection = saturate(historyValidity * finalHistoryAvailability);
                 float antiFlickerHistoryGate = smoothstep(0.85, 1.0, finalRejection) * (1.0 - responsiveStrength);
                 float antiFlickerSdBoost =
                     BurtTaaAntiFlickerStandardDeviationBoost(temporalContrast, motionPixels) *
@@ -1540,14 +1566,17 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 1e-4)));
                 float xrenderBaseBlend = max(0.05, lumaContrast);
                 float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
-                currentBlend = max(currentBlend, 0.25 * responsiveMask);
+                currentBlend = lerp(currentBlend, 0.25, responsiveMask);
                 currentBlend = saturate(currentBlend);
                 currentBlend = lerp(1.0, currentBlend, finalHistoryAvailability);
 
                 float3 resolvedWorking = lerp(clippedHistoryWorking, currentFilteredWorking, currentBlend);
                 resolvedWorking = lerp(currentFilteredWorking, resolvedWorking, finalHistoryAvailability);
                 float3 resolved = BurtTaaFromWorkingPerceptualSpace(max(resolvedWorking, 0.0));
-                float finalFeedback = saturate((1.0 - currentBlend) * finalRejection);
+                // This is the actual history coefficient used by the lerp.
+                // Multiplying by finalRejection again only distorted the debug
+                // view by squaring the acceptance signal.
+                float finalFeedback = saturate(1.0 - currentBlend);
 
                 int debugMode = (int)round(_BurtShadingDebugMode);
                 if (_BurtShadingDebugEnabled > 0.5 && ((debugMode >= 320 && debugMode <= 346) || debugMode == 365 || debugMode == 367 || debugMode == 376 || (debugMode >= 489 && debugMode <= 491) || debugMode == 495))
@@ -2085,12 +2114,12 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                         float weight = wx * wy * (pixelInBounds ? 1.0 : 0.0) * inBounds;
                         int2 safePixel = clamp(pixel, int2(0, 0), textureSize - 1);
                         float previousUseCount = max(0.0, _BurtTAAPrevUseCountTexture.Load(int3(safePixel, 0)));
-                            float historyGhostingRejection = saturate(1.0 - 2.0 * abs(previousUseCount - 1.0));
+                        float historyGhostingRejection = saturate(1.0 - abs(previousUseCount - 1.0));
                         float previousRawDepth = tex2D(_BurtTAADepthHistoryTexture, (float2(safePixel) + 0.5) * _BurtTAATexelSize.xy).r;
                         float previousLinearDepth = BurtTaaLinearDepth(previousRawDepth);
                         float depthDelta = abs(currentLinearDepth - previousLinearDepth);
-                            float depthRejection = saturate(2.0 - 12.0 * depthDelta / previousLinearDepth);
-                            float tapRejection = min(historyGhostingRejection, depthRejection);
+                        float depthRejection = saturate(2.0 - 4.0 * depthDelta / previousLinearDepth);
+                        float tapRejection = max(historyGhostingRejection, depthRejection);
                         finalRejection += tapRejection * weight;
                         historyGhosting += historyGhostingRejection * weight;
                         depthRejectionSum += depthRejection * weight;
@@ -2160,6 +2189,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float _BurtBloomBypassThreshold;
             float _BurtBloomFireflyClamp;
             float _BurtPostExposure;
+            float _BurtBloomExposureScale;
+            float _BurtInvPreExposure;
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -2205,13 +2236,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     return 1.0;
                 }
 
-                float brightness = BurtBloomDebugLuminance(color * _BurtPostExposure);
-                float knee = max(_BurtBloomThreshold * _BurtBloomSoftKnee, 0.0001);
-                float soft = clamp(brightness - _BurtBloomThreshold + knee, 0.0, 2.0 * knee);
-                soft = soft * soft / (4.0 * knee);
-                float contribution = max(soft, brightness - _BurtBloomThreshold);
-                contribution /= max(brightness, 0.0001);
-                return saturate(contribution);
+                float3 linearColor = color * max(_BurtInvPreExposure, 0.0);
+                float brightness = BurtBloomDebugLuminance(linearColor) * max(_BurtBloomExposureScale, 0.0);
+                return saturate((brightness - _BurtBloomThreshold) * 0.5);
             }
 
             float4 Frag(Varyings input) : SV_Target
@@ -2227,7 +2254,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 color.a = color.a == color.a ? saturate(color.a) : 0.0;
                 if (_BurtBloomDebugMode > 1.5)
                 {
-                    float mask = BloomThresholdMask(ClampBloomDebugFirefly(color.rgb));
+                    float mask = BloomThresholdMask(color.rgb);
                     return float4(mask.xxx, 1.0);
                 }
 
@@ -2436,10 +2463,31 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             #include "UnityCG.cginc"
 
             sampler2D _BurtPostProcessSourceTexture;
+            sampler2D _BurtExposureTexture;
+            sampler2D _BurtAutoExposureDebugMeteringMask;
+            sampler2D _BurtAutoExposureDebugHistogramTexture;
+            sampler2D _BurtAutoExposureDebugToneMappedTexture;
+            sampler3D _BurtLocalExposureHistogramTexture;
+            sampler2D _BurtLocalExposureBlurredLogLuminanceTexture;
             float4 _BurtAutoExposureTexelSize;
             float _BurtAutoExposureDebugMode;
             float4 _BurtAutoExposureDebugParams;
+            float4 _BurtAutoExposureDebugParams2;
+            float _BurtAutoExposureDebugUseMeteringMask;
+            float _BurtAutoExposureDebugHasHistogram;
+            float _BurtAutoExposureDebugHasToneMappedTexture;
             float _BurtInvPreExposure;
+            float _BurtUseExposureTexture;
+            float _BurtUseLocalExposure;
+            float4 _BurtLocalExposureContrastParams;
+            float4 _BurtLocalExposureThresholdParams;
+            float4 _BurtLocalExposureGridParams;
+            float _BurtTonemappingMode;
+            float _BurtFilmSlope;
+            float _BurtFilmToe;
+            float _BurtFilmShoulder;
+            float _BurtFilmBlackClip;
+            float _BurtFilmWhiteClip;
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -2486,38 +2534,263 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 return lerp(1.0, 0.2, t);
             }
 
+            float3 BurtExposureDebugLevelColor(int level)
+            {
+                if (level == 0) return float3(0.0, 0.0, 0.4);
+                if (level == 1) return float3(0.0, 0.3, 1.0);
+                if (level == 2) return float3(0.0, 0.7, 0.4);
+                if (level == 3) return float3(0.0, 1.0, 0.0);
+                if (level == 4) return float3(0.8, 0.8, 0.0);
+                if (level == 5) return float3(1.0, 0.3, 0.0);
+                if (level == 6) return float3(0.7, 0.0, 0.0);
+                if (level == 7) return float3(0.5, 0.0, 0.5);
+                if (level == 8) return float3(0.7, 0.3, 0.7);
+                return float3(1.0, 0.9, 0.9);
+            }
+
+            float3 BurtExposureDebugColorize(float luminance)
+            {
+                if (luminance < 1.0) return BurtExposureDebugLevelColor(0);
+                if (luminance < 10.0) return BurtExposureDebugLevelColor(1);
+                if (luminance < 100.0) return BurtExposureDebugLevelColor(2);
+                if (luminance < 500.0) return BurtExposureDebugLevelColor(3);
+                if (luminance < 1000.0) return BurtExposureDebugLevelColor(4);
+                if (luminance < 3000.0) return BurtExposureDebugLevelColor(5);
+                if (luminance < 5000.0) return BurtExposureDebugLevelColor(6);
+                if (luminance < 7000.0) return BurtExposureDebugLevelColor(7);
+                if (luminance < 10000.0) return BurtExposureDebugLevelColor(8);
+                return BurtExposureDebugLevelColor(9);
+            }
+
+            float3 BurtExposureDebugLegend(float2 uv, float3 color)
+            {
+                float width = max(_BurtAutoExposureTexelSize.z, 1.0);
+                float height = max(_BurtAutoExposureTexelSize.w, 1.0);
+                float2 pixel = uv * float2(width, height);
+                float2 legendMin = float2(64.0, 52.0);
+                float2 legendMax = float2(max(width - 64.0, 65.0), 90.0);
+                float inside = step(legendMin.x, pixel.x) * step(pixel.x, legendMax.x) * step(legendMin.y, pixel.y) * step(pixel.y, legendMax.y);
+                float legendT = saturate((pixel.x - legendMin.x) / max(legendMax.x - legendMin.x, 1.0));
+                int level = min((int)floor(legendT * 10.0), 9);
+                float3 legend = BurtExposureDebugLevelColor(level);
+                float border = step(abs(pixel.x - legendMin.x), 1.5) + step(abs(pixel.x - legendMax.x), 1.5) + step(abs(pixel.y - legendMin.y), 1.5) + step(abs(pixel.y - legendMax.y), 1.5);
+                legend = lerp(legend, 0.0.xxx, saturate(border));
+                return lerp(color, legend, inside);
+            }
+
+            float3 BurtExposureDebugCrossHair(float2 uv, float3 color)
+            {
+                float2 pixel = uv * _BurtAutoExposureTexelSize.zw;
+                float2 center = 0.5 * _BurtAutoExposureTexelSize.zw;
+                float2 delta = abs(pixel - center);
+                float distanceFromCenter = max(delta.x, delta.y);
+                float axis = max(step(delta.x, 2.5), step(delta.y, 2.5));
+                float lengthMask = step(4.0, distanceFromCenter) * (1.0 - step(47.0, distanceFromCenter));
+                return lerp(color, 0.0.xxx, axis * lengthMask);
+            }
+
+            float BurtExposureDebugCurrentScale()
+            {
+                float textureScale = tex2Dlod(_BurtExposureTexture, float4(0.25, 0.5, 0.0, 0.0)).x;
+                return max(lerp(_BurtAutoExposureDebugParams2.x, textureScale, saturate(_BurtUseExposureTexture)), 0.000001);
+            }
+
+            float4 BurtExposureDebugLocalData(float3 sceneColor, float2 uv)
+            {
+                if (_BurtUseLocalExposure < 0.5)
+                    return float4(1.0, BurtAutoExposureDebugLuminance(sceneColor), 1.0, 1.0);
+
+                float logLuminance = log2(max(dot(sceneColor, 1.0.xxx / 3.0), exp2(_BurtLocalExposureGridParams.z)));
+                float histogramRange = max(_BurtLocalExposureGridParams.w - _BurtLocalExposureGridParams.z, 0.001);
+                float histogramPosition = saturate((logLuminance - _BurtLocalExposureGridParams.z) / histogramRange);
+                float3 histogramUv = float3(uv * _BurtLocalExposureGridParams.xy, (histogramPosition * 31.0 + 0.5) / 32.0);
+                float2 bilateralData = tex3Dlod(_BurtLocalExposureHistogramTexture, float4(histogramUv, 0.0)).xy;
+                float blurredLogLuminance = tex2Dlod(_BurtLocalExposureBlurredLogLuminanceTexture, float4(uv, 0.0, 0.0)).r;
+                float bilateralLogLuminance = bilateralData.y >= 0.001 ? bilateralData.x / bilateralData.y : blurredLogLuminance;
+                float exposureScale = BurtExposureDebugCurrentScale();
+                float baseLogLuminance = lerp(bilateralLogLuminance, blurredLogLuminance, _BurtLocalExposureContrastParams.w) + log2(exposureScale);
+                float compensationScale = max(_BurtAutoExposureDebugParams2.w, 0.0001);
+                float logMiddleGrey = log2(0.18 * compensationScale * max(_BurtLocalExposureThresholdParams.z, 0.0001));
+                float exposedLogLuminance = logLuminance + log2(exposureScale);
+                float detailLogLuminance = exposedLogLuminance - baseLogLuminance;
+                float baseCentered = baseLogLuminance - logMiddleGrey;
+                float contrastScale = baseCentered > 0.0 ? _BurtLocalExposureContrastParams.x : _BurtLocalExposureContrastParams.y;
+                float thresholdOffset = baseCentered > 0.0
+                    ? baseCentered - max(0.0, baseCentered - _BurtLocalExposureThresholdParams.x)
+                    : baseCentered - min(0.0, baseCentered + _BurtLocalExposureThresholdParams.y);
+                baseCentered -= thresholdOffset;
+                float localLogLuminance = logMiddleGrey + thresholdOffset + baseCentered * contrastScale + detailLogLuminance * _BurtLocalExposureContrastParams.z;
+                float localExposure = exp2(localLogLuminance - exposedLogLuminance);
+                float baseLuminance = exp2(baseLogLuminance);
+                float detailRatio = exp2(detailLogLuminance);
+                float luminanceContrast = exp2((baseCentered * contrastScale + detailLogLuminance * _BurtLocalExposureContrastParams.z) - (baseCentered + detailLogLuminance));
+                return float4(localExposure, baseLuminance, detailRatio, luminanceContrast);
+            }
+
+            float BurtExposureDebugLuminanceContrast(float3 sceneColor, float2 uv)
+            {
+                if (_BurtUseLocalExposure < 0.5)
+                    return 1.0;
+
+                // XRender's LuminanceContrast capture is a separate diagnostic
+                // pass. It intentionally does not reuse the active local-exposure
+                // contrast controls: its defaults are 0.75/0.75, bias 0 and a
+                // fixed 0.35 bilateral/blurred blend.
+                float logLuminance = log2(max(dot(sceneColor, 1.0.xxx / 3.0), exp2(_BurtLocalExposureGridParams.z)));
+                float histogramRange = max(_BurtLocalExposureGridParams.w - _BurtLocalExposureGridParams.z, 0.001);
+                float histogramPosition = saturate((logLuminance - _BurtLocalExposureGridParams.z) / histogramRange);
+                float3 histogramUv = float3(uv * _BurtLocalExposureGridParams.xy, (histogramPosition * 31.0 + 0.5) / 32.0);
+                float2 bilateralData = tex3Dlod(_BurtLocalExposureHistogramTexture, float4(histogramUv, 0.0)).xy;
+                float blurredLogLuminance = tex2Dlod(_BurtLocalExposureBlurredLogLuminanceTexture, float4(uv, 0.0, 0.0)).r;
+                float bilateralLogLuminance = bilateralData.y >= 0.001 ? bilateralData.x / bilateralData.y : blurredLogLuminance;
+
+                float middleGrey = 0.18;
+                float averageSceneLuminance = max(_BurtAutoExposureDebugParams2.z, 0.000001);
+                float originExposureScale = middleGrey / averageSceneLuminance;
+                float baseLogLuminance = lerp(bilateralLogLuminance, blurredLogLuminance, 0.35) + log2(originExposureScale);
+                float exposedLogLuminance = logLuminance + log2(originExposureScale);
+                float detailLogLuminance = exposedLogLuminance - baseLogLuminance;
+                float logMiddleGrey = log2(middleGrey);
+                float baseCentered = baseLogLuminance - logMiddleGrey;
+                float localLogLuminance = logMiddleGrey + baseCentered * 0.75 + detailLogLuminance;
+                return exp2(localLogLuminance - exposedLogLuminance);
+            }
+
+            float3 BurtExposureDebugToneMap(float3 color)
+            {
+                color = max(color, 0.0);
+                if (_BurtTonemappingMode < 0.5)
+                    return color;
+                if (_BurtTonemappingMode < 1.5)
+                    return color / (1.0 + color);
+
+                float filmSlope = max(_BurtFilmSlope, 0.001);
+                float toeScale = max(1.0 + _BurtFilmBlackClip - _BurtFilmToe, 0.001);
+                float shoulderScale = max(1.0 + _BurtFilmWhiteClip - _BurtFilmShoulder, 0.001);
+                float inMatch = 0.18;
+                float outMatch = 0.18;
+                float toeMatch = (1.0 - _BurtFilmToe - outMatch) / filmSlope + log10(inMatch);
+                float straightMatch = (1.0 - _BurtFilmToe) / filmSlope - toeMatch;
+                float shoulderMatch = _BurtFilmShoulder / filmSlope - straightMatch;
+                float3 logColor = log10(max(color, 1e-6));
+                float3 straightColor = filmSlope * (logColor + straightMatch);
+                float3 toeColor = -_BurtFilmBlackClip + (2.0 * toeScale) / (1.0 + exp((-2.0 * filmSlope / toeScale) * (logColor - toeMatch)));
+                float3 shoulderColor = (1.0 + _BurtFilmWhiteClip) - (2.0 * shoulderScale) / (1.0 + exp((2.0 * filmSlope / shoulderScale) * (logColor - shoulderMatch)));
+                toeColor = lerp(straightColor, toeColor, 1.0 - step(toeMatch, logColor));
+                shoulderColor = lerp(straightColor, shoulderColor, step(shoulderMatch, logColor));
+                float3 blend = saturate((logColor - toeMatch) / max(abs(shoulderMatch - toeMatch), 0.0001));
+                blend = (3.0 - 2.0 * blend) * blend * blend;
+                return max(lerp(toeColor, shoulderColor, blend), 0.0);
+            }
+
+            float BurtExposureDebugHistogramBucket(int bucket)
+            {
+                int texelIndex = clamp(bucket, 0, 63) / 4;
+                int componentIndex = clamp(bucket, 0, 63) - texelIndex * 4;
+                float4 packed = tex2Dlod(_BurtAutoExposureDebugHistogramTexture, float4((texelIndex + 0.5) / 16.0, 0.25, 0.0, 0.0));
+                if (componentIndex == 0) return packed.x;
+                if (componentIndex == 1) return packed.y;
+                if (componentIndex == 2) return packed.z;
+                return packed.w;
+            }
+
+            float3 BurtExposureDebugLightMeter(float2 uv, float3 toneMappedColor)
+            {
+                float2 plotMin = float2(0.08, 0.58);
+                float2 plotMax = float2(0.92, 0.88);
+                float inside = step(plotMin.x, uv.x) * step(uv.x, plotMax.x) * step(plotMin.y, uv.y) * step(uv.y, plotMax.y);
+                float2 plotUv = saturate((uv - plotMin) / max(plotMax - plotMin, 0.0001));
+                int bucket = min((int)floor(plotUv.x * 64.0), 63);
+                float bucketWeight = BurtExposureDebugHistogramBucket(bucket);
+                float maximumWeight = 0.000001;
+                [loop]
+                for (int i = 0; i < 64; i++)
+                    maximumWeight = max(maximumWeight, BurtExposureDebugHistogramBucket(i));
+                float bar = step(1.0 - bucketWeight / maximumWeight, plotUv.y) * _BurtAutoExposureDebugHasHistogram;
+                float3 histogramColor = lerp(float3(0.035, 0.035, 0.035), BurtAutoExposureHeatmap(plotUv.x), bar);
+
+                float range = max(_BurtAutoExposureDebugParams.y - _BurtAutoExposureDebugParams.x, 0.001);
+                float compensationScale = max(_BurtAutoExposureDebugParams2.w, 0.000001);
+                float targetWithoutBias = max(_BurtAutoExposureDebugParams2.y / compensationScale, 0.000001);
+                float currentWithoutBias = max(_BurtAutoExposureDebugParams2.x / compensationScale, 0.000001);
+                float targetPosition = saturate((-log2(targetWithoutBias) - _BurtAutoExposureDebugParams.x) / range);
+                float currentWithoutBiasPosition = saturate((-log2(currentWithoutBias) - _BurtAutoExposureDebugParams.x) / range);
+                float currentPosition = saturate((-log2(max(_BurtAutoExposureDebugParams2.x, 0.000001)) - _BurtAutoExposureDebugParams.x) / range);
+                float targetLine = 1.0 - smoothstep(0.002, 0.008, abs(plotUv.x - targetPosition));
+                float currentWithoutBiasLine = 1.0 - smoothstep(0.002, 0.008, abs(plotUv.x - currentWithoutBiasPosition));
+                float currentLine = 1.0 - smoothstep(0.002, 0.008, abs(plotUv.x - currentPosition));
+                histogramColor = lerp(histogramColor, float3(0.0, 0.0, 1.0), targetLine);
+                histogramColor = lerp(histogramColor, float3(0.5, 0.0, 0.5), currentWithoutBiasLine);
+                histogramColor = lerp(histogramColor, float3(1.0, 1.0, 1.0), currentLine);
+                return lerp(toneMappedColor, histogramColor, inside);
+            }
+
             float4 Frag(Varyings input) : SV_Target
             {
-                float3 color = tex2D(_BurtPostProcessSourceTexture, input.uv).rgb * max(_BurtInvPreExposure, 0.0);
-                float logLum = clamp(log2(BurtAutoExposureDebugLuminance(color)), -20.0, 16.0);
-                float minLogLum = _BurtAutoExposureDebugParams.x;
-                float maxLogLum = max(minLogLum + 0.001, _BurtAutoExposureDebugParams.y);
-                float normalized = saturate((logLum - minLogLum) / (maxLogLum - minLogLum));
+                float3 preExposedColor = tex2D(_BurtPostProcessSourceTexture, input.uv).rgb;
+                float3 sceneColor = max(preExposedColor * max(_BurtInvPreExposure, 0.0), 0.0);
+                float sceneLuminance = BurtAutoExposureDebugLuminance(sceneColor);
+                float currentExposure = BurtExposureDebugCurrentScale();
+                float4 localData = BurtExposureDebugLocalData(sceneColor, input.uv);
+                float3 outputColor;
 
                 if (_BurtAutoExposureDebugMode < 1.5)
                 {
-                    return float4(BurtAutoExposureHeatmap(normalized), 1.0);
+                    outputColor = BurtExposureDebugColorize(sceneLuminance * UNITY_PI);
+                    outputColor = BurtExposureDebugLegend(input.uv, outputColor);
+                    outputColor = BurtExposureDebugCrossHair(input.uv, outputColor);
+                    return float4(outputColor, 1.0);
                 }
 
                 if (_BurtAutoExposureDebugMode < 2.5)
                 {
-                    float weight = BurtAutoExposureMeterWeight(input.uv);
-                    return float4(weight.xxx, 1.0);
+                    outputColor = BurtExposureDebugColorize(sceneLuminance);
+                    outputColor = BurtExposureDebugLegend(input.uv, outputColor);
+                    outputColor = BurtExposureDebugCrossHair(input.uv, outputColor);
+                    return float4(outputColor, 1.0);
                 }
 
-                if (logLum < minLogLum)
+                // XRender's Exposed Luminance view intentionally applies only the
+                // global exposure texture. Local exposure is visualized separately.
+                float3 exposedColor = sceneColor * currentExposure;
+                if (_BurtAutoExposureDebugMode < 3.5)
                 {
-                    return float4(0.05, 0.2, 1.0, 1.0);
+                    outputColor = BurtExposureDebugColorize(BurtAutoExposureDebugLuminance(exposedColor));
+                    outputColor = BurtExposureDebugLegend(input.uv, outputColor);
+                    outputColor = BurtExposureDebugCrossHair(input.uv, outputColor);
+                    return float4(outputColor, 1.0);
                 }
 
-                if (logLum > maxLogLum)
+                // Tone Mapped Luminance and Light Meter must inspect the real
+                // composite result. This preserves the production path's local
+                // exposure, bloom, AP1 film curve, gamut expansion and grading.
+                float3 fallbackToneMappedColor = BurtExposureDebugToneMap(exposedColor * localData.x);
+                float3 realToneMappedColor = tex2D(_BurtAutoExposureDebugToneMappedTexture, input.uv).rgb;
+                float3 toneMappedColor = lerp(fallbackToneMappedColor, realToneMappedColor, saturate(_BurtAutoExposureDebugHasToneMappedTexture));
+                if (_BurtAutoExposureDebugMode < 4.5)
                 {
-                    return float4(1.0, 0.08, 0.02, 1.0);
+                    outputColor = BurtExposureDebugColorize(BurtAutoExposureDebugLuminance(toneMappedColor));
+                    outputColor = BurtExposureDebugLegend(input.uv, outputColor);
+                    outputColor = BurtExposureDebugCrossHair(input.uv, outputColor);
+                    return float4(outputColor, 1.0);
                 }
 
-                float avgLine = 1.0 - smoothstep(0.03, 0.08, abs(normalized - saturate((_BurtAutoExposureDebugParams.w - minLogLum) / (maxLogLum - minLogLum))));
-                float3 rangeColor = lerp(float3(normalized, normalized, normalized), float3(1.0, 0.9, 0.1), avgLine);
-                return float4(rangeColor, 1.0);
+                if (_BurtAutoExposureDebugMode < 5.5)
+                {
+                    outputColor = BurtExposureDebugLightMeter(input.uv, toneMappedColor);
+                    return float4(outputColor, 1.0);
+                }
+
+                if (_BurtAutoExposureDebugMode < 6.5)
+                {
+                    float multiplier = max(localData.x, 0.000001);
+                    outputColor = saturate(abs(log2(multiplier)) * 0.5) * lerp(float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), step(multiplier, 1.0));
+                    return float4(outputColor, 1.0);
+                }
+
+                float contrast = max(BurtExposureDebugLuminanceContrast(sceneColor, input.uv), 0.000001);
+                outputColor = saturate(abs(log2(contrast)) * 0.5) * lerp(float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), step(contrast, 1.0));
+                return float4(outputColor, 1.0);
             }
             ENDHLSL
         }

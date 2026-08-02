@@ -23,7 +23,7 @@ Texture2D<float4> _BurtGBuffer0;
 Texture2D<float4> _BurtGBuffer2;
 Texture2D<float4> _BurtGBuffer3;
 
-RWStructuredBuffer<uint3> _BurtGIScreenProbeIntegrateTileIndirectArgsBuffer;
+RWStructuredBuffer<uint> _BurtGIScreenProbeIntegrateTileIndirectArgsBuffer;
 RWStructuredBuffer<uint> _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer;
 RWStructuredBuffer<uint> _BurtGIScreenProbeIntegrateTileDataAllBuffer;
 RWTexture2D<float4> _BurtGIScreenProbeIntegrateTileClassificationTexture;
@@ -131,14 +131,20 @@ void BurtGIAddIntegrateTileGroup(uint groupIndex, uint2 groupId, uint tileType)
     if (groupIndex == 0u && (BurtGIGroupLightingType & BURT_GI_TILE_LIGHTING_TYPE_ALL) != 0u)
     {
         uint indexToStore = 0u;
-        InterlockedAdd(_BurtGIScreenProbeIntegrateTileIndirectArgsBuffer[BURT_GI_TILE_CLASSIFICATION_SUPPORT_ALL].x, 1u, indexToStore);
+        InterlockedAdd(
+            _BurtGIScreenProbeIntegrateTileIndirectArgsBuffer[BURT_GI_TILE_CLASSIFICATION_SUPPORT_ALL * BURT_GI_DISPATCH_INDIRECT_UINT_COUNT],
+            1u,
+            indexToStore);
         _BurtGIScreenProbeIntegrateTileDataAllBuffer[2u * indexToStore + 0u] = groupId.x;
         _BurtGIScreenProbeIntegrateTileDataAllBuffer[2u * indexToStore + 1u] = groupId.y;
     }
     else if (groupIndex == 0u && (BurtGIGroupLightingType & BURT_GI_TILE_LIGHTING_TYPE_DIFFUSE) != 0u)
     {
         uint indexToStore = 0u;
-        InterlockedAdd(_BurtGIScreenProbeIntegrateTileIndirectArgsBuffer[BURT_GI_TILE_CLASSIFICATION_SIMPLE_DIFFUSE].x, 1u, indexToStore);
+        InterlockedAdd(
+            _BurtGIScreenProbeIntegrateTileIndirectArgsBuffer[BURT_GI_TILE_CLASSIFICATION_SIMPLE_DIFFUSE * BURT_GI_DISPATCH_INDIRECT_UINT_COUNT],
+            1u,
+            indexToStore);
         _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer[2u * indexToStore + 0u] = groupId.x;
         _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer[2u * indexToStore + 1u] = groupId.y;
     }

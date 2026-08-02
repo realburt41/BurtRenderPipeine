@@ -30,6 +30,7 @@ float4 BurtEvaluateDeferredLightingDebugOutput(
     BurtGBufferData gBufferData,
     BurtPBRShadingComponents components,
     BurtLightingResult lightingResult,
+    float shadowAttenuation,
     float3 finalPreExposedColor,
     float outputAlpha)
 {
@@ -57,6 +58,11 @@ float4 BurtEvaluateDeferredLightingDebugOutput(
         return float4(max(lightingResult.Emission, 0.0f), 1.0f);
     if (BurtIsDeferredLightingDebugMode(BURT_SHADING_DEBUG_MODE_FINAL_LIGHTING))
         return float4(max(lightingResult.FinalLighting, 0.0f), 1.0f);
+    // Use the exact attenuation consumed by production deferred lighting. This
+    // includes main CSM, per-object shadow, screen-space shadow and material
+    // micro-shadow terms, instead of recomputing a divergent diagnostic value.
+    if (BurtIsDeferredLightingDebugMode(BURT_SHADING_DEBUG_MODE_SHADOW_ATTENUATION))
+        return float4(saturate(shadowAttenuation).xxx, 1.0f);
 
     // BRDF diagnostics are captured while the production BRDF is evaluated.
     if (BurtIsDeferredLightingDebugMode(BURT_SHADING_DEBUG_MODE_SPECULAR_AA_ROUGHNESS))

@@ -56,11 +56,10 @@ namespace Burt.RenderPipeline
         public const int TileLightCountStride = 4;
         public const int TileLightIndexStride = 4;
         public const int TileLightOffsetStride = 8;
-        public const int PunctualTileBinCount = 4;
+        public const int PunctualTileBinCount = 3;
         public const int PunctualTileBin1To2 = 0;
         public const int PunctualTileBin3To8 = 1;
-        public const int PunctualTileBin9Plus = 2;
-        public const int PunctualTileBinShadow = 3;
+        public const int PunctualTileBinShadow = 2;
         public const float PunctualTileFullscreenFallbackThreshold = 0.95f;
         public const string DebugBuildModeLabel = "CPUTiledDebug";
         public const string RuntimeBuildModeLabel = "CPUClusteredRuntime";
@@ -77,7 +76,6 @@ namespace Burt.RenderPipeline
         public const string ClusterLightWorldToViewZShaderName = "_BurtClusterLightWorldToViewZ";
         public const string ClusterLightBufferEnabledShaderName = "_BurtClusterLightBufferEnabled";
         public const string PunctualTileIdBufferShaderName = "_BurtPunctualTileIds";
-        public const string PunctualTileDrawEnabledShaderName = "_BurtPunctualTileDrawEnabled";
         public const string PunctualTileIdOffsetShaderName = "_BurtPunctualTileIdOffset";
         public const string TileLightDebugStatsShaderName = "_BurtTileLightDebugStats";
         public const string TileLightDebugModeShaderName = "_BurtTileLightDebugMode";
@@ -97,7 +95,6 @@ namespace Burt.RenderPipeline
         public static readonly int ClusterLightWorldToViewZId = Shader.PropertyToID(ClusterLightWorldToViewZShaderName);
         public static readonly int ClusterLightBufferEnabledId = Shader.PropertyToID(ClusterLightBufferEnabledShaderName);
         public static readonly int PunctualTileIdBufferId = Shader.PropertyToID(PunctualTileIdBufferShaderName);
-        public static readonly int PunctualTileDrawEnabledId = Shader.PropertyToID(PunctualTileDrawEnabledShaderName);
         public static readonly int PunctualTileIdOffsetId = Shader.PropertyToID(PunctualTileIdOffsetShaderName);
         public static readonly int TileLightDebugStatsId = Shader.PropertyToID(TileLightDebugStatsShaderName);
         public static readonly int TileLightDebugModeId = Shader.PropertyToID(TileLightDebugModeShaderName);

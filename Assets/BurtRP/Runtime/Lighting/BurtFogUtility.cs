@@ -42,6 +42,9 @@ namespace Burt.RenderPipeline
         public readonly float Height;
         public readonly float Density;
         public readonly float HeightFalloff;
+        public readonly float SecondLayerHeightOffset;
+        public readonly float SecondLayerDensity;
+        public readonly float SecondLayerHeightFalloff;
         public readonly float StartDistance;
         public readonly float CutoffDistance;
         public readonly float MaxOpacity;
@@ -56,6 +59,9 @@ namespace Burt.RenderPipeline
             float height,
             float density,
             float heightFalloff,
+            float secondLayerHeightOffset,
+            float secondLayerDensity,
+            float secondLayerHeightFalloff,
             float startDistance,
             float cutoffDistance,
             float maxOpacity,
@@ -69,6 +75,9 @@ namespace Burt.RenderPipeline
             Height = height;
             Density = density;
             HeightFalloff = heightFalloff;
+            SecondLayerHeightOffset = secondLayerHeightOffset;
+            SecondLayerDensity = secondLayerDensity;
+            SecondLayerHeightFalloff = secondLayerHeightFalloff;
             StartDistance = startDistance;
             CutoffDistance = cutoffDistance;
             MaxOpacity = maxOpacity;
@@ -90,6 +99,9 @@ namespace Burt.RenderPipeline
                 settings.Height,
                 settings.Density,
                 settings.HeightFalloff,
+                settings.SecondLayerHeightOffset,
+                settings.SecondLayerDensity,
+                settings.SecondLayerHeightFalloff,
                 settings.StartDistance,
                 settings.CutoffDistance,
                 settings.MaxOpacity,
@@ -112,6 +124,9 @@ namespace Burt.RenderPipeline
         public readonly float Height;
         public readonly float Density;
         public readonly float HeightFalloff;
+        public readonly float SecondLayerHeightOffset;
+        public readonly float SecondLayerDensity;
+        public readonly float SecondLayerHeightFalloff;
         public readonly float StartDistance;
         public readonly float CutoffDistance;
         public readonly float MaxOpacity;
@@ -130,6 +145,9 @@ namespace Burt.RenderPipeline
             float height,
             float density,
             float heightFalloff,
+            float secondLayerHeightOffset,
+            float secondLayerDensity,
+            float secondLayerHeightFalloff,
             float startDistance,
             float cutoffDistance,
             float maxOpacity,
@@ -143,10 +161,16 @@ namespace Burt.RenderPipeline
             float aerialFadeEnd,
             BurtAtmosphereHorizontalFogSettings horizontalScattering)
         {
-            Enabled = enabled && aerialInteraction != AtmosphereFogInteraction.AerialOnly && density > 0.000001f && maxOpacity > 0.000001f;
+            Enabled = enabled &&
+                aerialInteraction != AtmosphereFogInteraction.AerialOnly &&
+                (density > 0.000001f || secondLayerDensity > 0.000001f) &&
+                maxOpacity > 0.000001f;
             Height = height;
             Density = Mathf.Clamp(density, 0f, 0.5f);
             HeightFalloff = Mathf.Clamp(heightFalloff, 0.001f, 4f);
+            SecondLayerHeightOffset = secondLayerHeightOffset;
+            SecondLayerDensity = Mathf.Clamp(secondLayerDensity, 0f, 0.5f);
+            SecondLayerHeightFalloff = Mathf.Clamp(secondLayerHeightFalloff, 0f, 4f);
             StartDistance = Mathf.Max(0f, startDistance);
             CutoffDistance = Mathf.Max(0f, cutoffDistance);
             MaxOpacity = Mathf.Clamp01(maxOpacity);
@@ -161,13 +185,22 @@ namespace Burt.RenderPipeline
             HorizontalScattering = horizontalScattering;
         }
 
-        public static BurtFogSettings Disabled => new BurtFogSettings(false, 0f, 0f, 0.2f, 0f, 0f, 0f, Color.white, 0f, 0f, 0f, AtmosphereFogInteraction.Additive, AtmosphereFogInteraction.Additive, 0f, 1f, BurtAtmosphereHorizontalFogSettings.Disabled);
+        public static BurtFogSettings Disabled => new BurtFogSettings(
+            false, 0f, 0f, 0.2f,
+            0f, 0f, 0f,
+            0f, 0f, 0f,
+            Color.white, 0f, 0f, 0f,
+            AtmosphereFogInteraction.Additive,
+            AtmosphereFogInteraction.Additive,
+            0f, 1f,
+            BurtAtmosphereHorizontalFogSettings.Disabled);
     }
 
     internal static class BurtFogUtility
     {
         private static readonly int TransparentHeightFogEnabledId = Shader.PropertyToID("_BurtTransparentHeightFogEnabled");
         private static readonly int TransparentHeightFogParamsId = Shader.PropertyToID("_BurtTransparentHeightFogParams");
+        private static readonly int TransparentHeightFogSecondLayerParamsId = Shader.PropertyToID("_BurtTransparentHeightFogSecondLayerParams");
         private static readonly int TransparentHeightFogDistanceParamsId = Shader.PropertyToID("_BurtTransparentHeightFogDistanceParams");
         private static readonly int TransparentHeightFogAerialParamsId = Shader.PropertyToID("_BurtTransparentHeightFogAerialParams");
         private static readonly int TransparentHeightFogAlbedoId = Shader.PropertyToID("_BurtTransparentHeightFogAlbedo");
@@ -182,7 +215,7 @@ namespace Burt.RenderPipeline
         private static readonly int TransparentHeightFogMainLightOcclusionId = Shader.PropertyToID("_BurtTransparentHeightFogMainLightOcclusion");
 
         public const string ShaderName = "Hidden/BurtRP/Fog";
-        public const string FormulaName = "XRenderGlobalHeightFogLiteTransparentV2";
+        public const string FormulaName = "XRenderGlobalHeightFogDualLayerTransparentV3";
 
         public static bool ShouldUseFog(BurtRenderRequest request)
         {
@@ -232,6 +265,9 @@ namespace Burt.RenderPipeline
                 fog.height.value,
                 fog.density.value,
                 fog.heightFalloff.value,
+                fog.secondLayerHeightOffset.value,
+                fog.secondLayerDensity.value,
+                fog.secondLayerHeightFalloff.value,
                 fog.startDistance.value,
                 fog.cutoffDistance.value,
                 fog.maxOpacity.value,
@@ -308,6 +344,11 @@ namespace Burt.RenderPipeline
                 settings.Density,
                 settings.HeightFalloff,
                 settings.MaxOpacity));
+            cmd.SetGlobalVector(TransparentHeightFogSecondLayerParamsId, new Vector4(
+                settings.Height + settings.SecondLayerHeightOffset,
+                settings.SecondLayerDensity,
+                settings.SecondLayerHeightFalloff,
+                0f));
             cmd.SetGlobalVector(TransparentHeightFogDistanceParamsId, new Vector4(
                 effectiveStartDistance,
                 settings.CutoffDistance,
@@ -385,6 +426,10 @@ namespace Burt.RenderPipeline
                 " Height=", Format(settings.Height),
                 " Density=", Format(settings.Density),
                 " Falloff=", Format(settings.HeightFalloff),
+                " SecondHeightOffset=", Format(settings.SecondLayerHeightOffset),
+                " SecondHeight=", Format(settings.Height + settings.SecondLayerHeightOffset),
+                " SecondDensity=", Format(settings.SecondLayerDensity),
+                " SecondFalloff=", Format(settings.SecondLayerHeightFalloff),
                 " Start=", Format(settings.StartDistance),
                 " Cutoff=", Format(settings.CutoffDistance),
                 " MaxOpacity=", Format(settings.MaxOpacity),
@@ -412,6 +457,10 @@ namespace Burt.RenderPipeline
                 " Height=", Format(settings.Height),
                 " Density=", Format(settings.Density),
                 " Falloff=", Format(settings.HeightFalloff),
+                " SecondHeightOffset=", Format(settings.SecondLayerHeightOffset),
+                " SecondHeight=", Format(settings.Height + settings.SecondLayerHeightOffset),
+                " SecondDensity=", Format(settings.SecondLayerDensity),
+                " SecondFalloff=", Format(settings.SecondLayerHeightFalloff),
                 " Start=", Format(settings.StartDistance),
                 " Cutoff=", Format(settings.CutoffDistance),
                 " MaxOpacity=", Format(settings.MaxOpacity),

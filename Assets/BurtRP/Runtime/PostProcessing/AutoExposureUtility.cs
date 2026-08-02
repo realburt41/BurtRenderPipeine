@@ -89,6 +89,44 @@ namespace Burt.RenderPipeline
     {
         public static bool TryGetSnapshot(Camera camera, out AutoExposureDebugSnapshot snapshot)
         {
+            snapshot = default;
+            if (camera == null)
+            {
+                return false;
+            }
+
+            if (GpuExposureUtility.TryGetSnapshot(camera, out var gpuSnapshot))
+            {
+                var exposure = VolumeManager.instance.stack.GetComponent<ExposureVolumeComponent>();
+                var settings = GpuExposureUtility.ResolveSettings(camera, exposure);
+                snapshot = new AutoExposureDebugSnapshot(
+                    true,
+                    settings.Mode,
+                    settings.EV100,
+                    settings.AutoTargetEV100,
+                    Mathf.Max(gpuSnapshot.AverageLuminance, 0.000001f),
+                    Mathf.Log(Mathf.Max(gpuSnapshot.AverageLuminance, 0.000001f), 2f),
+                    settings.AutoMinEV100,
+                    settings.AutoMaxEV100,
+                    settings.AutoMiddleGrey,
+                    settings.AutoLowPercent,
+                    settings.AutoHighPercent,
+                    settings.AutoHistogramMinEV100,
+                    settings.AutoHistogramMaxEV100,
+                    gpuSnapshot.HasSample,
+                    gpuSnapshot.ReadbackPending,
+                    gpuSnapshot.ReadbackPending ? 0 : -1,
+                    gpuSnapshot.SampleAgeFrames,
+                    gpuSnapshot.SampleAgeFrames,
+                    gpuSnapshot.SampleCount,
+                    PhysicalExposureSettings.DefaultAutoSampleRejectedReason,
+                    gpuSnapshot.HasSample ? "GPU histogram ready" : gpuSnapshot.ReadbackPending ? "GPU readback pending" : "Waiting for GPU exposure",
+                    !gpuSnapshot.HasSample,
+                    2,
+                    1);
+                return true;
+            }
+
             return AutoExposureUtility.TryGetDebugSnapshot(camera, out snapshot);
         }
     }

@@ -22,7 +22,6 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         sampler2D _BurtSSSSourceTexture;
         sampler2D _BurtSSSSeparableInputTexture;
         sampler2D _BurtSSSOriginalTexture;
-        sampler2D _BurtSSSSetupTexture;
         Texture2D<float> _BurtSSSProfileIDAndTypeTexture;
         sampler2D _BurtSSSMaskTexture;
         sampler2D _BurtSSSTempTexture;
@@ -494,7 +493,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
 
         float4 BurtSSSLoadSetup(float2 uv)
         {
-            return tex2D(_BurtSSSSetupTexture, uv);
+            return BurtSSSEncodeSetup(BurtSSSLoadSurface(uv));
         }
 
         float BurtSSSLoadCoarseMask(float2 uv)
@@ -738,8 +737,9 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             float sampleAlpha = BurtSSSSeparableSampleAlpha(centerSceneDepth, sampleDepth);
             float3 sampleNormalWS = BurtDecodeNormalWS888FromGBuffer(
                 BURT_SAMPLE_TEXTURE2D_LOD_POINT_CLAMP(_BurtGBuffer0, sampleUV, 0.0f).rgb);
-            float normalWeight = saturate(dot(center.NormalWS, sampleNormalWS));
-            normalWeight = pow(normalWeight, max(profile.Params.z * 24.0f, 1.0f));
+            float normalSimilarity = saturate(dot(center.NormalWS, sampleNormalWS));
+            float normalThreshold = saturate(profile.Params.z);
+            float normalWeight = smoothstep(normalThreshold, 1.0f, normalSimilarity);
             normalWeight = lerp(1.0f, normalWeight, sameSample * saturate(_BurtSSSQualityParams.w));
             float3 colorTint = sameSample > 0.5f ? float3(1.0f, 1.0f, 1.0f) : max(profile.BoundaryColorBleed.rgb, float3(0.0f, 0.0f, 0.0f));
             float3 weightedKernel = sampleAlpha * normalWeight * kernelWeight;
@@ -1080,14 +1080,13 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
         float4 BurtSSSEvaluateCombineColor(float2 uv)
         {
             float4 originalLit = tex2D(_BurtSSSSourceTexture, uv);
-            float4 setup = BurtSSSLoadSetup(uv);
-            float setupMask = setup.r;
             uint fullProfileIndex;
             uint fullProfileType;
             BurtSSSDecodeProfileIDAndType(BurtSSSLoadMaterialEncodedProfileIDAndType(uv), fullProfileIndex, fullProfileType);
             uint profileIndex;
             uint profileType;
             BurtSSSDecodeProfileIDAndType(BurtSSSLoadProfileIDAndType(uv), profileIndex, profileType);
+            float setupMask = (profileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u ? 1.0f : 0.0f;
             BurtSSSProfile profile = BurtSSSLoadProfile((float)profileIndex);
             bool validFullProfile = (fullProfileType & (BURT_SSS_PROFILE_TYPE_BURLEY | BURT_SSS_PROFILE_TYPE_SEPARABLE)) != 0u;
             bool representativeMatches = fullProfileIndex == profileIndex && (fullProfileType & profileType) != 0u;
@@ -1278,6 +1277,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             }
 
             HLSLPROGRAM
+            #pragma enable_d3d11_debug_symbols
             #pragma vertex Vert
             #pragma fragment FragCopy
             ENDHLSL
@@ -1291,6 +1291,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             ZTest Always
 
             HLSLPROGRAM
+            #pragma enable_d3d11_debug_symbols
             #pragma vertex Vert
             #pragma fragment FragHorizontal
             ENDHLSL
@@ -1304,6 +1305,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             ZTest Always
 
             HLSLPROGRAM
+            #pragma enable_d3d11_debug_symbols
             #pragma vertex Vert
             #pragma fragment FragVertical
             ENDHLSL
@@ -1324,6 +1326,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             }
 
             HLSLPROGRAM
+            #pragma enable_d3d11_debug_symbols
             #pragma vertex Vert
             #pragma fragment FragSetup
             ENDHLSL
@@ -1337,6 +1340,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             ZTest Always
 
             HLSLPROGRAM
+            #pragma enable_d3d11_debug_symbols
             #pragma vertex Vert
             #pragma fragment FragCoarseMask
             ENDHLSL
@@ -1350,6 +1354,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             ZTest Always
 
             HLSLPROGRAM
+            #pragma enable_d3d11_debug_symbols
             #pragma vertex Vert
             #pragma fragment FragCombine
             ENDHLSL
@@ -1363,6 +1368,7 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             ZTest Always
 
             HLSLPROGRAM
+            #pragma enable_d3d11_debug_symbols
             #pragma vertex Vert
             #pragma fragment FragDebugImportant
             ENDHLSL
@@ -1384,8 +1390,31 @@ Shader "Hidden/BurtRP/ScreenSpaceSubsurface"
             }
 
             HLSLPROGRAM
+            #pragma enable_d3d11_debug_symbols
             #pragma vertex Vert
             #pragma fragment FragMask
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Burt Screen Space Subsurface Direct Combine"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+
+            Stencil
+            {
+                Ref [_BurtDeferredStencilSubsurfaceRef]
+                ReadMask [_BurtDeferredStencilShadingModelMask]
+                Comp Equal
+                Pass Keep
+            }
+
+            HLSLPROGRAM
+            #pragma enable_d3d11_debug_symbols
+            #pragma vertex Vert
+            #pragma fragment FragCombine
             ENDHLSL
         }
     }

@@ -18,9 +18,8 @@ namespace Burt.RenderPipeline
             var request = context.Request;
             var settings = BurtAtmosphereUtility.ResolveSettings();
             var sunDirection4 = BurtDrawAtmospherePass.ResolveSunDirection(request, settings);
-            context.FlushCommandBuffer(false);
             BurtAtmosphereLutUtility.DispatchAsync(
-                context.ScriptableContext,
+                context,
                 request.Camera,
                 settings,
                 new Vector3(sunDirection4.x, sunDirection4.y, sunDirection4.z));
@@ -334,7 +333,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             PreparePermutation(cmd, settings, false);
             if (useMobilePreparedState)
             {
@@ -416,7 +415,7 @@ namespace Burt.RenderPipeline
             lastDrawUsedProceduralFallback = useProceduralFallback;
             lastDrawUsedCustomMaterial = settings.PhysicalSkyMaterial != null;
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
         }
 
         internal static void PrepareMobile(BurtRenderGraphContext context)
@@ -449,7 +448,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get("Burt Atmosphere Combine Mobile Prepare");
+            var cmd = context.AcquireCommandBuffer("Burt Atmosphere Combine Mobile Prepare");
             var sunDirection4 = ResolveSunDirection(request, settings);
             BurtAtmosphereLutUtility.EnsureLuts(
                 cmd,
@@ -459,7 +458,7 @@ namespace Burt.RenderPipeline
             UploadMaterialProperties(drawMaterial, camera, request, settings);
             UploadPreparedMaterialGlobals(cmd, drawMaterial, camera);
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
 
             unchecked
             {
@@ -1021,7 +1020,6 @@ namespace Burt.RenderPipeline
     {
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int CameraColorTextureId = BurtRenderGraphResourceRegistry.CameraColorTextureId;
-        private static readonly int AerialSourceColorTextureId = Shader.PropertyToID("_BurtAtmosphereAerialSourceColorTexture");
 
         private Material material;
         private bool hasLoggedMissingShader;
@@ -1039,6 +1037,8 @@ namespace Burt.RenderPipeline
 
             builder.ReadCameraColor();
             builder.ReadCameraDepth();
+            builder.WriteRenderTarget(BurtRenderGraphResourceRegistry.AtmosphereAerialSourceColorName);
+            builder.AllowUnconsumedRenderTargetWrite(BurtRenderGraphResourceRegistry.AtmosphereAerialSourceColorName);
             if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftOcclusion(builder.Request))
             {
                 builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.LightShaftOcclusionName);
@@ -1079,22 +1079,34 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             BurtLightShaftOcclusionUtility.BindForOpaqueFog(cmd, context);
             var sunDirection4 = BurtDrawAtmospherePass.ResolveSunDirection(request, settings);
             BurtAtmosphereLutUtility.EnsureLuts(cmd, camera, settings, new Vector3(sunDirection4.x, sunDirection4.y, sunDirection4.z));
             BurtDrawAtmospherePass.UploadMaterialProperties(drawMaterial, camera, request, settings);
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
-            cmd.GetTemporaryRT(AerialSourceColorTextureId, descriptor, FilterMode.Bilinear);
-            cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(AerialSourceColorTextureId));
+            context.ResourceRegistry.SetRenderTargetDescriptor(
+                BurtRenderGraphResourceRegistry.AtmosphereAerialSourceColorName,
+                descriptor,
+                FilterMode.Bilinear,
+                "Burt Atmosphere Aerial Source Color");
+            var aerialSourceTarget = context.ResourceRegistry.AllocateRenderTarget(
+                BurtRenderGraphResourceRegistry.AtmosphereAerialSourceColorName);
+            if (!aerialSourceTarget.IsValid)
+            {
+                context.ReleaseCommandBuffer(cmd);
+                return;
+            }
+
+            cmd.Blit(cameraColorTarget.Identifier, aerialSourceTarget.Identifier);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.SetGlobalTexture(CameraColorTextureId, new RenderTargetIdentifier(AerialSourceColorTextureId));
+            cmd.SetGlobalTexture(CameraColorTextureId, aerialSourceTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, 1, MeshTopology.Triangles, 3, 1);
-            cmd.ReleaseTemporaryRT(AerialSourceColorTextureId);
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
+            context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.AtmosphereAerialSourceColorName);
         }
     }
 }

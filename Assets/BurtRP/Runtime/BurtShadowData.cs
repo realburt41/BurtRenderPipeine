@@ -29,6 +29,7 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
         public float MainLightShadowDepthBias { get; private set; } // 保存 ShadowCaster 阶段的常量深度偏移，用于 CommandBuffer.SetGlobalDepthBias。
         public float MainLightShadowNormalBias { get; private set; } // 保存 ShadowCaster 阶段的 normal bias 倍率，C# 会上传给 shader 做顶点法线偏移。
         public float MainLightShadowSampleBias { get; private set; } // 保存 Receiver 阶段的采样偏移，Lit shader 比较 shadow map 前会使用它。
+        public BurtMainLightShadowFilterMode MainLightShadowFilterMode { get; private set; }
         public bool EnableMainLightShadowPCSS { get; private set; }
         public float MainLightShadowPCSSLightSize { get; private set; }
         public float MainLightShadowPCSSBlockerSearchRadius { get; private set; }
@@ -40,7 +41,26 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
         public float MainLightShadowCascadeBlendDistance { get; private set; }
         public float MainLightShadowFadeDistance { get; private set; }
         public bool IsMainLightShadowSoft => MainLightShadowType == LightShadows.Soft; // 把 Unity 的 Soft Shadows 枚举转成 shader 更容易使用的布尔语义。
-        public bool IsMainLightShadowHard => MainLightShadowType == LightShadows.Hard; // PCSS 作为 BurtRP 自己的软化路径，挂在 Unity Hard Shadows 模式下启用。
+        public bool IsMainLightShadowHard => MainLightShadowType == LightShadows.Hard;
+        public BurtMainLightShadowFilterMode ResolvedMainLightShadowFilterMode
+        {
+            get
+            {
+                if (MainLightShadowFilterMode != BurtMainLightShadowFilterMode.UseLightSettings)
+                {
+                    return MainLightShadowFilterMode;
+                }
+
+                if (EnableMainLightShadowPCSS || IsMainLightShadowSoft)
+                {
+                    return BurtMainLightShadowFilterMode.PCF5;
+                }
+
+                return BurtMainLightShadowFilterMode.Hard;
+            }
+        }
+        public bool UsesSoftMainLightShadowFilter => ResolvedMainLightShadowFilterMode != BurtMainLightShadowFilterMode.Hard;
+        public int MainLightShadowFilterKernelSize => UsesSoftMainLightShadowFilter ? (int)ResolvedMainLightShadowFilterMode : 0;
         private BurtShadowData() // 隐藏构造函数，强制所有调用方通过工厂函数创建已初始化的数据。
         {
         } // 构造函数本身不写逻辑，所有默认值都集中在 ResetToDefaults，避免遗漏字段。
@@ -89,6 +109,7 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
             data.MainLightShadowDepthBias = MainLightShadowDepthBias; // 复制 ShadowCaster 常量深度偏移。
             data.MainLightShadowNormalBias = MainLightShadowNormalBias; // 复制 ShadowCaster normal bias 倍率。
             data.MainLightShadowSampleBias = MainLightShadowSampleBias; // 复制 Receiver 采样偏移。
+            data.MainLightShadowFilterMode = MainLightShadowFilterMode;
             data.EnableMainLightShadowPCSS = EnableMainLightShadowPCSS;
             data.MainLightShadowPCSSLightSize = MainLightShadowPCSSLightSize;
             data.MainLightShadowPCSSBlockerSearchRadius = MainLightShadowPCSSBlockerSearchRadius;
@@ -157,6 +178,10 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
             {
                 MainLightShadowSampleBias = Mathf.Max(0f, volumeSettings.sampleBias.value); // ????? bias ???
             }
+            if (volumeSettings.filterMode.overrideState)
+            {
+                MainLightShadowFilterMode = NormalizeMainLightShadowFilterMode(volumeSettings.filterMode.value);
+            }
             if (volumeSettings.pcssEnabled.overrideState)
             {
                 EnableMainLightShadowPCSS = volumeSettings.pcssEnabled.value;
@@ -221,6 +246,7 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
             MainLightShadowDepthBias = DefaultMainLightShadowDepthBias; // 默认 ShadowCaster 常量 bias 使用 BurtRP 常量。
             MainLightShadowNormalBias = DefaultMainLightShadowNormalBias; // 默认 ShadowCaster normal bias 使用 BurtRP 常量。
             MainLightShadowSampleBias = DefaultMainLightShadowSampleBias; // 默认 Receiver 采样 bias 使用 BurtRP 常量。
+            MainLightShadowFilterMode = BurtMainLightShadowFilterMode.UseLightSettings;
             EnableMainLightShadowPCSS = false;
             MainLightShadowPCSSLightSize = DefaultMainLightShadowPCSSLightSize;
             MainLightShadowPCSSBlockerSearchRadius = DefaultMainLightShadowPCSSBlockerSearchRadius;
@@ -245,6 +271,19 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
                 return 2;
             }
             return MaxMainLightShadowCascadeCount;
+        }
+        public static BurtMainLightShadowFilterMode NormalizeMainLightShadowFilterMode(BurtMainLightShadowFilterMode filterMode)
+        {
+            switch (filterMode)
+            {
+                case BurtMainLightShadowFilterMode.Hard:
+                case BurtMainLightShadowFilterMode.PCF3:
+                case BurtMainLightShadowFilterMode.PCF5:
+                case BurtMainLightShadowFilterMode.PCF7:
+                    return filterMode;
+                default:
+                    return BurtMainLightShadowFilterMode.UseLightSettings;
+            }
         }
         public Vector3 CreateMainLightShadowCascadeSplitVector()
         {
@@ -401,8 +440,12 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
             var cascadeSplit = shadowData != null ? shadowData.CreateMainLightShadowCascadeSplitVector() : new Vector3(1f, 0f, 0f);
             var cascadeBlendDistance = shadowData != null ? shadowData.MainLightShadowCascadeBlendDistance : 0f;
             var shadowFadeDistance = shadowData != null ? shadowData.MainLightShadowFadeDistance : 0f;
-            var softSampling = shadowData != null && (shadowData.IsMainLightShadowSoft || (shadowData.IsMainLightShadowHard && shadowData.EnableMainLightShadowPCSS));
-            var pcssEnabled = shadowData != null && shadowData.IsMainLightShadowHard && shadowData.EnableMainLightShadowPCSS;
+            var pcssRequested = shadowData != null && shadowData.EnableMainLightShadowPCSS;
+            var resolvedShadowFilter = shadowData != null ? shadowData.ResolvedMainLightShadowFilterMode : BurtMainLightShadowFilterMode.Hard;
+            var shadowKernel = shadowData != null ? shadowData.MainLightShadowFilterKernelSize : 0;
+            var softSampling = shadowData != null && shadowData.UsesSoftMainLightShadowFilter;
+            var pcssEnabled = false;
+            var xrenderOptimizedPcf = shadowData != null && shadowData.HasMainLightShadow && softSampling;
             var pcssLightSize = shadowData != null ? shadowData.MainLightShadowPCSSLightSize : 0f;
             var pcssBlockerSearchRadius = shadowData != null ? shadowData.MainLightShadowPCSSBlockerSearchRadius : 0f;
             var pcssMaxFilterRadius = shadowData != null ? shadowData.MainLightShadowPCSSMaxFilterRadius : 0f;
@@ -411,7 +454,7 @@ namespace Burt.RenderPipeline // 让阴影数据和渲染请求、灯光数据�
             {
                 cascadeSphereRadii = $"({Mathf.Sqrt(Mathf.Max(0f, cascadeCache.CascadeSpheres[0].w)):0.###},{Mathf.Sqrt(Mathf.Max(0f, cascadeCache.CascadeSpheres[1].w)):0.###},{Mathf.Sqrt(Mathf.Max(0f, cascadeCache.CascadeSpheres[2].w)):0.###},{Mathf.Sqrt(Mathf.Max(0f, cascadeCache.CascadeSpheres[3].w)):0.###})";
             }
-            Debug.Log($"[BurtRP][MainLightShadowDiagnostic] Camera=\"{cameraName}\" CameraType={cameraType} DebugMode={BurtShadingDebugSettings.Mode} VisibleLightCount={visibleLightCount} HasMainLight={hasMainLight} MainLightIndex={mainLightIndex} LightShadowType={shadowType} ShadowStrength={shadowStrength:0.###} ShadowDistance={shadowDistance:0.###} ShadowResolution={shadowResolution} CascadeCount={cascadeCount} TileResolution={tileResolution} AtlasResolution={atlasResolution} CascadeCacheValid={cascadeCacheValid} CascadeSphereRadii={cascadeSphereRadii} CascadeSplits=({cascadeSplit.x:0.###},{cascadeSplit.y:0.###},{cascadeSplit.z:0.###}) CascadeBlendDistance={cascadeBlendDistance:0.###} ShadowFadeDistance={shadowFadeDistance:0.###} DepthBias={depthBias:0.#####} NormalBias={normalBias:0.#####} SampleBias={sampleBias:0.#####} SoftSampling={softSampling} PCSS={pcssEnabled} PCSSLightSize={pcssLightSize:0.###} PCSSBlockerSearchRadius={pcssBlockerSearchRadius:0.###} PCSSMaxFilterRadius={pcssMaxFilterRadius:0.###} UseMainLightShadow={useMainLightShadow} MainLightShadowMapValid={mainLightShadowMapIsValid}"); // 输出单行 key=value 结构化日志，方便在 Console 里搜索、复制和对比每台相机的阴影状态。
+            Debug.Log($"[BurtRP][MainLightShadowDiagnostic] Camera=\"{cameraName}\" CameraType={cameraType} DebugMode={BurtShadingDebugSettings.Mode} VisibleLightCount={visibleLightCount} HasMainLight={hasMainLight} MainLightIndex={mainLightIndex} LightShadowType={shadowType} ShadowStrength={shadowStrength:0.###} ShadowDistance={shadowDistance:0.###} ShadowResolution={shadowResolution} CascadeCount={cascadeCount} TileResolution={tileResolution} AtlasResolution={atlasResolution} CascadeCacheValid={cascadeCacheValid} CascadeSphereRadii={cascadeSphereRadii} CascadeSplits=({cascadeSplit.x:0.###},{cascadeSplit.y:0.###},{cascadeSplit.z:0.###}) CascadeBlendDistance={cascadeBlendDistance:0.###} ShadowFadeDistance={shadowFadeDistance:0.###} DepthBias={depthBias:0.#####} NormalBias={normalBias:0.#####} SampleBias={sampleBias:0.#####} ShadowFilter={resolvedShadowFilter} ShadowKernel={shadowKernel} SoftSampling={softSampling} XRenderOptimizedPCF={xrenderOptimizedPcf} PCSSRequested={pcssRequested} PCSS={pcssEnabled} PCSSLightSize={pcssLightSize:0.###} PCSSBlockerSearchRadius={pcssBlockerSearchRadius:0.###} PCSSMaxFilterRadius={pcssMaxFilterRadius:0.###} UseMainLightShadow={useMainLightShadow} MainLightShadowMapValid={mainLightShadowMapIsValid}"); // 输出单行 key=value 结构化日志，方便在 Console 里搜索、复制和对比每台相机的阴影状态。
         }
         public static int ResolveMainLightShadowCascadeCount(BurtShadowData shadowData)
         {

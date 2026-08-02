@@ -33,6 +33,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private SerializedProperty renderGraphProfilingMode;
         private SerializedProperty submitStrategy;
         private SerializedProperty enableRenderGraphDebug; // 缓存 RenderGraph 调试日志字段。
+        private SerializedProperty enableRenderGraphPassCulling;
         private SerializedProperty enableRenderGraphDebugConsoleLog; // 缓存 RenderGraph 长日志 Console 输出字段。
 
         private SerializedProperty enableCameraSortDebugLog; // 缓存相机排序调试日志字段。
@@ -60,6 +61,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private static readonly GUIContent UnsupportedShaderDebugLabel = new("Unsupported Shader Debug", "用 Unity 错误材质标记非 BurtRP Shader，方便发现错误材质。"); // 定义不支持 Shader 调试显示文本。
         private static readonly GUIContent RenderGraphProfilingModeLabel = new("RenderGraph Profiling", "Off 关闭 GPU Marker；CameraAndStage 适合常驻；CameraStageAndPass 用于 RenderDoc 精细抓帧。");
         private static readonly GUIContent SubmitStrategyLabel = new("Submit Strategy", "PerCamera 最稳健；EndOfFrameWhenSafe 会在无待释放图级 Buffer 时合并到帧末 Submit，否则自动回退。");
+        private static readonly GUIContent RenderGraphPassCullingLabel = new("RenderGraph Pass Culling", "根据资源消费者裁剪无副作用且输出未使用的 Pass。");
         private static readonly GUIContent RenderGraphDebugLabel = new("RenderGraph Debug Capture", "缓存最近一次 RenderGraph 调试信息，供下方按钮复制到剪切板。"); // 定义 RenderGraph 捕获显示文本。
         private static readonly GUIContent RenderGraphDebugConsoleLogLabel = new("RenderGraph Console Log", "把捕获到的完整 RenderGraph Debug 继续输出到 Console；默认关闭以避免刷屏。"); // 定义 RenderGraph Console 输出显示文本。
         private static readonly GUIContent CameraSortDebugLabel = new("Camera Sort Debug Log", "输出相机 request 排序列表，多相机调试时使用。"); // 定义相机排序调试显示文本。
@@ -93,6 +95,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             renderGraphProfilingMode = FindProperty(nameof(renderGraphProfilingMode));
             submitStrategy = FindProperty(nameof(submitStrategy));
             enableRenderGraphDebug = FindProperty(nameof(enableRenderGraphDebug)); // 绑定 RenderGraph 调试开关。
+            enableRenderGraphPassCulling = FindProperty(nameof(enableRenderGraphPassCulling));
             enableRenderGraphDebugConsoleLog = FindProperty(nameof(enableRenderGraphDebugConsoleLog)); // 绑定 RenderGraph Console 输出开关。
 
             enableCameraSortDebugLog = FindProperty(nameof(enableCameraSortDebugLog)); // 绑定相机排序日志开关。
@@ -194,6 +197,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
             DrawProperty(enableUnsupportedShaderDebug, UnsupportedShaderDebugLabel); // 绘制不支持 Shader 调试开关。
             DrawProperty(renderGraphProfilingMode, RenderGraphProfilingModeLabel);
             DrawProperty(submitStrategy, SubmitStrategyLabel);
+            DrawProperty(enableRenderGraphPassCulling, RenderGraphPassCullingLabel);
             DrawProperty(enableRenderGraphDebug, RenderGraphDebugLabel); // 绘制 RenderGraph 调试开关。
             using (new EditorGUI.DisabledScope(enableRenderGraphDebug == null || !enableRenderGraphDebug.boolValue)) // 只有开启捕获时，Console 长日志开关才有意义。
             {

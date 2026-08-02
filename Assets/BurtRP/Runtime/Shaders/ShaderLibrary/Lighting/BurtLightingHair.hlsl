@@ -367,8 +367,12 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
     BurtHairDirectComponents AdditionalDirectComponents = BurtCreateZeroHairDirectComponents();
     int AdditionalLightCount = BurtGetAdditionalLightCount();
 
+    #if defined(BURT_PUNCTUAL_BIN_1_2)
+    [unroll(2)]
+    #else
     [loop]
-    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; LocalLightIndex++)
+    #endif
+    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_PUNCTUAL_LIGHT_LOOP_MAX; LocalLightIndex++)
     {
         if (LocalLightIndex >= Range.y)
         {
@@ -381,7 +385,11 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
             continue;
         }
 
+        #if defined(BURT_PUNCTUAL_BIN_UNSHADOWED)
+        BurtLight AdditionalLight = BurtCreateAdditionalLightUnshadowed((int)StoredLightIndex, PositionWS, GeometryData.NormalWS);
+        #else
         BurtLight AdditionalLight = BurtCreateAdditionalLight((int)StoredLightIndex, PositionWS, GeometryData.NormalWS);
+        #endif
         AdditionalDirectComponents = BurtAddHairDirectComponents(AdditionalDirectComponents, BurtEvaluateHairDirectComponents(GBufferData, GeometryData, AdditionalLight));
     }
 
@@ -409,8 +417,12 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
     BurtHairDirectComponents AdditionalDirectComponents = BurtCreateZeroHairDirectComponents();
     int AdditionalLightCount = BurtGetAdditionalLightCount();
 
+    #if defined(BURT_PUNCTUAL_BIN_1_2)
+    [unroll(2)]
+    #else
     [loop]
-    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; LocalLightIndex++)
+    #endif
+    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_PUNCTUAL_LIGHT_LOOP_MAX; LocalLightIndex++)
     {
         if (LocalLightIndex >= Range.y)
         {
@@ -423,7 +435,11 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingComponents(Burt
             continue;
         }
 
+        #if defined(BURT_PUNCTUAL_BIN_UNSHADOWED)
+        BurtLight AdditionalLight = BurtCreateAdditionalLightUnshadowed((int)StoredLightIndex, PositionWS, GeometryData.NormalWS);
+        #else
         BurtLight AdditionalLight = BurtCreateAdditionalLight((int)StoredLightIndex, PositionWS, GeometryData.NormalWS, ShadowPositionWS);
+        #endif
         AdditionalDirectComponents = BurtAddHairDirectComponents(AdditionalDirectComponents, BurtEvaluateHairDirectComponents(GBufferData, GeometryData, AdditionalLight));
     }
 
@@ -475,8 +491,12 @@ BurtHairDirectComponents BurtEvaluateHairAdditionalDirectLightingUnshadowedCompo
     BurtHairDirectComponents AdditionalDirectComponents = BurtCreateZeroHairDirectComponents();
     int AdditionalLightCount = BurtGetAdditionalLightCount();
 
+    #if defined(BURT_PUNCTUAL_BIN_1_2)
+    [unroll(2)]
+    #else
     [loop]
-    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_MAX_ADDITIONAL_LIGHTS; LocalLightIndex++)
+    #endif
+    for (uint LocalLightIndex = 0u; LocalLightIndex < BURT_PUNCTUAL_LIGHT_LOOP_MAX; LocalLightIndex++)
     {
         if (LocalLightIndex >= Range.y)
         {

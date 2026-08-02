@@ -89,7 +89,7 @@ Material:
     - _SubsurfaceDistortion: 0.369
     - _SubsurfacePower: 1.52
     - _SubsurfaceProfileIndex: 0
-    - _SubsurfaceScatteringMode: 2
+    - _SubsurfaceScatteringMode: 1
     - _SubsurfaceThickness: 1
     - _Surface: 0
     - _ZTest: 4

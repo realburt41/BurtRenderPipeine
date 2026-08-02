@@ -126,6 +126,7 @@ Shader "BurtRP/Clear Crystal"
             HLSLPROGRAM
             #pragma vertex VertClearCrystal
             #pragma fragment FragClearCrystal
+            #pragma multi_compile_fragment _ BURT_MAIN_LIGHT_PCF_3 BURT_MAIN_LIGHT_PCF_7
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local _ BURT_IGNORE_FOG
             #pragma multi_compile_instancing

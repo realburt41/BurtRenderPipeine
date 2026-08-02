@@ -20,12 +20,14 @@ Shader "Hidden/BurtRP/DeferredAdditionalLighting"
         ZTest Always
 
         HLSLINCLUDE
-            // Matches XRender DeferredPunctual: normal and shading-debug output
-            // are variants of the same tiled punctual pass.
+            // Fullscreen punctual fallback. Tile/bin variants live in the
+            // dedicated DeferredPunctualTileLighting shader so vertex and
+            // fragment specialization do not form a Cartesian product.
             #pragma shader_feature_local_fragment _ BURT_USE_DEBUG_MODE_DEFERRED
             #if defined(BURT_USE_DEBUG_MODE_DEFERRED)
                 #define BURT_DEFERRED_ADDITIONAL_LIGHTING_DEBUG 1
-                #pragma skip_optimizations d3d11
+                // Do not put skip_optimizations in this keyword branch. Unity
+                // applies that ShaderLab pragma to the non-debug variant too.
             #endif
         ENDHLSL
 

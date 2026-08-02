@@ -648,12 +648,22 @@ bool BurtTrySampleGISceneVoxelProbeIrradiance(float3 PositionWS, float3 NormalWS
         Irradiance);
 }
 
+#if !defined(BURT_DEFERRED_LIGHTING_PROBE_SPECIALIZATION) || defined(BURT_GI_PROBE_VOLUME_EVALUATE) || defined(BURT_GI_SCENE_VOXEL_PROBE_EVALUATE) || defined(BURT_GI_PROBE_HYBRID_EVALUATE)
 bool BurtTrySampleGIProbeVolumeIrradiance(float3 PositionWS, float3 NormalWS, float3 ViewDirectionWS, out float3 Irradiance)
 {
     Irradiance = 0.0f;
+#if defined(BURT_DEFERRED_LIGHTING_PROBE_SPECIALIZATION) && defined(BURT_GI_SCENE_VOXEL_PROBE_EVALUATE)
+    // Scene-Voxel-only deferred variant. No virtual/direct probe addressing or
+    // physical-pool sampling is reachable from this entry point.
+    return BurtTrySampleGISceneVoxelProbeIrradiance(PositionWS, NormalWS, ViewDirectionWS, Irradiance);
+#else
     if (_BurtGIProbeVolumeParams.x < 0.5f)
     {
+#if !defined(BURT_DEFERRED_LIGHTING_PROBE_SPECIALIZATION) || defined(BURT_GI_PROBE_HYBRID_EVALUATE)
         return BurtTrySampleGISceneVoxelProbeIrradiance(PositionWS, NormalWS, ViewDirectionWS, Irradiance);
+#else
+        return false;
+#endif
     }
 
     if (BurtTrySampleGIProbeVolumeVirtualIrradiance(PositionWS, NormalWS, ViewDirectionWS, Irradiance))
@@ -664,20 +674,32 @@ bool BurtTrySampleGIProbeVolumeIrradiance(float3 PositionWS, float3 NormalWS, fl
 
     if (_BurtGIProbeVolumeParams.w >= 1.5f)
     {
+#if !defined(BURT_DEFERRED_LIGHTING_PROBE_SPECIALIZATION) || defined(BURT_GI_PROBE_HYBRID_EVALUATE)
         return BurtTrySampleGISceneVoxelProbeIrradiance(PositionWS, NormalWS, ViewDirectionWS, Irradiance);
+#else
+        return false;
+#endif
     }
 
     float3 HalfExtent = max(_BurtGIProbeVolumeDirectHalfExtent.xyz, 0.0001f);
     if (any(_BurtGIProbeVolumeDirectHalfExtent.xyz <= 0.0001f))
     {
+#if !defined(BURT_DEFERRED_LIGHTING_PROBE_SPECIALIZATION) || defined(BURT_GI_PROBE_HYBRID_EVALUATE)
         return BurtTrySampleGISceneVoxelProbeIrradiance(PositionWS, NormalWS, ViewDirectionWS, Irradiance);
+#else
+        return false;
+#endif
     }
 
     float3 LocalPosition = mul(_BurtGIProbeVolumeDirectWorldToLocal, float4(PositionWS, 1.0f)).xyz / HalfExtent;
     float3 AbsoluteLocalPosition = abs(LocalPosition);
     if (any(AbsoluteLocalPosition >= 1.0f))
     {
+#if !defined(BURT_DEFERRED_LIGHTING_PROBE_SPECIALIZATION) || defined(BURT_GI_PROBE_HYBRID_EVALUATE)
         return BurtTrySampleGISceneVoxelProbeIrradiance(PositionWS, NormalWS, ViewDirectionWS, Irradiance);
+#else
+        return false;
+#endif
     }
 
     float EdgeDistance = min(min(1.0f - AbsoluteLocalPosition.x, 1.0f - AbsoluteLocalPosition.y), 1.0f - AbsoluteLocalPosition.z);
@@ -686,6 +708,7 @@ bool BurtTrySampleGIProbeVolumeIrradiance(float3 PositionWS, float3 NormalWS, fl
     Irradiance = max(_BurtGIProbeVolumeIrradianceTexture.SampleLevel(sampler_LinearClamp, VolumeUV, 0.0f).rgb, 0.0f);
     Irradiance *= _BurtGIProbeVolumeParams.y * EdgeWeight;
     return true;
+#endif
 }
 
 bool BurtTrySampleGIProbeVolumeVirtualDebugChannels(float3 PositionWS, float3 NormalWS, float3 ViewDirectionWS, out float Validity, out float SkyVisibility)
@@ -809,6 +832,30 @@ bool BurtTryEvaluateGIProbeVolumeIndirectDiffuse(
     Diffuse = MaterialData.DiffuseColor * Irradiance * BurtGTAOMultiBounce(MaterialData.Occlusion, MaterialData.BaseColor) * saturate(EnergyPreservation);
     return true;
 }
-#endif
+#endif // !BURT_GI_PROBE_VOLUME_DEBUG_ONLY
+#else
+bool BurtTrySampleGIProbeVolumeIrradiance(float3 PositionWS, float3 NormalWS, float3 ViewDirectionWS, out float3 Irradiance)
+{
+    Irradiance = 0.0f;
+    return false;
+}
+
+float3 BurtEvaluateGIProbeVolumeIrradiance(float3 PositionWS, float3 NormalWS, float3 ViewDirectionWS)
+{
+    return 0.0f;
+}
+
+bool BurtTryEvaluateGIProbeVolumeIndirectDiffuse(
+    BurtPBRMaterialData MaterialData,
+    float3 PositionWS,
+    float3 NormalWS,
+    float3 ViewDirectionWS,
+    float EnergyPreservation,
+    out float3 Diffuse)
+{
+    Diffuse = 0.0f;
+    return false;
+}
+#endif // deferred lighting probe specialization
 
 #endif

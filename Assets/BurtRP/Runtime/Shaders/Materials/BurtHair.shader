@@ -257,6 +257,7 @@ Shader "BurtRP/Hair"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_fragment _ BURT_MAIN_LIGHT_PCF_3 BURT_MAIN_LIGHT_PCF_7
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
             #pragma shader_feature_fragment _ BURT_USE_DEBUG_MODE_FORWARD

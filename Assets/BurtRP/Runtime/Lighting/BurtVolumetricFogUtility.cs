@@ -25,6 +25,8 @@ namespace Burt.RenderPipeline
         public readonly float Anisotropy;
         public readonly float DirectIntensity;
         public readonly float AmbientIntensity;
+        public readonly float FarStylizedFactor;
+        public readonly BurtVolumetricFogShadowSourceMode ShadowSourceMode;
         public readonly bool FogMapEnabled;
         public readonly Texture2D FogMapTexture;
         public readonly Vector2 FogMapCenterXZ;
@@ -54,6 +56,8 @@ namespace Burt.RenderPipeline
             Anisotropy = settings.Anisotropy;
             DirectIntensity = settings.DirectIntensity;
             AmbientIntensity = settings.AmbientIntensity;
+            FarStylizedFactor = settings.FarStylizedFactor;
+            ShadowSourceMode = settings.ShadowSourceMode;
             FogMapEnabled = settings.FogMap.Enabled;
             FogMapTexture = settings.FogMap.Texture;
             FogMapCenterXZ = settings.FogMap.CenterXZ;
@@ -134,6 +138,8 @@ namespace Burt.RenderPipeline
         public readonly float Anisotropy;
         public readonly float DirectIntensity;
         public readonly float AmbientIntensity;
+        public readonly float FarStylizedFactor;
+        public readonly BurtVolumetricFogShadowSourceMode ShadowSourceMode;
         public readonly BurtVolumetricFogMapSettings FogMap;
         public readonly BurtAtmosphereHorizontalFogSettings HorizontalScattering;
 
@@ -155,6 +161,8 @@ namespace Burt.RenderPipeline
             float anisotropy,
             float directIntensity,
             float ambientIntensity,
+            float farStylizedFactor,
+            BurtVolumetricFogShadowSourceMode shadowSourceMode,
             BurtVolumetricFogMapSettings fogMap,
             BurtAtmosphereHorizontalFogSettings horizontalScattering)
         {
@@ -174,6 +182,10 @@ namespace Burt.RenderPipeline
             Anisotropy = Mathf.Clamp(anisotropy, -0.9f, 0.9f);
             DirectIntensity = Mathf.Max(0f, directIntensity);
             AmbientIntensity = Mathf.Max(0f, ambientIntensity);
+            FarStylizedFactor = Mathf.Clamp01(farStylizedFactor);
+            ShadowSourceMode = shadowSourceMode == BurtVolumetricFogShadowSourceMode.ShadowReference
+                ? BurtVolumetricFogShadowSourceMode.ShadowReference
+                : BurtVolumetricFogShadowSourceMode.RuntimeFilteredShadow;
             FogMap = fogMap;
             HorizontalScattering = horizontalScattering;
             Enabled = enabled && VisibleDistance > 0.001f &&
@@ -186,6 +198,7 @@ namespace Burt.RenderPipeline
             0f, 0f, 0f,
             1f, 0f,
             Color.white, 0f, 0f, 0f,
+            0.2f, BurtVolumetricFogShadowSourceMode.RuntimeFilteredShadow,
             BurtVolumetricFogMapSettings.Disabled,
             BurtAtmosphereHorizontalFogSettings.Disabled);
     }
@@ -193,7 +206,7 @@ namespace Burt.RenderPipeline
     internal static class BurtVolumetricFogUtility
     {
         public const string ShaderName = "Hidden/BurtRP/VolumetricFog";
-        public const string FormulaName = "XRenderPunctualClusterFalloffModeCellBiasTranslucencyGISH2SkySHL1DualLayerFogMapLocalMaterialTemporalV12";
+        public const string FormulaName = "XRenderPunctualClusterFalloffModeCellBiasTranslucencyGISH2SkySHL1DualLayerFogMapLocalMaterialTemporalFarStylizedShadowSourceFurthestHiZR16Thread8x8x1Halton16SafeLightBuffersV16";
         private static readonly int AmbientSHEnabledId = Shader.PropertyToID("_BurtAmbientSHEnabled");
 
         internal static bool IsSkyAmbientSHAvailable()
@@ -245,6 +258,8 @@ namespace Burt.RenderPipeline
                 fog.anisotropy.value,
                 fog.directIntensity.value,
                 fog.ambientIntensity.value,
+                fog.farStylizedFactor.value,
+                fog.shadowSourceMode.value,
                 new BurtVolumetricFogMapSettings(
                     fog.useFogMap.value,
                     fog.fogMap.value,
@@ -285,6 +300,8 @@ namespace Burt.RenderPipeline
                 " Anisotropy=", Format(settings.Anisotropy),
                 " Direct=", Format(settings.DirectIntensity),
                 " Ambient=", Format(settings.AmbientIntensity),
+                " FarStylized=", Format(settings.FarStylizedFactor),
+                " ShadowSource=", settings.ShadowSourceMode,
                 " PunctualDistanceBias=FroxelCellRadiusMin1m",
                 " PunctualFalloff=PerLightInverseSquaredOrLinear",
                 " AmbientModel=TGI_SH2->SkySH_L0L1",
@@ -325,6 +342,8 @@ namespace Burt.RenderPipeline
                 " Anisotropy=", Format(settings.Anisotropy),
                 " Direct=", Format(settings.DirectIntensity),
                 " Ambient=", Format(settings.AmbientIntensity),
+                " FarStylized=", Format(settings.FarStylizedFactor),
+                " ShadowSource=", settings.ShadowSourceMode,
                 " PunctualDistanceBias=FroxelCellRadiusMin1m",
                 " PunctualFalloff=PerLightInverseSquaredOrLinear",
                 " AmbientModel=TGI_SH2->SkySH_L0L1",
@@ -362,15 +381,20 @@ namespace Burt.RenderPipeline
     internal static class BurtVolumetricFogIntegratedUtility
     {
         private const string ComputeResourcePath = "BurtVolumetricFogIntegration";
+        private const string FurthestHiZMip0KernelName = "BuildFurthestHiZMip0";
+        private const string FurthestHiZMipKernelName = "BuildFurthestHiZMip";
         private const string ConservativeDepthKernelName = "BuildConservativeDepth";
         private const string MaterialKernelName = "BuildMaterialVolume";
         private const string LocalInjectKernelName = "InjectLocalVolume";
         private const string LightingKernelName = "BuildLightingVolume";
         private const string IntegrationKernelName = "BuildIntegratedVolume";
-        private const int GridPixelSize = 12;
         private const int GridDepth = 256;
         private const int MaterialGridDepth = 128;
         private const int MaxVisibleLocalVolumeCount = 16;
+        private const int VolumeThreadGroupSizeX = 8;
+        private const int VolumeThreadGroupSizeY = 8;
+        private const int VolumeThreadGroupSizeZ = 1;
+        private const int TemporalPhaseCount = 16;
         private const float GridDepthDistributionScale = 33f;
         private const float MinimumGridFarDistance = 2000f;
         private const float ConservativeDepthFootprintMargin = 0.5f;
@@ -387,6 +411,11 @@ namespace Burt.RenderPipeline
         private static readonly int OutputId = Shader.PropertyToID("_BurtVolumetricFogIntegratedOutput");
         private static readonly int GridSizeId = Shader.PropertyToID("_BurtVolumetricFogIntegratedGridSize");
         private static readonly int CameraDepthTextureId = Shader.PropertyToID("_BurtVolumetricFogCameraDepthTexture");
+        private static readonly int FurthestHiZSourceId = Shader.PropertyToID("_BurtVolumetricFogFurthestHiZSource");
+        private static readonly int FurthestHiZOutputId = Shader.PropertyToID("_BurtVolumetricFogFurthestHiZOutput");
+        private static readonly int FurthestHiZTextureId = Shader.PropertyToID("_BurtVolumetricFogFurthestHiZTexture");
+        private static readonly int FurthestHiZBuildParamsId = Shader.PropertyToID("_BurtVolumetricFogFurthestHiZBuildParams");
+        private static readonly int FurthestHiZParamsId = Shader.PropertyToID("_BurtVolumetricFogFurthestHiZParams");
         private static readonly int ConservativeDepthOutputId = Shader.PropertyToID("_BurtVolumetricFogConservativeDepthOutput");
         private static readonly int ConservativeDepthTextureId = Shader.PropertyToID("_BurtVolumetricFogConservativeDepthTexture");
         private static readonly int PreviousConservativeDepthTextureId = Shader.PropertyToID("_BurtVolumetricFogPreviousConservativeDepthTexture");
@@ -424,6 +453,7 @@ namespace Burt.RenderPipeline
         private static readonly int MainLightDirectionId = Shader.PropertyToID("_BurtVolumetricFogIntegratedMainLightDirection");
         private static readonly int LegacyLightColorScaleId = Shader.PropertyToID("_BurtVolumetricFogIntegratedLegacyLightColorScale");
         private static readonly int MainLightOcclusionId = Shader.PropertyToID("_BurtVolumetricFogIntegratedMainLightOcclusion");
+        private static readonly int ShadowParamsId = Shader.PropertyToID("_BurtVolumetricFogIntegratedShadowParams");
         private static readonly int AtmosphereParamsId = Shader.PropertyToID("_BurtVolumetricFogIntegratedAtmosphereParams");
         private static readonly int HorizontalSunDirectionId = Shader.PropertyToID("_BurtVolumetricFogIntegratedHorizontalSunDirection");
         private static readonly int HorizontalLightColorId = Shader.PropertyToID("_BurtVolumetricFogIntegratedHorizontalLightColor");
@@ -440,9 +470,13 @@ namespace Burt.RenderPipeline
         private static readonly int TranslucencyVolume0Id = Shader.PropertyToID("_BurtVolumetricFogTranslucencyVolume0");
         private static readonly int TranslucencyVolume1Id = Shader.PropertyToID("_BurtVolumetricFogTranslucencyVolume1");
         private static readonly int TranslucencyGIParamsId = Shader.PropertyToID("_BurtVolumetricFogTranslucencyGIParams");
+        private static readonly int AdditionalLightBufferId = Shader.PropertyToID("_BurtAdditionalLightBuffer");
+        private static readonly int AdditionalLightBufferEnabledId = Shader.PropertyToID("_BurtAdditionalLightBufferEnabled");
         private static readonly int MainLightShadowMapId = BurtRenderGraphResourceRegistry.MainLightShadowMapId;
 
         private static ComputeShader computeShader;
+        private static int furthestHiZMip0Kernel = -1;
+        private static int furthestHiZMipKernel = -1;
         private static int conservativeDepthKernel = -1;
         private static int materialKernel = -1;
         private static int localInjectKernel = -1;
@@ -450,7 +484,9 @@ namespace Burt.RenderPipeline
         private static int integrationKernel = -1;
         private static RenderTexture integratedLut;
         private static RenderTexture materialLut;
+        private static RenderTexture furthestHiZ;
         private static Texture3D whiteDensityTexture;
+        private static GraphicsBuffer additionalLightFallbackBuffer;
         private static GraphicsBuffer clusterCountFallbackBuffer;
         private static GraphicsBuffer clusterListFallbackBuffer;
         private static GraphicsBuffer clusterOffsetFallbackBuffer;
@@ -474,6 +510,11 @@ namespace Burt.RenderPipeline
         private static int lastInjectedLocalVolumeCount;
         private static bool lastTranslucencyGIEnabled;
         private static bool lastClusterLightListEnabled;
+        private static BurtVolumetricFogResolutionTier lastResolutionTier = BurtVolumetricFogResolutionTier.Low;
+        private static bool lastFurthestHiZUsed;
+        private static int furthestHiZWidth;
+        private static int furthestHiZHeight;
+        private static int furthestHiZMipCount;
         private static BurtRenderRequest lastBuiltRequest;
 
         internal static bool IsTranslucencyGIActive => lastTranslucencyGIEnabled;
@@ -500,11 +541,13 @@ namespace Burt.RenderPipeline
             Camera camera,
             BurtRenderRequest request,
             BurtVolumetricFogSettings settings,
+            BurtVolumetricFogResolutionTier resolutionTier,
             RenderTargetIdentifier cameraDepthTexture,
             RenderTargetIdentifier translucencyVolume0,
             RenderTargetIdentifier translucencyVolume1,
             bool translucencyGIEnabled,
             BurtRenderTargetHandle mainLightShadowMap,
+            BurtRenderBufferHandle additionalLightBuffer,
             BurtRenderBufferHandle clusterLightCountBuffer,
             BurtRenderBufferHandle clusterLightListBuffer,
             BurtRenderBufferHandle clusterLightOffsetBuffer)
@@ -515,8 +558,8 @@ namespace Burt.RenderPipeline
                 !SystemInfo.supportsComputeShaders || !SystemInfo.supports3DTextures ||
                 !SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.LoadStore) ||
                 !SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Sample) ||
-                !SystemInfo.IsFormatSupported(GraphicsFormat.R32_SFloat, FormatUsage.LoadStore) ||
-                !SystemInfo.IsFormatSupported(GraphicsFormat.R32_SFloat, FormatUsage.Sample))
+                !SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, FormatUsage.LoadStore) ||
+                !SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, FormatUsage.Sample))
             {
                 ready = false;
                 lastTranslucencyGIEnabled = false;
@@ -529,8 +572,7 @@ namespace Burt.RenderPipeline
             }
 
             var cameraDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
-            var width = Mathf.Max(1, Mathf.CeilToInt(cameraDescriptor.width / (float)GridPixelSize));
-            var height = Mathf.Max(1, Mathf.CeilToInt(cameraDescriptor.height / (float)GridPixelSize));
+            ResolveGridResolution(resolutionTier, out var width, out var height);
             if (!EnsureSharedResources(width, height))
             {
                 ready = false;
@@ -566,7 +608,12 @@ namespace Burt.RenderPipeline
                 settings.VisibleDistance,
                 MaxVisibleLocalVolumeCount,
                 visibleLocalVolumes);
-            var settingsSignature = ComputeSettingsSignature(settings, translucencyGIEnabled);
+            var useFurthestHiZ = BuildFurthestHiZ(
+                cmd,
+                cameraDepthTexture,
+                cameraDescriptor.width,
+                cameraDescriptor.height);
+            var settingsSignature = ComputeSettingsSignature(settings, translucencyGIEnabled, useFurthestHiZ);
             var historyInvalidationReason = ResolveHistoryInvalidationReason(
                 historyState,
                 nonJitteredProjection,
@@ -582,6 +629,7 @@ namespace Burt.RenderPipeline
             var previousConservativeDepth = historyState.ConservativeDepth[historyState.ReadIndex];
             var currentConservativeDepth = historyState.ConservativeDepth[writeIndex];
             var lightingData = request.LightingData;
+            BindAdditionalLightBuffer(cmd, lightingData, additionalLightBuffer);
             var clusterLightListEnabled = BindClusterLightList(
                 cmd,
                 lightingData,
@@ -618,7 +666,17 @@ namespace Burt.RenderPipeline
                 cameraDescriptor.height,
                 ConservativeDepthFootprintMargin,
                 ConservativeDepthSliceSafetyMargin));
+            cmd.SetComputeVectorParam(computeShader, FurthestHiZParamsId, new Vector4(
+                furthestHiZWidth,
+                furthestHiZHeight,
+                furthestHiZMipCount,
+                useFurthestHiZ ? 1f : 0f));
             cmd.SetComputeTextureParam(computeShader, conservativeDepthKernel, CameraDepthTextureId, cameraDepthTexture);
+            cmd.SetComputeTextureParam(
+                computeShader,
+                conservativeDepthKernel,
+                FurthestHiZTextureId,
+                useFurthestHiZ ? furthestHiZ : Texture2D.blackTexture);
             cmd.SetComputeTextureParam(computeShader, conservativeDepthKernel, ConservativeDepthOutputId, currentConservativeDepth);
             cmd.DispatchCompute(
                 computeShader,
@@ -627,12 +685,13 @@ namespace Burt.RenderPipeline
                 Mathf.CeilToInt(gridHeight / 8f),
                 1);
 
+            var temporalPhase = Time.frameCount % TemporalPhaseCount;
             cmd.SetComputeVectorParam(computeShader, IntegratedGridZParamsId, gridZParams);
             cmd.SetComputeVectorParam(computeShader, BuildParamsId, new Vector4(
                 settings.VisibleDistance,
                 settings.StartDistance,
                 settings.MaxOpacity,
-                settings.Jitter ? Time.frameCount & 1023 : -1f));
+                settings.Jitter ? temporalPhase : -1f));
             cmd.SetComputeVectorParam(computeShader, DensityParamsId, new Vector4(
                 settings.Height,
                 settings.Density,
@@ -685,6 +744,11 @@ namespace Burt.RenderPipeline
                 Mathf.Max(0f, outerSpaceLight.b * atmosphereTransmittance.b),
                 mainLightVolumetricScale));
             cmd.SetComputeFloatParam(computeShader, MainLightOcclusionId, Mathf.Clamp01(atmosphereSettings.MainLightOcclusion));
+            cmd.SetComputeVectorParam(computeShader, ShadowParamsId, new Vector4(
+                settings.FarStylizedFactor,
+                (float)settings.ShadowSourceMode,
+                0f,
+                0f));
             cmd.SetComputeVectorParam(computeShader, AtmosphereParamsId, new Vector4(
                 horizontalLutAvailable ? 1f : 0f,
                 atmosphereSettings.SunSource == AtmosphereSunSource.MainLight ? 1f : 0f,
@@ -710,9 +774,9 @@ namespace Burt.RenderPipeline
             cmd.DispatchCompute(
                 computeShader,
                 materialKernel,
-                Mathf.CeilToInt(gridWidth / 4f),
-                Mathf.CeilToInt(gridHeight / 4f),
-                Mathf.CeilToInt(MaterialGridDepth / 4f));
+                Mathf.CeilToInt((float)gridWidth / VolumeThreadGroupSizeX),
+                Mathf.CeilToInt((float)gridHeight / VolumeThreadGroupSizeY),
+                Mathf.CeilToInt((float)MaterialGridDepth / VolumeThreadGroupSizeZ));
 
             var injectedLocalVolumeCount = 0;
             for (var localVolumeIndex = 0; localVolumeIndex < visibleLocalVolumes.Count; localVolumeIndex++)
@@ -735,7 +799,9 @@ namespace Burt.RenderPipeline
                 injectedLocalVolumeCount++;
             }
 
-            var haltonIndex = (Time.frameCount & 1023) + 1;
+            // Match XRender's PC sequence: a 16-frame Halton(2,3,5) phase,
+            // with index zero skipped to avoid the corner sample.
+            var haltonIndex = temporalPhase + 1;
             var haltonJitter = settings.Jitter
                 ? new Vector4(
                     RadicalInverse(haltonIndex, 2),
@@ -768,9 +834,9 @@ namespace Burt.RenderPipeline
             cmd.DispatchCompute(
                 computeShader,
                 lightingKernel,
-                Mathf.CeilToInt(gridWidth / 4f),
-                Mathf.CeilToInt(gridHeight / 4f),
-                Mathf.CeilToInt(GridDepth / 4f));
+                Mathf.CeilToInt((float)gridWidth / VolumeThreadGroupSizeX),
+                Mathf.CeilToInt((float)gridHeight / VolumeThreadGroupSizeY),
+                Mathf.CeilToInt((float)GridDepth / VolumeThreadGroupSizeZ));
 
             cmd.SetComputeTextureParam(computeShader, integrationKernel, OutputId, integratedLut);
             cmd.SetComputeTextureParam(computeShader, integrationKernel, ConservativeDepthTextureId, currentConservativeDepth);
@@ -800,6 +866,10 @@ namespace Burt.RenderPipeline
             lastInjectedLocalVolumeCount = injectedLocalVolumeCount;
             lastTranslucencyGIEnabled = translucencyGIEnabled;
             lastClusterLightListEnabled = clusterLightListEnabled;
+            lastResolutionTier = resolutionTier == BurtVolumetricFogResolutionTier.High
+                ? BurtVolumetricFogResolutionTier.High
+                : BurtVolumetricFogResolutionTier.Low;
+            lastFurthestHiZUsed = useFurthestHiZ;
             BindGlobals(cmd, true);
             return true;
         }
@@ -839,6 +909,9 @@ namespace Burt.RenderPipeline
             return string.Concat(
                 ready ? "Ready" : "Unavailable",
                 " Grid=", gridWidth, "x", gridHeight, "x", GridDepth,
+                " ResolutionTier=", lastResolutionTier,
+                " ConservativeDepth=R16_SFloat/", lastFurthestHiZUsed ? "FurthestHiZ" : "CameraDepthFallback",
+                " FurthestHiZ=", furthestHiZWidth, "x", furthestHiZHeight, " Mips=", furthestHiZMipCount,
                 " VisibleSlices=", visibleSliceEnd,
                 " CameraHistories=", cameraHistories.Count,
                 " MaterialVolume=", materialLut != null && materialLut.IsCreated() ? "Ready" : "Unavailable",
@@ -850,6 +923,8 @@ namespace Burt.RenderPipeline
                 " ConservativeHistory=", lastConservativeHistoryValid ? "Valid" : "Invalid",
                 " HistoryReason=", lastHistoryInvalidationReason,
                 " HistoryAlpha=", TemporalHistoryAlpha.ToString("0.###", CultureInfo.InvariantCulture),
+                " Threads=", VolumeThreadGroupSizeX, "x", VolumeThreadGroupSizeY, "x", VolumeThreadGroupSizeZ,
+                " HaltonPhases=", TemporalPhaseCount,
                 " BootstrapSamples=4",
                 " FootprintMargin=", ConservativeDepthFootprintMargin,
                 " SliceSafety=", ConservativeDepthSliceSafetyMargin,
@@ -862,6 +937,7 @@ namespace Burt.RenderPipeline
         {
             ReleaseTexture(ref integratedLut);
             ReleaseTexture(ref materialLut);
+            ReleaseTexture(ref furthestHiZ);
             ReleaseWhiteDensityTexture();
             ReleaseClusterFallbackBuffers();
             foreach (var history in cameraHistories.Values)
@@ -872,6 +948,8 @@ namespace Burt.RenderPipeline
             cameraHistories.Clear();
             staleCameraIds.Clear();
             computeShader = null;
+            furthestHiZMip0Kernel = -1;
+            furthestHiZMipKernel = -1;
             conservativeDepthKernel = -1;
             materialKernel = -1;
             localInjectKernel = -1;
@@ -892,9 +970,142 @@ namespace Burt.RenderPipeline
             lastHistoryInvalidationReason = "Released";
             lastTranslucencyGIEnabled = false;
             lastClusterLightListEnabled = false;
+            lastResolutionTier = BurtVolumetricFogResolutionTier.Low;
+            lastFurthestHiZUsed = false;
+            furthestHiZWidth = 0;
+            furthestHiZHeight = 0;
+            furthestHiZMipCount = 0;
             lastVisibleLocalVolumeCount = 0;
             lastInjectedLocalVolumeCount = 0;
             visibleLocalVolumes.Clear();
+        }
+
+        private static bool BuildFurthestHiZ(
+            CommandBuffer cmd,
+            RenderTargetIdentifier cameraDepthTexture,
+            int cameraWidth,
+            int cameraHeight)
+        {
+            if (cmd == null || !EnsureFurthestHiZResources(cameraWidth, cameraHeight))
+            {
+                return false;
+            }
+
+            var textureIdentifier = new RenderTargetIdentifier(furthestHiZ);
+            var sourceWidth = Mathf.Max(1, cameraWidth);
+            var sourceHeight = Mathf.Max(1, cameraHeight);
+            cmd.SetComputeVectorParam(computeShader, FurthestHiZBuildParamsId, new Vector4(
+                sourceWidth,
+                sourceHeight,
+                furthestHiZWidth,
+                furthestHiZHeight));
+            cmd.SetComputeTextureParam(computeShader, furthestHiZMip0Kernel, CameraDepthTextureId, cameraDepthTexture);
+            cmd.SetComputeTextureParam(computeShader, furthestHiZMip0Kernel, FurthestHiZOutputId, textureIdentifier, 0);
+            cmd.DispatchCompute(
+                computeShader,
+                furthestHiZMip0Kernel,
+                Mathf.CeilToInt(furthestHiZWidth / 8f),
+                Mathf.CeilToInt(furthestHiZHeight / 8f),
+                1);
+
+            sourceWidth = furthestHiZWidth;
+            sourceHeight = furthestHiZHeight;
+            for (var mip = 1; mip < furthestHiZMipCount; mip++)
+            {
+                var targetWidth = Mathf.Max(1, (sourceWidth + 1) / 2);
+                var targetHeight = Mathf.Max(1, (sourceHeight + 1) / 2);
+                cmd.SetComputeVectorParam(computeShader, FurthestHiZBuildParamsId, new Vector4(
+                    sourceWidth,
+                    sourceHeight,
+                    targetWidth,
+                    targetHeight));
+                cmd.SetComputeTextureParam(computeShader, furthestHiZMipKernel, FurthestHiZSourceId, textureIdentifier, mip - 1);
+                cmd.SetComputeTextureParam(computeShader, furthestHiZMipKernel, FurthestHiZOutputId, textureIdentifier, mip);
+                cmd.DispatchCompute(
+                    computeShader,
+                    furthestHiZMipKernel,
+                    Mathf.CeilToInt(targetWidth / 8f),
+                    Mathf.CeilToInt(targetHeight / 8f),
+                    1);
+                sourceWidth = targetWidth;
+                sourceHeight = targetHeight;
+            }
+
+            return true;
+        }
+
+        private static bool EnsureFurthestHiZResources(int cameraWidth, int cameraHeight)
+        {
+            if (!SystemInfo.IsFormatSupported(GraphicsFormat.R32_SFloat, FormatUsage.LoadStore) ||
+                !SystemInfo.IsFormatSupported(GraphicsFormat.R32_SFloat, FormatUsage.Sample))
+            {
+                ReleaseTexture(ref furthestHiZ);
+                furthestHiZWidth = 0;
+                furthestHiZHeight = 0;
+                furthestHiZMipCount = 0;
+                return false;
+            }
+
+            var width = Mathf.Max(1, Mathf.NextPowerOfTwo(Mathf.Max(1, cameraWidth >> 1)));
+            var height = Mathf.Max(1, Mathf.NextPowerOfTwo(Mathf.Max(1, cameraHeight >> 1)));
+            var mipCount = BurtRenderTargetDescriptorUtility.CalculateMipCount(width, height);
+            if (furthestHiZ != null && furthestHiZ.IsCreated() &&
+                furthestHiZ.width == width && furthestHiZ.height == height &&
+                furthestHiZ.mipmapCount == mipCount)
+            {
+                furthestHiZWidth = width;
+                furthestHiZHeight = height;
+                furthestHiZMipCount = mipCount;
+                return true;
+            }
+
+            ReleaseTexture(ref furthestHiZ);
+            var descriptor = new RenderTextureDescriptor(width, height, GraphicsFormat.R32_SFloat, 0)
+            {
+                dimension = TextureDimension.Tex2D,
+                enableRandomWrite = true,
+                msaaSamples = 1,
+                useMipMap = true,
+                autoGenerateMips = false,
+                mipCount = mipCount,
+                sRGB = false
+            };
+            furthestHiZ = new RenderTexture(descriptor)
+            {
+                name = "Burt VF Furthest HZB",
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            if (!furthestHiZ.Create())
+            {
+                ReleaseTexture(ref furthestHiZ);
+                furthestHiZWidth = 0;
+                furthestHiZHeight = 0;
+                furthestHiZMipCount = 0;
+                return false;
+            }
+
+            furthestHiZWidth = width;
+            furthestHiZHeight = height;
+            furthestHiZMipCount = mipCount;
+            return true;
+        }
+
+        private static void ResolveGridResolution(
+            BurtVolumetricFogResolutionTier resolutionTier,
+            out int width,
+            out int height)
+        {
+            if (resolutionTier == BurtVolumetricFogResolutionTier.High)
+            {
+                width = 240;
+                height = 135;
+                return;
+            }
+
+            width = 160;
+            height = 90;
         }
 
         private static bool EnsureSharedResources(int width, int height)
@@ -915,6 +1126,8 @@ namespace Burt.RenderPipeline
 
                 try
                 {
+                    furthestHiZMip0Kernel = computeShader.FindKernel(FurthestHiZMip0KernelName);
+                    furthestHiZMipKernel = computeShader.FindKernel(FurthestHiZMipKernelName);
                     conservativeDepthKernel = computeShader.FindKernel(ConservativeDepthKernelName);
                     materialKernel = computeShader.FindKernel(MaterialKernelName);
                     localInjectKernel = computeShader.FindKernel(LocalInjectKernelName);
@@ -924,6 +1137,8 @@ namespace Burt.RenderPipeline
                 catch
                 {
                     initializationFailed = true;
+                    furthestHiZMip0Kernel = -1;
+                    furthestHiZMipKernel = -1;
                     conservativeDepthKernel = -1;
                     materialKernel = -1;
                     localInjectKernel = -1;
@@ -1057,9 +1272,29 @@ namespace Burt.RenderPipeline
             return enabled;
         }
 
+        private static bool BindAdditionalLightBuffer(
+            CommandBuffer cmd,
+            BurtLightingData lightingData,
+            BurtRenderBufferHandle additionalLightBuffer)
+        {
+            var enabled = lightingData != null &&
+                lightingData.AdditionalLightBufferUploaded &&
+                lightingData.AdditionalLightCount > 0 &&
+                additionalLightBuffer.IsValid &&
+                additionalLightBuffer.HasBuffer;
+            cmd.SetComputeBufferParam(
+                computeShader,
+                lightingKernel,
+                AdditionalLightBufferId,
+                enabled ? additionalLightBuffer.Buffer : additionalLightFallbackBuffer);
+            cmd.SetComputeFloatParam(computeShader, AdditionalLightBufferEnabledId, enabled ? 1f : 0f);
+            return enabled;
+        }
+
         private static bool EnsureClusterFallbackBuffers()
         {
-            if (clusterCountFallbackBuffer != null &&
+            if (additionalLightFallbackBuffer != null &&
+                clusterCountFallbackBuffer != null &&
                 clusterListFallbackBuffer != null &&
                 clusterOffsetFallbackBuffer != null)
             {
@@ -1069,6 +1304,13 @@ namespace Burt.RenderPipeline
             ReleaseClusterFallbackBuffers();
             try
             {
+                additionalLightFallbackBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    1,
+                    BurtLightingData.AdditionalLightBufferStride)
+                {
+                    name = "Burt VF Additional Light Fallback"
+                };
                 clusterCountFallbackBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint))
                 {
                     name = "Burt VF Cluster Count Fallback"
@@ -1081,6 +1323,7 @@ namespace Burt.RenderPipeline
                 {
                     name = "Burt VF Cluster Offset Fallback"
                 };
+                additionalLightFallbackBuffer.SetData(new Vector4[] { Vector4.zero });
                 clusterCountFallbackBuffer.SetData(new uint[] { 0u });
                 clusterListFallbackBuffer.SetData(new uint[] { 0u });
                 clusterOffsetFallbackBuffer.SetData(new Vector2Int[] { Vector2Int.zero });
@@ -1095,6 +1338,7 @@ namespace Burt.RenderPipeline
 
         private static void ReleaseClusterFallbackBuffers()
         {
+            ReleaseBuffer(ref additionalLightFallbackBuffer);
             ReleaseBuffer(ref clusterCountFallbackBuffer);
             ReleaseBuffer(ref clusterListFallbackBuffer);
             ReleaseBuffer(ref clusterOffsetFallbackBuffer);
@@ -1353,7 +1597,7 @@ namespace Burt.RenderPipeline
 
         private static RenderTexture CreateConservativeDepthTexture(int width, int height, int cameraId, int index)
         {
-            var descriptor = new RenderTextureDescriptor(width, height, GraphicsFormat.R32_SFloat, 0)
+            var descriptor = new RenderTextureDescriptor(width, height, GraphicsFormat.R16_SFloat, 0)
             {
                 dimension = TextureDimension.Tex2D,
                 enableRandomWrite = true,
@@ -1453,7 +1697,10 @@ namespace Burt.RenderPipeline
             return true;
         }
 
-        private static int ComputeSettingsSignature(BurtVolumetricFogSettings settings, bool translucencyGIEnabled)
+        private static int ComputeSettingsSignature(
+            BurtVolumetricFogSettings settings,
+            bool translucencyGIEnabled,
+            bool useFurthestHiZ)
         {
             unchecked
             {
@@ -1470,6 +1717,9 @@ namespace Burt.RenderPipeline
                 hash = hash * 31 + settings.Anisotropy.GetHashCode();
                 hash = hash * 31 + settings.DirectIntensity.GetHashCode();
                 hash = hash * 31 + settings.AmbientIntensity.GetHashCode();
+                hash = hash * 31 + settings.FarStylizedFactor.GetHashCode();
+                hash = hash * 31 + settings.ShadowSourceMode.GetHashCode();
+                hash = hash * 31 + useFurthestHiZ.GetHashCode();
                 hash = hash * 31 + settings.FogMap.Enabled.GetHashCode();
                 hash = hash * 31 + (settings.FogMap.Texture != null ? settings.FogMap.Texture.GetInstanceID() : 0);
                 hash = hash * 31 + settings.FogMap.CenterXZ.GetHashCode();

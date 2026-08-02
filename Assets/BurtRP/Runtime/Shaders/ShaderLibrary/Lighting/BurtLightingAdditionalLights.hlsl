@@ -2,6 +2,20 @@
 #ifndef BURT_LIGHTING_ADDITIONAL_LIGHTS_INCLUDED
 #define BURT_LIGHTING_ADDITIONAL_LIGHTS_INCLUDED
 
+// XRender-style punctual tile-bin specialization. Fullscreen and shadow bins
+// keep the complete loop; non-shadow bins have a compile-time maximum and can
+// omit shadow sampling because the CPU classifier routes every shadowed tile to
+// the default keyword variant.
+#if defined(BURT_PUNCTUAL_BIN_1_2)
+    #define BURT_PUNCTUAL_LIGHT_LOOP_MAX 2
+    #define BURT_PUNCTUAL_BIN_UNSHADOWED 1
+#elif defined(BURT_PUNCTUAL_BIN_3_8)
+    #define BURT_PUNCTUAL_LIGHT_LOOP_MAX 8
+    #define BURT_PUNCTUAL_BIN_UNSHADOWED 1
+#else
+    #define BURT_PUNCTUAL_LIGHT_LOOP_MAX BURT_MAX_ADDITIONAL_LIGHTS
+#endif
+
 #if !defined(BURT_MAIN_LIGHT_DIRECTION_DECLARED)
 #define BURT_MAIN_LIGHT_DIRECTION_DECLARED
 float4 _BurtMainLightDirection;

@@ -59,10 +59,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private const int MaxBloomMipCount = 8; // 第一版 Bloom 最多申请 8 级临时 RT，避免动态 RenderGraph 资源注册过重。
 
         private const int MaxBloomGaussianSamples = PostProcessUtility.BloomGaussianMaxSamples; // Match XRender PC GaussianBlur sample cap.
+        private const int BloomGaussianSampleCapacity = PostProcessUtility.BloomGaussianSampleCapacity; // XRender keeps 64 shader slots while the PC runtime caps active samples at 32.
         private const int BloomGaussianKernelCacheSize = MaxBloomMipCount * 2; // One horizontal and one vertical kernel per Bloom mip.
         private const float BloomGaussianKernelRadiusCacheScale = 1024f; // Quantize radius enough to keep cache stable without visible drift.
-        private const float BloomGaussianKernelTintCacheScale = 1024f; // Quantize RGB tint for compact Bloom kernel cache keys.
-        private const float BloomFireflyClamp = PostProcessUtility.BloomPrefilterFireflyClamp; // Soft HDR luma cap for Bloom prefilter fireflies; regular highlights stay below this.
         private static readonly RenderQueueRange TemporalAAObjectMotionVectorQueueRange = new RenderQueueRange
         {
             lowerBound = (int)RenderQueue.Geometry,
@@ -185,11 +184,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static readonly int BloomThresholdId = Shader.PropertyToID("_BurtBloomThreshold"); // 缓存 Bloom 预过滤阈值属性 ID。
 
-        private static readonly int BloomSoftKneeId = Shader.PropertyToID("_BurtBloomSoftKnee"); // 缓存 Bloom 软阈值属性 ID，降低小亮点跨像素移动时的闪烁。
-
         private static readonly int BloomTexelSizeId = Shader.PropertyToID("_BurtBloomTexelSize"); // 缓存 Bloom 当前源纹理 texel size 属性 ID。
-
-        private static readonly int BloomBlurDirectionId = Shader.PropertyToID("_BurtBloomBlurDirection"); // 缓存 PC Bloom 高斯模糊方向和半径。
 
         private static readonly int BloomAdditiveTextureId = Shader.PropertyToID("_BurtBloomAdditiveTexture"); // 缓存 PC Bloom 高斯阶段的加法合成纹理。
 
@@ -203,7 +198,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static readonly int BloomBypassThresholdId = Shader.PropertyToID("_BurtBloomBypassThreshold"); // Cached Bloom threshold bypass flag.
 
-        private static readonly int BloomFireflyClampId = Shader.PropertyToID("_BurtBloomFireflyClamp"); // Cached Bloom prefilter firefly clamp.
+        private static readonly int BloomExposureScaleId = Shader.PropertyToID("_BurtBloomExposureScale");
 
         private static readonly int UseBloomAlphaId = Shader.PropertyToID("_BurtUseBloomAlpha"); // Cached Bloom alpha-channel output flag.
 
@@ -211,19 +206,21 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static readonly int BloomDebugYFlipId = Shader.PropertyToID("_BurtBloomDebugYFlip"); // Cached Bloom debug source orientation flag.
 
-        private static readonly int[] BloomMipTextureIds = CreateBloomMipTextureIds(); // 缓存 Bloom mip 临时 RT 的属性 ID。
-
-        private static readonly int BloomBlurTextureId = Shader.PropertyToID("_BurtBloomBlurTemp"); // 缓存 PC Bloom 高斯横向模糊临时 RT 的属性 ID。
-
-        private static readonly int BloomDebugTextureId = Shader.PropertyToID("_BurtBloomDebugTexture"); // Stores the prefilter snapshot for Bloom debug view.
         private static readonly int AutoExposureTexelSizeId = Shader.PropertyToID("_BurtAutoExposureTexelSize");
         private static readonly int AutoExposureDebugModeId = Shader.PropertyToID("_BurtAutoExposureDebugMode");
         private static readonly int AutoExposureDebugParamsId = Shader.PropertyToID("_BurtAutoExposureDebugParams");
+        private static readonly int AutoExposureDebugParams2Id = Shader.PropertyToID("_BurtAutoExposureDebugParams2");
+        private static readonly int AutoExposureDebugMeteringMaskId = Shader.PropertyToID("_BurtAutoExposureDebugMeteringMask");
+        private static readonly int AutoExposureDebugUseMeteringMaskId = Shader.PropertyToID("_BurtAutoExposureDebugUseMeteringMask");
+        private static readonly int AutoExposureDebugHistogramTextureId = Shader.PropertyToID("_BurtAutoExposureDebugHistogramTexture");
+        private static readonly int AutoExposureDebugHasHistogramId = Shader.PropertyToID("_BurtAutoExposureDebugHasHistogram");
+        private static readonly int AutoExposureDebugToneMappedTextureId = Shader.PropertyToID("_BurtAutoExposureDebugToneMappedTexture");
+        private static readonly int AutoExposureDebugHasToneMappedTextureId = Shader.PropertyToID("_BurtAutoExposureDebugHasToneMappedTexture");
         private static readonly int[] AutoExposureTextureIds = CreateAutoExposureTextureIds();
 
-        private static readonly Vector4[] BloomGaussianWeights = new Vector4[MaxBloomGaussianSamples]; // Reused upload buffer for Gaussian weights.
+        private static readonly Vector4[] BloomGaussianWeights = new Vector4[BloomGaussianSampleCapacity]; // Match XRender's 64-slot constant-buffer layout.
 
-        private static readonly Vector4[] BloomGaussianOffsets = new Vector4[MaxBloomGaussianSamples]; // Reused upload buffer for Gaussian offsets.
+        private static readonly Vector4[] BloomGaussianOffsets = new Vector4[BloomGaussianSampleCapacity]; // Match XRender's 64-slot constant-buffer layout.
 
         private static readonly BloomGaussianKernelCacheEntry[] BloomGaussianKernelCache = CreateBloomGaussianKernelCache();
 
@@ -247,6 +244,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TonemappingModeId = Shader.PropertyToID("_BurtTonemappingMode"); // 缓存 Tonemapping 模式属性 ID，避免每帧通过字符串查找。
 
         private static readonly int PostExposureId = Shader.PropertyToID("_BurtPostExposure"); // 缓存后处理曝光倍率属性 ID，避免每帧通过字符串查找。
+        private static readonly int ExposureTextureId = Shader.PropertyToID("_BurtExposureTexture");
+        private static readonly int UseExposureTextureId = Shader.PropertyToID("_BurtUseExposureTexture");
+        private static readonly int UseLocalExposureId = Shader.PropertyToID("_BurtUseLocalExposure");
+        private static readonly int LocalExposureHistogramTextureId = Shader.PropertyToID("_BurtLocalExposureHistogramTexture");
+        private static readonly int LocalExposureBlurredLogLuminanceTextureId = Shader.PropertyToID("_BurtLocalExposureBlurredLogLuminanceTexture");
+        private static readonly int LocalExposureContrastParamsId = Shader.PropertyToID("_BurtLocalExposureContrastParams");
+        private static readonly int LocalExposureThresholdParamsId = Shader.PropertyToID("_BurtLocalExposureThresholdParams");
+        private static readonly int LocalExposureGridParamsId = Shader.PropertyToID("_BurtLocalExposureGridParams");
 
         private static readonly int FilmSlopeId = Shader.PropertyToID("_BurtFilmSlope"); // 缓存 UE/XRender Film Slope 属性 ID，避免每帧通过字符串查找。
 
@@ -362,12 +367,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             public int Width;
             public int Height;
             public bool Horizontal;
-            public int TintRKey;
-            public int TintGKey;
-            public int TintBKey;
             public int SampleCount;
-            public readonly Vector4[] Weights = new Vector4[MaxBloomGaussianSamples];
-            public readonly Vector4[] Offsets = new Vector4[MaxBloomGaussianSamples];
+            public readonly Vector4[] Weights = new Vector4[BloomGaussianSampleCapacity];
+            public readonly Vector4[] Offsets = new Vector4[BloomGaussianSampleCapacity];
         }
 
         public override void Configure(BurtRenderPassBuilder builder) // 声明这个 Pass 的资源使用关系。
@@ -384,6 +386,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             builder.ReadPostProcessColor(); // 声明第二段拷贝会读取 PostProcessColor。
 
             builder.WriteCameraColor(); // 声明最终会把结果写回 CameraColor，供 FinalBlit 继续输出。
+
+            var bloomStageCount = PostProcessUtility.ResolveBloomMipCount(builder.Request, builder.Asset);
+            if (bloomStageCount > 0)
+            {
+                builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.BloomInputName);
+                var bloomSettings = PostProcessUtility.ResolveBloomSettings(builder.Asset);
+                if (!PostProcessUtility.ShouldBypassBloomPrefilterThreshold(bloomSettings))
+                {
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.BloomSetupName);
+                }
+
+                for (var mipIndex = 0; mipIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount; mipIndex++)
+                {
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(mipIndex));
+                }
+
+                var firstMipIndex = PostProcessUtility.ResolveBloomFirstStageMipIndex(bloomStageCount);
+                for (var mipIndex = firstMipIndex; mipIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount; mipIndex++)
+                {
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex));
+                }
+            }
         }
 
         public override void Execute(BurtRenderGraphContext context) // 执行无效果后处理拷贝。
@@ -447,91 +471,89 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var bloomMipCount = PostProcessUtility.ResolveBloomMipCount(context.Request, context.Asset); // 按当前相机尺寸和 Volume 上限计算实际 mip 数。
             var bloomDebugView = PostProcessUtility.ResolveBloomDebugView(bloomSettings); // Shading Debug 的 Bloom Prefilter 会覆盖 Volume 内的 Bloom debug 下拉。
+            var bloomFirstMipIndex = bloomMipCount > 0 ? PostProcessUtility.ResolveBloomFirstStageMipIndex(bloomMipCount) : 0;
+            var bloomOutputTarget = bloomMipCount > 0 && context.ResourceRegistry != null
+                ? context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(bloomFirstMipIndex))
+                : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(0));
+            var hasBloomOutput = bloomMipCount > 0 && bloomOutputTarget.IsValid;
 
             var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流，避免后处理被拆成孤立提交。
             PreExposureUtility.UploadGlobals(cmd, preExposureState);
-            if (AutoExposureUtility.ShouldCapture(exposureSettings, context.Request.Camera))
-            {
-                AutoExposureUtility.CaptureAverageLogLuminance(
-                    cmd,
-                    context.Request.Camera,
-                    cameraColorTarget,
-                    exposureSettings,
-                    material,
-                    AutoExposureTextureIds,
-                    ShaderPass(PostProcessShaderPass.AutoExposureLogLuminanceReduce),
-                    ShaderPass(PostProcessShaderPass.AutoExposureFinalReduce),
-                    SourceTextureId,
-                    AutoExposureTexelSizeId);
-                exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettingsForFrame(context.Request, context.Asset, Time.deltaTime);
-                postExposureMultiplier = exposureSettings.Multiplier;
-                residualPostExposureMultiplier = PreExposureUtility.ResolveResidualPostExposure(exposureSettings, preExposureState);
-            }
-
             cmd.SetRenderTarget(postProcessColorTarget.Identifier); // 先绑定 PostProcessColor，让第一段全屏拷贝写入后处理中间目标。
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request.Camera);
 
+            var autoExposureDebugDrawnToCameraColor = false;
             var useBloomDebug = ShouldUseBloomDebugView(bloomDebugView, bloomMipCount); // Bloom debug 只在 Bloom 实际执行且没有其他 shading debug 抢占时显示。
             if (useBloomDebug)
             {
-                SetBloomDebugSource(cmd, context.Request.Camera, cameraColorTarget.Identifier, bloomSettings, bloomDebugView, bloomMipCount, residualPostExposureMultiplier); // 把选中的 Bloom 中间纹理绑定到 debug pass。
+                SetBloomDebugSource(cmd, context, cameraColorTarget.Identifier, bloomSettings, bloomDebugView, bloomMipCount, preExposureState); // 把选中的 Bloom 图资源绑定到 debug pass。
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomDebug), MeshTopology.Triangles, 3, 1); // 直接把 Bloom debug 画到 PostProcessColor。
             }
             else if (autoExposureDebugMode > 0)
             {
-                SetAutoExposureDebugSource(cmd, context.Request.Camera, cameraColorTarget.Identifier, exposureSettings, autoExposureDebugMode);
+                var needsRealToneMappedSource = autoExposureDebugMode == 4 || autoExposureDebugMode == 5;
+                if (needsRealToneMappedSource)
+                {
+                    SetCompositeGlobals(
+                        cmd,
+                        context,
+                        cameraColorTarget.Identifier,
+                        hasBloomOutput ? bloomOutputTarget.Identifier : cameraColorTarget.Identifier,
+                        hasBloomOutput,
+                        bloomSettings,
+                        bloomDebugView,
+                        bloomMipCount,
+                        tonemappingMode,
+                        residualPostExposureMultiplier,
+                        exposureSettings,
+                        filmSettings,
+                        useColorAdjustments,
+                        colorAdjustmentsSettings,
+                        colorGradingSettings,
+                        useColorGrading);
+                    cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.CopyAndComposite), MeshTopology.Triangles, 3, 1);
+                    cmd.SetRenderTarget(cameraColorTarget.Identifier);
+                    BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request.Camera);
+                    autoExposureDebugDrawnToCameraColor = true;
+                }
+
+                SetAutoExposureDebugSource(
+                    cmd,
+                    context,
+                    cameraColorTarget.Identifier,
+                    exposureSettings,
+                    autoExposureDebugMode,
+                    needsRealToneMappedSource ? postProcessColorTarget.Identifier : cameraColorTarget.Identifier,
+                    needsRealToneMappedSource);
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.AutoExposureDebug), MeshTopology.Triangles, 3, 1);
             }
             else
             {
-                cmd.SetGlobalTexture(SourceTextureId, cameraColorTarget.Identifier); // 把 CameraColor 设置为当前拷贝 shader 的源纹理。
-
-                cmd.SetGlobalTexture(BloomTextureId, bloomMipCount > 0 ? new RenderTargetIdentifier(BloomMipTextureIds[0]) : cameraColorTarget.Identifier); // Bloom 启用时把 mip0 交给最终合成，否则绑定一个有效兜底纹理。
-
-                cmd.SetGlobalFloat(UseBloomId, bloomMipCount > 0 ? 1f : 0f); // 上传 Bloom 合成开关，确保默认不改变画面。
-
-                cmd.SetGlobalFloat(BloomIntensityId, bloomMipCount > 0 ? bloomSettings.Intensity : 0f); // 上传 Bloom 强度，最终合成发生在 Tonemapping 前。
-
-                cmd.SetGlobalFloat(UseBloomAlphaId, bloomMipCount > 0 && PostProcessUtility.ShouldPreserveBloomAlpha(bloomSettings, bloomDebugView) ? 1f : 0f); // 上传 Bloom alpha 开关，默认不改变目标 alpha。
-
-                cmd.SetGlobalFloat(TonemappingModeId, (float)tonemappingMode); // 上传 Tonemapping 模式，None 会让 shader 原样输出，其他模式会执行对应曲线。
-
-                cmd.SetGlobalFloat(PostExposureId, residualPostExposureMultiplier); // 上传线性曝光倍率，让 Tonemapping 前可以整体调整 HDR 亮度。
-
-                cmd.SetGlobalFloat(FilmSlopeId, filmSettings.Slope); // 上传 Film Slope，让 shader 的 UE/XRender 曲线和 Volume 参数一致。
-
-                cmd.SetGlobalFloat(FilmToeId, filmSettings.Toe); // 上传 Film Toe，让 shader 控制暗部过渡。
-
-                cmd.SetGlobalFloat(FilmShoulderId, filmSettings.Shoulder); // 上传 Film Shoulder，让 shader 控制高光压缩。
-
-                cmd.SetGlobalFloat(FilmBlackClipId, filmSettings.BlackClip); // 上传 Film Black Clip，让 shader 控制黑位裁切。
-
-                cmd.SetGlobalFloat(FilmWhiteClipId, filmSettings.WhiteClip); // 上传 Film White Clip，让 shader 控制白位裁切。
-
-                cmd.SetGlobalFloat(FilmBlueCorrectionId, filmSettings.BlueCorrection); // 上传 Blue Correction，让 shader 对齐 XRender CombineLUT 中的蓝色修正。
-
-                cmd.SetGlobalFloat(FilmExpandGamutId, filmSettings.ExpandGamut); // 上传 Expand Gamut，让 shader 对齐 XRender CombineLUT 中的高饱和颜色扩展。
-
-                cmd.SetGlobalFloat(FilmToneCurveAmountId, filmSettings.ToneCurveAmount); // 上传 Tone Curve Amount，让 shader 支持按 XRender 的方式混合曲线强度。
-
-                cmd.SetGlobalFloat(UseColorAdjustmentsId, useColorAdjustments ? 1f : 0f); // 上传 Color Adjustments 开关，让第一段后处理按需执行颜色调整。
-
-                cmd.SetGlobalFloat(ColorAdjustmentsSaturationId, colorAdjustmentsSettings.Saturation); // 上传饱和度，1 表示不改变颜色鲜艳程度。
-
-                cmd.SetGlobalFloat(ColorAdjustmentsContrastId, colorAdjustmentsSettings.Contrast); // 上传对比度，1 表示不改变明暗差异。
-
-                cmd.SetGlobalFloat(ColorAdjustmentsGammaId, colorAdjustmentsSettings.Gamma); // 上传 Gamma，1 表示不改变整体明暗曲线。
-
-                cmd.SetGlobalColor(ColorAdjustmentsColorFilterId, colorAdjustmentsSettings.ColorFilter); // 上传颜色滤镜，白色表示不额外染色。
-                SetColorGradingGlobals(cmd, colorGradingSettings, useColorGrading);
+                SetCompositeGlobals(
+                    cmd,
+                    context,
+                    cameraColorTarget.Identifier,
+                    hasBloomOutput ? bloomOutputTarget.Identifier : cameraColorTarget.Identifier,
+                    hasBloomOutput,
+                    bloomSettings,
+                    bloomDebugView,
+                    bloomMipCount,
+                    tonemappingMode,
+                    residualPostExposureMultiplier,
+                    exposureSettings,
+                    filmSettings,
+                    useColorAdjustments,
+                    colorAdjustmentsSettings,
+                    colorGradingSettings,
+                    useColorGrading);
 
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.CopyAndComposite), MeshTopology.Triangles, 3, 1); // 绘制全屏三角形，把 CameraColor 处理到 PostProcessColor。
             }
 
             DisablePostProcessEffects(cmd);
             var allowFinalPostEffects = !useBloomDebug && autoExposureDebugMode <= 0;
-            var currentSource = postProcessColorTarget.Identifier;
-            var currentIsCameraColor = false;
+            var currentSource = autoExposureDebugDrawnToCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier;
+            var currentIsCameraColor = autoExposureDebugDrawnToCameraColor;
             var nextTargetIsCameraColor = true;
 
             if (allowFinalPostEffects && useVignette)
@@ -549,7 +571,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 DrawFinalPostProcessPass(cmd, context.Request.Camera, material, currentSource, cameraColorTarget.Identifier, PostProcessShaderPass.CopyAndComposite);
             }
 
-            ReleaseBloom(cmd, bloomMipCount, useBloomDebug && bloomDebugView == BloomDebugView.Prefilter); // 释放 Bloom 临时 mip，命令会随同一个 CommandBuffer 一起提交。
 
             context.ExecuteAndReleaseCommandBuffer(cmd); // 共享命令流在 Pass 结束时统一提交。
 
@@ -871,19 +892,124 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             }
         }
 
-        internal sealed class BloomPass : BurtRenderPass
+        internal sealed class BloomBuildPassSequence
         {
-            public override string Name => "Bloom";
+            private readonly BurtRenderPass sceneDownsamplePass = new BloomSceneDownsamplePass();
+            private readonly BurtRenderPass prefilterPass = new BloomPrefilterPass();
+            private readonly BurtRenderPass[] downsamplePasses = new BurtRenderPass[BurtRenderGraphResourceRegistry.BloomPyramidCount - 1];
+            private readonly BurtRenderPass[] horizontalPasses = new BurtRenderPass[BurtRenderGraphResourceRegistry.BloomPyramidCount];
+            private readonly BurtRenderPass[] verticalPasses = new BurtRenderPass[BurtRenderGraphResourceRegistry.BloomPyramidCount];
+
+            public BloomBuildPassSequence()
+            {
+                for (var stageIndex = 1; stageIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount; stageIndex++)
+                {
+                    downsamplePasses[stageIndex - 1] = new BloomDownsamplePass(stageIndex);
+                }
+
+                for (var mipIndex = 0; mipIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount; mipIndex++)
+                {
+                    horizontalPasses[mipIndex] = new BloomGaussianHorizontalPass(mipIndex);
+                    verticalPasses[mipIndex] = new BloomGaussianVerticalPass(mipIndex);
+                }
+            }
+
+            public void AddToGraph(BurtRenderGraph graph, BurtRenderRequest request, BurtRenderPipelineAsset asset)
+            {
+                if (graph == null)
+                {
+                    return;
+                }
+
+                var stageCount = PostProcessUtility.ResolveBloomMipCount(request, asset);
+                if (stageCount <= 0)
+                {
+                    return;
+                }
+
+                graph.AddPass(sceneDownsamplePass);
+                var settings = PostProcessUtility.ResolveBloomSettings(asset);
+                if (!PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings))
+                {
+                    graph.AddPass(prefilterPass);
+                }
+
+                // Every active Gaussian level ultimately reads the common downsample chain.
+                // The final downsample slot has no consumer: mip N reads downsample N-1.
+                for (var passIndex = 0; passIndex < downsamplePasses.Length; passIndex++)
+                {
+                    graph.AddPass(downsamplePasses[passIndex]);
+                }
+
+                var firstMipIndex = PostProcessUtility.ResolveBloomFirstStageMipIndex(stageCount);
+                for (var mipIndex = BurtRenderGraphResourceRegistry.BloomPyramidCount - 1; mipIndex >= firstMipIndex; mipIndex--)
+                {
+                    graph.AddPass(horizontalPasses[mipIndex]);
+                    graph.AddPass(verticalPasses[mipIndex]);
+                }
+            }
+        }
+
+        internal static BloomBuildPassSequence CreateBloomBuildPasses()
+        {
+            return new BloomBuildPassSequence();
+        }
+
+        internal sealed class BloomSceneDownsamplePass : BurtRenderPass
+        {
+            public override string Name => "Bloom Scene Downsample";
 
             public override void Configure(BurtRenderPassBuilder builder)
             {
-                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
-                    !ShouldUseBloomPass(builder.Request, builder.Asset))
+                if (!ShouldUseBloomPass(builder.Request, builder.Asset))
                 {
                     return;
                 }
 
                 builder.ReadCameraColor();
+                builder.WriteRenderTarget(BurtRenderGraphResourceRegistry.BloomInputName);
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!ShouldUseBloomPass(context.Request, context.Asset) || !context.CameraColorTarget.IsValid)
+                {
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                var target = AllocateBloomInputGraphTarget(context);
+                if (material == null || !target.IsValid)
+                {
+                    return;
+                }
+
+                var sourceWidth = PostProcessUtility.ResolveBloomSourceWidth(context.Request.Camera);
+                var sourceHeight = PostProcessUtility.ResolveBloomSourceHeight(context.Request.Camera);
+                var cmd = context.AcquireCommandBuffer(Name);
+                cmd.SetRenderTarget(target.Identifier);
+                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(context.Request.Camera, 0), GetBloomMipHeight(context.Request.Camera, 0));
+                SetBloomSource(cmd, context.CameraColorTarget.Identifier, sourceWidth, sourceHeight);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomDownsample), MeshTopology.Triangles, 3, 1);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
+            }
+        }
+
+        internal sealed class BloomPrefilterPass : BurtRenderPass
+        {
+            public override string Name => "Bloom Prefilter";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
+                    !ShouldUseBloomPass(builder.Request, builder.Asset) ||
+                    PostProcessUtility.ShouldBypassBloomPrefilterThreshold(PostProcessUtility.ResolveBloomSettings(builder.Asset)))
+                {
+                    return;
+                }
+
+                builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.BloomInputName);
+                builder.WriteRenderTarget(BurtRenderGraphResourceRegistry.BloomSetupName);
             }
 
             public override void Execute(BurtRenderGraphContext context)
@@ -894,8 +1020,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var cameraColorTarget = context.CameraColorTarget;
-                if (!cameraColorTarget.IsValid)
+                var inputTarget = context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.BloomInputName);
+                if (!inputTarget.IsValid)
                 {
                     return;
                 }
@@ -906,20 +1032,284 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var bloomSettings = PostProcessUtility.ResolveBloomSettings(context.Asset);
-                var bloomMipCount = PostProcessUtility.ResolveBloomMipCount(context.Request, context.Asset);
-                if (bloomMipCount <= 0)
+                var settings = PostProcessUtility.ResolveBloomSettings(context.Asset);
+                if (PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings))
                 {
                     return;
                 }
 
                 var exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
                 var preExposureState = PreExposureUtility.ResolveForFrame(exposureSettings);
-                var bloomDebugView = PostProcessUtility.ResolveBloomDebugView(bloomSettings);
+                var target = AllocateBloomGraphTarget(context, BurtRenderGraphResourceRegistry.BloomSetupName, 0, settings);
+                if (!target.IsValid)
+                {
+                    return;
+                }
+
                 var cmd = context.AcquireCommandBuffer(Name);
                 PreExposureUtility.UploadGlobals(cmd, preExposureState);
-                ExecuteBloom(cmd, context.Request.Camera, cameraColorTarget, material, bloomSettings, bloomDebugView, bloomMipCount, preExposureState.ResidualPostExposure);
+                cmd.SetGlobalFloat(BloomThresholdId, settings.Threshold);
+                cmd.SetGlobalFloat(BloomExposureScaleId, preExposureState.PostExposure);
+                var hasExposureTexture = GpuExposureUtility.TryGetCurrentTexture(context.Request.Camera, out var exposureTexture);
+                cmd.SetGlobalTexture(ExposureTextureId, hasExposureTexture ? exposureTexture : Texture2D.whiteTexture);
+                cmd.SetGlobalFloat(UseExposureTextureId, hasExposureTexture ? 1f : 0f);
+                cmd.SetGlobalFloat(UseBloomAlphaId, PostProcessUtility.ShouldPreserveBloomAlpha(settings, PostProcessUtility.ResolveBloomDebugView(settings)) ? 1f : 0f);
+                cmd.SetRenderTarget(target.Identifier);
+                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(context.Request.Camera, 0), GetBloomMipHeight(context.Request.Camera, 0));
+                SetBloomSource(cmd, inputTarget.Identifier, GetBloomMipWidth(context.Request.Camera, 0), GetBloomMipHeight(context.Request.Camera, 0));
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomPrefilter), MeshTopology.Triangles, 3, 1);
                 context.ExecuteAndReleaseCommandBuffer(cmd);
+            }
+        }
+
+        internal sealed class BloomDownsamplePass : BurtRenderPass
+        {
+            private readonly int stageIndex;
+
+            public BloomDownsamplePass(int stageIndex)
+            {
+                this.stageIndex = Mathf.Clamp(stageIndex, 1, BurtRenderGraphResourceRegistry.BloomPyramidCount);
+            }
+
+            public override string Name => "Bloom Downsample Stage " + stageIndex;
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                if (!ShouldUseBloomPass(builder.Request, builder.Asset))
+                {
+                    return;
+                }
+
+                if (stageIndex == 1)
+                {
+                    var settings = PostProcessUtility.ResolveBloomSettings(builder.Asset);
+                    builder.ReadRenderTarget(PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings)
+                        ? BurtRenderGraphResourceRegistry.BloomInputName
+                        : BurtRenderGraphResourceRegistry.BloomSetupName);
+                }
+                else
+                {
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(stageIndex - 2));
+                }
+
+                builder.WriteRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(stageIndex - 1));
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (!ShouldUseBloomPass(context.Request, context.Asset))
+                {
+                    return;
+                }
+
+                var material = GetPostProcessMaterial();
+                var settings = PostProcessUtility.ResolveBloomSettings(context.Asset);
+                var source = stageIndex == 1
+                    ? context.ResourceRegistry.GetRenderTarget(PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings)
+                        ? BurtRenderGraphResourceRegistry.BloomInputName
+                        : BurtRenderGraphResourceRegistry.BloomSetupName)
+                    : context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(stageIndex - 2));
+                var targetName = BurtRenderGraphResourceRegistry.GetBloomDownsampleName(stageIndex - 1);
+                var target = AllocateBloomGraphTarget(context, targetName, stageIndex, settings);
+                if (material == null || !source.IsValid || !target.IsValid)
+                {
+                    return;
+                }
+
+                var cmd = context.AcquireCommandBuffer(Name);
+                cmd.SetRenderTarget(target.Identifier);
+                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(context.Request.Camera, stageIndex), GetBloomMipHeight(context.Request.Camera, stageIndex));
+                SetBloomSource(cmd, source.Identifier, GetBloomMipWidth(context.Request.Camera, stageIndex - 1), GetBloomMipHeight(context.Request.Camera, stageIndex - 1));
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomDownsample), MeshTopology.Triangles, 3, 1);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
+            }
+        }
+
+        internal sealed class BloomGaussianHorizontalPass : BurtRenderPass
+        {
+            private readonly int mipIndex;
+
+            public BloomGaussianHorizontalPass(int mipIndex)
+            {
+                this.mipIndex = Mathf.Clamp(mipIndex, 0, BurtRenderGraphResourceRegistry.BloomPyramidCount - 1);
+            }
+
+            public override string Name => "Bloom Gaussian H " + mipIndex;
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                var stageCount = PostProcessUtility.ResolveBloomMipCount(builder.Request, builder.Asset);
+                if (!IsBloomGaussianMipActive(mipIndex, stageCount))
+                {
+                    return;
+                }
+
+                var settings = PostProcessUtility.ResolveBloomSettings(builder.Asset);
+                if (mipIndex == 0)
+                {
+                    builder.ReadRenderTarget(PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings)
+                        ? BurtRenderGraphResourceRegistry.BloomInputName
+                        : BurtRenderGraphResourceRegistry.BloomSetupName);
+                }
+                else
+                {
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(mipIndex - 1));
+                }
+
+                builder.WriteRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianHorizontalName(mipIndex));
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                var stageCount = PostProcessUtility.ResolveBloomMipCount(context.Request, context.Asset);
+                if (!IsBloomGaussianMipActive(mipIndex, stageCount))
+                {
+                    return;
+                }
+
+                var settings = PostProcessUtility.ResolveBloomSettings(context.Asset);
+                var material = GetPostProcessMaterial();
+                var source = mipIndex == 0
+                    ? context.ResourceRegistry.GetRenderTarget(PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings)
+                        ? BurtRenderGraphResourceRegistry.BloomInputName
+                        : BurtRenderGraphResourceRegistry.BloomSetupName)
+                    : context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(mipIndex - 1));
+                var target = AllocateBloomGraphTarget(context, BurtRenderGraphResourceRegistry.GetBloomGaussianHorizontalName(mipIndex), mipIndex, settings);
+                if (material == null || !source.IsValid || !target.IsValid)
+                {
+                    return;
+                }
+
+                var width = GetBloomMipWidth(context.Request.Camera, mipIndex);
+                var height = GetBloomMipHeight(context.Request.Camera, mipIndex);
+                var stageIndex = BurtRenderGraphResourceRegistry.BloomPyramidCount - 1 - mipIndex;
+                var blurRadius = PostProcessUtility.CalculateBloomBlurRadius(settings, width, stageIndex);
+                var cmd = context.AcquireCommandBuffer(Name);
+                cmd.SetRenderTarget(target.Identifier);
+                BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
+                SetBloomSource(cmd, source.Identifier, width, height);
+                SetBloomGaussianKernel(cmd, blurRadius, width, height, true, Color.white);
+                cmd.SetGlobalFloat(UseBloomAdditiveId, 0f);
+                cmd.SetGlobalFloat(UseBloomAlphaId, PostProcessUtility.ShouldPreserveBloomAlpha(settings, PostProcessUtility.ResolveBloomDebugView(settings)) ? 1f : 0f);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomGaussian), MeshTopology.Triangles, 3, 1);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
+            }
+        }
+
+        internal sealed class BloomGaussianVerticalPass : BurtRenderPass
+        {
+            private readonly int mipIndex;
+
+            public BloomGaussianVerticalPass(int mipIndex)
+            {
+                this.mipIndex = Mathf.Clamp(mipIndex, 0, BurtRenderGraphResourceRegistry.BloomPyramidCount - 1);
+            }
+
+            public override string Name => "Bloom Gaussian V " + mipIndex;
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                var stageCount = PostProcessUtility.ResolveBloomMipCount(builder.Request, builder.Asset);
+                if (!IsBloomGaussianMipActive(mipIndex, stageCount))
+                {
+                    return;
+                }
+
+                builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianHorizontalName(mipIndex));
+                if (mipIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount - 1)
+                {
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex + 1));
+                }
+
+                builder.WriteRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex));
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                var stageCount = PostProcessUtility.ResolveBloomMipCount(context.Request, context.Asset);
+                if (!IsBloomGaussianMipActive(mipIndex, stageCount))
+                {
+                    return;
+                }
+
+                var settings = PostProcessUtility.ResolveBloomSettings(context.Asset);
+                var material = GetPostProcessMaterial();
+                var source = context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianHorizontalName(mipIndex));
+                var target = AllocateBloomGraphTarget(context, BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex), mipIndex, settings);
+                if (material == null || !source.IsValid || !target.IsValid)
+                {
+                    return;
+                }
+
+                var width = GetBloomMipWidth(context.Request.Camera, mipIndex);
+                var height = GetBloomMipHeight(context.Request.Camera, mipIndex);
+                var stageIndex = BurtRenderGraphResourceRegistry.BloomPyramidCount - 1 - mipIndex;
+                var blurRadius = PostProcessUtility.CalculateBloomBlurRadius(settings, width, stageIndex);
+                var stageTint = PostProcessUtility.CalculateBloomXRenderStageTint(settings, stageIndex);
+                var useAdditive = mipIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount - 1;
+                var additive = useAdditive
+                    ? context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex + 1))
+                    : source;
+                var cmd = context.AcquireCommandBuffer(Name);
+                cmd.SetRenderTarget(target.Identifier);
+                BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
+                SetBloomSource(cmd, source.Identifier, width, height);
+                SetBloomGaussianKernel(cmd, blurRadius, width, height, false, stageTint);
+                cmd.SetGlobalTexture(BloomAdditiveTextureId, additive.Identifier);
+                cmd.SetGlobalFloat(UseBloomAdditiveId, useAdditive ? 1f : 0f);
+                cmd.SetGlobalFloat(UseBloomAlphaId, PostProcessUtility.ShouldPreserveBloomAlpha(settings, PostProcessUtility.ResolveBloomDebugView(settings)) ? 1f : 0f);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomGaussian), MeshTopology.Triangles, 3, 1);
+                context.ExecuteAndReleaseCommandBuffer(cmd);
+            }
+        }
+
+        internal sealed class ReleaseBloomPass : BurtRenderPass
+        {
+            public override string Name => "Release Bloom";
+
+            public override void Configure(BurtRenderPassBuilder builder)
+            {
+                var stageCount = PostProcessUtility.ResolveBloomMipCount(builder.Request, builder.Asset);
+                if (stageCount <= 0)
+                {
+                    return;
+                }
+
+                builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.BloomInputName);
+                var settings = PostProcessUtility.ResolveBloomSettings(builder.Asset);
+                if (!PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings))
+                {
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.BloomSetupName);
+                }
+
+                for (var stageIndex = 0; stageIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount; stageIndex++)
+                {
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(stageIndex));
+                }
+
+                var firstMipIndex = PostProcessUtility.ResolveBloomFirstStageMipIndex(stageCount);
+                for (var mipIndex = firstMipIndex; mipIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount; mipIndex++)
+                {
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianHorizontalName(mipIndex));
+                    builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex));
+                }
+            }
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
+                if (PostProcessUtility.ResolveBloomMipCount(context.Request, context.Asset) <= 0 || context.ResourceRegistry == null)
+                {
+                    return;
+                }
+
+                context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.BloomInputName);
+                context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.BloomSetupName);
+                for (var mipIndex = 0; mipIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount; mipIndex++)
+                {
+                    context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(mipIndex));
+                    context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianHorizontalName(mipIndex));
+                    context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex));
+                }
             }
         }
 
@@ -1240,6 +1630,54 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             }
 
             return false;
+        }
+
+        private static void SetCompositeGlobals(
+            CommandBuffer cmd,
+            BurtRenderGraphContext context,
+            RenderTargetIdentifier source,
+            RenderTargetIdentifier bloomSource,
+            bool hasBloomOutput,
+            BloomSettings bloomSettings,
+            BloomDebugView bloomDebugView,
+            int bloomMipCount,
+            TonemappingMode tonemappingMode,
+            float residualPostExposureMultiplier,
+            PhysicalExposureSettings exposureSettings,
+            TonemappingFilmSettings filmSettings,
+            bool useColorAdjustments,
+            ColorAdjustmentsSettings colorAdjustmentsSettings,
+            ColorGradingSettings colorGradingSettings,
+            bool useColorGrading)
+        {
+            cmd.SetGlobalTexture(SourceTextureId, source);
+            cmd.SetGlobalTexture(BloomTextureId, bloomSource);
+            cmd.SetGlobalFloat(UseBloomId, hasBloomOutput ? 1f : 0f);
+            cmd.SetGlobalFloat(BloomIntensityId, hasBloomOutput ? 1f : 0f);
+            cmd.SetGlobalFloat(UseBloomAlphaId, bloomMipCount > 0 && PostProcessUtility.ShouldPreserveBloomAlpha(bloomSettings, bloomDebugView) ? 1f : 0f);
+            cmd.SetGlobalFloat(TonemappingModeId, (float)tonemappingMode);
+            cmd.SetGlobalFloat(PostExposureId, residualPostExposureMultiplier);
+
+            var hasExposureTexture = GpuExposureUtility.TryGetCurrentTexture(context.Request.Camera, out var exposureTexture);
+            cmd.SetGlobalTexture(ExposureTextureId, hasExposureTexture ? exposureTexture : Texture2D.whiteTexture);
+            cmd.SetGlobalFloat(UseExposureTextureId, hasExposureTexture ? 1f : 0f);
+            SetLocalExposureGlobals(cmd, context, exposureSettings);
+
+            cmd.SetGlobalFloat(FilmSlopeId, filmSettings.Slope);
+            cmd.SetGlobalFloat(FilmToeId, filmSettings.Toe);
+            cmd.SetGlobalFloat(FilmShoulderId, filmSettings.Shoulder);
+            cmd.SetGlobalFloat(FilmBlackClipId, filmSettings.BlackClip);
+            cmd.SetGlobalFloat(FilmWhiteClipId, filmSettings.WhiteClip);
+            cmd.SetGlobalFloat(FilmBlueCorrectionId, filmSettings.BlueCorrection);
+            cmd.SetGlobalFloat(FilmExpandGamutId, filmSettings.ExpandGamut);
+            cmd.SetGlobalFloat(FilmToneCurveAmountId, filmSettings.ToneCurveAmount);
+
+            cmd.SetGlobalFloat(UseColorAdjustmentsId, useColorAdjustments ? 1f : 0f);
+            cmd.SetGlobalFloat(ColorAdjustmentsSaturationId, colorAdjustmentsSettings.Saturation);
+            cmd.SetGlobalFloat(ColorAdjustmentsContrastId, colorAdjustmentsSettings.Contrast);
+            cmd.SetGlobalFloat(ColorAdjustmentsGammaId, colorAdjustmentsSettings.Gamma);
+            cmd.SetGlobalColor(ColorAdjustmentsColorFilterId, colorAdjustmentsSettings.ColorFilter);
+            SetColorGradingGlobals(cmd, colorGradingSettings, useColorGrading);
         }
 
         private static void SetColorGradingGlobals(CommandBuffer cmd, ColorGradingSettings settings, bool useColorGrading)
@@ -2397,7 +2835,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             SetTemporalAAViewport(cmd, width, height);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
-            context.FlushCommandBuffer();
+            // DrawRendererList is recorded into the graph-owned command buffer. Keep the
+            // velocity target, viewport and camera matrices in that same ordered stream;
+            // flushing here clears the buffer before the renderer list is recorded and lets
+            // the list inherit an unrelated render target.
 
             var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
             var drawingSettings = new DrawingSettings(new ShaderTagId("BurtMotionVectors"), sortingSettings)
@@ -2408,7 +2849,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             };
 
             var filteringSettings = new FilteringSettings(TemporalAAObjectMotionVectorQueueRange, camera.cullingMask);
-            context.ScriptableContext.DrawRenderers(context.Request.CullingResults, ref drawingSettings, ref filteringSettings);
+            context.DrawRendererList(context.Request.CullingResults, ref drawingSettings, ref filteringSettings);
 
             var transparentSortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonTransparent };
             var transparentDrawingSettings = new DrawingSettings(new ShaderTagId("BurtTransparentMotionVectors"), transparentSortingSettings)
@@ -2418,7 +2859,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 enableInstancing = true
             };
             var transparentFilteringSettings = new FilteringSettings(TemporalAATransparentMotionVectorQueueRange, camera.cullingMask);
-            context.ScriptableContext.DrawRenderers(context.Request.CullingResults, ref transparentDrawingSettings, ref transparentFilteringSettings);
+            context.DrawRendererList(context.Request.CullingResults, ref transparentDrawingSettings, ref transparentFilteringSettings);
             return true;
         }
 
@@ -2445,7 +2886,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             // camera matrices as the preceding object-vector draw. Fullscreen passes may have
             // changed command-buffer matrices before we get here.
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
-            context.FlushCommandBuffer();
+            // Do not flush between SetRenderTarget and DrawRendererList. Renderer lists are
+            // graph-command-buffer commands, so the responsive mask binding must remain in
+            // the same submission as the draws that consume it.
 
             var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
             var drawingSettings = new DrawingSettings(new ShaderTagId("BurtResponsiveAAMask"), sortingSettings)
@@ -2458,7 +2901,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 enableInstancing = true
             };
             var filteringSettings = new FilteringSettings(TemporalAAObjectMotionVectorQueueRange, camera.cullingMask);
-            context.ScriptableContext.DrawRenderers(context.Request.CullingResults, ref drawingSettings, ref filteringSettings);
+            context.DrawRendererList(context.Request.CullingResults, ref drawingSettings, ref filteringSettings);
 
             var transparentSortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonTransparent };
             var transparentDrawingSettings = new DrawingSettings(new ShaderTagId("BurtResponsiveAAMask"), transparentSortingSettings)
@@ -2468,7 +2911,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 enableInstancing = true
             };
             var transparentFilteringSettings = new FilteringSettings(TemporalAATransparentMotionVectorQueueRange, camera.cullingMask);
-            context.ScriptableContext.DrawRenderers(context.Request.CullingResults, ref transparentDrawingSettings, ref transparentFilteringSettings);
+            context.DrawRendererList(context.Request.CullingResults, ref transparentDrawingSettings, ref transparentFilteringSettings);
 
             // Multipass Fur is drawn through BurtMultipassRenderer rather than DrawRenderers;
             // draw every visible shell layer into the same binary responsive mask.
@@ -2509,22 +2952,64 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalFloat(UseBloomAlphaId, 0f);
             cmd.SetGlobalFloat(TonemappingModeId, 0f);
             cmd.SetGlobalFloat(PostExposureId, 1f);
+            cmd.SetGlobalFloat(UseExposureTextureId, 0f);
+            cmd.SetGlobalFloat(UseLocalExposureId, 0f);
             cmd.SetGlobalFloat(UseColorAdjustmentsId, 0f);
             cmd.SetGlobalFloat(UseColorGradingId, 0f);
             cmd.SetGlobalFloat(UseWhiteBalanceId, 0f);
             cmd.SetGlobalFloat(UseVignetteId, 0f);
         }
 
-        private static int[] CreateBloomMipTextureIds() // 创建 Bloom mip 临时 RT 的属性 ID 数组。
+        private static void SetLocalExposureGlobals(CommandBuffer cmd, BurtRenderGraphContext context, PhysicalExposureSettings exposureSettings)
         {
-            var ids = new int[MaxBloomMipCount]; // 固定上限，避免每帧分配数组。
-
-            for (var i = 0; i < ids.Length; i++) // 遍历所有可能的 Bloom mip。
+            var localExposure = VolumeManager.instance.stack.GetComponent<LocalExposureVolumeComponent>();
+            if (localExposure == null || !localExposure.IsEnabled() ||
+                !GpuExposureUtility.TryGetLocalExposureTextures(context.Request.Camera, out var histogram, out var blurredLogLuminance))
             {
-                ids[i] = Shader.PropertyToID("_BurtBloomMip" + i); // 为每级 mip 生成稳定的全局纹理 ID。
+                cmd.SetGlobalFloat(UseLocalExposureId, 0f);
+                return;
             }
 
-            return ids; // 返回缓存数组。
+            var averageLuminance = Mathf.Max(exposureSettings.AutoAverageLuminance, 0.000001f);
+            var luminanceEv100 = Mathf.Log(averageLuminance, 2f) + Mathf.Log(1f / 0.18f, 2f);
+            var highlightCurve = localExposure.highlightContrastCurve.value;
+            var shadowCurve = localExposure.shadowContrastCurve.value;
+            var highlightContrast = localExposure.highlightContrast.value * (highlightCurve != null ? highlightCurve.Evaluate(luminanceEv100) : 1f);
+            var shadowContrast = localExposure.shadowContrast.value * (shadowCurve != null ? shadowCurve.Evaluate(luminanceEv100) : 1f);
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(context.Request.Camera);
+            var groupCountX = Mathf.Max(1, Mathf.CeilToInt(descriptor.width / 64f));
+            var groupCountY = Mathf.Max(1, Mathf.CeilToInt(descriptor.height / 64f));
+            var bilateralUvScaleX = (float)descriptor.width / 64f / groupCountX;
+            var bilateralUvScaleY = (float)descriptor.height / 64f / groupCountY;
+
+            cmd.SetGlobalTexture(LocalExposureHistogramTextureId, histogram);
+            cmd.SetGlobalTexture(LocalExposureBlurredLogLuminanceTextureId, blurredLogLuminance);
+            cmd.SetGlobalVector(LocalExposureContrastParamsId, new Vector4(
+                highlightContrast,
+                shadowContrast,
+                localExposure.detailStrength.value,
+                localExposure.blurredLuminanceBlend.value));
+            var middleGreyExposureCompensation = Mathf.Pow(2f, localExposure.middleGreyBias.value);
+            if (exposureSettings.Mode == ExposureMode.ManualEV100 || exposureSettings.Mode == ExposureMode.PhysicalCamera)
+            {
+                // XRender cancels the manual exposure compensation here. The
+                // exposure texture's W channel multiplies it back when the
+                // local middle-grey value is formed in the shader.
+                var manualCompensationScale = Mathf.Pow(2f, exposureSettings.Compensation) *
+                    Mathf.Max(exposureSettings.Calibration, 0f);
+                middleGreyExposureCompensation /= Mathf.Max(manualCompensationScale, 0.0001f);
+            }
+            cmd.SetGlobalVector(LocalExposureThresholdParamsId, new Vector4(
+                localExposure.highlightThreshold.value,
+                localExposure.shadowThreshold.value,
+                middleGreyExposureCompensation,
+                0f));
+            cmd.SetGlobalVector(LocalExposureGridParamsId, new Vector4(
+                bilateralUvScaleX,
+                bilateralUvScaleY,
+                exposureSettings.AutoHistogramMinEV100,
+                exposureSettings.AutoHistogramMaxEV100));
+            cmd.SetGlobalFloat(UseLocalExposureId, 1f);
         }
 
         private static int[] CreateAutoExposureTextureIds()
@@ -2549,133 +3034,104 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             return entries;
         }
 
-        private static void ExecuteBloom( // 在单个后处理 Pass 内部执行 Bloom mip 链。
-            CommandBuffer cmd, // 接收当前后处理 CommandBuffer。
-            Camera camera, // 接收当前相机，用来创建匹配尺寸的临时 RT。
-            BurtRenderTargetHandle cameraColorTarget, // 接收 HDR CameraColor，作为 Bloom prefilter 源。
-            Material material, // 接收后处理材质，复用其中的 Bloom 子 Pass。
-            BloomSettings settings, // 接收当前 Bloom 参数。
-            BloomDebugView debugView, // 接收当前有效 Bloom debug 视图，可能来自 Shading Debug 覆盖。
-            int mipCount, // 接收本帧实际使用的 mip 数。
-            float postExposureMultiplier) // 接收当前 Tonemapping 前曝光倍率，用来让 Bloom 阈值和最终曝光保持一致。
+        private static bool IsBloomGaussianMipActive(int mipIndex, int stageCount)
         {
-            var preserveAlpha = PostProcessUtility.ShouldPreserveBloomAlpha(settings, debugView); // Alpha debug also needs an alpha-capable Bloom chain even when the Volume output toggle is off.
-            var descriptor = PostProcessUtility.CreateBloomRenderTextureDescriptor(camera, 1, 1, settings, debugView); // Bloom mip 优先使用轻量 HDR 格式，尺寸在每级申请前填入。
-
-            for (var i = 0; i < mipCount; i++) // 逐级申请 Bloom 临时 RT。
-            {
-                descriptor.width = GetBloomMipWidth(camera, i); // 使用和后续 viewport/source 完全一致的 mip 宽度。
-                descriptor.height = GetBloomMipHeight(camera, i); // 使用和后续 viewport/source 完全一致的 mip 高度。
-                cmd.GetTemporaryRT(BloomMipTextureIds[i], descriptor, FilterMode.Bilinear); // 申请当前 mip，使用双线性过滤配合上采样。
-            }
-
-            cmd.SetGlobalFloat(BloomThresholdId, settings.Threshold); // 上传 Bloom 阈值。
-            cmd.SetGlobalFloat(BloomSoftKneeId, settings.SoftKnee); // 上传 Bloom 软阈值，让 prefilter 过渡更连续。
-            cmd.SetGlobalFloat(BloomBypassThresholdId, PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings) ? 1f : 0f); // threshold 为 -1 时对齐 XRender，跳过亮度裁剪让所有像素参与 Bloom。
-            cmd.SetGlobalFloat(BloomFireflyClampId, BloomFireflyClamp); // 在 Bloom prefilter 前软压极端 HDR 亮点，避免异常像素扩散到整条 mip 链。
-            cmd.SetGlobalFloat(UseBloomAlphaId, preserveAlpha ? 1f : 0f); // 上传 Bloom alpha 开关，让预过滤和高斯阶段保持一致。
-            cmd.SetGlobalFloat(PostExposureId, PostProcessUtility.ResolveBloomPrefilterPostExposure(postExposureMultiplier)); // Bloom 阈值使用 Tonemapping 前曝光后的亮度判断，贴近最终画面亮度。
-            cmd.SetRenderTarget(new RenderTargetIdentifier(BloomMipTextureIds[0])); // prefilter 写入 mip0。
-            BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(camera, 0), GetBloomMipHeight(camera, 0));
-            SetBloomSource(cmd, cameraColorTarget.Identifier, camera); // CameraColor 是 prefilter 源。
-            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomPrefilter), MeshTopology.Triangles, 3, 1); // 执行高光预过滤。
-            if (ShouldUseBloomDebugView(debugView, mipCount) && debugView == BloomDebugView.Prefilter)
-            {
-                var debugDescriptor = PostProcessUtility.CreateBloomRenderTextureDescriptor(camera, GetBloomMipWidth(camera, 0), GetBloomMipHeight(camera, 0), settings, debugView);
-                cmd.GetTemporaryRT(BloomDebugTextureId, debugDescriptor, FilterMode.Bilinear);
-                cmd.SetRenderTarget(new RenderTargetIdentifier(BloomDebugTextureId));
-                BurtRenderTargetDescriptorUtility.SetViewport(cmd, debugDescriptor.width, debugDescriptor.height);
-                SetBloomSource(cmd, new RenderTargetIdentifier(BloomMipTextureIds[0]), debugDescriptor.width, debugDescriptor.height);
-                cmd.SetGlobalFloat(UseBloomId, 0f);
-                cmd.SetGlobalFloat(TonemappingModeId, (float)TonemappingMode.None);
-                cmd.SetGlobalFloat(PostExposureId, 1f);
-                cmd.SetGlobalFloat(UseColorAdjustmentsId, 0f);
-                cmd.SetGlobalFloat(UseVignetteId, 0f);
-                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.CopyAndComposite), MeshTopology.Triangles, 3, 1);
-            }
-
-            for (var i = 1; i < mipCount; i++) // 从 mip0 开始逐级下采样。
-            {
-                var sourceId = BloomMipTextureIds[i - 1]; // 上一层作为当前下采样源。
-                var targetId = BloomMipTextureIds[i]; // 当前层作为下采样目标。
-
-                cmd.SetRenderTarget(new RenderTargetIdentifier(targetId)); // 绑定当前 mip 作为写入目标。
-                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(camera, i), GetBloomMipHeight(camera, i));
-                SetBloomSource(cmd, new RenderTargetIdentifier(sourceId), GetBloomMipWidth(camera, i - 1), GetBloomMipHeight(camera, i - 1)); // 设置上一层源纹理和 texel size。
-                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomDownsample), MeshTopology.Triangles, 3, 1); // 执行 4 tap 下采样。
-            }
-
-            for (var i = mipCount - 1; i >= 0; i--) // 按 XRender PC Bloom 的思路，从小 mip 到大 mip 做高斯并叠加。
-            {
-                var width = GetBloomMipWidth(camera, i); // 计算当前 mip 宽度。
-                var height = GetBloomMipHeight(camera, i); // 计算当前 mip 高度。
-                var stageIndex = mipCount - 1 - i; // XRender PC Bloom 从最小 mip 的 Filter6 逐步走向 Filter1。
-                var blurRadius = PostProcessUtility.CalculateBloomBlurRadius(settings, width, stageIndex); // 用 scatter、sizeScale 和 Filter6..Filter1 百分比计算高斯半径。
-                var stageTint = PostProcessUtility.ResolveBloomStageTint(settings, stageIndex); // 获取当前 Bloom 阶段的 tint，纵向阶段乘入以贴近 XRender。
-                var blurDescriptor = PostProcessUtility.CreateBloomRenderTextureDescriptor(camera, width, height, settings, debugView); // 横向模糊临时 RT 只需要当前 mip 尺寸。
-
-                cmd.GetTemporaryRT(BloomBlurTextureId, blurDescriptor, FilterMode.Bilinear); // 每级只临时申请一张横向高斯 RT，用完立即释放。
-                cmd.SetRenderTarget(new RenderTargetIdentifier(BloomBlurTextureId)); // 横向高斯写入同尺寸临时 RT。
-                BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
-                SetBloomSource(cmd, new RenderTargetIdentifier(BloomMipTextureIds[i]), width, height); // 当前 downsample mip 作为横向模糊源。
-                SetBloomGaussianKernel(cmd, blurRadius, width, height, true, Color.white); // 横向阶段只做滤波，保持白色权重。
-                cmd.SetGlobalVector(BloomBlurDirectionId, new Vector4(1f, 0f, blurRadius, 0f)); // 横向模糊轴和半径，shader 内按 XRender PC 高斯公式计算权重。
-                cmd.SetGlobalFloat(UseBloomAdditiveId, 0f); // 横向阶段不做加法合成。
-                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomGaussian), MeshTopology.Triangles, 3, 1); // 执行 PC Bloom 横向高斯。
-
-                cmd.SetRenderTarget(new RenderTargetIdentifier(BloomMipTextureIds[i])); // 纵向高斯写回当前 mip，后续更大 mip 会把它作为 additive 输入。
-                BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
-                SetBloomSource(cmd, new RenderTargetIdentifier(BloomBlurTextureId), width, height); // 横向模糊结果作为纵向源。
-                SetBloomGaussianKernel(cmd, blurRadius, width, height, false, stageTint); // 纵向阶段乘入每级 tint，允许按 XRender 风格调 Bloom 颜色和权重。
-                cmd.SetGlobalVector(BloomBlurDirectionId, new Vector4(0f, 1f, blurRadius, 0f)); // 纵向模糊轴和半径，shader 内按 XRender PC 高斯公式计算权重。
-                cmd.SetGlobalTexture(BloomAdditiveTextureId, i + 1 < mipCount ? new RenderTargetIdentifier(BloomMipTextureIds[i + 1]) : new RenderTargetIdentifier(BloomBlurTextureId)); // 更小一级的已累积结果作为 additive，最小 mip 绑定兜底纹理。
-                cmd.SetGlobalFloat(UseBloomAdditiveId, i + 1 < mipCount ? 1f : 0f); // 最小 mip 没有 additive，其他 mip 叠加上一轮结果。
-                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomGaussian), MeshTopology.Triangles, 3, 1); // 执行 PC Bloom 纵向高斯并合成。
-                cmd.ReleaseTemporaryRT(BloomBlurTextureId); // 当前 mip 的横向高斯 RT 已不再需要，立即释放以降低峰值显存。
-            }
-
-            cmd.SetGlobalFloat(UseBloomAdditiveId, 0f); // Bloom 链结束后关闭加法合成，避免影响后续全屏 pass。
-            cmd.SetGlobalFloat(PostExposureId, 1f); // Bloom 链结束后恢复默认曝光，后续最终合成会重新上传正确值。
+            return stageCount > 0 &&
+                mipIndex >= PostProcessUtility.ResolveBloomFirstStageMipIndex(stageCount) &&
+                mipIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount;
         }
 
-        private static void SetBloomDebugSource(CommandBuffer cmd, Camera camera, RenderTargetIdentifier cameraColorTarget, BloomSettings settings, BloomDebugView debugView, int mipCount, float postExposureMultiplier) // 选择 Bloom debug 要显示的中间纹理。
+        private static BurtRenderTargetHandle AllocateBloomGraphTarget(
+            BurtRenderGraphContext context,
+            string resourceName,
+            int mipIndex,
+            BloomSettings settings)
         {
-            var sourceId = BloomMipTextureIds[0]; // 默认显示最终合成后的 Bloom mip0。
-            var sourceWidth = GetBloomMipWidth(camera, 0);
-            var sourceHeight = GetBloomMipHeight(camera, 0);
-            var debugMode = ResolveBloomDebugShaderMode(debugView);
-            var useCameraColorSource = debugView == BloomDebugView.ThresholdMask;
-
-            if (useCameraColorSource)
+            if (context == null || context.ResourceRegistry == null || context.Request == null || context.Request.Camera == null)
             {
-                sourceWidth = PostProcessUtility.ResolveBloomSourceWidth(camera);
-                sourceHeight = PostProcessUtility.ResolveBloomSourceHeight(camera);
+                return BurtRenderTargetHandle.Invalid(resourceName);
+            }
+
+            RenderTextureDescriptor descriptor;
+            if (PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings))
+            {
+                descriptor = PostProcessUtility.CreateBloomInputRenderTextureDescriptor(
+                    context.Request.Camera,
+                    GetBloomMipWidth(context.Request.Camera, mipIndex),
+                    GetBloomMipHeight(context.Request.Camera, mipIndex));
+            }
+            else
+            {
+                descriptor = PostProcessUtility.CreateBloomRenderTextureDescriptor(
+                    context.Request.Camera,
+                    GetBloomMipWidth(context.Request.Camera, mipIndex),
+                    GetBloomMipHeight(context.Request.Camera, mipIndex),
+                    settings,
+                    PostProcessUtility.ResolveBloomDebugView(settings));
+            }
+
+            context.ResourceRegistry.SetRenderTargetDescriptor(resourceName, descriptor, FilterMode.Bilinear, "Burt " + resourceName);
+            return context.ResourceRegistry.AllocateRenderTarget(resourceName);
+        }
+
+        private static BurtRenderTargetHandle AllocateBloomInputGraphTarget(BurtRenderGraphContext context)
+        {
+            const string resourceName = BurtRenderGraphResourceRegistry.BloomInputName;
+            if (context == null || context.ResourceRegistry == null || context.Request == null || context.Request.Camera == null)
+            {
+                return BurtRenderTargetHandle.Invalid(resourceName);
+            }
+
+            var descriptor = PostProcessUtility.CreateBloomInputRenderTextureDescriptor(
+                context.Request.Camera,
+                GetBloomMipWidth(context.Request.Camera, 0),
+                GetBloomMipHeight(context.Request.Camera, 0));
+            context.ResourceRegistry.SetRenderTargetDescriptor(resourceName, descriptor, FilterMode.Bilinear, "Burt " + resourceName);
+            return context.ResourceRegistry.AllocateRenderTarget(resourceName);
+        }
+
+        private static void SetBloomDebugSource(CommandBuffer cmd, BurtRenderGraphContext context, RenderTargetIdentifier cameraColorTarget, BloomSettings settings, BloomDebugView debugView, int stageCount, PreExposureState preExposureState)
+        {
+            var camera = context.Request.Camera;
+            var firstMipIndex = PostProcessUtility.ResolveBloomFirstStageMipIndex(stageCount);
+            var sourceWidth = GetBloomMipWidth(camera, firstMipIndex);
+            var sourceHeight = GetBloomMipHeight(camera, firstMipIndex);
+            var source = context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(firstMipIndex));
+            if (debugView == BloomDebugView.ThresholdMask)
+            {
+                source = context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.BloomInputName);
+                sourceWidth = GetBloomMipWidth(camera, 0);
+                sourceHeight = GetBloomMipHeight(camera, 0);
             }
             else if (debugView == BloomDebugView.Prefilter)
             {
-                sourceId = BloomDebugTextureId;
+                source = context.ResourceRegistry.GetRenderTarget(PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings)
+                    ? BurtRenderGraphResourceRegistry.BloomInputName
+                    : BurtRenderGraphResourceRegistry.BloomSetupName);
+                sourceWidth = GetBloomMipWidth(camera, 0);
+                sourceHeight = GetBloomMipHeight(camera, 0);
             }
             else if (debugView >= BloomDebugView.Mip1 && debugView <= BloomDebugView.Mip5)
             {
-                var mipIndex = Mathf.Clamp((int)debugView - (int)BloomDebugView.Mip1 + 1, 0, Mathf.Max(0, mipCount - 1));
-                sourceId = BloomMipTextureIds[mipIndex];
+                var mipIndex = Mathf.Clamp((int)debugView - (int)BloomDebugView.Mip1 + 1, 1, BurtRenderGraphResourceRegistry.BloomPyramidCount - 1);
+                source = IsBloomGaussianMipActive(mipIndex, stageCount)
+                    ? context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex))
+                    : context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(mipIndex - 1));
                 sourceWidth = GetBloomMipWidth(camera, mipIndex);
                 sourceHeight = GetBloomMipHeight(camera, mipIndex);
             }
 
-            cmd.SetGlobalTexture(SourceTextureId, useCameraColorSource ? cameraColorTarget : new RenderTargetIdentifier(sourceId));
+            cmd.SetGlobalTexture(SourceTextureId, !source.IsValid ? cameraColorTarget : source.Identifier);
             cmd.SetGlobalVector(BloomTexelSizeId, new Vector4(1f / Mathf.Max(1, sourceWidth), 1f / Mathf.Max(1, sourceHeight), sourceWidth, sourceHeight));
             if (debugView == BloomDebugView.ThresholdMask)
             {
                 cmd.SetGlobalFloat(BloomThresholdId, settings.Threshold);
-                cmd.SetGlobalFloat(BloomSoftKneeId, settings.SoftKnee);
+                cmd.SetGlobalFloat(BloomExposureScaleId, preExposureState.PostExposure);
                 cmd.SetGlobalFloat(BloomBypassThresholdId, PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings) ? 1f : 0f);
-                cmd.SetGlobalFloat(BloomFireflyClampId, BloomFireflyClamp);
-                cmd.SetGlobalFloat(PostExposureId, PostProcessUtility.ResolveBloomPrefilterPostExposure(postExposureMultiplier));
             }
 
-            cmd.SetGlobalFloat(BloomDebugModeId, debugMode);
-            cmd.SetGlobalFloat(BloomDebugYFlipId, debugView == BloomDebugView.Prefilter ? 1f : 0f);
+            cmd.SetGlobalFloat(BloomDebugModeId, ResolveBloomDebugShaderMode(debugView));
+            cmd.SetGlobalFloat(BloomDebugYFlipId, 0f);
         }
 
         private static float ResolveBloomDebugShaderMode(BloomDebugView debugView)
@@ -2688,39 +3144,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             return debugView == BloomDebugView.ThresholdMask ? 2f : 0f;
         }
 
-        private static void ReleaseBloom(CommandBuffer cmd, int mipCount, bool releaseDebugTexture) // 释放本帧申请的 Bloom 临时 RT。
-        {
-            for (var i = 0; i < mipCount; i++) // 只释放实际申请过的 mip。
-            {
-                cmd.ReleaseTemporaryRT(BloomMipTextureIds[i]); // 释放当前 Bloom mip。
-            }
-
-            if (releaseDebugTexture)
-            {
-                cmd.ReleaseTemporaryRT(BloomDebugTextureId); // 释放 prefilter debug 快照。
-            }
-        }
-
         private static void SetBloomGaussianKernel(CommandBuffer cmd, float radius, int width, int height, bool horizontal, Color tint) // Upload XRender PC-style bilinear-merged Gaussian kernel.
         {
             var radiusKey = Mathf.RoundToInt(Mathf.Clamp(radius, 0.00001f, MaxBloomGaussianSamples - 1) * BloomGaussianKernelRadiusCacheScale); // Quantize radius so equivalent Bloom frames reuse kernels.
-            var tintRKey = Mathf.RoundToInt(tint.r * BloomGaussianKernelTintCacheScale); // Quantize stage tint for compact cache lookup.
-            var tintGKey = Mathf.RoundToInt(tint.g * BloomGaussianKernelTintCacheScale);
-            var tintBKey = Mathf.RoundToInt(tint.b * BloomGaussianKernelTintCacheScale);
             var sourceWidth = Mathf.Max(1, width);
             var sourceHeight = Mathf.Max(1, height);
-            var cacheHash = CalculateBloomGaussianKernelHash(radiusKey, sourceWidth, sourceHeight, horizontal, tintRKey, tintGKey, tintBKey);
-            var cacheEntry = GetBloomGaussianKernelCacheEntry(cacheHash, radiusKey, sourceWidth, sourceHeight, horizontal, tintRKey, tintGKey, tintBKey);
+            var cacheHash = CalculateBloomGaussianKernelHash(radiusKey, sourceWidth, sourceHeight, horizontal);
+            var cacheEntry = GetBloomGaussianKernelCacheEntry(cacheHash, radiusKey, sourceWidth, sourceHeight, horizontal);
             var sampleCount = cacheEntry.SampleCount;
 
-            CopyBloomGaussianKernel(cacheEntry, BloomGaussianWeights, BloomGaussianOffsets);
+            CopyBloomGaussianKernel(cacheEntry, BloomGaussianWeights, BloomGaussianOffsets, tint);
 
             cmd.SetGlobalFloat(BloomSampleCountId, sampleCount); // Shader reads the active count from fixed-size arrays.
             cmd.SetGlobalVectorArray(BloomSampleWeightsId, BloomGaussianWeights); // Upload normalized weights.
             cmd.SetGlobalVectorArray(BloomSampleOffsetsId, BloomGaussianOffsets); // Upload UV-space offsets.
         }
 
-        private static BloomGaussianKernelCacheEntry GetBloomGaussianKernelCacheEntry(int hash, int radiusKey, int width, int height, bool horizontal, int tintRKey, int tintGKey, int tintBKey)
+        private static BloomGaussianKernelCacheEntry GetBloomGaussianKernelCacheEntry(int hash, int radiusKey, int width, int height, bool horizontal)
         {
             for (var i = 0; i < BloomGaussianKernelCache.Length; i++)
             {
@@ -2730,10 +3170,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     entry.RadiusKey == radiusKey &&
                     entry.Width == width &&
                     entry.Height == height &&
-                    entry.Horizontal == horizontal &&
-                    entry.TintRKey == tintRKey &&
-                    entry.TintGKey == tintGKey &&
-                    entry.TintBKey == tintBKey)
+                    entry.Horizontal == horizontal)
                 {
                     return entry;
                 }
@@ -2747,15 +3184,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             target.Width = width;
             target.Height = height;
             target.Horizontal = horizontal;
-            target.TintRKey = tintRKey;
-            target.TintGKey = tintGKey;
-            target.TintBKey = tintBKey;
-            target.SampleCount = ComputeBloomGaussianKernel(radiusKey / BloomGaussianKernelRadiusCacheScale, width, height, horizontal, tintRKey / BloomGaussianKernelTintCacheScale, tintGKey / BloomGaussianKernelTintCacheScale, tintBKey / BloomGaussianKernelTintCacheScale, target.Weights, target.Offsets); // Mirrors XRender Compute1DGaussianFilterKernel.
+            target.SampleCount = ComputeBloomGaussianKernel(radiusKey / BloomGaussianKernelRadiusCacheScale, width, height, horizontal, target.Weights, target.Offsets); // Cache the normalized kernel shape; apply the unquantized stage tint only when uploading it.
 
             return target;
         }
 
-        private static int CalculateBloomGaussianKernelHash(int radiusKey, int width, int height, bool horizontal, int tintRKey, int tintGKey, int tintBKey)
+        private static int CalculateBloomGaussianKernelHash(int radiusKey, int width, int height, bool horizontal)
         {
             unchecked
             {
@@ -2764,30 +3198,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 hash = hash * 31 + width;
                 hash = hash * 31 + height;
                 hash = hash * 31 + (horizontal ? 1 : 0);
-                hash = hash * 31 + tintRKey;
-                hash = hash * 31 + tintGKey;
-                hash = hash * 31 + tintBKey;
 
                 return hash;
             }
         }
 
-        private static void CopyBloomGaussianKernel(BloomGaussianKernelCacheEntry entry, Vector4[] weights, Vector4[] offsets)
+        private static void CopyBloomGaussianKernel(BloomGaussianKernelCacheEntry entry, Vector4[] weights, Vector4[] offsets, Color tint)
         {
-            for (var i = 0; i < MaxBloomGaussianSamples; i++)
+            for (var i = 0; i < BloomGaussianSampleCapacity; i++)
             {
-                weights[i] = entry.Weights[i];
+                var weight = entry.Weights[i];
+                weights[i] = new Vector4(weight.x * tint.r, weight.y * tint.g, weight.z * tint.b, weight.w);
                 offsets[i] = entry.Offsets[i];
             }
         }
 
-        private static int ComputeBloomGaussianKernel(float radius, int width, int height, bool horizontal, float tintR, float tintG, float tintB, Vector4[] weights, Vector4[] offsets) // Mirrors XRender Compute1DGaussianFilterKernel.
+        private static int ComputeBloomGaussianKernel(float radius, int width, int height, bool horizontal, Vector4[] weights, Vector4[] offsets) // Mirrors XRender Compute1DGaussianFilterKernel.
         {
             var clampedRadius = Mathf.Clamp(radius, 0.00001f, MaxBloomGaussianSamples - 1); // Avoid divide-by-zero and cap sample count.
             var integerRadius = Mathf.Min(Mathf.CeilToInt(clampedRadius), MaxBloomGaussianSamples - 1); // XRender uses ceil(radius) as integer radius.
             var sampleCount = 0; // Count bilinear-merged samples.
             var weightSum = 0f; // Used to normalize weights.
-            var tintWeight = new Vector4(tintR, tintG, tintB, 1f); // RGB tint is stage-specific; alpha keeps the normalized Gaussian kernel.
 
             for (var sampleIndex = -integerRadius; sampleIndex <= integerRadius && sampleCount < MaxBloomGaussianSamples; sampleIndex += 2)
             {
@@ -2797,7 +3228,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 var sampleOffset = sampleIndex + weight1 / Mathf.Max(totalWeight, 0.00001f); // XRender bilinear offset merge formula.
                 var uvOffset = horizontal ? new Vector4(sampleOffset / width, 0f, 0f, 0f) : new Vector4(0f, sampleOffset / height, 0f, 0f); // Convert to UV-space offset.
 
-                weights[sampleCount] = tintWeight * totalWeight;
+                weights[sampleCount] = Vector4.one * totalWeight;
                 offsets[sampleCount] = uvOffset;
                 weightSum += totalWeight;
                 sampleCount++;
@@ -2809,7 +3240,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 weights[i] *= weightSumInverse;
             }
 
-            for (var i = sampleCount; i < MaxBloomGaussianSamples; i++)
+            for (var i = sampleCount; i < BloomGaussianSampleCapacity; i++)
             {
                 weights[i] = Vector4.zero;
                 offsets[i] = Vector4.zero;
@@ -2825,22 +3256,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             return Mathf.Exp(-16.7f * normalized * normalized); // XRender legacyCompatibilityConstant = -16.7.
         }
 
-        private static void SetBloomSource(CommandBuffer cmd, RenderTargetIdentifier source, Camera camera) // 用相机尺寸设置 Bloom 源纹理。
-        {
-            var width = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth); // 读取源宽度。
-            var height = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight); // 读取源高度。
-
-            SetBloomSource(cmd, source, width, height); // 转到统一上传函数。
-        }
-
         private static void SetBloomSource(CommandBuffer cmd, RenderTargetIdentifier source, int width, int height) // 上传 Bloom 源纹理和 texel size。
         {
             cmd.SetGlobalTexture(SourceTextureId, source); // 复用后处理源纹理属性，供 Bloom 子 Pass 采样。
             cmd.SetGlobalVector(BloomTexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height)); // 上传 texel size，便于 shader 做邻域采样。
         }
 
-        private static void SetAutoExposureDebugSource(CommandBuffer cmd, Camera camera, RenderTargetIdentifier source, PhysicalExposureSettings exposure, int debugMode)
+        private static void SetAutoExposureDebugSource(
+            CommandBuffer cmd,
+            BurtRenderGraphContext context,
+            RenderTargetIdentifier source,
+            PhysicalExposureSettings exposure,
+            int debugMode,
+            RenderTargetIdentifier toneMappedSource,
+            bool hasToneMappedSource)
         {
+            var camera = context.Request.Camera;
             var width = 1;
             var height = 1;
             if (camera != null)
@@ -2857,6 +3288,41 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 exposure.AutoHistogramMaxEV100,
                 exposure.AutoMiddleGrey,
                 exposure.AutoAverageLogLuminance));
+
+            var hasExposureTexture = GpuExposureUtility.TryGetCurrentTexture(camera, out var exposureTexture);
+            cmd.SetGlobalTexture(ExposureTextureId, hasExposureTexture ? exposureTexture : Texture2D.whiteTexture);
+            cmd.SetGlobalFloat(UseExposureTextureId, hasExposureTexture ? 1f : 0f);
+
+            var currentScale = exposure.Multiplier;
+            var targetScale = exposure.Multiplier;
+            var averageLuminance = Mathf.Max(exposure.AutoAverageLuminance, 0.000001f);
+            var compensationScale = Mathf.Pow(2f, exposure.Compensation) * Mathf.Max(exposure.Calibration, 0f);
+            if (GpuExposureUtility.TryGetSnapshot(camera, out var gpuSnapshot))
+            {
+                currentScale = gpuSnapshot.CurrentScale;
+                targetScale = gpuSnapshot.TargetScale;
+                averageLuminance = Mathf.Max(gpuSnapshot.AverageLuminance, 0.000001f);
+                compensationScale = gpuSnapshot.CompensationScale;
+            }
+            cmd.SetGlobalVector(AutoExposureDebugParams2Id, new Vector4(currentScale, targetScale, averageLuminance, compensationScale));
+
+            var exposureComponent = VolumeManager.instance.stack.GetComponent<ExposureVolumeComponent>();
+            var meteringMask = exposureComponent != null ? exposureComponent.meteringMask.value : null;
+            cmd.SetGlobalTexture(AutoExposureDebugMeteringMaskId, meteringMask != null ? meteringMask : Texture2D.whiteTexture);
+            cmd.SetGlobalFloat(AutoExposureDebugUseMeteringMaskId, meteringMask != null ? 1f : 0f);
+            var hasHistogram = GpuExposureUtility.TryGetHistogramTexture(camera, out var histogramTexture);
+            cmd.SetGlobalTexture(AutoExposureDebugHistogramTextureId, hasHistogram ? histogramTexture : Texture2D.blackTexture);
+            cmd.SetGlobalFloat(AutoExposureDebugHasHistogramId, hasHistogram ? 1f : 0f);
+            cmd.SetGlobalTexture(AutoExposureDebugToneMappedTextureId, toneMappedSource);
+            cmd.SetGlobalFloat(AutoExposureDebugHasToneMappedTextureId, hasToneMappedSource ? 1f : 0f);
+            cmd.SetGlobalFloat(TonemappingModeId, (float)PostProcessUtility.ResolveTonemappingMode(context.Asset));
+            var filmSettings = PostProcessUtility.ResolveTonemappingFilmSettings(context.Asset);
+            cmd.SetGlobalFloat(FilmSlopeId, filmSettings.Slope);
+            cmd.SetGlobalFloat(FilmToeId, filmSettings.Toe);
+            cmd.SetGlobalFloat(FilmShoulderId, filmSettings.Shoulder);
+            cmd.SetGlobalFloat(FilmBlackClipId, filmSettings.BlackClip);
+            cmd.SetGlobalFloat(FilmWhiteClipId, filmSettings.WhiteClip);
+            SetLocalExposureGlobals(cmd, context, exposure);
         }
 
         private static int GetBloomMipWidth(Camera camera, int mipIndex) // 计算指定 Bloom mip 的宽度。

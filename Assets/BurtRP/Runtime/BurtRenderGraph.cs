@@ -28,7 +28,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
     internal enum BurtRenderGraphCompilationMode
     {
         Lightweight = 0,
-        Full = 1,
+        Culling = 1,
+        Full = 2,
     }
 
     public sealed class BurtRenderGraphCompileResult
@@ -150,7 +151,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     {
                         for (var readerIndex = 0; readerIndex < readers.Count; readerIndex++)
                         {
-                            dependencyCount += AddDependency(dependencies[passIndex], readers[readerIndex]);
+                            if (readers[readerIndex] != passIndex)
+                            {
+                                dependencyCount += AddDependency(dependencies[passIndex], readers[readerIndex]);
+                            }
                         }
 
                         readers.Clear();
@@ -205,6 +209,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 for (var writeIndex = 0; writeIndex < writes.Count; writeIndex++)
                 {
                     requiredResources.Remove(writes[writeIndex]);
+                }
+
+                if (usage.PassKind == BurtRenderPassKind.Release)
+                {
+                    continue;
                 }
 
                 CollectReadKeys(usage, reads);
@@ -504,14 +513,79 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     BurtRenderGraphResourceRegistry.LightShaftOcclusionName,
                     new UnityEngine.Rendering.RenderTargetIdentifier(
                         BurtRenderGraphResourceRegistry.LightShaftOcclusionTextureId));
+                resources.RegisterRenderTarget(
+                    BurtRenderGraphResourceRegistry.LightShaftOcclusionTempName,
+                    new UnityEngine.Rendering.RenderTargetIdentifier(
+                        BurtRenderGraphResourceRegistry.LightShaftOcclusionTempTextureId));
             }
 
-            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName, BurtLightingData.CreateAdditionalLightBufferDescriptor()); // Register the graph-owned additional light buffer used by future tiled/cluster lighting.
+            if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftBloom(request))
+            {
+                resources.RegisterRenderTarget(
+                    BurtRenderGraphResourceRegistry.LightShaftBloomName,
+                    new UnityEngine.Rendering.RenderTargetIdentifier(
+                        BurtRenderGraphResourceRegistry.LightShaftBloomTextureId));
+                resources.RegisterRenderTarget(
+                    BurtRenderGraphResourceRegistry.LightShaftBloomTempName,
+                    new UnityEngine.Rendering.RenderTargetIdentifier(
+                        BurtRenderGraphResourceRegistry.LightShaftBloomTempTextureId));
+            }
+
+            if (BurtFogUtility.ShouldUseFog(request))
+            {
+                resources.RegisterRenderTarget(
+                    BurtRenderGraphResourceRegistry.FogSourceColorName,
+                    new UnityEngine.Rendering.RenderTargetIdentifier(
+                        BurtRenderGraphResourceRegistry.FogSourceColorTextureId));
+            }
+
+            if (BurtVolumetricFogUtility.ShouldUseVolumetricFog(request))
+            {
+                resources.RegisterRenderTarget(
+                    BurtRenderGraphResourceRegistry.VolumetricFogSourceColorName,
+                    new UnityEngine.Rendering.RenderTargetIdentifier(
+                        BurtRenderGraphResourceRegistry.VolumetricFogSourceColorTextureId));
+            }
+
+            if (BurtAtmosphereUtility.ShouldUseAerialPerspective(request))
+            {
+                resources.RegisterRenderTarget(
+                    BurtRenderGraphResourceRegistry.AtmosphereAerialSourceColorName,
+                    new UnityEngine.Rendering.RenderTargetIdentifier(
+                        BurtRenderGraphResourceRegistry.AtmosphereAerialSourceColorTextureId));
+            }
+
+            if (request.LightingData != null && request.LightingData.AdditionalLightCount > 0)
+            {
+                resources.RegisterBuffer(BurtRenderGraphResourceRegistry.AdditionalLightBufferName, BurtLightingData.CreateAdditionalLightBufferDescriptor()); // Register only when the request has packed additional-light rows.
+            }
 
             if (ShouldRegisterPostProcessColor(request, asset)) // 如果当前 request 启用了后处理框架，就把后处理中间颜色纳入资源表。
             {
                 resources.RegisterPostProcessColorTexture(); // 注册 PostProcessColor 临时 RT，让分配、No-op Copy 和释放 Pass 使用同一个资源句柄。
                 resources.RegisterTemporalAAOutputTexture();
+
+                if (PostProcessPass.ShouldUseBloomPass(request, asset))
+                {
+                    resources.RegisterRenderTarget(
+                        BurtRenderGraphResourceRegistry.BloomInputName,
+                        new UnityEngine.Rendering.RenderTargetIdentifier(BurtRenderGraphResourceRegistry.BloomInputTextureId));
+                    resources.RegisterRenderTarget(
+                        BurtRenderGraphResourceRegistry.BloomSetupName,
+                        new UnityEngine.Rendering.RenderTargetIdentifier(BurtRenderGraphResourceRegistry.BloomSetupTextureId));
+                    for (var mipIndex = 0; mipIndex < BurtRenderGraphResourceRegistry.BloomPyramidCount; mipIndex++)
+                    {
+                        resources.RegisterRenderTarget(
+                            BurtRenderGraphResourceRegistry.GetBloomDownsampleName(mipIndex),
+                            new UnityEngine.Rendering.RenderTargetIdentifier(BurtRenderGraphResourceRegistry.GetBloomDownsampleTextureId(mipIndex)));
+                        resources.RegisterRenderTarget(
+                            BurtRenderGraphResourceRegistry.GetBloomGaussianHorizontalName(mipIndex),
+                            new UnityEngine.Rendering.RenderTargetIdentifier(BurtRenderGraphResourceRegistry.GetBloomGaussianHorizontalTextureId(mipIndex)));
+                        resources.RegisterRenderTarget(
+                            BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex),
+                            new UnityEngine.Rendering.RenderTargetIdentifier(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalTextureId(mipIndex)));
+                    }
+                }
             }
 
             if (ShouldRegisterGBufferTargets(request, asset)) // 如果当前 request 走 Deferred 实验路径，就把全部 GBuffer 目标纳入资源表。
@@ -570,11 +644,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 {
                     resources.RegisterScreenSpaceGlobalIlluminationRawTexture();
                     resources.RegisterScreenSpaceGlobalIlluminationTexture();
-                    resources.RegisterScreenSpaceGlobalIlluminationUpsampledTexture();
                     resources.RegisterBurtGIBackfaceDiffuseIndirectTexture();
-                    resources.RegisterBurtGIBackfaceDiffuseIndirectUpsampledTexture();
                     resources.RegisterBurtGIRoughSpecularIndirectTexture();
-                    resources.RegisterBurtGIRoughSpecularIndirectUpsampledTexture();
+                    if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationBilateralUpsample(request, asset))
+                    {
+                        resources.RegisterScreenSpaceGlobalIlluminationUpsampledTexture();
+                        resources.RegisterBurtGIBackfaceDiffuseIndirectUpsampledTexture();
+                        resources.RegisterBurtGIRoughSpecularIndirectUpsampledTexture();
+                    }
                     if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTemporalDiagnostics(request, asset))
                     {
                         resources.RegisterBurtGITemporalDiagnosticsTexture();
@@ -589,11 +666,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                         var useRadianceCacheHashGrid = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationRadianceCacheHashGrid(request, asset);
                         var useTranslucencyVolume = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationTranslucencyVolume(request, asset);
                         var useSceneVoxel = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationSceneVoxel(request, asset);
+                        var useIntegrateTileData = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileData(request, asset);
+                        var useIntegrateTileClassification = BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileClassification(request, asset);
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileIndirectArgsBufferDescriptor());
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataDiffuseBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileDataDiffuseBufferDescriptor(request.Camera, screenProbeSettings));
-                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataAllBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileDataAllBufferDescriptor(request.Camera, screenProbeSettings));
-                        resources.RegisterBurtGIScreenProbeIntegrateTileClassificationTexture();
+                        if (useIntegrateTileData)
+                        {
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileIndirectArgsBufferDescriptor());
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataDiffuseBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileDataDiffuseBufferDescriptor(request.Camera, screenProbeSettings));
+                            resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataAllBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileDataAllBufferDescriptor(request.Camera, screenProbeSettings));
+                        }
+                        if (useIntegrateTileClassification)
+                        {
+                            resources.RegisterBurtGIScreenProbeIntegrateTileClassificationTexture();
+                        }
                         if (useScreenProbeTraceCompact)
                         {
                             resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelCountBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferDescriptor());
@@ -742,7 +827,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     resources.RegisterScreenSpaceSubsurfaceSourceTexture();
                     resources.RegisterScreenSpaceSubsurfaceBaseColorTexture();
                     resources.RegisterScreenSpaceSubsurfaceEmissionTexture();
-                    resources.RegisterScreenSpaceSubsurfaceSetupTexture();
                     resources.RegisterScreenSpaceSubsurfaceProfileIDAndTypeTexture();
                     if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceMaskTexture(request, asset))
                     {
@@ -751,13 +835,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
                     resources.RegisterScreenSpaceSubsurfaceTempTexture();
                     resources.RegisterScreenSpaceSubsurfaceBlurTexture();
-                    resources.RegisterScreenSpaceSubsurfaceCombineTexture();
+                    if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceDebugView(request, asset))
+                    {
+                        resources.RegisterScreenSpaceSubsurfaceCombineTexture();
+                    }
                     if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceBurley(request, asset))
                     {
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyArgsBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateBurleyArgsBufferDescriptor());
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceBurleyGroupBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateBurleyGroupBufferDescriptor(request.Camera));
-                        resources.RegisterScreenSpaceSubsurfaceHistoryTexture();
                         resources.RegisterScreenSpaceSubsurfaceVelocityTexture();
+                    }
+                    if (BurtScreenSpaceSubsurfacePassUtility.ShouldUseScreenSpaceSubsurfaceSeparable(request, asset))
+                    {
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSeparableArgsBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateSeparableArgsBufferDescriptor());
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.ScreenSpaceSubsurfaceSeparableGroupBufferName, BurtScreenSpaceSubsurfacePassUtility.CreateSeparableGroupBufferDescriptor(request.Camera));
                     }
                 }
 
@@ -958,11 +1049,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 using (ConfigureGraphMarker.Auto())
                 {
                     ConfigurePasses(context); // 在真正执行前收集所有 Pass 的资源读写声明，并把当前上下文传给配置阶段。
-                    ValidateConfiguredGraph(); // 对配置结果做轻量校验，只记录问题，不重排 Pass，也不改变 RenderTarget 绑定逻辑。
+                    if (compilationMode == BurtRenderGraphCompilationMode.Full)
+                    {
+                        ValidateConfiguredGraph(); // Debug capture performs diagnostics; runtime culling only compiles resource dependencies.
+                    }
                     compileResult = compiler.Compile(passes, resourceUsages, resources);
-                    AddValidationMessage("RenderGraph Compiler: dependencies=" + compileResult.DependencyCount +
-                        ", culled=" + compileResult.CulledPassCount +
-                        ", lifetimes=" + compileResult.ResourceLifetimes.Count + ".");
+                    if (compilationMode == BurtRenderGraphCompilationMode.Full)
+                    {
+                        AddValidationMessage("RenderGraph Compiler: dependencies=" + compileResult.DependencyCount +
+                            ", culled=" + compileResult.CulledPassCount +
+                            ", lifetimes=" + compileResult.ResourceLifetimes.Count + ".");
+                    }
                 }
             }
             else
@@ -989,12 +1086,25 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             var ownsProfilingCommandBuffer = !context.HasSharedCommandBuffer;
             var profilingCommandBuffer = context.CommandBuffer ?? CommandBufferPool.Get("BRP.RenderGraph/Profiling");
             var profileIndividualPasses = profilingMode == BurtRenderGraphProfilingMode.CameraStageAndPass;
+            ProfilingSampler activeResourceLifetimeSampler = null;
+            string activeResourceLifetimeScopeName = null;
             activeProfilingScopes.Clear();
             try
             {
                 var profilingEventIndex = 0;
                 for (var passIndex = 0; passIndex <= passes.Count; passIndex++)
                 {
+                    // A graph-assembly profiling event can close the current Stage. Resource
+                    // scopes must be closed first so the GPU marker stack remains well nested.
+                    if (activeResourceLifetimeSampler != null &&
+                        profilingEventIndex < profilingEvents.Count &&
+                        profilingEvents[profilingEventIndex].PassIndex == passIndex)
+                    {
+                        EndProfilingScope(context, profilingCommandBuffer, activeResourceLifetimeSampler);
+                        activeResourceLifetimeSampler = null;
+                        activeResourceLifetimeScopeName = null;
+                    }
+
                     while (profilingEventIndex < profilingEvents.Count &&
                         profilingEvents[profilingEventIndex].PassIndex == passIndex)
                     {
@@ -1011,6 +1121,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     if (pass == null || !ShouldExecutePass(passIndex))
                     {
                         continue;
+                    }
+
+                    var resourceLifetimeScopeName = profileIndividualPasses
+                        ? GetResourceLifetimeScopeName(pass)
+                        : null;
+                    if (!string.IsNullOrEmpty(resourceLifetimeScopeName))
+                    {
+                        if (!string.Equals(activeResourceLifetimeScopeName, resourceLifetimeScopeName, StringComparison.Ordinal))
+                        {
+                            if (activeResourceLifetimeSampler != null)
+                            {
+                                EndProfilingScope(context, profilingCommandBuffer, activeResourceLifetimeSampler);
+                            }
+
+                            activeResourceLifetimeScopeName = resourceLifetimeScopeName;
+                            activeResourceLifetimeSampler = GetOrCreateProfilingSampler(resourceLifetimeScopeName);
+                            BeginProfilingScope(context, profilingCommandBuffer, activeResourceLifetimeSampler);
+                        }
+
+                        ExecutePass(context, pass);
+                        continue;
+                    }
+
+                    if (activeResourceLifetimeSampler != null)
+                    {
+                        EndProfilingScope(context, profilingCommandBuffer, activeResourceLifetimeSampler);
+                        activeResourceLifetimeSampler = null;
+                        activeResourceLifetimeScopeName = null;
                     }
 
                     if (!profileIndividualPasses)
@@ -1033,6 +1171,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             }
             finally
             {
+                if (activeResourceLifetimeSampler != null)
+                {
+                    EndProfilingScope(context, profilingCommandBuffer, activeResourceLifetimeSampler);
+                    activeResourceLifetimeSampler = null;
+                    activeResourceLifetimeScopeName = null;
+                }
+
                 for (var scopeIndex = activeProfilingScopes.Count - 1; scopeIndex >= 0; scopeIndex--)
                 {
                     EndProfilingScope(context, profilingCommandBuffer, activeProfilingScopes[scopeIndex].Sampler);
@@ -1070,23 +1215,42 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             return compileResult == null || compileResult.ShouldExecute(passIndex);
         }
 
+        private static string GetResourceLifetimeScopeName(BurtRenderPass pass)
+        {
+            if (pass == null)
+            {
+                return null;
+            }
+
+            var passName = GetPassName(pass);
+            if (pass.Kind == BurtRenderPassKind.Allocate ||
+                passName.StartsWith("Burt Allocate ", StringComparison.OrdinalIgnoreCase))
+            {
+                return "BRP.Resources/Allocate/" + TrimResourceLifetimePassPrefix(passName, "Burt Allocate ");
+            }
+
+            if (pass.Kind == BurtRenderPassKind.Release ||
+                passName.StartsWith("Burt Release ", StringComparison.OrdinalIgnoreCase))
+            {
+                return "BRP.Resources/Release/" + TrimResourceLifetimePassPrefix(passName, "Burt Release ");
+            }
+
+            return null;
+        }
+
+        private static string TrimResourceLifetimePassPrefix(string passName, string prefix)
+        {
+            if (!string.IsNullOrEmpty(passName) && passName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return passName.Substring(prefix.Length);
+            }
+
+            return string.IsNullOrEmpty(passName) ? "Unnamed" : passName;
+        }
+
         private bool RequiresFullCompilation()
         {
-            if (compilationMode == BurtRenderGraphCompilationMode.Full)
-            {
-                return true;
-            }
-
-            for (var passIndex = 0; passIndex < passes.Count; passIndex++)
-            {
-                var pass = passes[passIndex];
-                if (pass != null && pass.AllowCulling)
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return compilationMode != BurtRenderGraphCompilationMode.Lightweight;
         }
 
         private void ExecutePass(BurtRenderGraphContext context, BurtRenderPass pass)

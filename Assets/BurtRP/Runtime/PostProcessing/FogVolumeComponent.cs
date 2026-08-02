@@ -11,13 +11,17 @@ namespace Burt.RenderPipeline
     public sealed class FogVolumeComponent : VolumeComponent
     {
         [Title("BurtRP Fog")]
-        [InfoBox("Lightweight screen-space exponential height fog inspired by XRender GlobalFog. Disabled by default.")]
+        [InfoBox("XRender-style two-layer screen-space exponential height fog. Disabled by default.")]
         public BoolParameter enabled = new BoolParameter(false);
 
         [Title("Shape")]
         public FloatParameter height = new FloatParameter(0f);
         public ClampedFloatParameter density = new ClampedFloatParameter(0.02f, 0f, 0.5f);
         public ClampedFloatParameter heightFalloff = new ClampedFloatParameter(0.2f, 0.001f, 4f);
+        [Tooltip("Second layer height relative to Height, matching XRender GlobalFog.")]
+        public FloatParameter secondLayerHeightOffset = new FloatParameter(0f);
+        public ClampedFloatParameter secondLayerDensity = new ClampedFloatParameter(0f, 0f, 0.5f);
+        public ClampedFloatParameter secondLayerHeightFalloff = new ClampedFloatParameter(0f, 0f, 4f);
         public ClampedFloatParameter startDistance = new ClampedFloatParameter(0f, 0f, 100000f);
         public ClampedFloatParameter cutoffDistance = new ClampedFloatParameter(0f, 0f, 200000f);
         public ClampedFloatParameter maxOpacity = new ClampedFloatParameter(0.85f, 0f, 1f);
@@ -40,7 +44,10 @@ namespace Burt.RenderPipeline
 
         public bool IsEnabled()
         {
-            return active && enabled.value && density.value > 0.000001f && maxOpacity.value > 0.000001f;
+            return active &&
+                enabled.value &&
+                (density.value > 0.000001f || secondLayerDensity.value > 0.000001f) &&
+                maxOpacity.value > 0.000001f;
         }
     }
 }

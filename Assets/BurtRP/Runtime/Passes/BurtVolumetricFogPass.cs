@@ -7,7 +7,6 @@ namespace Burt.RenderPipeline
     {
         private static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
         private static readonly int CameraColorTextureId = BurtRenderGraphResourceRegistry.CameraColorTextureId;
-        private static readonly int SourceColorTextureId = Shader.PropertyToID("_BurtVolumetricFogSourceColorTexture");
         private static readonly int ParamsId = Shader.PropertyToID("_BurtVolumetricFogParams");
         private static readonly int DensityParamsId = Shader.PropertyToID("_BurtVolumetricFogDensityParams");
         private static readonly int SecondDensityParamsId = Shader.PropertyToID("_BurtVolumetricFogSecondDensityParams");
@@ -48,6 +47,8 @@ namespace Burt.RenderPipeline
 
             builder.ReadCameraColor();
             builder.ReadCameraDepth();
+            builder.WriteRenderTarget(BurtRenderGraphResourceRegistry.VolumetricFogSourceColorName);
+            builder.AllowUnconsumedRenderTargetWrite(BurtRenderGraphResourceRegistry.VolumetricFogSourceColorName);
             if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftOcclusion(builder.Request))
             {
                 builder.ReadRenderTarget(BurtRenderGraphResourceRegistry.LightShaftOcclusionName);
@@ -120,7 +121,7 @@ namespace Burt.RenderPipeline
                 out var translucencyVolume1);
             UploadMaterialProperties(drawMaterial, camera, request, settings, translucencyGIEnabled);
 
-            var cmd = CommandBufferPool.Get(Name);
+            var cmd = context.AcquireCommandBuffer(Name);
             BurtLightShaftOcclusionUtility.BindForOpaqueFog(cmd, context);
             cmd.SetGlobalTexture(TranslucencyVolume0Id, translucencyVolume0);
             cmd.SetGlobalTexture(TranslucencyVolume1Id, translucencyVolume1);
@@ -133,25 +134,41 @@ namespace Burt.RenderPipeline
                 camera,
                 request,
                 settings,
+                context.Asset != null
+                    ? context.Asset.VolumetricFogResolutionTier
+                    : BurtVolumetricFogResolutionTier.Low,
                 cameraDepthTarget.Identifier,
                 translucencyVolume0,
                 translucencyVolume1,
                 translucencyGIEnabled,
                 context.MainLightShadowMapTarget,
+                context.AdditionalLightBuffer,
                 context.ClusterLightCountBuffer,
                 context.ClusterLightListBuffer,
                 context.ClusterLightOffsetBuffer);
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
-            cmd.GetTemporaryRT(SourceColorTextureId, descriptor, FilterMode.Bilinear);
-            cmd.Blit(cameraColorTarget.Identifier, new RenderTargetIdentifier(SourceColorTextureId));
+            context.ResourceRegistry.SetRenderTargetDescriptor(
+                BurtRenderGraphResourceRegistry.VolumetricFogSourceColorName,
+                descriptor,
+                FilterMode.Bilinear,
+                "Burt Volumetric Fog Source Color");
+            var sourceColorTarget = context.ResourceRegistry.AllocateRenderTarget(
+                BurtRenderGraphResourceRegistry.VolumetricFogSourceColorName);
+            if (!sourceColorTarget.IsValid)
+            {
+                context.ReleaseCommandBuffer(cmd);
+                return;
+            }
+
+            cmd.Blit(cameraColorTarget.Identifier, sourceColorTarget.Identifier);
             cmd.SetRenderTarget(cameraColorTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
-            cmd.SetGlobalTexture(CameraColorTextureId, new RenderTargetIdentifier(SourceColorTextureId));
+            cmd.SetGlobalTexture(CameraColorTextureId, sourceColorTarget.Identifier);
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepthTarget.Identifier);
             cmd.DrawProcedural(Matrix4x4.identity, drawMaterial, 0, MeshTopology.Triangles, 3, 1);
-            cmd.ReleaseTemporaryRT(SourceColorTextureId);
             context.ExecuteLegacyCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            context.ReleaseCommandBuffer(cmd);
+            context.ResourceRegistry.ReleaseRenderTarget(BurtRenderGraphResourceRegistry.VolumetricFogSourceColorName);
         }
 
         private static void UploadMaterialProperties(
@@ -244,7 +261,11 @@ namespace Burt.RenderPipeline
         private static void BindAdditionalLightBuffer(BurtRenderGraphContext context, CommandBuffer cmd, Material targetMaterial)
         {
             var additionalLightBuffer = context != null ? context.AdditionalLightBuffer : BurtRenderBufferHandle.Invalid(BurtRenderGraphResourceRegistry.AdditionalLightBufferName);
-            var enabled = additionalLightBuffer.IsValid && additionalLightBuffer.HasBuffer;
+            var lightingData = context != null && context.Request != null ? context.Request.LightingData : null;
+            var enabled = additionalLightBuffer.IsValid &&
+                additionalLightBuffer.HasBuffer &&
+                lightingData != null &&
+                lightingData.AdditionalLightBufferUploaded;
             if (enabled)
             {
                 cmd.SetGlobalBuffer(AdditionalLightBufferId, additionalLightBuffer.Buffer);

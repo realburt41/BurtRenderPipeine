@@ -95,9 +95,9 @@
 
         public virtual BurtRenderPassKind Kind => BurtRenderPassKindUtility.InferKind(Name); // Default to conservative name-based classification.
 
-        public virtual bool HasSideEffects => true; // Keep all existing passes conservative until real culling is implemented.
+        public virtual bool HasSideEffects => true; // Existing passes stay conservative until their resource-only behavior has been audited.
 
-        public virtual bool AllowCulling => false; // Metadata only for now; execution order and pass count stay unchanged.
+        public virtual bool AllowCulling => false; // Audited resource-only passes opt in and may be removed when no live output consumes them.
 
         public virtual bool EnableAsyncCompute => false; // Opt-in only; passes must record through the graph context command buffer.
 

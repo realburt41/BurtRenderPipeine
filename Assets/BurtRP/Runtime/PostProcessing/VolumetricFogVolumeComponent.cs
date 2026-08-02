@@ -5,6 +5,23 @@ using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline
 {
+    public enum BurtVolumetricFogShadowSourceMode
+    {
+        RuntimeFilteredShadow = 1,
+        ShadowReference = 2
+    }
+
+    [Serializable]
+    public sealed class BurtVolumetricFogShadowSourceModeParameter : VolumeParameter<BurtVolumetricFogShadowSourceMode>
+    {
+        public BurtVolumetricFogShadowSourceModeParameter(
+            BurtVolumetricFogShadowSourceMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
     [Serializable]
     [VolumeComponentMenu("Rendering/Volumetric Fog")]
     [UnityEngine.Scripting.APIUpdating.MovedFromAttribute(true, "Burt.RenderPipeline", null, "BurtVolumetricFogVolumeComponent")]
@@ -49,6 +66,14 @@ namespace Burt.RenderPipeline
         public ClampedFloatParameter directIntensity = new ClampedFloatParameter(1f, 0f, 8f);
         [Tooltip("Scales XRender-style ambient scattering. Deferred TGI uses its current filtered SH2 volume; other paths use BurtRP's packed sky SH, with flat white fallback before SH globals are available.")]
         public ClampedFloatParameter ambientIntensity = new ClampedFloatParameter(0.35f, 0f, 8f);
+
+        [Title("Main Light Shadow")]
+        [Tooltip("Raises the far-layer main-light shadow floor. 0 preserves the sampled shadow; 1 removes main-light shadowing from the far layer.")]
+        public ClampedFloatParameter farStylizedFactor = new ClampedFloatParameter(0.2f, 0f, 1f);
+        [Tooltip("Runtime Filtered uses BurtRP's filtered real-time main-light shadow. Shadow Reference uses the lightweight volumetric comparison sample for source-data comparison.")]
+        public BurtVolumetricFogShadowSourceModeParameter shadowSourceMode =
+            new BurtVolumetricFogShadowSourceModeParameter(
+                BurtVolumetricFogShadowSourceMode.RuntimeFilteredShadow);
 
         [Title("Atmosphere Horizontal Scattering")]
         [InfoBox("Blends from the legacy lighting model to XRender-style horizontal scattering between 130 m and 150 m. Rayleigh and Mie remain phase-dependent; multiple scattering is phase-independent.")]

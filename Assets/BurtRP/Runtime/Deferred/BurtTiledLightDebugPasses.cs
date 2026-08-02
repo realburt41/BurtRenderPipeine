@@ -639,11 +639,9 @@ namespace Burt.RenderPipeline
 
                 var binIndex = hasShadow
                     ? BurtTiledLightData.PunctualTileBinShadow
-                    : maxLights >= 9
-                        ? BurtTiledLightData.PunctualTileBin9Plus
-                        : maxLights >= 3
-                            ? BurtTiledLightData.PunctualTileBin3To8
-                            : BurtTiledLightData.PunctualTileBin1To2;
+                    : maxLights >= 3
+                        ? BurtTiledLightData.PunctualTileBin3To8
+                        : BurtTiledLightData.PunctualTileBin1To2;
                 punctualTileBinClassifications[tileIndex] = (byte)(binIndex + 1);
                 punctualTileBinCounts[binIndex]++;
                 punctualTileHitCount++;

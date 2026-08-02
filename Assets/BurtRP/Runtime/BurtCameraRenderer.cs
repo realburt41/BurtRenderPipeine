@@ -90,7 +90,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
                 renderGraph.ImportRequestResources(request, asset); // 把 request 的基础渲染目标导入 RenderGraph 资源表，并让资源注册使用当前管线资产配置。
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                var renderGraphProfilingName = BuildRenderGraphProfilingName(request);
                 var cameraProfilingName = BuildCameraProfilingName(request);
+                renderGraph.BeginProfilingScope(renderGraphProfilingName);
                 renderGraph.BeginProfilingScope(cameraProfilingName);
                 try
                 {
@@ -103,6 +105,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
                 finally
                 {
                     renderGraph.EndProfilingScope(cameraProfilingName);
+                    renderGraph.EndProfilingScope(renderGraphProfilingName);
                 }
 #else
                 renderGraph.AddPass(shadingDebugPreparePass);
@@ -116,9 +119,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
                 var captureRenderGraphDebug = ShouldCaptureRenderGraphDebug(request, asset);
                 renderGraph.SetCompilationMode(captureRenderGraphDebug
                     ? BurtRenderGraph.BurtRenderGraphCompilationMode.Full
-                    : BurtRenderGraph.BurtRenderGraphCompilationMode.Lightweight);
+                    : asset != null && asset.EnableRenderGraphPassCulling
+                        ? BurtRenderGraph.BurtRenderGraphCompilationMode.Culling
+                        : BurtRenderGraph.BurtRenderGraphCompilationMode.Lightweight);
 
-                var graphCommandBuffer = CommandBufferPool.Get("BRP.RenderGraph/Shared");
+                // The explicit RenderGraph/Camera/Stage/Pass samplers are the authoritative
+                // RenderDoc hierarchy. An unnamed pooled buffer avoids Unity adding a second
+                // implicit "Shared" marker around every physical ExecuteCommandBuffer segment.
+                var graphCommandBuffer = CommandBufferPool.Get();
                 BurtRenderGraphContext graphContext = null;
                 try
                 {
@@ -259,6 +267,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private static string BuildRenderGraphProfilingName(BurtRenderRequest request)
+        {
+            var assemblerName = request != null && request.GraphAssembler != null
+                ? request.GraphAssembler.Name
+                : "UnknownPath";
+            return assemblerName.IndexOf("Deferred", System.StringComparison.OrdinalIgnoreCase) >= 0
+                ? "BRP.RenderGraph(A:Deferred)"
+                : "BRP.RenderGraph(A:Forward)";
+        }
+
         private static string BuildCameraProfilingName(BurtRenderRequest request)
         {
             var assemblerName = request != null && request.GraphAssembler != null

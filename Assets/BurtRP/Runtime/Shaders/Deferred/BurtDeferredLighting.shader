@@ -20,6 +20,7 @@ Shader "Hidden/BurtRP/DeferredLighting"
         Tags { "RenderPipeline" = "BurtRenderPipeline" }
 
         HLSLINCLUDE
+            #pragma multi_compile_fragment _ BURT_MAIN_LIGHT_PCF_3 BURT_MAIN_LIGHT_PCF_7
             // XRender DeferredLightingNoPunctual equivalent: punctual/additional
             // lights are evaluated by the dedicated additive stage.
             #define BURT_DEFERRED_LIGHTING_EXCLUDE_ADDITIONAL 1
@@ -28,8 +29,13 @@ Shader "Hidden/BurtRP/DeferredLighting"
             // buffers, tiled lists, or their light loops.
             #define BURT_EXCLUDE_ADDITIONAL_LIGHTING 1
             #define BURT_SHADOWS_MAIN_ONLY 1
-            #define BURT_DEFERRED_MAIN_LIGHT_PCSS_VARIANT 1
-            #pragma shader_feature_local_fragment _ BURT_MAIN_LIGHT_SHADOW_PCSS
+            // Match XRender's static probe specialization and keep BRP's two
+            // independent probe implementations out of the common deferred
+            // variants. The Hybrid variant is selected only when both sources
+            // are ready and preserves the original per-pixel Scene Voxel
+            // fallback for Probe Volume streaming and coverage misses.
+            #define BURT_DEFERRED_LIGHTING_PROBE_SPECIALIZATION 1
+            #pragma multi_compile_local_fragment _ BURT_GI_PROBE_VOLUME_EVALUATE BURT_GI_SCENE_VOXEL_PROBE_EVALUATE BURT_GI_PROBE_HYBRID_EVALUATE
             // XRender-style deferred debug: the production lighting pass owns one
             // optional debug variant and selects the displayed result at runtime.
             // The debug path reuses the production shading result; it is not a
@@ -40,10 +46,10 @@ Shader "Hidden/BurtRP/DeferredLighting"
                 #define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_LIGHTING 1
                 #define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_BRDF 1
                 #define BURT_DEFERRED_LIGHTING_DEBUG_CATEGORY_TRANSMISSION 1
-                // D3D11's optimizer was the timeout hotspot in the former large
-                // Hidden debug shaders. Limit this to the debug variant; normal
-                // production lighting remains fully optimized.
-                #pragma skip_optimizations d3d11
+                // Keep debug as a normal optimized variant. ShaderLab compiler
+                // pragmas are collected before local-keyword preprocessing, so a
+                // skip_optimizations pragma placed here also disables optimization
+                // for the production variant where this keyword is off.
             #endif
             // 顶点输入只需要系统生成的顶点 ID。
             struct Attributes

@@ -262,7 +262,10 @@ void BurtFillPerObjectShadowTransmissionDebugData(
 
 float BurtGetMainLightShadowPCSSRadiusDebug(float3 PositionWS, float3 NormalWS)
 {
-    if (_BurtMainLightShadowPCSSParams.x <= 0.5f)
+    // Kept under the serialized legacy debug mode name. XRender's active
+    // directional path has no blocker-dependent PCSS radius: visualize the
+    // fixed optimized 5x5 footprint only where it contributes shadowing.
+    if (_BurtMainLightShadowSoftness <= 0.5f)
     {
         return 0.0f;
     }
@@ -281,50 +284,14 @@ float BurtGetMainLightShadowPCSSRadiusDebug(float3 PositionWS, float3 NormalWS)
     }
 
     ProjectedShadowCoord.z = BurtApplyMainLightReceiverBias(ProjectedShadowCoord.z);
-    float Radius = BurtCalculateMainLightShadowPCSSRadiusTexels(ProjectedShadowCoord, CascadeIndex);
-    float NormalizedRadius = saturate(Radius / max(_BurtMainLightShadowPCSSParams.w, 1.5f));
-
-    // For debug readability, suppress the wide low-level halo on lit receivers and emphasize
-    // where the current PCSS filter is actually contributing to visible shadowing.
-    float ShadowedWeight = saturate((1.0f - BurtSampleMainLightShadowPCSS(ProjectedShadowCoord, CascadeIndex)) * 1.25f);
-    return NormalizedRadius * ShadowedWeight;
+    return saturate((1.0f - BurtSampleMainLightShadowFiltered(ProjectedShadowCoord, CascadeIndex)) * 1.25f);
 }
 
 float BurtGetMainLightShadowPCSSBlockerFractionDebug(float3 PositionWS, float3 NormalWS)
 {
-    if (_BurtMainLightShadowPCSSParams.x <= 0.5f)
-    {
-        return 0.0f;
-    }
-
-    int CascadeIndex = BurtSelectMainLightShadowCascade(PositionWS);
-    if (CascadeIndex < 0)
-    {
-        return 0.0f;
-    }
-
-    float3 ReceiverPositionWS = BurtApplyMainLightShadowReceiverNormalBias(PositionWS, NormalWS, CascadeIndex);
-    float3 ProjectedShadowCoord = BurtProjectWorldToMainLightShadowCascade(ReceiverPositionWS, CascadeIndex);
-    if (!BurtIsInsideMainLightShadowMap(ProjectedShadowCoord, CascadeIndex))
-    {
-        return 0.0f;
-    }
-
-    ProjectedShadowCoord.z = BurtApplyMainLightReceiverBias(ProjectedShadowCoord.z);
-
-    float BlockerFraction = 0.0f;
-    float AverageBlockerDistance = 0.0f;
-    float AverageBlockerDepth = 0.0f;
-    BurtTryEvaluateMainLightShadowPCSSBlockers(ProjectedShadowCoord, CascadeIndex, BlockerFraction, AverageBlockerDistance, AverageBlockerDepth);
-
-    // Raw blocker fraction is too sparse to read on narrow silhouettes when only a few Poisson
-    // taps land on the occluder. Use the center sample as a floor for debug visibility, then
-    // gate by actual shadow visibility so lit receivers do not show false self-blockers.
-    float CenterRawDepth = BurtSampleMainLightShadowRawDepthBilinear(ProjectedShadowCoord.xy, CascadeIndex);
-    float CenterIsBlocker = BurtIsMainLightShadowRawBlocker(CenterRawDepth, ProjectedShadowCoord.z);
-    float DisplayFraction = saturate(max(BlockerFraction, CenterIsBlocker * 0.35f) * 1.75f);
-    float BlockedWeight = saturate(1.0f - BurtSampleMainLightShadowPCSS(ProjectedShadowCoord, CascadeIndex));
-    return DisplayFraction * BlockedWeight;
+    // Optimized PCF has no blocker-search stage. Preserve the old debug slot so
+    // existing serialized debug selections remain valid, but report not-applicable.
+    return 0.0f;
 }
 
 float BurtGetMainLightShadowReceiverDepthDeltaDebug(float3 positionWS, float3 normalWS)
@@ -365,7 +332,7 @@ float BurtGetMainLightShadowReceiverDepthDeltaDebug(float3 positionWS, float3 no
     // This view is for receiver-vs-shadow-surface alignment, not for visualizing full cast-shadow
     // separation. Once the pixel is genuinely blocked by another surface, blend back toward mid-gray
     // so acne/bias pressure on lit receivers remains readable.
-    float Visibility = BurtSampleMainLightShadowPCSS(float3(ProjectedShadowCoord.xy, ReceiverDepth), cascadeIndex);
+    float Visibility = BurtSampleMainLightShadowFiltered(float3(ProjectedShadowCoord.xy, ReceiverDepth), cascadeIndex);
     float LitWeight = saturate((Visibility - 0.05f) / 0.95f);
 
     // Keep the scale wide enough that small flat-surface bias differences stay around mid-gray.

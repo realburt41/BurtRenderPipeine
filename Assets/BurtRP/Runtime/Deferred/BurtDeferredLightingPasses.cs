@@ -177,10 +177,18 @@ namespace Burt.RenderPipeline
 
         private const string DeferredLightingShaderName = "Hidden/BurtRP/DeferredLighting";
         private const string DeferredAdditionalLightingShaderName = "Hidden/BurtRP/DeferredAdditionalLighting";
+        private const string DeferredPunctualTileLightingShaderName = "Hidden/BurtRP/DeferredPunctualTileLighting";
         private const string DeferredLightingDebugProbeShaderName = "Hidden/BurtRP/DeferredLightingDebugProbe";
         private const string DeferredLightingDebugShadowShaderName = "Hidden/BurtRP/DeferredLightingDebugShadow";
         private const string DeferredLightingDebugKeyword = "BURT_USE_DEBUG_MODE_DEFERRED";
-        private const string DeferredMainLightShadowPcssKeyword = "BURT_MAIN_LIGHT_SHADOW_PCSS";
+        private const string DeferredGIProbeVolumeEvaluateKeyword = "BURT_GI_PROBE_VOLUME_EVALUATE";
+        private const string DeferredGISceneVoxelProbeEvaluateKeyword = "BURT_GI_SCENE_VOXEL_PROBE_EVALUATE";
+        private const string DeferredGIProbeHybridEvaluateKeyword = "BURT_GI_PROBE_HYBRID_EVALUATE";
+        private static readonly string[] PunctualTileBinKeywords =
+        {
+            "BURT_PUNCTUAL_BIN_1_2",
+            "BURT_PUNCTUAL_BIN_3_8"
+        };
 
         private static readonly int GBuffer0Id = BurtRenderGraphResourceRegistry.GBuffer0Id;
         private static readonly int GBuffer1Id = BurtRenderGraphResourceRegistry.GBuffer1Id;
@@ -222,8 +230,10 @@ namespace Burt.RenderPipeline
         private readonly bool isAdditionalLightingStage;
         private Material deferredLightingMaterial;
         private Material deferredLightingDebugMaterial;
+        private readonly Material[] deferredPunctualTileMaterials = new Material[BurtTiledLightData.PunctualTileBinCount];
         private bool hasLoggedMissingShader;
         private bool hasLoggedMissingDebugShader;
+        private bool hasLoggedMissingPunctualTileShader;
         private bool hasLoggedMissingShaderPass;
 
         protected BurtDeferredLightingPass(
@@ -366,7 +376,7 @@ namespace Burt.RenderPipeline
                 return;
             }
 
-            ConfigureDeferredMainLightShadowPcssKeyword(context, material);
+            ConfigureDeferredGIProbeEvaluateKeyword(context, material);
 
             var cmd = context.AcquireCommandBuffer(Name);
             cmd.SetRenderTarget(cameraColorTarget.Identifier, cameraDepthTarget.Identifier);
@@ -410,7 +420,6 @@ namespace Burt.RenderPipeline
                 context.Request == null ||
                 context.Request.LightingData == null)
             {
-                cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 0f);
                 cmd.DrawProcedural(Matrix4x4.identity, material, shaderPassIndex, MeshTopology.Triangles, 3, 1);
                 return;
             }
@@ -420,7 +429,6 @@ namespace Burt.RenderPipeline
                 context.ResourceRegistry == null ||
                 !context.ResourceRegistry.ContainsBuffer(BurtRenderGraphResourceRegistry.PunctualTileIdBufferName))
             {
-                cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 0f);
                 cmd.DrawProcedural(Matrix4x4.identity, material, shaderPassIndex, MeshTopology.Triangles, 3, 1);
                 return;
             }
@@ -429,17 +437,21 @@ namespace Burt.RenderPipeline
             if (!tileIdBuffer.IsValid ||
                 !tileIdBuffer.HasBuffer)
             {
-                cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 0f);
                 cmd.DrawProcedural(Matrix4x4.identity, material, shaderPassIndex, MeshTopology.Triangles, 3, 1);
                 return;
             }
 
             cmd.SetGlobalBuffer(BurtTiledLightData.PunctualTileIdBufferId, tileIdBuffer.Buffer);
-            cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 1f);
             for (var binIndex = 0; binIndex < BurtTiledLightData.PunctualTileBinCount; binIndex++)
             {
                 var tileCount = lightingData.PunctualTileDrawBinCounts[binIndex];
                 if (tileCount <= 0)
+                {
+                    continue;
+                }
+
+                var tileMaterial = GetDeferredPunctualTileMaterial(context.Asset, material, binIndex);
+                if (tileMaterial == null || shaderPassIndex < 0 || shaderPassIndex >= tileMaterial.passCount)
                 {
                     continue;
                 }
@@ -449,15 +461,67 @@ namespace Burt.RenderPipeline
                     lightingData.PunctualTileDrawBinOffsets[binIndex]);
                 cmd.DrawProcedural(
                     Matrix4x4.identity,
-                    material,
+                    tileMaterial,
                     shaderPassIndex,
                     MeshTopology.Triangles,
                     6,
                     tileCount);
             }
 
-            cmd.SetGlobalFloat(BurtTiledLightData.PunctualTileDrawEnabledId, 0f);
             cmd.SetGlobalInt(BurtTiledLightData.PunctualTileIdOffsetId, 0);
+        }
+
+        private Material GetDeferredPunctualTileMaterial(BurtRenderPipelineAsset asset, Material fullscreenMaterial, int binIndex)
+        {
+            if (fullscreenMaterial == null || fullscreenMaterial.shader == null ||
+                binIndex < 0 || binIndex >= deferredPunctualTileMaterials.Length)
+            {
+                return null;
+            }
+
+            var tileShader = asset != null && asset.RuntimeResources != null
+                ? asset.RuntimeResources.ResolveDeferredShadingDebugShader(DeferredPunctualTileLightingShaderName)
+                : null;
+            if (tileShader == null)
+            {
+                tileShader = Shader.Find(DeferredPunctualTileLightingShaderName);
+            }
+            if (tileShader == null)
+            {
+                if (!hasLoggedMissingPunctualTileShader)
+                {
+                    Debug.LogWarning("BurtRP could not find shader: " + DeferredPunctualTileLightingShaderName);
+                    hasLoggedMissingPunctualTileShader = true;
+                }
+
+                return null;
+            }
+
+            var material = deferredPunctualTileMaterials[binIndex];
+            if (material == null || material.shader != tileShader)
+            {
+                if (material != null)
+                {
+                    CoreUtils.Destroy(material);
+                }
+
+                material = new Material(tileShader)
+                {
+                    hideFlags = HideFlags.HideAndDontSave
+                };
+                deferredPunctualTileMaterials[binIndex] = material;
+                BurtShadingModelIds.ApplyDeferredLightingStencilProperties(material);
+            }
+
+            for (var keywordIndex = 0; keywordIndex < PunctualTileBinKeywords.Length; keywordIndex++)
+            {
+                CoreUtils.SetKeyword(material, PunctualTileBinKeywords[keywordIndex], keywordIndex == binIndex);
+            }
+            CoreUtils.SetKeyword(
+                material,
+                DeferredLightingDebugKeyword,
+                fullscreenMaterial.IsKeywordEnabled(DeferredLightingDebugKeyword));
+            return material;
         }
 
         private static bool TryGetRequiredTargets(
@@ -1121,21 +1185,21 @@ namespace Burt.RenderPipeline
             CoreUtils.SetKeyword(material, DeferredLightingDebugKeyword, enabled);
         }
 
-        private void ConfigureDeferredMainLightShadowPcssKeyword(BurtRenderGraphContext context, Material material)
+        private void ConfigureDeferredGIProbeEvaluateKeyword(BurtRenderGraphContext context, Material material)
         {
             if (isAdditionalLightingStage || material == null || material.shader == null || material.shader.name != DeferredLightingShaderName)
             {
                 return;
             }
 
-            var shadowData = context != null
-                ? BurtShadowUtility.ResolveMainLightShadowData(context.Request, context.Asset)
-                : null;
-            var enabled = shadowData != null &&
-                          shadowData.HasMainLightShadow &&
-                          shadowData.IsMainLightShadowHard &&
-                          shadowData.EnableMainLightShadowPCSS;
-            CoreUtils.SetKeyword(material, DeferredMainLightShadowPcssKeyword, enabled);
+            var camera = context != null && context.Request != null ? context.Request.Camera : null;
+            var hasProbeVolume = BurtGIProbeVolume.TryGetBestForCamera(camera, out var probeVolume) &&
+                (probeVolume.IsVirtualReady || probeVolume.IsDirectIrradianceReady);
+            var hasSceneVoxelProbe = BurtGISceneVoxelClipmapStateUtility.HasProbeApplyResources(camera);
+            var useHybridProbe = hasProbeVolume && hasSceneVoxelProbe;
+            CoreUtils.SetKeyword(material, DeferredGIProbeVolumeEvaluateKeyword, hasProbeVolume && !hasSceneVoxelProbe);
+            CoreUtils.SetKeyword(material, DeferredGISceneVoxelProbeEvaluateKeyword, !hasProbeVolume && hasSceneVoxelProbe);
+            CoreUtils.SetKeyword(material, DeferredGIProbeHybridEvaluateKeyword, useHybridProbe);
         }
 
         private static string ResolveDeferredLightingDebugShaderName(BurtShadingDebugMode mode)
@@ -1202,7 +1266,6 @@ namespace Burt.RenderPipeline
                 case BurtShadingDebugMode.HairScatter:
                     return DeferredLightingDebugCategory.Transmission;
 
-                case BurtShadingDebugMode.ShadowAttenuation:
                 case BurtShadingDebugMode.ShadowCascadeIndex:
                 case BurtShadingDebugMode.ShadowCascadeBlend:
                 case BurtShadingDebugMode.ShadowDistanceFade:
@@ -1228,6 +1291,7 @@ namespace Burt.RenderPipeline
                     return DeferredLightingDebugCategory.Shadow;
 
                 case BurtShadingDebugMode.DetailLighting:
+                case BurtShadingDebugMode.ShadowAttenuation:
                 case BurtShadingDebugMode.IndirectLighting:
                 case BurtShadingDebugMode.DirectDiffuse:
                 case BurtShadingDebugMode.DirectSpecular:

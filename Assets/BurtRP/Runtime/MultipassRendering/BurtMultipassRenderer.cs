@@ -395,7 +395,36 @@ namespace Burt.RenderPipeline
         {
             hash = hash * 31 + (material != null ? material.GetInstanceID() : 0);
             hash = hash * 31 + (material != null && material.shader != null ? material.shader.GetInstanceID() : 0);
+            hash = hash * 31 + (material != null ? material.passCount : 0);
             return hash;
+        }
+
+        private static bool IsMaterialPassCurrent(
+            Material material,
+            BurtMultipassShaderPass pass,
+            int materialPassIndex)
+        {
+            var shaderPassTypeIndex = (int)pass;
+            if (!IsSupportedMaterial(material) ||
+                shaderPassTypeIndex < 0 ||
+                shaderPassTypeIndex >= ShaderPassNames.Length ||
+                materialPassIndex < 0 ||
+                materialPassIndex >= material.passCount)
+            {
+                return false;
+            }
+
+            var currentPassName = material.GetPassName(materialPassIndex);
+            var expectedPassNames = ShaderPassNames[shaderPassTypeIndex];
+            for (var expectedIndex = 0; expectedIndex < expectedPassNames.Length; expectedIndex++)
+            {
+                if (string.Equals(currentPassName, expectedPassNames[expectedIndex], StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void EnsureCache()
@@ -518,6 +547,20 @@ namespace Burt.RenderPipeline
 
         private void Draw(CommandBuffer cmd, Camera camera, BurtMultipassShaderPass pass, RenderQueueRange range)
         {
+#if UNITY_EDITOR
+            // Shader import can temporarily replace the real shader with Hidden/Internal-Loading.
+            // A DrawMeshInstanced command recorded with a cached pass index during that window is
+            // only validated later at Submit, where the loading shader exposes pass 0 only.
+            // Skip editor-only transient frames instead of recording a command that cannot replay.
+            if (UnityEditor.EditorApplication.isCompiling ||
+                UnityEditor.EditorApplication.isUpdating ||
+                UnityEditor.ShaderUtil.anythingCompiling)
+            {
+                cacheDirty = true;
+                return;
+            }
+#endif
+
             EnsureCache();
             var renderer = m_Renderer;
             var materials = renderer != null ? renderer.sharedMaterials : null;
@@ -571,8 +614,9 @@ namespace Burt.RenderPipeline
                 for (var passIndex = 0; passIndex < passList.Count; passIndex++)
                 {
                     var materialPassIndex = passList[passIndex];
-                    if (materialPassIndex < 0 || materialPassIndex >= material.passCount)
+                    if (!IsMaterialPassCurrent(material, pass, materialPassIndex))
                     {
+                        cacheDirty = true;
                         continue;
                     }
 

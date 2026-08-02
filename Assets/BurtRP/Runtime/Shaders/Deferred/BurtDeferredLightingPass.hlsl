@@ -34,6 +34,9 @@
 #define BURT_DEFERRED_LIGHTING_PRUNE_MODEL_HELPERS 1
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLighting.hlsl"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtLightingResult.hlsl"
+#if !BURT_MODEL_HAS_TRANSMISSION
+#define BURT_SHADOWS_EXCLUDE_TRANSMISSION 1
+#endif
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtShadows.hlsl"
 
 Texture2D<float> _BurtScreenSpaceAmbientOcclusionTexture;
@@ -361,8 +364,12 @@ float4 Frag(Varyings input) : SV_Target
     float ShadowAttenuation = BurtSampleMainLightShadow(ShadowPositionWS, ShadowNormalWS, PerObjectShadowObjectIndex);
     ShadowAttenuation *= BurtResolveDeferredMaterialScreenSpaceShadow(ScreenUV, GBufferData);
     ShadowAttenuation *= BurtResolveDeferredMaterialFoliageMicroShadow(GBufferData);
-    float TransmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(ShadowPositionWS, PerObjectShadowObjectIndex, -1.0f);
-    float TransmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(ShadowPositionWS, ShadowNormalWS, PerObjectShadowObjectIndex, TransmissionThickness);
+    float TransmissionThickness = -1.0f;
+    float TransmissionShadowAttenuation = 1.0f;
+#if BURT_MODEL_HAS_TRANSMISSION
+    TransmissionThickness = BurtResolvePerObjectShadowTransmissionThickness(ShadowPositionWS, PerObjectShadowObjectIndex, -1.0f);
+    TransmissionShadowAttenuation = BurtSampleMainLightTransmissionShadow(ShadowPositionWS, ShadowNormalWS, PerObjectShadowObjectIndex, TransmissionThickness);
+#endif
     BurtLight MainLight = BurtCreateMainLight(ShadowAttenuation, TransmissionShadowAttenuation, TransmissionThickness);
 
     BurtGBufferData ShadingGBufferData = GBufferData;
@@ -401,6 +408,7 @@ float4 Frag(Varyings input) : SV_Target
         GBufferData,
         PBRComponents,
         LightingResult,
+        ShadowAttenuation,
         FinalPreExposedColor,
         OutputAlpha);
 #endif

@@ -575,8 +575,8 @@ namespace Burt.RenderPipeline.Editor
             material.enableInstancing = true;
             BurtShadingModelIds.ApplyMotionVectorStencilProperties(material);
             material.SetShaderPassEnabled("BurtDepthOnly", true);
-            material.SetShaderPassEnabled("BurtMotionVectors", true);
-            material.SetShaderPassEnabled("BurtResponsiveAAMask", true);
+            material.SetShaderPassEnabled("BurtMultipassMotionVectors", true);
+            material.SetShaderPassEnabled("BurtMultipassResponsiveAAMask", true);
             material.SetShaderPassEnabled("BurtGBuffer", true);
             material.SetShaderPassEnabled("ShadowCaster", true);
             material.SetShaderPassEnabled("BurtForward", true);

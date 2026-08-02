@@ -200,6 +200,7 @@ Shader "BurtRP/Silk"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_fragment _ BURT_MAIN_LIGHT_PCF_3 BURT_MAIN_LIGHT_PCF_7
             #pragma shader_feature_local _ BURT_MATERIAL_TRANSPARENT
             #pragma shader_feature_local _ BURT_TRANSPARENT_VERTEX_FOG
             #pragma shader_feature_local _ BURT_IGNORE_FOG

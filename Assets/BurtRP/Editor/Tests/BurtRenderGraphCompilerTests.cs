@@ -26,6 +26,22 @@ namespace Burt.RenderPipeline.Tests
         }
 
         [Test]
+        public void CompileDoesNotCreateSelfDependencyForReadWritePass()
+        {
+            var target = new BurtRenderTargetHandle("ReadWrite", new RenderTargetIdentifier(111));
+            var usages = new List<BurtRenderPassResourceUsage>
+            {
+                CreateUsage(0, "Initial write", write: target),
+                CreateUsage(1, "Read write", read: target, write: target),
+            };
+
+            var result = Compile(usages, null);
+
+            CollectionAssert.AreEqual(new[] { 0 }, result.Dependencies[1]);
+            CollectionAssert.DoesNotContain(result.Dependencies[1], 1);
+        }
+
+        [Test]
         public void CompileCullsDeadBranchAndKeepsTerminalWriteChain()
         {
             var dead = new BurtRenderTargetHandle("Dead", new RenderTargetIdentifier(201));
@@ -45,6 +61,25 @@ namespace Burt.RenderPipeline.Tests
             Assert.IsTrue(result.ShouldExecute(1));
             Assert.IsTrue(result.ShouldExecute(2));
             Assert.AreEqual(1, result.CulledPassCount);
+        }
+
+        [Test]
+        public void ReleasePassDoesNotKeepUnusedProducerAlive()
+        {
+            var target = new BurtRenderTargetHandle("ReleasedOnly", new RenderTargetIdentifier(211));
+            var producer = CreateCullableUsage(0, "Unused producer", write: target);
+            var release = new BurtRenderPassResourceUsage(
+                1,
+                "Release unused target",
+                BurtRenderPassKind.Release,
+                true,
+                false);
+            release.AddReadRenderTarget(target);
+
+            var result = Compile(new[] { producer, release }, null);
+
+            Assert.IsFalse(result.ShouldExecute(0));
+            Assert.IsTrue(result.ShouldExecute(1));
         }
 
         [Test]
@@ -125,6 +160,37 @@ namespace Burt.RenderPipeline.Tests
                 Assert.IsTrue(resources.TryGetAllocatedRenderTexture("Pooled", out var second));
 
                 Assert.AreNotSame(first, second);
+            }
+            finally
+            {
+                resources.DisposeResources();
+            }
+        }
+
+        [Test]
+        public void RegistryKeepsPhysicalRenderTextureNameStableAcrossLogicalAliases()
+        {
+            var resources = new BurtRenderGraphResourceRegistry();
+            try
+            {
+                var descriptor = new RenderTextureDescriptor(64, 64, RenderTextureFormat.ARGB32, 0);
+                resources.RegisterRenderTarget("LogicalA", new RenderTargetIdentifier(403));
+                resources.SetRenderTargetDescriptor("LogicalA", descriptor, FilterMode.Bilinear, "Logical A");
+                resources.AllocateRenderTarget("LogicalA");
+                Assert.IsTrue(resources.TryGetAllocatedRenderTexture("LogicalA", out var first));
+                var physicalName = first.name;
+
+                resources.ReleaseRenderTarget("LogicalA");
+                resources.RegisterRenderTarget("LogicalB", new RenderTargetIdentifier(404));
+                resources.SetRenderTargetDescriptor("LogicalB", descriptor, FilterMode.Bilinear, "Logical B");
+                resources.AllocateRenderTarget("LogicalB");
+                Assert.IsTrue(resources.TryGetAllocatedRenderTexture("LogicalB", out var second));
+
+                Assert.AreSame(first, second);
+                Assert.AreEqual(physicalName, second.name);
+                StringAssert.StartsWith("BRP.Transient/RT#", second.name);
+                Assert.AreNotEqual("Logical A", second.name);
+                Assert.AreNotEqual("Logical B", second.name);
             }
             finally
             {

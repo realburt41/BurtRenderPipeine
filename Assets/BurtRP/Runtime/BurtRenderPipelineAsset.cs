@@ -32,6 +32,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         Low = 2
     }
 
+    public enum BurtVolumetricFogResolutionTier
+    {
+        Low = 0,
+        High = 1
+    }
+
     public enum BurtGBufferDebugViewMode // 定义 Deferred GBuffer 调试视图要显示哪一种内容。
     {
         Disabled = 0, // 关闭 GBuffer 调试视图，保持正常渲染结果。
@@ -80,6 +86,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
     [System.Serializable]
     public sealed class BurtRenderPipelineRuntimeResources
     {
+        [Header("Deferred Lighting")]
+        [SerializeField] private Shader deferredLightingShader;
+        [SerializeField] private Shader deferredAdditionalLightingShader;
+        [SerializeField] private Shader deferredPunctualTileLightingShader;
+
         [Header("Deferred Special Debug Passes")]
         [SerializeField] private Shader deferredLightingDebugProbeShader;
         [SerializeField] private Shader deferredLightingDebugShadowShader;
@@ -93,6 +104,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         {
             switch (shaderName)
             {
+                case "Hidden/BurtRP/DeferredLighting":
+                    return deferredLightingShader;
+                case "Hidden/BurtRP/DeferredAdditionalLighting":
+                    return deferredAdditionalLightingShader;
+                case "Hidden/BurtRP/DeferredPunctualTileLighting":
+                    return deferredPunctualTileLightingShader;
                 case "Hidden/BurtRP/DeferredLightingDebugProbe":
                     return deferredLightingDebugProbeShader;
                 case "Hidden/BurtRP/DeferredLightingDebugShadow":
@@ -119,6 +136,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         [TitleGroup("Pipeline - Async Compute")]
         [SerializeField, LabelText("Atmosphere LUT")] private bool enableAtmosphereLutAsyncCompute = true;
+
+        [TitleGroup("Pipeline - Volumetric Fog")]
+        [SerializeField, LabelText("Resolution Tier"), Tooltip("XRender-compatible fixed froxel resolution. Low uses 160x90; High uses 240x135. The depth dimension remains 256 slices.")]
+        private BurtVolumetricFogResolutionTier volumetricFogResolutionTier = BurtVolumetricFogResolutionTier.Low;
 
         [TitleGroup("Pipeline - Runtime Resources")]
         [SerializeField, InlineProperty, HideLabel]
@@ -223,7 +244,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
 
         [SerializeField] private bool enableRenderGraphDebug = false; // 定义 RenderGraph 调试捕获开关，默认关闭，避免每帧生成长文本。
 
-        [SerializeField] private BurtRenderGraphProfilingMode renderGraphProfilingMode = BurtRenderGraphProfilingMode.CameraAndStage;
+        [SerializeField, Tooltip("Compile resource dependencies every request and cull passes whose outputs are not consumed.")]
+        private bool enableRenderGraphPassCulling = true;
+
+        [SerializeField, LabelText("RenderGraph Profiling"), Tooltip("CameraStageAndPass is the RenderDoc capture mode. It adds logical Pass markers without creating per-Pass command buffer submissions.")]
+        private BurtRenderGraphProfilingMode renderGraphProfilingMode = BurtRenderGraphProfilingMode.CameraAndStage;
 
         [SerializeField] private BurtSubmitStrategy submitStrategy = BurtSubmitStrategy.PerCamera;
 
@@ -267,6 +292,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public bool EnableAsyncCompute => enableAsyncCompute;
 
         public bool EnableAtmosphereLutAsyncCompute => enableAtmosphereLutAsyncCompute;
+
+        public BurtVolumetricFogResolutionTier VolumetricFogResolutionTier => volumetricFogResolutionTier;
 
         public BurtRenderPipelineRuntimeResources RuntimeResources => runtimeResources;
 
@@ -332,6 +359,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         public bool EnableUnsupportedShaderDebug => enableUnsupportedShaderDebug; // 暴露不支持 Shader 调试开关给 Graph Assembler 使用。
 
         public bool EnableRenderGraphDebug => enableRenderGraphDebug; // 暴露 RenderGraph 调试开关给 BurtCameraRenderer 使用。
+        public bool EnableRenderGraphPassCulling => enableRenderGraphPassCulling;
 
         public BurtRenderGraphProfilingMode RenderGraphProfilingMode => renderGraphProfilingMode;
 

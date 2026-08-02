@@ -17,7 +17,7 @@ namespace Burt.RenderPipeline
         public BoolParameter enabled = new BoolParameter(true);
         public ClampedFloatParameter threshold = new ClampedFloatParameter(BloomSettings.DefaultThreshold, -1f, 10f);
         public ClampedFloatParameter softKnee = new ClampedFloatParameter(BloomSettings.DefaultSoftKnee, 0f, 1f);
-        public ClampedFloatParameter intensity = new ClampedFloatParameter(0f, 0f, 10f);
+        public ClampedFloatParameter intensity = new ClampedFloatParameter(BloomSettings.DefaultIntensity, 0f, 10f);
         public ClampedFloatParameter scatter = new ClampedFloatParameter(BloomSettings.DefaultScatter, 0f, 1f);
         public ClampedFloatParameter sizeScale = new ClampedFloatParameter(BloomSettings.DefaultSizeScale, 0f, 64f);
         public BloomQualityParameter quality = new BloomQualityParameter(BloomSettings.DefaultQuality);
@@ -42,7 +42,33 @@ namespace Burt.RenderPipeline
 
         public bool IsEnabled()
         {
-            return active && enabled.value && BloomSettings.IsQualityEnabled(quality.value) && intensity.value > IntensityEpsilon;
+            return active && HasAnyOverride() && enabled.value && BloomSettings.IsQualityEnabled(quality.value) && intensity.value > IntensityEpsilon;
+        }
+
+        private bool HasAnyOverride()
+        {
+            return enabled.overrideState ||
+                threshold.overrideState ||
+                softKnee.overrideState ||
+                intensity.overrideState ||
+                scatter.overrideState ||
+                sizeScale.overrideState ||
+                quality.overrideState ||
+                maxIterations.overrideState ||
+                bloomAlphaChannel.overrideState ||
+                debugView.overrideState ||
+                filter1Size.overrideState ||
+                filter2Size.overrideState ||
+                filter3Size.overrideState ||
+                filter4Size.overrideState ||
+                filter5Size.overrideState ||
+                filter6Size.overrideState ||
+                filter1Tint.overrideState ||
+                filter2Tint.overrideState ||
+                filter3Tint.overrideState ||
+                filter4Tint.overrideState ||
+                filter5Tint.overrideState ||
+                filter6Tint.overrideState;
         }
     }
 }

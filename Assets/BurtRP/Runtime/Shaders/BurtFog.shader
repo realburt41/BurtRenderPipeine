@@ -26,6 +26,7 @@ Shader "Hidden/BurtRP/Fog"
             UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
 
             float4 _BurtFogParams; // x=height, y=density, z=height falloff, w=max opacity
+            float4 _BurtFogSecondLayerParams; // x=absolute height, y=density, z=height falloff
             float4 _BurtFogDistanceParams; // x=start distance, y=cutoff distance
             float4 _BurtFogAlbedo;
             float4 _BurtFogScatteringParams; // x=directional, y=ambient, z=anisotropy, w=use atmosphere horizontal scattering
@@ -182,7 +183,15 @@ Shader "Hidden/BurtRP/Fog"
                 float heightFalloff = max(_BurtFogParams.z, 0.001f);
                 float maxOpacity = saturate(_BurtFogParams.w);
                 float mediumDensity = fogDensity * exp2(-max(-127.0f, heightFalloff * (startY - fogHeight)));
-                float opticalDepth = CalcLineIntegral(heightFalloff, rayDeltaY, mediumDensity) * rayLength;
+                float secondFogHeight = _BurtFogSecondLayerParams.x;
+                float secondFogDensity = max(_BurtFogSecondLayerParams.y, 0.0f);
+                float secondHeightFalloff = max(_BurtFogSecondLayerParams.z, 0.0f);
+                float secondMediumDensity = secondFogDensity * exp2(
+                    -max(-127.0f, secondHeightFalloff * (startY - secondFogHeight)));
+                float opticalDepth = (
+                    CalcLineIntegral(heightFalloff, rayDeltaY, mediumDensity)
+                    + CalcLineIntegral(secondHeightFalloff, rayDeltaY, secondMediumDensity))
+                    * rayLength;
                 // XRender caps final opacity by clamping transmittance, rather
                 // than scaling the optical depth response by MaxOpacity.
                 float transmittance = max(

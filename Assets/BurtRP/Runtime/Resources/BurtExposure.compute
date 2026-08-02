@@ -1,0 +1,374 @@
+#pragma kernel AtomicHistogramGenerateCSMain
+#pragma kernel HistogramConvertCSMain
+#pragma kernel HistogramAutoExposureCSMain
+#pragma kernel ManualExposureCSMain
+#pragma kernel LocalExposureDownsampleCSMain
+#pragma kernel LocalExposureHistogramCSMain
+#pragma kernel LocalExposureSetupLogLuminanceCSMain
+#pragma kernel LocalExposureGaussianHorizontalCSMain
+#pragma kernel LocalExposureGaussianVerticalCSMain
+
+#define BURT_HISTOGRAM_SIZE 64
+#define BURT_HISTOGRAM_THREADS 64
+#define BURT_HISTOGRAM_FIXED_POINT_BITS 19
+
+Texture2D<float4> _BurtExposureSceneColor;
+Texture2D<float> _BurtExposureMeteringMask;
+Texture2D<uint> _BurtExposureHistogramScatter;
+Texture2D<float4> _BurtExposureHistoryTexture;
+Texture2D<float4> _BurtExposureHistogramTexture;
+
+RWTexture2D<uint> _BurtExposureHistogramScatterUAV;
+RWTexture2D<float4> _BurtExposureHistogramUAV;
+RWTexture2D<float4> _BurtExposureOutputUAV;
+
+Texture2D<float4> _BurtLocalExposureSceneColor;
+Texture2D<float4> _BurtLocalExposureDownsampleSource;
+Texture2D<float> _BurtLocalExposureBlurSource;
+SamplerState sampler_BurtLocalExposureBlurSource;
+RWTexture2D<float4> _BurtLocalExposureDownsampleUAV;
+RWTexture3D<float2> _BurtLocalExposureHistogramUAV;
+RWTexture2D<float> _BurtLocalExposureLogLuminanceUAV;
+RWTexture2D<float> _BurtLocalExposureBlurUAV;
+
+SamplerState sampler_BurtExposureMeteringMask;
+SamplerState sampler_BurtLocalExposureDownsampleSource;
+
+float4 _BurtExposureSceneExtent; // width, height, 1 / width, 1 / height
+float4 _BurtExposureHistogramParams; // scale, bias, luminance min, black bucket influence
+float4 _BurtExposureRangeParams; // low fraction, high fraction, min average luminance, max average luminance
+float4 _BurtExposureAdaptationParams; // delta time, speed up, speed down, force target
+float4 _BurtExposureAdaptationShape; // exponential up M, exponential down M, transition distance, inv pre-exposure
+float4 _BurtExposureCompensationParams; // compensation scale, curve scale, manual EV100, reserved
+float4 _BurtLocalExposureExtent; // histogram groups x/y, blurred width/height
+float4 _BurtLocalExposureDownsampleExtent; // source width/height, output width/height
+float4 _BurtLocalExposureBlurParams; // radius, source width, source height, reserved
+
+groupshared uint BurtHistogramLDS[BURT_HISTOGRAM_SIZE];
+
+uint BurtPackHistogramWeight(float value)
+{
+    return (uint)(max(value, 0.0) * (float)(1 << BURT_HISTOGRAM_FIXED_POINT_BITS));
+}
+
+float BurtUnpackHistogramWeight(uint high, uint low)
+{
+    const float invScale = 1.0 / (float)(1 << BURT_HISTOGRAM_FIXED_POINT_BITS);
+    return (float)low * invScale + (float)high * (float)(1 << (32 - BURT_HISTOGRAM_FIXED_POINT_BITS));
+}
+
+float BurtHistogramPositionFromLogLuminance(float logLuminance)
+{
+    return logLuminance * _BurtExposureHistogramParams.x + _BurtExposureHistogramParams.y;
+}
+
+float BurtLogLuminanceFromHistogramPosition(float histogramPosition)
+{
+    return (histogramPosition - _BurtExposureHistogramParams.y) / max(_BurtExposureHistogramParams.x, 1e-6);
+}
+
+float BurtHistogramBucket(Texture2D<float4> histogramTexture, uint bucketIndex)
+{
+    float4 packed = histogramTexture.Load(int3(bucketIndex / 4, 0, 0));
+    uint channel = bucketIndex & 3;
+    return channel == 0 ? packed.x : (channel == 1 ? packed.y : (channel == 2 ? packed.z : packed.w));
+}
+
+[numthreads(BURT_HISTOGRAM_THREADS, 1, 1)]
+void AtomicHistogramGenerateCSMain(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint lane = groupThreadId.x;
+    BurtHistogramLDS[lane] = 0;
+    GroupMemoryBarrierWithGroupSync();
+
+    uint y = groupId.x;
+    uint width = (uint)_BurtExposureSceneExtent.x;
+    for (uint x = lane; x < width; x += BURT_HISTOGRAM_THREADS)
+    {
+        uint2 pixel = uint2(x, y);
+        float3 sceneColor = max(_BurtExposureSceneColor.Load(int3(pixel, 0)).rgb * _BurtExposureAdaptationShape.w, 0.0);
+        float luminance = max(dot(sceneColor, 1.0.xxx / 3.0), _BurtExposureHistogramParams.z);
+        float bucket = saturate(BurtHistogramPositionFromLogLuminance(log2(luminance))) * (BURT_HISTOGRAM_SIZE - 1);
+        uint bucket0 = min((uint)bucket, BURT_HISTOGRAM_SIZE - 1);
+        uint bucket1 = min(bucket0 + 1, BURT_HISTOGRAM_SIZE - 1);
+        float weight1 = frac(bucket);
+        float weight0 = 1.0 - weight1;
+        if (bucket0 == 0)
+            weight0 *= _BurtExposureHistogramParams.w;
+
+        float2 uv = (float2(pixel) + 0.5) * _BurtExposureSceneExtent.zw;
+        float screenWeight = _BurtExposureMeteringMask.SampleLevel(sampler_BurtExposureMeteringMask, uv, 0);
+        InterlockedAdd(BurtHistogramLDS[bucket0], BurtPackHistogramWeight(weight0 * screenWeight));
+        InterlockedAdd(BurtHistogramLDS[bucket1], BurtPackHistogramWeight(weight1 * screenWeight));
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    uint value = BurtHistogramLDS[lane];
+    uint oldValue;
+    InterlockedAdd(_BurtExposureHistogramScatterUAV[uint2(lane * 2, 0)], value, oldValue);
+    if (0xffffffffu - value < oldValue)
+        InterlockedAdd(_BurtExposureHistogramScatterUAV[uint2(lane * 2 + 1, 0)], 1);
+}
+
+[numthreads(BURT_HISTOGRAM_THREADS, 1, 1)]
+void HistogramConvertCSMain(uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint index = groupThreadId.x;
+    if (index >= BURT_HISTOGRAM_SIZE / 4)
+        return;
+
+    uint4 low = uint4(
+        _BurtExposureHistogramScatter[uint2((index * 4 + 0) * 2, 0)],
+        _BurtExposureHistogramScatter[uint2((index * 4 + 1) * 2, 0)],
+        _BurtExposureHistogramScatter[uint2((index * 4 + 2) * 2, 0)],
+        _BurtExposureHistogramScatter[uint2((index * 4 + 3) * 2, 0)]);
+    uint4 high = uint4(
+        _BurtExposureHistogramScatter[uint2((index * 4 + 0) * 2 + 1, 0)],
+        _BurtExposureHistogramScatter[uint2((index * 4 + 1) * 2 + 1, 0)],
+        _BurtExposureHistogramScatter[uint2((index * 4 + 2) * 2 + 1, 0)],
+        _BurtExposureHistogramScatter[uint2((index * 4 + 3) * 2 + 1, 0)]);
+
+    float4 value = float4(
+        BurtUnpackHistogramWeight(high.x, low.x),
+        BurtUnpackHistogramWeight(high.y, low.y),
+        BurtUnpackHistogramWeight(high.z, low.z),
+        BurtUnpackHistogramWeight(high.w, low.w));
+    value *= 0.5 * _BurtExposureSceneExtent.z * _BurtExposureSceneExtent.w;
+    _BurtExposureHistogramUAV[uint2(index, 0)] = value;
+    _BurtExposureHistogramUAV[uint2(index, 1)] = _BurtExposureHistoryTexture.Load(int3(0, 0, 0));
+}
+
+float BurtComputeAverageSceneLuminance()
+{
+    float histogramSum = 0.0;
+    [unroll] for (uint i = 0; i < BURT_HISTOGRAM_SIZE; ++i)
+        histogramSum += BurtHistogramBucket(_BurtExposureHistogramTexture, i);
+
+    float minFractionSum = histogramSum * _BurtExposureRangeParams.x;
+    float maxFractionSum = histogramSum * _BurtExposureRangeParams.y;
+    float2 sumWithoutOutliers = 0.0;
+    [unroll] for (uint bucket = 0; bucket < BURT_HISTOGRAM_SIZE; ++bucket)
+    {
+        float localValue = BurtHistogramBucket(_BurtExposureHistogramTexture, bucket);
+        float sub = min(localValue, minFractionSum);
+        localValue -= sub;
+        minFractionSum -= sub;
+        maxFractionSum -= sub;
+        localValue = min(localValue, maxFractionSum);
+        maxFractionSum -= localValue;
+        float logLum = BurtLogLuminanceFromHistogramPosition((float)bucket / (BURT_HISTOGRAM_SIZE - 1));
+        sumWithoutOutliers += float2(logLum, 1.0) * localValue;
+    }
+    return exp2(sumWithoutOutliers.x / max(sumWithoutOutliers.y, 1e-4));
+}
+
+float BurtExponentialAdaptation(float current, float target, float frameTime, float speed, float slopeModifier)
+{
+    return current + (target - current) * (1.0 - exp2(-frameTime * speed)) * slopeModifier;
+}
+
+float BurtLinearAdaptation(float current, float target, float frameTime, float speed)
+{
+    float offset = frameTime * speed;
+    return current < target ? min(target, current + offset) : max(target, current - offset);
+}
+
+float BurtComputeAutoExposure(float oldExposure, float targetExposure)
+{
+    float logTarget = log2(max(targetExposure, 1e-4));
+    float logOld = log2(max(oldExposure, 1e-4));
+    float difference = logTarget - logOld;
+    float speed = difference > 0.0 ? _BurtExposureAdaptationParams.y : _BurtExposureAdaptationParams.z;
+    float slopeModifier = difference > 0.0 ? _BurtExposureAdaptationShape.x : _BurtExposureAdaptationShape.y;
+    float exponentialValue = BurtExponentialAdaptation(logOld, logTarget, _BurtExposureAdaptationParams.x, speed, slopeModifier);
+    float linearValue = BurtLinearAdaptation(logOld, logTarget, _BurtExposureAdaptationParams.x, speed);
+    float adapted = exp2(abs(difference) > _BurtExposureAdaptationShape.z ? linearValue : exponentialValue);
+    return lerp(adapted, targetExposure, _BurtExposureAdaptationParams.w);
+}
+
+float BurtComputeCompensation(float oldCompensation, float targetCompensation)
+{
+    if (oldCompensation <= 0.0 || _BurtExposureAdaptationParams.w > 0.5)
+        return targetCompensation;
+    float logOld = log2(max(oldCompensation, 1e-4));
+    float logTarget = log2(max(targetCompensation, 1e-4));
+    float difference = logTarget - logOld;
+    float speed = difference > 0.0 ? _BurtExposureAdaptationParams.y : _BurtExposureAdaptationParams.z;
+    float factor = 1.0 - exp2(-_BurtExposureAdaptationParams.x * speed);
+    return exp2(logOld + difference * factor);
+}
+
+[numthreads(1, 1, 1)]
+void HistogramAutoExposureCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    float averageSceneLuminance = BurtComputeAverageSceneLuminance();
+    float targetAverageLuminance = clamp(averageSceneLuminance, _BurtExposureRangeParams.z, _BurtExposureRangeParams.w);
+    float targetExposure = targetAverageLuminance / 0.18;
+    float4 oldData = _BurtExposureHistogramTexture.Load(int3(0, 1, 0));
+    float targetCompensation = _BurtExposureCompensationParams.x * _BurtExposureCompensationParams.y;
+    float oldExposure = (oldData.w == 0.0 ? 1.0 : oldData.w) / (oldData.x != 0.0 ? oldData.x : 1.0);
+    float estimatedExposure = BurtComputeAutoExposure(oldExposure, targetExposure);
+    float compensation = BurtComputeCompensation(oldData.w, targetCompensation);
+    float4 output = float4(
+        compensation / max(estimatedExposure, 1e-4),
+        compensation / max(targetExposure, 1e-4),
+        averageSceneLuminance,
+        compensation);
+    _BurtExposureOutputUAV[uint2(0, 0)] = output;
+    _BurtExposureOutputUAV[uint2(1, 0)] = float4(1.0, 0.0, 0.0, 0.0);
+}
+
+[numthreads(1, 1, 1)]
+void ManualExposureCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    float compensationScale = max(_BurtExposureCompensationParams.x * _BurtExposureCompensationParams.y, 0.0);
+    float exposureScale = compensationScale * exp2(-_BurtExposureCompensationParams.z);
+    _BurtExposureOutputUAV[uint2(0, 0)] = float4(exposureScale, exposureScale, 1.0, compensationScale);
+    _BurtExposureOutputUAV[uint2(1, 0)] = float4(1.0, 0.0, 0.0, 0.0);
+}
+
+#define BURT_LOCAL_HISTOGRAM_SIZE 32
+#define BURT_LOCAL_GROUP_SIZE 8
+#define BURT_LOCAL_TILE_SIZE 64
+#define BURT_LOCAL_FIXED_POINT_SCALE 512.0
+
+[numthreads(8, 8, 1)]
+void LocalExposureDownsampleCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 outputSize = (uint2)_BurtLocalExposureDownsampleExtent.zw;
+    if (dispatchThreadId.x >= outputSize.x || dispatchThreadId.y >= outputSize.y)
+        return;
+
+    float2 sourceInvSize = rcp(max(_BurtLocalExposureDownsampleExtent.xy, float2(1.0, 1.0)));
+    float2 uv = (float2(dispatchThreadId.xy) + 0.5) / max(float2(outputSize), float2(1.0, 1.0));
+    float4 value =
+        _BurtLocalExposureDownsampleSource.SampleLevel(sampler_BurtLocalExposureDownsampleSource, uv + sourceInvSize * float2(-1.0, -1.0), 0.0) +
+        _BurtLocalExposureDownsampleSource.SampleLevel(sampler_BurtLocalExposureDownsampleSource, uv + sourceInvSize * float2( 1.0, -1.0), 0.0) +
+        _BurtLocalExposureDownsampleSource.SampleLevel(sampler_BurtLocalExposureDownsampleSource, uv + sourceInvSize * float2(-1.0,  1.0), 0.0) +
+        _BurtLocalExposureDownsampleSource.SampleLevel(sampler_BurtLocalExposureDownsampleSource, uv + sourceInvSize * float2( 1.0,  1.0), 0.0);
+    _BurtLocalExposureDownsampleUAV[dispatchThreadId.xy] = max(value * 0.25, 0.0);
+}
+
+// Each 64 x 64 tile only needs one 32-bucket histogram. Keeping two flat
+// accumulators avoids the very large 8 x 8 x 33 groupshared array that makes
+// DX11 shader compilation (and LDS reduction) unnecessarily expensive.
+groupshared uint BurtLocalHistogramWeight[BURT_LOCAL_HISTOGRAM_SIZE];
+groupshared uint BurtLocalHistogramPosition[BURT_LOCAL_HISTOGRAM_SIZE];
+
+[numthreads(BURT_LOCAL_GROUP_SIZE, BURT_LOCAL_GROUP_SIZE, 1)]
+void LocalExposureHistogramCSMain(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint groupIndex : SV_GroupIndex)
+{
+    if (groupIndex < BURT_LOCAL_HISTOGRAM_SIZE)
+    {
+        BurtLocalHistogramWeight[groupIndex] = 0;
+        BurtLocalHistogramPosition[groupIndex] = 0;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint2 tileOrigin = groupId.xy * BURT_LOCAL_TILE_SIZE;
+    uint2 sceneSize = (uint2)_BurtExposureSceneExtent.xy;
+    for (uint y = 0; y < BURT_LOCAL_TILE_SIZE; y += BURT_LOCAL_GROUP_SIZE * 2)
+    {
+        for (uint x = 0; x < BURT_LOCAL_TILE_SIZE; x += BURT_LOCAL_GROUP_SIZE * 2)
+        {
+            uint2 quadOrigin = tileOrigin + uint2(x, y) + groupThreadId.xy * 2;
+            if (quadOrigin.x >= sceneSize.x || quadOrigin.y >= sceneSize.y)
+                continue;
+            [unroll] for (uint quadY = 0; quadY < 2; ++quadY)
+            {
+                [unroll] for (uint quadX = 0; quadX < 2; ++quadX)
+                {
+                    // XRender gathers a 2x2 quad with a point-clamp sampler.
+                    // On odd-sized edges this repeats the final texel rather
+                    // than dropping the out-of-range members of the quad.
+                    uint2 pixel = min(quadOrigin + uint2(quadX, quadY), sceneSize - 1);
+                    float3 sceneColor = max(_BurtLocalExposureSceneColor.Load(int3(pixel, 0)).rgb * _BurtExposureAdaptationShape.w, 0.0);
+                    float luminance = max(dot(sceneColor, 1.0.xxx / 3.0), _BurtExposureHistogramParams.z);
+                    float histogramPosition = BurtHistogramPositionFromLogLuminance(log2(luminance));
+                    float continuousBucket = saturate(histogramPosition) * (BURT_LOCAL_HISTOGRAM_SIZE - 1);
+                    uint bucket0 = min((uint)continuousBucket, BURT_LOCAL_HISTOGRAM_SIZE - 1);
+                    uint bucket1 = min(bucket0 + 1, BURT_LOCAL_HISTOGRAM_SIZE - 1);
+                    // Match XRender: the global exposure histogram uses the
+                    // metering mask, but the local bilateral grid does not.
+                    float weight1 = frac(continuousBucket);
+                    float weight0 = 1.0 - weight1;
+                    InterlockedAdd(BurtLocalHistogramWeight[bucket0], (uint)(weight0 * BURT_LOCAL_FIXED_POINT_SCALE));
+                    InterlockedAdd(BurtLocalHistogramPosition[bucket0], (uint)(histogramPosition * weight0 * BURT_LOCAL_FIXED_POINT_SCALE));
+                    InterlockedAdd(BurtLocalHistogramWeight[bucket1], (uint)(weight1 * BURT_LOCAL_FIXED_POINT_SCALE));
+                    InterlockedAdd(BurtLocalHistogramPosition[bucket1], (uint)(histogramPosition * weight1 * BURT_LOCAL_FIXED_POINT_SCALE));
+                }
+            }
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    if (groupIndex < BURT_LOCAL_HISTOGRAM_SIZE)
+    {
+        float sumWeight = (float)BurtLocalHistogramWeight[groupIndex] / BURT_LOCAL_FIXED_POINT_SCALE;
+        float sumPosition = (float)BurtLocalHistogramPosition[groupIndex] / BURT_LOCAL_FIXED_POINT_SCALE;
+        float sumLogLuminance = (sumPosition - sumWeight * _BurtExposureHistogramParams.y) / max(_BurtExposureHistogramParams.x, 1e-6);
+        _BurtLocalExposureHistogramUAV[uint3(groupId.xy, groupIndex)] = float2(sumLogLuminance, sumWeight);
+    }
+}
+
+[numthreads(8, 8, 1)]
+void LocalExposureSetupLogLuminanceCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 outputSize = (uint2)_BurtLocalExposureExtent.zw;
+    if (dispatchThreadId.x >= outputSize.x || dispatchThreadId.y >= outputSize.y)
+        return;
+    // The source is XRender's five-stage 1/32 scene downsample chain.
+    float3 sceneColor = max(_BurtLocalExposureSceneColor.Load(int3(dispatchThreadId.xy, 0)).rgb * _BurtExposureAdaptationShape.w, 0.0);
+    float luminance = max(dot(sceneColor, 1.0.xxx / 3.0), _BurtExposureHistogramParams.z);
+    _BurtLocalExposureLogLuminanceUAV[dispatchThreadId.xy] = log2(luminance);
+}
+
+float BurtGaussianWeight(float offset, float radius)
+{
+    float normalized = abs(offset) / max(radius, 1e-5);
+    return exp(-16.7 * normalized * normalized);
+}
+
+float BurtBlurLocalLogLuminance(uint2 pixel, bool horizontal)
+{
+    int width = (int)_BurtLocalExposureBlurParams.y;
+    int height = (int)_BurtLocalExposureBlurParams.z;
+    float radius = clamp(_BurtLocalExposureBlurParams.x, 1e-5, 31.0);
+    int integerRadius = min((int)ceil(radius), 31);
+    float weightedSum = 0.0;
+    float weightSum = 0.0;
+    float2 textureSize = float2(width, height);
+    float2 axis = horizontal ? float2(1.0, 0.0) : float2(0.0, 1.0);
+    [loop] for (int sampleIndex = -integerRadius; sampleIndex <= integerRadius; sampleIndex += 2)
+    {
+        float weight0 = BurtGaussianWeight((float)sampleIndex, radius);
+        float weight1 = sampleIndex != integerRadius
+            ? BurtGaussianWeight((float)(sampleIndex + 1), radius)
+            : 0.0;
+        float totalWeight = weight0 + weight1;
+        float sampleOffset = (float)sampleIndex + weight1 / max(totalWeight, 1e-6);
+        float2 sampleUv = (float2(pixel) + 0.5 + axis * sampleOffset) / max(textureSize, 1.0.xx);
+        weightedSum += _BurtLocalExposureBlurSource.SampleLevel(sampler_BurtLocalExposureBlurSource, sampleUv, 0.0) * totalWeight;
+        weightSum += totalWeight;
+    }
+    return weightedSum / max(weightSum, 1e-6);
+}
+
+[numthreads(8, 8, 1)]
+void LocalExposureGaussianHorizontalCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 size = (uint2)_BurtLocalExposureExtent.zw;
+    if (dispatchThreadId.x < size.x && dispatchThreadId.y < size.y)
+        _BurtLocalExposureBlurUAV[dispatchThreadId.xy] = BurtBlurLocalLogLuminance(dispatchThreadId.xy, true);
+}
+
+[numthreads(8, 8, 1)]
+void LocalExposureGaussianVerticalCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 size = (uint2)_BurtLocalExposureExtent.zw;
+    if (dispatchThreadId.x < size.x && dispatchThreadId.y < size.y)
+        _BurtLocalExposureBlurUAV[dispatchThreadId.xy] = BurtBlurLocalLogLuminance(dispatchThreadId.xy, false);
+}

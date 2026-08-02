@@ -60,11 +60,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
         private readonly BurtRenderPass allocatePostProcessColorPass = new AllocatePostProcessColorPass(); // 创建后处理颜色分配 Pass，用来申请 PostProcessColor 中间 RT。
 
+        private readonly BurtRenderPass lightShaftBloomPass = new BurtLightShaftBloomPass();
         private readonly BurtRenderPass temporalAAPass = new PostProcessPass.TemporalAAPass();
         private readonly BurtRenderPass temporalAAFinalCopyPass = new PostProcessPass.TemporalAAFinalCopyPass();
         private readonly BurtRenderPass diaphragmDepthOfFieldPass = new PostProcessPass.DiaphragmDepthOfFieldPass();
         private readonly BurtRenderPass lensFlarePass = new PostProcessPass.LensFlarePass();
-        private readonly BurtRenderPass bloomPass = new PostProcessPass.BloomPass();
+        private readonly BurtRenderPass exposurePass = new GpuExposurePass();
+        private readonly PostProcessPass.BloomBuildPassSequence bloomBuildPasses = PostProcessPass.CreateBloomBuildPasses();
+        private readonly BurtRenderPass releaseBloomPass = new PostProcessPass.ReleaseBloomPass();
         private readonly BurtRenderPass postProcessPass = new PostProcessPass(); // 创建第一版后处理 Pass，用来执行 No-op Copy 或 Tonemapping。
         private readonly BurtRenderPass subpixelMorphologicalAAPass = new PostProcessPass.SubpixelMorphologicalAAPass();
         private readonly BurtRenderPass fastApproximateAAPass = new PostProcessPass.FastApproximateAAPass();
@@ -134,6 +137,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
             var useMainLightShadow = BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 合并 Light 与 PipelineAsset 设置后判断本相机是否需要主光阴影。
             var useAdditionalLightShadow = BurtAdditionalLightShadowUtility.ShouldUseAdditionalLightShadows(request);
             var usePerObjectShadow = BurtPerObjectShadowUtility.ShouldUsePerObjectShadow(request, asset);
+            var useAdditionalLights = request.LightingData != null && request.LightingData.AdditionalLightCount > 0;
 
             graph.BeginProfilingScope("BRP.Stage/Resources Lighting Shadows");
             if (safeRenderOptions.ShouldAllocateCameraColor) // 只有独立 request 或共享栈的第一个 request 才申请 CameraColor。
@@ -146,7 +150,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 graph.AddPass(allocateCameraDepthPass); // 把 CameraDepth 分配 Pass 添加到 RenderGraph，保证后续绑定深度目标时 RT 已经存在。
             }
 
-            graph.AddPass(allocateAdditionalLightBufferPass); // Allocate the additional light GPU buffer before Setup Lighting uploads packed rows.
+            if (useAdditionalLights)
+            {
+                graph.AddPass(allocateAdditionalLightBufferPass); // Allocate only when Setup Lighting has packed rows to upload.
+            }
             var useAtmosphereAsyncCompute = BurtAtmosphereUtility.ShouldUseAtmosphereAsyncCompute(request, asset);
             if (useAtmosphereAsyncCompute)
             {
@@ -320,6 +327,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 var useTemporalAAUpscale = PostProcessPass.ShouldUseTemporalAAUpscale(request, asset);
                 var useTemporalAA = PostProcessPass.ShouldUseTemporalAAPass(request, asset);
                 graph.AddPass(allocatePostProcessColorPass); // 申请后处理中间颜色 RT，避免 CameraColor 自读自写导致平台不稳定。
+                if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftBloom(request))
+                {
+                    graph.AddPass(lightShaftBloomPass);
+                }
+
                 if (useTemporalAA && !useTemporalAAUpscale)
                 {
                     graph.AddPass(temporalAAPass);
@@ -336,12 +348,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                     graph.AddPass(lensFlarePass);
                 }
 
+                graph.AddPass(exposurePass);
+
                 if (PostProcessPass.ShouldUseBloomPass(request, asset))
                 {
-                    graph.AddPass(bloomPass);
+                    bloomBuildPasses.AddToGraph(graph, request, asset);
                 }
 
                 graph.AddPass(postProcessPass); // 执行 CameraColor -> PostProcessColor -> CameraColor，必要时在第一段拷贝里应用 Tonemapping。
+                if (PostProcessPass.ShouldUseBloomPass(request, asset))
+                {
+                    graph.AddPass(releaseBloomPass);
+                }
                 if (PostProcessPass.ShouldUseSubpixelMorphologicalAAPass(request, asset))
                 {
                     graph.AddPass(subpixelMorphologicalAAPass);
@@ -414,7 +432,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 graph.AddPass(releasePerObjectShadowAtlasPass);
             }
 
-            graph.AddPass(releaseAdditionalLightBufferPass); // Release after opaque, transparent, gizmo, debug, and final blit consumers are done.
+            if (useAdditionalLights)
+            {
+                graph.AddPass(releaseAdditionalLightBufferPass); // Release after opaque, transparent, gizmo, debug, and final blit consumers are done.
+            }
 
             if (safeRenderOptions.ShouldReleaseCameraColor) // 只有独立 request 或共享栈的最后一个 request 才释放 CameraColor。
             {

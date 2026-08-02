@@ -73,6 +73,42 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int LightShaftOcclusionTextureId = Shader.PropertyToID(LightShaftOcclusionTextureShaderName);
 
+        public const string LightShaftOcclusionTempName = "LightShaftOcclusionTemp";
+
+        public const string LightShaftOcclusionTempTextureShaderName = "_BurtLightShaftOcclusionTempTexture";
+
+        public static readonly int LightShaftOcclusionTempTextureId = Shader.PropertyToID(LightShaftOcclusionTempTextureShaderName);
+
+        public const string LightShaftBloomName = "LightShaftBloom";
+
+        public const string LightShaftBloomTextureShaderName = "_BurtLightShaftBloomTexture";
+
+        public static readonly int LightShaftBloomTextureId = Shader.PropertyToID(LightShaftBloomTextureShaderName);
+
+        public const string LightShaftBloomTempName = "LightShaftBloomTemp";
+
+        public const string LightShaftBloomTempTextureShaderName = "_BurtLightShaftBloomTempTexture";
+
+        public static readonly int LightShaftBloomTempTextureId = Shader.PropertyToID(LightShaftBloomTempTextureShaderName);
+
+        public const string FogSourceColorName = "FogSourceColor";
+
+        public const string FogSourceColorTextureShaderName = "_BurtFogSourceColorTexture";
+
+        public static readonly int FogSourceColorTextureId = Shader.PropertyToID(FogSourceColorTextureShaderName);
+
+        public const string VolumetricFogSourceColorName = "VolumetricFogSourceColor";
+
+        public const string VolumetricFogSourceColorTextureShaderName = "_BurtVolumetricFogSourceColorTexture";
+
+        public static readonly int VolumetricFogSourceColorTextureId = Shader.PropertyToID(VolumetricFogSourceColorTextureShaderName);
+
+        public const string AtmosphereAerialSourceColorName = "AtmosphereAerialSourceColor";
+
+        public const string AtmosphereAerialSourceColorTextureShaderName = "_BurtAtmosphereAerialSourceColorTexture";
+
+        public static readonly int AtmosphereAerialSourceColorTextureId = Shader.PropertyToID(AtmosphereAerialSourceColorTextureShaderName);
+
         public const string DeferredStencilTextureShaderName = "_BurtDeferredStencilTexture";
 
         public static readonly int DeferredStencilTextureId = Shader.PropertyToID(DeferredStencilTextureShaderName);
@@ -96,6 +132,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string PostProcessColorTextureShaderName = "_BurtPostProcessColorTexture"; // 定义后处理中间颜色 RT 暴露给 shader 的全局纹理名称。
 
         public static readonly int PostProcessColorTextureId = Shader.PropertyToID(PostProcessColorTextureShaderName); // 把后处理中间颜色名称转换成整数 ID，申请、绑定和释放都会复用它。
+
+        public const int BloomPyramidCount = 6;
+
+        public const string BloomInputName = "BloomInputHalfResolution";
+
+        public const string BloomInputTextureShaderName = "_BurtBloomInputTexture";
+
+        public static readonly int BloomInputTextureId = Shader.PropertyToID(BloomInputTextureShaderName);
+
+        public const string BloomSetupName = "BloomSetup";
+
+        public const string BloomSetupTextureShaderName = "_BurtBloomSetupTexture";
+
+        public static readonly int BloomSetupTextureId = Shader.PropertyToID(BloomSetupTextureShaderName);
+
+        private static readonly string[] BloomDownsampleNames = CreateBloomResourceNames("BloomDownsample");
+
+        private static readonly string[] BloomGaussianHorizontalNames = CreateBloomResourceNames("BloomGaussianHorizontal");
+
+        private static readonly string[] BloomGaussianVerticalNames = CreateBloomResourceNames("BloomGaussianVertical");
+
+        private static readonly int[] BloomDownsampleTextureIds = CreateBloomTextureIds("_BurtBloomDownsample");
+
+        private static readonly int[] BloomGaussianHorizontalTextureIds = CreateBloomTextureIds("_BurtBloomGaussianHorizontal");
+
+        private static readonly int[] BloomGaussianVerticalTextureIds = CreateBloomTextureIds("_BurtBloomGaussianVertical");
 
         public const string TemporalAAOutputName = "TemporalAAOutput";
 
@@ -653,13 +715,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int ScreenSpaceSubsurfaceCombineTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceCombineTextureShaderName);
 
-        public const string ScreenSpaceSubsurfaceHistoryName = "ScreenSpaceSubsurfaceHistory";
-
         public const string ScreenSpaceSubsurfacePersistentHistoryName = "ScreenSpaceSubsurfacePersistentHistory";
-
-        public const string ScreenSpaceSubsurfaceHistoryTextureShaderName = "_BurtScreenSpaceSubsurfaceHistoryTexture";
-
-        public static readonly int ScreenSpaceSubsurfaceHistoryTextureId = Shader.PropertyToID(ScreenSpaceSubsurfaceHistoryTextureShaderName);
 
         public const string ScreenSpaceSubsurfaceVelocityName = "ScreenSpaceSubsurfaceVelocity";
 
@@ -712,6 +768,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string ScreenSpaceSubsurfaceBurleyArgsBufferName = "ScreenSpaceSubsurfaceBurleyArgsBuffer";
 
         public const string ScreenSpaceSubsurfaceBurleyGroupBufferName = "ScreenSpaceSubsurfaceBurleyGroupBuffer";
+
+        public const string ScreenSpaceSubsurfaceSeparableArgsBufferName = "ScreenSpaceSubsurfaceSeparableArgsBuffer";
+
+        public const string ScreenSpaceSubsurfaceSeparableGroupBufferName = "ScreenSpaceSubsurfaceSeparableGroupBuffer";
 
         public const string BurtGIScreenProbeIndirectArgsBufferName = "BurtGIScreenProbeIndirectArgsBuffer";
 
@@ -1028,6 +1088,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         private int nextRenderTargetIndex;
         private int nextBufferIndex;
         private uint nextResourceVersion = 1;
+        private int nextPhysicalRenderTextureIndex = 1;
 
         public IEnumerable<string> RenderTargetNames => renderTargets.Keys; // Exposes registered RT names for debug dumps without exposing the dictionary.
 
@@ -1036,6 +1097,58 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public IEnumerable<string> BufferNames => buffers.Keys; // Exposes registered logical buffer names for debug dumps.
 
         public IEnumerable<string> ExternalBufferNames => externalBuffers; // Exposes external buffer names for debug dumps.
+
+        public static string GetBloomDownsampleName(int mipIndex)
+        {
+            return BloomDownsampleNames[Mathf.Clamp(mipIndex, 0, BloomPyramidCount - 1)];
+        }
+
+        public static string GetBloomGaussianHorizontalName(int mipIndex)
+        {
+            return BloomGaussianHorizontalNames[Mathf.Clamp(mipIndex, 0, BloomPyramidCount - 1)];
+        }
+
+        public static string GetBloomGaussianVerticalName(int mipIndex)
+        {
+            return BloomGaussianVerticalNames[Mathf.Clamp(mipIndex, 0, BloomPyramidCount - 1)];
+        }
+
+        public static int GetBloomDownsampleTextureId(int mipIndex)
+        {
+            return BloomDownsampleTextureIds[Mathf.Clamp(mipIndex, 0, BloomPyramidCount - 1)];
+        }
+
+        public static int GetBloomGaussianHorizontalTextureId(int mipIndex)
+        {
+            return BloomGaussianHorizontalTextureIds[Mathf.Clamp(mipIndex, 0, BloomPyramidCount - 1)];
+        }
+
+        public static int GetBloomGaussianVerticalTextureId(int mipIndex)
+        {
+            return BloomGaussianVerticalTextureIds[Mathf.Clamp(mipIndex, 0, BloomPyramidCount - 1)];
+        }
+
+        private static string[] CreateBloomResourceNames(string prefix)
+        {
+            var names = new string[BloomPyramidCount];
+            for (var mipIndex = 0; mipIndex < names.Length; mipIndex++)
+            {
+                names[mipIndex] = prefix + mipIndex;
+            }
+
+            return names;
+        }
+
+        private static int[] CreateBloomTextureIds(string prefix)
+        {
+            var ids = new int[BloomPyramidCount];
+            for (var mipIndex = 0; mipIndex < ids.Length; mipIndex++)
+            {
+                ids[mipIndex] = Shader.PropertyToID(prefix + mipIndex);
+            }
+
+            return ids;
+        }
 
         public bool HasPendingBufferReleases
         {
@@ -1192,9 +1305,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             if (texture == null)
             {
                 texture = new RenderTexture(allocationDescriptor.Descriptor);
+                // A pooled RenderTexture can back several non-overlapping logical graph resources.
+                // Give the GPU object a stable physical-slot name before Create(): renaming an
+                // already-created D3D11 resource does not update its RenderDoc debug name and can
+                // otherwise leave a Fog scratch target labelled as an older Post Process target.
+                texture.name = CreatePhysicalRenderTextureName(allocationDescriptor.Descriptor);
             }
 
-            texture.name = string.IsNullOrEmpty(allocationDescriptor.DebugName) ? safeName : allocationDescriptor.DebugName;
             texture.filterMode = allocationDescriptor.FilterMode;
             texture.wrapMode = TextureWrapMode.Clamp;
             texture.hideFlags = HideFlags.HideAndDontSave;
@@ -2942,21 +3059,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
             return GetRenderTarget(ScreenSpaceSubsurfaceCombineName);
         }
 
-        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceHistoryTexture()
-        {
-            return RegisterScreenSpaceSubsurfaceHistory(new RenderTargetIdentifier(ScreenSpaceSubsurfaceHistoryTextureId));
-        }
-
-        public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceHistory(RenderTargetIdentifier identifier)
-        {
-            return RegisterRenderTarget(ScreenSpaceSubsurfaceHistoryName, identifier);
-        }
-
-        public BurtRenderTargetHandle GetScreenSpaceSubsurfaceHistory()
-        {
-            return GetRenderTarget(ScreenSpaceSubsurfaceHistoryName);
-        }
-
         public BurtRenderTargetHandle RegisterScreenSpaceSubsurfaceVelocityTexture()
         {
             return RegisterScreenSpaceSubsurfaceVelocity(new RenderTargetIdentifier(ScreenSpaceSubsurfaceVelocityTextureId));
@@ -3169,6 +3271,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
             texture.Release();
             CoreUtils.Destroy(texture);
+        }
+
+        private string CreatePhysicalRenderTextureName(RenderTextureDescriptor descriptor)
+        {
+            var dimensions = descriptor.width + "x" + descriptor.height;
+            if (descriptor.volumeDepth > 1)
+            {
+                dimensions += "x" + descriptor.volumeDepth;
+            }
+
+            var usage = descriptor.enableRandomWrite ? " UAV" : string.Empty;
+            return "BRP.Transient/RT#" + nextPhysicalRenderTextureIndex++ +
+                " [" + dimensions + " " + descriptor.graphicsFormat + usage + "]";
         }
 
         private void RecycleAllInternalBuffers() // Returns surviving graph-owned buffers to the descriptor pool before the registry is reset.

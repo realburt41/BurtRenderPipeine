@@ -31,6 +31,8 @@ float3 _LightPosition;
 float4 _ShadowBias;
 float _BurtMainLightShadowDepthBias;
 float _BurtMainLightShadowNormalBias;
+float4x4 _BurtShadowCasterViewProjection;
+float _BurtUseExplicitShadowCasterViewProjection;
 
 struct ShadowAttributes
 {
@@ -112,6 +114,10 @@ ShadowVaryings VertShadow(ShadowAttributes input)
     ShadowVaryings output;
     float3 biasedPositionWS = ApplyBurtShadowCasterNormalBias(positionOS, input.NormalOS);
     output.PositionCS = mul(UNITY_MATRIX_VP, float4(biasedPositionWS, 1.0f));
+    if (_BurtUseExplicitShadowCasterViewProjection > 0.5f)
+    {
+        output.PositionCS = mul(_BurtShadowCasterViewProjection, float4(biasedPositionWS, 1.0f));
+    }
 
     #if BURT_SHADOW_CASTER_USES_BASE_MAP_UV
     #if defined(BURT_MATERIAL_SHADING_MODEL_HAIR)
