@@ -111,8 +111,8 @@ Material:
     - _AtlasMode: 1
     - _BumpScale: 1
     - _BurtGBufferStencilReadMask: 224
-    - _BurtGBufferStencilRef: 32
-    - _BurtGBufferStencilWriteMask: 224
+    - _BurtGBufferStencilRef: 40
+    - _BurtGBufferStencilWriteMask: 232
     - _ColorTemp: 2
     - _CubemapLightMultiplier: 1
     - _Cull: 2

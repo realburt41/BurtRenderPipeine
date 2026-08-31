@@ -133,6 +133,7 @@ namespace Burt.RenderPipeline
                 cmd,
                 camera,
                 request,
+                context.Asset,
                 settings,
                 context.Asset != null
                     ? context.Asset.VolumetricFogResolutionTier

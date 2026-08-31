@@ -871,7 +871,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
     {
         private const string FinalBlitShaderName = "Hidden/BurtRP/FinalBlit"; // 定义 FinalBlit shader 的查找名称，必须和 shader 文件里的 Shader 名称一致。
 
-        private static readonly int FinalBlitYFlipId = Shader.PropertyToID("_BurtFinalBlitYFlip"); // 缓存 FinalBlit Y 翻转开关的 shader 属性 ID，避免每帧字符串查找。
+        private static readonly int FinalBlitScaleBiasId = Shader.PropertyToID("_BurtFinalBlitScaleBias");
 
         private Material finalBlitMaterial; // 缓存 FinalBlit 材质，避免每帧重复创建 Material。
 
@@ -883,11 +883,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
         {
             builder.ReadCameraColor(); // 声明这个 Pass 会读取中间 CameraColor。
 
-            if (PostProcessPass.ShouldUseTemporalAAUpscale(builder.Request, builder.Asset))
-            {
-                builder.ReadTemporalAAOutput();
-            }
-
             builder.WriteFinalCameraTarget(); // 声明这个 Pass 会写入 request.TargetIdentifier 对应的最终输出目标。
         }
 
@@ -897,13 +892,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var cameraColorTarget = context.CameraColorTarget; // 从 GraphContext 中取出中间 CameraColor 资源句柄。
 
-            var temporalAAOutputTarget = context.TemporalAAOutputTarget;
-
             var finalCameraTarget = context.FinalCameraTarget; // 从 GraphContext 中取出最终相机输出目标句柄。
 
-            var useTemporalAAUpscale = PostProcessPass.ShouldUseTemporalAAUpscale(context.Request, context.Asset);
-
-            var sourceTarget = useTemporalAAUpscale ? temporalAAOutputTarget : cameraColorTarget;
+            // TAAU hands its full-resolution result back to CameraColor before
+            // Bloom and tonemapping, exactly like XRender's BeforeBloom DRS
+            // stage. FinalBlit therefore always consumes the raster color chain.
+            var sourceTarget = cameraColorTarget;
 
             if (!sourceTarget.IsValid) // 如果最终源无效，说明当前图没有可读取的中间颜色 RT。
             {
@@ -924,14 +918,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流。
 
-            cmd.SetRenderTarget(finalCameraTarget.Identifier); // 绑定最终输出目标，后续全屏三角形会写到 request.TargetIdentifier。
-            BurtRenderTargetDescriptorUtility.SetOutputTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
+            // Match XRender's SetFinalRenderTarget binding. The explicit load/store
+            // overload makes Unity open a new render-target domain for the external
+            // camera target instead of retaining the low-resolution CameraColor
+            // render area from the previous graph pass.
+            cmd.SetRenderTarget(
+                finalCameraTarget.Identifier,
+                RenderBufferLoadAction.DontCare,
+                RenderBufferStoreAction.Store,
+                RenderBufferLoadAction.DontCare,
+                RenderBufferStoreAction.DontCare);
+            var outputCamera = context.Request.Camera;
+            var outputWidth = BurtRenderTargetDescriptorUtility.ResolveOutputTargetWidth(outputCamera);
+            var outputHeight = BurtRenderTargetDescriptorUtility.ResolveOutputTargetHeight(outputCamera);
+            cmd.SetViewport(new Rect(0f, 0f, outputWidth, outputHeight));
 
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraColorTextureId, sourceTarget.Identifier); // 确保 _BurtCameraColorTexture 指向当前 request 的最终颜色源。
 
             var finalBlitYFlip = BurtFinalBlitUtility.ResolveFinalBlitYFlip(context.Request); // 调用 RenderTarget 工具类计算 Y 翻转开关，保持 FinalBlit Pass 只负责上传参数和绘制。
-
-            cmd.SetGlobalFloat(FinalBlitYFlipId, finalBlitYFlip); // 把翻转开关上传给 FinalBlit shader，让 Scene/Game 输出方向由 C# 明确控制。
+            cmd.SetGlobalVector(
+                FinalBlitScaleBiasId,
+                finalBlitYFlip > 0.5f
+                    ? new Vector4(1f, -1f, 0f, 1f)
+                    : new Vector4(1f, 1f, 0f, 0f));
 
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制一个全屏三角形，把中间颜色纹理采样并输出到最终目标。
 

@@ -54,8 +54,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
 
         private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // 创建不支持 Shader 的调试 Pass，让非 BurtRP 材质显示为明显的错误材质。
 
-        private readonly BurtRenderPass drawPreImageEffectsGizmosPass = new BurtDrawPreImageEffectsGizmosPass(); // 创建编辑器 Gizmos 绘制 Pass，恢复 SRP Scene/Game View 的 Gizmos 显示。
-
         private readonly BurtRenderPass drawPostImageEffectsGizmosPass = new BurtDrawPostImageEffectsGizmosPass(); // 创建后处理后的编辑器 Gizmos Pass，避免直接画到外部最终目标。
 
         private readonly BurtRenderPass allocatePostProcessColorPass = new AllocatePostProcessColorPass(); // 创建后处理颜色分配 Pass，用来申请 PostProcessColor 中间 RT。
@@ -314,17 +312,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 graph.EndProfilingScope("BRP.Stage/Transparent");
             }
 
-            graph.BeginProfilingScope("BRP.Stage/Editor Gizmos");
-            if (BurtEditorGizmoUtility.ShouldRenderGizmos(request)) // 编辑器里 Scene/Game View 打开 Gizmos 时，在后处理前绘制 PreImageEffects Gizmos。
-            {
-                graph.AddPass(drawPreImageEffectsGizmosPass); // 添加 PreImageEffects Gizmos Pass，让 Gizmos 参与常规 CameraColor 输出链路。
-            }
-            graph.EndProfilingScope("BRP.Stage/Editor Gizmos");
-
             graph.BeginProfilingScope("BRP.Stage/Post Process");
             if (ShouldUsePostProcessFramework(request, asset, safeRenderOptions)) // 如果后处理框架启用且当前 request 会 FinalBlit，就插入全屏后处理链路。
             {
-                var useTemporalAAUpscale = PostProcessPass.ShouldUseTemporalAAUpscale(request, asset);
                 var useTemporalAA = PostProcessPass.ShouldUseTemporalAAPass(request, asset);
                 graph.AddPass(allocatePostProcessColorPass); // 申请后处理中间颜色 RT，避免 CameraColor 自读自写导致平台不稳定。
                 if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftBloom(request))
@@ -332,27 +322,28 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                     graph.AddPass(lightShaftBloomPass);
                 }
 
-                if (useTemporalAA && !useTemporalAAUpscale)
-                {
-                    graph.AddPass(temporalAAPass);
-                    graph.AddPass(temporalAAFinalCopyPass);
-                }
-
                 if (PostProcessPass.ShouldUseDiaphragmDepthOfFieldPass(request, asset))
                 {
                     graph.AddPass(diaphragmDepthOfFieldPass);
                 }
 
-                if (PostProcessPass.ShouldUseLensFlarePass(request, asset))
+                // XRender places both native TSR and the BeforeBloom TAAU path
+                // after DOF/forward translucency and before exposure/Bloom.
+                if (useTemporalAA)
                 {
-                    graph.AddPass(lensFlarePass);
+                    graph.AddPass(temporalAAPass);
+                    graph.AddPass(temporalAAFinalCopyPass);
                 }
 
                 graph.AddPass(exposurePass);
 
-                if (PostProcessPass.ShouldUseBloomPass(request, asset))
+                bloomBuildPasses.AddToGraph(graph, request, asset);
+
+                // XRender keeps lens flare out of temporal history and submits
+                // it after Bloom generation, immediately before tonemapping.
+                if (PostProcessPass.ShouldUseLensFlarePass(request, asset))
                 {
-                    bloomBuildPasses.AddToGraph(graph, request, asset);
+                    graph.AddPass(lensFlarePass);
                 }
 
                 graph.AddPass(postProcessPass); // 执行 CameraColor -> PostProcessColor -> CameraColor，必要时在第一段拷贝里应用 Tonemapping。
@@ -376,11 +367,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 }
 
                 graph.AddPass(releasePostProcessColorPass); // 释放后处理中间 RT，确保临时资源生命周期清晰。
-
-                if (useTemporalAA && useTemporalAAUpscale)
-                {
-                    graph.AddPass(temporalAAPass);
-                }
             }
             graph.EndProfilingScope("BRP.Stage/Post Process");
 

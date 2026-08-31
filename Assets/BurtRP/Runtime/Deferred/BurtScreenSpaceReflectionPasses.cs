@@ -2018,15 +2018,9 @@ namespace Burt.RenderPipeline
 
         public static void GetCameraTargetSize(Camera camera, out int width, out int height)
         {
-            if (camera != null && camera.targetTexture != null)
-            {
-                width = Mathf.Max(1, camera.targetTexture.width);
-                height = Mathf.Max(1, camera.targetTexture.height);
-                return;
-            }
-
-            width = Mathf.Max(1, camera != null ? camera.pixelWidth : 1);
-            height = Mathf.Max(1, camera != null ? camera.pixelHeight : 1);
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
+            width = Mathf.Max(1, descriptor.width);
+            height = Mathf.Max(1, descriptor.height);
         }
 
         public static BurtScreenSpaceReflectionSettings ResolveScreenSpaceReflectionHistorySettings(Camera camera)

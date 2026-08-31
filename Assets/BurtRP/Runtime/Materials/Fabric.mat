@@ -88,8 +88,8 @@ Material:
     - _Anisotropy: -0.149
     - _BumpScale: 1
     - _BurtGBufferStencilReadMask: 224
-    - _BurtGBufferStencilRef: 160
-    - _BurtGBufferStencilWriteMask: 224
+    - _BurtGBufferStencilRef: 168
+    - _BurtGBufferStencilWriteMask: 232
     - _Cull: 2
     - _Cutoff: 0.5
     - _DetailNormalMapScale: 1

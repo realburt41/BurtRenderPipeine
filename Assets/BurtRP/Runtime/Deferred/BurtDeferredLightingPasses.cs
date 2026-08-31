@@ -971,8 +971,12 @@ namespace Burt.RenderPipeline
             var inverseNonJitteredViewProjectionMatrix = request.TemporalAA != null
                 ? request.TemporalAA.InverseCurrentNonJitteredViewProjectionMatrix
                 : inverseViewProjectionMatrix;
-            var pixelWidth = Mathf.Max(1, camera.pixelWidth);
-            var pixelHeight = Mathf.Max(1, camera.pixelHeight);
+            // XRender's camera.actualWidth/actualHeight are the active DRS input
+            // extent. camera.pixelWidth remains the final output extent in Unity,
+            // so using it here crops fullscreen deferred UVs to renderScale.
+            var inputDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
+            var pixelWidth = Mathf.Max(1, inputDescriptor.width);
+            var pixelHeight = Mathf.Max(1, inputDescriptor.height);
             var screenSize = new Vector4(pixelWidth, pixelHeight, 1f / pixelWidth, 1f / pixelHeight);
             var clipPlanes = new Vector4(
                 camera.nearClipPlane,

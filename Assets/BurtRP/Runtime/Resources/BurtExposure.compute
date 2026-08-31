@@ -43,6 +43,8 @@ float4 _BurtExposureCompensationParams; // compensation scale, curve scale, manu
 float4 _BurtLocalExposureExtent; // histogram groups x/y, blurred width/height
 float4 _BurtLocalExposureDownsampleExtent; // source width/height, output width/height
 float4 _BurtLocalExposureBlurParams; // radius, source width, source height, reserved
+float4 _BurtLocalExposureAutoParams; // enabled, middle-grey compensation, highlight contrast, shadow contrast
+float4 _BurtLocalExposureThresholdParams; // highlight threshold, shadow threshold, reserved, reserved
 
 groupshared uint BurtHistogramLDS[BURT_HISTOGRAM_SIZE];
 
@@ -198,6 +200,55 @@ float BurtComputeCompensation(float oldCompensation, float targetCompensation)
     return exp2(logOld + difference * factor);
 }
 
+float BurtCalculateLogLocalExposure(
+    float logLuminance,
+    float baseLogLuminance,
+    float logMiddleGrey,
+    float highlightContrastScale,
+    float shadowContrastScale,
+    float detailStrength)
+{
+    float detailLogLuminance = logLuminance - baseLogLuminance;
+    float baseCentered = baseLogLuminance - logMiddleGrey;
+    float contrastScale = baseCentered > 0.0 ? highlightContrastScale : shadowContrastScale;
+    float thresholdOffset;
+    if (baseCentered > 0.0)
+        thresholdOffset = baseCentered - max(0.0, baseCentered - _BurtLocalExposureThresholdParams.x);
+    else
+        thresholdOffset = baseCentered - min(0.0, baseCentered + _BurtLocalExposureThresholdParams.y);
+    baseCentered -= thresholdOffset;
+    float localLogLuminance = logMiddleGrey + thresholdOffset + baseCentered * contrastScale + detailLogLuminance * detailStrength;
+    return localLogLuminance - logLuminance;
+}
+
+float BurtComputeAverageLocalExposure(float exposureScale, float middleGreyExposureCompensation)
+{
+    if (_BurtLocalExposureAutoParams.x < 0.5)
+        return 1.0;
+
+    float logMiddleGrey = log2(max(
+        0.18 * middleGreyExposureCompensation * _BurtLocalExposureAutoParams.y,
+        1e-6));
+    float2 sum = 0.0;
+    [unroll] for (uint bucket = 0; bucket < BURT_HISTOGRAM_SIZE; ++bucket)
+    {
+        float localValue = BurtHistogramBucket(_BurtExposureHistogramTexture, bucket);
+        float logLuminance = BurtLogLuminanceFromHistogramPosition((float)bucket / (BURT_HISTOGRAM_SIZE - 1));
+        float baseLogLuminance = logLuminance + log2(max(exposureScale, 1e-6));
+        float logLocalExposure = BurtCalculateLogLocalExposure(
+            baseLogLuminance,
+            baseLogLuminance,
+            logMiddleGrey,
+            _BurtLocalExposureAutoParams.z,
+            _BurtLocalExposureAutoParams.w,
+            0.0);
+        sum += float2(logLocalExposure, 1.0) * localValue;
+    }
+
+    // XRender intentionally uses natural exp here (not exp2).
+    return exp(sum.x / max(sum.y, 1e-4));
+}
+
 [numthreads(1, 1, 1)]
 void HistogramAutoExposureCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -214,8 +265,9 @@ void HistogramAutoExposureCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         compensation / max(targetExposure, 1e-4),
         averageSceneLuminance,
         compensation);
+    float averageLocalExposure = BurtComputeAverageLocalExposure(output.x, output.w);
     _BurtExposureOutputUAV[uint2(0, 0)] = output;
-    _BurtExposureOutputUAV[uint2(1, 0)] = float4(1.0, 0.0, 0.0, 0.0);
+    _BurtExposureOutputUAV[uint2(1, 0)] = float4(averageLocalExposure, 0.0, 0.0, 0.0);
 }
 
 [numthreads(1, 1, 1)]

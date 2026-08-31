@@ -26,6 +26,15 @@ float4x4 _BurtTAAPreviousNonJitteredViewProjection;
 float4x4 unity_MatrixPreviousM;
 float4 _BurtTAATexelSize;
 
+float4x4 BurtGetClearCrystalPreviousObjectToWorldMatrix()
+{
+#if defined(UNITY_INSTANCING_ENABLED)
+    return UNITY_ACCESS_INSTANCED_PROP(unity_Builtins3, unity_PrevObjectToWorldArray);
+#else
+    return unity_MatrixPreviousM;
+#endif
+}
+
 struct BurtClearCrystalAttributes
 {
     float4 PositionOS : POSITION;
@@ -95,7 +104,7 @@ BurtClearCrystalMotionVectorVaryings VertClearCrystalMotionVector(BurtClearCryst
     UNITY_SETUP_INSTANCE_ID(input);
 
     float4 currentWorld = mul(unity_ObjectToWorld, input.PositionOS);
-    float4 previousWorld = mul(unity_MatrixPreviousM, input.PositionOS);
+    float4 previousWorld = mul(BurtGetClearCrystalPreviousObjectToWorldMatrix(), input.PositionOS);
     float3 objectDelta = previousWorld.xyz - currentWorld.xyz;
 
     BurtClearCrystalMotionVectorVaryings output;

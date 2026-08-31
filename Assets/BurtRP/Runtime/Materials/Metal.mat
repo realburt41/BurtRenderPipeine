@@ -48,8 +48,8 @@ Material:
     - _Anisotropy: 0
     - _BlendMode: 0
     - _BurtGBufferStencilReadMask: 224
-    - _BurtGBufferStencilRef: 32
-    - _BurtGBufferStencilWriteMask: 224
+    - _BurtGBufferStencilRef: 40
+    - _BurtGBufferStencilWriteMask: 232
     - _Cull: 2
     - _Cutoff: 0.564
     - _DoubleSidedEnable: 0

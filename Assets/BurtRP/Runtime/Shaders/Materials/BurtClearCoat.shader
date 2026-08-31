@@ -61,9 +61,9 @@ Shader "BurtRP/Clear Coat"
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
-        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 128
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 136
         [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
-        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 232
         [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
         [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
@@ -105,6 +105,7 @@ Shader "BurtRP/Clear Coat"
             // Declares the depth fragment shader entry point.
             #pragma fragment FragDepth
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
+            #pragma multi_compile_instancing
 
             // Includes Unity helper functions such as UnityObjectToClipPos.
             #include "UnityCG.cginc"
@@ -227,6 +228,7 @@ Shader "BurtRP/Clear Coat"
             #pragma fragment FragDepthNormals
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma multi_compile_instancing
             #pragma target 4.5
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtClearCoatProperties.hlsl"
@@ -276,6 +278,7 @@ Shader "BurtRP/Clear Coat"
             #pragma fragment FragGBuffer
             #pragma shader_feature_local_fragment _ BURT_ALPHA_CLIP
             #pragma shader_feature_local_fragment _ _EMISSION
+            #pragma multi_compile_instancing
 
             // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
             #pragma target 4.5
@@ -327,6 +330,7 @@ Shader "BurtRP/Clear Coat"
             #pragma shader_feature_local_fragment _ _EMISSION
 
             #pragma shader_feature_fragment _ BURT_USE_DEBUG_MODE_FORWARD
+            #pragma multi_compile_instancing
 
             // Uses explicit LOD cubemap sampling through UnityCG in BurtLighting.hlsl.
             #pragma target 3.0

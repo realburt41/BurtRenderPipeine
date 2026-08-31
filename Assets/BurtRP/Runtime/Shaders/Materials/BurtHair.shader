@@ -79,9 +79,9 @@ Shader "BurtRP/Hair"
         [HideInInspector] _DoubleSidedNormalMode ("Double Sided Normal Mode", Float) = 2
         [HideInInspector] _DoubleSidedNormalModeConstants ("Double Sided Normal Mode Constants", Vector) = (1, 1, -1, 0)
         [HideInInspector] _Cull ("Cull", Float) = 0
-        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 96
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 104
         [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
-        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 232
         [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
         [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }

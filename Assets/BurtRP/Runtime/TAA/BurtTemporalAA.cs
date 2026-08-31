@@ -79,6 +79,8 @@ namespace Burt.RenderPipeline
         public Matrix4x4 InverseCurrentViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 InverseCurrentNonJitteredViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 ClipToPreviousClipMatrix { get; private set; } = Matrix4x4.identity;
+        public float PreviousRenderDeltaTime { get; private set; }
+        internal double CurrentRenderTimeSeconds { get; private set; }
         public float CurrentPreExposure { get; private set; } = 1f;
         public float HistoryExposureCorrection { get; private set; } = 1f;
         public BurtTemporalAASettings Settings { get; private set; } = BurtTemporalAASettings.Default;
@@ -121,6 +123,8 @@ namespace Burt.RenderPipeline
             Matrix4x4 previousViewProjectionMatrix,
             Matrix4x4 previousNonJitteredViewProjectionMatrix,
             Matrix4x4 clipToPreviousClipMatrix,
+            double currentRenderTimeSeconds,
+            float previousRenderDeltaTime,
             float currentPreExposure,
             float historyExposureCorrection,
             bool historyValid)
@@ -147,6 +151,8 @@ namespace Burt.RenderPipeline
                 InverseCurrentViewProjectionMatrix = currentViewProjection.inverse,
                 InverseCurrentNonJitteredViewProjectionMatrix = currentNonJitteredViewProjection.inverse,
                 ClipToPreviousClipMatrix = clipToPreviousClipMatrix,
+                CurrentRenderTimeSeconds = currentRenderTimeSeconds,
+                PreviousRenderDeltaTime = Mathf.Max(previousRenderDeltaTime, 0f),
                 CurrentPreExposure = Mathf.Max(currentPreExposure, 0.0001f),
                 HistoryExposureCorrection = Mathf.Max(historyExposureCorrection, 0f),
                 Settings = settings,
@@ -219,15 +225,13 @@ namespace Burt.RenderPipeline
     internal static class BurtTemporalAAUtility
     {
         private const float ProjectionChangeEpsilon = 0.0001f;
-        private const float TemporalAAPostProcessSignatureEpsilon = 0.001f;
-        private const float SceneViewJitterScaleMultiplier = 0.5f;
         private const int NativeTemporalAAJitterPhaseCount = 8;
         private const int MaxTemporalAAJitterPhaseCount = 1024;
         private const float TAAUHistoryResolutionScale = 2f;
         private const int TAAUMaxHistoryDimension = 6144;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
-        private const int HistoryLayoutVersion = 36;
+        private const int HistoryLayoutVersion = 39;
 
         private sealed class CameraState
         {
@@ -247,15 +251,12 @@ namespace Burt.RenderPipeline
             public int PreviousTargetWidth;
             public int PreviousTargetHeight;
             public Vector2 PreviousRenderScale = Vector2.one;
-            public Vector4 PreviousTemporalAAPostProcessSignature0;
-            public Vector4 PreviousTemporalAAPostProcessSignature1;
-            public Vector4 PreviousTemporalAAPostProcessSignature2;
-            public Vector4 PreviousTemporalAAPostProcessSignature3;
             public float PreviousPreExposure = 1f;
             public Matrix4x4 PreviousViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredViewProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousNonJitteredProjectionMatrix = Matrix4x4.identity;
             public Matrix4x4 PreviousViewMatrix = Matrix4x4.identity;
+            public double PreviousRenderTimeSeconds;
             public RenderTexture ColorHistory;
             public RenderTexture CurrentColorHistory;
             public RenderTexture DepthHistory;
@@ -328,22 +329,12 @@ namespace Burt.RenderPipeline
 
             if (temporalAA.debugFreezeJitter.value)
             {
-                jitterFrameOverride = Mathf.Clamp(temporalAA.debugJitterFrame.value, 0, MaxTemporalAAJitterPhaseCount - 1) + 1;
+                jitterFrameOverride = Mathf.Clamp(temporalAA.debugJitterFrame.value, 0, MaxTemporalAAJitterPhaseCount - 1);
             }
 
             return temporalAA.debugOverrideJitterScale.value
                 ? settings.WithJitterScale(temporalAA.debugJitterScale.value)
                 : settings;
-        }
-
-        private static BurtTemporalAASettings ApplyTemporalAAViewJitterScale(BurtTemporalAASettings settings, Camera camera)
-        {
-            if (camera != null && camera.cameraType == CameraType.SceneView)
-            {
-                return settings.WithJitterScale(settings.JitterScale * SceneViewJitterScaleMultiplier);
-            }
-
-            return settings;
         }
 
         private static TemporalAAVolumeComponent GetTemporalAAVolumeComponent()
@@ -365,6 +356,7 @@ namespace Burt.RenderPipeline
         public static BurtTemporalAARequestState PrepareRequest(BurtRenderRequest request, BurtRenderPipelineAsset asset, BurtRequestRenderOptions renderOptions)
         {
             var camera = request != null ? request.Camera : null;
+            BurtRenderResolutionStageUtility.BeginInputResolutionStage(camera);
             var viewMatrix = camera != null ? camera.worldToCameraMatrix : Matrix4x4.identity;
             var projectionMatrix = camera != null ? camera.projectionMatrix : Matrix4x4.identity;
 
@@ -376,14 +368,12 @@ namespace Burt.RenderPipeline
             }
 
             var settings = PostProcessUtility.ResolveTemporalAASettings(request, asset);
-            settings = ApplyTemporalAAViewJitterScale(settings, camera);
             settings = ApplyTemporalAADebugOverrides(settings, out var jitterFrameOverride);
             var cameraId = camera.GetInstanceID();
             var state = GetOrCreateState(cameraId);
             state.Camera = camera;
             PruneDisposedCameraStates();
             var rendererMode = asset != null ? asset.RendererMode : BurtRendererMode.Forward;
-            ResolveTemporalAAPostProcessSignature(out var postProcessSignature0, out var postProcessSignature1, out var postProcessSignature2, out var postProcessSignature3);
             var currentPreExposure = PreExposureUtility.ResolveForFrame(request, asset).PreExposure;
             var previousPreExposure = state.HasPreviousCameraState ? state.PreviousPreExposure : currentPreExposure;
             var historyExposureCorrection = currentPreExposure / Mathf.Max(previousPreExposure, 0.0001f);
@@ -397,7 +387,9 @@ namespace Burt.RenderPipeline
             var descriptorsMatch = colorMatches && depthMatches && layoutMatches;
             var targetTextureId = GetTargetTextureId(camera);
             GetTargetSize(camera, out var targetWidth, out var targetHeight);
-            var renderScale = CalculateRenderScale(camera, colorDescriptor);
+            // The persistent TAAU color history is 2x output resolution, but
+            // render scale and camera jitter are defined in input pixels.
+            var renderScale = CalculateRenderScale(camera, depthDescriptor);
             var invalidationReason = ResolveHistoryInvalidationReason(
                 camera,
                 state,
@@ -406,10 +398,6 @@ namespace Burt.RenderPipeline
                 targetWidth,
                 targetHeight,
                 renderScale,
-                postProcessSignature0,
-                postProcessSignature1,
-                postProcessSignature2,
-                postProcessSignature3,
                 projectionMatrix,
                 descriptorsMatch);
             if (!layoutMatches && string.IsNullOrEmpty(invalidationReason))
@@ -433,8 +421,8 @@ namespace Burt.RenderPipeline
             var jitterFrameIndex = jitterFrameOverride.HasValue ? jitterFrameOverride.Value : frameIndex;
             var jitterPhaseCount = CalculateJitterPhaseCount(camera);
             var jitterPixels = CalculateHaltonJitter(jitterFrameIndex, jitterPhaseCount) * settings.JitterScale;
-            var pixelWidth = Mathf.Max(1, colorDescriptor.width);
-            var pixelHeight = Mathf.Max(1, colorDescriptor.height);
+            var pixelWidth = Mathf.Max(1, depthDescriptor.width);
+            var pixelHeight = Mathf.Max(1, depthDescriptor.height);
             var jitter = new Vector2(jitterPixels.x * 2f / pixelWidth, jitterPixels.y * 2f / pixelHeight);
             // Match XRender/Unity temporal jitter: translating clip space is not the
             // same as adding m02/m12 directly on perspective projection matrices.
@@ -449,6 +437,16 @@ namespace Burt.RenderPipeline
                 projectionMatrix,
                 previousViewMatrix,
                 previousNonJitteredProjectionMatrix);
+            var currentRenderTimeSeconds = ResolveRenderTimeSeconds();
+            var hasValidPreviousRenderTime = state.HasPreviousCameraState && state.HasValidHistory && descriptorsMatch;
+            var previousRenderDeltaTime = hasValidPreviousRenderTime
+                // Match XCamera.UpdateTime exactly: gameplay uses the engine's
+                // simulation delta, while editor cameras use their actual
+                // repaint interval.
+                ? (Application.isPlaying
+                    ? Mathf.Max(Time.deltaTime, 0f)
+                    : (float)System.Math.Max(0.0, currentRenderTimeSeconds - state.PreviousRenderTimeSeconds))
+                : 0f;
 
             return BurtTemporalAARequestState.Create(
                 settings,
@@ -462,6 +460,8 @@ namespace Burt.RenderPipeline
                 previousViewProjection,
                 previousNonJitteredViewProjection,
                 clipToPreviousClip,
+                currentRenderTimeSeconds,
+                previousRenderDeltaTime,
                 currentPreExposure,
                 historyExposureCorrection,
                 state.HasValidHistory && descriptorsMatch);
@@ -478,7 +478,7 @@ namespace Burt.RenderPipeline
 
             var state = GetOrCreateState(camera.GetInstanceID());
             state.Camera = camera;
-            var colorDescriptor = CreateColorHistoryDescriptor(camera);
+            var inputDescriptor = CreateScalarHistoryDescriptor(camera);
             GetTargetSize(camera, out var targetWidth, out var targetHeight);
             state.PreviousRendererMode = state.CurrentRendererMode;
             state.PreviousCameraPosition = camera.transform.position;
@@ -491,13 +491,13 @@ namespace Burt.RenderPipeline
             state.PreviousTargetTextureId = GetTargetTextureId(camera);
             state.PreviousTargetWidth = targetWidth;
             state.PreviousTargetHeight = targetHeight;
-            state.PreviousRenderScale = CalculateRenderScale(camera, colorDescriptor);
-            ResolveTemporalAAPostProcessSignature(out state.PreviousTemporalAAPostProcessSignature0, out state.PreviousTemporalAAPostProcessSignature1, out state.PreviousTemporalAAPostProcessSignature2, out state.PreviousTemporalAAPostProcessSignature3);
+            state.PreviousRenderScale = CalculateRenderScale(camera, inputDescriptor);
             state.PreviousPreExposure = temporalAA.CurrentPreExposure;
             state.PreviousViewProjectionMatrix = temporalAA.CurrentViewProjectionMatrix;
             state.PreviousNonJitteredViewProjectionMatrix = temporalAA.CurrentNonJitteredViewProjectionMatrix;
             state.PreviousNonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
             state.PreviousViewMatrix = temporalAA.ViewMatrix;
+            state.PreviousRenderTimeSeconds = temporalAA.CurrentRenderTimeSeconds;
             state.HistoryLayoutVersion = HistoryLayoutVersion;
             state.HasPreviousCameraState = true;
         }
@@ -523,6 +523,15 @@ namespace Burt.RenderPipeline
             previousView.m23 = 0f;
 
             return previousGpuNonJitteredProjection * (previousView * (currentInverseView * currentInverseProjection));
+        }
+
+        private static double ResolveRenderTimeSeconds()
+        {
+            // Unity's built-in _Time follows game time while playing, but editor camera
+            // repaints continue on realtime. Tracking the same clock domain per camera lets
+            // vertex animation reconstruct the actual previous render instead of assuming
+            // that every SceneView repaint is exactly one unity_DeltaTime apart.
+            return Application.isPlaying ? Time.timeAsDouble : Time.realtimeSinceStartupAsDouble;
         }
 
         public static bool ShouldUseTemporalAA(BurtRenderRequest request, BurtRenderPipelineAsset asset)
@@ -792,11 +801,30 @@ namespace Burt.RenderPipeline
             if (ShouldUseOutputResolutionHistory(camera))
             {
                 ApplyTAAUHistoryResolutionScale(ref descriptor);
+                // XRender stores the 2x TAAU history in packed 11/11/10 float.
+                // Matching the storage precision is part of the temporal filter:
+                // UpdateHistory performs its stochastic rounding for this exact
+                // format, and using ARGBHalf otherwise changes convergence.
+                var historyFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32;
+                if (SystemInfo.IsFormatSupported(historyFormat, UnityEngine.Experimental.Rendering.FormatUsage.Render) &&
+                    SystemInfo.IsFormatSupported(historyFormat, UnityEngine.Experimental.Rendering.FormatUsage.Sample) &&
+                    SystemInfo.IsFormatSupported(historyFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
+                {
+                    descriptor.graphicsFormat = historyFormat;
+                }
+                else
+                {
+                    // XRender's history is always HDR.  An LDR camera target must
+                    // not turn the temporal store into RGBA8 when packed UAV
+                    // writes are unavailable on the current graphics API.
+                    descriptor.graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat;
+                }
             }
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
             descriptor.autoGenerateMips = false;
+            descriptor.sRGB = false;
             descriptor.enableRandomWrite = ShouldUseOutputResolutionHistory(camera);
             return descriptor;
         }
@@ -806,7 +834,12 @@ namespace Burt.RenderPipeline
             // Closest-depth history is consumed by input-resolution velocity dilation and
             // disocclusion rejection, so it deliberately stays at the input resolution.
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
-            descriptor.colorFormat = RenderTextureFormat.RFloat;
+            BurtRenderResolutionStageUtility.ForceInputResolution(ref descriptor, camera);
+            // Match XRender's two closest-device-depth history contracts. Native TAA
+            // uses R16_SFloat; TAAU uses R16_UNorm.
+            descriptor.graphicsFormat = ShouldUseOutputResolutionHistory(camera)
+                ? UnityEngine.Experimental.Rendering.GraphicsFormat.R16_UNorm
+                : UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat;
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
@@ -825,7 +858,20 @@ namespace Burt.RenderPipeline
         private static RenderTextureDescriptor CreateGuideHistoryDescriptor(Camera camera)
         {
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
-            descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            BurtRenderResolutionStageUtility.ForceInputResolution(ref descriptor, camera);
+            var guideFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.A2B10G10R10_UNormPack32;
+            if (SystemInfo.IsFormatSupported(guideFormat, UnityEngine.Experimental.Rendering.FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(guideFormat, UnityEngine.Experimental.Rendering.FormatUsage.Sample) &&
+                SystemInfo.IsFormatSupported(guideFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
+            {
+                // XRender's guide is a packed UNorm signal (including its
+                // intentionally coarse 2-bit uncertainty channel).
+                descriptor.graphicsFormat = guideFormat;
+            }
+            else
+            {
+                descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            }
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
@@ -884,10 +930,6 @@ namespace Burt.RenderPipeline
             int targetWidth,
             int targetHeight,
             Vector2 renderScale,
-            Vector4 postProcessSignature0,
-            Vector4 postProcessSignature1,
-            Vector4 postProcessSignature2,
-            Vector4 postProcessSignature3,
             Matrix4x4 projectionMatrix,
             bool descriptorsMatch)
         {
@@ -919,14 +961,6 @@ namespace Burt.RenderPipeline
             if (VectorChanged(renderScale, state.PreviousRenderScale, 0.0001f))
             {
                 return "RenderScaleChanged";
-            }
-
-            if (VectorChanged(postProcessSignature0, state.PreviousTemporalAAPostProcessSignature0, TemporalAAPostProcessSignatureEpsilon)
-                || VectorChanged(postProcessSignature1, state.PreviousTemporalAAPostProcessSignature1, TemporalAAPostProcessSignatureEpsilon)
-                || VectorChanged(postProcessSignature2, state.PreviousTemporalAAPostProcessSignature2, TemporalAAPostProcessSignatureEpsilon)
-                || VectorChanged(postProcessSignature3, state.PreviousTemporalAAPostProcessSignature3, TemporalAAPostProcessSignatureEpsilon))
-            {
-                return "PostProcessColorChanged";
             }
 
             if (camera != null)
@@ -1051,73 +1085,6 @@ namespace Burt.RenderPipeline
                 || FloatChanged(current.w, previous.w, epsilon);
         }
 
-        private static void ResolveTemporalAAPostProcessSignature(out Vector4 signature0, out Vector4 signature1, out Vector4 signature2, out Vector4 signature3)
-        {
-            var volumeManager = VolumeManager.instance;
-            var stack = volumeManager != null ? volumeManager.stack : null;
-            if (stack == null)
-            {
-                signature0 = Vector4.zero;
-                signature1 = Vector4.zero;
-                signature2 = Vector4.zero;
-                signature3 = Vector4.zero;
-                return;
-            }
-
-            var tonemapping = stack.GetComponent<TonemappingVolumeComponent>();
-            var exposure = stack.GetComponent<ExposureVolumeComponent>();
-            var colorAdjustments = stack.GetComponent<ColorAdjustmentsVolumeComponent>();
-            var vignette = stack.GetComponent<VignetteVolumeComponent>();
-            var temporalAA = stack.GetComponent<TemporalAAVolumeComponent>();
-            var tonemappingEnabled = tonemapping != null && tonemapping.IsEnabled();
-            var exposureEnabled = exposure != null && exposure.IsEnabled();
-            var colorAdjustmentsEnabled = colorAdjustments != null && colorAdjustments.IsEnabled();
-            var vignetteEnabled = vignette != null && vignette.IsEnabled();
-            var temporalAAUpscaleFactor = temporalAA != null && temporalAA.IsEnabled() ? temporalAA.upscaleFactor.value : BurtTemporalAASettings.Default.UpscaleFactor;
-            var exposureMultiplier = exposureEnabled &&
-                exposure.mode.value != ExposureMode.Automatic &&
-                exposure.mode.value != ExposureMode.AutomaticHistogram
-                ? new PhysicalExposureSettings(
-                    exposure.mode.value,
-                    exposure.manualEV100.value,
-                    exposure.iso.value,
-                    exposure.shutterTime.value,
-                    exposure.aperture.value,
-                    exposure.calibration.value,
-                    exposure.compensation.value).Multiplier
-                : 1f;
-            var saturation = colorAdjustmentsEnabled ? colorAdjustments.saturation.value : ColorAdjustmentsSettings.DefaultSaturation;
-            var contrast = colorAdjustmentsEnabled ? colorAdjustments.contrast.value : ColorAdjustmentsSettings.DefaultContrast;
-            var gamma = colorAdjustmentsEnabled ? colorAdjustments.gamma.value : ColorAdjustmentsSettings.DefaultGamma;
-            var colorFilter = colorAdjustmentsEnabled ? colorAdjustments.colorFilter.value : ColorAdjustmentsSettings.DefaultColorFilter;
-            var vignetteColor = vignetteEnabled ? vignette.color.value : VignetteSettings.DefaultColor;
-            var vignetteIntensity = vignetteEnabled ? vignette.intensity.value : VignetteSettings.DefaultIntensity;
-            var vignetteEdgeWidth = vignetteEnabled ? vignette.edgeWidth.value : VignetteSettings.DefaultEdgeWidth;
-            var vignetteEdgeSoftness = vignetteEnabled ? vignette.edgeSoftness.value : VignetteSettings.DefaultEdgeSoftness;
-            var vignetteFisheyeFovDeg = vignetteEnabled ? vignette.fisheyeFovDeg.value : VignetteSettings.DefaultFisheyeFovDeg;
-            var vignetteFollowAspect = vignetteEnabled && vignette.followAspect.value ? 1f : 0f;
-            signature0 = new Vector4(
-                exposureMultiplier,
-                saturation,
-                contrast,
-                gamma);
-            signature1 = new Vector4(
-                colorFilter.r,
-                colorFilter.g,
-                colorFilter.b,
-                (tonemappingEnabled ? (int)tonemapping.mode.value + 1 : 0f) + Mathf.Clamp(temporalAAUpscaleFactor, 1f, 2f) * 0.01f);
-            signature2 = new Vector4(
-                vignetteColor.r,
-                vignetteColor.g,
-                vignetteColor.b,
-                vignetteColor.a * vignetteIntensity);
-            signature3 = new Vector4(
-                vignetteEdgeWidth,
-                vignetteEdgeSoftness,
-                vignetteFisheyeFovDeg,
-                vignetteFollowAspect);
-        }
-
         private static bool ProjectionChanged(Matrix4x4 current, Matrix4x4 previous)
         {
             for (var i = 0; i < 16; i++)
@@ -1181,26 +1148,22 @@ namespace Burt.RenderPipeline
 
         private static int CalculateJitterPhaseCount(Camera camera)
         {
-            if (!ShouldUseOutputResolutionHistory(camera))
-            {
-                return NativeTemporalAAJitterPhaseCount;
-            }
-
-            var input = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
-            var output = BurtRenderTargetDescriptorUtility.CreateOutputPostProcessColorDescriptor(camera);
-            var upscaleX = output.width / (float)Mathf.Max(1, input.width);
-            var upscaleY = output.height / (float)Mathf.Max(1, input.height);
-            var upscaleRatio = Mathf.Max(1f, Mathf.Max(upscaleX, upscaleY));
-            return Mathf.Clamp(
-                Mathf.CeilToInt(NativeTemporalAAJitterPhaseCount * upscaleRatio * upscaleRatio),
-                NativeTemporalAAJitterPhaseCount,
-                MaxTemporalAAJitterPhaseCount);
+            // XRender uses an 8-phase Halton sequence for native TAA and keeps
+            // the full 1024-phase sequence for TAAU, independent of the active
+            // input/output ratio. A short ratio-derived TAAU sequence repeats
+            // its sub-pixel pattern too early and produces periodic shimmer.
+            return ShouldUseOutputResolutionHistory(camera)
+                ? MaxTemporalAAJitterPhaseCount
+                : NativeTemporalAAJitterPhaseCount;
         }
 
         private static Vector2 CalculateHaltonJitter(int frameIndex, int phaseCount)
         {
             var sequenceLength = Mathf.Clamp(phaseCount, 1, MaxTemporalAAJitterPhaseCount);
-            var sequenceIndex = ((Mathf.Max(1, frameIndex) - 1) % sequenceLength) + 1;
+            // XRender advances the frame index first, then samples Halton(index + 1).
+            // This yields Halton(2) on the first rendered frame and wraps to
+            // Halton(1) after the final phase.
+            var sequenceIndex = (Mathf.Max(0, frameIndex) % sequenceLength) + 1;
             return new Vector2(Halton(sequenceIndex, 2) - 0.5f, Halton(sequenceIndex, 3) - 0.5f);
         }
 

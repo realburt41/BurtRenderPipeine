@@ -148,7 +148,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceReflectionTemporalColor = 318, // SSR debug: temporal accumulation output.
         ScreenSpaceReflectionResolveAlpha = 319, // SSR debug: final alpha used by composite.
         TemporalAAHistory = 320, // TAA debug: reprojected history color.
-        TemporalAAFeedback = 321, // TAA debug: final history feedback weight.
+        TemporalAAFeedback = 321, // TAA debug: XRender final current-frame blend factor.
         TemporalAARejection = 322, // TAA debug: luma/clip/depth-normal pass weights; bright means stable/accepted.
         TemporalAAHistoryUV = 323, // TAA debug: history UV and in-bounds state.
         TemporalAADifference = 324, // TAA debug: current frame versus history difference.
@@ -193,7 +193,7 @@ namespace Burt.RenderPipeline // 使用 BurtRP 运行时命名空间，让渲染
         ScreenSpaceReflectionHiZProbeBlocked = 363, // SSR debug: candidate HiZ skip attempts blocked by local mip0 raw-hit proof.
         ScreenSpaceReflectionHiZStepCompare = 364, // SSR debug: green means candidate used fewer normalized steps, red means more, blue means near equal.
         TemporalAARejectionReasons = 365, // TAA debug: RGB rejection causes, with magenta highlighting clamp pressure.
-        TemporalAAFeedbackWeight = 367, // TAA debug: heatmap of the final history feedback weight.
+        TemporalAAFeedbackWeight = 367, // TAA debug: heatmap of XRender's final current-frame blend factor.
         TemporalAAPrevUseCount = 376, // TAA debug: raw PrevUseCount RT, where 1 reuse maps to mid gray.
         TemporalAAMetadata = 489, // TAA debug: metadata RGB, red = trusted object motion, green = responsive, blue = untrusted motion.
         TemporalAAObjectMotionMask = 490, // TAA debug: object motion ownership, red = trusted, green = untrusted, blue = velocity valid.

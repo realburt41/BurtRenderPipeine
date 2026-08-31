@@ -117,11 +117,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 #endif
 
                 var captureRenderGraphDebug = ShouldCaptureRenderGraphDebug(request, asset);
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                renderGraph.SetCompilationMode(captureRenderGraphDebug ||
+                    (asset != null && asset.EnableRenderGraphPassCulling)
+                        ? BurtRenderGraph.BurtRenderGraphCompilationMode.Full
+                        : BurtRenderGraph.BurtRenderGraphCompilationMode.Validation);
+#else
                 renderGraph.SetCompilationMode(captureRenderGraphDebug
                     ? BurtRenderGraph.BurtRenderGraphCompilationMode.Full
                     : asset != null && asset.EnableRenderGraphPassCulling
                         ? BurtRenderGraph.BurtRenderGraphCompilationMode.Culling
                         : BurtRenderGraph.BurtRenderGraphCompilationMode.Lightweight);
+#endif
 
                 // The explicit RenderGraph/Camera/Stage/Pass samplers are the authoritative
                 // RenderDoc hierarchy. An unnamed pooled buffer avoids Unity adding a second

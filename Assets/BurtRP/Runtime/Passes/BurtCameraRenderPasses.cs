@@ -251,7 +251,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
         {
             var drawingSettings = new DrawingSettings(BurtGBuffer, sortingSettings); // 只绘制 LightMode 为 BurtGBuffer 的 shader pass，避免 Forward pass 误写入 GBuffer。
 
-            drawingSettings.perObjectData = PerObjectData.None; // GBuffer 只负责写材质属性，不再请求 SH/ReflectionProbe，避免 Deferred 间接光继续依赖 DrawRenderers 的 per-object 副作用。
+            drawingSettings.perObjectData = PerObjectData.MotionVectors; // XRender writes desktop velocity in the GBuffer draw and requests Unity's previous-object data here.
 
             return drawingSettings; // 返回配置好的 GBuffer 绘制设置，供 Draw GBuffer Opaque Pass 使用。
         }
@@ -261,6 +261,142 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             var drawingSettings = new DrawingSettings(BurtSubsurfaceForward, sortingSettings);
             drawingSettings.perObjectData = PerObjectData.None;
             return drawingSettings;
+        }
+    }
+
+    // XRender's desktop deferred path writes velocity in the same GBuffer draw.
+    // BRP uses the eighth MRT for the same purpose, avoiding a depth-sensitive
+    // second scene draw for opaque motion vectors.
+    internal static class BurtGBufferVelocityUtility
+    {
+        public static readonly int TextureId = Shader.PropertyToID("_BurtTAAVelocityTexture");
+        private static readonly int CurrentNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAACurrentNonJitteredViewProjection");
+        private static readonly int PreviousNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAAPreviousNonJitteredViewProjection");
+        private static readonly int ClipToPreviousClipId = Shader.PropertyToID("_BurtTAAClipToPreviousClip");
+        private static readonly int TexelSizeId = Shader.PropertyToID("_BurtTAATexelSize");
+        private static readonly int JitterId = Shader.PropertyToID("_BurtTAAJitter");
+        private static readonly int PreviousRenderDeltaTimeId = Shader.PropertyToID("_BurtTAAPreviousRenderDeltaTime");
+
+        public static bool IsEnabled(BurtRenderGraphContext context)
+        {
+            var temporalAA = context != null && context.Request != null ? context.Request.TemporalAA : null;
+            return temporalAA != null && temporalAA.Enabled && SystemInfo.supportedRenderTargetCount >= 8;
+        }
+
+        public static RenderTextureDescriptor CreateDescriptor(Camera camera)
+        {
+            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            descriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            descriptor.depthBufferBits = 0;
+            descriptor.msaaSamples = 1;
+            descriptor.sRGB = false;
+            descriptor.useMipMap = false;
+            descriptor.autoGenerateMips = false;
+            descriptor.enableRandomWrite = false;
+            return descriptor;
+        }
+
+        public static void AllocateClearAndBind(
+            CommandBuffer cmd,
+            BurtRenderGraphContext context,
+            Camera camera,
+            BurtRenderTargetHandle gbuffer0,
+            BurtRenderTargetHandle gbuffer1,
+            BurtRenderTargetHandle gbuffer2,
+            BurtRenderTargetHandle gbuffer3,
+            BurtRenderTargetHandle gbuffer4,
+            BurtRenderTargetHandle gbuffer5,
+            BurtRenderTargetHandle objectIndex,
+            BurtRenderTargetHandle depth)
+        {
+            if (!IsEnabled(context))
+            {
+                return;
+            }
+
+            var descriptor = CreateDescriptor(camera);
+            cmd.GetTemporaryRT(TextureId, descriptor, FilterMode.Point);
+            var velocity = new RenderTargetIdentifier(TextureId);
+            cmd.SetRenderTarget(velocity, depth.Identifier);
+            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+            UploadGlobals(cmd, context, descriptor.width, descriptor.height);
+            Bind(cmd, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4, gbuffer5, objectIndex, velocity, depth);
+        }
+
+        public static void BindExisting(
+            CommandBuffer cmd,
+            BurtRenderGraphContext context,
+            Camera camera,
+            BurtRenderTargetHandle gbuffer0,
+            BurtRenderTargetHandle gbuffer1,
+            BurtRenderTargetHandle gbuffer2,
+            BurtRenderTargetHandle gbuffer3,
+            BurtRenderTargetHandle gbuffer4,
+            BurtRenderTargetHandle gbuffer5,
+            BurtRenderTargetHandle objectIndex,
+            BurtRenderTargetHandle depth)
+        {
+            if (!IsEnabled(context))
+            {
+                return;
+            }
+
+            var descriptor = CreateDescriptor(camera);
+            UploadGlobals(cmd, context, descriptor.width, descriptor.height);
+            Bind(cmd, gbuffer0, gbuffer1, gbuffer2, gbuffer3, gbuffer4, gbuffer5, objectIndex, new RenderTargetIdentifier(TextureId), depth);
+        }
+
+        private static void UploadGlobals(CommandBuffer cmd, BurtRenderGraphContext context, int width, int height)
+        {
+            var temporalAA = context.Request.TemporalAA;
+            cmd.SetGlobalMatrix(CurrentNonJitteredViewProjectionId, temporalAA.CurrentNonJitteredViewProjectionMatrix);
+            cmd.SetGlobalMatrix(PreviousNonJitteredViewProjectionId, temporalAA.PreviousNonJitteredViewProjectionMatrix);
+            // XRender evaluates camera-only velocity per pixel from device depth.
+            // Upload this before the GBuffer draw; setting it only in the later
+            // temporal resolve leaves large static triangles with interpolated
+            // previous-clip coordinates and therefore incorrect camera motion.
+            cmd.SetGlobalMatrix(ClipToPreviousClipId, temporalAA.ClipToPreviousClipMatrix);
+            // XRender animates the previous foliage endpoint with the previous
+            // render time for this camera. SceneView repaint cadence is not
+            // guaranteed to match Unity's global frame delta.
+            cmd.SetGlobalFloat(PreviousRenderDeltaTimeId, temporalAA.PreviousRenderDeltaTime);
+            cmd.SetGlobalVector(JitterId, new Vector4(
+                temporalAA.Jitter.x,
+                temporalAA.Jitter.y,
+                temporalAA.JitterPixels.x,
+                temporalAA.JitterPixels.y));
+            cmd.SetGlobalVector(TexelSizeId, new Vector4(
+                1f / Mathf.Max(1, width),
+                1f / Mathf.Max(1, height),
+                Mathf.Max(1, width),
+                Mathf.Max(1, height)));
+        }
+
+        private static void Bind(
+            CommandBuffer cmd,
+            BurtRenderTargetHandle gbuffer0,
+            BurtRenderTargetHandle gbuffer1,
+            BurtRenderTargetHandle gbuffer2,
+            BurtRenderTargetHandle gbuffer3,
+            BurtRenderTargetHandle gbuffer4,
+            BurtRenderTargetHandle gbuffer5,
+            BurtRenderTargetHandle objectIndex,
+            RenderTargetIdentifier velocity,
+            BurtRenderTargetHandle depth)
+        {
+            var colorTargets = new[]
+            {
+                gbuffer0.Identifier,
+                gbuffer1.Identifier,
+                gbuffer2.Identifier,
+                gbuffer3.Identifier,
+                gbuffer4.Identifier,
+                gbuffer5.Identifier,
+                objectIndex.Identifier,
+                velocity
+            };
+            cmd.SetRenderTarget(colorTargets, depth.Identifier);
         }
     }
 
@@ -3204,7 +3340,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
                 return;
             }
 
-            context.ScriptableContext.DrawGizmos(context.Request.Camera, GizmoSubset.PostImageEffects);
+            var camera = context.Request.Camera;
+            var temporalAA = context.Request.TemporalAA;
+            if (camera == null || temporalAA == null || !temporalAA.Enabled)
+            {
+                context.ScriptableContext.DrawGizmos(camera, GizmoSubset.PostImageEffects);
+                return;
+            }
+
+            // XRender never jitters the native Unity Camera; it keeps Halton jitter in its own
+            // per-camera constants, so editor gizmos read the stable native projection. BurtRP
+            // temporarily jitters Camera.projectionMatrix for regular scene draws, therefore
+            // expose the non-jittered projection while Unity records this editor-only draw and
+            // restore the jittered camera immediately afterwards for the pending SRP submit.
+            var savedProjectionMatrix = camera.projectionMatrix;
+            var savedNonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
+            try
+            {
+                camera.projectionMatrix = temporalAA.NonJitteredProjectionMatrix;
+                camera.nonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
+                context.ScriptableContext.DrawGizmos(camera, GizmoSubset.PostImageEffects);
+            }
+            finally
+            {
+                camera.nonJitteredProjectionMatrix = savedNonJitteredProjectionMatrix;
+                camera.projectionMatrix = savedProjectionMatrix;
+            }
 #endif
         }
     }

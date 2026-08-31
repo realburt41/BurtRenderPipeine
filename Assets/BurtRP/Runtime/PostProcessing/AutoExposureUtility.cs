@@ -31,6 +31,9 @@ namespace Burt.RenderPipeline
         public readonly bool UsingFallbackSample;
         public readonly int ReadbackWidth;
         public readonly int ReadbackHeight;
+        public readonly float GlobalExposureScale;
+        public readonly float AverageLocalExposure;
+        public readonly float PreExposure;
 
         public AutoExposureDebugSnapshot(
             bool hasState,
@@ -56,7 +59,10 @@ namespace Burt.RenderPipeline
             string sampleStatus,
             bool usingFallbackSample,
             int readbackWidth,
-            int readbackHeight)
+            int readbackHeight,
+            float globalExposureScale = 1f,
+            float averageLocalExposure = 1f,
+            float preExposure = 1f)
         {
             HasState = hasState;
             Mode = mode;
@@ -82,6 +88,9 @@ namespace Burt.RenderPipeline
             UsingFallbackSample = usingFallbackSample;
             ReadbackWidth = Mathf.Max(0, readbackWidth);
             ReadbackHeight = Mathf.Max(0, readbackHeight);
+            GlobalExposureScale = PreExposureUtility.SanitizeExposure(globalExposureScale, 1f);
+            AverageLocalExposure = PreExposureUtility.SanitizeExposure(averageLocalExposure, 1f);
+            PreExposure = PreExposureUtility.SanitizeExposure(preExposure, 1f);
         }
     }
 
@@ -123,7 +132,10 @@ namespace Burt.RenderPipeline
                     gpuSnapshot.HasSample ? "GPU histogram ready" : gpuSnapshot.ReadbackPending ? "GPU readback pending" : "Waiting for GPU exposure",
                     !gpuSnapshot.HasSample,
                     2,
-                    1);
+                    1,
+                    gpuSnapshot.CurrentScale,
+                    gpuSnapshot.AverageLocalExposure,
+                    GpuExposureUtility.ResolvePreExposure(camera, gpuSnapshot.CurrentScale));
                 return true;
             }
 

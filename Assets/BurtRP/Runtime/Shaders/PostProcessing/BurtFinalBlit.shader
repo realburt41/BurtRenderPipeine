@@ -40,8 +40,9 @@ Shader "Hidden/BurtRP/FinalBlit"
             // 声明 BurtRP 注册的中间相机颜色纹理。
             sampler2D _BurtCameraColorTexture;
 
-            // 声明 FinalBlit 是否需要翻转采样 UV 的 Y 轴，1 表示翻转，0 表示保持原样。
-            float _BurtFinalBlitYFlip;
+            // XRender-style source scale/bias. It maps the final camera viewport
+            // back onto the valid source domain and carries the platform Y flip.
+            float4 _BurtFinalBlitScaleBias;
 
             // 定义顶点输入结构，全屏三角形只需要系统提供的顶点 ID。
             struct Attributes
@@ -72,15 +73,7 @@ Shader "Hidden/BurtRP/FinalBlit"
                 // 把 UV 从 0..2 区间转换成裁剪空间坐标，形成一个覆盖全屏的三角形。
                 output.PositionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
 
-                // 先把程序化生成的 UV 写入输出结构，后面再根据 C# 上传的开关决定是否翻转 Y。
-                output.UV = uv;
-
-                // 如果当前最终目标需要适配 D3D 类平台的 RenderTexture 到 backbuffer 方向差异，就翻转采样 UV 的 Y 轴。
-                if (_BurtFinalBlitYFlip > 0.5)
-                {
-                    // 用 1 - y 把屏幕底部采样到源纹理底部，修正 Scene/Game 视图上下颠倒。
-                    output.UV.y = 1.0 - output.UV.y;
-                }
+                output.UV = uv * _BurtFinalBlitScaleBias.xy + _BurtFinalBlitScaleBias.zw;
 
                 // 返回顶点 shader 输出结果。
                 return output;
@@ -104,4 +97,3 @@ Shader "Hidden/BurtRP/FinalBlit"
     // 禁用 fallback，避免最终拷贝出错时悄悄回退到其他管线 shader。
     Fallback Off
 }
-

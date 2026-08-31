@@ -62,16 +62,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private const int BloomGaussianSampleCapacity = PostProcessUtility.BloomGaussianSampleCapacity; // XRender keeps 64 shader slots while the PC runtime caps active samples at 32.
         private const int BloomGaussianKernelCacheSize = MaxBloomMipCount * 2; // One horizontal and one vertical kernel per Bloom mip.
         private const float BloomGaussianKernelRadiusCacheScale = 1024f; // Quantize radius enough to keep cache stable without visible drift.
-        private static readonly RenderQueueRange TemporalAAObjectMotionVectorQueueRange = new RenderQueueRange
-        {
-            lowerBound = (int)RenderQueue.Geometry,
-            upperBound = (int)RenderQueue.AlphaTest + 45
-        };
-        private static readonly RenderQueueRange TemporalAATransparentMotionVectorQueueRange = new RenderQueueRange
-        {
-            lowerBound = (int)RenderQueue.Transparent,
-            upperBound = (int)RenderQueue.Overlay - 1
-        };
+        private static readonly RenderQueueRange TemporalAAObjectMotionVectorQueueRange = RenderQueueRange.opaque;
+        private static readonly RenderQueueRange TemporalAATransparentMotionVectorQueueRange = RenderQueueRange.transparent;
+        private static readonly ShaderTagId TemporalAAObjectMotionVectorsTag = new ShaderTagId("BurtMotionVectors");
+        private static readonly ShaderTagId TemporalAAForwardOnlyMotionVectorsTag = new ShaderTagId("BurtForwardOnlyMotionVectors");
         private enum PostProcessShaderPass
         {
             CopyAndComposite = 0,
@@ -143,10 +137,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAAUHistoryGuideOutputTextureId = Shader.PropertyToID("_BurtTAAUHistoryGuideOutputTexture");
         private static readonly int TemporalAAUShadingRejectionTextureId = Shader.PropertyToID("_BurtTAAUShadingRejectionTexture");
         private static readonly int TemporalAAUShadingRejectionOutputTextureId = Shader.PropertyToID("_BurtTAAUShadingRejectionOutputTexture");
+        private static readonly int TemporalAAUDilatedShadingRejectionTextureId = Shader.PropertyToID("_BurtTAAUDilatedShadingRejectionTexture");
+        private static readonly int TemporalAAUDilatedShadingRejectionOutputTextureId = Shader.PropertyToID("_BurtTAAUDilatedShadingRejectionOutputTexture");
         private static readonly int TemporalAAUUpdatedHistoryTextureId = Shader.PropertyToID("_BurtTAAUUpdatedHistoryTexture");
         private static readonly int TemporalAAUUpdatedHistoryOutputTextureId = Shader.PropertyToID("_BurtTAAUUpdatedHistoryOutputTexture");
+        private static readonly int TemporalAAUFinalBlendDebugOutputTextureId = Shader.PropertyToID("_BurtTAAUFinalBlendDebugOutputTexture");
+        private static readonly int TemporalAAUOutputTextureId = Shader.PropertyToID("_BurtTAAUOutputTexture");
         private static readonly int TemporalAAUHistoryParamsId = Shader.PropertyToID("_BurtTAAUHistoryParams");
         private static readonly int TemporalAAUOutputTexelSizeId = Shader.PropertyToID("_BurtTAAUOutputTexelSize");
+        private static readonly int TemporalAAUInputTexelSizeId = Shader.PropertyToID("_BurtTAAUInputTexelSize");
         private static readonly int TemporalAAUGuideTexelSizeId = Shader.PropertyToID("_BurtTAAUGuideTexelSize");
         private static readonly int TemporalAAUpscaleCurrentTextureId = Shader.PropertyToID("_BurtTAAUpscaleCurrentTexture");
         private static readonly int TemporalAAUpscaleTexelSizeId = Shader.PropertyToID("_BurtTAAUpscaleTexelSize");
@@ -166,6 +165,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAAParamsId = Shader.PropertyToID("_BurtTAAParams");
         private static readonly int TemporalAAParams2Id = Shader.PropertyToID("_BurtTAAParams2");
         private static readonly int TemporalAADepthParamsId = Shader.PropertyToID("_BurtTAADepthParams");
+        private static readonly int TemporalAADecimateModeId = Shader.PropertyToID("_BurtTAADecimateMode");
+        private static readonly int TemporalAADilateModeId = Shader.PropertyToID("_BurtTAADilateMode");
         private static readonly int TemporalAAResponsiveParamsId = Shader.PropertyToID("_BurtTAAResponsiveParams");
         private static readonly int TemporalAAEdgeParamsId = Shader.PropertyToID("_BurtTAAEdgeParams");
         private static readonly int TemporalAAStencilTexelSizeId = Shader.PropertyToID("_BurtTAAStencilTexelSize");
@@ -174,7 +175,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int TemporalAACurrentSampleWeights1Id = Shader.PropertyToID("_BurtTAACurrentSampleWeights1");
         private static readonly int TemporalAACurrentSampleWeights2Id = Shader.PropertyToID("_BurtTAACurrentSampleWeights2");
         private static readonly int TemporalAAHasGBufferId = Shader.PropertyToID("_BurtTAAHasGBuffer");
-        private static readonly int TemporalAAObjectMotionStencilFallbackId = Shader.PropertyToID("_BurtTAAObjectMotionStencilFallback");
+        private static readonly int TemporalAAPreviousRenderDeltaTimeId = Shader.PropertyToID("_BurtTAAPreviousRenderDeltaTime");
         private static readonly int ShadingDebugEnabledId = Shader.PropertyToID(BurtShadingDebugSettings.EnabledShaderName);
         private static readonly Color TemporalAADebugUnavailableColor = new Color(0.65f, 0.05f, 0.9f, 1f);
 
@@ -216,6 +217,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int AutoExposureDebugHasHistogramId = Shader.PropertyToID("_BurtAutoExposureDebugHasHistogram");
         private static readonly int AutoExposureDebugToneMappedTextureId = Shader.PropertyToID("_BurtAutoExposureDebugToneMappedTexture");
         private static readonly int AutoExposureDebugHasToneMappedTextureId = Shader.PropertyToID("_BurtAutoExposureDebugHasToneMappedTexture");
+        private static readonly int AutoExposureDebugFlipYId = Shader.PropertyToID("_BurtAutoExposureDebugFlipY");
+        private static readonly int PlainCopyFlipYId = Shader.PropertyToID("_BurtPlainCopyFlipY");
         private static readonly int[] AutoExposureTextureIds = CreateAutoExposureTextureIds();
 
         private static readonly Vector4[] BloomGaussianWeights = new Vector4[BloomGaussianSampleCapacity]; // Match XRender's 64-slot constant-buffer layout.
@@ -451,7 +454,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var tonemappingMode = PostProcessUtility.ResolveTonemappingMode(context.Asset); // 从当前 VolumeStack 安全解析本次后处理应该使用的 Tonemapping 模式。
 
             var exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
-            var preExposureState = PreExposureUtility.ResolveForFrame(exposureSettings);
+            var preExposureState = PreExposureUtility.ResolveForFrame(context.Request, context.Asset);
             var residualPostExposureMultiplier = preExposureState.ResidualPostExposure;
             var postExposureMultiplier = exposureSettings.Multiplier; // 把 Global Volume 中的 EV 曝光转换成本次 shader 使用的线性倍率。
 
@@ -477,10 +480,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 : BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(0));
             var hasBloomOutput = bloomMipCount > 0 && bloomOutputTarget.IsValid;
 
+            ResolveActivePostProcessSize(context, out var postProcessWidth, out var postProcessHeight);
+
             var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流，避免后处理被拆成孤立提交。
             PreExposureUtility.UploadGlobals(cmd, preExposureState);
             cmd.SetRenderTarget(postProcessColorTarget.Identifier); // 先绑定 PostProcessColor，让第一段全屏拷贝写入后处理中间目标。
-            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request.Camera);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, postProcessWidth, postProcessHeight);
+            SetPostProcessTexelSize(cmd, postProcessWidth, postProcessHeight);
 
             var autoExposureDebugDrawnToCameraColor = false;
             var useBloomDebug = ShouldUseBloomDebugView(bloomDebugView, bloomMipCount); // Bloom debug 只在 Bloom 实际执行且没有其他 shading debug 抢占时显示。
@@ -513,7 +519,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                         useColorGrading);
                     cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.CopyAndComposite), MeshTopology.Triangles, 3, 1);
                     cmd.SetRenderTarget(cameraColorTarget.Identifier);
-                    BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request.Camera);
+                    BurtRenderTargetDescriptorUtility.SetViewport(cmd, postProcessWidth, postProcessHeight);
                     autoExposureDebugDrawnToCameraColor = true;
                 }
 
@@ -559,7 +565,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             if (allowFinalPostEffects && useVignette)
             {
                 SetVignetteGlobals(cmd, vignetteSettings);
-                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, currentSource, nextTargetIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier, PostProcessShaderPass.Vignette);
+                DrawFinalPostProcessPass(cmd, context, material, currentSource, nextTargetIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier, PostProcessShaderPass.Vignette);
                 currentIsCameraColor = nextTargetIsCameraColor;
                 currentSource = currentIsCameraColor ? cameraColorTarget.Identifier : postProcessColorTarget.Identifier;
                 nextTargetIsCameraColor = !nextTargetIsCameraColor;
@@ -568,7 +574,29 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             if (!currentIsCameraColor)
             {
-                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, currentSource, cameraColorTarget.Identifier, PostProcessShaderPass.CopyAndComposite);
+                if (autoExposureDebugMode > 0)
+                {
+                    // Auto-exposure debug is already a final display image. The
+                    // intermediate RT -> CameraColor transition needs one explicit
+                    // UV correction on D3D so the scene and XRender-style overlay
+                    // keep their top-left orientation.
+                    DrawFinalPostProcessPass(
+                        cmd,
+                        context,
+                        material,
+                        currentSource,
+                        cameraColorTarget.Identifier,
+                        PostProcessShaderPass.PlainCopy,
+                        true);
+                }
+                else
+                {
+                    // Match XRender's post chain: tone-map/composite exactly once,
+                    // then use a neutral transfer when ping-ponging back to the
+                    // camera color target. Re-running CopyAndComposite here applies
+                    // exposure, bloom and tone mapping a second time.
+                    DrawFinalPostProcessPass(cmd, context, material, currentSource, cameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
+                }
             }
 
 
@@ -684,6 +712,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 if (useTemporalAAUpscale && context.ResourceRegistry != null)
                 {
                     var temporalAAOutputDescriptor = BurtRenderTargetDescriptorUtility.CreateOutputPostProcessColorDescriptor(context.Request.Camera);
+                    var temporalAAUOutputFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32;
+                    if (SystemInfo.IsFormatSupported(temporalAAUOutputFormat, UnityEngine.Experimental.Rendering.FormatUsage.Render) &&
+                        SystemInfo.IsFormatSupported(temporalAAUOutputFormat, UnityEngine.Experimental.Rendering.FormatUsage.Sample) &&
+                        SystemInfo.IsFormatSupported(temporalAAUOutputFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
+                    {
+                        temporalAAOutputDescriptor.graphicsFormat = temporalAAUOutputFormat;
+                    }
+                    else
+                    {
+                        // Keep XRender's HDR output contract when packed
+                        // R11G11B10 UAV writes are unavailable (notably D3D11).
+                        temporalAAOutputDescriptor.graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat;
+                    }
+                    temporalAAOutputDescriptor.sRGB = false;
                     temporalAAOutputDescriptor.enableRandomWrite = SystemInfo.supportsComputeShaders;
                     context.ResourceRegistry.SetRenderTargetDescriptor(BurtRenderGraphResourceRegistry.TemporalAAOutputName, temporalAAOutputDescriptor, FilterMode.Bilinear, "Burt Temporal AA Output");
                     temporalAAOutputTarget = context.ResourceRegistry.AllocateRenderTarget(BurtRenderGraphResourceRegistry.TemporalAAOutputName);
@@ -712,7 +754,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 }
 
                 var exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
-                var preExposureState = PreExposureUtility.ResolveForFrame(exposureSettings);
+                var preExposureState = PreExposureUtility.ResolveForFrame(context.Request, context.Asset);
                 var cmd = context.AcquireCommandBuffer(Name);
                 PreExposureUtility.UploadGlobals(cmd, preExposureState);
                 if (useTemporalAA &&
@@ -757,13 +799,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             public override void Configure(BurtRenderPassBuilder builder)
             {
                 if (!PostProcessUtility.ShouldUsePostProcessFramework(builder.Request, builder.Asset) ||
-                    !ShouldUseTemporalAAPass(builder.Request, builder.Asset) ||
-                    ShouldUseTemporalAAUpscale(builder.Request, builder.Asset))
+                    !ShouldUseTemporalAAPass(builder.Request, builder.Asset))
                 {
                     return;
                 }
 
-                builder.ReadPostProcessColor();
+                if (ShouldUseTemporalAAUpscale(builder.Request, builder.Asset))
+                {
+                    builder.ReadTemporalAAOutput();
+                    // TAAU transfers ownership from the scaled scene target to a
+                    // full-resolution raster target consumed by Bloom/tonemapping.
+                    builder.WritePostProcessColor();
+                }
+                else
+                {
+                    builder.ReadPostProcessColor();
+                }
                 builder.WriteCameraColor();
             }
 
@@ -771,11 +822,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             {
                 if (!PostProcessUtility.ShouldUsePostProcessFramework(context.Request, context.Asset) ||
                     !ShouldUseTemporalAAPass(context.Request, context.Asset) ||
-                    ShouldUseTemporalAAUpscale(context.Request, context.Asset) ||
                     context.Request == null ||
                     context.Request.Camera == null ||
-                    !context.CameraColorTarget.IsValid ||
-                    !context.PostProcessColorTarget.IsValid)
+                    !context.CameraColorTarget.IsValid)
+                {
+                    return;
+                }
+
+                var useTemporalAAUpscale = ShouldUseTemporalAAUpscale(context.Request, context.Asset);
+                var sourceTarget = useTemporalAAUpscale ? context.TemporalAAOutputTarget : context.PostProcessColorTarget;
+                if (!sourceTarget.IsValid ||
+                    (useTemporalAAUpscale && (context.ResourceRegistry == null || !context.PostProcessColorTarget.IsValid)))
                 {
                     return;
                 }
@@ -788,13 +845,64 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
                 var cmd = context.AcquireCommandBuffer(Name);
                 DisablePostProcessEffects(cmd);
-                DrawFinalPostProcessPass(
-                    cmd,
-                    context.Request.Camera,
-                    material,
-                    context.PostProcessColorTarget.Identifier,
-                    context.CameraColorTarget.Identifier,
-                    PostProcessShaderPass.TemporalAACopy);
+
+                if (useTemporalAAUpscale)
+                {
+                    BurtRenderResolutionStageUtility.BeginOutputResolutionStage(context.Request.Camera);
+                    // XRender changes sceneColor ownership at its BeforeBloom DRS
+                    // stage. Recreate both raster ping-pong targets at the TAAU
+                    // output extent, then normalize the compute UAV orientation
+                    // through the same platform-aware TemporalAACopy shader used
+                    // by native TSR.
+                    var fullResolutionDescriptor = BurtRenderTargetDescriptorUtility.CreateOutputPostProcessColorDescriptor(context.Request.Camera);
+                    if (context.ResourceRegistry.TryGetAllocatedRenderTexture(BurtRenderGraphResourceRegistry.TemporalAAOutputName, out var temporalAAOutputTexture) &&
+                        temporalAAOutputTexture != null)
+                    {
+                        fullResolutionDescriptor = temporalAAOutputTexture.descriptor;
+                    }
+
+                    fullResolutionDescriptor.depthBufferBits = 0;
+                    fullResolutionDescriptor.msaaSamples = 1;
+                    fullResolutionDescriptor.useMipMap = false;
+                    fullResolutionDescriptor.autoGenerateMips = false;
+                    fullResolutionDescriptor.enableRandomWrite = false;
+
+                    context.ResourceRegistry.SetRenderTargetDescriptor(
+                        BurtRenderGraphResourceRegistry.CameraColorName,
+                        fullResolutionDescriptor,
+                        FilterMode.Bilinear,
+                        "Burt Camera Color Post TAAU");
+                    var cameraColorTarget = context.ResourceRegistry.AllocateRenderTarget(BurtRenderGraphResourceRegistry.CameraColorName);
+                    context.ResourceRegistry.SetRenderTargetDescriptor(
+                        BurtRenderGraphResourceRegistry.PostProcessColorName,
+                        fullResolutionDescriptor,
+                        FilterMode.Bilinear,
+                        "Burt Post Process Color Post TAAU");
+                    var postProcessColorTarget = context.ResourceRegistry.AllocateRenderTarget(BurtRenderGraphResourceRegistry.PostProcessColorName);
+                    if (!cameraColorTarget.IsValid || !postProcessColorTarget.IsValid)
+                    {
+                        context.ExecuteAndReleaseCommandBuffer(cmd);
+                        return;
+                    }
+
+                    cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraColorTextureId, cameraColorTarget.Identifier);
+                    cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.PostProcessColorTextureId, postProcessColorTarget.Identifier);
+                    // XRender hands the compute output to the post stack without a
+                    // fullscreen UV transform. Preserve that storage orientation
+                    // exactly: a raster copy applies UNITY_UV_STARTS_AT_TOP and
+                    // turns the D3D UAV result upside down before Bloom/tonemapping.
+                    cmd.CopyTexture(sourceTarget.Identifier, cameraColorTarget.Identifier);
+                }
+                else
+                {
+                    DrawFinalPostProcessPass(
+                        cmd,
+                        context.Request.Camera,
+                        material,
+                        sourceTarget.Identifier,
+                        context.CameraColorTarget.Identifier,
+                        PostProcessShaderPass.TemporalAACopy);
+                }
                 context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
@@ -894,6 +1002,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         internal sealed class BloomBuildPassSequence
         {
+            private static readonly string[] BloomTokens = { "Bloom" };
             private readonly BurtRenderPass sceneDownsamplePass = new BloomSceneDownsamplePass();
             private readonly BurtRenderPass prefilterPass = new BloomPrefilterPass();
             private readonly BurtRenderPass[] downsamplePasses = new BurtRenderPass[BurtRenderGraphResourceRegistry.BloomPyramidCount - 1];
@@ -922,7 +1031,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 }
 
                 var stageCount = PostProcessUtility.ResolveBloomMipCount(request, asset);
-                if (stageCount <= 0)
+                using var featureBlock = new BurtRenderGraphFeatureBlock(
+                    graph,
+                    "Bloom",
+                    PostProcessPass.ShouldUseBloomPass(request, asset) && stageCount > 0,
+                    BloomTokens,
+                    BloomTokens);
+                if (!featureBlock.IsEnabled)
                 {
                     return;
                 }
@@ -984,11 +1099,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var sourceWidth = PostProcessUtility.ResolveBloomSourceWidth(context.Request.Camera);
-                var sourceHeight = PostProcessUtility.ResolveBloomSourceHeight(context.Request.Camera);
+                ResolveActivePostProcessSize(context, out var sourceWidth, out var sourceHeight);
                 var cmd = context.AcquireCommandBuffer(Name);
                 cmd.SetRenderTarget(target.Identifier);
-                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(context.Request.Camera, 0), GetBloomMipHeight(context.Request.Camera, 0));
+                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(context, 0), GetBloomMipHeight(context, 0));
                 SetBloomSource(cmd, context.CameraColorTarget.Identifier, sourceWidth, sourceHeight);
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomDownsample), MeshTopology.Triangles, 3, 1);
                 context.ExecuteAndReleaseCommandBuffer(cmd);
@@ -1039,7 +1153,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 }
 
                 var exposureSettings = PostProcessUtility.ResolvePhysicalExposureSettings(context.Request, context.Asset);
-                var preExposureState = PreExposureUtility.ResolveForFrame(exposureSettings);
+                var preExposureState = PreExposureUtility.ResolveForFrame(context.Request, context.Asset);
                 var target = AllocateBloomGraphTarget(context, BurtRenderGraphResourceRegistry.BloomSetupName, 0, settings);
                 if (!target.IsValid)
                 {
@@ -1055,8 +1169,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 cmd.SetGlobalFloat(UseExposureTextureId, hasExposureTexture ? 1f : 0f);
                 cmd.SetGlobalFloat(UseBloomAlphaId, PostProcessUtility.ShouldPreserveBloomAlpha(settings, PostProcessUtility.ResolveBloomDebugView(settings)) ? 1f : 0f);
                 cmd.SetRenderTarget(target.Identifier);
-                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(context.Request.Camera, 0), GetBloomMipHeight(context.Request.Camera, 0));
-                SetBloomSource(cmd, inputTarget.Identifier, GetBloomMipWidth(context.Request.Camera, 0), GetBloomMipHeight(context.Request.Camera, 0));
+                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(context, 0), GetBloomMipHeight(context, 0));
+                SetBloomSource(cmd, inputTarget.Identifier, GetBloomMipWidth(context, 0), GetBloomMipHeight(context, 0));
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomPrefilter), MeshTopology.Triangles, 3, 1);
                 context.ExecuteAndReleaseCommandBuffer(cmd);
             }
@@ -1118,8 +1232,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
                 var cmd = context.AcquireCommandBuffer(Name);
                 cmd.SetRenderTarget(target.Identifier);
-                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(context.Request.Camera, stageIndex), GetBloomMipHeight(context.Request.Camera, stageIndex));
-                SetBloomSource(cmd, source.Identifier, GetBloomMipWidth(context.Request.Camera, stageIndex - 1), GetBloomMipHeight(context.Request.Camera, stageIndex - 1));
+                BurtRenderTargetDescriptorUtility.SetViewport(cmd, GetBloomMipWidth(context, stageIndex), GetBloomMipHeight(context, stageIndex));
+                SetBloomSource(cmd, source.Identifier, GetBloomMipWidth(context, stageIndex - 1), GetBloomMipHeight(context, stageIndex - 1));
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.BloomDownsample), MeshTopology.Triangles, 3, 1);
                 context.ExecuteAndReleaseCommandBuffer(cmd);
             }
@@ -1180,8 +1294,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var width = GetBloomMipWidth(context.Request.Camera, mipIndex);
-                var height = GetBloomMipHeight(context.Request.Camera, mipIndex);
+                var width = GetBloomMipWidth(context, mipIndex);
+                var height = GetBloomMipHeight(context, mipIndex);
                 var stageIndex = BurtRenderGraphResourceRegistry.BloomPyramidCount - 1 - mipIndex;
                 var blurRadius = PostProcessUtility.CalculateBloomBlurRadius(settings, width, stageIndex);
                 var cmd = context.AcquireCommandBuffer(Name);
@@ -1241,8 +1355,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     return;
                 }
 
-                var width = GetBloomMipWidth(context.Request.Camera, mipIndex);
-                var height = GetBloomMipHeight(context.Request.Camera, mipIndex);
+                var width = GetBloomMipWidth(context, mipIndex);
+                var height = GetBloomMipHeight(context, mipIndex);
                 var stageIndex = BurtRenderGraphResourceRegistry.BloomPyramidCount - 1 - mipIndex;
                 var blurRadius = PostProcessUtility.CalculateBloomBlurRadius(settings, width, stageIndex);
                 var stageTint = PostProcessUtility.CalculateBloomXRenderStageTint(settings, stageIndex);
@@ -1352,9 +1466,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 }
 
                 var cmd = context.AcquireCommandBuffer(Name);
-                if (ExecuteSMAA(cmd, context.Request.Camera, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, settings))
+                if (ExecuteSMAA(cmd, context, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, settings))
                 {
-                    DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
+                    DrawFinalPostProcessPass(cmd, context, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
                 }
 
                 context.ExecuteAndReleaseCommandBuffer(cmd);
@@ -1401,8 +1515,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
                 var cmd = context.AcquireCommandBuffer(Name);
                 SetFXAAGlobals(cmd, settings);
-                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, PostProcessShaderPass.FXAA);
-                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
+                DrawFinalPostProcessPass(cmd, context, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, PostProcessShaderPass.FXAA);
+                DrawFinalPostProcessPass(cmd, context, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
                 context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
@@ -1447,8 +1561,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
                 var cmd = context.AcquireCommandBuffer(Name);
                 SetRCASGlobals(cmd, settings);
-                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, PostProcessShaderPass.RCAS);
-                DrawFinalPostProcessPass(cmd, context.Request.Camera, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
+                DrawFinalPostProcessPass(cmd, context, material, context.CameraColorTarget.Identifier, context.PostProcessColorTarget.Identifier, PostProcessShaderPass.RCAS);
+                DrawFinalPostProcessPass(cmd, context, material, context.PostProcessColorTarget.Identifier, context.CameraColorTarget.Identifier, PostProcessShaderPass.PlainCopy);
                 context.ExecuteAndReleaseCommandBuffer(cmd);
             }
         }
@@ -1712,16 +1826,48 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalVector(ColorGradingLutParamsId, new Vector4(settings.LutSize, 1f / Mathf.Max(1, settings.LutSize), settings.HasLut ? settings.LutContribution : 0f, 0f));
         }
 
-        private static void DrawFinalPostProcessPass(CommandBuffer cmd, Camera camera, Material material, RenderTargetIdentifier source, RenderTargetIdentifier target, PostProcessShaderPass pass)
+        private static void DrawFinalPostProcessPass(CommandBuffer cmd, Camera camera, Material material, RenderTargetIdentifier source, RenderTargetIdentifier target, PostProcessShaderPass pass, bool flipY = false)
         {
             cmd.SetRenderTarget(target);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             cmd.SetGlobalTexture(SourceTextureId, source);
+            cmd.SetGlobalFloat(PlainCopyFlipYId, flipY ? 1f : 0f);
             SetPostProcessTexelSize(cmd, camera);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(pass), MeshTopology.Triangles, 3, 1);
         }
 
-        private static bool ExecuteSMAA(CommandBuffer cmd, Camera camera, Material material, RenderTargetIdentifier source, RenderTargetIdentifier target, SubpixelMorphologicalAASettings settings)
+        private static void DrawFinalPostProcessPass(CommandBuffer cmd, BurtRenderGraphContext context, Material material, RenderTargetIdentifier source, RenderTargetIdentifier target, PostProcessShaderPass pass, bool flipY = false)
+        {
+            ResolveActivePostProcessSize(context, out var width, out var height);
+            cmd.SetRenderTarget(target);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
+            cmd.SetGlobalTexture(SourceTextureId, source);
+            cmd.SetGlobalFloat(PlainCopyFlipYId, flipY ? 1f : 0f);
+            SetPostProcessTexelSize(cmd, width, height);
+            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(pass), MeshTopology.Triangles, 3, 1);
+        }
+
+        private static void ResolveActivePostProcessSize(BurtRenderGraphContext context, out int width, out int height)
+        {
+            width = 1;
+            height = 1;
+            if (context != null &&
+                context.ResourceRegistry != null &&
+                context.ResourceRegistry.TryGetAllocatedRenderTexture(BurtRenderGraphResourceRegistry.CameraColorName, out var cameraColorTexture) &&
+                cameraColorTexture != null)
+            {
+                width = Mathf.Max(1, cameraColorTexture.width);
+                height = Mathf.Max(1, cameraColorTexture.height);
+                return;
+            }
+
+            var camera = context != null && context.Request != null ? context.Request.Camera : null;
+            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            width = Mathf.Max(1, descriptor.width);
+            height = Mathf.Max(1, descriptor.height);
+        }
+
+        private static bool ExecuteSMAA(CommandBuffer cmd, BurtRenderGraphContext context, Material material, RenderTargetIdentifier source, RenderTargetIdentifier target, SubpixelMorphologicalAASettings settings)
         {
             if (!HasSMAAPasses(material))
             {
@@ -1733,7 +1879,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 return false;
             }
 
+            var camera = context != null && context.Request != null ? context.Request.Camera : null;
             var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            ResolveActivePostProcessSize(context, out var width, out var height);
+            descriptor.width = width;
+            descriptor.height = height;
             descriptor.depthBufferBits = 0;
             descriptor.msaaSamples = 1;
             descriptor.useMipMap = false;
@@ -1751,22 +1901,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             SetSMAAGlobals(cmd, settings);
             cmd.SetGlobalTexture(SMAAAreaTextureId, smaaAreaTexture);
             cmd.SetGlobalTexture(SMAASearchTextureId, smaaSearchTexture);
-            SetPostProcessTexelSize(cmd, camera);
+            SetPostProcessTexelSize(cmd, width, height);
 
             cmd.SetRenderTarget(edgeTarget);
-            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.ClearRenderTarget(false, true, Color.clear);
             cmd.SetGlobalTexture(SourceTextureId, source);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.SMAAEdgeDetection), MeshTopology.Triangles, 3, 1);
 
             cmd.SetRenderTarget(blendTarget);
-            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.ClearRenderTarget(false, true, Color.clear);
             cmd.SetGlobalTexture(SMAAEdgeTextureId, edgeTarget);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.SMAABlendWeights), MeshTopology.Triangles, 3, 1);
 
             cmd.SetRenderTarget(target);
-            BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             cmd.SetGlobalTexture(SourceTextureId, source);
             cmd.SetGlobalTexture(SMAABlendTextureId, blendTarget);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.SMAANeighborhoodBlending), MeshTopology.Triangles, 3, 1);
@@ -1832,14 +1982,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static void SetPostProcessTexelSize(CommandBuffer cmd, Camera camera)
         {
-            var width = 1;
-            var height = 1;
-            if (camera != null)
-            {
-                width = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.width : camera.pixelWidth);
-                height = Mathf.Max(1, camera.targetTexture != null ? camera.targetTexture.height : camera.pixelHeight);
-            }
+            var descriptor = BurtRenderTargetDescriptorUtility.CreatePostProcessColorDescriptor(camera);
+            SetPostProcessTexelSize(cmd, Mathf.Max(1, descriptor.width), Mathf.Max(1, descriptor.height));
+        }
 
+        private static void SetPostProcessTexelSize(CommandBuffer cmd, int width, int height)
+        {
+            width = Mathf.Max(1, width);
+            height = Mathf.Max(1, height);
             cmd.SetGlobalVector(PostProcessTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
         }
 
@@ -1961,10 +2111,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var depthHistoryHeight = Mathf.Max(1, histories.Depth.height);
             var cameraTargetWidth = Mathf.Max(1, useTemporalAAUpscale ? outputDescriptor.width : colorDescriptor.width);
             var cameraTargetHeight = Mathf.Max(1, useTemporalAAUpscale ? outputDescriptor.height : colorDescriptor.height);
-            var useTemporalAAComputeDilateDecimate = CanUseTemporalAAComputeDilateDecimatePath();
+            var useTemporalAAComputeDilateDecimate = CanUseTemporalAAComputeDilateDecimatePath(useTemporalAAUpscale);
+            var useGBufferVelocity = BurtGBufferVelocityUtility.IsEnabled(context) &&
+                context.GBuffer0Target.IsValid && context.GBuffer2Target.IsValid;
             var useTemporalAAUComputePath = useTemporalAAUpscale &&
                 useTemporalAAComputeDilateDecimate &&
                 CanUseTemporalAAUComputePath(histories);
+            // XRender native TSR is DilateVelocity -> DecimateHistory ->
+            // Accumulate.  The older BRP shading-rejection pair is only needed
+            // by the legacy upscale fallback when the dedicated TAAU kernels
+            // cannot run; executing it for native TSR is dead work and allocates
+            // two full-resolution R16 targets every frame.
+            var useLegacyTemporalAAUpscaleRejection = useTemporalAAUpscale &&
+                useTemporalAAComputeDilateDecimate &&
+                !useTemporalAAUComputePath;
+            // Mode 331 is exactly the dedicated full-resolution packed output of
+            // ResolveTAAUHistoryAACS. Present that resource directly instead of
+            // routing it through the input-sized fragment debug path.
+            var presentResolvedTAAUDebugDirectly = useTemporalAADebug &&
+                useTemporalAAUComputePath &&
+                BurtShadingDebugSettings.Mode == BurtShadingDebugMode.TemporalAAResolvedColor;
+            // XRender writes TAAU BLEND_FACTOR from UpdateHistory itself at
+            // history resolution, then scales that debug UAV to output size.
+            var presentTAAUFinalBlendDebugDirectly = useTemporalAADebug &&
+                useTemporalAAUComputePath &&
+                BurtShadingDebugSettings.Mode == BurtShadingDebugMode.TemporalAAFeedback;
+            var useTemporalAADebugTexture = useTemporalAADebug && !presentResolvedTAAUDebugDirectly;
             colorDescriptor.width = width;
             colorDescriptor.height = height;
             colorDescriptor.depthBufferBits = 0;
@@ -1974,6 +2146,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var resolveDescriptor = colorDescriptor;
             resolveDescriptor.enableRandomWrite = SystemInfo.supportsComputeShaders;
+
+            // XRender converts TAAU diagnostics to output resolution before
+            // presenting them. Keeping this temporary target at input size
+            // makes a low-resolution debug image look like a partial TAAU
+            // resolve when copied into the full-resolution output.
+            var debugDescriptor = useTemporalAAUpscale ? outputDescriptor : resolveDescriptor;
+            if (presentTAAUFinalBlendDebugDirectly)
+            {
+                debugDescriptor.width = historyWidth;
+                debugDescriptor.height = historyHeight;
+                debugDescriptor.graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat;
+            }
+            debugDescriptor.depthBufferBits = 0;
+            debugDescriptor.msaaSamples = 1;
+            debugDescriptor.useMipMap = false;
+            debugDescriptor.autoGenerateMips = false;
+            debugDescriptor.enableRandomWrite = presentTAAUFinalBlendDebugDirectly;
 
             var scalarDescriptor = colorDescriptor;
             scalarDescriptor.colorFormat = RenderTextureFormat.RFloat;
@@ -2003,10 +2192,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             metadataDescriptor.colorFormat = RenderTextureFormat.ARGB32;
             metadataDescriptor.sRGB = false;
 
-            var temporalAAUGuideDescriptor = colorDescriptor;
-            temporalAAUGuideDescriptor.colorFormat = RenderTextureFormat.ARGBHalf;
+            var temporalAAUGuideDescriptor = histories.PreviousGuide != null
+                ? histories.PreviousGuide.descriptor
+                : colorDescriptor;
             temporalAAUGuideDescriptor.sRGB = false;
             temporalAAUGuideDescriptor.enableRandomWrite = true;
+
+            var temporalAAURejectionDescriptor = colorDescriptor;
+            temporalAAURejectionDescriptor.graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm;
+            temporalAAURejectionDescriptor.sRGB = false;
+            temporalAAURejectionDescriptor.enableRandomWrite = true;
 
             var velocityDescriptor = colorDescriptor;
             velocityDescriptor.colorFormat = RenderTextureFormat.ARGBHalf;
@@ -2027,7 +2222,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var closestDepthDescriptor = scalarDescriptor;
             if (useTemporalAAComputeDilateDecimate)
             {
-                closestDepthDescriptor.graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat;
+                closestDepthDescriptor.graphicsFormat = useTemporalAAUpscale
+                    ? UnityEngine.Experimental.Rendering.GraphicsFormat.R16_UNorm
+                    : UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat;
                 closestDepthDescriptor.enableRandomWrite = true;
             }
 
@@ -2050,7 +2247,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             prevUseCountUintDescriptor.enableRandomWrite = true;
 
             cmd.GetTemporaryRT(TemporalAACurrentDepthTextureId, scalarDescriptor, FilterMode.Point);
-            cmd.GetTemporaryRT(TemporalAAVelocityTextureId, velocityDescriptor, FilterMode.Point);
+            if (!useGBufferVelocity)
+            {
+                cmd.GetTemporaryRT(TemporalAAVelocityTextureId, velocityDescriptor, FilterMode.Point);
+            }
             cmd.GetTemporaryRT(TemporalAADilatedVelocityTextureId, dilatedVelocityDescriptor, FilterMode.Point);
             if (useTemporalAAComputeDilateDecimate)
             {
@@ -2068,7 +2268,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.GetTemporaryRT(TemporalAAMetadataTextureId, metadataDescriptor, FilterMode.Point);
             cmd.GetTemporaryRT(TemporalAAResolveTextureId, resolveDescriptor, FilterMode.Bilinear);
             cmd.GetTemporaryRT(TemporalAAParallaxRejectionTextureId, parallaxDescriptor, FilterMode.Bilinear);
-            if (useTemporalAAComputeDilateDecimate)
+            if (useLegacyTemporalAAUpscaleRejection)
             {
                 cmd.GetTemporaryRT(TemporalAAHistoryRejectionTextureId, historyRejectionDescriptor, FilterMode.Point);
                 cmd.GetTemporaryRT(TemporalAADilatedHistoryRejectionTextureId, historyRejectionDescriptor, FilterMode.Point);
@@ -2076,11 +2276,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             if (useTemporalAAUComputePath)
             {
                 cmd.GetTemporaryRT(TemporalAAUReprojectedGuideTextureId, temporalAAUGuideDescriptor, FilterMode.Bilinear);
-                cmd.GetTemporaryRT(TemporalAAUShadingRejectionTextureId, temporalAAUGuideDescriptor, FilterMode.Point);
+                cmd.GetTemporaryRT(TemporalAAUShadingRejectionTextureId, temporalAAURejectionDescriptor, FilterMode.Point);
+                cmd.GetTemporaryRT(TemporalAAUDilatedShadingRejectionTextureId, temporalAAURejectionDescriptor, FilterMode.Point);
             }
-            if (useTemporalAADebug)
+            if (useTemporalAADebugTexture)
             {
-                cmd.GetTemporaryRT(TemporalAADebugTextureId, resolveDescriptor, FilterMode.Bilinear);
+                cmd.GetTemporaryRT(TemporalAADebugTextureId, debugDescriptor, FilterMode.Bilinear);
             }
 
             var currentDepth = new RenderTargetIdentifier(TemporalAACurrentDepthTextureId);
@@ -2100,7 +2301,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var temporalAAUReprojectedGuide = new RenderTargetIdentifier(TemporalAAUReprojectedGuideTextureId);
             var temporalAAUHistoryGuide = new RenderTargetIdentifier(histories.CurrentGuide);
             var temporalAAUShadingRejection = new RenderTargetIdentifier(TemporalAAUShadingRejectionTextureId);
+            var temporalAAUDilatedShadingRejection = new RenderTargetIdentifier(TemporalAAUDilatedShadingRejectionTextureId);
             var temporalAAUUpdatedHistory = new RenderTargetIdentifier(histories.CurrentColor);
+            // Match XRender's ownership hand-off: the compute resolve writes the
+            // graph's full-resolution TAAU output directly. A second raster copy
+            // would inherit the low-resolution camera render area and can clip the
+            // output back to the input extent.
+            var temporalAAUOutput = postProcessColorTarget.Identifier;
             var debugTarget = new RenderTargetIdentifier(TemporalAADebugTextureId);
             var blackTexture = new RenderTargetIdentifier(Texture2D.blackTexture);
             var hasTaaGBuffer = context.GBuffer0Target.IsValid && context.GBuffer2Target.IsValid;
@@ -2120,19 +2327,40 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             SetTemporalAAViewport(cmd, width, height);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACurrentDepth), MeshTopology.Triangles, 3, 1);
 
-            cmd.SetRenderTarget(velocity);
-            SetTemporalAAViewport(cmd, width, height);
-            cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
-            cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACameraVelocity), MeshTopology.Triangles, 3, 1);
+            if (!useGBufferVelocity)
+            {
+                cmd.SetRenderTarget(velocity);
+                SetTemporalAAViewport(cmd, width, height);
+                cmd.SetGlobalTexture(TemporalAACurrentDepthTextureId, currentDepth);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACameraVelocity), MeshTopology.Triangles, 3, 1);
+            }
 
             cmd.SetRenderTarget(responsiveMask);
             SetTemporalAAViewport(cmd, width, height);
             cmd.ClearRenderTarget(false, true, Color.clear);
 
-            var drewObjectMotionVectors = DrawTemporalAAObjectMotionVectors(context, cmd, camera, velocity, cameraDepthTarget, width, height, bindCameraDepthStencil: true);
-            drewObjectMotionVectors |= DrawTemporalAAMultipassFurMotionVectors(context, cmd, velocity, cameraDepthTarget, width, height);
+            var drewObjectMotionVectors = DrawTemporalAAObjectMotionVectors(
+                context,
+                cmd,
+                camera,
+                velocity,
+                cameraDepthTarget,
+                width,
+                height,
+                bindCameraDepthStencil: true,
+                // XRender keeps deferred velocity owned by GBuffer. BRP supplements only
+                // explicitly forward-only opaque surfaces; the pure-forward renderer still
+                // draws both motion-vector tags because it has no GBuffer velocity owner.
+                includeOpaque: true,
+                deferredGBufferOwnsOpaqueVelocity: useGBufferVelocity);
+            if (!useGBufferVelocity)
+            {
+                drewObjectMotionVectors |= DrawTemporalAAMultipassFurMotionVectors(context, cmd, velocity, cameraDepthTarget, width, height);
+            }
             temporalAA.ObjectMotionVectorPassDrawn = drewObjectMotionVectors;
-            temporalAA.VelocityMode = drewObjectMotionVectors ? BurtTemporalAAVelocityMode.CameraAndObject : BurtTemporalAAVelocityMode.CameraOnly;
+            temporalAA.VelocityMode = useGBufferVelocity || drewObjectMotionVectors
+                ? BurtTemporalAAVelocityMode.CameraAndObject
+                : BurtTemporalAAVelocityMode.CameraOnly;
 
             DrawTemporalAAResponsiveAAMask(context, cmd, camera, responsiveMask, cameraDepthTarget, width, height);
 
@@ -2141,12 +2369,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.ClearRenderTarget(false, true, Color.clear);
             cmd.SetGlobalTexture(TemporalAAVelocityTextureId, velocity);
             cmd.SetGlobalTexture(TemporalAAResponsiveMaskTextureId, responsiveMask);
-            // The deferred-stencil texture has a safe fallback on platforms where native stencil
-            // sampling is unavailable.  In that case, recover the object-motion bit directly
-            // from our object velocity payload for both native-resolution TAA and TAAU.  The
-            // camera-only velocity pass has w == 0, so this cannot mark static camera motion as
-            // object motion.
-            cmd.SetGlobalFloat(TemporalAAObjectMotionStencilFallbackId, 1f);
+            // The stencil-mask pass merges the native S8 bits with BRP's velocity
+            // ownership payload. Some Unity backends expose a sampleable S8 view
+            // even after later passes have lost bit 8, so availability alone cannot
+            // decide whether the payload is needed. Responsive-AA ownership still
+            // clears bit 8 in the shader, matching XRender's Ref=16/WriteMask=24.
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAABuildStencilMask), MeshTopology.Triangles, 3, 1);
 
             cmd.SetGlobalTexture(TemporalAAStencilMaskTextureId, stencilMask);
@@ -2164,6 +2391,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     closestDepth,
                     prevUseCountUint,
                     temporalAA,
+                    useTemporalAAUpscale,
                     width,
                     height,
                     width,
@@ -2186,7 +2414,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     width,
                     height,
                     historyValid ? depthHistoryWidth : width,
-                    historyValid ? depthHistoryHeight : height);
+                    historyValid ? depthHistoryHeight : height,
+                    useTemporalAAUpscale);
             }
             else
             {
@@ -2222,7 +2451,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalTexture(TemporalAAStencilMaskTextureId, stencilMask);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAMetadata), MeshTopology.Triangles, 3, 1);
 
-            if (useTemporalAAComputeDilateDecimate)
+            if (useLegacyTemporalAAUpscaleRejection)
             {
                 ExecuteTemporalAAHistoryRejectionCompute(
                     cmd,
@@ -2274,15 +2503,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     new RenderTargetIdentifier(histories.PreviousGuide),
                     dilatedVelocity,
                     dilateMask,
-                    parallaxRejection,
-                    dilatedHistoryRejection,
-                    metadata,
                     stencilMask,
                     temporalAAUReprojectedGuide,
                     temporalAAUHistoryGuide,
                     temporalAAUShadingRejection,
+                    temporalAAUDilatedShadingRejection,
                     temporalAAUUpdatedHistory,
-                    postProcessColorTarget.Identifier,
+                    temporalAAUOutput,
+                    debugTarget,
+                    presentTAAUFinalBlendDebugDirectly,
                     temporalAA,
                     historyValid,
                     width,
@@ -2300,7 +2529,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     historyDepthTarget,
                     dilatedVelocity,
                     parallaxRejection,
-                    useTemporalAAComputeDilateDecimate ? dilatedHistoryRejection : parallaxRejection,
+                    useLegacyTemporalAAUpscaleRejection ? dilatedHistoryRejection : parallaxRejection,
                     metadata,
                     stencilMask,
                     resolveTarget,
@@ -2316,18 +2545,41 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAResolve), MeshTopology.Triangles, 3, 1);
             }
 
-            if (useTemporalAADebug)
+            if (useTemporalAADebugTexture && !presentTAAUFinalBlendDebugDirectly)
             {
                 cmd.SetRenderTarget(debugTarget);
-                SetTemporalAAViewport(cmd, width, height);
-                cmd.SetGlobalFloat(ShadingDebugEnabledId, 1f);
-                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAResolve), MeshTopology.Triangles, 3, 1);
-                cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
+                SetTemporalAAViewport(
+                    cmd,
+                    useTemporalAAUpscale ? cameraTargetWidth : width,
+                    useTemporalAAUpscale ? cameraTargetHeight : height);
+                if (resolvedHighResolutionHistory &&
+                    BurtShadingDebugSettings.Mode == BurtShadingDebugMode.TemporalAAResolvedColor)
+                {
+                    // The TAAU result is produced by ResolveTAAUHistoryAACS,
+                    // not by the native-resolution fragment resolve below.
+                    // Copy the actual compute output so mode 331 remains an
+                    // honest resolved-color diagnostic at every render scale.
+                    DisablePostProcessEffects(cmd);
+                    cmd.SetGlobalTexture(SourceTextureId, temporalAAUOutput);
+                    cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAACopy), MeshTopology.Triangles, 3, 1);
+                }
+                else
+                {
+                    cmd.SetGlobalFloat(ShadingDebugEnabledId, 1f);
+                    cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAResolve), MeshTopology.Triangles, 3, 1);
+                    cmd.SetGlobalFloat(ShadingDebugEnabledId, 0f);
+                }
             }
 
             cmd.SetRenderTarget(histories.Depth);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, Mathf.Max(1, histories.Depth.width), Mathf.Max(1, histories.Depth.height));
-            cmd.SetGlobalTexture(TemporalAAClosestDepthTextureId, closestDepth);
+            // XRender seeds native TSR's first depth history from scene depth
+            // directly, then stores the dilated closest depth on later frames.
+            // TAAU always owns its dedicated closest-depth history path.
+            var depthHistorySource = !historyValid && !useTemporalAAUpscale
+                ? currentDepth
+                : closestDepth;
+            cmd.SetGlobalTexture(TemporalAAClosestDepthTextureId, depthHistorySource);
             cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAClosestDepthCopy), MeshTopology.Triangles, 3, 1);
 
             if (!resolvedHighResolutionHistory)
@@ -2364,19 +2616,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalFloat(ShadingDebugEnabledId, BurtShadingDebugSettings.IsDebugging ? 1f : 0f);
             cmd.SetGlobalFloat(TemporalAAHasDilatedHistoryRejectionId, 0f);
 
-            if (useTemporalAADebug)
+            if (useTemporalAADebugTexture)
             {
                 cmd.ReleaseTemporaryRT(TemporalAADebugTextureId);
             }
 
             cmd.ReleaseTemporaryRT(TemporalAAParallaxRejectionTextureId);
-            if (useTemporalAAComputeDilateDecimate)
+            if (useLegacyTemporalAAUpscaleRejection)
             {
                 cmd.ReleaseTemporaryRT(TemporalAADilatedHistoryRejectionTextureId);
                 cmd.ReleaseTemporaryRT(TemporalAAHistoryRejectionTextureId);
             }
             if (useTemporalAAUComputePath)
             {
+                cmd.ReleaseTemporaryRT(TemporalAAUDilatedShadingRejectionTextureId);
                 cmd.ReleaseTemporaryRT(TemporalAAUShadingRejectionTextureId);
                 cmd.ReleaseTemporaryRT(TemporalAAUReprojectedGuideTextureId);
             }
@@ -2410,6 +2663,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalMatrix(TemporalAAInverseCurrentViewProjectionId, temporalAA.InverseCurrentViewProjectionMatrix);
             cmd.SetGlobalMatrix(TemporalAAInverseCurrentNonJitteredViewProjectionId, temporalAA.InverseCurrentNonJitteredViewProjectionMatrix);
             cmd.SetGlobalMatrix(TemporalAAClipToPreviousClipId, temporalAA.ClipToPreviousClipMatrix);
+            cmd.SetGlobalFloat(TemporalAAPreviousRenderDeltaTimeId, temporalAA.PreviousRenderDeltaTime);
             cmd.SetGlobalVector(TemporalAAJitterId, new Vector4(temporalAA.Jitter.x, temporalAA.Jitter.y, temporalAA.JitterPixels.x, temporalAA.JitterPixels.y));
             cmd.SetGlobalVector(TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
             cmd.SetGlobalVector(TemporalAAParamsId, new Vector4(0f, 0f, historyValid ? 1f : 0f, temporalAA.FrameIndex));
@@ -2433,11 +2687,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             return new Vector4(depthPixelRadiusScale, 0f, 0f, 0f);
         }
 
-        private static bool CanUseTemporalAAComputeDilateDecimatePath()
+        private static bool CanUseTemporalAAComputeDilateDecimatePath(bool useTemporalAAUpscale)
         {
+            var closestDepthFormat = useTemporalAAUpscale
+                ? UnityEngine.Experimental.Rendering.GraphicsFormat.R16_UNorm
+                : UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat;
             if (!SystemInfo.supportsComputeShaders ||
                 !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R32_UInt, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
-                !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
+                !SystemInfo.IsFormatSupported(closestDepthFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
                 !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16_SFloat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
                 !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
             {
@@ -2468,6 +2725,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             RenderTargetIdentifier closestDepth,
             RenderTargetIdentifier prevUseCountUint,
             BurtTemporalAARequestState temporalAA,
+            bool useTemporalAAUpscale,
             int width,
             int height,
             int stencilWidth,
@@ -2495,6 +2753,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
             cmd.SetComputeVectorParam(shader, TemporalAAStencilTexelSizeId, new Vector4(1f / Mathf.Max(1, stencilWidth), 1f / Mathf.Max(1, stencilHeight), stencilWidth, stencilHeight));
             cmd.SetComputeVectorParam(shader, TemporalAADepthParamsId, CalculateTemporalAADepthParams(temporalAA, width));
+            cmd.SetComputeFloatParam(shader, TemporalAADilateModeId, useTemporalAAUpscale ? 1f : 0f);
             cmd.DispatchCompute(shader, kernel, Mathf.CeilToInt(width / 8f), Mathf.CeilToInt(height / 8f), 1);
         }
 
@@ -2509,7 +2768,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             int width,
             int height,
             int depthHistoryWidth,
-            int depthHistoryHeight)
+            int depthHistoryHeight,
+            bool useTemporalAAUpscale)
         {
             var shader = GetTemporalAAComputeShader();
             var kernel = shader.FindKernel("DecimateHistoryAACS");
@@ -2525,6 +2785,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 1f / Mathf.Max(1, depthHistoryHeight),
                 depthHistoryWidth,
                 depthHistoryHeight));
+            cmd.SetComputeFloatParam(shader, TemporalAADecimateModeId, useTemporalAAUpscale ? 1f : 0f);
             cmd.DispatchCompute(shader, kernel, Mathf.CeilToInt(width / 8f), Mathf.CeilToInt(height / 8f), 1);
         }
 
@@ -2621,6 +2882,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static bool CanUseTemporalAAUComputePath(BurtTemporalAAHistoryTextures histories)
         {
+            var packedOutputFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32;
+            var fallbackOutputFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat;
+            var canUsePackedOutput =
+                SystemInfo.IsFormatSupported(packedOutputFormat, UnityEngine.Experimental.Rendering.FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(packedOutputFormat, UnityEngine.Experimental.Rendering.FormatUsage.Sample) &&
+                SystemInfo.IsFormatSupported(packedOutputFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore);
+            var canUseFallbackOutput =
+                SystemInfo.IsFormatSupported(fallbackOutputFormat, UnityEngine.Experimental.Rendering.FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(fallbackOutputFormat, UnityEngine.Experimental.Rendering.FormatUsage.Sample) &&
+                SystemInfo.IsFormatSupported(fallbackOutputFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore);
             if (!SystemInfo.supportsComputeShaders ||
                 histories.PreviousColor == null ||
                 histories.CurrentColor == null ||
@@ -2629,7 +2900,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 !histories.CurrentColor.enableRandomWrite ||
                 !histories.CurrentGuide.enableRandomWrite ||
                 !SystemInfo.IsFormatSupported(histories.PreviousColor.graphicsFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
-                !SystemInfo.IsFormatSupported(histories.PreviousGuide.graphicsFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
+                !SystemInfo.IsFormatSupported(histories.PreviousGuide.graphicsFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore) ||
+                (!canUsePackedOutput && !canUseFallbackOutput) ||
+                !SystemInfo.IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore))
             {
                 return false;
             }
@@ -2637,11 +2910,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var shader = GetTemporalAAComputeShader();
             int reprojectKernel;
             int rejectKernel;
+            int dilateRejectionKernel;
             int updateKernel;
             int resolveKernel;
             return shader != null &&
                 TryFindTemporalAAComputeKernel(shader, "ReprojectTAAUHistoryGuideAACS", out reprojectKernel) &&
                 TryFindTemporalAAComputeKernel(shader, "RejectTAAUShadingAACS", out rejectKernel) &&
+                TryFindTemporalAAComputeKernel(shader, "DilateTAAUShadingRejectionAACS", out dilateRejectionKernel) &&
                 TryFindTemporalAAComputeKernel(shader, "UpdateTAAUHistoryAACS", out updateKernel) &&
                 TryFindTemporalAAComputeKernel(shader, "ResolveTAAUHistoryAACS", out resolveKernel);
         }
@@ -2653,15 +2928,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             RenderTargetIdentifier previousGuide,
             RenderTargetIdentifier velocity,
             RenderTargetIdentifier dilateMask,
-            RenderTargetIdentifier parallaxRejection,
-            RenderTargetIdentifier dilatedHistoryRejection,
-            RenderTargetIdentifier metadata,
             RenderTargetIdentifier stencilMask,
             RenderTargetIdentifier reprojectedGuide,
             RenderTargetIdentifier currentGuide,
             RenderTargetIdentifier shadingRejection,
+            RenderTargetIdentifier dilatedShadingRejection,
             RenderTargetIdentifier updatedHistory,
             RenderTargetIdentifier output,
+            RenderTargetIdentifier finalBlendDebugOutput,
+            bool writeFinalBlendDebug,
             BurtTemporalAARequestState temporalAA,
             bool historyValid,
             int inputWidth,
@@ -2680,7 +2955,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             if (shader == null ||
                 !TryFindTemporalAAComputeKernel(shader, "ReprojectTAAUHistoryGuideAACS", out var reprojectKernel) ||
                 !TryFindTemporalAAComputeKernel(shader, "RejectTAAUShadingAACS", out var rejectKernel) ||
-                !TryFindTemporalAAComputeKernel(shader, "UpdateTAAUHistoryAACS", out var updateKernel) ||
+                !TryFindTemporalAAComputeKernel(shader, "DilateTAAUShadingRejectionAACS", out var dilateRejectionKernel) ||
+                !TryFindTemporalAAComputeKernel(
+                    shader,
+                    writeFinalBlendDebug ? "UpdateTAAUHistoryDebugAACS" : "UpdateTAAUHistoryAACS",
+                    out var updateKernel) ||
                 !TryFindTemporalAAComputeKernel(shader, "ResolveTAAUHistoryAACS", out var resolveKernel))
             {
                 return false;
@@ -2694,7 +2973,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var historyHysteresis = 1f / historySampleCount;
             var outputToInput = inputWidth / (float)Mathf.Max(1, outputWidth);
             var theoreticalBlend = 1f / (1f + 16f / Mathf.Max(0.0001f, outputToInput * outputToInput));
-            var historyParams = new Vector4(historySampleCount, historyHysteresis, theoreticalBlend, historyScale);
+            var packedHistoryFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32;
+            var usePackedHistory = SystemInfo.IsFormatSupported(packedHistoryFormat, UnityEngine.Experimental.Rendering.FormatUsage.Render) &&
+                SystemInfo.IsFormatSupported(packedHistoryFormat, UnityEngine.Experimental.Rendering.FormatUsage.Sample) &&
+                SystemInfo.IsFormatSupported(packedHistoryFormat, UnityEngine.Experimental.Rendering.FormatUsage.LoadStore);
+            var historyParams = new Vector4(historySampleCount, historyHysteresis, theoreticalBlend, usePackedHistory ? 1f : 0f);
             var frameParams = new Vector4(0f, 0f, historyValid ? 1f : 0f, temporalAA != null ? temporalAA.FrameIndex : 0f);
             var jitter = temporalAA != null ? temporalAA.Jitter : Vector2.zero;
             var jitterPixels = temporalAA != null ? temporalAA.JitterPixels : Vector2.zero;
@@ -2703,6 +2986,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetComputeTextureParam(shader, reprojectKernel, TemporalAAVelocityTextureId, velocity);
             cmd.SetComputeTextureParam(shader, reprojectKernel, TemporalAAUReprojectedGuideOutputTextureId, reprojectedGuide);
             cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, inputTexelSize);
+            cmd.SetComputeVectorParam(shader, TemporalAAUInputTexelSizeId, inputTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAHistoryTexelSizeId, historyTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAUGuideTexelSizeId, inputTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAParamsId, frameParams);
@@ -2712,26 +2996,34 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetComputeTextureParam(shader, rejectKernel, SourceTextureId, source);
             cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAAUReprojectedGuideTextureId, reprojectedGuide);
             cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAADilateMaskTextureId, dilateMask);
-            cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAAParallaxRejectionTextureId, parallaxRejection);
-            cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAADilatedHistoryRejectionTextureId, dilatedHistoryRejection);
-            cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAAMetadataTextureId, metadata);
             cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAAStencilMaskTextureId, stencilMask);
             cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAAUHistoryGuideOutputTextureId, currentGuide);
             cmd.SetComputeTextureParam(shader, rejectKernel, TemporalAAUShadingRejectionOutputTextureId, shadingRejection);
             cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, inputTexelSize);
+            cmd.SetComputeVectorParam(shader, TemporalAAUInputTexelSizeId, inputTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAUGuideTexelSizeId, inputTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAStencilTexelSizeId, inputTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAParamsId, frameParams);
             cmd.DispatchCompute(shader, rejectKernel, Mathf.CeilToInt(inputWidth / 8f), Mathf.CeilToInt(inputHeight / 8f), 1);
 
+            cmd.SetComputeTextureParam(shader, dilateRejectionKernel, TemporalAAUShadingRejectionTextureId, shadingRejection);
+            cmd.SetComputeTextureParam(shader, dilateRejectionKernel, TemporalAAUDilatedShadingRejectionOutputTextureId, dilatedShadingRejection);
+            cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, inputTexelSize);
+            cmd.SetComputeVectorParam(shader, TemporalAAUInputTexelSizeId, inputTexelSize);
+            cmd.DispatchCompute(shader, dilateRejectionKernel, Mathf.CeilToInt(inputWidth / 8f), Mathf.CeilToInt(inputHeight / 8f), 1);
+
             cmd.SetComputeTextureParam(shader, updateKernel, SourceTextureId, source);
             cmd.SetComputeTextureParam(shader, updateKernel, TemporalAAHistoryTextureId, history);
             cmd.SetComputeTextureParam(shader, updateKernel, TemporalAAVelocityTextureId, velocity);
-            cmd.SetComputeTextureParam(shader, updateKernel, TemporalAAUShadingRejectionTextureId, shadingRejection);
-            cmd.SetComputeTextureParam(shader, updateKernel, TemporalAAMetadataTextureId, metadata);
+            cmd.SetComputeTextureParam(shader, updateKernel, TemporalAAUDilatedShadingRejectionTextureId, dilatedShadingRejection);
             cmd.SetComputeTextureParam(shader, updateKernel, TemporalAAStencilMaskTextureId, stencilMask);
             cmd.SetComputeTextureParam(shader, updateKernel, TemporalAAUUpdatedHistoryOutputTextureId, updatedHistory);
+            if (writeFinalBlendDebug)
+            {
+                cmd.SetComputeTextureParam(shader, updateKernel, TemporalAAUFinalBlendDebugOutputTextureId, finalBlendDebugOutput);
+            }
             cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, inputTexelSize);
+            cmd.SetComputeVectorParam(shader, TemporalAAUInputTexelSizeId, inputTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAHistoryTexelSizeId, historyTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAUOutputTexelSizeId, outputTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAStencilTexelSizeId, inputTexelSize);
@@ -2742,7 +3034,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.DispatchCompute(shader, updateKernel, Mathf.CeilToInt(historyWidth / 8f), Mathf.CeilToInt(historyHeight / 8f), 1);
 
             cmd.SetComputeTextureParam(shader, resolveKernel, TemporalAAUUpdatedHistoryTextureId, updatedHistory);
-            cmd.SetComputeTextureParam(shader, resolveKernel, BurtRenderGraphResourceRegistry.TemporalAAOutputTextureId, output);
+            cmd.SetComputeTextureParam(shader, resolveKernel, TemporalAAUOutputTextureId, output);
             cmd.SetComputeVectorParam(shader, TemporalAAHistoryTexelSizeId, historyTexelSize);
             cmd.SetComputeVectorParam(shader, TemporalAAUOutputTexelSizeId, outputTexelSize);
             cmd.DispatchCompute(shader, resolveKernel, Mathf.CeilToInt(outputWidth / 8f), Mathf.CeilToInt(outputHeight / 8f), 1);
@@ -2815,7 +3107,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             BurtRenderTargetHandle cameraDepthTarget,
             int width,
             int height,
-            bool bindCameraDepthStencil)
+            bool bindCameraDepthStencil,
+            bool includeOpaque,
+            bool deferredGBufferOwnsOpaqueVelocity)
         {
             if (context == null || context.Request == null || camera == null)
             {
@@ -2840,27 +3134,38 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             // flushing here clears the buffer before the renderer list is recorded and lets
             // the list inherit an unrelated render target.
 
-            var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
-            var drawingSettings = new DrawingSettings(new ShaderTagId("BurtMotionVectors"), sortingSettings)
+            if (includeOpaque)
             {
-                perObjectData = PerObjectData.MotionVectors,
-                enableDynamicBatching = false,
-                enableInstancing = true
-            };
+                var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
+                // Match XRender's desktop deferred ownership: GBuffer velocity is final for
+                // deferred surfaces. Only forward-only opaque surfaces need a supplemental
+                // motion pass, otherwise a second draw can overwrite the correct GBuffer
+                // vector with a materially different deformation/previous-transform path.
+                var primaryTag = deferredGBufferOwnsOpaqueVelocity
+                    ? TemporalAAForwardOnlyMotionVectorsTag
+                    : TemporalAAObjectMotionVectorsTag;
+                var drawingSettings = new DrawingSettings(primaryTag, sortingSettings)
+                {
+                    perObjectData = PerObjectData.MotionVectors,
+                    enableDynamicBatching = false,
+                    enableInstancing = true
+                };
+                if (!deferredGBufferOwnsOpaqueVelocity)
+                {
+                    drawingSettings.SetShaderPassName(1, TemporalAAForwardOnlyMotionVectorsTag);
+                }
 
-            var filteringSettings = new FilteringSettings(TemporalAAObjectMotionVectorQueueRange, camera.cullingMask);
-            context.DrawRendererList(context.Request.CullingResults, ref drawingSettings, ref filteringSettings);
+                var filteringSettings = new FilteringSettings(TemporalAAObjectMotionVectorQueueRange, camera.cullingMask);
+                context.DrawRendererList(context.Request.CullingResults, ref drawingSettings, ref filteringSettings);
+            }
 
-            var transparentSortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonTransparent };
-            var transparentDrawingSettings = new DrawingSettings(new ShaderTagId("BurtTransparentMotionVectors"), transparentSortingSettings)
-            {
-                perObjectData = PerObjectData.MotionVectors,
-                enableDynamicBatching = false,
-                enableInstancing = true
-            };
-            var transparentFilteringSettings = new FilteringSettings(TemporalAATransparentMotionVectorQueueRange, camera.cullingMask);
-            context.DrawRendererList(context.Request.CullingResults, ref transparentDrawingSettings, ref transparentFilteringSettings);
-            return true;
+            // Match XRender desktop TAA: transparent DefaultLit writes the
+            // responsive-AA stencil bit, but it does not own a motion vector.
+            // Reprojection therefore keeps the velocity/depth of the visible
+            // opaque surface behind it and raises current-frame contribution
+            // to the fixed responsive 25% instead of injecting an alpha-blended
+            // surface velocity into the shared motion buffer.
+            return includeOpaque;
         }
 
         private static void DrawTemporalAAResponsiveAAMask(
@@ -2877,9 +3182,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 return;
             }
 
-            // The material pass clips itself unless _ResponsiveAA is enabled.  Using LEqual
-            // keeps alpha-blended responsive materials eligible while rejecting geometry hidden
-            // behind the opaque camera depth.
+            // XRender writes responsive AA only from transparent Forward
+            // surfaces (and water), never from opaque GBuffer or object-motion
+            // passes. The material mask pass reproduces that coverage when the
+            // native stencil subresource cannot be sampled. Using LEqual keeps
+            // visible alpha-blended surfaces eligible while rejecting geometry
+            // hidden behind opaque camera depth.
             cmd.SetRenderTarget(maskTarget, cameraDepthTarget.Identifier);
             SetTemporalAAViewport(cmd, width, height);
             // This pass shares the motion-vector vertex path and must use the same jittered
@@ -2890,19 +3198,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             // graph-command-buffer commands, so the responsive mask binding must remain in
             // the same submission as the draws that consume it.
 
-            var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
-            var drawingSettings = new DrawingSettings(new ShaderTagId("BurtResponsiveAAMask"), sortingSettings)
-            {
-                // Responsive passes reuse the shared motion-vector vertex path. Request the
-                // same per-renderer data as the velocity draw so skinned and instanced objects
-                // never see an undefined previous-object transform while building the mask.
-                perObjectData = PerObjectData.MotionVectors,
-                enableDynamicBatching = false,
-                enableInstancing = true
-            };
-            var filteringSettings = new FilteringSettings(TemporalAAObjectMotionVectorQueueRange, camera.cullingMask);
-            context.DrawRendererList(context.Request.CullingResults, ref drawingSettings, ref filteringSettings);
-
             var transparentSortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonTransparent };
             var transparentDrawingSettings = new DrawingSettings(new ShaderTagId("BurtResponsiveAAMask"), transparentSortingSettings)
             {
@@ -2912,10 +3207,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             };
             var transparentFilteringSettings = new FilteringSettings(TemporalAATransparentMotionVectorQueueRange, camera.cullingMask);
             context.DrawRendererList(context.Request.CullingResults, ref transparentDrawingSettings, ref transparentFilteringSettings);
-
-            // Multipass Fur is drawn through BurtMultipassRenderer rather than DrawRenderers;
-            // draw every visible shell layer into the same binary responsive mask.
-            BurtMultipassRenderer.DrawAll(cmd, context, BurtMultipassShaderPass.ResponsiveAAMask, RenderQueueRange.opaque);
         }
 
         private static bool DrawTemporalAAMultipassFurMotionVectors(
@@ -2977,10 +3268,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             var highlightContrast = localExposure.highlightContrast.value * (highlightCurve != null ? highlightCurve.Evaluate(luminanceEv100) : 1f);
             var shadowContrast = localExposure.shadowContrast.value * (shadowCurve != null ? shadowCurve.Evaluate(luminanceEv100) : 1f);
             var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(context.Request.Camera);
-            var groupCountX = Mathf.Max(1, Mathf.CeilToInt(descriptor.width / 64f));
-            var groupCountY = Mathf.Max(1, Mathf.CeilToInt(descriptor.height / 64f));
-            var bilateralUvScaleX = (float)descriptor.width / 64f / groupCountX;
-            var bilateralUvScaleY = (float)descriptor.height / 64f / groupCountY;
+            // XRender fills the bilateral histogram from the shared half-size
+            // exposure source. Scale UVs by the populated part of the 64x64
+            // histogram tiles, not by full-resolution camera groups.
+            var histogramSourceWidth = Mathf.Max(1, (descriptor.width + 1) / 2);
+            var histogramSourceHeight = Mathf.Max(1, (descriptor.height + 1) / 2);
+            var groupCountX = Mathf.Max(1, histogram.width);
+            var groupCountY = Mathf.Max(1, histogram.height);
+            var bilateralUvScaleX = (float)histogramSourceWidth / (64f * groupCountX);
+            var bilateralUvScaleY = (float)histogramSourceHeight / (64f * groupCountY);
 
             cmd.SetGlobalTexture(LocalExposureHistogramTextureId, histogram);
             cmd.SetGlobalTexture(LocalExposureBlurredLogLuminanceTextureId, blurredLogLuminance);
@@ -3057,15 +3353,15 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             {
                 descriptor = PostProcessUtility.CreateBloomInputRenderTextureDescriptor(
                     context.Request.Camera,
-                    GetBloomMipWidth(context.Request.Camera, mipIndex),
-                    GetBloomMipHeight(context.Request.Camera, mipIndex));
+                    GetBloomMipWidth(context, mipIndex),
+                    GetBloomMipHeight(context, mipIndex));
             }
             else
             {
                 descriptor = PostProcessUtility.CreateBloomRenderTextureDescriptor(
                     context.Request.Camera,
-                    GetBloomMipWidth(context.Request.Camera, mipIndex),
-                    GetBloomMipHeight(context.Request.Camera, mipIndex),
+                    GetBloomMipWidth(context, mipIndex),
+                    GetBloomMipHeight(context, mipIndex),
                     settings,
                     PostProcessUtility.ResolveBloomDebugView(settings));
             }
@@ -3084,8 +3380,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var descriptor = PostProcessUtility.CreateBloomInputRenderTextureDescriptor(
                 context.Request.Camera,
-                GetBloomMipWidth(context.Request.Camera, 0),
-                GetBloomMipHeight(context.Request.Camera, 0));
+                GetBloomMipWidth(context, 0),
+                GetBloomMipHeight(context, 0));
             context.ResourceRegistry.SetRenderTargetDescriptor(resourceName, descriptor, FilterMode.Bilinear, "Burt " + resourceName);
             return context.ResourceRegistry.AllocateRenderTarget(resourceName);
         }
@@ -3094,22 +3390,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         {
             var camera = context.Request.Camera;
             var firstMipIndex = PostProcessUtility.ResolveBloomFirstStageMipIndex(stageCount);
-            var sourceWidth = GetBloomMipWidth(camera, firstMipIndex);
-            var sourceHeight = GetBloomMipHeight(camera, firstMipIndex);
+            var sourceWidth = GetBloomMipWidth(context, firstMipIndex);
+            var sourceHeight = GetBloomMipHeight(context, firstMipIndex);
             var source = context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(firstMipIndex));
             if (debugView == BloomDebugView.ThresholdMask)
             {
                 source = context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.BloomInputName);
-                sourceWidth = GetBloomMipWidth(camera, 0);
-                sourceHeight = GetBloomMipHeight(camera, 0);
+                sourceWidth = GetBloomMipWidth(context, 0);
+                sourceHeight = GetBloomMipHeight(context, 0);
             }
             else if (debugView == BloomDebugView.Prefilter)
             {
                 source = context.ResourceRegistry.GetRenderTarget(PostProcessUtility.ShouldBypassBloomPrefilterThreshold(settings)
                     ? BurtRenderGraphResourceRegistry.BloomInputName
                     : BurtRenderGraphResourceRegistry.BloomSetupName);
-                sourceWidth = GetBloomMipWidth(camera, 0);
-                sourceHeight = GetBloomMipHeight(camera, 0);
+                sourceWidth = GetBloomMipWidth(context, 0);
+                sourceHeight = GetBloomMipHeight(context, 0);
             }
             else if (debugView >= BloomDebugView.Mip1 && debugView <= BloomDebugView.Mip5)
             {
@@ -3117,8 +3413,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 source = IsBloomGaussianMipActive(mipIndex, stageCount)
                     ? context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomGaussianVerticalName(mipIndex))
                     : context.ResourceRegistry.GetRenderTarget(BurtRenderGraphResourceRegistry.GetBloomDownsampleName(mipIndex - 1));
-                sourceWidth = GetBloomMipWidth(camera, mipIndex);
-                sourceHeight = GetBloomMipHeight(camera, mipIndex);
+                sourceWidth = GetBloomMipWidth(context, mipIndex);
+                sourceHeight = GetBloomMipHeight(context, mipIndex);
             }
 
             cmd.SetGlobalTexture(SourceTextureId, !source.IsValid ? cameraColorTarget : source.Identifier);
@@ -3315,6 +3611,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalFloat(AutoExposureDebugHasHistogramId, hasHistogram ? 1f : 0f);
             cmd.SetGlobalTexture(AutoExposureDebugToneMappedTextureId, toneMappedSource);
             cmd.SetGlobalFloat(AutoExposureDebugHasToneMappedTextureId, hasToneMappedSource ? 1f : 0f);
+            // Tone-mapped HDR debug writes directly to CameraColor to avoid reading
+            // and writing the same intermediate texture. Match the Y orientation of
+            // the other HDR views, which pass through the final composite copy.
+            cmd.SetGlobalFloat(AutoExposureDebugFlipYId, hasToneMappedSource ? 1f : 0f);
             cmd.SetGlobalFloat(TonemappingModeId, (float)PostProcessUtility.ResolveTonemappingMode(context.Asset));
             var filmSettings = PostProcessUtility.ResolveTonemappingFilmSettings(context.Asset);
             cmd.SetGlobalFloat(FilmSlopeId, filmSettings.Slope);
@@ -3325,14 +3625,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             SetLocalExposureGlobals(cmd, context, exposure);
         }
 
-        private static int GetBloomMipWidth(Camera camera, int mipIndex) // 计算指定 Bloom mip 的宽度。
+        private static int GetBloomMipWidth(BurtRenderGraphContext context, int mipIndex) // 计算指定 Bloom mip 的宽度。
         {
-            return PostProcessUtility.GetBloomMipWidth(camera, mipIndex); // 和 Bloom 诊断共用同一套尺寸计算。
+            ResolveActivePostProcessSize(context, out var width, out _);
+            for (var i = 0; i <= Mathf.Max(0, mipIndex); i++)
+            {
+                width = Mathf.Max(1, (width + 1) / 2);
+            }
+
+            return width;
         }
 
-        private static int GetBloomMipHeight(Camera camera, int mipIndex) // 计算指定 Bloom mip 的高度。
+        private static int GetBloomMipHeight(BurtRenderGraphContext context, int mipIndex) // 计算指定 Bloom mip 的高度。
         {
-            return PostProcessUtility.GetBloomMipHeight(camera, mipIndex); // 和 Bloom 诊断共用同一套尺寸计算。
+            ResolveActivePostProcessSize(context, out _, out var height);
+            for (var i = 0; i <= Mathf.Max(0, mipIndex); i++)
+            {
+                height = Mathf.Max(1, (height + 1) / 2);
+            }
+
+            return height;
         }
 
         private static Material GetPostProcessMaterial() // 定义获取后处理材质的内部辅助函数。

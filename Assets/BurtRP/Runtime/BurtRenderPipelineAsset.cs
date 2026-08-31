@@ -16,7 +16,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
     {
         Off = 0,
         CameraAndStage = 1,
-        CameraStageAndPass = 2
+        CameraStageAndPass = 2,
+        CameraStagePassAndResource = 3
     }
 
     public enum BurtSubmitStrategy

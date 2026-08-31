@@ -13,6 +13,7 @@ namespace Burt.RenderPipeline
         public readonly float TargetScale;
         public readonly float AverageLuminance;
         public readonly float CompensationScale;
+        public readonly float AverageLocalExposure;
         public readonly int SampleCount;
         public readonly int SampleAgeFrames;
         public readonly bool ReadbackPending;
@@ -23,6 +24,7 @@ namespace Burt.RenderPipeline
             float targetScale,
             float averageLuminance,
             float compensationScale,
+            float averageLocalExposure,
             int sampleCount,
             int sampleAgeFrames,
             bool readbackPending)
@@ -32,6 +34,7 @@ namespace Burt.RenderPipeline
             TargetScale = targetScale;
             AverageLuminance = averageLuminance;
             CompensationScale = compensationScale;
+            AverageLocalExposure = averageLocalExposure;
             SampleCount = sampleCount;
             SampleAgeFrames = sampleAgeFrames;
             ReadbackPending = readbackPending;
@@ -76,6 +79,7 @@ namespace Burt.RenderPipeline
             public float TargetScale = 1f;
             public float AverageLuminance = 1f;
             public float CompensationScale = 1f;
+            public float AverageLocalExposure = 1f;
         }
 
         private static readonly Dictionary<int, CameraState> CameraStates = new Dictionary<int, CameraState>();
@@ -117,6 +121,8 @@ namespace Burt.RenderPipeline
         private static readonly int LocalExposureBlurUavId = Shader.PropertyToID("_BurtLocalExposureBlurUAV");
         private static readonly int LocalExposureExtentId = Shader.PropertyToID("_BurtLocalExposureExtent");
         private static readonly int LocalExposureBlurParamsId = Shader.PropertyToID("_BurtLocalExposureBlurParams");
+        private static readonly int LocalExposureAutoParamsId = Shader.PropertyToID("_BurtLocalExposureAutoParams");
+        private static readonly int LocalExposureThresholdParamsId = Shader.PropertyToID("_BurtLocalExposureThresholdParams");
 
         public static bool IsSupported => SystemInfo.supportsComputeShaders && EnsureShader();
 
@@ -194,10 +200,27 @@ namespace Burt.RenderPipeline
                 state.TargetScale,
                 state.AverageLuminance,
                 state.CompensationScale,
+                state.AverageLocalExposure,
                 state.SampleCount,
                 state.LastSampleFrame >= 0 ? Mathf.Max(0, Time.frameCount - state.LastSampleFrame) : -1,
                 state.ReadbackPending);
             return true;
+        }
+
+        public static float ResolvePreExposure(Camera camera, float fallbackGlobalExposure)
+        {
+            var fallback = SanitizeScale(fallbackGlobalExposure);
+            if (camera == null ||
+                !CameraStates.TryGetValue(camera.GetInstanceID(), out var state) ||
+                !state.HasSample)
+            {
+                return fallback;
+            }
+
+            // XRender pre-exposes the next frame with the product stored in the
+            // two pixels of its exposure texture: global exposure scale and the
+            // average local-exposure scale.
+            return SanitizeScale(state.CurrentScale * SanitizeScale(state.AverageLocalExposure));
         }
 
         public static bool TryGetLocalExposureTextures(Camera camera, out RenderTexture histogram, out RenderTexture blurredLogLuminance)
@@ -220,7 +243,7 @@ namespace Burt.RenderPipeline
             return histogram != null && histogram.IsCreated();
         }
 
-        public static void Execute(CommandBuffer cmd, Camera camera, BurtRenderTargetHandle cameraColor, ExposureVolumeComponent exposure, float invPreExposure)
+        public static void Execute(CommandBuffer cmd, Camera camera, BurtRenderTargetHandle cameraColor, ExposureVolumeComponent exposure, float invPreExposure, int sourceWidth = 0, int sourceHeight = 0)
         {
             if (cmd == null || camera == null || !cameraColor.IsValid || !IsSupported)
                 return;
@@ -249,20 +272,40 @@ namespace Burt.RenderPipeline
 
             var component = exposure != null && exposure.active && exposure.enabled.value ? exposure : null;
             var mode = component != null ? component.mode.value : ExposureMode.ManualEV100;
+            var useAutomaticExposure = mode == ExposureMode.Automatic || mode == ExposureMode.AutomaticHistogram;
             var sceneDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
-            var sceneWidth = Mathf.Max(1, sceneDescriptor.width);
-            var sceneHeight = Mathf.Max(1, sceneDescriptor.height);
-            UploadCommonParameters(cmd, component, state.ForceTarget, invPreExposure, sceneWidth, sceneHeight);
+            var sceneWidth = Mathf.Max(1, sourceWidth > 0 ? sourceWidth : sceneDescriptor.width);
+            var sceneHeight = Mathf.Max(1, sourceHeight > 0 ? sourceHeight : sceneDescriptor.height);
             var meteringMask = component != null && component.meteringMask.value != null
                 ? component.meteringMask.value
                 : Texture2D.whiteTexture;
 
             var localExposure = VolumeManager.instance.stack.GetComponent<LocalExposureVolumeComponent>();
-            state.LocalExposureValid = localExposure != null && localExposure.IsEnabled() &&
-                ExecuteLocalExposure(cmd, cameraColor, state, localExposure, meteringMask, sceneWidth, sceneHeight);
+            var requestLocalExposure = useAutomaticExposure && localExposure != null && localExposure.IsEnabled();
+            state.LocalExposureValid = false;
 
-            if (mode == ExposureMode.Automatic || mode == ExposureMode.AutomaticHistogram)
+            if (useAutomaticExposure)
             {
+                var downsampleStageCount = requestLocalExposure ? LocalExposureDownsampleStageCount : 1;
+                if (!EnsureLocalExposureDownsampleTextures(state, sceneWidth, sceneHeight, downsampleStageCount) ||
+                    !ExecuteSceneDownsampleChain(cmd, cameraColor, state, sceneWidth, sceneHeight, downsampleStageCount))
+                {
+                    UploadCommonParameters(cmd, component, state.ForceTarget, invPreExposure, sceneWidth, sceneHeight);
+                    UploadLocalExposureAutoParameters(cmd, null, state.AverageLuminance, false);
+                    return;
+                }
+
+                var histogramSceneColor = state.LocalDownsampleTextures[0];
+                var histogramWidth = histogramSceneColor.width;
+                var histogramHeight = histogramSceneColor.height;
+                UploadCommonParameters(cmd, component, state.ForceTarget, invPreExposure, histogramWidth, histogramHeight);
+                state.LocalExposureValid = requestLocalExposure && ExecuteLocalExposure(
+                    cmd,
+                    state,
+                    localExposure,
+                    histogramSceneColor);
+                UploadLocalExposureAutoParameters(cmd, localExposure, state.AverageLuminance, state.LocalExposureValid);
+
                 var scatterDescriptor = new RenderTextureDescriptor(HistogramScatterWidth, 1)
                 {
                     graphicsFormat = GraphicsFormat.R32_UInt,
@@ -276,10 +319,10 @@ namespace Burt.RenderPipeline
                 cmd.ClearRenderTarget(false, true, Color.clear);
 
                 cmd.BeginSample("Atomic Histogram Generate Pass");
-                cmd.SetComputeTextureParam(computeShader, histogramGenerateKernel, SceneColorId, cameraColor.Identifier);
+                cmd.SetComputeTextureParam(computeShader, histogramGenerateKernel, SceneColorId, histogramSceneColor);
                 cmd.SetComputeTextureParam(computeShader, histogramGenerateKernel, MeteringMaskId, meteringMask);
                 cmd.SetComputeTextureParam(computeShader, histogramGenerateKernel, HistogramScatterUavId, new RenderTargetIdentifier(HistogramScatterTemporaryId));
-                cmd.DispatchCompute(computeShader, histogramGenerateKernel, sceneHeight, 1, 1);
+                cmd.DispatchCompute(computeShader, histogramGenerateKernel, histogramHeight, 1, 1);
                 cmd.EndSample("Atomic Histogram Generate Pass");
 
                 cmd.BeginSample("Histogram Convert Pass");
@@ -299,6 +342,8 @@ namespace Burt.RenderPipeline
             }
             else
             {
+                UploadCommonParameters(cmd, component, state.ForceTarget, invPreExposure, sceneWidth, sceneHeight);
+                UploadLocalExposureAutoParameters(cmd, null, state.AverageLuminance, false);
                 cmd.BeginSample("Manual Exposure Pass");
                 cmd.SetComputeTextureParam(computeShader, manualExposureKernel, OutputUavId, outputTexture);
                 cmd.DispatchCompute(computeShader, manualExposureKernel, 1, 1, 1);
@@ -375,6 +420,36 @@ namespace Burt.RenderPipeline
             return FrameTimeEpsilon / Mathf.Max((1f - Mathf.Pow(2f, -FrameTimeEpsilon * speed)) * startTime, 0.000001f);
         }
 
+        private static void UploadLocalExposureAutoParameters(
+            CommandBuffer cmd,
+            LocalExposureVolumeComponent settings,
+            float lastAverageLuminance,
+            bool enabled)
+        {
+            if (!enabled || settings == null)
+            {
+                cmd.SetComputeVectorParam(computeShader, LocalExposureAutoParamsId, new Vector4(0f, 1f, 1f, 1f));
+                cmd.SetComputeVectorParam(computeShader, LocalExposureThresholdParamsId, Vector4.zero);
+                return;
+            }
+
+            var luminanceEv100 = Mathf.Log(Mathf.Max(lastAverageLuminance, 0.000001f), 2f) + Mathf.Log(1f / MiddleGrey, 2f);
+            var highlightCurve = settings.highlightContrastCurve.value;
+            var shadowCurve = settings.shadowContrastCurve.value;
+            var highlightContrast = settings.highlightContrast.value * (highlightCurve != null ? highlightCurve.Evaluate(luminanceEv100) : 1f);
+            var shadowContrast = settings.shadowContrast.value * (shadowCurve != null ? shadowCurve.Evaluate(luminanceEv100) : 1f);
+            cmd.SetComputeVectorParam(computeShader, LocalExposureAutoParamsId, new Vector4(
+                1f,
+                Mathf.Pow(2f, settings.middleGreyBias.value),
+                highlightContrast,
+                shadowContrast));
+            cmd.SetComputeVectorParam(computeShader, LocalExposureThresholdParamsId, new Vector4(
+                settings.highlightThreshold.value,
+                settings.shadowThreshold.value,
+                0f,
+                0f));
+        }
+
         private static bool EnsureShader()
         {
             if (computeShader != null)
@@ -402,55 +477,23 @@ namespace Burt.RenderPipeline
 
         private static bool ExecuteLocalExposure(
             CommandBuffer cmd,
-            BurtRenderTargetHandle cameraColor,
             CameraState state,
             LocalExposureVolumeComponent settings,
-            Texture meteringMask,
-            int sceneWidth,
-            int sceneHeight)
+            RenderTexture histogramSceneColor)
         {
-            var histogramWidth = Mathf.Max(1, Mathf.CeilToInt(sceneWidth / 64f));
-            var histogramHeight = Mathf.Max(1, Mathf.CeilToInt(sceneHeight / 64f));
-            // XRender feeds local exposure's Gaussian setup from scene downsample
-            // chain index 5: full, 1/2, 1/4, 1/8, 1/16, 1/32.
-            var blurredWidth = Mathf.Max(1, Mathf.CeilToInt(sceneWidth / 32f));
-            var blurredHeight = Mathf.Max(1, Mathf.CeilToInt(sceneHeight / 32f));
-            if (!EnsureLocalExposureDownsampleTextures(state, sceneWidth, sceneHeight))
+            var histogramWidth = Mathf.Max(1, Mathf.CeilToInt(histogramSceneColor.width / 64f));
+            var histogramHeight = Mathf.Max(1, Mathf.CeilToInt(histogramSceneColor.height / 64f));
+            var blurredSource = state.LocalDownsampleTextures[LocalExposureDownsampleStageCount - 1];
+            if (blurredSource == null || !blurredSource.IsCreated())
                 return false;
+            var blurredWidth = blurredSource.width;
+            var blurredHeight = blurredSource.height;
             if (!EnsureLocalExposureTextures(state, histogramWidth, histogramHeight, blurredWidth, blurredHeight))
                 return false;
 
-            var downsampleSourceWidth = sceneWidth;
-            var downsampleSourceHeight = sceneHeight;
-            for (var stageIndex = 0; stageIndex < LocalExposureDownsampleStageCount; stageIndex++)
-            {
-                var downsampleTarget = state.LocalDownsampleTextures[stageIndex];
-                var downsampleSource = stageIndex == 0
-                    ? cameraColor.Identifier
-                    : new RenderTargetIdentifier(state.LocalDownsampleTextures[stageIndex - 1]);
-                cmd.BeginSample("LocalExposure.SceneDownsample" + (stageIndex + 1));
-                cmd.SetComputeVectorParam(computeShader, LocalExposureDownsampleExtentId, new Vector4(
-                    downsampleSourceWidth,
-                    downsampleSourceHeight,
-                    downsampleTarget.width,
-                    downsampleTarget.height));
-                cmd.SetComputeTextureParam(computeShader, localExposureDownsampleKernel, LocalExposureDownsampleSourceId, downsampleSource);
-                cmd.SetComputeTextureParam(computeShader, localExposureDownsampleKernel, LocalExposureDownsampleUavId, downsampleTarget);
-                cmd.DispatchCompute(
-                    computeShader,
-                    localExposureDownsampleKernel,
-                    Mathf.CeilToInt(downsampleTarget.width / 8f),
-                    Mathf.CeilToInt(downsampleTarget.height / 8f),
-                    1);
-                cmd.EndSample("LocalExposure.SceneDownsample" + (stageIndex + 1));
-                downsampleSourceWidth = downsampleTarget.width;
-                downsampleSourceHeight = downsampleTarget.height;
-            }
-
             cmd.BeginSample("LocalExposureHistogramPass");
             cmd.SetComputeVectorParam(computeShader, LocalExposureExtentId, new Vector4(histogramWidth, histogramHeight, blurredWidth, blurredHeight));
-            cmd.SetComputeTextureParam(computeShader, localExposureHistogramKernel, LocalExposureSceneColorId, cameraColor.Identifier);
-            cmd.SetComputeTextureParam(computeShader, localExposureHistogramKernel, MeteringMaskId, meteringMask);
+            cmd.SetComputeTextureParam(computeShader, localExposureHistogramKernel, LocalExposureSceneColorId, histogramSceneColor);
             cmd.SetComputeTextureParam(computeShader, localExposureHistogramKernel, LocalExposureHistogramUavId, state.LocalHistogramTexture);
             cmd.DispatchCompute(computeShader, localExposureHistogramKernel, histogramWidth, histogramHeight, 1);
             cmd.EndSample("LocalExposureHistogramPass");
@@ -460,7 +503,7 @@ namespace Burt.RenderPipeline
                 computeShader,
                 localExposureSetupLogLuminanceKernel,
                 LocalExposureSceneColorId,
-                state.LocalDownsampleTextures[LocalExposureDownsampleStageCount - 1]);
+                blurredSource);
             cmd.SetComputeTextureParam(computeShader, localExposureSetupLogLuminanceKernel, LocalExposureLogLuminanceUavId, state.LocalLogLuminanceTexture);
             cmd.DispatchCompute(computeShader, localExposureSetupLogLuminanceKernel, Mathf.CeilToInt(blurredWidth / 8f), Mathf.CeilToInt(blurredHeight / 8f), 1);
             cmd.EndSample("LocalExposureSetupLogLuminancePass");
@@ -481,12 +524,52 @@ namespace Burt.RenderPipeline
             return true;
         }
 
-        private static bool EnsureLocalExposureDownsampleTextures(CameraState state, int sceneWidth, int sceneHeight)
+        private static bool ExecuteSceneDownsampleChain(
+            CommandBuffer cmd,
+            BurtRenderTargetHandle cameraColor,
+            CameraState state,
+            int sceneWidth,
+            int sceneHeight,
+            int stageCount)
         {
+            var sourceWidth = sceneWidth;
+            var sourceHeight = sceneHeight;
+            for (var stageIndex = 0; stageIndex < stageCount; stageIndex++)
+            {
+                var target = state.LocalDownsampleTextures[stageIndex];
+                if (target == null || !target.IsCreated())
+                    return false;
+                var source = stageIndex == 0
+                    ? cameraColor.Identifier
+                    : new RenderTargetIdentifier(state.LocalDownsampleTextures[stageIndex - 1]);
+                cmd.BeginSample("Exposure.SceneDownsample" + (stageIndex + 1));
+                cmd.SetComputeVectorParam(computeShader, LocalExposureDownsampleExtentId, new Vector4(
+                    sourceWidth,
+                    sourceHeight,
+                    target.width,
+                    target.height));
+                cmd.SetComputeTextureParam(computeShader, localExposureDownsampleKernel, LocalExposureDownsampleSourceId, source);
+                cmd.SetComputeTextureParam(computeShader, localExposureDownsampleKernel, LocalExposureDownsampleUavId, target);
+                cmd.DispatchCompute(
+                    computeShader,
+                    localExposureDownsampleKernel,
+                    Mathf.CeilToInt(target.width / 8f),
+                    Mathf.CeilToInt(target.height / 8f),
+                    1);
+                cmd.EndSample("Exposure.SceneDownsample" + (stageIndex + 1));
+                sourceWidth = target.width;
+                sourceHeight = target.height;
+            }
+            return true;
+        }
+
+        private static bool EnsureLocalExposureDownsampleTextures(CameraState state, int sceneWidth, int sceneHeight, int stageCount)
+        {
+            stageCount = Mathf.Clamp(stageCount, 1, LocalExposureDownsampleStageCount);
             var expectedWidth = Mathf.Max(1, sceneWidth);
             var expectedHeight = Mathf.Max(1, sceneHeight);
             var valid = true;
-            for (var stageIndex = 0; stageIndex < LocalExposureDownsampleStageCount; stageIndex++)
+            for (var stageIndex = 0; stageIndex < stageCount; stageIndex++)
             {
                 expectedWidth = Mathf.Max(1, (expectedWidth + 1) / 2);
                 expectedHeight = Mathf.Max(1, (expectedHeight + 1) / 2);
@@ -501,7 +584,7 @@ namespace Burt.RenderPipeline
             ReleaseLocalExposureDownsampleTextures(state);
             expectedWidth = Mathf.Max(1, sceneWidth);
             expectedHeight = Mathf.Max(1, sceneHeight);
-            for (var stageIndex = 0; stageIndex < LocalExposureDownsampleStageCount; stageIndex++)
+            for (var stageIndex = 0; stageIndex < stageCount; stageIndex++)
             {
                 expectedWidth = Mathf.Max(1, (expectedWidth + 1) / 2);
                 expectedHeight = Mathf.Max(1, (expectedHeight + 1) / 2);
@@ -709,6 +792,9 @@ namespace Burt.RenderPipeline
             state.TargetScale = SanitizeScale(exposure.y);
             state.AverageLuminance = Mathf.Max(SanitizeFinite(exposure.z, 1f), 0.000001f);
             state.CompensationScale = SanitizeScale(exposure.w);
+            state.AverageLocalExposure = data.Length > 1
+                ? SanitizeScale(data[1].x)
+                : 1f;
             state.HasSample = true;
             state.LastSampleFrame = Time.frameCount;
             state.SampleCount++;
@@ -781,7 +867,18 @@ namespace Burt.RenderPipeline
             var exposure = VolumeManager.instance.stack.GetComponent<ExposureVolumeComponent>();
             var cmd = context.AcquireCommandBuffer(Name);
             var invPreExposure = PreExposureUtility.ResolveForFrame(context.Request, context.Asset).InvPreExposure;
-            GpuExposureUtility.Execute(cmd, context.Request.Camera, context.CameraColorTarget, exposure, invPreExposure);
+            var sourceDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(context.Request.Camera);
+            var sourceWidth = Mathf.Max(1, sourceDescriptor.width);
+            var sourceHeight = Mathf.Max(1, sourceDescriptor.height);
+            if (context.ResourceRegistry != null &&
+                context.ResourceRegistry.TryGetAllocatedRenderTexture(BurtRenderGraphResourceRegistry.CameraColorName, out var cameraColorTexture) &&
+                cameraColorTexture != null)
+            {
+                sourceWidth = Mathf.Max(1, cameraColorTexture.width);
+                sourceHeight = Mathf.Max(1, cameraColorTexture.height);
+            }
+
+            GpuExposureUtility.Execute(cmd, context.Request.Camera, context.CameraColorTarget, exposure, invPreExposure, sourceWidth, sourceHeight);
             context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }

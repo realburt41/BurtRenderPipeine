@@ -9511,6 +9511,7 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGIScreenProbeViewProjectionMatrixId = Shader.PropertyToID("_BurtGIScreenProbeViewProjectionMatrix");
         private static readonly int BurtGIScreenProbeHistoryScreenDepthTextureId = Shader.PropertyToID("_BurtGIScreenProbeHistoryScreenDepthTexture");
         private static readonly int BurtGIPreviousSceneColorTextureId = Shader.PropertyToID("_BurtGIPreviousSceneColorTexture");
+        private static readonly int BurtGIPreviousSceneDepthTextureId = Shader.PropertyToID("_BurtGIPreviousSceneDepthTexture");
         private static readonly int BurtGIPreviousSceneColorParamsId = Shader.PropertyToID("_BurtGIPreviousSceneColorParams");
         private static readonly int HardwareRayTracingAccelerationStructureId = Shader.PropertyToID("_BurtGIRayTracingAccelerationStructure");
         private static readonly int HardwareRayMaxDistanceId = Shader.PropertyToID("_BurtGIHardwareRayMaxDistance");
@@ -10395,6 +10396,10 @@ namespace Burt.RenderPipeline
                 context.Asset,
                 out var previousSceneColorValid,
                 out var previousSceneColorExposureCorrection);
+            var previousSceneDepth = BurtGIPreviousSceneColorHistoryUtility.GetPreviousSceneDepth(
+                context.Request,
+                out var previousSceneDepthValid);
+            previousSceneColorValid &= previousSceneDepthValid;
             var previousSceneColorWidth = previousSceneColor != null ? Mathf.Max(1, previousSceneColor.width) : 1;
             var previousSceneColorHeight = previousSceneColor != null ? Mathf.Max(1, previousSceneColor.height) : 1;
             cmd.SetComputeTextureParam(
@@ -10402,6 +10407,11 @@ namespace Burt.RenderPipeline
                 kernel,
                 BurtGIPreviousSceneColorTextureId,
                 previousSceneColorValid && previousSceneColor != null ? (Texture)previousSceneColor : Texture2D.blackTexture);
+            cmd.SetComputeTextureParam(
+                shader,
+                kernel,
+                BurtGIPreviousSceneDepthTextureId,
+                previousSceneColorValid && previousSceneDepth != null ? (Texture)previousSceneDepth : Texture2D.blackTexture);
             cmd.SetComputeVectorParam(shader, BurtGIPreviousSceneColorParamsId, new Vector4(
                 previousSceneColorValid ? 1f : 0f,
                 previousSceneColorExposureCorrection,
@@ -10963,7 +10973,9 @@ namespace Burt.RenderPipeline
                 0.0001f,
                 screenProbeSettings.TraceRelativeDepthThickness * Mathf.Max(0f, giSettings.ShortRangeAOSlopeCompareToleranceScale));
             var cameraPosition = camera != null ? camera.transform.position : Vector3.zero;
-            var viewWidth = camera != null ? Mathf.Max(1, camera.pixelWidth) : Mathf.Max(1, probeWidth * screenProbeSettings.SpacingPixels);
+            var viewWidth = camera != null
+                ? Mathf.Max(1, BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera).width)
+                : Mathf.Max(1, probeWidth * screenProbeSettings.SpacingPixels);
             var shortRangeAOMaxScreenTraceFraction = Mathf.Max(1f, screenProbeSettings.SpacingPixels) * 2f / viewWidth;
             var tanHalfHorizontalFov = camera != null && !camera.orthographic
                 ? Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad) * Mathf.Max(camera.aspect, 0.0001f)
@@ -17832,6 +17844,7 @@ namespace Burt.RenderPipeline
         {
             public Camera Camera;
             public RenderTexture Texture;
+            public RenderTexture DepthTexture;
             public int Width;
             public int Height;
             public float StoredPreExposure = 1f;
@@ -17889,11 +17902,31 @@ namespace Burt.RenderPipeline
             return state.Texture;
         }
 
+        public static RenderTexture GetPreviousSceneDepth(
+            BurtRenderRequest request,
+            out bool valid)
+        {
+            valid = false;
+            var camera = request != null ? request.Camera : null;
+            if (camera == null)
+            {
+                return null;
+            }
+
+            var state = GetOrCreateState(camera);
+            EnsureTexture(state, camera);
+            var frameGap = state.LastStoredFrame >= 0 ? Time.frameCount - state.LastStoredFrame : int.MaxValue;
+            valid = state.Valid && state.DepthTexture != null && frameGap >= 0 && frameGap <= 2;
+            return state.DepthTexture;
+        }
+
         public static void Store(
             CommandBuffer cmd,
             BurtRenderRequest request,
             BurtRenderPipelineAsset asset,
-            RenderTargetIdentifier source)
+            RenderTargetIdentifier colorSource,
+            RenderTargetIdentifier depthSource,
+            Material depthCopyMaterial)
         {
             var camera = request != null ? request.Camera : null;
             if (cmd == null || camera == null)
@@ -17903,12 +17936,16 @@ namespace Burt.RenderPipeline
 
             var state = GetOrCreateState(camera);
             EnsureTexture(state, camera);
-            if (state.Texture == null)
+            if (state.Texture == null || state.DepthTexture == null || depthCopyMaterial == null)
             {
                 return;
             }
 
-            cmd.Blit(source, new RenderTargetIdentifier(state.Texture));
+            cmd.Blit(colorSource, new RenderTargetIdentifier(state.Texture));
+            cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.CameraDepthTextureId, depthSource);
+            cmd.SetRenderTarget(new RenderTargetIdentifier(state.DepthTexture));
+            BurtRenderTargetDescriptorUtility.SetViewport(cmd, state.Width, state.Height);
+            cmd.DrawProcedural(Matrix4x4.identity, depthCopyMaterial, 5, MeshTopology.Triangles, 3, 1);
             state.StoredPreExposure = PreExposureUtility.SanitizeExposure(
                 PreExposureUtility.ResolveForFrame(request, asset).PreExposure,
                 1f);
@@ -17943,7 +17980,9 @@ namespace Burt.RenderPipeline
             var width = Mathf.Max(1, descriptor.width);
             var height = Mathf.Max(1, descriptor.height);
             if (state.Texture != null &&
+                state.DepthTexture != null &&
                 state.Texture.IsCreated() &&
+                state.DepthTexture.IsCreated() &&
                 state.Width == width &&
                 state.Height == height)
             {
@@ -17959,6 +17998,16 @@ namespace Burt.RenderPipeline
                 hideFlags = HideFlags.HideAndDontSave
             };
             state.Texture.Create();
+            var depthDescriptor = descriptor;
+            depthDescriptor.colorFormat = RenderTextureFormat.RFloat;
+            state.DepthTexture = new RenderTexture(depthDescriptor)
+            {
+                name = "BurtGI Previous Scene Depth " + camera.GetInstanceID(),
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            state.DepthTexture.Create();
             state.Width = width;
             state.Height = height;
             state.Valid = false;
@@ -17992,6 +18041,13 @@ namespace Burt.RenderPipeline
                 state.Texture = null;
             }
 
+            if (state.DepthTexture != null)
+            {
+                state.DepthTexture.Release();
+                Object.DestroyImmediate(state.DepthTexture);
+                state.DepthTexture = null;
+            }
+
             state.Valid = false;
         }
 
@@ -18007,7 +18063,7 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal sealed class BurtStoreGIPreviousSceneColorPass : BurtRenderPass
+    internal sealed class BurtStoreGIPreviousSceneColorPass : BurtScreenSpaceGlobalIlluminationPass
     {
         public override string Name => "Burt Store GI Previous Scene Color";
 
@@ -18021,6 +18077,7 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadCameraColor();
+            builder.ReadCameraDepth();
         }
 
         public override void Execute(BurtRenderGraphContext context)
@@ -18034,7 +18091,14 @@ namespace Burt.RenderPipeline
             }
 
             var cameraColorTarget = context.CameraColorTarget;
-            if (!cameraColorTarget.IsValid)
+            var cameraDepthTarget = context.CameraDepthTarget;
+            if (!cameraColorTarget.IsValid || !cameraDepthTarget.IsValid)
+            {
+                return;
+            }
+
+            var material = GetScreenSpaceGlobalIlluminationMaterial();
+            if (material == null)
             {
                 return;
             }
@@ -18044,7 +18108,9 @@ namespace Burt.RenderPipeline
                 cmd,
                 context.Request,
                 context.Asset,
-                cameraColorTarget.Identifier);
+                cameraColorTarget.Identifier,
+                cameraDepthTarget.Identifier,
+                material);
             context.ExecuteLegacyCommandBuffer(cmd);
             context.ReleaseCommandBuffer(cmd);
         }
@@ -28094,8 +28160,9 @@ namespace Burt.RenderPipeline
         public static BurtRenderBufferDescriptor CreateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileDataBufferDescriptor(Camera camera, BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings, string debugName)
         {
             var screenProbeDescriptor = CreateScreenSpaceGlobalIlluminationScreenProbeDescriptor(camera, settings);
-            var width = Mathf.Max(1, Mathf.Max(camera != null ? camera.pixelWidth : 1, screenProbeDescriptor.width));
-            var height = Mathf.Max(1, Mathf.Max(camera != null ? camera.pixelHeight : 1, screenProbeDescriptor.height));
+            var cameraDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
+            var width = Mathf.Max(1, Mathf.Max(cameraDescriptor.width, screenProbeDescriptor.width));
+            var height = Mathf.Max(1, Mathf.Max(cameraDescriptor.height, screenProbeDescriptor.height));
             var tileCountX = Mathf.Max(1, (width + ScreenProbeIntegrateTileSize - 1) / ScreenProbeIntegrateTileSize);
             var tileCountY = Mathf.Max(1, (height + ScreenProbeIntegrateTileSize - 1) / ScreenProbeIntegrateTileSize);
             return new BurtRenderBufferDescriptor(
@@ -29190,15 +29257,9 @@ namespace Burt.RenderPipeline
 
         public static void GetCameraTargetSize(Camera camera, out int width, out int height)
         {
-            if (camera != null && camera.targetTexture != null)
-            {
-                width = Mathf.Max(1, camera.targetTexture.width);
-                height = Mathf.Max(1, camera.targetTexture.height);
-                return;
-            }
-
-            width = camera != null ? Mathf.Max(1, camera.pixelWidth) : 1;
-            height = camera != null ? Mathf.Max(1, camera.pixelHeight) : 1;
+            var descriptor = BurtRenderTargetDescriptorUtility.CreateCameraColorDescriptor(camera);
+            width = Mathf.Max(1, descriptor.width);
+            height = Mathf.Max(1, descriptor.height);
         }
 
         public static bool IsScreenSpaceGlobalIlluminationShaderAvailable()
@@ -29801,7 +29862,10 @@ namespace Burt.RenderPipeline
                 settings.ShortRangeAOWeight,
                 settings.ShortRangeAOApplyWeight,
                 settings.ShortRangeAOSlopeCompareToleranceScale,
-                false,
+                // XRender keeps ScreenProbeReprojection enabled even when the
+                // camera also uses TAA. TAA stabilizes the composed scene, but
+                // cannot replace GI's depth/normal-aware history and frame count.
+                settings.TemporalAccumulation,
                 settings.TemporalFeedback,
                 settings.TemporalDepthRejection,
                 settings.TemporalNormalRejection,

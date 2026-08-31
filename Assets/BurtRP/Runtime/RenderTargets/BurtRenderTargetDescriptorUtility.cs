@@ -43,7 +43,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             descriptor.autoGenerateMips = false; // 中间颜色 RT 不生成 mipmap，避免 Unity 在 FinalBlit 前做额外工作。
 
-            ApplyInputRenderScale(ref descriptor, camera);
+            if (!BurtRenderResolutionStageUtility.IsOutputResolutionStage(camera))
+            {
+                ApplyInputRenderScale(ref descriptor, camera);
+            }
             return descriptor; // 返回创建好的颜色 RT 描述，供分配 Pass 使用。
         }
 
@@ -550,7 +553,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
                 return;
             }
 
-            cmd.SetViewport(new Rect(0f, 0f, Mathf.Max(1, width), Mathf.Max(1, height)));
+            var safeWidth = Mathf.Max(1, width);
+            var safeHeight = Mathf.Max(1, height);
+            cmd.SetViewport(new Rect(0f, 0f, safeWidth, safeHeight));
         }
 
         public static void SetOutputTargetViewport(CommandBuffer cmd, Camera camera)

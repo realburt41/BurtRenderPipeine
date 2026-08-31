@@ -1312,7 +1312,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float2 BurtTaaClipToUv(float4 clipPosition)
             {
-                float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
+                float safeW = abs(clipPosition.w) > 1e-6 ? clipPosition.w : (clipPosition.w < 0.0 ? -1e-6 : 1e-6);
+                float2 ndc = clipPosition.xy / safeW;
                 float2 uv = ndc * 0.5 + 0.5;
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0 - uv.y;
@@ -1544,15 +1545,13 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 // its sole rejection gate. Keep the additional values above for
                 // diagnostics without feeding their jitter back into the blend.
                 float finalRejection = saturate(historyValidity * finalHistoryAvailability);
-                float antiFlickerHistoryGate = smoothstep(0.85, 1.0, finalRejection) * (1.0 - responsiveStrength);
-                float antiFlickerSdBoost =
-                    BurtTaaAntiFlickerStandardDeviationBoost(temporalContrast, motionPixels) *
-                    antiFlickerHistoryGate;
-                float standardDeviationFactor = 1.5 + antiFlickerSdBoost;
+                // ACCUMULATE_CONFIG_ANTI_FLICKER_SD_BOOST is disabled in
+                // XRender's desktop TSR permutation.
+                float standardDeviationFactor = 1.5;
                 float3 clampMin = moment1 - standardDeviation * standardDeviationFactor;
                 float3 clampMax = moment1 + standardDeviation * standardDeviationFactor;
                 float3 boxCenter = 0.5 * (clampMax + clampMin);
-                float3 boxExtents = max(0.5 * (clampMax - clampMin), float3(1e-5, 1e-5, 1e-5));
+                float3 boxExtents = max(0.5 * (clampMax - clampMin), float3(6.103515625e-5, 6.103515625e-5, 6.103515625e-5));
                 float3 historyOffset = historyWorking - boxCenter;
                 float3 clampUnitVector = abs(historyOffset) / boxExtents;
                 float clampUnit = max(max(clampUnitVector.x, clampUnitVector.y), clampUnitVector.z);
@@ -1563,7 +1562,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float minBoundLuma = BurtTaaWorkingLuma(clampMin);
                 float maxBoundLuma = BurtTaaWorkingLuma(clampMax);
                 float historyLuma = BurtTaaWorkingLuma(historyWorking);
-                float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 1e-4)));
+                float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 6.103515625e-5)));
                 float xrenderBaseBlend = max(0.05, lumaContrast);
                 float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
                 currentBlend = lerp(currentBlend, 0.25, responsiveMask);
@@ -1573,9 +1572,12 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float3 resolvedWorking = lerp(clippedHistoryWorking, currentFilteredWorking, currentBlend);
                 resolvedWorking = lerp(currentFilteredWorking, resolvedWorking, finalHistoryAvailability);
                 float3 resolved = BurtTaaFromWorkingPerceptualSpace(max(resolvedWorking, 0.0));
-                // This is the actual history coefficient used by the lerp.
-                // Multiplying by finalRejection again only distorted the debug
-                // view by squaring the acceptance signal.
+                // XRender returns/stores raw scene color while native TSR history
+                // is unavailable. Keep the raster fallback identical to compute.
+                resolved = finalHistoryAvailability > 0.0 ? resolved : current;
+                // Keep both coefficients explicit. XRender's FINAL_BLEND_FACTOR
+                // diagnostic displays currentBlend, the current-frame weight
+                // supplied to lerp(history, current, currentBlend).
                 float finalFeedback = saturate(1.0 - currentBlend);
 
                 int debugMode = (int)round(_BurtShadingDebugMode);
@@ -1588,7 +1590,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     float untrustedObjectMotion = max(velocitySourceCoverage.y, taaMetadata.b);
 
                     if (debugMode == 320) return float4(BurtTaaDebugColor(rawHistory), 1.0);
-                    if (debugMode == 321) return float4(finalFeedback.xxx, 1.0);
+                    if (debugMode == 321) return float4(currentBlend.xxx, 1.0);
                     if (debugMode == 322) return float4(lumaContrast, clipWeight, finalRejection, 1.0);
                     if (debugMode == 323) return float4(saturate(historyUv), finalHistoryAvailability, 1.0);
                     if (debugMode == 324) return float4(saturate(abs(resolved - current) * 8.0), 1.0);
@@ -1659,7 +1661,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     }
                     if (debugMode == 367)
                     {
-                        float3 feedbackColor = BurtTaaDebugHeatmap(finalFeedback);
+                        float3 feedbackColor = BurtTaaDebugHeatmap(currentBlend);
                         return float4(feedbackColor, 1.0);
                     }
 
@@ -1761,7 +1763,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float2 BurtTaaClipToUv(float4 clipPosition)
             {
-                float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
+                float safeW = abs(clipPosition.w) > 1e-6 ? clipPosition.w : (clipPosition.w < 0.0 ? -1e-6 : 1e-6);
+                float2 ndc = clipPosition.xy / safeW;
                 float2 uv = ndc * 0.5 + 0.5;
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0 - uv.y;
@@ -1886,7 +1889,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float2 BurtTaaClipToUv(float4 clipPosition)
             {
-                float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
+                float safeW = abs(clipPosition.w) > 1e-6 ? clipPosition.w : (clipPosition.w < 0.0 ? -1e-6 : 1e-6);
+                float2 ndc = clipPosition.xy / safeW;
                 float2 uv = ndc * 0.5 + 0.5;
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0 - uv.y;
@@ -1968,8 +1972,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float centerDeviceZError = BurtTaaCalculateDeviceZError(centerDepth);
 
                 BurtTaaSelectClosestDepthTap(uv, float2(1.0, 0.0), centerDepth, centerDeviceZError, closestDepth, closestOffset);
-                BurtTaaSelectClosestDepthTap(uv, float2(1.0, 1.0), centerDepth, centerDeviceZError, closestDepth, closestOffset);
                 BurtTaaSelectClosestDepthTap(uv, float2(0.0, 1.0), centerDepth, centerDeviceZError, closestDepth, closestOffset);
+                BurtTaaSelectClosestDepthTap(uv, float2(1.0, 1.0), centerDepth, centerDeviceZError, closestDepth, closestOffset);
                 BurtTaaSelectClosestDepthTap(uv, float2(-1.0, 1.0), centerDepth, centerDeviceZError, closestDepth, closestOffset);
 
                 float staticAvailable = 0.0;
@@ -1977,9 +1981,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float2 closestUv = saturate(uv + closestOffset * _BurtTAATexelSize.xy);
                 float4 objectVelocity = tex2D(_BurtTAAVelocityTexture, closestUv);
                 float stencilObjectMotion = (BurtTaaLoadStencil(closestUv) & BURT_DEFERRED_STENCIL_OBJECT_MOTION_BIT) != 0u ? 1.0 : 0.0;
-                float rawObjectMotion = step(0.75, objectVelocity.w) * objectVelocity.z;
-                float objectVelocityValid = stencilObjectMotion * rawObjectMotion;
-                finalVelocity = lerp(finalVelocity, objectVelocity.xy, objectVelocityValid);
+                finalVelocity = lerp(finalVelocity, objectVelocity.xy, stencilObjectMotion);
                 DilationOutput output;
                 output.velocity = float4(finalVelocity, 0.0, 1.0);
                 output.closestDepth = float4(closestDepth, closestDepth, closestDepth, closestDepth);
@@ -2476,6 +2478,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             float _BurtAutoExposureDebugUseMeteringMask;
             float _BurtAutoExposureDebugHasHistogram;
             float _BurtAutoExposureDebugHasToneMappedTexture;
+            float _BurtAutoExposureDebugFlipY;
             float _BurtInvPreExposure;
             float _BurtUseExposureTexture;
             float _BurtUseLocalExposure;
@@ -2727,26 +2730,33 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float3 preExposedColor = tex2D(_BurtPostProcessSourceTexture, input.uv).rgb;
+                float2 sampleUv = input.uv;
+                if (_BurtAutoExposureDebugFlipY > 0.5)
+                    sampleUv.y = 1.0 - sampleUv.y;
+                // XRender's HDR debug positions use a top-left pixel origin.
+                // Keep overlay placement independent from scene texture storage.
+                float2 overlayUv = float2(input.uv.x, 1.0 - input.uv.y);
+
+                float3 preExposedColor = tex2D(_BurtPostProcessSourceTexture, sampleUv).rgb;
                 float3 sceneColor = max(preExposedColor * max(_BurtInvPreExposure, 0.0), 0.0);
                 float sceneLuminance = BurtAutoExposureDebugLuminance(sceneColor);
                 float currentExposure = BurtExposureDebugCurrentScale();
-                float4 localData = BurtExposureDebugLocalData(sceneColor, input.uv);
+                float4 localData = BurtExposureDebugLocalData(sceneColor, sampleUv);
                 float3 outputColor;
 
                 if (_BurtAutoExposureDebugMode < 1.5)
                 {
                     outputColor = BurtExposureDebugColorize(sceneLuminance * UNITY_PI);
-                    outputColor = BurtExposureDebugLegend(input.uv, outputColor);
-                    outputColor = BurtExposureDebugCrossHair(input.uv, outputColor);
+                    outputColor = BurtExposureDebugLegend(overlayUv, outputColor);
+                    outputColor = BurtExposureDebugCrossHair(overlayUv, outputColor);
                     return float4(outputColor, 1.0);
                 }
 
                 if (_BurtAutoExposureDebugMode < 2.5)
                 {
                     outputColor = BurtExposureDebugColorize(sceneLuminance);
-                    outputColor = BurtExposureDebugLegend(input.uv, outputColor);
-                    outputColor = BurtExposureDebugCrossHair(input.uv, outputColor);
+                    outputColor = BurtExposureDebugLegend(overlayUv, outputColor);
+                    outputColor = BurtExposureDebugCrossHair(overlayUv, outputColor);
                     return float4(outputColor, 1.0);
                 }
 
@@ -2756,8 +2766,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 if (_BurtAutoExposureDebugMode < 3.5)
                 {
                     outputColor = BurtExposureDebugColorize(BurtAutoExposureDebugLuminance(exposedColor));
-                    outputColor = BurtExposureDebugLegend(input.uv, outputColor);
-                    outputColor = BurtExposureDebugCrossHair(input.uv, outputColor);
+                    outputColor = BurtExposureDebugLegend(overlayUv, outputColor);
+                    outputColor = BurtExposureDebugCrossHair(overlayUv, outputColor);
                     return float4(outputColor, 1.0);
                 }
 
@@ -2765,19 +2775,19 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 // composite result. This preserves the production path's local
                 // exposure, bloom, AP1 film curve, gamut expansion and grading.
                 float3 fallbackToneMappedColor = BurtExposureDebugToneMap(exposedColor * localData.x);
-                float3 realToneMappedColor = tex2D(_BurtAutoExposureDebugToneMappedTexture, input.uv).rgb;
+                float3 realToneMappedColor = tex2D(_BurtAutoExposureDebugToneMappedTexture, sampleUv).rgb;
                 float3 toneMappedColor = lerp(fallbackToneMappedColor, realToneMappedColor, saturate(_BurtAutoExposureDebugHasToneMappedTexture));
                 if (_BurtAutoExposureDebugMode < 4.5)
                 {
                     outputColor = BurtExposureDebugColorize(BurtAutoExposureDebugLuminance(toneMappedColor));
-                    outputColor = BurtExposureDebugLegend(input.uv, outputColor);
-                    outputColor = BurtExposureDebugCrossHair(input.uv, outputColor);
+                    outputColor = BurtExposureDebugLegend(overlayUv, outputColor);
+                    outputColor = BurtExposureDebugCrossHair(overlayUv, outputColor);
                     return float4(outputColor, 1.0);
                 }
 
                 if (_BurtAutoExposureDebugMode < 5.5)
                 {
-                    outputColor = BurtExposureDebugLightMeter(input.uv, toneMappedColor);
+                    outputColor = BurtExposureDebugLightMeter(overlayUv, toneMappedColor);
                     return float4(outputColor, 1.0);
                 }
 
@@ -2788,7 +2798,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     return float4(outputColor, 1.0);
                 }
 
-                float contrast = max(BurtExposureDebugLuminanceContrast(sceneColor, input.uv), 0.000001);
+                float contrast = max(BurtExposureDebugLuminanceContrast(sceneColor, sampleUv), 0.000001);
                 outputColor = saturate(abs(log2(contrast)) * 0.5) * lerp(float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), step(contrast, 1.0));
                 return float4(outputColor, 1.0);
             }
@@ -3166,7 +3176,6 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             sampler2D _BurtTAAVelocityTexture;
             sampler2D _BurtTAAResponsiveMaskTexture;
             Texture2D<uint2> _BurtDeferredStencilTexture;
-            float _BurtTAAObjectMotionStencilFallback;
             float4 _BurtDeferredStencilTexelSize;
             float _BurtDeferredStencilTextureAvailable;
 
@@ -3202,11 +3211,26 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 uint realStencil = BurtTaaLoadDeferredStencil(input.uv);
                 float4 velocity = tex2D(_BurtTAAVelocityTexture, input.uv);
                 float objectMotion = step(0.75, velocity.w) * velocity.z;
-                uint generatedObjectMotion = (_BurtTAAObjectMotionStencilFallback > 0.5 && objectMotion > 0.0) ? BURT_DEFERRED_STENCIL_OBJECT_MOTION_BIT : 0u;
+                // XRender's effective contract is that every valid opaque scene-
+                // velocity pixel owns stencil bit 8. BRP also carries that ownership
+                // in the velocity payload because Unity can expose an S8 sampling
+                // view while later passes have already lost the bit written by the
+                // GBuffer. Merge both sources unconditionally: on an intact stencil
+                // target this is idempotent, while on the broken S8 path it preserves
+                // the exact ownership XRender's dilation expects.
+                uint generatedObjectMotion = objectMotion > 0.0 ? BURT_DEFERRED_STENCIL_OBJECT_MOTION_BIT : 0u;
                 uint generatedResponsive = tex2D(_BurtTAAResponsiveMaskTexture, input.uv).r > 0.5
                     ? BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT
                     : 0u;
-                return float4((float)(realStencil | generatedObjectMotion | generatedResponsive), 0.0, 0.0, 0.0);
+                uint combinedStencil = realStencil | generatedObjectMotion;
+                // XRender's transparent Forward pass uses Ref=16 and
+                // WriteMask=24. A responsive transparent fragment therefore
+                // sets bit 16 and clears the opaque object-motion bit 8 below
+                // it; simply OR-ing both bits changes velocity ownership.
+                combinedStencil = generatedResponsive != 0u
+                    ? ((combinedStencil & ~BURT_DEFERRED_STENCIL_OBJECT_MOTION_BIT) | generatedResponsive)
+                    : combinedStencil;
+                return float4((float)combinedStencil, 0.0, 0.0, 0.0);
             }
             ENDHLSL
         }
@@ -3443,6 +3467,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             #include "UnityCG.cginc"
 
             sampler2D _BurtPostProcessSourceTexture;
+            float _BurtPlainCopyFlipY;
 
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -3458,7 +3483,10 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                return tex2D(_BurtPostProcessSourceTexture, input.uv);
+                float2 uv = input.uv;
+                if (_BurtPlainCopyFlipY > 0.5)
+                    uv.y = 1.0 - uv.y;
+                return tex2D(_BurtPostProcessSourceTexture, uv);
             }
             ENDHLSL
         }

@@ -2009,26 +2009,7 @@ namespace Burt.RenderPipeline.Editor
 
         private static void ApplyGBufferStencilState(Material material)
         {
-            if (material == null || !material.HasProperty("_BurtGBufferStencilRef") || !material.HasProperty("_BurtGBufferStencilWriteMask"))
-            {
-                return;
-            }
-
-            int stencilRef = ResolveGBufferStencilModel(material);
-            int writeMask = BurtShadingModelIds.DeferredStencilShadingModelMask;
-            if (material.HasProperty("_ResponsiveAA") && material.GetFloat("_ResponsiveAA") >= 0.5f)
-            {
-                stencilRef |= BurtShadingModelIds.DeferredStencilResponsiveAABit;
-                writeMask |= BurtShadingModelIds.DeferredStencilResponsiveAABit;
-            }
-
-            material.SetFloat("_BurtGBufferStencilRef", stencilRef);
-            if (material.HasProperty("_BurtGBufferStencilReadMask"))
-            {
-                material.SetFloat("_BurtGBufferStencilReadMask", BurtShadingModelIds.DeferredStencilShadingModelMask);
-            }
-
-            material.SetFloat("_BurtGBufferStencilWriteMask", writeMask);
+            BurtShadingModelIds.ApplyGBufferStencilProperties(material, ResolveGBufferStencilModel(material));
         }
 
         private static void ApplyMotionVectorStencilState(Material material)

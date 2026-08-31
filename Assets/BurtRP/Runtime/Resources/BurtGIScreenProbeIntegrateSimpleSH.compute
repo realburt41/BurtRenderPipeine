@@ -443,6 +443,36 @@ float2 BurtGIIntegrateSimpleSHFallbackProbeCoord(float2 screenUV, float2 gridSiz
     return clamp(floor(screenPixel / spacingPixels), 0.0f, gridSize - 1.0f);
 }
 
+uint BurtGIIntegrateSimpleSHHash(uint value)
+{
+    value ^= value >> 16u;
+    value *= 0x7feb352du;
+    value ^= value >> 15u;
+    value *= 0x846ca68bu;
+    value ^= value >> 16u;
+    return value;
+}
+
+float BurtGIIntegrateSimpleSHStochasticRandom(float2 screenUV)
+{
+    uint2 pixelCoord = (uint2)floor(saturate(screenUV) * max(_BurtGISourceTexelSize.zw, 1.0f));
+    uint temporalIndex = (uint)abs((int)floor(_BurtGIScreenProbeIntegrateSimpleSHParams2.x));
+    uint seed = pixelCoord.x * 0x9e3779b9u ^ pixelCoord.y * 0x85ebca6bu ^ temporalIndex * 0xc2b2ae35u;
+    return min((float)BurtGIIntegrateSimpleSHHash(seed) * (1.0f / 4294967296.0f), 0.999999f);
+}
+
+uint BurtGIIntegrateSimpleSHSelectStochasticProbe(float4 weights, float2 screenUV)
+{
+    float weightSum = dot(max(weights, 0.0f), 1.0f);
+    float threshold = BurtGIIntegrateSimpleSHStochasticRandom(screenUV) * max(weightSum, 1.0e-8f);
+    float cumulative = weights.x;
+    if (threshold < cumulative) return 0u;
+    cumulative += weights.y;
+    if (threshold < cumulative) return 1u;
+    cumulative += weights.z;
+    return threshold < cumulative ? 2u : 3u;
+}
+
 float4 BurtGIIntegrateSimpleSHBasis3V0(float3 direction)
 {
     return float4(
@@ -471,15 +501,17 @@ float4 BurtGIIntegrateSimpleSHLoadDirectionalTile(uint2 probePixel, uint tileInd
     return _BurtGIScreenProbeRadianceSHDirectionalTexture.Load(int3(uint2(probePixel.x + tileIndex * screenProbeWidth, probePixel.y), 0));
 }
 
-float4 BurtGIIntegrateSimpleSHEvaluateSH3Probe(uint2 probePixel, float3 normalWS, uint screenProbeWidth, float cosThetaAO)
+float3 BurtGIIntegrateSimpleSHEvaluateSH3Coefficients(
+    float3 ambient,
+    float4 red0,
+    float4 red1,
+    float4 green0,
+    float4 green1,
+    float4 blue0,
+    float4 blue1,
+    float3 normalWS,
+    float cosThetaAO)
 {
-    float4 ambient = _BurtGIScreenProbeRadianceSHAmbientTexture.Load(int3(probePixel, 0));
-    float4 red0 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 0u, screenProbeWidth);
-    float4 red1 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 1u, screenProbeWidth);
-    float4 green0 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 2u, screenProbeWidth);
-    float4 green1 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 3u, screenProbeWidth);
-    float4 blue0 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 4u, screenProbeWidth);
-    float4 blue1 = BurtGIIntegrateSimpleSHLoadDirectionalTile(probePixel, 5u, screenProbeWidth);
     float3 direction = BurtGIIntegrateSimpleSHSafeNormalize(normalWS).zxy;
     float coneCos = saturate(cosThetaAO);
     float coneCos2 = coneCos * coneCos;
@@ -497,14 +529,14 @@ float4 BurtGIIntegrateSimpleSHEvaluateSH3Probe(uint2 probePixel, float3 normalWS
     float3 sh7 = float3(red1.z, green1.z, blue1.z);
     float3 sh8 = float3(red1.w, green1.w, blue1.w);
     float3 irradiance =
-        c0 * ambient.rgb +
+        c0 * ambient +
         c1 * (-sh1 * direction.y + sh2 * direction.z - sh3 * direction.x) +
         c2 * (
             sh6 * (3.0f * direction.z * direction.z - 1.0f) +
             1.73205080757f * (
                 sh8 * (direction.x * direction.x - direction.y * direction.y) +
                 2.0f * (sh4 * direction.x * direction.y - sh5 * direction.y * direction.z - sh7 * direction.z * direction.x)));
-    return float4(max(irradiance * 12.56637061436f, 0.0f), saturate(ambient.a));
+    return max(irradiance * 12.56637061436f, 0.0f);
 }
 
 bool BurtGIIntegrateSimpleSHResolveAdaptiveProbe(
@@ -674,8 +706,16 @@ float4 BurtGIIntegrateSimpleSHSampleIrradianceSH3(
         bilinearWeights.y * bilinearWeights.x);
     float3 unitNormalWS = BurtGIIntegrateSimpleSHSafeNormalize(normalWS);
     float4 scenePlane = float4(unitNormalWS, dot(positionWS, unitNormalWS));
-    float4 irradianceSum = 0.0f;
+    float3 ambientSum = 0.0f;
+    float4 red0Sum = 0.0f;
+    float4 red1Sum = 0.0f;
+    float4 green0Sum = 0.0f;
+    float4 green1Sum = 0.0f;
+    float4 blue0Sum = 0.0f;
+    float4 blue1Sum = 0.0f;
     float weightSum = 0.0f;
+    uint2 stochasticProbeCoords[4];
+    float4 stochasticProbeWeights = 0.0f;
 
     [unroll]
     for (int cornerIndex = 0; cornerIndex < 4; ++cornerIndex)
@@ -727,8 +767,15 @@ float4 BurtGIIntegrateSimpleSHSampleIrradianceSH3(
             }
         }
 
-        float4 shSample = BurtGIIntegrateSimpleSHEvaluateSH3Probe(probeAtlasCoord, normalWS, screenProbeWidth, cosThetaAO);
-        irradianceSum += shSample * weight;
+        ambientSum += _BurtGIScreenProbeRadianceSHAmbientTexture.Load(int3(probeAtlasCoord, 0)).rgb * weight;
+        red0Sum += BurtGIIntegrateSimpleSHLoadDirectionalTile(probeAtlasCoord, 0u, screenProbeWidth) * weight;
+        red1Sum += BurtGIIntegrateSimpleSHLoadDirectionalTile(probeAtlasCoord, 1u, screenProbeWidth) * weight;
+        green0Sum += BurtGIIntegrateSimpleSHLoadDirectionalTile(probeAtlasCoord, 2u, screenProbeWidth) * weight;
+        green1Sum += BurtGIIntegrateSimpleSHLoadDirectionalTile(probeAtlasCoord, 3u, screenProbeWidth) * weight;
+        blue0Sum += BurtGIIntegrateSimpleSHLoadDirectionalTile(probeAtlasCoord, 4u, screenProbeWidth) * weight;
+        blue1Sum += BurtGIIntegrateSimpleSHLoadDirectionalTile(probeAtlasCoord, 5u, screenProbeWidth) * weight;
+        stochasticProbeCoords[cornerIndex] = probeAtlasCoord;
+        stochasticProbeWeights[cornerIndex] = weight;
         weightSum += weight;
     }
 
@@ -737,10 +784,24 @@ float4 BurtGIIntegrateSimpleSHSampleIrradianceSH3(
         return 0.0f;
     }
 
-    // Match XRender CalculateUpsampleInterpolationWeights: the 0.01 floor is
-    // part of the rejection contract, not merely a divide-by-zero guard.
-    float4 irradiance = irradianceSum * rcp(max(weightSum, 0.01f));
-    return float4(max(irradiance.rgb, 0.0f), saturate(irradiance.a));
+    // XRender enables STOCHASTIC_PROBE_INTERPOLATION: normalize the geometric
+    // weights conceptually, choose one probe with that probability, and let the
+    // main temporal reprojection converge the noise.  Deterministically blending
+    // all four probe histories stamps moving silhouettes into the current GI and
+    // creates a feedback loop before TAA sees the image.
+    uint stochasticProbeIndex = BurtGIIntegrateSimpleSHSelectStochasticProbe(stochasticProbeWeights, screenUV);
+    uint2 stochasticProbeCoord = stochasticProbeCoords[stochasticProbeIndex];
+    float3 irradiance = BurtGIIntegrateSimpleSHEvaluateSH3Coefficients(
+        _BurtGIScreenProbeRadianceSHAmbientTexture.Load(int3(stochasticProbeCoord, 0)).rgb,
+        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 0u, screenProbeWidth),
+        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 1u, screenProbeWidth),
+        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 2u, screenProbeWidth),
+        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 3u, screenProbeWidth),
+        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 4u, screenProbeWidth),
+        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 5u, screenProbeWidth),
+        normalWS,
+        cosThetaAO);
+    return float4(irradiance, 1.0f);
 }
 
 float4 BurtGIIntegrateSimpleSHSampleRadianceOct(

@@ -51,8 +51,8 @@ Material:
     - _AlphaClip: 0
     - _Anisotropy: 0.385
     - _BurtGBufferStencilReadMask: 224
-    - _BurtGBufferStencilRef: 128
-    - _BurtGBufferStencilWriteMask: 224
+    - _BurtGBufferStencilRef: 136
+    - _BurtGBufferStencilWriteMask: 232
     - _ClearCoatMask: 1
     - _ClearCoatNormalScale: 0
     - _ClearCoatRoughness: 0.046

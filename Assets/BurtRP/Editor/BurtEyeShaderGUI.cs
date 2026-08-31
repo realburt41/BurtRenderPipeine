@@ -361,18 +361,7 @@ namespace Burt.RenderPipeline.Editor
 
         private static void ApplyGBufferStencilState(Material material)
         {
-            if (material == null || !material.HasProperty("_BurtGBufferStencilRef") || !material.HasProperty("_BurtGBufferStencilWriteMask"))
-            {
-                return;
-            }
-
-            material.SetFloat("_BurtGBufferStencilRef", BurtShadingModelIds.DeferredStencilDefaultLitRef);
-            if (material.HasProperty("_BurtGBufferStencilReadMask"))
-            {
-                material.SetFloat("_BurtGBufferStencilReadMask", BurtShadingModelIds.DeferredStencilShadingModelMask);
-            }
-
-            material.SetFloat("_BurtGBufferStencilWriteMask", BurtShadingModelIds.DeferredStencilShadingModelMask);
+            BurtShadingModelIds.ApplyGBufferStencilProperties(material, BurtShadingModelIds.DeferredStencilDefaultLitRef);
         }
 
         private static void UpdateEyeEmissionFlag(Material material)

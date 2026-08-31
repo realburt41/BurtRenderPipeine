@@ -13,6 +13,7 @@ namespace Burt.RenderPipeline
     public static class BurtPhysicalLightUnitUtility
     {
         private const float MinimumArea = 0.000001f;
+        private const float MinimumSpotSolidAngle = 0.01f;
 
         public static float PointLumenToCandela(float lumen)
         {
@@ -28,16 +29,16 @@ namespace Burt.RenderPipeline
         {
             if (!exact)
                 return Mathf.Max(lumen, 0f) / Mathf.PI;
-            var fullAngleRadians = Mathf.Clamp(fullAngleDegrees, 0.01f, 179f) * Mathf.Deg2Rad;
+            var fullAngleRadians = fullAngleDegrees * Mathf.Deg2Rad;
             var solidAngle = 2f * Mathf.PI * (1f - Mathf.Cos(fullAngleRadians * 0.5f));
-            return Mathf.Max(lumen, 0f) / Mathf.Max(solidAngle, MinimumArea);
+            return Mathf.Max(lumen, 0f) / Mathf.Max(solidAngle, MinimumSpotSolidAngle);
         }
 
         public static float SpotCandelaToLumen(float candela, float fullAngleDegrees, bool exact)
         {
             if (!exact)
                 return Mathf.Max(candela, 0f) * Mathf.PI;
-            var fullAngleRadians = Mathf.Clamp(fullAngleDegrees, 0.01f, 179f) * Mathf.Deg2Rad;
+            var fullAngleRadians = fullAngleDegrees * Mathf.Deg2Rad;
             var solidAngle = 2f * Mathf.PI * (1f - Mathf.Cos(fullAngleRadians * 0.5f));
             return Mathf.Max(candela, 0f) * solidAngle;
         }
@@ -64,6 +65,21 @@ namespace Burt.RenderPipeline
                     return BurtPhysicalLightUnit.Nits;
                 default:
                     return BurtPhysicalLightUnit.Candela;
+            }
+        }
+
+        public static BurtPhysicalLightUnit PreferredDisplayUnitFor(LightType type)
+        {
+            switch (type)
+            {
+                case LightType.Directional:
+                    return BurtPhysicalLightUnit.Lux;
+                case LightType.Point:
+                case LightType.Spot:
+                case LightType.Area:
+                    return BurtPhysicalLightUnit.Lumen;
+                default:
+                    return NativeUnitFor(type);
             }
         }
 
@@ -137,7 +153,9 @@ namespace Burt.RenderPipeline
     [ExecuteAlways]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Light))]
-    [AddComponentMenu("BurtRP/Lighting/Physical Light")]
+    // Additional light data owned by the BRP Light inspector. Keeping it out of
+    // Add Component avoids exposing two competing intensity inspectors.
+    [AddComponentMenu("")]
     public sealed class BurtPhysicalLight : MonoBehaviour
     {
         [SerializeField]
@@ -160,14 +178,12 @@ namespace Burt.RenderPipeline
         public bool UsePhysicalLightUnits
         {
             get => usePhysicalLightUnits;
-            set
-            {
-                usePhysicalLightUnits = value;
-                ApplyToUnityLight();
-            }
+            set => SetUsePhysicalLightUnits(value);
         }
 
         public BurtPhysicalLightUnit Unit => unit;
+
+        public bool ExactSpotReflector => exactSpotReflector;
 
         public float Intensity
         {
@@ -195,7 +211,9 @@ namespace Burt.RenderPipeline
             if (light == null || !BurtPhysicalLightUnitUtility.IsSupported(light.type, newUnit))
                 return;
 
-            var nativeIntensity = preserveOutput ? NativeIntensity : light.intensity;
+            var nativeIntensity = preserveOutput
+                ? (usePhysicalLightUnits ? NativeIntensity : Mathf.Max(light.intensity, 0f))
+                : Mathf.Max(light.intensity, 0f);
             unit = newUnit;
             if (preserveOutput)
             {
@@ -208,6 +226,85 @@ namespace Burt.RenderPipeline
                     exactSpotReflector);
             }
             ApplyToUnityLight();
+        }
+
+        public void SetUsePhysicalLightUnits(bool enabled, bool preserveOutput = true)
+        {
+            var light = ResolveLight();
+            if (light == null)
+            {
+                usePhysicalLightUnits = enabled;
+                return;
+            }
+
+            if (usePhysicalLightUnits == enabled)
+            {
+                if (enabled)
+                    ApplyToUnityLight();
+                return;
+            }
+
+            if (enabled)
+            {
+                unit = BurtPhysicalLightUnitUtility.PreferredDisplayUnitFor(light.type);
+
+                if (preserveOutput)
+                {
+                    intensity = BurtPhysicalLightUnitUtility.FromNativeIntensity(
+                        light.type,
+                        unit,
+                        light.intensity,
+                        light.spotAngle,
+                        light.areaSize,
+                        exactSpotReflector);
+                }
+            }
+
+            usePhysicalLightUnits = enabled;
+            if (enabled)
+                ApplyToUnityLight();
+            else
+                lastAppliedHash = CalculateStateHash(light);
+        }
+
+        public void SetExactSpotReflector(bool exact, bool preserveOutput = true)
+        {
+            var light = ResolveLight();
+            if (light == null || exactSpotReflector == exact)
+                return;
+
+            var nativeIntensity = usePhysicalLightUnits ? NativeIntensity : Mathf.Max(light.intensity, 0f);
+            exactSpotReflector = exact;
+            if (preserveOutput && light.type == LightType.Spot && unit == BurtPhysicalLightUnit.Lumen)
+            {
+                intensity = BurtPhysicalLightUnitUtility.FromNativeIntensity(
+                    light.type,
+                    unit,
+                    nativeIntensity,
+                    light.spotAngle,
+                    light.areaSize,
+                    exactSpotReflector);
+            }
+            ApplyToUnityLight();
+        }
+
+        public void SyncFromUnityLight()
+        {
+            var light = ResolveLight();
+            if (light == null)
+                return;
+
+            if (!BurtPhysicalLightUnitUtility.IsSupported(light.type, unit))
+                unit = BurtPhysicalLightUnitUtility.NativeUnitFor(light.type);
+
+            intensity = BurtPhysicalLightUnitUtility.FromNativeIntensity(
+                light.type,
+                unit,
+                light.intensity,
+                light.spotAngle,
+                light.areaSize,
+                exactSpotReflector);
+            lastAppliedHash = CalculateStateHash(light);
         }
 
         public void ApplyToUnityLight()
@@ -231,8 +328,14 @@ namespace Burt.RenderPipeline
             var light = ResolveLight();
             if (light == null)
                 return;
-            unit = BurtPhysicalLightUnitUtility.NativeUnitFor(light.type);
-            intensity = Mathf.Max(light.intensity, 0f);
+            unit = BurtPhysicalLightUnitUtility.PreferredDisplayUnitFor(light.type);
+            intensity = BurtPhysicalLightUnitUtility.FromNativeIntensity(
+                light.type,
+                unit,
+                light.intensity,
+                light.spotAngle,
+                light.areaSize,
+                true);
             exactSpotReflector = true;
             usePhysicalLightUnits = true;
             ApplyToUnityLight();

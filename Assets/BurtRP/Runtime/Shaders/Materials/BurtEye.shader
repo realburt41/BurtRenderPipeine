@@ -59,9 +59,9 @@ Shader "BurtRP/Eye"
         [HideInInspector] _DstBlend ("Destination Blend", Float) = 0
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
-        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 32
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 40
         [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
-        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 232
         [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
         [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 1
@@ -99,7 +99,10 @@ Shader "BurtRP/Eye"
         Pass
         {
             Name "Burt Eye Motion Vectors"
-            Tags { "LightMode" = "BurtMotionVectors" }
+            // Eye is rendered through BurtForwardOnly in Deferred, so its velocity
+            // must use the matching supplemental tag. Pure Forward also lists this
+            // tag as a fallback, while Deferred avoids redrawing GBuffer owners.
+            Tags { "LightMode" = "BurtForwardOnlyMotionVectors" }
             ZWrite Off
             ZTest Equal
             Cull [_Cull]

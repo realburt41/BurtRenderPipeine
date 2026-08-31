@@ -64,8 +64,8 @@ Material:
     - _AlphaClip: 0
     - _BlendMode: 0
     - _BurtGBufferStencilReadMask: 224
-    - _BurtGBufferStencilRef: 64
-    - _BurtGBufferStencilWriteMask: 224
+    - _BurtGBufferStencilRef: 72
+    - _BurtGBufferStencilWriteMask: 232
     - _BurtSkinnedDecalEntryDebug: 0
     - _BurtSkinnedDecalProjectionDebug: 0
     - _BurtSkinnedDecalUseMeshPosition: 0

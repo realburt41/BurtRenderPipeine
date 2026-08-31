@@ -1,5 +1,56 @@
 namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让组装器基类和具体组装器处在同一个模块里。
 {
+    public readonly struct BurtRenderGraphFeatureBlock : System.IDisposable
+    {
+        private readonly BurtRenderGraph graph;
+        private readonly string name;
+        private readonly int firstPassIndex;
+        private readonly System.Collections.Generic.IReadOnlyList<string> ownedPassNameTokens;
+        private readonly System.Collections.Generic.IReadOnlyList<string> ownedResourceNameTokens;
+
+        public BurtRenderGraphFeatureBlock(BurtRenderGraph graph, string name, bool enabled)
+            : this(graph, name, enabled, null, null)
+        {
+        }
+
+        public BurtRenderGraphFeatureBlock(
+            BurtRenderGraph graph,
+            string name,
+            bool enabled,
+            System.Collections.Generic.IReadOnlyList<string> ownedPassNameTokens,
+            System.Collections.Generic.IReadOnlyList<string> ownedResourceNameTokens)
+        {
+            this.graph = graph;
+            this.name = string.IsNullOrEmpty(name) ? "Unnamed" : name;
+            this.ownedPassNameTokens = ownedPassNameTokens;
+            this.ownedResourceNameTokens = ownedResourceNameTokens;
+            IsEnabled = enabled && graph != null;
+            firstPassIndex = graph != null ? graph.PassCount : 0;
+            if (IsEnabled)
+            {
+                graph.BeginProfilingScope("BRP.Feature/" + this.name);
+            }
+        }
+
+        public bool IsEnabled { get; }
+
+        public void Dispose()
+        {
+            if (graph == null)
+            {
+                return;
+            }
+
+            var assembledPassCount = graph.PassCount - firstPassIndex;
+            if (IsEnabled)
+            {
+                graph.EndProfilingScope("BRP.Feature/" + name);
+            }
+
+            graph.RecordFeatureBlock(name, IsEnabled, assembledPassCount, ownedPassNameTokens, ownedResourceNameTokens);
+        }
+    }
+
     public abstract class BurtRenderGraphAssembler // 定义 RenderGraph 组装器基类，负责把一次 request 转换成一串 RenderPass。
     {
         public abstract string Name { get; } // 定义组装器名称，用于调试、Frame Debugger、Profiler 或日志显示。

@@ -34,6 +34,7 @@ namespace Burt.RenderPipeline
         private static readonly int FurScaleId = Shader.PropertyToID("_FurScale");
         private static readonly int FurMaxCountId = Shader.PropertyToID("_FurMaxCount");
         private static readonly int FurPreviousSkinnedMeshValidId = Shader.PropertyToID("_BurtFurBlurPreviousSkinnedMeshValid");
+        private static readonly int FurUseCameraMotionId = Shader.PropertyToID("_BurtMultipassFurUseCameraMotion");
         private static int skinnedRendererCount;
         private static int bakedSkinnedMeshCount;
         private static int bakedSkinnedMeshCountFrame = -1;
@@ -579,6 +580,11 @@ namespace Burt.RenderPipeline
             var instanceMatrix = ResolveRendererMatrix(renderer, rootTransform);
             var previousMatrix = ResolvePreviousObjectToWorld(instanceMatrix);
             var previousSkinnedMeshValid = renderer is SkinnedMeshRenderer && bakedSkinnedMeshHasPreviousPositions;
+            // Multipass fur is submitted with DrawMeshInstanced, so Unity does not
+            // provide a reliable per-renderer unity_MotionVectorsParams value here.
+            // Select XRender's per-pixel camera reprojection only when neither the
+            // transform nor skinned vertices have an object-motion history.
+            var useCameraMotion = !previousSkinnedMeshValid && ApproximatelyEqual(instanceMatrix, previousMatrix);
             FillInstanceMatrices(instanceMatrix, MaxMultipassLayerCount);
 
             var submeshCount = Mathf.Min(materials.Length, mesh.subMeshCount);
@@ -611,6 +617,7 @@ namespace Burt.RenderPipeline
                 propertyBlock.SetInteger(FurMaxCountId, layerCount);
                 propertyBlock.SetMatrix(BurtFurBlurPassUtility.PreviousObjectToWorldId, previousMatrix);
                 propertyBlock.SetFloat(FurPreviousSkinnedMeshValidId, previousSkinnedMeshValid ? 1f : 0f);
+                propertyBlock.SetFloat(FurUseCameraMotionId, useCameraMotion ? 1f : 0f);
                 for (var passIndex = 0; passIndex < passList.Count; passIndex++)
                 {
                     var materialPassIndex = passList[passIndex];
@@ -631,7 +638,13 @@ namespace Burt.RenderPipeline
                 }
             }
 
-            if (pass == BurtMultipassShaderPass.FurBlurVelocity)
+            // Desktop XRender writes TAA velocity in the GBuffer draw. Capture the
+            // transform after that draw so the next frame's fur shells use the same
+            // previous-object ownership even when the optional fur-blur pass is off.
+            // MotionVectors remains the low-MRT/forward fallback.
+            if (pass == BurtMultipassShaderPass.GBuffer ||
+                pass == BurtMultipassShaderPass.MotionVectors ||
+                pass == BurtMultipassShaderPass.FurBlurVelocity)
             {
                 CaptureCurrentObjectToWorld(instanceMatrix);
             }
@@ -642,6 +655,20 @@ namespace Burt.RenderPipeline
             PromoteCapturedObjectToWorldIfNeeded(Time.frameCount);
             var frameDelta = Time.frameCount - previousObjectToWorldFrame;
             return hasPreviousObjectToWorld && frameDelta >= 0 && frameDelta <= 1 ? previousObjectToWorld : currentMatrix;
+        }
+
+        private static bool ApproximatelyEqual(Matrix4x4 left, Matrix4x4 right)
+        {
+            const float epsilon = 1e-6f;
+            for (var index = 0; index < 16; index++)
+            {
+                if (Mathf.Abs(left[index] - right[index]) > epsilon)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void CaptureCurrentObjectToWorld(Matrix4x4 currentMatrix)

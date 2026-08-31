@@ -2,6 +2,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 {
     public sealed class BurtDeferredGraphAssembler : BurtRenderGraphAssembler // 定义 Deferred 渲染图组装器，当前阶段先建立可插入 GBuffer 阶段的顺序图。
     {
+        private static readonly string[] ScreenSpaceGIPassTokens =
+        {
+            "Screen Space Global Illumination",
+            "ScreenProbe",
+            "BurtGI",
+            "Store GI Previous Scene Color",
+        };
+        private static readonly string[] ScreenSpaceGIResourceTokens =
+        {
+            "ScreenSpaceGlobalIllumination",
+            "Screen Space Global Illumination",
+            "ScreenProbe",
+            "BurtGI",
+        };
+        private static readonly string[] AdditionalLightingPassTokens = { "Additional Lighting" };
+        private static readonly string[] AdditionalLightingResourceTokens = { "AdditionalLightBuffer" };
+
         private readonly BurtRenderPass allocateCameraColorPass = new BurtAllocateCameraColorPass(); // 创建 CameraColor 分配 Pass，保证 Deferred 最终仍然有中间颜色输出。
         private readonly BurtRenderPass allocateCameraDepthPass = new BurtAllocateCameraDepthPass(); // 创建 CameraDepth 分配 Pass，保证 GBuffer MRT 和后续 Forward fallback 都能共用深度。
         private readonly BurtRenderPass allocateGBuffer0Pass = new BurtAllocateGBuffer0Pass(); // 创建 GBuffer0 分配 Pass，用于保存 DepthNormals prepass 写入的 normal 和 perceptual roughness。
@@ -422,7 +439,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass drawMultipassTransparentPass = new BurtDrawMultipassTransparentPass();
         private readonly BurtRenderPass releaseRefractionPass = new BurtReleaseRefractionPass();
         private readonly BurtRenderPass drawUnsupportedShadersPass = new BurtDrawUnsupportedShadersPass(); // 创建不支持 Shader 调试 Pass，让非 BurtRP 材质继续显示错误材质。
-        private readonly BurtRenderPass drawPreImageEffectsGizmosPass = new BurtDrawPreImageEffectsGizmosPass(); // 创建编辑器 Gizmos 绘制 Pass，恢复 SRP Scene/Game View 的 Gizmos 显示。
         private readonly BurtRenderPass drawPostImageEffectsGizmosPass = new BurtDrawPostImageEffectsGizmosPass(); // 创建后处理后的编辑器 Gizmos Pass，避免直接画到外部最终目标。
         private readonly BurtRenderPass allocatePostProcessColorPass = new AllocatePostProcessColorPass(); // 创建后处理中间 RT 分配 Pass，保持后处理尾部链路不分 Forward/Deferred。
         private readonly BurtRenderPass lightShaftBloomPass = new BurtLightShaftBloomPass();
@@ -515,6 +531,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             var shadingDebugPolicy = BurtShadingDebugRenderPolicy.Resolve(request);
             var useDeferredLightCulling = shadingDebugPolicy.NeedsDeferredLightCulling;
             var useAdditionalLights = ShouldUseDeferredAdditionalLighting(request);
+            var useScreenSpaceGlobalIllumination = useLocalGBufferTargets &&
+                BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset);
             var useMainLightShadow = shadingDebugPolicy.NeedsMainLightShadowMap &&
                 BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 终端 Debug 只生产自己真正读取的阴影资源。
             var useAdditionalLightShadow = shadingDebugPolicy.NeedsAdditionalLightShadowAtlas &&
@@ -593,9 +611,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.BeginProfilingScope("BRP.Stage/Screen Space Deferred Lighting");
             AddScreenSpaceAmbientOcclusionPasses(graph, request, asset, useLocalGBufferTargets);
             AddScreenSpaceShadowPasses(graph, request, asset, useLocalGBufferTargets);
-            AddScreenSpaceGlobalIlluminationPasses(graph, request, asset, useLocalGBufferTargets, safeRenderOptions);
+            AddScreenSpaceGlobalIlluminationPasses(graph, request, asset, useScreenSpaceGlobalIllumination, safeRenderOptions);
             AddDeferredLightingDepthCopyPass(graph, useLocalGBufferTargets);
-            AddDeferredLightingPass(graph, request, asset, useLocalGBufferTargets); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
+            AddDeferredLightingPass(graph, request, asset, useLocalGBufferTargets, useAdditionalLights); // 使用 GBuffer 合成不透明物体光照，CameraColor 从这里开始进入真正 Deferred 不透明结果。
             AddDeferredLightingDepthReleasePass(graph, useLocalGBufferTargets);
             AddScreenSpaceGlobalIlluminationFinalReleaseAfterLighting(
                 graph,
@@ -606,7 +624,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 retainTranslucencyVolumeForVolumetricFog);
             AddFurBlurPasses(graph, request, asset, useLocalGBufferTargets);
             AddDeferredForwardOnlyOpaqueFallback(graph, asset); // 根据资产开关决定是否绘制不能写入 GBuffer 的前向专用不透明物体。
-            graph.AddPass(storeGIPreviousSceneColorPass);
+            if (useScreenSpaceGlobalIllumination)
+            {
+                graph.AddPass(storeGIPreviousSceneColorPass);
+            }
             AddHiZBuildPass(graph, useHiZDepth);
             AddScreenSpaceSubsurfacePasses(graph, request, asset, useLocalGBufferTargets);
             graph.EndProfilingScope("BRP.Stage/Screen Space Deferred Lighting");
@@ -709,10 +730,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 asset,
                 safeRenderOptions,
                 retainTranslucencyVolumeForVolumetricFog);
-            graph.BeginProfilingScope("BRP.Stage/Editor Gizmos");
-            AddPreImageEffectsGizmosPass(graph, request); // 编辑器里在后处理前恢复 PreImageEffects Gizmos。
-            graph.EndProfilingScope("BRP.Stage/Editor Gizmos");
-
             graph.BeginProfilingScope("BRP.Stage/Post Process");
             AddPostProcessPasses(graph, request, asset, safeRenderOptions); // 根据后处理和 FinalBlit 条件决定是否插入 Tonemapping 链路。
             graph.EndProfilingScope("BRP.Stage/Post Process");
@@ -1099,10 +1116,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             BurtRenderGraph graph,
             BurtRenderRequest request,
             BurtRenderPipelineAsset asset,
-            bool useLocalGBufferTargets,
+            bool enabled,
             BurtRequestRenderOptions renderOptions)
         {
-            if (!useLocalGBufferTargets || !BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset))
+            using var featureBlock = new BurtRenderGraphFeatureBlock(
+                graph,
+                "Screen Space GI",
+                enabled,
+                ScreenSpaceGIPassTokens,
+                ScreenSpaceGIResourceTokens);
+            if (!featureBlock.IsEnabled)
             {
                 return;
             }
@@ -1651,7 +1674,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
             BurtRenderRequest request,
             BurtRenderPipelineAsset asset,
-            bool useLocalGBufferTargets) // 接收当前 request 是否拥有本地图内 GBuffer。
+            bool useLocalGBufferTargets,
+            bool useAdditionalLights) // 接收当前 request 是否拥有本地图内 GBuffer。
         {
             if (!useLocalGBufferTargets) // 没有本地 GBuffer 生命周期时不能执行 Deferred Lighting。
             {
@@ -1672,7 +1696,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 
             // XRender-style punctual stage: evaluate additional lights only
             // after the no-punctual base lighting has been written.
-            if (ShouldUseDeferredAdditionalLighting(request))
+            using var additionalLightingFeature = new BurtRenderGraphFeatureBlock(
+                graph,
+                "Additional Lighting",
+                useAdditionalLights,
+                AdditionalLightingPassTokens,
+                AdditionalLightingResourceTokens);
+            if (additionalLightingFeature.IsEnabled)
             {
                 graph.AddPass(deferredLitAdditionalLightingPass);
                 graph.AddPass(deferredHairAdditionalLightingPass);
@@ -1769,18 +1799,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.AddPass(drawUnsupportedShadersPass); // 添加不支持 Shader 调试 Pass。
         }
 
-        private void AddPreImageEffectsGizmosPass( // 根据编辑器 Gizmos 开关添加 PreImageEffects Gizmos Pass。
-            BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
-            BurtRenderRequest request) // 接收当前 request，用来过滤 Preview/Reflection 和 Gizmos 开关。
-        {
-            if (!BurtEditorGizmoUtility.ShouldRenderGizmos(request)) // 非编辑器、Preview/Reflection 或关闭 Gizmos 时不添加这个 Pass。
-            {
-                return; // 直接返回，避免运行时和无 Gizmos 场景出现空 Pass。
-            }
-
-            graph.AddPass(drawPreImageEffectsGizmosPass); // 添加 PreImageEffects Gizmos Pass。
-        }
-
         private void AddPostImageEffectsGizmosPass( // 根据编辑器 Gizmos 开关添加 PostImageEffects Gizmos Pass。
             BurtRenderGraph graph, // 接收要写入 Pass 的 RenderGraph。
             BurtRenderRequest request) // 接收当前 request，用来过滤 Preview/Reflection 和 Gizmos 开关。
@@ -1804,7 +1822,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return; // 直接返回，避免无意义的 PostProcessColor 分配。
             }
 
-            var useTemporalAAUpscale = PostProcessPass.ShouldUseTemporalAAUpscale(request, asset);
             var useTemporalAA = PostProcessPass.ShouldUseTemporalAAPass(request, asset);
             graph.AddPass(allocatePostProcessColorPass); // 添加后处理中间颜色 RT 分配 Pass。
             if (BurtLightShaftOcclusionUtility.ShouldUseLightShaftBloom(request))
@@ -1812,27 +1829,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(lightShaftBloomPass);
             }
 
-            if (useTemporalAA && !useTemporalAAUpscale)
-            {
-                graph.AddPass(temporalAAPass);
-                graph.AddPass(temporalAAFinalCopyPass);
-            }
-
             if (PostProcessPass.ShouldUseDiaphragmDepthOfFieldPass(request, asset))
             {
                 graph.AddPass(diaphragmDepthOfFieldPass);
             }
 
-            if (PostProcessPass.ShouldUseLensFlarePass(request, asset))
+            // Match XRender's common temporal boundary: native TSR and the
+            // BeforeBloom TAAU path both run after DOF and before Bloom.
+            if (useTemporalAA)
             {
-                graph.AddPass(lensFlarePass);
+                graph.AddPass(temporalAAPass);
+                graph.AddPass(temporalAAFinalCopyPass);
             }
 
             graph.AddPass(exposurePass);
 
-            if (PostProcessPass.ShouldUseBloomPass(request, asset))
+            bloomBuildPasses.AddToGraph(graph, request, asset);
+
+            // XRender submits lens flare after Bloom and outside TAA history.
+            if (PostProcessPass.ShouldUseLensFlarePass(request, asset))
             {
-                bloomBuildPasses.AddToGraph(graph, request, asset);
+                graph.AddPass(lensFlarePass);
             }
 
             graph.AddPass(postProcessPass); // 添加后处理 Pass，执行 No-op Copy 或 Tonemapping。
@@ -1856,11 +1873,6 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             }
 
             graph.AddPass(releasePostProcessColorPass); // 添加后处理中间颜色 RT 释放 Pass。
-
-            if (useTemporalAA && useTemporalAAUpscale)
-            {
-                graph.AddPass(temporalAAPass);
-            }
         }
 
         private void AddDebugViewPasses( // 根据资产开关添加调试视图 Pass。

@@ -491,6 +491,19 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
 
+            BurtGBufferVelocityUtility.AllocateClearAndBind(
+                cmd,
+                context,
+                camera,
+                gbuffer0Target,
+                gbuffer1Target,
+                gbuffer2Target,
+                gbuffer3Target,
+                gbuffer4Target,
+                gbuffer5Target,
+                gbufferObjectIndexTarget,
+                cameraDepthTarget);
+
             context.ExecuteLegacyCommandBuffer(cmd); // Preserve graph ordering before the legacy local command buffer is submitted.
 
             context.ReleaseCommandBuffer(cmd); // 图级共享缓冲由 RenderGraph 持有；本地缓冲才真正归还池。

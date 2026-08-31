@@ -48,6 +48,7 @@ Shader "BurtRP/UnlitColor"
 
             // 声明片元 shader 函数名是 FragDepth。
             #pragma fragment FragDepth
+            #pragma multi_compile_instancing
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
@@ -74,7 +75,7 @@ Shader "BurtRP/UnlitColor"
         Pass
         {
             Name "Burt Unlit Motion Vectors"
-            Tags { "LightMode" = "BurtMotionVectors" }
+            Tags { "LightMode" = "BurtForwardOnlyMotionVectors" }
             ZWrite Off
             ZTest Equal
 
@@ -202,6 +203,7 @@ Shader "BurtRP/UnlitColor"
             // 声明片元 shader 函数名是 Frag。
             #pragma fragment Frag
             #pragma shader_feature_fragment _ BURT_USE_DEBUG_MODE_FORWARD
+            #pragma multi_compile_instancing
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Core/BurtPreExposure.hlsl"
 
@@ -224,6 +226,7 @@ Shader "BurtRP/UnlitColor"
                 // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
                 float4 PositionOS : POSITION;
                 float3 NormalOS : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             // 定义顶点输出结构，也就是顶点 shader 传给片元 shader 的数据。
@@ -238,6 +241,8 @@ Shader "BurtRP/UnlitColor"
             // 定义顶点 shader 函数，输入 Mesh 顶点数据，输出裁剪空间位置。
             Varyings Vert(Attributes input)
             {
+                UNITY_SETUP_INSTANCE_ID(input);
+
                 // 创建一个输出结构变量，用来保存顶点 shader 的输出结果。
                 Varyings output;
 
@@ -300,6 +305,7 @@ Shader "BurtRP/UnlitColor"
             // 声明片元 shader 函数名是 FragForwardOnly。
             #pragma fragment FragForwardOnly
             #pragma shader_feature_fragment _ BURT_USE_DEBUG_MODE_FORWARD
+            #pragma multi_compile_instancing
 
             // 引入 Unity 的基础 shader 工具函数，例如 UnityObjectToClipPos。
             #include "UnityCG.cginc"
@@ -321,6 +327,7 @@ Shader "BurtRP/UnlitColor"
                 // 读取模型空间顶点位置，POSITION 是 Unity 传入顶点位置的语义。
                 float4 PositionOS : POSITION;
                 float3 NormalOS : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             // 定义 Deferred ForwardOnly 顶点输出结构，也就是顶点 shader 传给片元 shader 的数据。
@@ -335,6 +342,8 @@ Shader "BurtRP/UnlitColor"
             // 定义 Deferred ForwardOnly 顶点 shader 函数，输入 Mesh 顶点数据，输出裁剪空间位置。
             ForwardOnlyVaryings VertForwardOnly(ForwardOnlyAttributes input)
             {
+                UNITY_SETUP_INSTANCE_ID(input);
+
                 // 创建一个输出结构变量，用来保存顶点 shader 的输出结果。
                 ForwardOnlyVaryings output;
 

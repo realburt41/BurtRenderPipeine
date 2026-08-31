@@ -91,9 +91,9 @@ Shader "BurtRP/Subsurface"
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
         [HideInInspector] _ZTest ("ZTest", Float) = 4
         [ToggleUI] _ResponsiveAA ("Responsive AA", Float) = 0
-        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 64
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 72
         [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
-        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 232
         [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
         [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
@@ -217,6 +217,7 @@ Shader "BurtRP/Subsurface"
             #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
             #pragma shader_feature_local _ BURT_SKINNED_DECAL
             #pragma multi_compile _ XSKIN_MESH_COMPRESSED
+            #pragma multi_compile_instancing
             #pragma target 4.5
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"
@@ -270,6 +271,7 @@ Shader "BurtRP/Subsurface"
             #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
             #pragma shader_feature_local _ BURT_SKINNED_DECAL
             #pragma multi_compile _ XSKIN_MESH_COMPRESSED
+            #pragma multi_compile_instancing
 
             // MRT 输出 SV_Target0..4，显式要求 shader target 3.0，避免低目标平台不支持多渲染目标。
             #pragma target 4.5
@@ -302,6 +304,7 @@ Shader "BurtRP/Subsurface"
             #pragma shader_feature_local _ BURT_PRESKIN_POSITION_PACKED
             #pragma shader_feature_local _ BURT_SKINNED_DECAL
             #pragma multi_compile _ XSKIN_MESH_COMPRESSED
+            #pragma multi_compile_instancing
             #pragma target 4.5
 
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtSubsurfaceProperties.hlsl"

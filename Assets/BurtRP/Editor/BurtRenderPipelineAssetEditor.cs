@@ -59,7 +59,7 @@ namespace Burt.RenderPipeline.Editor // 将编辑器扩展放在 BurtRP Editor �
         private static readonly GUIContent PostProcessSettingsLabel = new("Post Process Settings", "后处理框架设置，具体效果参数从 Global Volume 读取。"); // 定义后处理设置显示文本。
         private static readonly GUIContent PostProcessVolumeLayerMaskLabel = new("Post Process Volume Layer Mask", "后处理 Global Volume 查询层，Tonemapping 等效果参数从匹配的 Volume Profile 读取。"); // 定义后处理 Volume 层显示文本。
         private static readonly GUIContent UnsupportedShaderDebugLabel = new("Unsupported Shader Debug", "用 Unity 错误材质标记非 BurtRP Shader，方便发现错误材质。"); // 定义不支持 Shader 调试显示文本。
-        private static readonly GUIContent RenderGraphProfilingModeLabel = new("RenderGraph Profiling", "Off 关闭 GPU Marker；CameraAndStage 适合常驻；CameraStageAndPass 用于 RenderDoc 精细抓帧。");
+        private static readonly GUIContent RenderGraphProfilingModeLabel = new("RenderGraph Profiling", "Off 关闭 GPU Marker；CameraAndStage 适合常驻；CameraStageAndPass 展示 Camera/Stage/Pass 并折叠连续资源生命周期；CameraStagePassAndResource 额外逐项展开资源，适合排查分配和释放。");
         private static readonly GUIContent SubmitStrategyLabel = new("Submit Strategy", "PerCamera 最稳健；EndOfFrameWhenSafe 会在无待释放图级 Buffer 时合并到帧末 Submit，否则自动回退。");
         private static readonly GUIContent RenderGraphPassCullingLabel = new("RenderGraph Pass Culling", "根据资源消费者裁剪无副作用且输出未使用的 Pass。");
         private static readonly GUIContent RenderGraphDebugLabel = new("RenderGraph Debug Capture", "缓存最近一次 RenderGraph 调试信息，供下方按钮复制到剪切板。"); // 定义 RenderGraph 捕获显示文本。

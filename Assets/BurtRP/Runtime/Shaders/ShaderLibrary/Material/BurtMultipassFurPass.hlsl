@@ -26,6 +26,12 @@ float4x4 _BurtFurBlurPreviousNonJitteredViewProjection;
 float4x4 _BurtFurBlurPreviousObjectToWorld;
 float4 _BurtFurBlurScreenSize;
 float _BurtFurBlurPreviousSkinnedMeshValid;
+float4x4 _BurtTAACurrentNonJitteredViewProjection;
+float4x4 _BurtTAAPreviousNonJitteredViewProjection;
+float4x4 _BurtTAAClipToPreviousClip;
+float _BurtMultipassFurUseCameraMotion;
+float4 _BurtTAATexelSize;
+float4 _BurtTAAJitter;
 float4 _BurtBlueNoiseDimensions;
 float4 _BurtBlueNoiseModuloMasks;
 float _BurtBlueNoiseScalarTextureValid;
@@ -59,6 +65,8 @@ struct BurtMultipassFurVaryings
     float3 GeometricNormalWS : TEXCOORD6;
     float3 FurDirectionWS : TEXCOORD7;
     float3 FurOffsetDirectionWS : TEXCOORD8;
+    float4 CurrentClipNoJitter : TEXCOORD9;
+    float4 PreviousClipNoJitter : TEXCOORD10;
 };
 
 struct BurtMultipassFurGBufferOutput
@@ -70,6 +78,7 @@ struct BurtMultipassFurGBufferOutput
     float4 GBuffer4 : SV_Target4;
     float4 GBuffer5 : SV_Target5;
     float4 ObjectIndex : SV_Target6;
+    float4 Velocity : SV_Target7;
 };
 
 struct BurtMultipassFurVelocityVaryings
@@ -263,9 +272,25 @@ BurtMultipassFurVaryings VertMultipassFur(BurtMultipassFurAttributes input)
     float3 furDirectionOS;
     positionOS.xyz += BurtCalculateMultipassFurOffsetOS(input, layerIndex, furDirectionOS);
 
+    float4 previousPositionOS = positionOS;
+    if (_BurtFurBlurPreviousSkinnedMeshValid > 0.5f)
+    {
+        BurtMultipassFurAttributes previousInput = input;
+        previousInput.PositionOS = float4(input.PreviousPositionOS, input.PositionOS.w);
+        previousInput.NormalOS = dot(input.PreviousNormalOS, input.PreviousNormalOS) > BURT_EPSILON ? input.PreviousNormalOS : input.NormalOS;
+        previousInput.TangentOS = dot(input.PreviousTangentOS.xyz, input.PreviousTangentOS.xyz) > BURT_EPSILON ? input.PreviousTangentOS : input.TangentOS;
+
+        float3 previousFurDirectionOS;
+        float3 previousFurOffsetOS = BurtCalculateMultipassFurOffsetOS(previousInput, layerIndex, previousFurDirectionOS);
+        previousPositionOS = float4(input.PreviousPositionOS + previousFurOffsetOS, input.PositionOS.w);
+    }
+
+    float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
+    float4 previousWorld = mul(_BurtFurBlurPreviousObjectToWorld, previousPositionOS);
+
     BurtMultipassFurVaryings output;
     output.PositionCS = UnityObjectToClipPos(positionOS);
-    output.PositionWS = mul(unity_ObjectToWorld, positionOS).xyz;
+    output.PositionWS = currentWorld.xyz;
     output.NormalWS = BurtSafeNormalize(UnityObjectToWorldNormal(input.NormalOS));
     output.GeometricNormalWS = output.NormalWS;
     output.TangentWS = BurtMultipassFurObjectToWorldTangent(input.TangentOS);
@@ -274,17 +299,61 @@ BurtMultipassFurVaryings VertMultipassFur(BurtMultipassFurAttributes input)
     output.LayerIndex = layerIndex;
     output.FurDirectionWS = BurtSafeNormalize(UnityObjectToWorldDir(furDirectionOS));
     output.FurOffsetDirectionWS = output.FurDirectionWS;
+    output.CurrentClipNoJitter = mul(_BurtTAACurrentNonJitteredViewProjection, currentWorld);
+    output.PreviousClipNoJitter = mul(_BurtTAAPreviousNonJitteredViewProjection, previousWorld);
     return output;
 }
 
 float2 BurtMultipassFurClipToUv(float4 clipPosition)
 {
-    float2 uv = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
+    float safeW = abs(clipPosition.w) > 1e-6f
+        ? clipPosition.w
+        : (clipPosition.w < 0.0f ? -1e-6f : 1e-6f);
+    float2 uv = clipPosition.xy / safeW;
     uv = uv * 0.5f + 0.5f;
     #if UNITY_UV_STARTS_AT_TOP
         uv.y = 1.0f - uv.y;
     #endif
     return uv;
+}
+
+float2 BurtMultipassFurRasterCurrentUv(float4 positionCS)
+{
+    // XRender derives the current endpoint from SV_Position and removes the
+    // projection jitter in the pixel shader. Interpolating a current clip-space
+    // endpoint produces a different vector on large/deforming shell triangles,
+    // especially at silhouettes.
+    float2 rasterUv = positionCS.xy * _BurtTAATexelSize.xy;
+    float2 clipXY = rasterUv * 2.0f - 1.0f;
+    #if UNITY_UV_STARTS_AT_TOP
+        clipXY.y = -clipXY.y;
+    #endif
+
+    float2 currentJitter = _BurtTAAJitter.xy;
+    #if UNITY_UV_STARTS_AT_TOP
+        currentJitter.y = -currentJitter.y;
+    #endif
+    clipXY -= currentJitter;
+    return BurtMultipassFurClipToUv(float4(clipXY, 0.0f, 1.0f));
+}
+
+float4 BurtMultipassFurResolvePreviousClip(float4 positionCS, float4 objectPreviousClip)
+{
+    float2 rasterUv = positionCS.xy * _BurtTAATexelSize.xy;
+    float2 currentClipXY = rasterUv * 2.0f - 1.0f;
+    #if UNITY_UV_STARTS_AT_TOP
+        currentClipXY.y = -currentClipXY.y;
+    #endif
+    float2 currentJitter = _BurtTAAJitter.xy;
+    #if UNITY_UV_STARTS_AT_TOP
+        currentJitter.y = -currentJitter.y;
+    #endif
+    currentClipXY -= currentJitter;
+
+    float4 cameraPreviousClip = mul(
+        _BurtTAAClipToPreviousClip,
+        float4(currentClipXY, positionCS.z, 1.0f));
+    return lerp(objectPreviousClip, cameraPreviousClip, saturate(_BurtMultipassFurUseCameraMotion));
 }
 
 BurtMultipassFurVelocityVaryings VertMultipassFurVelocity(BurtMultipassFurAttributes input)
@@ -477,7 +546,20 @@ float3 BurtEvaluateMultipassFurRim(BurtMultipassFurVaryings input, float3 viewDi
     return saturate(pow(1.0f - ndotv, _FurRimPower) * _FurRimIntensity).xxx;
 }
 
-BurtMultipassFurGBufferOutput BurtPackMultipassFurGBuffer(BurtEncodedGBuffer encodedGBuffer)
+float4 BurtEncodeMultipassFurGBufferVelocity(BurtMultipassFurVaryings input)
+{
+    float2 currentUv = BurtMultipassFurRasterCurrentUv(input.PositionCS);
+    float4 previousClip = BurtMultipassFurResolvePreviousClip(input.PositionCS, input.PreviousClipNoJitter);
+    float2 previousUv = BurtMultipassFurClipToUv(previousClip);
+    float2 velocity = currentUv - previousUv;
+    float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
+    velocity *= step(float2(0.02f, 0.02f), velocityPixels);
+    return float4(velocity, 1.0f, 1.0f);
+}
+
+BurtMultipassFurGBufferOutput BurtPackMultipassFurGBuffer(
+    BurtEncodedGBuffer encodedGBuffer,
+    BurtMultipassFurVaryings input)
 {
     BurtMultipassFurGBufferOutput output;
     output.GBuffer0 = encodedGBuffer.GBuffer0;
@@ -487,6 +569,7 @@ BurtMultipassFurGBufferOutput BurtPackMultipassFurGBuffer(BurtEncodedGBuffer enc
     output.GBuffer4 = encodedGBuffer.GBuffer4;
     output.GBuffer5 = encodedGBuffer.GBuffer5;
     output.ObjectIndex = BurtEncodeMultipassFurPerObjectShadowObjectIndexTarget();
+    output.Velocity = BurtEncodeMultipassFurGBufferVelocity(input);
     return output;
 }
 
@@ -504,7 +587,7 @@ BurtMultipassFurGBufferOutput FragMultipassFurGBuffer(BurtMultipassFurVaryings i
     float3 geometryNormalWS = BurtGetMultipassFurGeometryNormalWS(input, facing);
     float3 shadingDirectionWS = BurtGetMultipassFurShadingDirectionWS(input);
     BurtGBufferData gbufferData = BurtCreateFurGBufferData(surfaceData, normalWS, float4(shadingDirectionWS, 1.0f), emissionColor);
-    return BurtPackMultipassFurGBuffer(BurtEncodeGBuffer(gbufferData));
+    return BurtPackMultipassFurGBuffer(BurtEncodeGBuffer(gbufferData), input);
 }
 
 float4 FragMultipassFurForward(BurtMultipassFurVaryings input, fixed facing : VFACE) : SV_Target
@@ -626,16 +709,20 @@ float4 FragMultipassFurTemporalAAMotionVectors(BurtMultipassFurVelocityVaryings 
     baseColor.a = BurtEvaluateMultipassFurDitheredAlpha(input.PositionCS, input.UV0, input.LayerIndex, flowAlpha, baseColor.a);
     BurtApplyMultipassFurClip(baseColor.a, input.PositionCS);
 
-    float valid = step(1e-5f, input.CurrentClipNoJitter.w) * step(1e-5f, input.PreviousClipNoJitter.w);
-    float2 currentUv = BurtMultipassFurClipToUv(input.CurrentClipNoJitter);
-    float2 previousUv = BurtMultipassFurClipToUv(input.PreviousClipNoJitter);
+    float4 previousClip = BurtMultipassFurResolvePreviousClip(input.PositionCS, input.PreviousClipNoJitter);
+    float valid = step(1e-5f, input.CurrentClipNoJitter.w) * step(1e-5f, previousClip.w);
+    float2 currentUv = BurtMultipassFurRasterCurrentUv(input.PositionCS);
+    float2 previousUv = BurtMultipassFurClipToUv(previousClip);
     valid *= step(0.0f, currentUv.x) * step(currentUv.x, 1.0f) * step(0.0f, currentUv.y) * step(currentUv.y, 1.0f);
     valid *= step(0.0f, previousUv.x) * step(previousUv.x, 1.0f) * step(0.0f, previousUv.y) * step(previousUv.y, 1.0f);
 
     float2 velocity = currentUv - previousUv;
     float2 velocityPixels = abs(velocity * _BurtFurBlurScreenSize.xy);
-    clip(max(velocityPixels.x, velocityPixels.y) - 0.02f);
-    return float4(velocity * valid, 1.0f, 1.0f);
+    // XRender keeps the motion-vector owner/stencil coverage even for static or
+    // micro-moving surfaces; only the RG payload is thresholded to zero. Clipping
+    // here loses bit 8 on fur shells and makes dilation substitute camera motion.
+    float keepVelocity = step(0.02f, max(velocityPixels.x, velocityPixels.y));
+    return float4(velocity * valid * keepVelocity, 1.0f, 1.0f);
 }
 
 #endif // BURT_MULTIPASS_FUR_PASS_INCLUDED

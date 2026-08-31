@@ -219,6 +219,18 @@ namespace Burt.RenderPipeline
                 gbuffer5Target,
                 gbufferObjectIndexTarget,
                 cameraDepthTarget);
+            BurtGBufferVelocityUtility.BindExisting(
+                cmd,
+                context,
+                context.Request.Camera,
+                gbuffer0Target,
+                gbuffer1Target,
+                gbuffer2Target,
+                gbuffer3Target,
+                gbuffer4Target,
+                gbuffer5Target,
+                gbufferObjectIndexTarget,
+                cameraDepthTarget);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             context.ExecuteLegacyCommandBuffer(cmd);

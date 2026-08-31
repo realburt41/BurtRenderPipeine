@@ -198,6 +198,32 @@ namespace Burt.RenderPipeline.Tests
             }
         }
 
+        [Test]
+        public void FeatureBlockRecordsTopologyWithoutAddingDisabledPasses()
+        {
+            var graph = new BurtRenderGraph();
+
+            using (var disabled = new BurtRenderGraphFeatureBlock(graph, "Disabled", false))
+            {
+                if (disabled.IsEnabled)
+                {
+                    graph.AddPass(new TestPass("Should Not Exist"));
+                }
+            }
+
+            using (var enabled = new BurtRenderGraphFeatureBlock(graph, "Enabled", true))
+            {
+                if (enabled.IsEnabled)
+                {
+                    graph.AddPass(new TestPass("Expected"));
+                }
+            }
+
+            Assert.AreEqual(1, graph.PassCount);
+            CollectionAssert.Contains(graph.FeatureBlockSummaries, "Disabled=Disabled Passes=0");
+            CollectionAssert.Contains(graph.FeatureBlockSummaries, "Enabled=Enabled Passes=1");
+        }
+
         private static BurtRenderGraph.BurtRenderGraphCompileResult Compile(
             IReadOnlyList<BurtRenderPassResourceUsage> usages,
             BurtRenderGraphResourceRegistry resources)
@@ -287,6 +313,22 @@ namespace Burt.RenderPipeline.Tests
             if (write.IsValid)
             {
                 usage.AddWriteRenderTarget(write);
+            }
+        }
+
+        private sealed class TestPass : BurtRenderPass
+        {
+            private readonly string name;
+
+            public TestPass(string name)
+            {
+                this.name = name;
+            }
+
+            public override string Name => name;
+
+            public override void Execute(BurtRenderGraphContext context)
+            {
             }
         }
     }

@@ -16,8 +16,27 @@ namespace Burt.RenderPipeline
             }
 
             SetGlobalTexelSize(cmd, camera);
+            if (CanSampleStencil(cameraDepthTarget))
+            {
+                // Match XRender's Texture2D<uint2> stencil binding. Unity exposes
+                // the S8 plane through the Stencil subelement and the shader reads
+                // its value from the uint2 G component.
+                cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.DeferredStencilTextureAvailableId, 1f);
+                cmd.SetGlobalTexture(
+                    BurtRenderGraphResourceRegistry.DeferredStencilTextureId,
+                    cameraDepthTarget.Identifier,
+                    RenderTextureSubElement.Stencil);
+                return;
+            }
+
             cmd.SetGlobalFloat(BurtRenderGraphResourceRegistry.DeferredStencilTextureAvailableId, 0f);
             cmd.SetGlobalTexture(BurtRenderGraphResourceRegistry.DeferredStencilTextureId, GetFallbackStencilTexture());
+        }
+
+        public static bool CanSampleStencil(BurtRenderTargetHandle cameraDepthTarget)
+        {
+            return cameraDepthTarget.IsValid &&
+                SystemInfo.IsFormatSupported(GraphicsFormat.R8_UInt, FormatUsage.StencilSampling);
         }
 
         public static void BindCompute(CommandBuffer cmd, ComputeShader shader, int kernel, BurtRenderTargetHandle cameraDepthTarget, Camera camera)

@@ -55,6 +55,9 @@ namespace Burt.RenderPipeline
 
         public static readonly int MotionVectorsStencilRefId = Shader.PropertyToID("_MotionVectorsStencilRef");
         public static readonly int MotionVectorsStencilMaskId = Shader.PropertyToID("_MotionVectorsStencilMask");
+        public static readonly int GBufferStencilRefId = Shader.PropertyToID("_BurtGBufferStencilRef");
+        public static readonly int GBufferStencilReadMaskId = Shader.PropertyToID("_BurtGBufferStencilReadMask");
+        public static readonly int GBufferStencilWriteMaskId = Shader.PropertyToID("_BurtGBufferStencilWriteMask");
         public static readonly int ResponsiveAAId = Shader.PropertyToID("_ResponsiveAA");
         public static readonly int DeferredStencilDefaultLitRefId = Shader.PropertyToID("_BurtDeferredStencilDefaultLitRef");
         public static readonly int DeferredStencilSubsurfaceRefId = Shader.PropertyToID("_BurtDeferredStencilSubsurfaceRef");
@@ -67,11 +70,24 @@ namespace Burt.RenderPipeline
 
         public static void ApplyMotionVectorStencilProperties(Material material)
         {
-            var responsive = material != null && material.HasProperty(ResponsiveAAId) && material.GetFloat(ResponsiveAAId) >= 0.5f;
-            var stencilRef = DeferredStencilObjectMotionBit | (responsive ? DeferredStencilResponsiveAABit : 0);
-            var stencilMask = DeferredStencilObjectMotionBit | (responsive ? DeferredStencilResponsiveAABit : 0);
-            SetFloatIfPropertyExists(material, MotionVectorsStencilRefId, stencilRef);
-            SetFloatIfPropertyExists(material, MotionVectorsStencilMaskId, stencilMask);
+            // Match XRender's desktop stencil ownership: opaque/GBuffer and
+            // object-motion passes own bit 8 only. Responsive AA is written by
+            // the transparent Forward surface (bit 16 with write mask 24), not
+            // by an opaque motion-vector pass.
+            SetFloatIfPropertyExists(material, MotionVectorsStencilRefId, DeferredStencilObjectMotionBit);
+            SetFloatIfPropertyExists(material, MotionVectorsStencilMaskId, DeferredStencilObjectMotionBit);
+        }
+
+        public static void ApplyGBufferStencilProperties(Material material, int shadingModelRef)
+        {
+            // XRender never derives responsive AA from an opaque GBuffer
+            // material toggle. The GBuffer owns its shading-model bits and the
+            // valid object-motion bit; transparent Forward owns bit 16 later.
+            var stencilRef = shadingModelRef | DeferredStencilObjectMotionBit;
+            var writeMask = DeferredStencilShadingModelMask | DeferredStencilObjectMotionBit;
+            SetFloatIfPropertyExists(material, GBufferStencilRefId, stencilRef);
+            SetFloatIfPropertyExists(material, GBufferStencilReadMaskId, DeferredStencilShadingModelMask);
+            SetFloatIfPropertyExists(material, GBufferStencilWriteMaskId, writeMask);
         }
 
         public static void ApplyDeferredLightingStencilProperties(Material material)

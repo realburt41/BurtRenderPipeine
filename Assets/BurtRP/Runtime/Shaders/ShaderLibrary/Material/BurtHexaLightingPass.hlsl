@@ -49,6 +49,15 @@ float4x4 _BurtTAAPreviousNonJitteredViewProjection;
 float4x4 unity_MatrixPreviousM;
 float4 _BurtTAATexelSize;
 
+float4x4 BurtGetHexaPreviousObjectToWorldMatrix()
+{
+#if defined(UNITY_INSTANCING_ENABLED)
+    return UNITY_ACCESS_INSTANCED_PROP(unity_Builtins3, unity_PrevObjectToWorldArray);
+#else
+    return unity_MatrixPreviousM;
+#endif
+}
+
 float2 BurtHexaFlipbookUV(float2 uv, float columns, float rows, float currentTile)
 {
     currentTile = floor(currentTile);
@@ -147,7 +156,7 @@ BurtHexaMotionVectorVaryings VertMotionVector(BurtHexaAttributes input)
     UNITY_SETUP_INSTANCE_ID(input);
 
     float4 currentWorld = mul(unity_ObjectToWorld, input.PositionOS);
-    float4 previousWorld = mul(unity_MatrixPreviousM, input.PositionOS);
+    float4 previousWorld = mul(BurtGetHexaPreviousObjectToWorldMatrix(), input.PositionOS);
     float3 objectDelta = previousWorld.xyz - currentWorld.xyz;
 
     BurtHexaMotionVectorVaryings output;

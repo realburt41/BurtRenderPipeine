@@ -466,7 +466,13 @@ void ScreenProbeIndirectReprojectionCS(uint3 dispatchThreadId : SV_DispatchThrea
     bool historyOnscreen = all(historyUV >= 0.0f) && all(historyUV <= 1.0f);
     float2 historySampleUV = saturate(historyUV);
     float historyWeight = BurtGIIndirectReprojectionHistoryWeight(projectedHistoryRawDepth, historyUV);
-    historyWeight = (!currentDiffuseValid && historyOnscreen) ? max(historyWeight, _BurtGIIndirectReprojectionParams.z) : historyWeight;
+    // XRender ships with STOCHASTIC_PROBE_INTERPOLATION enabled, so its
+    // non-stochastic "missing current lighting => force history" fallback is
+    // compiled out.  BRP still performs a deterministic neighborhood fallback,
+    // but a failed fallback must never resurrect history that depth/use-count
+    // rejection already invalidated.  Doing so preserves the old foreground GI
+    // on freshly revealed background pixels and presents a complete silhouette
+    // to the later TAA pass.
 
     float maxFrames = max(_BurtGIIndirectReprojectionParams.w, 1.0f);
     float historyFrames = _BurtGIIndirectNumFramesAccumulatedHistoryTexture.SampleLevel(sampler_BurtGIIndirectNumFramesAccumulatedHistoryTexture, historySampleUV, 0.0f) * maxFrames;

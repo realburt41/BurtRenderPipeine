@@ -70,6 +70,7 @@ Texture2D<float4> _BurtGIScreenProbeHistoryRadianceTexture;
 Texture2D<float4> _BurtGIScreenProbeHistoryTraceRadianceTexture;
 Texture2D<float> _BurtGIScreenProbeHistoryScreenDepthTexture;
 Texture2D<float4> _BurtGIPreviousSceneColorTexture;
+Texture2D<float> _BurtGIPreviousSceneDepthTexture;
 Texture2D<float> _BurtHiZDepthTexture;
 float _BurtGISceneVoxelOctreeValid;
 
@@ -411,6 +412,21 @@ float2 BurtGIScreenProbeClipToScreenUV(float2 clipXY)
 #endif
     return uv;
 }
+float3 BurtGIScreenProbeReconstructPositionWS(float2 screenUV, float rawDepth)
+{
+    float2 clipXY = screenUV * 2.0 - 1.0;
+#if UNITY_UV_STARTS_AT_TOP
+    clipXY.y = -clipXY.y;
+#endif
+#if defined(UNITY_REVERSED_Z)
+    float clipZ = rawDepth;
+#else
+    float clipZ = lerp(UNITY_NEAR_CLIP_VALUE, 1.0, rawDepth);
+#endif
+    float4 positionWS = mul(_BurtDeferredInverseViewProjectionMatrix, float4(clipXY, clipZ, 1.0));
+    float safeW = abs(positionWS.w) > 1.0e-6 ? positionWS.w : (positionWS.w < 0.0 ? -1.0e-6 : 1.0e-6);
+    return positionWS.xyz / safeW;
+}
 bool BurtGIScreenProbeProjectPositionWS(float3 positionWS, out float2 screenUV, out float rawDepth)
 {
     float4 clipPosition = mul(_BurtGIScreenProbeViewProjectionMatrix, float4(positionWS, 1.0));
@@ -612,7 +628,12 @@ bool BurtGIScreenProbeTryHiZScreenTraceRadiance(
         float hitVignette = BurtGIScreenProbeComputeHitVignetteFromScreenUV(sampleUV);
         float2 hitHistoryUV;
         float hitHistoryRawDepth;
-        bool hitHistoryValid = BurtGIScreenProbeProjectPreviousPositionWS(samplePositionWS, hitHistoryUV, hitHistoryRawDepth);
+        // Match XRender's GetHistoryPositionNDC path: reproject the actual
+        // depth-buffer hit, not the ray-march sample position inside the
+        // thickness interval.  Using the latter can accidentally project onto
+        // the old foreground depth and validate stale scene color.
+        float3 hitPositionWS = BurtGIScreenProbeReconstructPositionWS(sampleUV, sceneRawDepth);
+        bool hitHistoryValid = BurtGIScreenProbeProjectPreviousPositionWS(hitPositionWS, hitHistoryUV, hitHistoryRawDepth);
         hitVignette = hitHistoryValid
             ? min(hitVignette, BurtGIScreenProbeComputeHitVignetteFromScreenUV(hitHistoryUV))
             : 0.0;
@@ -629,6 +650,26 @@ bool BurtGIScreenProbeTryHiZScreenTraceRadiance(
             continue;
         }
 
+        // XRender validates a screen-trace hit against the full-resolution
+        // previous scene depth at the exact reprojected hit UV before sampling
+        // previous scene color.  Probe-grid depth is far too coarse at moving
+        // silhouettes and otherwise feeds rejected GI back into the next frame.
+        uint previousSceneDepthWidth;
+        uint previousSceneDepthHeight;
+        _BurtGIPreviousSceneDepthTexture.GetDimensions(previousSceneDepthWidth, previousSceneDepthHeight);
+        uint2 previousSceneDepthSize = max(uint2(previousSceneDepthWidth, previousSceneDepthHeight), 1u);
+        uint2 previousSceneDepthCoord = min(
+            (uint2)floor(saturate(hitHistoryUV) * (float2)previousSceneDepthSize),
+            previousSceneDepthSize - 1u);
+        float previousSceneRawDepth = _BurtGIPreviousSceneDepthTexture.Load(int3(previousSceneDepthCoord, 0));
+        float previousSceneColorValid = saturate(_BurtGIPreviousSceneColorParams.x);
+        if (previousSceneColorValid < 0.5 ||
+            BurtGIScreenProbeTraceCompactIsSkyDepth(previousSceneRawDepth) ||
+            abs(previousSceneRawDepth - hitHistoryRawDepth) >= historyDepthThickness * lerp(0.5, 2.0, vignetteNoise))
+        {
+            continue;
+        }
+
         float spacingPixels = max(_BurtGIScreenProbeScreenTraceParams2.x, 1.0);
         uint historyJitterIndex = BurtGIScreenProbePreviousJitterIndex(_BurtGIScreenProbeScreenTraceParams2.y);
         float2 historyProbeCoord = BurtGIScreenProbeTileCoordFromScreenUV(
@@ -640,13 +681,6 @@ bool BurtGIScreenProbeTryHiZScreenTraceRadiance(
             (int2)floor(historyProbeCoord),
             int2(0, 0),
             int2((int)screenProbeGridSize.x - 1, (int)screenProbeGridSize.y - 1));
-        float historyProbeRawDepth = _BurtGIScreenProbeHistoryScreenDepthTexture.Load(int3(historyDepthCoord, 0));
-        if (BurtGIScreenProbeTraceCompactIsSkyDepth(historyProbeRawDepth) ||
-            abs(historyProbeRawDepth - hitHistoryRawDepth) >= historyDepthThickness * lerp(0.5, 2.0, vignetteNoise))
-        {
-            continue;
-        }
-
         uint traceResolution = max(1u, min(32u, (uint)_BurtGIScreenProbeTraceParams.x));
         uint2 traceAtlasSize = uint2(max(1u, (uint)_BurtGIScreenProbeTraceParams.y), max(1u, (uint)_BurtGIScreenProbeTraceParams.z));
         uint2 historyTraceAtlasCoord = historyDepthCoord * traceResolution + traceTexelCoord;
@@ -671,8 +705,6 @@ bool BurtGIScreenProbeTryHiZScreenTraceRadiance(
             _BurtGIPreviousSceneColorTexture.Load(int3(previousSceneColorCoord, 0)).rgb *
             max(_BurtGIPreviousSceneColorParams.y, 0.0),
             0.0);
-        float previousSceneColorValid = saturate(_BurtGIPreviousSceneColorParams.x);
-
         float4 hitNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(hitProbeCoord, 0));
         float3 hitNormalWS = BurtGIScreenProbeDecodeNormalWS(hitNormal);
         float facingWeight = saturate(dot(hitNormalWS, -rayDirectionWS) * 0.5 + 0.5);

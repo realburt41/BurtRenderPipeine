@@ -60,9 +60,9 @@ Shader "BurtRP/Lit"
         [ToggleUI] _Refraction ("Refraction", Float) = 0
         _IOR ("IOR", Range(-3, 3)) = 1.5
         _RefractionStage ("Refraction Stage", Range(0, 1)) = 0
-        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 32
+        [HideInInspector] _BurtGBufferStencilRef ("GBuffer Stencil Ref", Float) = 40
         [HideInInspector] _BurtGBufferStencilReadMask ("GBuffer Stencil Read Mask", Float) = 224
-        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 224
+        [HideInInspector] _BurtGBufferStencilWriteMask ("GBuffer Stencil Write Mask", Float) = 232
         [HideInInspector] _MotionVectorsStencilRef ("Motion Vectors Stencil Ref", Float) = 8
         [HideInInspector] _MotionVectorsStencilMask ("Motion Vectors Stencil Mask", Float) = 8
     }
@@ -197,6 +197,10 @@ Shader "BurtRP/Lit"
             #pragma multi_compile_instancing
             #pragma target 3.5
             #define BURT_MOTION_VECTOR_RESPONSIVE_AA_MASK 1
+            // XRender's DefaultLit always marks transparent surfaces as
+            // responsive. The material toggle remains available for opaque
+            // cutouts that explicitly need the same treatment.
+            #define BURT_DEFAULT_LIT_FORCE_TRANSPARENT_RESPONSIVE_AA 1
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtDefaultLitProperties.hlsl"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtMotionVectorPass.hlsl"

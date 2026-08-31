@@ -121,7 +121,12 @@ float3 BurtReconstructDeferredPositionWS(float2 screenUV, float rawDepth)
 
 float3 BurtReconstructDeferredNonJitteredPositionWS(float2 screenUV, float rawDepth)
 {
-    return BurtReconstructDeferredPositionWSWithMatrix(screenUV, rawDepth, _BurtDeferredInverseNonJitteredViewProjectionMatrix);
+    // The depth buffer was rasterized with the current jittered projection, so the matching
+    // inverse VP must be used with the unmodified screen UV. XRender follows the same rule for
+    // deferred lighting, shadow resolve and GI through _InvViewProjMatrix. Combining jittered
+    // depth with a non-jittered inverse VP moves the reconstructed receiver every frame and makes
+    // otherwise stable shadows shimmer with the TAA sample sequence.
+    return BurtReconstructDeferredPositionWS(screenUV, rawDepth);
 }
 
 // Sample the current BurtRP GBuffer RTs and pack them as BurtEncodedGBuffer.
@@ -302,7 +307,8 @@ void BurtPrepareDeferredViewData(float2 screenUV, out float rawDepth, out float3
 {
     rawDepth = BurtSampleDeferredRawDepth(screenUV);
     positionWS = BurtReconstructDeferredPositionWS(screenUV, rawDepth);
-    nonJitteredPositionWS = BurtReconstructDeferredNonJitteredPositionWS(screenUV, rawDepth);
+    // Shadow/GI receivers must describe the exact surface represented by this depth sample.
+    nonJitteredPositionWS = positionWS;
     viewDirectionWS = BurtSafeNormalize(_BurtDeferredCameraWorldPosition.xyz - positionWS);
 }
 

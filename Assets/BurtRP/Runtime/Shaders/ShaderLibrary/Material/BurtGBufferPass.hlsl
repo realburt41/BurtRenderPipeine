@@ -18,6 +18,26 @@
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtTrunkVertexAnimation.hlsl"
 
 int _BurtPerObjectShadowObjectIndex;
+float4x4 _BurtTAACurrentNonJitteredViewProjection;
+float4x4 _BurtTAAPreviousNonJitteredViewProjection;
+float4x4 _BurtTAAClipToPreviousClip;
+float4x4 unity_MatrixPreviousM;
+float4 unity_MotionVectorsParams;
+float4 _BurtTAATexelSize;
+float4 _BurtTAAJitter;
+float _BurtTAAPreviousRenderDeltaTime;
+
+float4x4 BurtGetPreviousObjectToWorldMatrix()
+{
+#if defined(UNITY_INSTANCING_ENABLED)
+    // Match XRender's GetPrevObjectToWorldMatrix(): an instanced draw must use
+    // the previous matrix belonging to the current instance, not the scalar
+    // per-draw fallback shared by the whole batch.
+    return UNITY_ACCESS_INSTANCED_PROP(unity_Builtins3, unity_PrevObjectToWorldArray);
+#else
+    return unity_MatrixPreviousM;
+#endif
+}
 
 #if defined(BURT_USE_PRESKIN_POSITION) && BURT_USE_PRESKIN_POSITION && defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)
     #define BURT_MATERIAL_ENABLE_PRESKIN_POSITION 1
@@ -36,6 +56,7 @@ struct GBufferAttributes
     float3 NormalOS : NORMAL;
     float4 TangentOS : TANGENT;
     float2 UV0 : TEXCOORD0;
+    float3 PreviousPositionOS : TEXCOORD4;
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE) || defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
     float4 Color : COLOR;
 #endif
@@ -83,6 +104,8 @@ struct GBufferVaryings
         #endif
     #endif
 #endif
+    float4 CurrentClipNoJitter : TEXCOORD9;
+    float4 PreviousClipNoJitter : TEXCOORD10;
 };
 
 struct GBufferFragmentOutput
@@ -94,7 +117,57 @@ struct GBufferFragmentOutput
     float4 GBuffer4 : SV_Target4;
     float4 GBuffer5 : SV_Target5;
     float4 ObjectIndex : SV_Target6;
+    float4 Velocity : SV_Target7;
 };
+
+float2 BurtGBufferMotionClipToUv(float4 clipPosition)
+{
+    float safeW = abs(clipPosition.w) > 1e-6
+        ? clipPosition.w
+        : (clipPosition.w < 0.0 ? -1e-6 : 1e-6);
+    float2 uv = clipPosition.xy / safeW * 0.5 + 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+    uv.y = 1.0 - uv.y;
+#endif
+    return uv;
+}
+
+float4 BurtEncodeGBufferMotionVector(GBufferVaryings input)
+{
+    // Match XRender: the current endpoint comes from the rasterized pixel
+    // position with the projection jitter removed.  Only the previous clip
+    // position is interpolated.  Interpolating both endpoints causes visible
+    // velocity error on large/deforming triangles near silhouettes.
+    float2 currentRasterUv = input.PositionCS.xy * _BurtTAATexelSize.xy;
+    float2 currentClipXY = currentRasterUv * 2.0 - 1.0;
+#if UNITY_UV_STARTS_AT_TOP
+    currentClipXY.y = -currentClipXY.y;
+#endif
+    float2 currentJitter = _BurtTAAJitter.xy;
+#if UNITY_UV_STARTS_AT_TOP
+    currentJitter.y = -currentJitter.y;
+#endif
+    currentClipXY -= currentJitter;
+    float2 currentUv = BurtGBufferMotionClipToUv(float4(currentClipXY, 0.0, 1.0));
+    // XRender does not interpolate the previous endpoint for camera-only
+    // motion. Reproject the current pixel/depth through ClipToPrevClip so
+    // perspective-correct interpolation cannot bend velocity across a large
+    // triangle. Object/deformation motion still uses the previous-object clip.
+    float4 cameraPreviousClip = mul(
+        _BurtTAAClipToPreviousClip,
+        float4(currentClipXY, input.PositionCS.z, 1.0));
+    float cameraMotion = 1.0 - step(1e-6, abs(unity_MotionVectorsParams.w));
+    float4 previousClip = lerp(input.PreviousClipNoJitter, cameraPreviousClip, cameraMotion);
+    float2 previousUv = BurtGBufferMotionClipToUv(previousClip);
+    float2 velocity = currentUv - previousUv;
+    float2 velocityPixels = abs(velocity * _BurtTAATexelSize.zw);
+    velocity *= step(float2(0.02, 0.02), velocityPixels);
+
+    // Match XRender's desktop GBuffer velocity ownership: every visible opaque
+    // surface carries a valid velocity payload, including static objects whose
+    // motion is camera-only.  Z/W are consumed by BRP's stencil fallback.
+    return float4(velocity, 1.0, 1.0);
+}
 
 float4 BurtEncodePerObjectShadowObjectIndexTarget()
 {
@@ -126,7 +199,8 @@ float BurtEncodeSubsurfaceProfileIDAndTypeForScreenSpacePass(BurtSurfaceData Sur
 GBufferVaryings VertGBuffer(GBufferAttributes Input)
 {
     UNITY_SETUP_INSTANCE_ID(Input);
-    float4 PositionOS = BurtApplyMultipassObjectShellOffset(Input.PositionOS, Input.NormalOS);
+    float4 BasePositionOS = BurtApplyMultipassObjectShellOffset(Input.PositionOS, Input.NormalOS);
+    float4 PositionOS = BasePositionOS;
     #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
         PositionOS = BurtApplyTrunkVertexAnimationObjectSpace(PositionOS, Input.Color, _Time.y);
     #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
@@ -137,8 +211,54 @@ GBufferVaryings VertGBuffer(GBufferAttributes Input)
         #endif
     #endif
 
+    float4 CurrentWorld = mul(unity_ObjectToWorld, PositionOS);
+    float4x4 PreviousObjectToWorld = BurtGetPreviousObjectToWorldMatrix();
+    float HasDeformation = step(1e-6, unity_MotionVectorsParams.x);
+    float4 PreviousPositionOS = float4(
+        lerp(BasePositionOS.xyz, Input.PreviousPositionOS, HasDeformation),
+        BasePositionOS.w);
+    #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+        // Match XRender's _LastTimeParameters.x semantics. In particular,
+        // SceneView can render several times (or not at all) inside one Unity
+        // frame, so unity_DeltaTime does not describe this camera's history.
+        float PreviousTimeSeconds = max(_Time.y - _BurtTAAPreviousRenderDeltaTime, 0.0f);
+        float4 PreviousObjectWorld = BurtGetTrunkAnimatedWorldPosition(
+            PreviousPositionOS,
+            Input.Color,
+            PreviousObjectToWorld,
+            PreviousTimeSeconds);
+    #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+        float PreviousTimeSeconds = max(_Time.y - _BurtTAAPreviousRenderDeltaTime, 0.0f);
+        #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+            float4 PreviousObjectWorld = BurtGetGrassAnimatedWorldPosition(
+                PreviousPositionOS,
+                Input.NormalOS,
+                Input.Color,
+                PreviousObjectToWorld,
+                PreviousTimeSeconds);
+        #else
+            float4 PreviousObjectWorld = BurtGetFoliageAnimatedWorldPosition(
+                PreviousPositionOS,
+                Input.Color,
+                PreviousObjectToWorld,
+                PreviousTimeSeconds);
+        #endif
+    #else
+        float4 PreviousObjectWorld = mul(PreviousObjectToWorld, PreviousPositionOS);
+    #endif
+
+    // Match XRender's ownership rule exactly.  w == 0 means this draw uses
+    // camera motion, so reproject the current world position.  Otherwise use
+    // the previous object matrix and, when x > 0, Unity's TEXCOORD4 previous
+    // skinned position.  Matrix-delta fallbacks can classify stale per-draw
+    // matrices as object motion and are intentionally not used here.
+    float CameraMotion = 1.0 - step(1e-6, abs(unity_MotionVectorsParams.w));
+    float4 PreviousWorld = lerp(PreviousObjectWorld, CurrentWorld, CameraMotion);
+
     GBufferVaryings Output;
     Output.PositionCS = UnityObjectToClipPos(PositionOS);
+    Output.CurrentClipNoJitter = mul(_BurtTAACurrentNonJitteredViewProjection, CurrentWorld);
+    Output.PreviousClipNoJitter = mul(_BurtTAAPreviousNonJitteredViewProjection, PreviousWorld);
     Output.NormalWS = BurtSafeNormalize(UnityObjectToWorldNormal(Input.NormalOS));
     Output.TangentWS = BurtObjectToWorldTangent(Input.TangentOS);
 #if !defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_HAIR)
@@ -185,7 +305,7 @@ void BurtApplySubsurfacePreSkinPositionDebug(inout float4 BaseColor, float3 PreS
 }
 #endif
 
-GBufferFragmentOutput BurtPackGBufferOutput(BurtEncodedGBuffer EncodedGBuffer)
+GBufferFragmentOutput BurtPackGBufferOutput(BurtEncodedGBuffer EncodedGBuffer, GBufferVaryings Input)
 {
     GBufferFragmentOutput Output;
     Output.GBuffer0 = EncodedGBuffer.GBuffer0;
@@ -195,6 +315,7 @@ GBufferFragmentOutput BurtPackGBufferOutput(BurtEncodedGBuffer EncodedGBuffer)
     Output.GBuffer4 = EncodedGBuffer.GBuffer4;
     Output.GBuffer5 = EncodedGBuffer.GBuffer5;
     Output.ObjectIndex = BurtEncodePerObjectShadowObjectIndexTarget();
+    Output.Velocity = BurtEncodeGBufferMotionVector(Input);
     return Output;
 }
 
@@ -290,7 +411,7 @@ BurtGBufferData BurtCreateMaterialPassGBufferDataFromInput(GBufferVaryings Input
 GBufferFragmentOutput FragGBuffer(GBufferVaryings Input, fixed Facing : VFACE)
 {
     BurtGBufferData GBufferData = BurtCreateMaterialPassGBufferDataFromInput(Input, Facing);
-    return BurtPackGBufferOutput(BurtEncodeGBuffer(GBufferData));
+    return BurtPackGBufferOutput(BurtEncodeGBuffer(GBufferData), Input);
 }
 
 #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_SUBSURFACE)

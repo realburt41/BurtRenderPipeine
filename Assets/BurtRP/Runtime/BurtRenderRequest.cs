@@ -169,6 +169,11 @@ namespace Burt.RenderPipeline
             }
 
             // 创建一个新的请求对象。
+            // Match XRender's camera-frame preparation timing. Unity needs
+            // this flag before culling/GBuffer setup to retain previous
+            // skinned vertices and per-object motion state.
+            camera.depthTextureMode |= DepthTextureMode.MotionVectors | DepthTextureMode.Depth;
+
             var request = Acquire();
 
             // 先解析相机角色，后续 request 类型、排序和调试都复用这个结果，保证同一帧内分类一致。

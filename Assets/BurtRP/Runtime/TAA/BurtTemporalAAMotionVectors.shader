@@ -24,6 +24,7 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
             #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_instancing
             #include "UnityCG.cginc"
 
             float4x4 _BurtTAACurrentViewProjection;
@@ -33,9 +34,19 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
             float4 unity_MotionVectorsParams;
             float4 _BurtTAATexelSize;
 
+            float4x4 BurtGetTemporalAAPreviousObjectToWorldMatrix()
+            {
+                #if defined(UNITY_INSTANCING_ENABLED)
+                    return UNITY_ACCESS_INSTANCED_PROP(unity_Builtins3, unity_PrevObjectToWorldArray);
+                #else
+                    return unity_MatrixPreviousM;
+                #endif
+            }
+
             struct Attributes
             {
                 float3 positionOS : POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -48,7 +59,8 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
 
             float2 BurtTaaClipToUv(float4 clipPosition)
             {
-                float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 1e-6);
+                float safeW = abs(clipPosition.w) > 1e-6 ? clipPosition.w : (clipPosition.w < 0.0 ? -1e-6 : 1e-6);
+                float2 ndc = clipPosition.xy / safeW;
                 float2 uv = ndc * 0.5 + 0.5;
                 #if UNITY_UV_STARTS_AT_TOP
                     uv.y = 1.0 - uv.y;
@@ -59,9 +71,10 @@ Shader "Hidden/BurtRP/TemporalAAMotionVectors"
 
             Varyings Vert(Attributes input)
             {
+                UNITY_SETUP_INSTANCE_ID(input);
                 Varyings output;
                 float4 currentWorld = mul(unity_ObjectToWorld, float4(input.positionOS, 1.0));
-                float4 previousObjectWorld = mul(unity_MatrixPreviousM, float4(input.positionOS, 1.0));
+                float4 previousObjectWorld = mul(BurtGetTemporalAAPreviousObjectToWorldMatrix(), float4(input.positionOS, 1.0));
                 float3 objectDelta = previousObjectWorld.xyz - currentWorld.xyz;
                 float objectMoved = step(1e-8, dot(objectDelta, objectDelta));
                 float4 previousWorld = lerp(currentWorld, previousObjectWorld, objectMoved);

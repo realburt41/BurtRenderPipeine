@@ -9,6 +9,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 {
     public sealed class BurtRenderGraph // 定义 BurtRP 的最小渲染图类，当前阶段负责保存 Pass、资源表和资源读写声明。
     {
+        private readonly struct BurtRenderGraphFeatureRecord
+        {
+            public BurtRenderGraphFeatureRecord(
+                string name,
+                bool enabled,
+                IReadOnlyList<string> ownedPassNameTokens,
+                IReadOnlyList<string> ownedResourceNameTokens)
+            {
+                Name = name;
+                Enabled = enabled;
+                OwnedPassNameTokens = ownedPassNameTokens;
+                OwnedResourceNameTokens = ownedResourceNameTokens;
+            }
+
+            public string Name { get; }
+            public bool Enabled { get; }
+            public IReadOnlyList<string> OwnedPassNameTokens { get; }
+            public IReadOnlyList<string> OwnedResourceNameTokens { get; }
+        }
+
         private static readonly ProfilerMarker ConfigureGraphMarker = new ProfilerMarker("BRP.RenderGraph.Configure");
         private static readonly ProfilerMarker ExecuteGraphMarker = new ProfilerMarker("BRP.RenderGraph.Execute");
         private readonly List<BurtRenderPass> passes = new List<BurtRenderPass>(); // 创建一个可复用的 Pass 列表，避免每帧重复分配 List。
@@ -16,6 +36,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
         private readonly List<BurtRenderPassResourceUsage> resourceUsages = new List<BurtRenderPassResourceUsage>(); // 创建一个可复用的资源使用记录列表，用来保存每个 Pass 的读写声明。
 
         private readonly List<string> validationMessages = new List<string>(); // 保存当前图级别的轻量校验消息，只用于 Debug dump，不改变实际渲染顺序。
+        private readonly List<string> featureBlockSummaries = new List<string>();
+        private readonly List<BurtRenderGraphFeatureRecord> featureBlockRecords = new List<BurtRenderGraphFeatureRecord>();
 
         private readonly BurtRenderGraphResourceRegistry resources = new BurtRenderGraphResourceRegistry(); // 创建一个可复用的资源注册表，用来保存当前图里的渲染目标资源。
 
@@ -28,8 +50,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
     internal enum BurtRenderGraphCompilationMode
     {
         Lightweight = 0,
-        Culling = 1,
-        Full = 2,
+        Validation = 1,
+        Culling = 2,
+        Full = 3,
     }
 
     public sealed class BurtRenderGraphCompileResult
@@ -399,6 +422,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
         public IReadOnlyList<BurtRenderPassResourceUsage> ResourceUsages => resourceUsages; // 暴露只读资源使用记录，方便后面调试或做依赖分析。
 
         public IReadOnlyList<string> ValidationMessages => validationMessages; // 暴露只读校验消息，供调试工具集中输出 RenderGraph 问题。
+        public IReadOnlyList<string> FeatureBlockSummaries => featureBlockSummaries;
         public bool RequiresImmediateSubmit => resources.HasPendingBufferReleases;
 
         public void Clear() // 定义清空函数，每次组装新 request 前都要调用。
@@ -408,6 +432,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             resourceUsages.Clear(); // 清空上一轮 Pass 的资源读写声明，避免调试数据残留。
 
             validationMessages.Clear(); // 清空上一轮图校验消息，避免不同相机或 request 互相污染。
+            featureBlockSummaries.Clear();
+            featureBlockRecords.Clear();
 
             resources.Clear(); // 清空上一轮 request 注册的资源，避免 CameraColor 和 CameraDepth 等资源残留到下一次渲染。
             compileResult = null;
@@ -1035,6 +1061,31 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             passes.Add(pass); // 把有效 Pass 加入当前 RenderGraph 的执行列表。
         }
 
+        internal void RecordFeatureBlock(
+            string name,
+            bool enabled,
+            int assembledPassCount,
+            IReadOnlyList<string> ownedPassNameTokens,
+            IReadOnlyList<string> ownedResourceNameTokens)
+        {
+            var safeName = string.IsNullOrEmpty(name) ? "Unnamed" : name;
+            var safePassCount = Math.Max(0, assembledPassCount);
+            featureBlockSummaries.Add(safeName + "=" + (enabled ? "Enabled" : "Disabled") + " Passes=" + safePassCount);
+            featureBlockRecords.Add(new BurtRenderGraphFeatureRecord(
+                safeName,
+                enabled,
+                ownedPassNameTokens,
+                ownedResourceNameTokens));
+            if (!enabled && safePassCount > 0)
+            {
+                AddValidationMessage("Feature Block " + safeName + " 已关闭但仍组装了 " + safePassCount + " 个 Pass。");
+            }
+            else if (enabled && safePassCount == 0)
+            {
+                AddValidationMessage("Feature Block " + safeName + " 已开启但没有组装 Pass。");
+            }
+        }
+
         public void Execute(BurtRenderGraphContext context) // 定义执行函数，用来先收集资源声明再顺序执行所有 Pass。
         {
             if (context == null) // 如果执行上下文为空，说明调用方传入了异常数据。
@@ -1049,12 +1100,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 using (ConfigureGraphMarker.Auto())
                 {
                     ConfigurePasses(context); // 在真正执行前收集所有 Pass 的资源读写声明，并把当前上下文传给配置阶段。
-                    if (compilationMode == BurtRenderGraphCompilationMode.Full)
+                    if (compilationMode == BurtRenderGraphCompilationMode.Validation ||
+                        compilationMode == BurtRenderGraphCompilationMode.Full)
                     {
                         ValidateConfiguredGraph(); // Debug capture performs diagnostics; runtime culling only compiles resource dependencies.
                     }
                     compileResult = compiler.Compile(passes, resourceUsages, resources);
-                    if (compilationMode == BurtRenderGraphCompilationMode.Full)
+                    if (compilationMode == BurtRenderGraphCompilationMode.Validation ||
+                        compilationMode == BurtRenderGraphCompilationMode.Full)
                     {
                         AddValidationMessage("RenderGraph Compiler: dependencies=" + compileResult.DependencyCount +
                             ", culled=" + compileResult.CulledPassCount +
@@ -1085,7 +1138,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
             var ownsProfilingCommandBuffer = !context.HasSharedCommandBuffer;
             var profilingCommandBuffer = context.CommandBuffer ?? CommandBufferPool.Get("BRP.RenderGraph/Profiling");
-            var profileIndividualPasses = profilingMode == BurtRenderGraphProfilingMode.CameraStageAndPass;
+            var profileIndividualPasses = profilingMode == BurtRenderGraphProfilingMode.CameraStageAndPass ||
+                profilingMode == BurtRenderGraphProfilingMode.CameraStagePassAndResource;
+            var profileIndividualResources = profilingMode == BurtRenderGraphProfilingMode.CameraStagePassAndResource;
             ProfilingSampler activeResourceLifetimeSampler = null;
             string activeResourceLifetimeScopeName = null;
             activeProfilingScopes.Clear();
@@ -1124,7 +1179,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                     }
 
                     var resourceLifetimeScopeName = profileIndividualPasses
-                        ? GetResourceLifetimeScopeName(pass)
+                        ? GetResourceLifetimeScopeName(pass, profileIndividualResources)
                         : null;
                     if (!string.IsNullOrEmpty(resourceLifetimeScopeName))
                     {
@@ -1212,10 +1267,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
         private bool ShouldExecutePass(int passIndex)
         {
-            return compileResult == null || compileResult.ShouldExecute(passIndex);
+            var applyCulling = compilationMode == BurtRenderGraphCompilationMode.Culling ||
+                compilationMode == BurtRenderGraphCompilationMode.Full;
+            return !applyCulling || compileResult == null || compileResult.ShouldExecute(passIndex);
         }
 
-        private static string GetResourceLifetimeScopeName(BurtRenderPass pass)
+        private static string GetResourceLifetimeScopeName(BurtRenderPass pass, bool includeResourceName)
         {
             if (pass == null)
             {
@@ -1226,13 +1283,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             if (pass.Kind == BurtRenderPassKind.Allocate ||
                 passName.StartsWith("Burt Allocate ", StringComparison.OrdinalIgnoreCase))
             {
-                return "BRP.Resources/Allocate/" + TrimResourceLifetimePassPrefix(passName, "Burt Allocate ");
+                return includeResourceName
+                    ? "BRP.Resources/Allocate/" + TrimResourceLifetimePassPrefix(passName, "Burt Allocate ")
+                    : "BRP.Resources/Allocate";
             }
 
             if (pass.Kind == BurtRenderPassKind.Release ||
                 passName.StartsWith("Burt Release ", StringComparison.OrdinalIgnoreCase))
             {
-                return "BRP.Resources/Release/" + TrimResourceLifetimePassPrefix(passName, "Burt Release ");
+                return includeResourceName
+                    ? "BRP.Resources/Release/" + TrimResourceLifetimePassPrefix(passName, "Burt Release ")
+                    : "BRP.Resources/Release";
             }
 
             return null;
@@ -1474,12 +1535,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
         private string AppendCompilerDebugInfo(string debugInfo)
         {
-            if (compileResult == null)
+            if (compileResult == null && featureBlockSummaries.Count == 0)
             {
                 return debugInfo;
             }
 
             var builder = new StringBuilder(debugInfo ?? string.Empty);
+            if (featureBlockSummaries.Count > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine("Feature Blocks");
+                for (var featureIndex = 0; featureIndex < featureBlockSummaries.Count; featureIndex++)
+                {
+                    builder.Append("- ").AppendLine(featureBlockSummaries[featureIndex]);
+                }
+            }
+
+            if (compileResult == null)
+            {
+                return builder.ToString();
+            }
+
             builder.AppendLine();
             builder.AppendLine("RenderGraph Compiler");
             builder.Append("Dependencies: ").Append(compileResult.DependencyCount)
@@ -1606,6 +1682,63 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
         private void ValidateConfiguredGraph() // 对已收集的资源声明做轻量校验，当前阶段只产生日志，不改变实际渲染行为。
         {
             BurtRenderGraphValidationUtility.ValidateConfiguredGraph(passes, resourceUsages, resources, AddValidationMessage); // 交给诊断工具集中检查读写声明，保持执行类只负责调度。
+            ValidateFeatureBlockContracts();
+        }
+
+        private void ValidateFeatureBlockContracts()
+        {
+            for (var featureIndex = 0; featureIndex < featureBlockRecords.Count; featureIndex++)
+            {
+                var feature = featureBlockRecords[featureIndex];
+                if (feature.Enabled)
+                {
+                    continue;
+                }
+
+                for (var passIndex = 0; passIndex < passes.Count; passIndex++)
+                {
+                    var passName = GetPassName(passes[passIndex]);
+                    if (ContainsAnyToken(passName, feature.OwnedPassNameTokens))
+                    {
+                        AddValidationMessage("Feature Block " + feature.Name + " 已关闭但仍包含 Pass: " + passName + "。");
+                    }
+                }
+
+                foreach (var resourceName in resources.RenderTargetNames)
+                {
+                    if (ContainsAnyToken(resourceName, feature.OwnedResourceNameTokens))
+                    {
+                        AddValidationMessage("Feature Block " + feature.Name + " 已关闭但仍注册 RenderTarget: " + resourceName + "。");
+                    }
+                }
+
+                foreach (var resourceName in resources.BufferNames)
+                {
+                    if (ContainsAnyToken(resourceName, feature.OwnedResourceNameTokens))
+                    {
+                        AddValidationMessage("Feature Block " + feature.Name + " 已关闭但仍注册 Buffer: " + resourceName + "。");
+                    }
+                }
+            }
+        }
+
+        private static bool ContainsAnyToken(string value, IReadOnlyList<string> tokens)
+        {
+            if (string.IsNullOrEmpty(value) || tokens == null)
+            {
+                return false;
+            }
+
+            for (var tokenIndex = 0; tokenIndex < tokens.Count; tokenIndex++)
+            {
+                var token = tokens[tokenIndex];
+                if (!string.IsNullOrEmpty(token) && value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void AddValidationMessage(string message) // 定义图级别校验消息追加函数，带简单去重避免 Debug 开关打开时噪音过大。

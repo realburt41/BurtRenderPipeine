@@ -44,6 +44,15 @@ float4x4 _BurtTAAPreviousNonJitteredViewProjection;
 float4x4 unity_MatrixPreviousM;
 float4 _BurtTAATexelSize;
 
+float4x4 BurtGetEasyFogPreviousObjectToWorldMatrix()
+{
+#if defined(UNITY_INSTANCING_ENABLED)
+    return UNITY_ACCESS_INSTANCED_PROP(unity_Builtins3, unity_PrevObjectToWorldArray);
+#else
+    return unity_MatrixPreviousM;
+#endif
+}
+
 float3 BurtEasyFogObjectCenterWS()
 {
     return float3(unity_ObjectToWorld._m03, unity_ObjectToWorld._m13, unity_ObjectToWorld._m23);
@@ -174,7 +183,7 @@ BurtEasyFogMotionVectorVaryings BurtEasyFogMotionVectorVert(BurtEasyFogAttribute
 
     float4 positionOS = BurtEasyFogApplyBillboard(input.PositionOS);
     float4 currentWorld = mul(unity_ObjectToWorld, positionOS);
-    float4 previousWorld = mul(unity_MatrixPreviousM, positionOS);
+    float4 previousWorld = mul(BurtGetEasyFogPreviousObjectToWorldMatrix(), positionOS);
     float3 objectDelta = previousWorld.xyz - currentWorld.xyz;
 
     BurtEasyFogMotionVectorVaryings output;

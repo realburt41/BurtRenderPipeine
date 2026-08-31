@@ -61,8 +61,8 @@ Material:
     m_Floats:
     - _AlphaClip: 1
     - _Anisotropy: 0
-    - _BurtGBufferStencilRef: 224
-    - _BurtGBufferStencilWriteMask: 224
+    - _BurtGBufferStencilRef: 232
+    - _BurtGBufferStencilWriteMask: 232
     - _Cull: 2
     - _Cutoff: 0.01
     - _DstBlend: 0

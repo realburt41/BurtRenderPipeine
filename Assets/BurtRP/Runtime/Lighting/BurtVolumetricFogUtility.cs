@@ -470,6 +470,8 @@ namespace Burt.RenderPipeline
         private static readonly int TranslucencyVolume0Id = Shader.PropertyToID("_BurtVolumetricFogTranslucencyVolume0");
         private static readonly int TranslucencyVolume1Id = Shader.PropertyToID("_BurtVolumetricFogTranslucencyVolume1");
         private static readonly int TranslucencyGIParamsId = Shader.PropertyToID("_BurtVolumetricFogTranslucencyGIParams");
+        private static readonly int TranslucencyVolumeGridSizeId = Shader.PropertyToID("_BurtGITranslucencyVolumeGridSize");
+        private static readonly int TranslucencyVolumeGridZParamsId = Shader.PropertyToID("_BurtGITranslucencyVolumeGridZParams");
         private static readonly int AdditionalLightBufferId = Shader.PropertyToID("_BurtAdditionalLightBuffer");
         private static readonly int AdditionalLightBufferEnabledId = Shader.PropertyToID("_BurtAdditionalLightBufferEnabled");
         private static readonly int MainLightShadowMapId = BurtRenderGraphResourceRegistry.MainLightShadowMapId;
@@ -540,6 +542,7 @@ namespace Burt.RenderPipeline
             CommandBuffer cmd,
             Camera camera,
             BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
             BurtVolumetricFogSettings settings,
             BurtVolumetricFogResolutionTier resolutionTier,
             RenderTargetIdentifier cameraDepthTexture,
@@ -722,11 +725,25 @@ namespace Burt.RenderPipeline
                 settings.DirectIntensity,
                 settings.AmbientIntensity,
                 horizontalLutAvailable ? 1f : 0f));
+            ResolveTranslucencyGIGridParams(
+                camera,
+                request,
+                asset,
+                translucencyGIEnabled,
+                out var translucencyGIGridSize,
+                out var translucencyGIGridZParams);
             cmd.SetComputeVectorParam(computeShader, TranslucencyGIParamsId, new Vector4(
                 translucencyGIEnabled ? 1f : 0f,
                 0f,
                 0f,
                 0f));
+            // Deferred opaque lighting deliberately clears these globals because it must not
+            // consume the translucency volume. Volumetric fog is a later, valid consumer, so it
+            // must restore the metadata explicitly instead of inheriting that cleared state.
+            cmd.SetComputeVectorParam(computeShader, TranslucencyVolumeGridSizeId, translucencyGIGridSize);
+            cmd.SetComputeVectorParam(computeShader, TranslucencyVolumeGridZParamsId, translucencyGIGridZParams);
+            cmd.SetGlobalVector(TranslucencyVolumeGridSizeId, translucencyGIGridSize);
+            cmd.SetGlobalVector(TranslucencyVolumeGridZParamsId, translucencyGIGridZParams);
             cmd.SetComputeTextureParam(computeShader, lightingKernel, TranslucencyVolume0Id, translucencyVolume0);
             cmd.SetComputeTextureParam(computeShader, lightingKernel, TranslucencyVolume1Id, translucencyVolume1);
             cmd.SetComputeVectorParam(computeShader, AlbedoId, settings.Albedo);
@@ -872,6 +889,39 @@ namespace Burt.RenderPipeline
             lastFurthestHiZUsed = useFurthestHiZ;
             BindGlobals(cmd, true);
             return true;
+        }
+
+        private static void ResolveTranslucencyGIGridParams(
+            Camera camera,
+            BurtRenderRequest request,
+            BurtRenderPipelineAsset asset,
+            bool enabled,
+            out Vector4 gridSize,
+            out Vector4 gridZParams)
+        {
+            if (!enabled)
+            {
+                // Keep every divisor valid even if a stale shader branch samples the fallback.
+                gridSize = Vector4.one;
+                gridZParams = Vector4.zero;
+                return;
+            }
+
+            var screenProbeSettings =
+                BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(
+                    request,
+                    asset);
+            var descriptor =
+                BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationTranslucencyVolumeDescriptor(
+                    camera,
+                    screenProbeSettings);
+            gridSize = new Vector4(
+                descriptor.width,
+                descriptor.height,
+                descriptor.volumeDepth,
+                BurtScreenSpaceGlobalIlluminationPassUtility.TranslucencyVolumeMaterialIntensityScale);
+            gridZParams =
+                BurtScreenSpaceGlobalIlluminationPassUtility.ResolveTranslucencyVolumeGridZParams(screenProbeSettings);
         }
 
         public static void BindForTransparentFog(CommandBuffer cmd, Camera camera, BurtRenderRequest request)
