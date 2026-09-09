@@ -20,6 +20,9 @@ namespace Burt.RenderPipeline
         private static readonly ProfilerMarker FrameMarker = new ProfilerMarker("BRP.Frame");
         private static readonly ProfilerMarker PrepareRequestsMarker = new ProfilerMarker("BRP.PrepareRequests");
         private static readonly ProfilerMarker FrameSubmitMarker = new ProfilerMarker("BRP.Frame.Submit");
+        private const int GICameraMaintenanceInterval = 128;
+        private int lastGICameraMaintenanceFrame = -1;
+        private int giCameraMaintenanceCounter;
 
         private static readonly int PreIntegratedFGTextureId = Shader.PropertyToID("_BurtPreIntegratedFG"); // 缓存预积分 FG LUT 全局纹理 ID，供 PBR IBL 和能量补偿采样。
         private static readonly int PreIntegratedFGEnabledId = Shader.PropertyToID("_BurtPreIntegratedFGEnabled"); // 缓存 LUT 是否有效的开关，未绑定时 shader 会回退到解析近似。
@@ -110,14 +113,9 @@ namespace Burt.RenderPipeline
             BurtAtmosphereLutUtility.Release();
             BurtVolumetricFogIntegratedUtility.Release();
             BurtImageBasedFilterUtility.Release();
-            BurtRadianceCacheClipMapHistoryUtility.ReleaseAll();
-            BurtRadianceCacheClipMapPersistentBufferUtility.ReleaseAll();
-            BurtRadianceCacheHashGridHistoryUtility.ReleaseAll();
-            BurtGISceneVoxelHistoryUtility.ReleaseAll();
+            BurtScreenSpaceGlobalIlluminationPassUtility.ReleaseCameraResources();
             BurtGISceneVoxelMeshRasterizerUtility.ReleaseAll();
             BurtGISceneVoxelOctreeUtility.Release();
-            BurtGISceneVoxelClipmapStateUtility.ReleaseAll();
-            BurtGIXGILightGridUtility.ReleaseAll();
             BurtRayTracingAccelerationStructureUtility.ReleaseAll();
             base.Dispose(disposing);
         }
@@ -126,6 +124,17 @@ namespace Burt.RenderPipeline
         private void RenderCameras(ScriptableRenderContext context, List<Camera> cameras)
         {
             using var frameScope = FrameMarker.Auto();
+            // Lifecycle maintenance must not depend on a GI pass being enabled.
+            // Count distinct Unity frames, not cameras or nested manual renders.
+            if (lastGICameraMaintenanceFrame != Time.frameCount)
+            {
+                lastGICameraMaintenanceFrame = Time.frameCount;
+                if (++giCameraMaintenanceCounter >= GICameraMaintenanceInterval)
+                {
+                    giCameraMaintenanceCounter = 0;
+                    BurtScreenSpaceGlobalIlluminationPassUtility.PruneDisposedCameraResources();
+                }
+            }
             var safeCameras = cameras ?? legacyCameraList;
             var submitAtEndOfFrame = asset != null && asset.SubmitStrategy == BurtSubmitStrategy.EndOfFrameWhenSafe;
             var frameSubmitted = false;

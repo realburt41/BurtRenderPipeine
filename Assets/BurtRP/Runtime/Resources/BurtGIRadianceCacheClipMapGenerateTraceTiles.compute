@@ -394,9 +394,9 @@ float3 BurtGISampleRawScreenGI(uint probeIndex, float3 direction, float3 probeWo
     float maxTraceDistance = max(_BurtGIScreenProbeTraceParams.w, 1.0);
     hitDistance = validSurface > 0.0 ? distance(probeWorldCenter, screenProbeWorldPosition.xyz) : maxTraceDistance;
 
-    float upFactor = saturate(direction.y * 0.5 + 0.5);
-    float3 analyticSkyFallback = lerp(float3(0.015, 0.018, 0.022), float3(0.08, 0.09, 0.11), upFactor);
-    float3 skyFallback = lerp(analyticSkyFallback, skyRadiance, skyTraceEnabled);
+    // Missing surface data is not a light source. Only the explicitly enabled
+    // scene sky may supply miss radiance, including valid black sky samples.
+    float3 skyFallback = skyRadiance * skyTraceEnabled;
     float directionalEnergy = lerp(0.72, 1.18, saturate(direction.z * 0.5 + 0.5));
     float3 fallbackRadiance = max(lerp(skyFallback, rawGI.rgb, validSurface), 0.0) * directionalEnergy;
 

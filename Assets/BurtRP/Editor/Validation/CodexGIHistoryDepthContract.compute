@@ -1,0 +1,18 @@
+#pragma kernel Main
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "../../Runtime/Resources/BurtGIHistoryDepthValidation.hlsl"
+StructuredBuffer<float4> Inputs;
+RWStructuredBuffer<float4> Outputs;
+float4x4 PreviousInverseProjection;
+float Thickness;
+float Noise;
+uint Count;
+[numthreads(64,1,1)]
+void Main(uint3 id:SV_DispatchThreadID)
+{
+    if(id.x>=Count)return;
+    float4 v=Inputs[id.x];
+    bool valid=BurtGIHistoryDepthMatches(v.xy,v.z,v.w,Thickness,Noise,PreviousInverseProjection);
+    bool legacy=abs(v.z-v.w)<max(Thickness,0.0001)*lerp(0.5,2.0,Noise);
+    Outputs[id.x]=float4(valid?1:0,legacy?1:0,0,0);
+}

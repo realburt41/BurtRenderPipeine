@@ -1,4 +1,7 @@
 #pragma kernel MarkRadianceProbesUsedByGBufferCS
+
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #pragma kernel MarkUsedRadianceProbesFromGBufferCS
 #pragma kernel MarkUsedRadianceProbesByVoxelPassCS
 #pragma kernel MarkUsedRadianceProbesFromSceneVoxelCS

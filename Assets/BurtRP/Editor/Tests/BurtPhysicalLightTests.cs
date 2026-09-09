@@ -72,5 +72,61 @@ namespace Burt.RenderPipeline.Tests
             light.spotAngle = 30f;
             physicalLight = lightObject.AddComponent<BurtPhysicalLight>();
         }
+
+        [Test]
+        public void RectangleAreaSizeChangesPreserveLumensAndUpdateNits()
+        {
+            CreateLight(LightType.Area, 2f);
+            physicalLight.AreaSize = new Vector2(2f, 3f);
+            physicalLight.SetUnit(BurtPhysicalLightUnit.Lumen, false);
+            physicalLight.Intensity = 120f * Mathf.PI;
+            Assert.That(light.intensity, Is.EqualTo(20f).Within(0.0001f));
+
+            physicalLight.AreaSize = new Vector2(3f, 4f);
+            Assert.AreEqual(new Vector2(3f, 4f), light.areaSize);
+            Assert.That(light.intensity, Is.EqualTo(10f).Within(0.0001f));
+            Assert.That(physicalLight.Intensity, Is.EqualTo(120f * Mathf.PI).Within(0.0001f));
+        }
+
+        [Test]
+        public void EditorAuthoredRectangleSizeIsCapturedWithoutChangingOutput()
+        {
+            CreateLight(LightType.Area, 4f);
+            physicalLight.SetUsePhysicalLightUnits(false);
+            light.areaSize = new Vector2(2f, 5f);
+            physicalLight.CaptureAreaSizeForPlayer();
+
+            var serialized = new UnityEditor.SerializedObject(physicalLight);
+            Assert.AreEqual(new Vector2(2f, 5f), serialized.FindProperty("areaSize").vector2Value);
+            Assert.That(light.intensity, Is.EqualTo(4f).Within(0.0001f));
+        }
+
+        [Test]
+        public void RectangleUnitSwitchPreservesNativeOutputAndDimensions()
+        {
+            CreateLight(LightType.Area, 4f);
+            physicalLight.AreaSize = new Vector2(2f, 5f);
+            physicalLight.SetUnit(BurtPhysicalLightUnit.Nits, false);
+            physicalLight.Intensity = 4f;
+            physicalLight.SetUnit(BurtPhysicalLightUnit.Lumen, true);
+            Assert.That(physicalLight.Intensity, Is.EqualTo(40f * Mathf.PI).Within(0.0001f));
+            Assert.That(light.intensity, Is.EqualTo(4f).Within(0.0001f));
+            physicalLight.SetUnit(BurtPhysicalLightUnit.Nits, true);
+            Assert.That(physicalLight.Intensity, Is.EqualTo(4f).Within(0.0001f));
+            Assert.AreEqual(new Vector2(2f, 5f), physicalLight.AreaSize);
+        }
+
+        [Test]
+        public void ReenabledInitializedComponentAppliesItsAuthoredOutput()
+        {
+            CreateLight(LightType.Point, 4f);
+            physicalLight.SetUnit(BurtPhysicalLightUnit.Candela, true);
+            physicalLight.Intensity = 7f;
+            physicalLight.enabled = false;
+            light.intensity = 2f;
+            physicalLight.enabled = true;
+            Assert.That(light.intensity, Is.EqualTo(7f).Within(0.0001f));
+            Assert.That(physicalLight.Intensity, Is.EqualTo(7f).Within(0.0001f));
+        }
     }
 }

@@ -2591,7 +2591,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             }
             // The TAAU compute path writes directly into the current side of the
             // persistent ping-pong pair. MarkHistoryValid swaps the pair here.
-            BurtTemporalAAUtility.MarkHistoryValid(camera);
+            BurtTemporalAAUtility.MarkHistoryValid(camera, temporalAA);
 
             if (!resolvedHighResolutionHistory || useTemporalAADebug)
             {

@@ -968,6 +968,7 @@ namespace Burt.RenderPipeline
 
         private sealed class CameraState
         {
+            public Camera Camera;
             public readonly Bounds[] Bounds = new Bounds[ClipmapCount];
             public readonly BurtGISceneVoxelClipmapResources[] Resources = new BurtGISceneVoxelClipmapResources[ClipmapCount];
             public uint ValidMask;
@@ -979,6 +980,10 @@ namespace Burt.RenderPipeline
         }
 
         private static readonly Dictionary<int, CameraState> CameraStates = new Dictionary<int, CameraState>();
+
+        private const int CameraStatePruneInterval = 128;
+        private static int cameraStatePruneCounter;
+        private static readonly List<int> CameraStateRemovalKeys = new List<int>();
 
         public static void Update(
             Camera camera,
@@ -999,11 +1004,13 @@ namespace Burt.RenderPipeline
                 return;
             }
 
+            PruneDisposedCameraStates();
             if (!CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
             {
                 state = new CameraState();
                 CameraStates.Add(camera.GetInstanceID(), state);
             }
+            state.Camera = camera;
 
             var normalizedResolution = BurtScreenSpaceGlobalIlluminationPassUtility.NormalizeSceneVoxelRadianceResolution(radianceResolution);
             if (state.RadianceResolution != normalizedResolution)
@@ -1054,6 +1061,20 @@ namespace Burt.RenderPipeline
                 if (changed)
                 {
                     state.Bounds[level] = bounds;
+                }
+
+                // The base volume refreshes periodically even with a stationary
+                // camera. Coarse levels must also pick up changed/removed sources;
+                // otherwise disabling AlwaysUpdate retains old emission forever.
+                // Refresh one coarse level per base update to bound staleness
+                // without rebuilding every clipmap together. Keep the existing
+                // snapped bounds until the movement threshold actually changes them.
+                var updateInterval = BurtGISceneVoxelMeshRasterizerUtility.UpdateInterval;
+                var periodicRefresh = !forceUpdate && level > 0 && activeCount > 1 &&
+                    Time.frameCount % updateInterval == 0 &&
+                    (Time.frameCount / updateInterval) % (activeCount - 1) == level - 1;
+                if (changed || periodicRefresh)
+                {
                     state.ValidMask &= ~(1u << level);
                     state.UpdateMask |= 1u << level;
                 }
@@ -1594,15 +1615,7 @@ namespace Burt.RenderPipeline
         {
             foreach (var pair in CameraStates)
             {
-                var resources = pair.Value.Resources;
-                for (var level = 0; level < resources.Length; ++level)
-                {
-                    resources[level]?.Release();
-                    resources[level] = null;
-                }
-
-                pair.Value.BaseSdfContext.Dispose();
-                pair.Value.BaseSdfStatus = "Unconfigured";
+                Release(pair.Value);
             }
 
             CameraStates.Clear();
@@ -1616,6 +1629,45 @@ namespace Burt.RenderPipeline
             fallbackProbeIndexBuffer?.Release();
             fallbackProbeIndexBuffer = null;
         }
+
+        internal static void PruneDisposedCameraStates(bool force = false)
+        {
+            ++cameraStatePruneCounter;
+            if (!force && cameraStatePruneCounter < CameraStatePruneInterval)
+            {
+                return;
+            }
+
+            cameraStatePruneCounter = 0;
+            CameraStateRemovalKeys.Clear();
+            foreach (var pair in CameraStates)
+            {
+                if (pair.Value.Camera != null)
+                {
+                    continue;
+                }
+
+                Release(pair.Value);
+                CameraStateRemovalKeys.Add(pair.Key);
+            }
+
+            foreach (var key in CameraStateRemovalKeys)
+            {
+                CameraStates.Remove(key);
+            }
+            CameraStateRemovalKeys.Clear();
+        }
+
+        private static void Release(CameraState state)
+        {
+            for (var level = 0; level < state.Resources.Length; ++level)
+            {
+                state.Resources[level]?.Release();
+                state.Resources[level] = null;
+            }
+            state.BaseSdfContext.Dispose();
+            state.BaseSdfStatus = "Unconfigured";
+        }
     }
 
     internal static class BurtGIXGILightGridUtility
@@ -1626,6 +1678,9 @@ namespace Burt.RenderPipeline
         private const int MaxSceneLights = 32;
         private const int LightDataRows = 4;
         private const int RebuildPeriodFrames = 8;
+        private const int CameraStatePruneInterval = 128;
+        private static int cameraStatePruneCounter;
+        private static readonly List<int> CameraStateRemovalKeys = new List<int>();
 
         private static readonly int LightDataId = Shader.PropertyToID("_BurtGIXGILightData");
         private static readonly int GridCountId = Shader.PropertyToID("_BurtGIXGILightGridCount");
@@ -1639,6 +1694,7 @@ namespace Burt.RenderPipeline
 
         private sealed class CameraState
         {
+            public Camera Camera;
             public readonly Vector4[] LightData = new Vector4[MaxSceneLights * LightDataRows];
             public readonly uint[] GridCounts = new uint[ClipmapCount * GridResolution * GridResolution];
             public readonly uint[] GridLists = new uint[ClipmapCount * GridResolution * GridResolution * MaxLightsPerCell];
@@ -1735,6 +1791,7 @@ namespace Burt.RenderPipeline
                 return null;
             }
 
+            PruneDisposedCameraStates();
             var cameraId = camera.GetInstanceID();
             if (!CameraStates.TryGetValue(cameraId, out var state))
             {
@@ -1744,8 +1801,36 @@ namespace Burt.RenderPipeline
                 state.GridListBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, state.GridLists.Length, sizeof(uint));
                 CameraStates.Add(cameraId, state);
             }
-
+            state.Camera = camera;
             return state;
+        }
+
+        internal static void PruneDisposedCameraStates(bool force = false)
+        {
+            ++cameraStatePruneCounter;
+            if (!force && cameraStatePruneCounter < CameraStatePruneInterval)
+            {
+                return;
+            }
+
+            cameraStatePruneCounter = 0;
+            CameraStateRemovalKeys.Clear();
+            foreach (var pair in CameraStates)
+            {
+                if (pair.Value.Camera != null)
+                {
+                    continue;
+                }
+
+                Release(pair.Value);
+                CameraStateRemovalKeys.Add(pair.Key);
+            }
+
+            foreach (var key in CameraStateRemovalKeys)
+            {
+                CameraStates.Remove(key);
+            }
+            CameraStateRemovalKeys.Clear();
         }
 
         private static CameraState PrepareState(Camera camera)
@@ -1993,6 +2078,9 @@ namespace Burt.RenderPipeline
             state.LightDataBuffer?.Release();
             state.GridCountBuffer?.Release();
             state.GridListBuffer?.Release();
+            state.LightDataBuffer = null;
+            state.GridCountBuffer = null;
+            state.GridListBuffer = null;
         }
     }
 }

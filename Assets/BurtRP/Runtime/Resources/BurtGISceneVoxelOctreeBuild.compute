@@ -153,7 +153,7 @@ void SceneVoxelBuildOctreeRootCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             [unroll]
             for (uint x = 0u; x < 4u; ++x)
             {
-                uint3 childCoord = uint3(x, y, z);
+                uint3 childCoord = dispatchThreadId * 4u + uint3(x, y, z);
                 if (any(childCoord >= parentSize))
                 {
                     continue;

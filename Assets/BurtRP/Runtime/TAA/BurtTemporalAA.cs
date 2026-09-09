@@ -79,6 +79,8 @@ namespace Burt.RenderPipeline
         public Matrix4x4 InverseCurrentViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 InverseCurrentNonJitteredViewProjectionMatrix { get; private set; } = Matrix4x4.identity;
         public Matrix4x4 ClipToPreviousClipMatrix { get; private set; } = Matrix4x4.identity;
+        public float ViewProjectionHistoryDelta { get; private set; }
+        public float ClipToPreviousIdentityDelta { get; private set; }
         public float PreviousRenderDeltaTime { get; private set; }
         internal double CurrentRenderTimeSeconds { get; private set; }
         public float CurrentPreExposure { get; private set; } = 1f;
@@ -86,6 +88,8 @@ namespace Burt.RenderPipeline
         public BurtTemporalAASettings Settings { get; private set; } = BurtTemporalAASettings.Default;
         public BurtTemporalAAVelocityMode VelocityMode { get; internal set; } = BurtTemporalAAVelocityMode.Disabled;
         public bool ObjectMotionVectorPassDrawn { get; internal set; }
+        public bool HistoryWritten { get; internal set; }
+        internal bool CameraStateCommitted { get; set; }
 
         public static BurtTemporalAARequestState CreateDisabled(Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix)
         {
@@ -151,6 +155,12 @@ namespace Burt.RenderPipeline
                 InverseCurrentViewProjectionMatrix = currentViewProjection.inverse,
                 InverseCurrentNonJitteredViewProjectionMatrix = currentNonJitteredViewProjection.inverse,
                 ClipToPreviousClipMatrix = clipToPreviousClipMatrix,
+                ViewProjectionHistoryDelta = CalculateMatrixMaxAbsDelta(
+                    currentNonJitteredViewProjection,
+                    previousNonJitteredViewProjectionMatrix),
+                ClipToPreviousIdentityDelta = CalculateMatrixMaxAbsDelta(
+                    clipToPreviousClipMatrix,
+                    Matrix4x4.identity),
                 CurrentRenderTimeSeconds = currentRenderTimeSeconds,
                 PreviousRenderDeltaTime = Mathf.Max(previousRenderDeltaTime, 0f),
                 CurrentPreExposure = Mathf.Max(currentPreExposure, 0.0001f),
@@ -158,6 +168,17 @@ namespace Burt.RenderPipeline
                 Settings = settings,
                 VelocityMode = BurtTemporalAAVelocityMode.CameraOnly
             };
+        }
+
+        private static float CalculateMatrixMaxAbsDelta(Matrix4x4 left, Matrix4x4 right)
+        {
+            var delta = 0f;
+            for (var i = 0; i < 16; i++)
+            {
+                delta = Mathf.Max(delta, Mathf.Abs(left[i] - right[i]));
+            }
+
+            return delta;
         }
     }
 
@@ -471,7 +492,16 @@ namespace Burt.RenderPipeline
         {
             var temporalAA = request != null ? request.TemporalAA : null;
             var camera = request != null ? request.Camera : null;
-            if (camera == null || temporalAA == null || !temporalAA.Enabled)
+            // Previous camera matrices must advance with the color/depth history
+            // they describe. SceneView and camera stacks can successfully execute
+            // TAA-enabled requests which never reach the temporal resolve. Advancing
+            // here without a history write pairs old color with a newer camera pose,
+            // producing an identity ClipToPreviousClip on the next visible request.
+            if (camera == null ||
+                temporalAA == null ||
+                !temporalAA.Enabled ||
+                !temporalAA.HistoryWritten ||
+                temporalAA.CameraStateCommitted)
             {
                 return;
             }
@@ -500,6 +530,7 @@ namespace Burt.RenderPipeline
             state.PreviousRenderTimeSeconds = temporalAA.CurrentRenderTimeSeconds;
             state.HistoryLayoutVersion = HistoryLayoutVersion;
             state.HasPreviousCameraState = true;
+            temporalAA.CameraStateCommitted = true;
         }
 
         private static Matrix4x4 CalculateClipToPreviousClip(
@@ -678,9 +709,9 @@ namespace Burt.RenderPipeline
             return EnsureHistoryTextures(camera, out historyValid).PreviousColor;
         }
 
-        public static void MarkHistoryValid(Camera camera)
+        public static void MarkHistoryValid(Camera camera, BurtTemporalAARequestState temporalAA)
         {
-            if (camera == null)
+            if (camera == null || temporalAA == null || !temporalAA.Enabled)
             {
                 return;
             }
@@ -698,6 +729,10 @@ namespace Burt.RenderPipeline
             }
 
             state.HasValidHistory = true;
+            // CommitRequest consumes this marker after the graph has executed and
+            // submitted successfully. This keeps camera matrices, render time and
+            // the persistent history ping-pong pair on the same temporal epoch.
+            temporalAA.HistoryWritten = true;
         }
 
         public static void InvalidateHistory(Camera camera)

@@ -1,5 +1,11 @@
 #pragma kernel ScreenProbePlacementAdaptiveCS
+
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #pragma kernel ScreenProbeAdaptivePlacementLiteCS
+#pragma kernel ScreenProbeAdaptiveSelectInitializeCS
+#pragma kernel ScreenProbeAdaptiveHistogramCS
+#pragma kernel ScreenProbeAdaptiveSelectBucketCS
 
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
 #define BURT_GI_SCREEN_PROBE_PLACEMENT_THREADGROUP_SIZE 8
@@ -60,6 +66,9 @@
     #endif
 #endif
 
+Texture2D<float> _BurtCameraDepthTexture;
+Texture2D<float4> _BurtGBuffer0;
+Texture2D<float4> _BurtGBuffer2;
 Texture2D<float> _BurtGIScreenProbeScreenDepthTexture;
 Texture2D<float4> _BurtGIScreenProbeWorldNormalTexture;
 Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
@@ -70,7 +79,17 @@ RWTexture2D<uint> _BurtGIScreenProbeAdaptiveProbeIndicesTexture;
 
 
 RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
-RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+RWStructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+// Pass-local scratch. A unique screen-space priority makes the retained set
+// independent of dispatch scheduling when the adaptive budget is exhausted.
+RWTexture2D<uint> _BurtGIAdaptiveCandidateKeys;
+RWTexture2D<uint> _BurtGIAdaptiveSelectionHistogram;
+RWTexture2D<uint> _BurtGIAdaptiveSelectionState;
+uint4 _BurtGIAdaptiveSelectionLayout; // candidate width/height, histogram width, group count
+uint _BurtGIAdaptiveSelectionGroupCountX;
+uint _BurtGIAdaptiveSelectionShift;
+uint _BurtGIAdaptiveSelectionPhase; // 0: evaluate candidates; 1: scatter selected candidates
 
 #define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6
 #define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffffffu
@@ -387,6 +406,52 @@ bool BurtGIScreenProbeShouldSkipAdaptivePlacement(float encodedPlacementPayload)
     uint placementPayload = (uint)round(max(encodedPlacementPayload, 0.0f));
     return (placementPayload & BURT_GI_SCREEN_PROBE_SKIP_ADAPTIVE_FLAG) != 0u;
 }
+float3 BurtGIScreenProbeDecodeGBufferNormalWS(float2 encodedNormal)
+{
+    float2 f = encodedNormal * 2.0 - 1.0;
+    float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    float t = saturate(-n.z);
+    n.x += n.x >= 0.0 ? -t : t;
+    n.y += n.y >= 0.0 ? -t : t;
+    return BurtGIScreenProbeTraceEarlySafeNormalize(n + 0.000001, float3(0.0, 0.0, 1.0));
+}
+float2 BurtGIScreenProbeUnpack888UIntToFloat2(uint3 value)
+{
+    uint hi = value.z >> 4;
+    uint lo = value.z & 15u;
+    uint2 packed = value.xy | uint2(lo << 8, hi << 8);
+    return (float2)packed / 4095.0;
+}
+float2 BurtGIScreenProbeUnpack888ToFloat2(float3 value)
+{
+    uint3 quantized = (uint3)(saturate(value) * 255.5);
+    return BurtGIScreenProbeUnpack888UIntToFloat2(quantized);
+}
+float3 BurtGIScreenProbeDecodeGBufferNormalWS888(float3 encodedNormal)
+{
+    return BurtGIScreenProbeDecodeGBufferNormalWS(BurtGIScreenProbeUnpack888ToFloat2(encodedNormal));
+}
+float4 BurtGIScreenProbeBuildDeferredClipPosition(float2 screenUV, float rawDepth)
+{
+    float2 clipXY = screenUV * 2.0 - 1.0;
+#if UNITY_UV_STARTS_AT_TOP
+    clipXY.y = -clipXY.y;
+#endif
+
+#if defined(UNITY_REVERSED_Z)
+    float clipZ = rawDepth;
+#else
+    float clipZ = lerp(UNITY_NEAR_CLIP_VALUE, 1.0, rawDepth);
+#endif
+
+    return float4(clipXY, clipZ, 1.0);
+}
+float3 BurtGIScreenProbeReconstructDeferredPositionWS(float2 screenUV, float rawDepth)
+{
+    float4 positionWS = mul(_BurtDeferredInverseViewProjectionMatrix, BurtGIScreenProbeBuildDeferredClipPosition(screenUV, rawDepth));
+    float safeW = abs(positionWS.w) > 0.00001 ? positionWS.w : (positionWS.w < 0.0 ? -0.00001 : 0.00001);
+    return positionWS.xyz / safeW;
+}
 uint BurtGIPackScreenProbeAdaptiveProbeData(uint2 adaptiveFineProbeCoord, uint adaptiveLevel)
 {
     return (adaptiveFineProbeCoord.x & 0x3fffu) | ((adaptiveFineProbeCoord.y & 0x3fffu) << 14) | ((adaptiveLevel & 0xfu) << 28);
@@ -404,6 +469,18 @@ void BurtGIScreenProbeAdaptivePlacement(uint3 dispatchThreadId)
     if (adaptiveFineProbeCoord.x >= adaptiveFineGridSize.x || adaptiveFineProbeCoord.y >= adaptiveFineGridSize.y)
     {
         return;
+    }
+
+    if (_BurtGIAdaptiveSelectionPhase == 0u)
+    {
+        _BurtGIAdaptiveCandidateKeys[adaptiveFineProbeCoord] = 0xffffffffu;
+    }
+    else
+    {
+        uint key = _BurtGIAdaptiveCandidateKeys[adaptiveFineProbeCoord];
+        if (key == 0xffffffffu || _BurtGIAdaptiveSelectionState[uint2(2u, 0u)] == 0u ||
+            key > _BurtGIAdaptiveSelectionState[uint2(0u, 0u)])
+            return;
     }
 
     uint previousSubGridSize = adaptiveSubGridSize >> 1u;
@@ -425,6 +502,36 @@ void BurtGIScreenProbeAdaptivePlacement(uint3 dispatchThreadId)
     {
         return;
     }
+
+    // Like XRender, place the adaptive probe on its own visible surface. Uniform
+    // neighbours below only determine allocation; they never define this position.
+    uint sourceWidth, sourceHeight;
+    _BurtCameraDepthTexture.GetDimensions(sourceWidth, sourceHeight);
+    float adaptiveSpacing = max(_BurtGIScreenProbeAdaptivePlacementParams.x, 1.0f) / adaptiveSubGridSize;
+    uint2 sourcePixel = (uint2)floor((float2(adaptiveFineProbeCoord) + 0.5f) * adaptiveSpacing);
+    if (any(sourcePixel >= uint2(sourceWidth, sourceHeight)))
+        return;
+    float candidateDepth = _BurtCameraDepthTexture.Load(int3(sourcePixel, 0));
+    if (BurtGIScreenProbeTraceCompactIsSkyDepth(candidateDepth))
+        return;
+    float shadingModelID = floor(min(saturate(_BurtGBuffer2.Load(int3(sourcePixel, 0)).r) * 8.0f, 7.9999f));
+    bool isHair = abs(shadingModelID - BURT_GI_SHADING_MODEL_HAIR) < 0.5f;
+    bool isFoliage = abs(shadingModelID - BURT_GI_SHADING_MODEL_FOLIAGE) < 0.5f;
+    if (isHair || isFoliage)
+        return;
+    bool isSubsurface = abs(shadingModelID - BURT_GI_SHADING_MODEL_SUBSURFACE) < 0.5f;
+    bool isFur = abs(shadingModelID - BURT_GI_SHADING_MODEL_FUR) < 0.5f;
+    BurtGIAdaptiveProbeData candidate;
+    candidate.packedCoord = BurtGIPackScreenProbeAdaptiveProbeData(adaptiveFineProbeCoord, adaptiveLevel);
+    candidate.placementPayload = BURT_GI_SCREEN_PROBE_VALID_FLAG |
+        ((isSubsurface || isFur) ? BURT_GI_SCREEN_PROBE_SKIP_SCREEN_TRACE_FLAG : 0u) |
+        (isSubsurface ? BURT_GI_SCREEN_PROBE_SPHERICAL_VISIBILITY_FLAG : 0u);
+    candidate.sourcePixel = sourcePixel;
+    candidate.positionWS = BurtGIScreenProbeReconstructDeferredPositionWS(
+        (float2(sourcePixel) + 0.5f) / float2(sourceWidth, sourceHeight), candidateDepth);
+    candidate.rawDepth = candidateDepth;
+    candidate.normalWS = BurtGIScreenProbeDecodeGBufferNormalWS888(_BurtGBuffer0.Load(int3(sourcePixel, 0)).rgb);
+    candidate.valid = 1.0f;
 
     float rawDepth = _BurtGIScreenProbeScreenDepthTexture.Load(int3(screenProbeCoord, 0));
     float4 encodedNormal = _BurtGIScreenProbeWorldNormalTexture.Load(int3(screenProbeCoord, 0));
@@ -538,6 +645,17 @@ void BurtGIScreenProbeAdaptivePlacement(uint3 dispatchThreadId)
         return;
     }
 
+    if (_BurtGIAdaptiveSelectionPhase == 0u)
+    {
+        // Bit reversal is a bijection, distributes early priorities across the
+        // screen, and cannot produce the sentinel for a legal texture index.
+        // Unlike a rank rescale, adding one candidate replaces at most one
+        // retained candidate at this level instead of reshuffling the subset.
+        uint linearCandidate = adaptiveFineProbeCoord.y * adaptiveFineGridSize.x + adaptiveFineProbeCoord.x;
+        _BurtGIAdaptiveCandidateKeys[adaptiveFineProbeCoord] = reversebits(linearCandidate);
+        return;
+    }
+
     uint adaptiveProbeIndex;
     InterlockedAdd(_BurtGIScreenProbeAdaptiveProbeNumBuffer[0], 1u, adaptiveProbeIndex);
     if (adaptiveProbeIndex >= maxAdaptiveProbeCount || adaptiveProbeIndex > 65515u)
@@ -545,7 +663,7 @@ void BurtGIScreenProbeAdaptivePlacement(uint3 dispatchThreadId)
         return;
     }
 
-    _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex] = BurtGIPackScreenProbeAdaptiveProbeData(adaptiveFineProbeCoord, adaptiveLevel);
+    _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex] = candidate;
 
     uint adaptiveSlot;
     InterlockedAdd(_BurtGIScreenProbeAdaptiveProbeHeaderTexture[screenProbeCoord], 1u, adaptiveSlot);
@@ -565,4 +683,84 @@ void ScreenProbePlacementAdaptiveCS(uint3 dispatchThreadId : SV_DispatchThreadID
 void ScreenProbeAdaptivePlacementLiteCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     BurtGIScreenProbeAdaptivePlacement(dispatchThreadId);
+}
+
+uint2 BurtGIAdaptiveHistogramCoord(uint index)
+{
+    return uint2(index % _BurtGIAdaptiveSelectionLayout.z, index / _BurtGIAdaptiveSelectionLayout.z);
+}
+
+[numthreads(1, 1, 1)]
+void ScreenProbeAdaptiveSelectInitializeCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint capacity = min(max(1u, (uint)_BurtGIScreenProbeAdaptiveParams.w), 65516u);
+    uint baseCount = min(_BurtGIScreenProbeAdaptiveProbeNumBuffer[0], capacity);
+    _BurtGIAdaptiveSelectionState[uint2(0u, 0u)] = 0u; // selected key prefix
+    _BurtGIAdaptiveSelectionState[uint2(1u, 0u)] = capacity - baseCount; // one-based rank
+    _BurtGIAdaptiveSelectionState[uint2(2u, 0u)] = capacity - baseCount;
+    _BurtGIAdaptiveSelectionState[uint2(3u, 0u)] = 0u; // eligible candidate count
+}
+
+groupshared uint BurtGIAdaptiveHistogramShared[256];
+
+[numthreads(256, 1, 1)]
+void ScreenProbeAdaptiveHistogramCS(uint3 groupId : SV_GroupID, uint threadIndex : SV_GroupIndex)
+{
+    uint groupIndex = groupId.y * _BurtGIAdaptiveSelectionGroupCountX + groupId.x;
+    uint linearIndex = groupIndex * 256u + threadIndex;
+    uint candidateCount = _BurtGIAdaptiveSelectionLayout.x * _BurtGIAdaptiveSelectionLayout.y;
+    BurtGIAdaptiveHistogramShared[threadIndex] = 0u;
+    GroupMemoryBarrierWithGroupSync();
+    if (linearIndex < candidateCount)
+    {
+        uint2 coord = uint2(linearIndex % _BurtGIAdaptiveSelectionLayout.x, linearIndex / _BurtGIAdaptiveSelectionLayout.x);
+        uint key = _BurtGIAdaptiveCandidateKeys[coord];
+        uint prefixMask = _BurtGIAdaptiveSelectionShift == 24u ? 0u : (0xffffffffu << (_BurtGIAdaptiveSelectionShift + 8u));
+        uint prefix = _BurtGIAdaptiveSelectionState[uint2(0u, 0u)];
+        if (key != 0xffffffffu && (key & prefixMask) == prefix)
+            InterlockedAdd(BurtGIAdaptiveHistogramShared[(key >> _BurtGIAdaptiveSelectionShift) & 255u], 1u);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    // No early return or varying barrier: every lane, including padded groups,
+    // participates. Each group owns all 256 histogram entries it publishes.
+    if (groupIndex < _BurtGIAdaptiveSelectionLayout.w)
+        _BurtGIAdaptiveSelectionHistogram[BurtGIAdaptiveHistogramCoord(groupIndex * 256u + threadIndex)] = BurtGIAdaptiveHistogramShared[threadIndex];
+}
+
+groupshared uint BurtGIAdaptiveBucketTotals[256];
+
+[numthreads(256, 1, 1)]
+void ScreenProbeAdaptiveSelectBucketCS(uint threadIndex : SV_GroupIndex)
+{
+    uint totalForBucket = 0u;
+    [loop]
+    for (uint groupIndex = 0u; groupIndex < _BurtGIAdaptiveSelectionLayout.w; ++groupIndex)
+        totalForBucket += _BurtGIAdaptiveSelectionHistogram[BurtGIAdaptiveHistogramCoord(groupIndex * 256u + threadIndex)];
+    BurtGIAdaptiveBucketTotals[threadIndex] = totalForBucket;
+    GroupMemoryBarrierWithGroupSync();
+    if (threadIndex == 0u)
+    {
+        uint total = 0u;
+        [loop] for (uint bucket = 0u; bucket < 256u; ++bucket) total += BurtGIAdaptiveBucketTotals[bucket];
+        if (_BurtGIAdaptiveSelectionShift == 24u)
+            _BurtGIAdaptiveSelectionState[uint2(3u, 0u)] = total;
+        uint rank = min(max(_BurtGIAdaptiveSelectionState[uint2(1u, 0u)], 1u), total);
+        uint prefix = _BurtGIAdaptiveSelectionState[uint2(0u, 0u)];
+        if (total > 0u)
+        {
+            [loop]
+            for (uint bucket = 0u; bucket < 256u; ++bucket)
+            {
+                uint bucketCount = BurtGIAdaptiveBucketTotals[bucket];
+                if (rank <= bucketCount)
+                {
+                    prefix |= bucket << _BurtGIAdaptiveSelectionShift;
+                    break;
+                }
+                rank -= bucketCount;
+            }
+        }
+        _BurtGIAdaptiveSelectionState[uint2(0u, 0u)] = prefix;
+        _BurtGIAdaptiveSelectionState[uint2(1u, 0u)] = rank;
+    }
 }

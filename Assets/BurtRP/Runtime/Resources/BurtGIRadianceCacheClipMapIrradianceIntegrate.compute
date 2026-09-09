@@ -1,5 +1,8 @@
 #pragma kernel IrradianceIntegrateCS
 
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
 #define BURT_GI_IRRADIANCE_INTEGRATE_THREADGROUP_SIZE 8
 #define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6u
 #define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffu

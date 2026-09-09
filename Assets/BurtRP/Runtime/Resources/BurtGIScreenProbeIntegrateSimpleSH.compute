@@ -1,4 +1,7 @@
 #pragma kernel ScreenProbeIntegrateSimpleSHDiffuseCS
+
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #pragma kernel ScreenProbeIntegrateSimpleSHAllCS
 #pragma kernel ScreenProbeIntegrateSimpleSHCS
 #pragma kernel ScreenProbeIntegrateSimpleNICS
@@ -36,7 +39,8 @@ Texture2D<float4> _BurtGIScreenProbeRadianceSHDirectionalTexture;
 Texture2D<uint> _BurtGIScreenProbeAdaptiveProbeHeaderTexture;
 Texture2D<uint> _BurtGIScreenProbeAdaptiveProbeIndicesTexture;
 StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
-StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 SamplerState sampler_BurtGIScreenProbeIrradianceOctTexture;
 SamplerState sampler_BurtGIScreenProbeRadianceOctTexture;
 StructuredBuffer<uint> _BurtGIScreenProbeIntegrateTileDataDiffuseBuffer;
@@ -557,40 +561,12 @@ bool BurtGIIntegrateSimpleSHResolveAdaptiveProbe(
         return false;
     }
 
-    uint packedProbeData = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex];
-    uint2 adaptiveFineProbeCoord = uint2(packedProbeData & 0x3fffu, (packedProbeData >> 14) & 0x3fffu);
-    uint adaptiveLevel = (packedProbeData >> 28) & 0xfu;
-    uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
-    uint2 baseProbeCoord = min(adaptiveFineProbeCoord / max(1u, adaptiveSubGridSize), gridSize - 1u);
-    uint2 adaptiveCellCoord = adaptiveFineProbeCoord - baseProbeCoord * adaptiveSubGridSize;
-    float2 adaptiveCellUV = saturate((float2(adaptiveCellCoord) + 0.5f) / (float)max(1u, adaptiveSubGridSize));
-    float4 bilinearWeights = float4(
-        (1.0f - adaptiveCellUV.x) * (1.0f - adaptiveCellUV.y),
-        adaptiveCellUV.x * (1.0f - adaptiveCellUV.y),
-        (1.0f - adaptiveCellUV.x) * adaptiveCellUV.y,
-        adaptiveCellUV.x * adaptiveCellUV.y);
-    uint2 rightProbeCoord = uint2(min(baseProbeCoord.x + 1u, gridSize.x - 1u), baseProbeCoord.y);
-    uint2 downProbeCoord = uint2(baseProbeCoord.x, min(baseProbeCoord.y + 1u, gridSize.y - 1u));
-    uint2 rightDownProbeCoord = uint2(rightProbeCoord.x, downProbeCoord.y);
-    float4 position00 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(baseProbeCoord, 0));
-    float4 position10 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightProbeCoord, 0));
-    float4 position01 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(downProbeCoord, 0));
-    float4 position11 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightDownProbeCoord, 0));
-    float4 validWeights = bilinearWeights * float4(position00.a > 0.5f, position10.a > 0.5f, position01.a > 0.5f, position11.a > 0.5f);
-    float validWeightSum = dot(validWeights, 1.0f);
-    if (validWeightSum <= 0.0001f)
-    {
-        return false;
-    }
-
-    adaptivePositionWS =
-        (position00.xyz * validWeights.x + position10.xyz * validWeights.y + position01.xyz * validWeights.z + position11.xyz * validWeights.w) /
-        validWeightSum;
-    adaptiveScreenCoord = (float2(baseProbeCoord) + adaptiveCellUV) * spacingPixels;
-    uint uniformProbeCount = gridSize.x * gridSize.y;
-    uint screenProbeIndex = uniformProbeCount + adaptiveProbeIndex;
+    BurtGIAdaptiveProbeData probe = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex];
+    adaptivePositionWS = probe.positionWS;
+    adaptiveScreenCoord = float2(probe.sourcePixel) + 0.5f;
+    uint screenProbeIndex = gridSize.x * gridSize.y + adaptiveProbeIndex;
     atlasProbeCoord = uint2(screenProbeIndex % gridSize.x, screenProbeIndex / gridSize.x);
-    return true;
+    return probe.valid > 0.5f;
 }
 
 float4 BurtGIIntegrateSimpleSHSampleIrradianceOctAtlasMip(float2 probeCoord, float2 localCoord, float2 atlasSize, float mipLevel)
@@ -784,23 +760,34 @@ float4 BurtGIIntegrateSimpleSHSampleIrradianceSH3(
         return 0.0f;
     }
 
-    // XRender enables STOCHASTIC_PROBE_INTERPOLATION: normalize the geometric
-    // weights conceptually, choose one probe with that probability, and let the
-    // main temporal reprojection converge the noise.  Deterministically blending
-    // all four probe histories stamps moving silhouettes into the current GI and
-    // creates a feedback loop before TAA sees the image.
-    uint stochasticProbeIndex = BurtGIIntegrateSimpleSHSelectStochasticProbe(stochasticProbeWeights, screenUV);
-    uint2 stochasticProbeCoord = stochasticProbeCoords[stochasticProbeIndex];
-    float3 irradiance = BurtGIIntegrateSimpleSHEvaluateSH3Coefficients(
-        _BurtGIScreenProbeRadianceSHAmbientTexture.Load(int3(stochasticProbeCoord, 0)).rgb,
-        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 0u, screenProbeWidth),
-        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 1u, screenProbeWidth),
-        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 2u, screenProbeWidth),
-        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 3u, screenProbeWidth),
-        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 4u, screenProbeWidth),
-        BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 5u, screenProbeWidth),
-        normalWS,
-        cosThetaAO);
+    // Evaluate each geometric candidate before weighting. This removes the
+    // stochastic selection variance without changing its conditional mean.
+    // Clamp each probe separately; clamping interpolated SH is not equivalent.
+    float3 irradiance = 0.0f;
+    [unroll]
+    for (uint probeIndex = 0u; probeIndex < 4u; ++probeIndex)
+    {
+        // Invalid candidates can contain stale/nonfinite SH. Do not evaluate
+        // them: multiplying an infinite irradiance by zero still produces NaN.
+        // Valid black probes keep their positive geometric weight.
+        [branch]
+        if (stochasticProbeWeights[probeIndex] <= 0.0f)
+        {
+            continue;
+        }
+        uint2 stochasticProbeCoord = stochasticProbeCoords[probeIndex];
+        float3 probeIrradiance = BurtGIIntegrateSimpleSHEvaluateSH3Coefficients(
+            _BurtGIScreenProbeRadianceSHAmbientTexture.Load(int3(stochasticProbeCoord, 0)).rgb,
+            BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 0u, screenProbeWidth),
+            BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 1u, screenProbeWidth),
+            BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 2u, screenProbeWidth),
+            BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 3u, screenProbeWidth),
+            BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 4u, screenProbeWidth),
+            BurtGIIntegrateSimpleSHLoadDirectionalTile(stochasticProbeCoord, 5u, screenProbeWidth),
+            normalWS,
+            cosThetaAO);
+        irradiance += probeIrradiance * (stochasticProbeWeights[probeIndex] / weightSum);
+    }
     return float4(irradiance, 1.0f);
 }
 
@@ -1026,7 +1013,9 @@ void BurtGIIntegrateSimpleSHEvaluatePixel(
     // Match XRender's energy contract: trace confidence is metadata for temporal
     // validity, not a lighting multiplier. Multiplying full-resolution lighting by
     // probe-grid confidence stamps every 16 px probe footprint into the image.
-    diffuseIndirect = float4(max(diffuseLighting * BURT_INV_PI, 0.0f) * diffuseBentOcclusion, hitRatio);
+    // Preserve validity separately from brightness: a valid black result must
+    // not be replaced by a lit neighbor during indirect-channel reconstruction.
+    diffuseIndirect = float4(max(diffuseLighting * BURT_INV_PI, 0.0f) * diffuseBentOcclusion, hitRatio * lightingValidity);
 
     if (_BurtGIScreenProbeIntegrateSimpleSHParams1.x > 0.5f && backfaceDiffuseMaterial)
     {

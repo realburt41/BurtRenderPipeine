@@ -1,5 +1,8 @@
 #pragma kernel TranslucencyVolumeTraceVoxelsCS
 
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
 #define BURT_GI_TRANSLUCENCY_VOLUME_THREADGROUP_SIZE 4
 #define BURT_GI_TRANSLUCENCY_VOLUME_TRACE_FILTER_THREADGROUP_SIZE 8
 Texture2D<float> _BurtHiZDepthTexture;

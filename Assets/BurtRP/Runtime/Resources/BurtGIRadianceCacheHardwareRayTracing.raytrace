@@ -19,7 +19,8 @@ RWTexture2D<float> _BurtGIRadianceCacheClipMapDepthProbeAtlasTexture;
 StructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelCountBuffer;
 StructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelDataBuffer;
 StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
-StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 Texture2D<float> _BurtGIScreenProbeScreenDepthTexture;
 Texture2D<float4> _BurtGIScreenProbeWorldNormalTexture;
 Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
@@ -607,7 +608,7 @@ bool BurtGIHardwareRayResolveScreenProbeCoord(
         return false;
     }
 
-    uint packedProbeData = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex];
+    uint packedProbeData = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex].packedCoord;
     uint2 adaptiveFineProbeCoord = uint2(packedProbeData & 0x3fffu, (packedProbeData >> 14u) & 0x3fffu);
     uint adaptiveLevel = (packedProbeData >> 28u) & 0xfu;
     uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
@@ -678,56 +679,10 @@ bool BurtGIHardwareRayResolveScreenProbeTracePlacement(
     }
 
     uint adaptiveProbeIndex = screenProbeIndex - uniformProbeCount;
-    uint packedProbeData = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex];
-    uint2 adaptiveFineProbeCoord = uint2(packedProbeData & 0x3fffu, (packedProbeData >> 14u) & 0x3fffu);
-    uint adaptiveLevel = (packedProbeData >> 28u) & 0xfu;
-    uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
-    uint2 baseProbeCoord = min(
-        adaptiveFineProbeCoord / max(1u, adaptiveSubGridSize),
-        uint2(screenProbeWidth - 1u, screenProbeHeight - 1u));
-    uint2 adaptiveCellCoord = adaptiveFineProbeCoord - baseProbeCoord * adaptiveSubGridSize;
-    float2 bilinearUV = saturate((float2(adaptiveCellCoord) + 0.5) / max(1.0, (float)adaptiveSubGridSize));
-    float4 bilinearWeights = float4(
-        (1.0 - bilinearUV.x) * (1.0 - bilinearUV.y),
-        bilinearUV.x * (1.0 - bilinearUV.y),
-        (1.0 - bilinearUV.x) * bilinearUV.y,
-        bilinearUV.x * bilinearUV.y);
-
-    uint2 rightProbeCoord = uint2(min(baseProbeCoord.x + 1u, screenProbeWidth - 1u), baseProbeCoord.y);
-    uint2 downProbeCoord = uint2(baseProbeCoord.x, min(baseProbeCoord.y + 1u, screenProbeHeight - 1u));
-    uint2 rightDownProbeCoord = uint2(rightProbeCoord.x, downProbeCoord.y);
-    float4 encodedNormal00 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(baseProbeCoord, 0));
-    float4 encodedNormal10 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(rightProbeCoord, 0));
-    float4 encodedNormal01 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(downProbeCoord, 0));
-    float4 encodedNormal11 = _BurtGIScreenProbeWorldNormalTexture.Load(int3(rightDownProbeCoord, 0));
-    float4 encodedPosition00 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(baseProbeCoord, 0));
-    float4 encodedPosition10 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightProbeCoord, 0));
-    float4 encodedPosition01 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(downProbeCoord, 0));
-    float4 encodedPosition11 = _BurtGIScreenProbeWorldPositionTexture.Load(int3(rightDownProbeCoord, 0));
-    float rawDepth00 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(baseProbeCoord, 0));
-    float rawDepth10 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(rightProbeCoord, 0));
-    float rawDepth01 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(downProbeCoord, 0));
-    float rawDepth11 = _BurtGIScreenProbeScreenDepthTexture.Load(int3(rightDownProbeCoord, 0));
-    bool valid00 = encodedNormal00.a > 0.5 && encodedPosition00.a > 0.5 && !BurtGIHardwareRayIsSkyDepth(rawDepth00);
-    bool valid10 = encodedNormal10.a > 0.5 && encodedPosition10.a > 0.5 && !BurtGIHardwareRayIsSkyDepth(rawDepth10);
-    bool valid01 = encodedNormal01.a > 0.5 && encodedPosition01.a > 0.5 && !BurtGIHardwareRayIsSkyDepth(rawDepth01);
-    bool valid11 = encodedNormal11.a > 0.5 && encodedPosition11.a > 0.5 && !BurtGIHardwareRayIsSkyDepth(rawDepth11);
-    float4 validWeights = bilinearWeights * float4(valid00 ? 1.0 : 0.0, valid10 ? 1.0 : 0.0, valid01 ? 1.0 : 0.0, valid11 ? 1.0 : 0.0);
-    float validWeightSum = dot(validWeights, float4(1.0, 1.0, 1.0, 1.0));
-    if (validWeightSum <= 0.0001)
-    {
-        return false;
-    }
-
-    float3 normal00 = valid00 ? BurtGIHardwareRayDecodeScreenProbeNormal(encodedNormal00) : sourceNormalWS;
-    float3 normal10 = valid10 ? BurtGIHardwareRayDecodeScreenProbeNormal(encodedNormal10) : normal00;
-    float3 normal01 = valid01 ? BurtGIHardwareRayDecodeScreenProbeNormal(encodedNormal01) : normal00;
-    float3 normal11 = valid11 ? BurtGIHardwareRayDecodeScreenProbeNormal(encodedNormal11) : normal00;
-    sourcePositionWS = (encodedPosition00.xyz * validWeights.x + encodedPosition10.xyz * validWeights.y + encodedPosition01.xyz * validWeights.z + encodedPosition11.xyz * validWeights.w) / validWeightSum;
-    sourceNormalWS = normal00 * validWeights.x + normal10 * validWeights.y + normal01 * validWeights.z + normal11 * validWeights.w;
-    float sourceNormalLengthSq = dot(sourceNormalWS, sourceNormalWS);
-    sourceNormalWS = sourceNormalLengthSq > 0.0001 ? sourceNormalWS * rsqrt(sourceNormalLengthSq) : normal00;
-    return true;
+    BurtGIAdaptiveProbeData probe = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex];
+    sourcePositionWS = probe.positionWS;
+    sourceNormalWS = probe.normalWS;
+    return probe.valid > 0.5f;
 }
 
 [shader("raygeneration")]

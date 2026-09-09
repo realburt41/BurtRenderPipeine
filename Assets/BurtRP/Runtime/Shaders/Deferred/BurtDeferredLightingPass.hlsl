@@ -215,7 +215,10 @@ void BurtApplyDeferredGIIndirect(float2 ScreenUV, BurtGBufferData GBufferData, f
     float RawDepth = BurtSampleDeferredRawDepth(ScreenUV);
     float3 PositionWS = BurtReconstructDeferredPositionWS(ScreenUV, RawDepth);
     float3 ProbeVolumeIrradiance;
-    if (BurtTrySampleGIProbeVolumeIrradiance(PositionWS, BurtGetDeferredSurfaceNormalWS(GBufferData), ViewDirectionWS, ProbeVolumeIrradiance))
+    // Screen GI already contains the traced indirect solution, including valid black.
+    // Match XRender's exclusive XGI/XGIProbe evaluator selection; never double-add it.
+    if (_BurtGIApplyIndirectParams.x < 0.5f &&
+        BurtTrySampleGIProbeVolumeIrradiance(PositionWS, BurtGetDeferredSurfaceNormalWS(GBufferData), ViewDirectionWS, ProbeVolumeIrradiance))
     {
         Components.IndirectDiffuse = Components.DiffuseColor * ProbeVolumeIrradiance * BurtGTAOMultiBounce(GBufferData.Occlusion, GBufferData.BaseColor) * saturate(Components.EnergyPreservation);
     }

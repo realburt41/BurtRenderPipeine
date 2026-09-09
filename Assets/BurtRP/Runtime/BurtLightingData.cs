@@ -544,11 +544,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让灯光
 
             VisibleLightCount = visibleLightCount; // 保存可见光数量，方便调试输出和后续多光源逻辑使用。
 
-            MainLightDirection = DefaultMainLightDirection; // 使用兜底方向，避免无主光时 Lit 材质完全失去形体光照。
+            MainLightDirection = DefaultMainLightDirection; // Keep normalization safe even when there is no light energy.
 
-            MainLightColor = Color.white; // 使用白色兜底主光，避免没有灯光时材质直接变黑。
+            // No visible directional light means no main-light energy. A white
+            // fallback illuminated the camera image and was then bounced by
+            // Screen GI, while the voxel path correctly gated on HasMainLight.
+            MainLightColor = Color.black;
 
-            MainLightColorOuterSpace = Color.white;
+            MainLightColorOuterSpace = Color.black;
 
             AtmosphereTransmittance = Color.white;
 

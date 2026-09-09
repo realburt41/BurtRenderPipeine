@@ -97,13 +97,15 @@ int VoxelProbeClipmapValidMask;
 int VoxelProbeArgsMaxProbeCount;
 int VoxelProbeArgsClipmapCount;
 
-float4 unity_SHAr;
-float4 unity_SHAg;
-float4 unity_SHAb;
-float4 unity_SHBr;
-float4 unity_SHBg;
-float4 unity_SHBb;
-float4 unity_SHC;
+// Use the camera-request SH uploaded by BurtIndirectLightingUtility.
+// Unity may overwrite its reserved unity_SH constants during per-draw setup.
+float4 _BurtAmbientSHAr;
+float4 _BurtAmbientSHAg;
+float4 _BurtAmbientSHAb;
+float4 _BurtAmbientSHBr;
+float4 _BurtAmbientSHBg;
+float4 _BurtAmbientSHBb;
+float4 _BurtAmbientSHC;
 
 
 struct BurtGISceneVoxelOccupancySample
@@ -117,6 +119,15 @@ float3 BurtGISceneVoxelWorldToUVW(float3 worldPosition)
     float4 centerExtent = _BurtGISceneVoxelCenterExtent;
     float extent = max(centerExtent.w, 0.001);
     return (worldPosition - centerExtent.xyz) / (extent * 2.0) + 0.5;
+}
+float BurtGISceneVoxelBoundGeometryResolution()
+{
+    // Geometry and center/extent belong to the same currently bound clipmap.
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(width, height, depth);
+    return max((float)width, 1.0);
 }
 float3 BurtGISceneVoxelLightingSafeNormalize(float3 value, float3 fallback)
 {
@@ -163,18 +174,18 @@ float3 BurtGISceneVoxelEvaluateAmbientSH(float3 normalWS)
 {
     float4 normal = float4(BurtGISceneVoxelLightingSafeNormalize(normalWS, float3(0.0, 1.0, 0.0)), 1.0);
     float3 sh = float3(
-        dot(unity_SHAr, normal),
-        dot(unity_SHAg, normal),
-        dot(unity_SHAb, normal));
+        dot(_BurtAmbientSHAr, normal),
+        dot(_BurtAmbientSHAg, normal),
+        dot(_BurtAmbientSHAb, normal));
 
     float4 vB = normal.xyzz * normal.yzzx;
     sh += float3(
-        dot(unity_SHBr, vB),
-        dot(unity_SHBg, vB),
-        dot(unity_SHBb, vB));
+        dot(_BurtAmbientSHBr, vB),
+        dot(_BurtAmbientSHBg, vB),
+        dot(_BurtAmbientSHBb, vB));
 
     float vC = normal.x * normal.x - normal.y * normal.y;
-    sh += unity_SHC.rgb * vC;
+    sh += _BurtAmbientSHC.rgb * vC;
     return max(sh, 0.0);
 }
 float3 BurtGISceneVoxelRecoverBoostedDiffuseColor(float3 storedRadiance)
@@ -385,10 +396,12 @@ bool BurtGISceneVoxelOctreeContainsVoxel(uint3 voxelCoord)
 {
     uint3 parentCoord = voxelCoord >> 4u;
     uint3 leafCoord = voxelCoord >> 2u;
-    uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+    uint3 rootCoord = parentCoord >> 2u;
+    uint3 rootChild = parentCoord & 3u;
+    uint rootBit = rootChild.x + rootChild.y * 4u + rootChild.z * 16u;
     if (!BurtGISceneVoxelOctreeMaskContains(
-            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
-            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootLowTexture[rootCoord],
+            _BurtGISceneVoxelOctreeRootHighTexture[rootCoord],
             rootBit))
     {
         return false;
@@ -472,10 +485,12 @@ bool BurtGIRayTraceSceneVoxelOctree(float3 originWS, float3 directionWS, float m
         uint3 voxelCoord = min((uint3)(localPosition / voxelSizeWS), volumeSize - 1u);
         uint3 parentCoord = voxelCoord >> 4u;
         uint3 leafCoord = voxelCoord >> 2u;
-        uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+        uint3 rootCoord = parentCoord >> 2u;
+        uint3 rootChild = parentCoord & 3u;
+        uint rootBit = rootChild.x + rootChild.y * 4u + rootChild.z * 16u;
         bool occupied = BurtGISceneVoxelOctreeMaskContains(
-            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
-            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootLowTexture[rootCoord],
+            _BurtGISceneVoxelOctreeRootHighTexture[rootCoord],
             rootBit);
         uint levelScale = 16u;
         if (occupied)
@@ -658,7 +673,7 @@ BurtGISceneVoxelOccupancySample BurtGITrySampleSceneVoxelOccupancyMip(float3 sam
 float BurtGITraceSceneVoxelDirectionalVisibility(float3 worldPosition, float3 direction, float maxDistance)
 {
     float4 octreeCenterExtent = _BurtGISceneVoxelCenterExtent;
-    float octreeVoxelSizeWS = max(octreeCenterExtent.w / 32.0, 0.001);
+    float octreeVoxelSizeWS = max(octreeCenterExtent.w * 2.0 / BurtGISceneVoxelBoundGeometryResolution(), 0.001);
     float3 octreeDirection = BurtGISceneVoxelLightingSafeNormalize(direction, float3(0.0, 0.0, 1.0));
     float octreeHitDistance = 0.0;
     if (BurtGIRayTraceSceneVoxelOctree(
@@ -754,7 +769,7 @@ float3 BurtGISceneVoxelEvaluateAdditionalLights(float3 worldPosition, float3 nor
         float lightVisibility = 1.0;
         if (_BurtGISceneVoxelRadianceCacheParams.w > 0.5 && lightType >= 0.5)
         {
-            float normalBias = min(max(_BurtGISceneVoxelCenterExtent.w / 64.0, 0.01), 1.0);
+            float normalBias = min(max(_BurtGISceneVoxelCenterExtent.w / BurtGISceneVoxelBoundGeometryResolution(), 0.01), 1.0);
             lightVisibility = BurtGITraceSceneVoxelDirectionalVisibility(
                 worldPosition + normalWS * normalBias,
                 lightDirection,
@@ -857,7 +872,7 @@ float3 BurtGISceneVoxelEvaluateXGILightGrid(float3 worldPosition, float3 normalW
         float lightVisibility = 1.0;
         if (_BurtGISceneVoxelRadianceCacheParams.w > 0.5 && colorAndType.w >= 0.5)
         {
-            float normalBias = min(max(_BurtGISceneVoxelCenterExtent.w / 64.0, 0.01), 1.0);
+            float normalBias = min(max(_BurtGISceneVoxelCenterExtent.w / BurtGISceneVoxelBoundGeometryResolution(), 0.01), 1.0);
             lightVisibility = BurtGITraceSceneVoxelDirectionalVisibility(
                 worldPosition + normalWS * normalBias,
                 lightDirection,
@@ -894,16 +909,8 @@ void BurtGISceneVoxelBuildLighting(uint3 dispatchThreadId)
     float normalLengthSq = dot(normalWS, normalWS);
     normalWS = normalLengthSq > 0.0001 ? normalWS * rsqrt(normalLengthSq) : float3(0.0, 1.0, 0.0);
 
-    uint mipWidth = 1u;
-    uint mipHeight = 1u;
-    uint mipDepth = 1u;
-    _BurtGISceneVoxelOccupancyMipReadTexture.GetDimensions(mipWidth, mipHeight, mipDepth);
-    uint3 mipSize = max(uint3(mipWidth, mipHeight, mipDepth), uint3(1u, 1u, 1u));
     uint3 fullSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
-    uint3 mipCoord = min((dispatchThreadId * mipSize) / fullSize, mipSize - 1u);
-    float coarseOccupancy = saturate(_BurtGISceneVoxelOccupancyMipReadTexture.Load(int4((int)mipCoord.x, (int)mipCoord.y, (int)mipCoord.z, 0)).x);
 
-    float hemi = saturate(normalWS.y * 0.5 + 0.5);
     float4 centerExtent = _BurtGISceneVoxelCenterExtent;
     float traceDistance = max(centerExtent.w * 1.25, 1.0);
     float3 worldPosition = centerExtent.xyz + (((float3(dispatchThreadId) + 0.5) / (float3)fullSize) - 0.5) * (centerExtent.w * 2.0);
@@ -911,10 +918,10 @@ void BurtGISceneVoxelBuildLighting(uint3 dispatchThreadId)
     float skyVisibilityTrace = BurtGITraceSceneVoxelDirectionalVisibility(worldPosition, normalWS, traceDistance);
     float skyVisibility = lerp(1.0, skyVisibilityTrace, saturate(_BurtGISceneVoxelIndirectLightTint.w));
     float skyLightEnabled = _BurtGISceneVoxelDirectLightTint.w > 0.5 ? 1.0 : 0.0;
-    float3 analyticSkyTint = lerp(float3(0.015, 0.018, 0.022), float3(0.08, 0.095, 0.12), hemi);
     float3 ambientSkyTint = BurtGISceneVoxelEvaluateAmbientSH(normalWS);
-    float3 skyTint = max(ambientSkyTint, analyticSkyTint) * skyVisibility * skyLightEnabled;
-    float normalBoost = lerp(0.75, 1.2, saturate(dot(normalWS, normalize(float3(0.35, 0.75, 0.45))) * 0.5 + 0.5));
+    // Match XRender's real sky SH evaluation. An enabled sky flag must not
+    // invent radiance or add unrelated colors when the supplied SH is dark.
+    float3 skyTint = ambientSkyTint * skyVisibility * skyLightEnabled;
     float3 mainLightDirection = _BurtGIMainLightDirection.xyz;
     float mainLightDirectionLengthSq = dot(mainLightDirection, mainLightDirection);
     mainLightDirection = mainLightDirectionLengthSq > 0.0001 ? mainLightDirection * rsqrt(mainLightDirectionLengthSq) : float3(0.0, 1.0, 0.0);
@@ -927,7 +934,8 @@ void BurtGISceneVoxelBuildLighting(uint3 dispatchThreadId)
         ? BurtGISceneVoxelEvaluateXGILightGrid(worldPosition, normalWS)
         : 0.0;
     float oneOverPreExposure = max(_BurtGISceneVoxelExposureParams.x, 0.0);
-    float3 directLighting = (normalBoost.xxx + mainLightRadiance + additionalLightRadiance) *
+    // Only real light sources contribute energy; a normal-only term lights an unlit scene.
+    float3 directLighting = (mainLightRadiance + additionalLightRadiance) *
         (max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.z, 0.0) * oneOverPreExposure);
     const float xgiSecondaryBounceSkyScale = 0.2;
     float3 storedDiffuseRadiance = max(radiance.rgb - prelitRadiance, 0.0);
@@ -949,8 +957,8 @@ void BurtGISceneVoxelBuildLighting(uint3 dispatchThreadId)
     float3 adjustedLighting = lerp(grey.xxx, lighting, saturate(_BurtGISceneVoxelLightingParams.y));
     lighting = lighting.g > (lighting.b + lighting.r) * 0.6 ? adjustedLighting : lighting;
 
-    float luminance = dot(lighting, float3(0.2126, 0.7152, 0.0722));
-    lighting = lerp(lighting, luminance.xxx, saturate(coarseOccupancy * 0.18));
+    // Occupancy controls visibility, not light chromaticity. Only the explicit
+    // Avoid Bleeding control above may desaturate the evaluated lighting.
     lighting = max(lighting, 0.0);
     _BurtGISceneVoxelLightingTexture[dispatchThreadId] = float4(lighting, saturate(radiance.a * occupancy));
 }

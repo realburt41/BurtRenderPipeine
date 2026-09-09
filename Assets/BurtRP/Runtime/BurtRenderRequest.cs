@@ -61,6 +61,9 @@ namespace Burt.RenderPipeline
         // 保存当前请求对应的 Unity 原生相机。
         public Camera Camera { get; private set; }
 
+        // Camera render sequence, independent of the Player loop (SceneView also renders in Edit mode).
+        public int RenderFrameIndex { get; internal set; }
+
         // 保存当前请求对应的 BurtRP 相机扩展数据。
         public BurtCameraData CameraData { get; private set; }
 
@@ -223,6 +226,7 @@ namespace Burt.RenderPipeline
 
             request.Type = BurtRenderRequestType.Unknown;
             request.Camera = null;
+            request.RenderFrameIndex = 0;
             request.CameraData = null;
             request.CameraRole = BurtCameraRole.Base;
             request.StackId = 0;

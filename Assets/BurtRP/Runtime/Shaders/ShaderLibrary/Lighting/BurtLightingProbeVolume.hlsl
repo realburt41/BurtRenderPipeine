@@ -567,7 +567,10 @@ bool BurtTrySampleGISceneVoxelProbeIrradianceFromLevel(
     }
 
     Irradiance = max(Irradiance / WeightSum, 0.0f) * max(_BurtGISceneVoxelProbeParams.y, 0.0f);
-    return any(Irradiance > 0.00001f);
+    // Validity comes from the page data and interpolation support above, not
+    // brightness. A valid dark/black level must not fall through to a brighter
+    // coarse level or disappear as its energy crosses an arbitrary threshold.
+    return true;
 }
 
 bool BurtTrySampleGISceneVoxelProbeIrradiance(float3 PositionWS, float3 NormalWS, float3 ViewDirectionWS, out float3 Irradiance)

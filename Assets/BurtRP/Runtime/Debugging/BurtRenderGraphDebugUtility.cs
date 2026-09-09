@@ -1719,6 +1719,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
                         var burtGIScreenProbeTraceDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceDescriptor(camera, burtGIScreenProbeSettings);
                         AppendDescriptorLine(builder, "BurtGIScreenProbeTraceRadiance", burtGIScreenProbeTraceDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceRadianceName);
                         AppendDescriptorLine(builder, "BurtGIScreenProbeTraceHit", BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceHitDescriptor(camera, burtGIScreenProbeSettings), resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceHitName);
+                        var traceGeometryStateDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceHitDescriptor(camera, burtGIScreenProbeSettings);
+                        traceGeometryStateDescriptor.colorFormat = RenderTextureFormat.ARGBFloat;
+                        AppendDescriptorLine(builder, "BurtGIScreenProbeTraceGeometryDistance", traceGeometryStateDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceGeometryDistanceName);
+                        AppendDescriptorLine(builder, "BurtGIScreenProbeGatherGeometryDistance", BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceHitDescriptor(camera, burtGIScreenProbeSettings), resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeGatherGeometryDistanceName);
                         AppendDescriptorLine(builder, "BurtGIScreenProbeTemporalRadiance", burtGIScreenProbeDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTemporalRadianceName);
                         AppendDescriptorLine(builder, "BurtGIScreenProbeTemporalIrradiance", burtGIScreenProbeDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTemporalIrradianceName);
                         AppendDescriptorLine(builder, "BurtGIScreenProbeTemporalConfidence", burtGIScreenProbeDescriptor, resourceRegistry, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTemporalConfidenceName);
@@ -2202,6 +2206,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAASource=").Append(temporalAASource);
             builder.Append(" TAAVolume=").Append(temporalAAVolumeState);
             builder.Append(" TAAHistoryValid=").Append(temporalAAEnabled && temporalAA.HistoryValid);
+            builder.Append(" TAAHistoryWritten=").Append(temporalAA != null && temporalAA.HistoryWritten);
             builder.Append(" TAAHistoryAllocated=").Append(temporalHistory.HasHistory);
             builder.Append(" TAAHistoryMatches=").Append(temporalHistory.DescriptorMatches);
             builder.Append(" TAADepthHistoryAllocated=").Append(temporalHistory.HasDepthHistory);
@@ -2209,6 +2214,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的运行时命名空间，让工
             builder.Append(" TAAHistoryAge=").Append(temporalHistory.HistoryAge);
             builder.Append(" TAAFrame=").Append(temporalAA != null ? temporalAA.FrameIndex.ToString() : temporalHistory.FrameIndex.ToString());
             builder.Append(" TAAHistoryReason=").Append(temporalHistory.LastInvalidationReason);
+            builder.Append(" TAAViewProjectionHistoryDelta=").Append(temporalAA != null ? FormatFloat(temporalAA.ViewProjectionHistoryDelta) : "<none>");
+            builder.Append(" TAAClipToPreviousIdentityDelta=").Append(temporalAA != null ? FormatFloat(temporalAA.ClipToPreviousIdentityDelta) : "<none>");
             builder.Append(" TAAJitter=").Append(temporalAA != null ? temporalAA.JitterPixels.ToString("F3") : "<none>");
             builder.Append(" TAAJitterScale=").Append((temporalAA != null ? temporalAA.Settings.JitterScale : temporalAASettings.JitterScale).ToString("0.###"));
             builder.Append(" TAAConfiguredJitterScale=").Append(temporalAASettings.JitterScale.ToString("0.###"));

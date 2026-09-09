@@ -1,12 +1,22 @@
 #pragma kernel FixupBordersAndGenerateMipsCS
 #pragma kernel FixupBorderAndGenerateMipsCS
+#pragma kernel FixupBordersMip0CS BURT_GI_FIXUP_MAX_MIP=0
+#pragma kernel FixupBordersMip1CS BURT_GI_FIXUP_MAX_MIP=1
+
+#ifndef BURT_GI_FIXUP_MAX_MIP
+    #define BURT_GI_FIXUP_MAX_MIP 2
+#endif
 
 #define BURT_GI_TRACE_TILE_THREADGROUP_SIZE 8
 
 Texture2D<float4> _BurtGIRadianceCacheClipMapRadianceProbeAtlasReadTexture;
 RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture;
+#if BURT_GI_FIXUP_MAX_MIP >= 1
 RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip1Texture;
+#endif
+#if BURT_GI_FIXUP_MAX_MIP >= 2
 RWTexture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip2Texture;
+#endif
 
 StructuredBuffer<uint> _BurtGIRadianceCacheClipMapProbeTraceAllocatorBuffer;
 StructuredBuffer<float4> _BurtGIRadianceCacheClipMapProbeTraceDataBuffer;
@@ -17,8 +27,10 @@ uint _BurtGIRadianceCacheClipMapRadianceProbeResolution;
 uint _BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip;
 uint _BurtGIRadianceCacheClipMapFinalProbeResolution;
 
+#if BURT_GI_FIXUP_MAX_MIP >= 1
 groupshared float3 BurtGIFinalRadianceMip0LDS[BURT_GI_TRACE_TILE_THREADGROUP_SIZE][BURT_GI_TRACE_TILE_THREADGROUP_SIZE];
 groupshared float3 BurtGIFinalRadianceMip1LDS[BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2][BURT_GI_TRACE_TILE_THREADGROUP_SIZE / 2];
+#endif
 
 uint BurtGIProbeAtlasResolutionInProbes()
 {
@@ -113,6 +125,7 @@ void BurtGIFixupBordersAndGenerateMips(
         _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture[finalAtlasCoord] = float4(lighting, 1.0);
     }
 
+#if BURT_GI_FIXUP_MAX_MIP >= 1
     BurtGIFinalRadianceMip0LDS[groupThreadId.y][groupThreadId.x] = lighting;
     GroupMemoryBarrierWithGroupSync();
     uint atlasResolutionInProbes = BurtGIProbeAtlasResolutionInProbes();
@@ -134,6 +147,7 @@ void BurtGIFixupBordersAndGenerateMips(
         }
     }
 
+#if BURT_GI_FIXUP_MAX_MIP >= 2
     GroupMemoryBarrierWithGroupSync();
     if (_BurtGIRadianceCacheClipMapFinalRadianceAtlasMaxMip > 1u)
     {
@@ -149,6 +163,21 @@ void BurtGIFixupBordersAndGenerateMips(
             _BurtGIRadianceCacheClipMapFinalRadianceAtlasMip2Texture[mip2ProbeTexelCoord + mip2Resolution * probeCoord] = float4(mip2Lighting * 0.25, 1.0);
         }
     }
+#endif
+#endif
+}
+
+// Static resource layouts avoid aliasing inactive mip UAVs onto mip0 on D3D11.
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void FixupBordersMip0CS(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID, uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIFixupBordersAndGenerateMips(groupId, groupThreadId, dispatchThreadId);
+}
+
+[numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]
+void FixupBordersMip1CS(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID, uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    BurtGIFixupBordersAndGenerateMips(groupId, groupThreadId, dispatchThreadId);
 }
 
 [numthreads(BURT_GI_TRACE_TILE_THREADGROUP_SIZE, BURT_GI_TRACE_TILE_THREADGROUP_SIZE, 1)]

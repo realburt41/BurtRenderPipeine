@@ -1,4 +1,7 @@
 #pragma kernel ScreenProbeShortRangeAOCS
+
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #pragma kernel ScreenProbeBentNormalCS
 
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64

@@ -28,6 +28,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
 
         public bool HasSharedCommandBuffer => CommandBuffer != null;
 
+        // Per-request handoff between fresh tracing, cache update and fallback.
+        internal bool BurtGIScreenProbeFreshTraceReady { get; set; }
+
         public BurtRenderRequest Request { get; private set; } // 保存当前正在执行的渲染请求，Pass 通过它读取 Camera、CullingResults 等任务数据。
 
         public BurtRenderPipelineAsset Asset { get; private set; } // 保存当前管线资产，Pass 通过它读取默认清屏色等全局配置。
@@ -772,6 +775,32 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
                 }
 
                 return ResourceRegistry.GetBurtGIScreenProbeTraceHit();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeTraceGeometryDistanceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceGeometryDistanceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeTraceGeometryDistance();
+            }
+        }
+
+        public BurtRenderTargetHandle BurtGIScreenProbeGatherGeometryDistanceTarget
+        {
+            get
+            {
+                if (ResourceRegistry == null)
+                {
+                    return BurtRenderTargetHandle.Invalid(BurtRenderGraphResourceRegistry.BurtGIScreenProbeGatherGeometryDistanceName);
+                }
+
+                return ResourceRegistry.GetBurtGIScreenProbeGatherGeometryDistance();
             }
         }
 
@@ -1594,6 +1623,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个上下
             ScriptableContext = scriptableContext; // 把 Unity SRP 渲染上下文保存到 ScriptableContext 属性里。
 
             Request = request; // 把当前渲染请求保存到 Request 属性里。
+            BurtGIScreenProbeFreshTraceReady = false;
 
             Asset = asset; // 把管线资产保存到 Asset 属性里。
 

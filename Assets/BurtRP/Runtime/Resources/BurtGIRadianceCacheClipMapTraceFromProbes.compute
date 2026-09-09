@@ -153,6 +153,7 @@ uint _BurtGIXGILightGridValid;
 
 uint _BurtGIRadianceCacheClipMapMaxProbeCount;
 uint _BurtGIRadianceCacheClipMapFrameIndex;
+uint _BurtGIRadianceCacheHashGridFrameIndex;
 uint _BurtGIRadianceCacheClipMapUseIrradianceField;
 uint _BurtGIAdditionalLightCount;
 uint _BurtGIRadianceCacheClipMapNumProbesToTraceBudget;
@@ -399,9 +400,9 @@ float3 BurtGISampleRawScreenGI(uint probeIndex, float3 direction, float3 probeWo
     float maxTraceDistance = max(_BurtGIScreenProbeTraceParams.w, 1.0);
     hitDistance = validSurface > 0.0 ? distance(probeWorldCenter, screenProbeWorldPosition.xyz) : maxTraceDistance;
 
-    float upFactor = saturate(direction.y * 0.5 + 0.5);
-    float3 analyticSkyFallback = lerp(float3(0.015, 0.018, 0.022), float3(0.08, 0.09, 0.11), upFactor);
-    float3 skyFallback = lerp(analyticSkyFallback, skyRadiance, skyTraceEnabled);
+    // Missing surface data is not a light source. Only the explicitly enabled
+    // scene sky may supply miss radiance, including valid black sky samples.
+    float3 skyFallback = skyRadiance * skyTraceEnabled;
     float directionalEnergy = lerp(0.72, 1.18, saturate(direction.z * 0.5 + 0.5));
     float3 fallbackRadiance = max(lerp(skyFallback, rawGI.rgb, validSurface), 0.0) * directionalEnergy;
 
@@ -491,24 +492,17 @@ bool BurtGIRadianceCacheHashGridFindTileRead(uint tileHash, out uint tileIndex)
 {
     uint bucketIndex = BurtGIRadianceCacheHashGridHash(uint3(tileHash, tileHash >> 7, tileHash >> 17)) % BurtGIRadianceCacheHashGridBucketCount();
     uint tilesPerBucket = BurtGIRadianceCacheHashGridTilesPerBucket();
+    uint tileCount = BurtGIRadianceCacheHashGridTileCount();
+    uint probeCount = min(tileCount, tilesPerBucket * 4u);
     tileIndex = 0xffffffffu;
 
-    [loop]
-    for (uint bucketOffset = 0u; bucketOffset < tilesPerBucket; ++bucketOffset)
-    {
-        uint candidateTileIndex = bucketIndex * tilesPerBucket + bucketOffset;
-        if (candidateTileIndex >= BurtGIRadianceCacheHashGridTileCount())
-        {
-            break;
-        }
-
-        if (_BurtGIRadianceCacheHashGridTileReadBuffer[candidateTileIndex].x == tileHash)
-        {
-            tileIndex = candidateTileIndex;
-            return true;
+    // Search through purge holes before claiming any empty slot.
+    [loop] for (uint i = 0u; i < probeCount; ++i) {
+        uint index = (bucketIndex * tilesPerBucket + i) % tileCount;
+        if (_BurtGIRadianceCacheHashGridTileReadBuffer[index].x == tileHash) {
+            tileIndex = index; return true;
         }
     }
-
     return false;
 }
 float4 BurtGIRadianceCacheHashGridUnpackPackedRadiance(uint2 packedRadiance)
@@ -537,7 +531,7 @@ uint BurtGIRadianceCacheHashGridFrameDelta(uint frameIndex, uint lastUpdateFrame
 }
 float BurtGIRadianceCacheHashGridAgeConfidenceScale(uint4 packedValue)
 {
-    uint frameDelta = BurtGIRadianceCacheHashGridFrameDelta(_BurtGIRadianceCacheClipMapFrameIndex, packedValue.z);
+    uint frameDelta = BurtGIRadianceCacheHashGridFrameDelta(_BurtGIRadianceCacheHashGridFrameIndex, packedValue.z);
     return 1.0 - saturate((float)frameDelta / (float)BURT_GI_HASH_GRID_TILE_DECAY_MAX);
 }
 float3 BurtGISceneVoxelWorldToUVW(float3 worldPosition)
@@ -843,7 +837,7 @@ BurtGISceneVoxelRadianceSample BurtGITrySampleSceneVoxelRadianceResource(
     uint width = 1u;
     uint height = 1u;
     uint depth = 1u;
-    radianceTexture.GetDimensions(width, height, depth);
+    lightingTexture.GetDimensions(width, height, depth);
     uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
     float3 uvw = (samplePosition - centerExtent.xyz) / max(centerExtent.w * 2.0, 0.001) + 0.5;
     if (any(uvw < 0.0) || any(uvw > 1.0))
@@ -852,15 +846,12 @@ BurtGISceneVoxelRadianceSample BurtGITrySampleSceneVoxelRadianceResource(
     }
 
     uint3 voxelCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
-    float4 voxelRadiance = radianceTexture.Load(int4((int3)voxelCoord, 0));
-    float4 voxelLighting = lightingTexture.Load(int4((int3)voxelCoord, 0));
-    if (voxelLighting.a > 0.001 && dot(voxelLighting.rgb, voxelLighting.rgb) > 0.0)
-    {
-        voxelRadiance = voxelLighting;
-    }
+    // Material radiance stores surface data, not outgoing lighting. A valid
+    // black lighting sample is an opaque hit, not a reason to emit its albedo.
+    float4 voxelRadiance = lightingTexture.Load(int4((int3)voxelCoord, 0));
 
     float confidence = saturate(voxelRadiance.a);
-    if (confidence <= 0.001 || dot(voxelRadiance.rgb, voxelRadiance.rgb) <= 0.0)
+    if (confidence <= 0.001)
     {
         return BurtGIMakeSceneVoxelRadianceSample(0u, 0.0, 0.0);
     }
@@ -927,7 +918,7 @@ BurtGISceneVoxelRadianceSample BurtGITrySampleSceneVoxelRadiance(
     uint width = 1u;
     uint height = 1u;
     uint depth = 1u;
-    _BurtGISceneVoxelRadianceReadTexture.GetDimensions(width, height, depth);
+    _BurtGISceneVoxelLightingReadTexture.GetDimensions(width, height, depth);
     uint3 volumeSize = max(uint3(width, height, depth), uint3(1u, 1u, 1u));
     float3 uvw = BurtGISceneVoxelWorldToUVW(samplePosition);
     if (any(uvw < 0.0) || any(uvw > 1.0))
@@ -936,15 +927,12 @@ BurtGISceneVoxelRadianceSample BurtGITrySampleSceneVoxelRadiance(
     }
 
     uint3 voxelCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
-    float4 voxelRadiance = _BurtGISceneVoxelRadianceReadTexture.Load(int4((int)voxelCoord.x, (int)voxelCoord.y, (int)voxelCoord.z, 0));
-    float4 voxelLighting = _BurtGISceneVoxelLightingReadTexture.Load(int4((int)voxelCoord.x, (int)voxelCoord.y, (int)voxelCoord.z, 0));
-    if (voxelLighting.a > 0.001 && dot(voxelLighting.rgb, voxelLighting.rgb) > 0.0)
-    {
-        voxelRadiance = voxelLighting;
-    }
+    // Match the higher clipmaps: validity comes from occupancy/confidence,
+    // while RGB comes exclusively from the outgoing-lighting field.
+    float4 voxelRadiance = _BurtGISceneVoxelLightingReadTexture.Load(int4((int)voxelCoord.x, (int)voxelCoord.y, (int)voxelCoord.z, 0));
 
     float confidence = saturate(voxelRadiance.a);
-    if (confidence <= 0.001 || dot(voxelRadiance.rgb, voxelRadiance.rgb) <= 0.0)
+    if (confidence <= 0.001)
     {
         return BurtGIMakeSceneVoxelRadianceSample(0u, 0.0, 0.0);
     }
@@ -980,7 +968,11 @@ bool BurtGITrySampleSceneVoxelConeTrace(
     float accumulatedWeight = 0.0;
     float nearestHitDistance = maxTraceDistance;
     float4 centerExtent = _BurtGISceneVoxelCenterExtent;
-    float voxelSizeWS = max(centerExtent.w / 32.0, 0.001);
+    uint geometryWidth = 1u;
+    uint geometryHeight = 1u;
+    uint geometryDepth = 1u;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(geometryWidth, geometryHeight, geometryDepth);
+    float voxelSizeWS = max(centerExtent.w * 2.0 / max((float)geometryWidth, 1.0), 0.001);
     float tanConeHalfAngle = min(tan(coneHalfAngle), 8.0);
     float traceRange = max(maxTraceDistance - minTraceDistance, 0.001);
     float traceDistance = minTraceDistance;
@@ -1172,8 +1164,12 @@ void TraceFromProbesCS(
         float2 probeUV = (float2(probeTexelCoord) + 0.5) / (float)traceResolution;
         float3 direction = BurtGIEquiAreaSphericalMapping(probeUV);
 
-        float hitDistance = 0.0;
-        float3 radiance = BurtGISampleRawScreenGI(probeIndex, direction, probeWorldCenter, hitDistance);
+        // A world-space cache probe has no corresponding screen-probe index.
+        // Seeding it from probeIndex modulo the screen grid recirculates unrelated
+        // screen GI (including history after a light turns off). Like XRender's
+        // voxel probe trace, start empty and accumulate only traced scene/sky input.
+        float hitDistance = max(_BurtGIScreenProbeTraceParams.w, 1.0);
+        float3 radiance = 0.0;
         uint clipmapIndex = min(BurtGIGetClipmapIndexFromTraceDataRead(probeTraceIndex), BurtGIClipmapCount() - 1u);
         float clipmapProbeSpacing = max(_BurtGIRadianceCacheClipMapProbeCoordToWorldCenter[clipmapIndex].w, 0.001);
         float hashGridCellSize = max(0.001, _BurtGIRadianceCacheHashGridParams0.x);
@@ -1182,9 +1178,6 @@ void TraceFromProbesCS(
         float probeTMin = max(_BurtGIRadianceCacheClipMapClipmapParams[clipmapIndex].y, 0.001);
         float minTraceDistance = max(0.0001, probeTMin);
         float maxTraceDistance = max(_BurtGIScreenProbeTraceParams.w, minTraceDistance + clipmapProbeSpacing);
-        float3 sceneCacheRadiance = 0.0;
-        float sceneCacheHitDistance = maxTraceDistance;
-        float sceneCacheConfidence = 0.0;
         float3 sceneVoxelRadiance = 0.0;
         float sceneVoxelHitDistance = maxTraceDistance;
         float sceneVoxelConfidence = 0.0;
@@ -1205,25 +1198,13 @@ void TraceFromProbesCS(
             hitDistance = lerp(hitDistance, min(hitDistance, sceneVoxelHitDistance), sceneVoxelBlend);
         }
 
-        if (BurtGITrySampleRadianceCacheHashGridSceneCache(
-                probeWorldCenter,
-                direction,
-                coneHalfAngle,
-                minSampleRadius,
-                minTraceDistance,
-                maxTraceDistance,
-                1.0,
-                sceneCacheRadiance,
-                sceneCacheHitDistance,
-                sceneCacheConfidence))
-        {
-            float sceneCacheBlend = saturate(sceneCacheConfidence * 0.75 * (1.0 - saturate(sceneVoxelConfidence)));
-            radiance = lerp(radiance, sceneCacheRadiance, sceneCacheBlend);
-            hitDistance = lerp(hitDistance, min(hitDistance, sceneCacheHitDistance), sceneCacheBlend);
-        }
-
+        // Screen-probe HashGrid stores incoming traced radiance, not outgoing
+        // world-space surface lighting. Reading it here feeds this ClipMap's own
+        // previous result back into itself, even with multi-bounce disabled.
+        // Match XRender's voxel trace: use scene lighting and sky only. Explicit
+        // multi-bounce remains in the separately gated voxel-lighting pass.
         float skyTraceEnabled = _BurtGIRadianceCacheClipMapSkyRadiance.w > 0.5 ? 1.0 : 0.0;
-        float sceneTraceConfidence = saturate(max(sceneVoxelConfidence, sceneCacheConfidence));
+        float sceneTraceConfidence = saturate(sceneVoxelConfidence);
         float skyMissWeight = skyTraceEnabled * saturate(1.0 - sceneTraceConfidence);
         float3 skyRadiance = BurtGIRadianceCacheResolveSkyRadiance(direction, 0.18);
         radiance = lerp(radiance, max(radiance, skyRadiance), skyMissWeight * 0.5);

@@ -417,6 +417,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
         {
             builder.WriteCameraDepth();
             builder.WriteGBuffer0();
+            if (builder.ResourceRegistry.GetRenderTarget(BurtGISurfaceNormalUtility.ResourceName).IsValid)
+                builder.WriteRenderTarget(BurtGISurfaceNormalUtility.ResourceName);
         }
 
         public override void Execute(BurtRenderGraphContext context)
@@ -436,7 +438,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred Pa
             }
 
             var cmd = context.AcquireCommandBuffer(Name);
-            cmd.SetRenderTarget(gbuffer0Target.Identifier, cameraDepthTarget.Identifier);
+            var surfaceNormalTarget = BurtGISurfaceNormalUtility.Get(context);
+            if (surfaceNormalTarget.IsValid)
+                cmd.SetRenderTarget(new[] { gbuffer0Target.Identifier, surfaceNormalTarget.Identifier }, cameraDepthTarget.Identifier);
+            else
+                cmd.SetRenderTarget(gbuffer0Target.Identifier, cameraDepthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, camera);
             BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
             context.ExecuteLegacyCommandBuffer(cmd);

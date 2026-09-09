@@ -173,6 +173,11 @@ namespace Burt.RenderPipeline
         [SerializeField, HideInInspector]
         private int lastAppliedHash;
 
+        // Unity exposes Light.areaSize only in the editor in 2022 LTS. Carry
+        // the authored dimensions into Player instead of substituting unit area.
+        [SerializeField, HideInInspector]
+        private Vector2 areaSize = Vector2.one;
+
         private Light cachedLight;
 
         public bool UsePhysicalLightUnits
@@ -184,6 +189,25 @@ namespace Burt.RenderPipeline
         public BurtPhysicalLightUnit Unit => unit;
 
         public bool ExactSpotReflector => exactSpotReflector;
+
+        public Vector2 AreaSize
+        {
+            get
+            {
+                var light = ResolveLight();
+                return light != null ? ResolveAreaSize(light) : areaSize;
+            }
+            set
+            {
+                areaSize = value;
+#if UNITY_EDITOR
+                var light = ResolveLight();
+                if (light != null)
+                    light.areaSize = value;
+#endif
+                ApplyToUnityLight();
+            }
+        }
 
         public float Intensity
         {
@@ -201,7 +225,7 @@ namespace Burt.RenderPipeline
                 unit,
                 intensity,
                 cachedLight.spotAngle,
-                cachedLight.areaSize,
+                ResolveAreaSize(cachedLight),
                 exactSpotReflector)
             : 0f;
 
@@ -222,7 +246,7 @@ namespace Burt.RenderPipeline
                     unit,
                     nativeIntensity,
                     light.spotAngle,
-                    light.areaSize,
+                    ResolveAreaSize(light),
                     exactSpotReflector);
             }
             ApplyToUnityLight();
@@ -255,7 +279,7 @@ namespace Burt.RenderPipeline
                         unit,
                         light.intensity,
                         light.spotAngle,
-                        light.areaSize,
+                        ResolveAreaSize(light),
                         exactSpotReflector);
                 }
             }
@@ -282,7 +306,7 @@ namespace Burt.RenderPipeline
                     unit,
                     nativeIntensity,
                     light.spotAngle,
-                    light.areaSize,
+                    ResolveAreaSize(light),
                     exactSpotReflector);
             }
             ApplyToUnityLight();
@@ -302,7 +326,7 @@ namespace Burt.RenderPipeline
                 unit,
                 light.intensity,
                 light.spotAngle,
-                light.areaSize,
+                ResolveAreaSize(light),
                 exactSpotReflector);
             lastAppliedHash = CalculateStateHash(light);
         }
@@ -334,7 +358,7 @@ namespace Burt.RenderPipeline
                 unit,
                 light.intensity,
                 light.spotAngle,
-                light.areaSize,
+                ResolveAreaSize(light),
                 true);
             exactSpotReflector = true;
             usePhysicalLightUnits = true;
@@ -343,13 +367,25 @@ namespace Burt.RenderPipeline
 
         private void OnEnable()
         {
-            ApplyToUnityLight();
+            // Reset may follow OnEnable when a component is added in the
+            // editor. Leave the original Light intact until Reset imports it.
+            // Serialized components have an applied state; runtime-created
+            // components still apply through setters or the first LateUpdate.
+            if (lastAppliedHash != 0)
+                ApplyToUnityLight();
         }
 
         private void OnValidate()
         {
             intensity = Mathf.Max(intensity, 0f);
-            ApplyToUnityLight();
+#if UNITY_EDITOR
+            CaptureAreaSizeForPlayer();
+#endif
+            // Adding a component can validate its default serialized values
+            // before Reset imports the existing Light intensity. Do not write
+            // those defaults over the input that Reset must preserve.
+            if (lastAppliedHash != 0)
+                ApplyToUnityLight();
         }
 
         private void LateUpdate()
@@ -376,9 +412,28 @@ namespace Burt.RenderPipeline
                 hash = hash * 31 + intensity.GetHashCode();
                 hash = hash * 31 + exactSpotReflector.GetHashCode();
                 hash = hash * 31 + light.spotAngle.GetHashCode();
-                hash = hash * 31 + light.areaSize.GetHashCode();
+                hash = hash * 31 + ResolveAreaSize(light).GetHashCode();
                 return hash;
             }
         }
+
+        private Vector2 ResolveAreaSize(Light light)
+        {
+#if UNITY_EDITOR
+            areaSize = light.areaSize;
+#endif
+            return areaSize;
+        }
+
+#if UNITY_EDITOR
+        // Called on the build's scene copy, including inactive components and
+        // older scenes/prefabs that have never serialized the new cache field.
+        public void CaptureAreaSizeForPlayer()
+        {
+            var light = ResolveLight();
+            if (light != null)
+                areaSize = light.areaSize;
+        }
+#endif
     }
 }

@@ -1,5 +1,8 @@
 #pragma kernel TranslucencyVolumeTraceVoxelOctreeCS
 
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
 #define BURT_GI_TRANSLUCENCY_VOLUME_THREADGROUP_SIZE 4
 #define BURT_GI_TRANSLUCENCY_VOLUME_TRACE_FILTER_THREADGROUP_SIZE 8
 #define BURT_GI_CLIPMAP_COUNT 6
@@ -238,10 +241,12 @@ bool BurtGITranslucencyVolumeSceneVoxelOctreeMayContain(float3 samplePosition)
     uint3 voxelCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
     uint3 parentCoord = voxelCoord >> 4u;
     uint3 leafCoord = voxelCoord >> 2u;
-    uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+    uint3 rootCoord = parentCoord >> 2u;
+    uint3 rootChild = parentCoord & 3u;
+    uint rootBit = rootChild.x + rootChild.y * 4u + rootChild.z * 16u;
     if (!BurtGITranslucencyVolumeOctreeMaskContains(
-            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
-            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootLowTexture[rootCoord],
+            _BurtGISceneVoxelOctreeRootHighTexture[rootCoord],
             rootBit))
     {
         return false;

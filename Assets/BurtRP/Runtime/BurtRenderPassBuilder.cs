@@ -1162,6 +1162,26 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Builder 和
             return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceHitName);
         }
 
+        public BurtRenderTargetHandle ReadBurtGIScreenProbeTraceGeometryDistance()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceGeometryDistanceName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGIScreenProbeTraceGeometryDistance()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceGeometryDistanceName);
+        }
+
+        public BurtRenderTargetHandle ReadBurtGIScreenProbeGatherGeometryDistance()
+        {
+            return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeGatherGeometryDistanceName);
+        }
+
+        public BurtRenderTargetHandle WriteBurtGIScreenProbeGatherGeometryDistance()
+        {
+            return WriteRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeGatherGeometryDistanceName);
+        }
+
         public BurtRenderTargetHandle ReadBurtGIScreenProbeTemporalRadiance()
         {
             return ReadRenderTarget(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTemporalRadianceName);

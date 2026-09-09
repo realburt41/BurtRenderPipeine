@@ -1,4 +1,7 @@
 #pragma kernel SceneRepresentVoxelOccupyDebug
+
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #pragma kernel VoxelDebugTraceCS
 #pragma kernel DebugGenArgs
 #pragma kernel DebugProbeCompactFromOccupancy

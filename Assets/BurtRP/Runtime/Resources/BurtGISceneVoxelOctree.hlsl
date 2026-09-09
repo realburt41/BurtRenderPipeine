@@ -11,10 +11,12 @@ bool BurtGIVoxelOctreeContainsVoxel(uint3 voxelCoord)
 {
     uint3 parentCoord = voxelCoord >> 4u;
     uint3 leafCoord = voxelCoord >> 2u;
-    uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+    uint3 rootCoord = parentCoord >> 2u;
+    uint3 rootChild = parentCoord & 3u;
+    uint rootBit = rootChild.x + rootChild.y * 4u + rootChild.z * 16u;
     if (!BurtGIVoxelOctreeMaskContains(
-            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
-            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootLowTexture[rootCoord],
+            _BurtGISceneVoxelOctreeRootHighTexture[rootCoord],
             rootBit))
     {
         return false;
@@ -38,8 +40,9 @@ bool BurtGIVoxelOctreeContainsVoxel(uint3 voxelCoord)
         leafBit);
 }
 
-bool BurtGIVoxelOctreeRayTrace(float3 originWS, float3 directionWS, float maxDistance, out float hitDistance)
+bool BurtGIVoxelOctreeRayTraceWithCompletion(float3 originWS, float3 directionWS, float maxDistance, out float hitDistance, out bool rangeComplete)
 {
+    rangeComplete = false;
     hitDistance = maxDistance;
     if (_BurtGISceneVoxelOctreeValid <= 0.5 || maxDistance <= 0.0)
     {
@@ -77,10 +80,12 @@ bool BurtGIVoxelOctreeRayTrace(float3 originWS, float3 directionWS, float maxDis
         uint3 voxelCoord = min((uint3)(localPosition / voxelSizeWS), volumeSize - 1u);
         uint3 parentCoord = voxelCoord >> 4u;
         uint3 leafCoord = voxelCoord >> 2u;
-        uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+        uint3 rootCoord = parentCoord >> 2u;
+        uint3 rootChild = parentCoord & 3u;
+        uint rootBit = rootChild.x + rootChild.y * 4u + rootChild.z * 16u;
         bool rootOccupied = BurtGIVoxelOctreeMaskContains(
-            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
-            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootLowTexture[rootCoord],
+            _BurtGISceneVoxelOctreeRootHighTexture[rootCoord],
             rootBit);
         uint levelScale = 16u;
         bool occupied = rootOccupied;
@@ -120,10 +125,20 @@ bool BurtGIVoxelOctreeRayTrace(float3 originWS, float3 directionWS, float maxDis
         traceDistance += min(min(distanceToBoundary.x, distanceToBoundary.y), distanceToBoundary.z);
     }
 
+    // Report the requested covered interval, not merely an empty result.
+    // A capped HDDA loop or an out-of-volume part remains unresolved.
+    rangeComplete = traceDistance >= traceEnd && entryDistance <= 0.0 &&
+        exitDistance >= maxDistance;
     return false;
 }
 
-bool BurtGIVoxelOctreeRayTraceResource(
+bool BurtGIVoxelOctreeRayTrace(float3 originWS, float3 directionWS, float maxDistance, out float hitDistance)
+{
+    bool rangeComplete;
+    return BurtGIVoxelOctreeRayTraceWithCompletion(originWS, directionWS, maxDistance, hitDistance, rangeComplete);
+}
+
+bool BurtGIVoxelOctreeRayTraceResourceWithCompletion(
     Texture3D<float4> geometryTexture,
     Texture3D<uint> leafLowTexture,
     Texture3D<uint> leafHighTexture,
@@ -136,8 +151,9 @@ bool BurtGIVoxelOctreeRayTraceResource(
     float3 originWS,
     float3 directionWS,
     float maxDistance,
-    out float hitDistance)
+    out float hitDistance, out bool rangeComplete)
 {
+    rangeComplete = false;
     hitDistance = maxDistance;
     if (valid <= 0.5 || maxDistance <= 0.0)
     {
@@ -174,10 +190,12 @@ bool BurtGIVoxelOctreeRayTraceResource(
         uint3 voxelCoord = min((uint3)(localPosition / voxelSizeWS), volumeSize - 1u);
         uint3 parentCoord = voxelCoord >> 4u;
         uint3 leafCoord = voxelCoord >> 2u;
-        uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+        uint3 rootCoord = parentCoord >> 2u;
+        uint3 rootChild = parentCoord & 3u;
+        uint rootBit = rootChild.x + rootChild.y * 4u + rootChild.z * 16u;
         bool occupied = BurtGIVoxelOctreeMaskContains(
-            rootLowTexture[uint3(0u, 0u, 0u)],
-            rootHighTexture[uint3(0u, 0u, 0u)],
+            rootLowTexture[rootCoord],
+            rootHighTexture[rootCoord],
             rootBit);
         uint levelScale = 16u;
         if (occupied)
@@ -210,7 +228,30 @@ bool BurtGIVoxelOctreeRayTraceResource(
         traceDistance += min(min(distanceToBoundary.x, distanceToBoundary.y), distanceToBoundary.z);
     }
 
+    // Report the requested covered interval, not merely an empty result.
+    // A capped HDDA loop or an out-of-volume part remains unresolved.
+    rangeComplete = traceDistance >= traceEnd && entryDistance <= 0.0 &&
+        exitDistance >= maxDistance;
     return false;
+}
+
+bool BurtGIVoxelOctreeRayTraceResource(
+    Texture3D<float4> geometryTexture,
+    Texture3D<uint> leafLowTexture,
+    Texture3D<uint> leafHighTexture,
+    Texture3D<uint> parentLowTexture,
+    Texture3D<uint> parentHighTexture,
+    Texture3D<uint> rootLowTexture,
+    Texture3D<uint> rootHighTexture,
+    float4 centerExtent,
+    float valid,
+    float3 originWS,
+    float3 directionWS,
+    float maxDistance,
+    out float hitDistance)
+{
+    bool rangeComplete;
+    return BurtGIVoxelOctreeRayTraceResourceWithCompletion(geometryTexture, leafLowTexture, leafHighTexture, parentLowTexture, parentHighTexture, rootLowTexture, rootHighTexture, centerExtent, valid, originWS, directionWS, maxDistance, hitDistance, rangeComplete);
 }
 
 bool BurtGIVoxelOctreeRayTraceClipmaps(

@@ -1,0 +1,133 @@
+#pragma kernel Clear
+#pragma kernel SetCells
+#pragma kernel Query
+#pragma kernel QueryCell
+#include "../../Runtime/Resources/BurtGISceneVoxelFineOccupancy.hlsl"
+
+RWTexture3D<uint> _FineLow;
+RWTexture3D<uint> _FineHigh;
+StructuredBuffer<uint4> _Cells;
+uint _CellCount;
+uint _Resolution;
+struct RayInput { float4 originMax; float4 directionPad; };
+struct RayOutput { float4 hitDistance; uint4 cell; };
+StructuredBuffer<RayInput> _Rays;
+RWStructuredBuffer<RayOutput> _Results;
+uint _RayCount;
+float4 _DirectVolumeMinSize;
+int3 _DirectCoarseCell;
+uint2 _DirectMask;
+
+[numthreads(64,1,1)]
+void QueryCell(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _RayCount) return;
+    RayInput ray = _Rays[id.x];
+    RayOutput result = (RayOutput)0;
+    result.hitDistance.y = ray.originMax.w;
+    float lengthSq = dot(ray.directionPad.xyz, ray.directionPad.xyz);
+    if (lengthSq <= 0.0) { _Results[id.x] = result; return; }
+    float hitT; uint3 fineCell; bool complete; uint steps;
+    bool hit = BurtGIFineOccupancyTraceCell(_DirectMask, (uint3)_DirectCoarseCell,
+        _DirectVolumeMinSize.xyz, _DirectVolumeMinSize.w, ray.originMax.xyz,
+        ray.directionPad.xyz * rsqrt(lengthSq), 0.0, ray.originMax.w,
+        hitT, fineCell, complete, steps);
+    result.hitDistance = float4(hit ? 1.0 : 0.0, hitT, complete ? 1.0 : 0.0, steps);
+    result.cell.xyz = fineCell;
+    _Results[id.x] = result;
+}
+
+[numthreads(4,4,4)]
+void Clear(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= _Resolution)) return;
+    _FineLow[id] = 0u;
+    _FineHigh[id] = 0u;
+}
+
+[numthreads(64,1,1)]
+void SetCells(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _CellCount) return;
+    uint3 fine = _Cells[id.x].xyz;
+    if (any(fine >= _Resolution * 4u)) return;
+    uint3 local = fine & 3u;
+    uint bit = local.x + local.y * 4u + local.z * 16u;
+    if (bit < 32u) InterlockedOr(_FineLow[fine >> 2u], 1u << bit);
+    else InterlockedOr(_FineHigh[fine >> 2u], 1u << (bit & 31u));
+}
+
+// Isolated adapter: linear coarse DDA, not a replacement production HDDA.
+// Tests the shared local refinement, mask packing and completion contract.
+[numthreads(64,1,1)]
+void Query(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _RayCount) return;
+    RayInput ray = _Rays[id.x];
+    RayOutput result = (RayOutput)0;
+    result.hitDistance.y = ray.originMax.w;
+    float maxT = ray.originMax.w;
+    float lengthSq = dot(ray.directionPad.xyz, ray.directionPad.xyz);
+    if (maxT <= 0.0 || lengthSq <= 0.0) { _Results[id.x] = result; return; }
+    float3 direction = ray.directionPad.xyz * rsqrt(lengthSq);
+    float3 origin = ray.originMax.xyz;
+    float entryT, exitT;
+    if (!BurtGIFineOccupancyRayBox(origin, direction, 0.0,
+                                  (float)_Resolution, entryT, exitT))
+    { _Results[id.x] = result; return; }
+    float t = max(0.0, entryT);
+    float stopT = min(maxT, exitT);
+    if (t >= stopT) { _Results[id.x] = result; return; }
+    int3 cell = clamp(BurtGIFineOccupancyDirectionalCell(
+        clamp(origin + direction * t, 0.0, (float)_Resolution), direction), 0, (int)_Resolution-1);
+    int3 stepCell = int3(sign(direction));
+    float3 nextT = 3.402823466e+38;
+    [unroll]
+    for (uint axis=0u; axis<3u; ++axis)
+    {
+        if (direction[axis] != 0.0)
+        {
+            nextT[axis] = ((float)(cell[axis] + (stepCell[axis] > 0 ? 1 : 0)) - origin[axis]) / direction[axis];
+        }
+    }
+    [loop]
+    for (uint iteration=0u; iteration<512u; ++iteration)
+    {
+        if (any(cell < 0) || any(cell >= (int)_Resolution)) break;
+        float crossingT = min(nextT.x, min(nextT.y, nextT.z));
+        float cellEnd = min(stopT, crossingT);
+        if (cellEnd > t)
+        {
+            uint2 mask = uint2(_FineLow[cell], _FineHigh[cell]);
+            float hitT; uint3 fineCell; bool complete; uint steps;
+            bool hit = BurtGIFineOccupancyTraceCell(mask, (uint3)cell, 0.0, 1.0,
+                origin, direction, t, cellEnd, hitT, fineCell, complete, steps);
+            result.hitDistance.w += steps;
+            if (hit)
+            {
+                result.hitDistance.xyz = float3(1.0, hitT, 0.0);
+                result.cell.xyz = fineCell;
+                _Results[id.x] = result;
+                return;
+            }
+            if (!complete) { _Results[id.x] = result; return; }
+        }
+        if (crossingT >= stopT)
+        {
+            result.hitDistance.z = entryT <= 0.0 && exitT >= maxT ? 1.0 : 0.0;
+            _Results[id.x] = result;
+            return;
+        }
+        [unroll]
+        for (uint axis=0u; axis<3u; ++axis)
+        {
+            if (nextT[axis] <= crossingT)
+            {
+                cell[axis] += stepCell[axis];
+                nextT[axis] = ((float)(cell[axis] + (stepCell[axis] > 0 ? 1 : 0)) - origin[axis]) / direction[axis];
+            }
+        }
+        t = max(t, crossingT);
+    }
+    _Results[id.x] = result;
+}

@@ -78,7 +78,8 @@ Shader "Hidden/BurtRP/BurtGI"
             Texture2D<uint> _BurtGIScreenProbeAdaptiveProbeIndicesTexture;
             Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
             StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
-            StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+            #include "../Resources/BurtGIScreenProbeAdaptiveData.hlsl"
+            StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
             Texture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
             Texture2D<float4> _BurtGIRadianceCacheClipMapFinalRadianceAtlasTexture;
             Texture2D<float4> _BurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture;
@@ -1716,7 +1717,7 @@ Shader "Hidden/BurtRP/BurtGI"
 
                         uint2 adaptiveFineProbeCoord;
                         uint adaptiveLevel;
-                        BurtGIUnpackAdaptiveProbeData(_BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex], adaptiveFineProbeCoord, adaptiveLevel);
+                        BurtGIUnpackAdaptiveProbeData(_BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex].packedCoord, adaptiveFineProbeCoord, adaptiveLevel);
                         uint2 sourceProbeCoord = BurtGIAdaptiveFineProbeCoordToBaseCoord(adaptiveFineProbeCoord, adaptiveLevel, gridSize);
                         if (sourceProbeCoord.x >= gridSize.x || sourceProbeCoord.y >= gridSize.y)
                         {
@@ -1730,10 +1731,10 @@ Shader "Hidden/BurtRP/BurtGI"
                             continue;
                         }
 
-                        float2 sourceProbeUV = (float2(sourceProbeCoord) + 0.5f) * _BurtGIScreenProbeGridParams.zw;
-                        float2 adaptiveProbeUV = BurtGIAdaptiveFineProbeCoordToScreenUV(adaptiveFineProbeCoord, adaptiveLevel, gridSizeFloat);
-                        float4 sourcePosition = _BurtGIScreenProbeWorldPositionTexture.SampleLevel(sampler_LinearClamp, sourceProbeUV, 0.0f);
-                        float4 sourceNormal = _BurtGIScreenProbeWorldNormalTexture.SampleLevel(sampler_LinearClamp, sourceProbeUV, 0.0f);
+                        BurtGIAdaptiveProbeData adaptiveProbe = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex];
+                        float2 adaptiveProbeUV = (float2(adaptiveProbe.sourcePixel) + 0.5f) * _BurtGISourceTexelSize.xy;
+                        float4 sourcePosition = float4(adaptiveProbe.positionWS, adaptiveProbe.valid);
+                        float4 sourceNormal = float4(adaptiveProbe.normalWS * 0.5f + 0.5f, adaptiveProbe.valid);
                         if (sourcePosition.a <= 0.5f || sourceNormal.a <= 0.5f)
                         {
                             continue;

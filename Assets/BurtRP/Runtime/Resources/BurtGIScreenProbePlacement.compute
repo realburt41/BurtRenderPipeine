@@ -1,6 +1,9 @@
 #pragma kernel ScreenProbePlacementUniformCS
 #pragma kernel ScreenProbePlacementDebugCS
 
+// Compute shaders need the platform depth/UV conventions explicitly (unlike CGPROGRAM).
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
 #define BURT_GI_SCREEN_PROBE_PLACEMENT_THREADGROUP_SIZE 8
 #define BURT_GI_SCREEN_PROBE_TRACE_VISUALIZE_THREADGROUP_SIZE 8
@@ -76,7 +79,8 @@ RWTexture2D<float4> _RW_ScreenProbePlacementDebug;
 
 
 RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
-RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+RWStructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 
 #define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6
 #define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffffffu
@@ -644,7 +648,7 @@ bool BurtGIResolveScreenProbeSourceAndAtlasCoord(
     uint adaptiveLevel;
     uint2 adaptiveFineProbeCoord;
     BurtGIUnpackScreenProbeAdaptiveProbeData(
-        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex],
+        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex].packedCoord,
         adaptiveFineProbeCoord,
         adaptiveLevel);
     sourceScreenProbeCoord = BurtGIAdaptiveFineProbeCoordToBaseCoord(

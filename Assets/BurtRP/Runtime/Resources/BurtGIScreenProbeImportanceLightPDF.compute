@@ -1,4 +1,7 @@
 #pragma kernel ScreenProbeImportanceSamplingLightCS
+
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #pragma kernel ScreenProbeImportanceLightPDFLiteCS
 
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
@@ -75,7 +78,8 @@ RWTexture2D<float> _BurtGIScreenProbeImportanceLightPDFTexture;
 groupshared float BurtGIScreenProbeImportanceLightSharedPDF[BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT];
 
 RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
-RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+RWStructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 
 #define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6
 #define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffffffu
@@ -504,7 +508,7 @@ bool BurtGIResolveScreenProbeSourceAndAtlasCoord(
     uint adaptiveLevel;
     uint2 adaptiveFineProbeCoord;
     BurtGIUnpackScreenProbeAdaptiveProbeData(
-        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex],
+        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex].packedCoord,
         adaptiveFineProbeCoord,
         adaptiveLevel);
     sourceScreenProbeCoord = BurtGIAdaptiveFineProbeCoordToBaseCoord(
@@ -562,6 +566,14 @@ void BurtGIScreenProbeImportanceLightPDF(uint groupIndex, uint3 groupId, uint3 g
             float4 currentWorldPositionData = _BurtGIScreenProbeWorldPositionTexture.Load(int3(sourceScreenProbeCoord, 0));
             float3 currentWorldPosition = currentWorldPositionData.xyz;
             float3 currentNormalWS = BurtGIScreenProbeDecodeNormalWS(_BurtGIScreenProbeWorldNormalTexture.Load(int3(sourceScreenProbeCoord, 0)));
+            if (screenProbeIndex >= uniformProbeCount)
+            {
+                BurtGIAdaptiveProbeData probe = _BurtGIScreenProbeAdaptiveProbeDataBuffer[screenProbeIndex - uniformProbeCount];
+                currentRawDepth = probe.rawDepth;
+                currentWorldPositionData = float4(probe.positionWS, (float)probe.placementPayload);
+                currentWorldPosition = probe.positionWS;
+                currentNormalWS = probe.normalWS;
+            }
             float currentSceneDepth = max(BurtGILinearEyeDepth(currentRawDepth), 0.0001);
             float4 historyRadiance = 0.0;
             float historyGeometryWeight = 0.0;

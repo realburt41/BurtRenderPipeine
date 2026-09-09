@@ -10,7 +10,8 @@ Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
 RWTexture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
 
 StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
-StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 
 float4 _BurtGIRadianceCacheClipMapParams;
 float4 _BurtGIRadianceCacheClipMapWorldParams;
@@ -166,49 +167,9 @@ bool BurtGIResolveAdaptiveScreenProbeWorldPosition(uint adaptiveProbeIndex, out 
         return false;
     }
 
-    uint adaptiveLevel;
-    uint2 adaptiveFineProbeCoord;
-    BurtGIUnpackScreenProbeAdaptiveProbeData(
-        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex],
-        adaptiveFineProbeCoord,
-        adaptiveLevel);
-
-    uint2 screenProbeGridSize = BurtGIScreenProbeGridSize();
-    uint adaptiveSubGridSize = 1u << min(adaptiveLevel, 13u);
-    uint2 baseProbeCoord = min(adaptiveFineProbeCoord / max(1u, adaptiveSubGridSize), screenProbeGridSize - 1u);
-    uint2 adaptiveCellCoord = adaptiveFineProbeCoord - baseProbeCoord * adaptiveSubGridSize;
-    float2 adaptiveCellUV = (float2(adaptiveCellCoord) + 0.5f) / (float)max(1u, adaptiveSubGridSize);
-    float2 bilinearUV = saturate(adaptiveCellUV);
-    float4 bilinearWeights = float4(
-        (1.0 - bilinearUV.x) * (1.0 - bilinearUV.y),
-        bilinearUV.x * (1.0 - bilinearUV.y),
-        (1.0 - bilinearUV.x) * bilinearUV.y,
-        bilinearUV.x * bilinearUV.y);
-
-    uint2 rightProbeCoord = uint2(min(baseProbeCoord.x + 1u, screenProbeGridSize.x - 1u), baseProbeCoord.y);
-    uint2 downProbeCoord = uint2(baseProbeCoord.x, min(baseProbeCoord.y + 1u, screenProbeGridSize.y - 1u));
-    uint2 rightDownProbeCoord = uint2(rightProbeCoord.x, downProbeCoord.y);
-    float4 position00 = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)baseProbeCoord.x, (int)baseProbeCoord.y, 0));
-    float4 position10 = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)rightProbeCoord.x, (int)rightProbeCoord.y, 0));
-    float4 position01 = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)downProbeCoord.x, (int)downProbeCoord.y, 0));
-    float4 position11 = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)rightDownProbeCoord.x, (int)rightDownProbeCoord.y, 0));
-    float4 validWeights = bilinearWeights * float4(
-        position00.a > 0.5 ? 1.0 : 0.0,
-        position10.a > 0.5 ? 1.0 : 0.0,
-        position01.a > 0.5 ? 1.0 : 0.0,
-        position11.a > 0.5 ? 1.0 : 0.0);
-    float validWeightSum = dot(validWeights, float4(1.0, 1.0, 1.0, 1.0));
-    if (validWeightSum <= 0.0001)
-    {
-        return false;
-    }
-
-    worldPosition =
-        (position00.xyz * validWeights.x +
-            position10.xyz * validWeights.y +
-            position01.xyz * validWeights.z +
-            position11.xyz * validWeights.w) / validWeightSum;
-    return true;
+    BurtGIAdaptiveProbeData probe = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex];
+    worldPosition = probe.positionWS;
+    return probe.valid > 0.5f;
 }
 
 void BurtGIMarkRadianceProbesUsedByScreenProbes(uint3 dispatchThreadId)

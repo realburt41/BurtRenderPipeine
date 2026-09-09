@@ -63,6 +63,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，和其他 BurtR
 
             var safeRenderOptions = renderOptions ?? BurtRequestRenderOptions.CreateSingleRequest(); // 传入空 options 时回退旧行为，避免调用方漏传导致 RT 不分配。
 
+            // XRender advances a camera-owned frame counter, not Time.frameCount.
+            // Keep one index through assembly/dispatch and restore the enclosing camera on nested renders.
+            using var giCameraFrame = BurtScreenSpaceGlobalIlluminationPassUtility.BeginCameraFrame(request);
+
 
             var temporalAA = BurtTemporalAAUtility.PrepareRequest(request, asset, safeRenderOptions);
             request.SetTemporalAA(temporalAA);

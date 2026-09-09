@@ -1,0 +1,86 @@
+#pragma kernel ClearPool
+#pragma kernel BuildOffsets
+#pragma kernel SampleCells
+#include "../../Runtime/Resources/BurtGISceneVoxelFineOccupancy.hlsl"
+
+// Isolated proof of fine-cell/payload association. The serial allocator is
+// deliberately bounded to the fixture and is NOT a production scan algorithm.
+struct FinePayload { float4 radiance; float4 geometry; float4 lighting; };
+struct FineSample { uint4 status; float4 radiance; float4 geometry; float4 lighting; };
+Texture3D<uint> _FineLowRead;
+Texture3D<uint> _FineHighRead;
+RWTexture3D<uint> _FineOffsets;
+RWStructuredBuffer<uint> _FineOwners;
+RWStructuredBuffer<FinePayload> _FinePayload;
+RWStructuredBuffer<uint> _FineCounts;
+StructuredBuffer<uint4> _SampleCells;
+RWStructuredBuffer<FineSample> _Samples;
+uint _Resolution;
+uint _Capacity;
+uint _SampleCount;
+
+[numthreads(64,1,1)]
+void ClearPool(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Capacity) return;
+    _FineOwners[id.x] = 0xffffffffu;
+    _FinePayload[id.x] = (FinePayload)0;
+}
+
+[numthreads(1,1,1)]
+void BuildOffsets(uint3 id : SV_DispatchThreadID)
+{
+    uint cursor = 0u;
+    uint missing = 0u;
+    [loop]
+    for (uint z=0u; z<_Resolution; ++z)
+    [loop]
+    for (uint y=0u; y<_Resolution; ++y)
+    [loop]
+    for (uint x=0u; x<_Resolution; ++x)
+    {
+        uint3 cell = uint3(x,y,z);
+        uint count = countbits(_FineLowRead[cell]) + countbits(_FineHighRead[cell]);
+        bool fits = cursor <= _Capacity && count <= _Capacity - min(cursor, _Capacity);
+        _FineOffsets[cell] = count > 0u && fits ? cursor : 0xffffffffu;
+        if (!fits) missing += count;
+        cursor += count;
+    }
+    _FineCounts[0] = cursor;
+    _FineCounts[1] = missing;
+}
+
+[numthreads(64,1,1)]
+void SampleCells(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _SampleCount) return;
+    FineSample result = (FineSample)0;
+    result.status.zw = 0xffffffffu;
+    uint3 fine = _SampleCells[id.x].xyz;
+    if (any(fine >= _Resolution*4u)) { _Samples[id.x]=result; return; }
+    uint3 coarse = fine >> 2u;
+    uint3 local = fine & 3u;
+    uint2 mask = uint2(_FineLowRead[coarse], _FineHighRead[coarse]);
+    if (!BurtGIFineOccupancyContains(mask,local)) { _Samples[id.x]=result; return; }
+    // Geometric opacity survives absent/overflowed material. The adapter does
+    // not pretend to certify the production clipmap fallback behavior.
+    result.status.x = 1u;
+    uint offset = _FineOffsets[coarse];
+    uint bit = local.x + local.y*4u + local.z*16u;
+    uint rank = BurtGIFineOccupancyRank(mask,bit);
+    if (offset == 0xffffffffu || offset >= _Capacity || rank >= _Capacity-offset)
+    { _Samples[id.x]=result; return; }
+    uint index = offset + rank;
+    result.status.z = index;
+    result.status.w = _FineOwners[index];
+    FinePayload payload = _FinePayload[index];
+    if (result.status.w != 0xffffffffu && payload.geometry.a > 0.5 &&
+        payload.radiance.a > 0.5 && payload.lighting.a > 0.5)
+    {
+        result.status.y = 1u;
+        result.radiance = payload.radiance;
+        result.geometry = payload.geometry;
+        result.lighting = payload.lighting;
+    }
+    _Samples[id.x] = result;
+}

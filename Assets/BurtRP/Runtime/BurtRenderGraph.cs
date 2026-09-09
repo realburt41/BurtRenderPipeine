@@ -820,6 +820,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                         resources.RegisterBurtGIScreenProbeBentNormalTexture();
                         resources.RegisterBurtGIScreenProbeTraceRadianceTexture();
                         resources.RegisterBurtGIScreenProbeTraceHitTexture();
+                        resources.RegisterBurtGIScreenProbeTraceGeometryDistanceTexture();
+                        resources.RegisterBurtGIScreenProbeGatherGeometryDistanceTexture();
                         resources.RegisterBurtGIScreenProbeTemporalRadianceTexture();
                         resources.RegisterBurtGIScreenProbeTemporalIrradianceTexture();
                         resources.RegisterBurtGIScreenProbeTemporalConfidenceTexture();

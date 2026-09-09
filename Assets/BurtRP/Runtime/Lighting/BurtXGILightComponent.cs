@@ -248,7 +248,7 @@ namespace Burt.RenderPipeline
         [FormerlySerializedAs("clipmapUpdateDistance47")]
         public Vector4 sceneVoxelClipMapUpdateDistance47 = new Vector4(200f, 400f, 800f, 1600f);
         [FormerlySerializedAs("m_SceneRepresentVoxelClipMapResolution")]
-        [Range(16, 64)] public int sceneVoxelClipMapResolution = 64;
+        [Range(16, 128)] public int sceneVoxelClipMapResolution = 64;
         [FormerlySerializedAs("voxelOctree_MaterialBudget")]
         public SceneVoxelMaterialMemoryBudget sceneVoxelMaterialBudget = SceneVoxelMaterialMemoryBudget.Medium;
         [FormerlySerializedAs("voxelOctree_MaterialGenMethod")]

@@ -697,6 +697,11 @@ namespace Burt.RenderPipeline
             if (enabled)
             {
                 cmd.SetGlobalTexture(BurtGIApplyIndirectDiffuseTextureId, target.Identifier);
+#if UNITY_EDITOR
+                // Observe the texture actually consumed by deferred lighting,
+                // including full-resolution reprojection and reconstruction.
+                BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass.DiagnosticTextureCapture?.Invoke(cmd, "AppliedDiffuse", target.Identifier);
+#endif
             }
             else
             {
@@ -1197,9 +1202,15 @@ namespace Burt.RenderPipeline
             }
 
             var camera = context != null && context.Request != null ? context.Request.Camera : null;
-            var hasProbeVolume = BurtGIProbeVolume.TryGetBestForCamera(camera, out var probeVolume) &&
+            // XRender's PC deferred evaluator selects XGI OR XGI Probe. Allocated voxel
+            // probe resources alone must not add a second diffuse solution to Screen GI.
+            // Probe-first disables Screen GI in ResolveSettings; its volume -> voxel
+            // hybrid fallback remains unchanged below.
+            var useScreenSpaceGI = context != null &&
+                BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(context.Request, context.Asset);
+            var hasProbeVolume = !useScreenSpaceGI && BurtGIProbeVolume.TryGetBestForCamera(camera, out var probeVolume) &&
                 (probeVolume.IsVirtualReady || probeVolume.IsDirectIrradianceReady);
-            var hasSceneVoxelProbe = BurtGISceneVoxelClipmapStateUtility.HasProbeApplyResources(camera);
+            var hasSceneVoxelProbe = !useScreenSpaceGI && BurtGISceneVoxelClipmapStateUtility.HasProbeApplyResources(camera);
             var useHybridProbe = hasProbeVolume && hasSceneVoxelProbe;
             CoreUtils.SetKeyword(material, DeferredGIProbeVolumeEvaluateKeyword, hasProbeVolume && !hasSceneVoxelProbe);
             CoreUtils.SetKeyword(material, DeferredGISceneVoxelProbeEvaluateKeyword, !hasProbeVolume && hasSceneVoxelProbe);

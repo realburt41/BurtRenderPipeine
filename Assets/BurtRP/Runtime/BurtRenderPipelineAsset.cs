@@ -98,6 +98,20 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [SerializeField] private Shader debugGBufferShader;
         [SerializeField] private Shader debugTextureShader;
 
+        // Shader.Find does not create a Player build dependency. These shared
+        // passes are required by GI and its depth/presentation path even when
+        // no scene material references them.
+        [Header("GI and Shared Frame Passes")]
+        [SerializeField] private Shader screenSpaceGlobalIlluminationShader;
+        [SerializeField] private Shader hiZDepthPyramidShader;
+        [SerializeField] private Shader postProcessCopyShader;
+        [SerializeField] private Shader finalBlitShader;
+
+        public Shader ScreenSpaceGlobalIlluminationShader => screenSpaceGlobalIlluminationShader;
+        public Shader HiZDepthPyramidShader => hiZDepthPyramidShader;
+        public Shader PostProcessCopyShader => postProcessCopyShader;
+        public Shader FinalBlitShader => finalBlitShader;
+
         public Shader DebugGBufferShader => debugGBufferShader;
         public Shader DebugTextureShader => debugTextureShader;
 
@@ -124,6 +138,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
     [CreateAssetMenu(menuName = "Rendering/Burt Render Pipeline Asset", fileName = "BurtRenderPipelineAsset")] // 让 Unity 可以通过 Create 菜单创建 BurtRenderPipelineAsset。
     public sealed class BurtRenderPipelineAsset : RenderPipelineAsset // 定义 BurtRP 的管线资产，Unity Graphics Settings 会引用它来创建管线实例。
     {
+        // SRP Core's Player shader stripper compares this value with each
+        // SubShader RenderPipeline tag, even before a camera has rendered.
+        public override string renderPipelineShaderTag => "BurtRenderPipeline";
+
         private const string DefaultMaterialAssetPath = "Assets/BurtRP/Runtime/Materials/MI_StandardLit.mat";
         private const string DefaultMaterialFallbackShaderName = "BurtRP/Lit";
         private const string XGIRadianceCacheHardwareRayTracingResourcePath = "BurtGIRadianceCacheHardwareRayTracing";

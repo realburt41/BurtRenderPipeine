@@ -2,6 +2,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
 {
     public sealed class BurtDeferredGraphAssembler : BurtRenderGraphAssembler // 定义 Deferred 渲染图组装器，当前阶段先建立可插入 GBuffer 阶段的顺序图。
     {
+        private readonly BurtRenderPass allocateGISurfaceNormalPass = new BurtAllocateGISurfaceNormalPass();
+        private readonly BurtRenderPass mergeGISurfaceNormalPass = new BurtMergeGISurfaceNormalPass();
+        private readonly BurtRenderPass releaseGISurfaceNormalPass = new BurtReleaseGISurfaceNormalPass();
         private static readonly string[] ScreenSpaceGIPassTokens =
         {
             "Screen Space Global Illumination",
@@ -56,6 +59,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactThreadCountXBufferName);
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeNumBufferName);
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeDataBufferName);
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeImportancePDFSHBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeImportancePDFSHBufferName);
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeAllocatorBufferName);
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListAllocatorBufferName);
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeFreeListBufferName);
@@ -121,6 +125,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeBentNormalPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeBentNormalPass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceHitPass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTraceHitPass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceGeometryDistancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTraceGeometryDistancePass();
+        private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeGatherGeometryDistancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeGatherGeometryDistancePass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass = new BurtAllocateScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass();
@@ -184,6 +190,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheClipMapPostPass = new BurtScreenSpaceGlobalIlluminationRadianceCacheClipMapPostPass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbePreparePass = new BurtScreenSpaceGlobalIlluminationScreenProbePreparePass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeTraceAtlasPass = new BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass();
+        private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeTraceFallbackPass = new BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass(true);
         private readonly BurtRenderPass screenSpaceGlobalIlluminationScreenProbeCompositeTracesPass = new BurtScreenSpaceGlobalIlluminationScreenProbeCompositeTracesPass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationRadianceCacheHashGridLitePass = new BurtScreenSpaceGlobalIlluminationRadianceCacheHashGridLitePass();
         private readonly BurtRenderPass screenSpaceGlobalIlluminationSceneVoxelRadianceLitePass = new BurtScreenSpaceGlobalIlluminationSceneVoxelRadianceLitePass();
@@ -243,11 +250,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceHitPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTraceHitPass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceGeometryDistancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTraceGeometryDistancePass();
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeGatherGeometryDistancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeGatherGeometryDistancePass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeDataBufferName);
+        private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeImportancePDFSHBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeImportancePDFSHBufferName);
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeNumBufferName);
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass();
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass = new BurtReleaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass();
@@ -533,6 +543,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             var useAdditionalLights = ShouldUseDeferredAdditionalLighting(request);
             var useScreenSpaceGlobalIllumination = useLocalGBufferTargets &&
                 BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset);
+            var useGISurfaceNormal = useScreenSpaceGlobalIllumination && !shadingDebugPolicy.CanTerminateAfterDeferredGeometry;
             var useMainLightShadow = shadingDebugPolicy.NeedsMainLightShadowMap &&
                 BurtShadowUtility.ShouldUseMainLightShadow(request, asset); // 终端 Debug 只生产自己真正读取的阴影资源。
             var useAdditionalLightShadow = shadingDebugPolicy.NeedsAdditionalLightShadowAtlas &&
@@ -547,6 +558,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             graph.BeginProfilingScope("BRP.Stage/Resources Lighting Shadows");
             AddCameraAllocationPasses(graph, safeRenderOptions); // 先申请 CameraColor 和 CameraDepth，确保 GBuffer MRT 可以使用独立深度。
             AddGBufferAllocationPasses(graph, useLocalGBufferTargets); // 再申请全部 GBuffer，给后面的 MRT 绑定和清理阶段准备真实 RT。
+            if (useGISurfaceNormal)
+            {
+                graph.Resources.RegisterRenderTarget(BurtGISurfaceNormalUtility.ResourceName,
+                    new UnityEngine.Rendering.RenderTargetIdentifier(BurtGISurfaceNormalUtility.TextureId));
+                graph.AddPass(allocateGISurfaceNormalPass);
+            }
             if (!shadingDebugPolicy.CanTerminateAfterDeferredGeometry)
             {
                 AddDeferredLightingDepthAllocationPass(graph, useLocalGBufferTargets);
@@ -603,12 +620,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
             {
                 AddFurBlurPropertyPasses(graph, request, asset, useLocalGBufferTargets);
             }
+            if (useGISurfaceNormal) graph.AddPass(mergeGISurfaceNormalPass);
             AddReturnToCameraColorPass(graph, useLocalGBufferTargets); // GBuffer 阶段完成后重新绑定 CameraColor，避免 Forward fallback 继续画进 GBuffer。
             graph.EndProfilingScope("BRP.Stage/Depth GBuffer");
 
             if (!shadingDebugPolicy.CanTerminateAfterDeferredGeometry)
             {
             graph.BeginProfilingScope("BRP.Stage/Screen Space Deferred Lighting");
+            // Screen GI traces current geometry against previous scene color.
+            // Build current HiZ after GBuffer/depth, before its first GI read;
+            // newly allocated pooled mip textures can still contain last frame.
+            // Keep the later build for SSR after ForwardOnly depth writers.
+            AddHiZBuildPass(graph, useHiZDepth && useScreenSpaceGlobalIllumination);
             AddScreenSpaceAmbientOcclusionPasses(graph, request, asset, useLocalGBufferTargets);
             AddScreenSpaceShadowPasses(graph, request, asset, useLocalGBufferTargets);
             AddScreenSpaceGlobalIlluminationPasses(graph, request, asset, useScreenSpaceGlobalIllumination, safeRenderOptions);
@@ -766,6 +789,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 AddFurBlurReleasePasses(graph, request, asset, useLocalGBufferTargets);
             }
             AddGBufferReleasePasses(graph, useLocalGBufferTargets); // 释放本 request 内申请的 GBuffer，当前阶段不跨 request 保留它们。
+            if (useGISurfaceNormal) graph.AddPass(releaseGISurfaceNormalPass);
             AddCameraReleasePasses(graph, safeRenderOptions); // 最后按相机栈策略释放 CameraColor 和 CameraDepth。
             graph.EndProfilingScope("BRP.Stage/Cleanup");
         }
@@ -1173,6 +1197,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeImportancePDFSHBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeAllocatorBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListAllocatorBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeFreeListBufferPass);
@@ -1244,6 +1269,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeBentNormalPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceHitPass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceGeometryDistancePass);
+                graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeGatherGeometryDistancePass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTemporalConfidencePass);
@@ -1316,6 +1343,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(screenSpaceGlobalIlluminationScreenProbeTraceCompactSetupPass);
                 graph.AddPass(screenSpaceGlobalIlluminationScreenProbeTraceAtlasPass);
                 graph.AddPass(screenSpaceGlobalIlluminationRadianceCacheHashGridLitePass);
+                graph.AddPass(screenSpaceGlobalIlluminationScreenProbeTraceFallbackPass);
                 // HashGrid resolve still consumes the importance-sampled raw trace layout.
                 // Convert to XRender's stable 8x8 direction atlas only after all raw-trace writers.
                 graph.AddPass(screenSpaceGlobalIlluminationScreenProbeCompositeTracesPass);
@@ -1391,11 +1419,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceHitPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceGeometryDistancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeGatherGeometryDistancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeImportancePDFSHBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass);
@@ -1973,11 +2004,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalIrradiancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTemporalRadiancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceHitPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceGeometryDistancePass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeGatherGeometryDistancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceRadiancePass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeWorldPositionPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeWorldNormalPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeScreenDepthPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferPass);
+                    graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeImportancePDFSHBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeIndicesPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeHeaderPass);

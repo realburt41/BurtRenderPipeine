@@ -64,6 +64,8 @@ float _BurtGISceneVoxelOctreeValid;
 
 RWTexture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
 RWTexture2D<float> _BurtGIScreenProbeTraceHitTexture;
+#include "BurtGIScreenProbeGeometryDistance.hlsl"
+RWTexture2D<float4> _BurtGIScreenProbeTraceGeometryDistanceTexture;
 
 
 
@@ -368,6 +370,7 @@ void BurtGIScreenProbeTraceClear(uint3 dispatchThreadId)
 
     _BurtGIScreenProbeTraceRadianceTexture[atlasCoord] = float4(0.0, 0.0, 0.0, 0.0);
     _BurtGIScreenProbeTraceHitTexture[atlasCoord] = 0.0;
+    _BurtGIScreenProbeTraceGeometryDistanceTexture[atlasCoord] = BurtGIInitialTraceState();
 }
 [numthreads(BURT_GI_SCREEN_PROBE_TRACE_ATLAS_CLEAR_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TRACE_ATLAS_CLEAR_THREADGROUP_SIZE, 1)]
 void ScreenProbeTraceClearCS(uint3 dispatchThreadId : SV_DispatchThreadID)

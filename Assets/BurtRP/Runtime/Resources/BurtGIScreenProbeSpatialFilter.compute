@@ -1,4 +1,9 @@
+#include "BurtGIScreenProbeGeometryDistance.hlsl"
+Texture2D<float> _BurtGIScreenProbeGatherGeometryDistanceTexture;
 #pragma kernel ScreenProbeFilterSpatialCS
+
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #pragma kernel ScreenProbeDirectionalSpatialCS
 
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
@@ -68,6 +73,9 @@ Texture2D<float4> _BurtGIScreenProbeTemporalIrradianceTexture;
 Texture2D<float4> _BurtGIScreenProbeTemporalConfidenceTexture;
 Texture2D<float4> _BurtGIScreenProbeHitDistanceTexture;
 Texture2D<float4> _BurtGIScreenProbeDirectionalSpatialSourceTexture;
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
+StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 float _BurtGISceneVoxelOctreeValid;
 
 RWTexture2D<float> _BurtGIScreenProbeTraceHitTexture;
@@ -131,6 +139,7 @@ float4 _ZBufferParams;
 float4 _BurtDeferredCameraWorldPosition;
 float4x4 _BurtDeferredInverseViewProjectionMatrix;
 float4x4 _BurtGIScreenProbeViewProjectionMatrix;
+float4x4 _BurtGIScreenProbeFilterViewMatrix;
 float4x4 _BurtGIPreviousViewProjectionMatrix;
 float4 _BurtSkyReflectionHDR;
 float4 _BurtSkyReflectionTint;
@@ -562,27 +571,46 @@ void ScreenProbeDirectionalSpatialCS(uint3 dispatchThreadId : SV_DispatchThreadI
     uint2 probeCoord = atlasCoord / traceResolution;
     uint2 directionTexel = atlasCoord - probeCoord * traceResolution;
     uint2 gridSize = max((uint2)_BurtGIScreenProbeGridParams.xy, uint2(1u, 1u));
-    if (_BurtGIScreenProbeFilterParams.x <= 0.0001f || any(probeCoord >= gridSize))
+    if (_BurtGIScreenProbeFilterParams.x <= 0.0001f)
     {
         _BurtGIScreenProbeDirectionalSpatialWriteTexture[atlasCoord] = centerRadiance;
         return;
     }
 
+    // Traces and SH integration use an equal-area sphere, not normal-map oct encoding.
     float2 oct = ((float2(directionTexel) + 0.5f) / (float)traceResolution) * 2.0f - 1.0f;
-    float3 directionWS = float3(oct.x, 1.0f - abs(oct.x) - abs(oct.y), oct.y);
-    if (directionWS.y < 0.0f)
-    {
-        float2 directionSign = float2(directionWS.x >= 0.0f ? 1.0f : -1.0f, directionWS.z >= 0.0f ? 1.0f : -1.0f);
-        float2 folded = (1.0f - abs(directionWS.zx)) * directionSign;
-        directionWS.xz = folded;
-    }
+    float d = 1.0f - (abs(oct.x) + abs(oct.y));
+    float r = 1.0f - abs(d);
+    float phi = r == 0.0f ? 0.0f : 0.7853981633974483f * ((abs(oct.y) - abs(oct.x)) / r + 1.0f);
+    float f = r * sqrt(max(2.0f - r * r, 0.0f));
+    float3 directionWS = float3(f * sign(oct.y) * abs(sin(phi)), sign(d) * (1.0f - r * r), f * sign(oct.x) * abs(cos(phi)));
     directionWS = BurtGIScreenProbeTraceEarlySafeNormalize(directionWS, float3(0.0f, 1.0f, 0.0f));
 
-    float4 centerPositionData = _BurtGIScreenProbeWorldPositionTexture.Load(int3(probeCoord, 0));
-    float3 centerNormal = BurtGIScreenProbeDecodeNormalWS(_BurtGIScreenProbeWorldNormalTexture.Load(int3(probeCoord, 0)));
-    float4 centerHitData = _BurtGIScreenProbeHitDistanceTexture.Load(int3(probeCoord, 0));
-    float centerHitDistance = BurtGIDecodeScreenProbeHitDistanceForFiltering(centerHitData.r, centerHitData.z);
-    float centerHit = saturate(_BurtGIScreenProbeTraceHitTexture[atlasCoord]);
+    float4 centerPositionData = 0.0f;
+    float3 centerNormal = float3(0.0f, 1.0f, 0.0f);
+    float centerHitDistance = BurtGIResolveFilterSupportDistance(_BurtGIScreenProbeGatherGeometryDistanceTexture.Load(int3(atlasCoord, 0)), _BurtGIScreenProbeTraceParams.w);
+    if (probeCoord.y >= gridSize.y)
+    {
+        uint adaptiveIndex = (probeCoord.y - gridSize.y) * gridSize.x + probeCoord.x;
+        uint capacity, stride;
+        _BurtGIScreenProbeAdaptiveProbeDataBuffer.GetDimensions(capacity, stride);
+        if (adaptiveIndex >= min(capacity, _BurtGIScreenProbeAdaptiveProbeNumBuffer[0]))
+        {
+            _BurtGIScreenProbeDirectionalSpatialWriteTexture[atlasCoord] = centerRadiance;
+            return;
+        }
+        BurtGIAdaptiveProbeData adaptive = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveIndex];
+        centerPositionData = float4(adaptive.positionWS, adaptive.valid);
+        centerNormal = BurtGIScreenProbeTraceEarlySafeNormalize(adaptive.normalWS, float3(0.0f, 1.0f, 0.0f));
+        // Search uniform neighbors around the adaptive probe's actual screen tile.
+        probeCoord = min(adaptive.sourcePixel / max(1u, (uint)_BurtGIScreenProbeParams.x), gridSize - 1u);
+        // Distance is indexed by the original adaptive atlas coordinate.
+    }
+    else
+    {
+        centerPositionData = _BurtGIScreenProbeWorldPositionTexture.Load(int3(probeCoord, 0));
+        centerNormal = BurtGIScreenProbeDecodeNormalWS(_BurtGIScreenProbeWorldNormalTexture.Load(int3(probeCoord, 0)));
+    }
     float4 radianceSum = centerRadiance;
     float weightSum = 1.0f;
     uint halfKernel = max(1u, (uint)round(max(_BurtGIScreenProbeFilterParams.y, 1.0f)));
@@ -599,29 +627,35 @@ void ScreenProbeDirectionalSpatialCS(uint3 dispatchThreadId : SV_DispatchThreadI
         uint2 neighborProbe = (uint2)neighborProbeSigned;
         uint2 neighborAtlasCoord = min(neighborProbe * traceResolution + directionTexel, atlasSize - 1u);
         float4 neighborPositionData = _BurtGIScreenProbeWorldPositionTexture.Load(int3(neighborProbe, 0));
-        float3 neighborNormal = BurtGIScreenProbeDecodeNormalWS(_BurtGIScreenProbeWorldNormalTexture.Load(int3(neighborProbe, 0)));
-        float normalWeight = saturate(dot(centerNormal, neighborNormal));
-        normalWeight *= normalWeight;
-        float planeDistance = abs(dot(neighborPositionData.xyz - centerPositionData.xyz, centerNormal));
+        // XRender filters directional radiance using relative eye-depth and the
+        // hit cone. The parameter is dimensionless, not inverse world-units^2.
+        // Use an explicitly uploaded view matrix for uniform and adaptive probes.
+        float centerDepth = max(-mul(_BurtGIScreenProbeFilterViewMatrix, float4(centerPositionData.xyz, 1.0f)).z, 0.0001f);
+        float neighborDepth = -mul(_BurtGIScreenProbeFilterViewMatrix, float4(neighborPositionData.xyz, 1.0f)).z;
+        float relativeDepthDifference = abs(neighborDepth - centerDepth) / centerDepth;
         float positionWeight = centerPositionData.a > 0.5f && neighborPositionData.a > 0.5f
-            ? exp2(-max(_BurtGIScreenProbeSpatialFilterParams.y, 0.001f) * planeDistance * planeDistance)
+            ? exp2(-max(_BurtGIScreenProbeSpatialFilterParams.y, 0.001f) * relativeDepthDifference * relativeDepthDifference)
             : 0.0f;
-        float4 neighborHitData = _BurtGIScreenProbeHitDistanceTexture.Load(int3(neighborProbe, 0));
-        float neighborHitDistance = BurtGIDecodeScreenProbeHitDistanceForFiltering(neighborHitData.r, neighborHitData.z);
-        float angleWeight = 1.0f;
-        if (centerHitDistance >= 0.0f && neighborHitDistance >= 0.0f)
+        float neighborHitDistance = BurtGIResolveFilterSupportDistance(_BurtGIScreenProbeGatherGeometryDistanceTexture.Load(int3(neighborAtlasCoord, 0)), _BurtGIScreenProbeTraceParams.w);
+        float angleWeight = 0.0f;
+        if (neighborHitDistance >= 0.0f)
         {
-            float3 centerHitPosition = centerPositionData.xyz + directionWS * centerHitDistance;
+            if (centerHitDistance >= 0.0f)
+            {
+                neighborHitDistance = min(neighborHitDistance, centerHitDistance);
+            }
             float3 neighborHitPosition = neighborPositionData.xyz + directionWS * neighborHitDistance;
-            float3 hitDelta = neighborHitPosition - centerHitPosition;
+            // XRender tests the cone from the receiver, not between two hit points.
+            float3 hitDelta = neighborHitPosition - centerPositionData.xyz;
             float hitDeltaLength = length(hitDelta);
-            float hitAngle = hitDeltaLength > 0.0001f ? acos(saturate(dot(hitDelta / hitDeltaLength, directionWS))) : 0.0f;
+            float hitAngle = hitDeltaLength > 0.0001f ? acos(clamp(dot(hitDelta / hitDeltaLength, directionWS), -1.0f, 1.0f)) : 0.0f;
             angleWeight = 1.0f - saturate(hitAngle / max(_BurtGIScreenProbeSpatialFilterParams.x, 0.001f));
         }
 
-        float neighborHit = saturate(_BurtGIScreenProbeTraceHitTexture[neighborAtlasCoord]);
-        float hitWeight = 1.0f - smoothstep(0.15f, 0.6f, abs(neighborHit - centerHit));
-        float weight = positionWeight * normalWeight * angleWeight * hitWeight;
+        // Do not gate reuse by stochastic hit-fraction differences. Geometry
+        // support and the clamped hit-distance cone above preserve occlusion,
+        // including valid black hits; a radiance sample is not a surface test.
+        float weight = positionWeight * angleWeight;
         radianceSum += _BurtGIScreenProbeDirectionalSpatialSourceTexture.Load(int3(neighborAtlasCoord, 0)) * weight;
         weightSum += weight;
     }

@@ -1,0 +1,14 @@
+#pragma kernel ClearOwnersCS
+
+// Separate from the material voxelizer: clear every cell, including cells that
+// become empty after an emitter/occluder moves. 0xffffffff is never a valid key.
+RWTexture3D<uint> _BurtGIVoxelizeOwnerTexture;
+
+[numthreads(4, 4, 4)]
+void ClearOwnersCS(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height, depth;
+    _BurtGIVoxelizeOwnerTexture.GetDimensions(width, height, depth);
+    if (any(id >= uint3(width, height, depth))) return;
+    _BurtGIVoxelizeOwnerTexture[id] = 0xffffffffu;
+}

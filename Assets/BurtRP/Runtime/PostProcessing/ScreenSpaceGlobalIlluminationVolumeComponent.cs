@@ -496,6 +496,7 @@ namespace Burt.RenderPipeline
         public BoolParameter screenProbeTraceHierarchically = new BoolParameter(true);
         public ClampedIntParameter screenProbeTraceHierarchicalMaxIterations = new ClampedIntParameter(50, 1, 50);
         public ClampedFloatParameter screenProbeTraceRelativeDepthThickness = new ClampedFloatParameter(0.02f, 0.0001f, 1f);
+        [Tooltip("Screen trace history depth tolerance: both raw device depth and relative eye-depth must match. Uses the previous capture's projection; smaller values reject disoccluded history more strictly.")]
         public ClampedFloatParameter screenProbeTraceHistoryDepthTestRelativeThickness = new ClampedFloatParameter(0.01f, 0.0001f, 1f);
         public ClampedFloatParameter screenProbeScreenTraceThicknessScaleWhenNoFallback = new ClampedFloatParameter(2f, 0.001f, 2f);
         public ClampedFloatParameter screenProbeGatherMaxRayIntensity = new ClampedFloatParameter(1f, 0.01f, 40f);
@@ -603,7 +604,7 @@ namespace Burt.RenderPipeline
         public Vector4Parameter sceneVoxelClipMapUpdateDistance03 = new Vector4Parameter(new Vector4(30f, 60f, 70f, 100f));
         public Vector4Parameter sceneVoxelClipMapOffset47 = new Vector4Parameter(new Vector4(60f, 120f, 250f, 500f));
         public Vector4Parameter sceneVoxelClipMapUpdateDistance47 = new Vector4Parameter(new Vector4(200f, 400f, 800f, 1600f));
-        public ClampedIntParameter sceneVoxelClipMapResolution = new ClampedIntParameter(64, 16, 64);
+        public ClampedIntParameter sceneVoxelClipMapResolution = new ClampedIntParameter(64, 16, 128);
         public SceneVoxelMaterialMemoryBudgetParameter sceneVoxelMaterialBudget = new SceneVoxelMaterialMemoryBudgetParameter(SceneVoxelMaterialMemoryBudget.Medium);
         public SceneVoxelMaterialGenerateMethodParameter sceneVoxelMaterialGenerateMethod = new SceneVoxelMaterialGenerateMethodParameter(SceneVoxelMaterialGenerateMethod.Atomic);
         public BoolParameter sceneVoxelDrawVegetation = new BoolParameter(true);

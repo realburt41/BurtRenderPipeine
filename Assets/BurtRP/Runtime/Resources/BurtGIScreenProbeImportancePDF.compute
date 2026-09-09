@@ -1,4 +1,7 @@
 #pragma kernel ScreenProbeImportanceSamplingTransferCS
+
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #pragma kernel ScreenProbeImportancePDFLiteCS
 
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
@@ -78,7 +81,8 @@ groupshared float BurtGIScreenProbeImportanceTransferSharedSH2[2 * BURT_GI_SCREE
 groupshared float BurtGIScreenProbeImportanceTransferSharedSHWeight[2 * BURT_GI_SCREEN_PROBE_IRRADIANCE_OCT_THREAD_COUNT];
 
 RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
-RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+RWStructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 RWStructuredBuffer<float> _BurtGIScreenProbeImportancePDFSHBuffer;
 
 #define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6
@@ -522,7 +526,7 @@ bool BurtGIResolveScreenProbeSourceAndAtlasCoord(
     uint adaptiveLevel;
     uint2 adaptiveFineProbeCoord;
     BurtGIUnpackScreenProbeAdaptiveProbeData(
-        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex],
+        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex].packedCoord,
         adaptiveFineProbeCoord,
         adaptiveLevel);
     sourceScreenProbeCoord = BurtGIAdaptiveFineProbeCoordToBaseCoord(
@@ -870,9 +874,19 @@ void BurtGIScreenProbeImportanceSamplingTransfer(uint groupIndex, uint3 groupId,
         sourceNormalWS = BurtGIScreenProbeDecodeNormalWS(_BurtGIScreenProbeWorldNormalTexture.Load(int3(sourceScreenProbeCoord, 0)));
         sourcePositionData = _BurtGIScreenProbeWorldPositionTexture.Load(int3(sourceScreenProbeCoord, 0));
     }
+    bool isAdaptiveProbe = validAtlasProbe && screenProbeIndex >= uniformProbeCount;
+    if (isAdaptiveProbe)
+    {
+        BurtGIAdaptiveProbeData probe = _BurtGIScreenProbeAdaptiveProbeDataBuffer[screenProbeIndex - uniformProbeCount];
+        hasValidProbe = probe.valid > 0.5f;
+        sourceNormalWS = probe.normalWS;
+        sourcePositionData = float4(probe.positionWS, (float)probe.placementPayload);
+    }
     float3 sourcePositionWS = sourcePositionData.xyz;
     bool sourceHasSphericalVisibility = hasValidProbe && BurtGIScreenProbeHasSphericalVisibility(sourcePositionData.a);
     float sourceRawDepth = hasValidProbe ? _BurtGIScreenProbeScreenDepthTexture.Load(int3(sourceScreenProbeCoord, 0)) : 1.0;
+    if (isAdaptiveProbe)
+        sourceRawDepth = _BurtGIScreenProbeAdaptiveProbeDataBuffer[screenProbeIndex - uniformProbeCount].rawDepth;
     float sourceSceneDepth = BurtGIScreenProbeTraceCompactIsSkyDepth(sourceRawDepth) ? 0.0 : max(BurtGILinearEyeDepth(sourceRawDepth), 0.0001);
     bool isUniformProbe = screenProbeIndex < uniformProbeCount;
     BurtGIScreenProbeFillImportanceTransferSharedNormals(

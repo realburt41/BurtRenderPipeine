@@ -908,7 +908,7 @@ namespace Burt.RenderPipeline
             var cell = FindCell(cellIndex);
             if (cell == null)
             {
-                return TryUnloadBakedCell(FindBakedCell(cellIndex));
+                return TryUnloadBakedCell(FindLoadedBakedCell(cellIndex));
             }
 
             if (cell == null || !loadedCells.Contains(cellIndex))
@@ -1776,6 +1776,25 @@ namespace Burt.RenderPipeline
             return cells.Find(cell => cell != null && cell.index == cellIndex);
         }
 
+        private BurtXGIProbeBakedCellData FindLoadedBakedCell(int cellIndex)
+        {
+            // A slice or scene selection can change before invalidation unloads
+            // the old cells. Their page ranges still belong to the loaded asset.
+            var loadedAsset = initializedBakedDataAsset;
+            if (loadedAsset != null && loadedAsset.cells != null)
+            {
+                foreach (var cell in loadedAsset.cells)
+                {
+                    if (cell != null && cell.cellIndex == cellIndex)
+                    {
+                        return cell;
+                    }
+                }
+            }
+
+            return FindBakedCell(cellIndex);
+        }
+
         private BurtXGIProbeBakedCellData FindBakedCell(int cellIndex)
         {
             foreach (var cell in EnumerateBakedCells())
@@ -2027,6 +2046,7 @@ namespace Burt.RenderPipeline
             }
 
             worseBlockers.Sort((left, right) => CompareStreamingPriority(right, left, streamingScorePosition, streamingForward));
+            var displacedCells = new List<int>(worseBlockers.Count);
             for (var index = 0; index < worseBlockers.Count; ++index)
             {
                 if (!TryUnloadCell(worseBlockers[index].Index))
@@ -2034,12 +2054,30 @@ namespace Burt.RenderPipeline
                     continue;
                 }
 
+                displacedCells.Add(worseBlockers[index].Index);
                 if (TryLoadCell(candidate.Index))
                 {
                     return true;
                 }
             }
 
+            // A higher-priority candidate can still fail decoding or uploading. Keep
+            // the previously valid coverage when no replacement was committed.
+            var replacementFailure = lastStreamingStatus;
+            var rollbackFailed = false;
+            for (var index = displacedCells.Count - 1; index >= 0; --index)
+            {
+                if (!TryLoadCell(displacedCells[index]))
+                {
+                    rollbackFailed = true;
+                }
+            }
+            if (displacedCells.Count > 0)
+            {
+                lastStreamingStatus = (rollbackFailed ? "ReplacementRollbackFailed" : "ReplacementRolledBack") +
+                    "(Candidate=" + candidate.Index + ",Displaced=" + displacedCells.Count +
+                    ",Cause=" + replacementFailure + ")";
+            }
             return false;
         }
 

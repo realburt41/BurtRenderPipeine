@@ -1,4 +1,7 @@
 #pragma kernel ScreenProbeImportanceSamplingGenRaysCS
+
+// Define the platform depth and texture-coordinate conventions used below.
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #pragma kernel ScreenProbeImportanceGenRaysLiteCS
 
 #define BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE 64
@@ -73,7 +76,8 @@ groupshared uint2 BurtGIScreenProbeImportanceRaySharedSort[2 * BURT_GI_SCREEN_PR
 groupshared uint BurtGIScreenProbeImportanceRaySharedSubdivideCount;
 
 RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
-RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+RWStructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 RWStructuredBuffer<float> _BurtGIScreenProbeImportancePDFSHBuffer;
 
 #define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6
@@ -441,7 +445,7 @@ bool BurtGIResolveScreenProbeSourceAndAtlasCoord(
     uint adaptiveLevel;
     uint2 adaptiveFineProbeCoord;
     BurtGIUnpackScreenProbeAdaptiveProbeData(
-        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex],
+        _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveProbeIndex].packedCoord,
         adaptiveFineProbeCoord,
         adaptiveLevel);
     sourceScreenProbeCoord = BurtGIAdaptiveFineProbeCoordToBaseCoord(
@@ -565,7 +569,9 @@ void BurtGIScreenProbeImportanceGenRays(uint groupIndex, uint3 groupId, uint3 gr
     {
         if (validTexel)
         {
-            _BurtGIScreenProbeImportanceRayInfoTexture[atlasCoord] = BurtGIPackScreenProbeImportanceRayInfo(traceTexelCoord, 0u);
+            // Consumers decode mip size from the doubled importance domain.
+            // Uniform 8x8 tracing is level 1 of that 16x16 domain, not level 0.
+            _BurtGIScreenProbeImportanceRayInfoTexture[atlasCoord] = BurtGIPackScreenProbeImportanceRayInfo(traceTexelCoord, uniformLevel);
         }
         else if (validAtlasTexel)
         {

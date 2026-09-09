@@ -463,6 +463,18 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
 
         public static readonly int BurtGIScreenProbeTraceHitTextureId = Shader.PropertyToID(BurtGIScreenProbeTraceHitTextureShaderName);
 
+        public const string BurtGIScreenProbeTraceGeometryDistanceName = "BurtGIScreenProbeTraceGeometryDistance";
+
+        public const string BurtGIScreenProbeTraceGeometryDistanceTextureShaderName = "_BurtGIScreenProbeTraceGeometryDistanceTexture";
+
+        public static readonly int BurtGIScreenProbeTraceGeometryDistanceTextureId = Shader.PropertyToID(BurtGIScreenProbeTraceGeometryDistanceTextureShaderName);
+
+        public const string BurtGIScreenProbeGatherGeometryDistanceName = "BurtGIScreenProbeGatherGeometryDistance";
+
+        public const string BurtGIScreenProbeGatherGeometryDistanceTextureShaderName = "_BurtGIScreenProbeGatherGeometryDistanceTexture";
+
+        public static readonly int BurtGIScreenProbeGatherGeometryDistanceTextureId = Shader.PropertyToID(BurtGIScreenProbeGatherGeometryDistanceTextureShaderName);
+
         public const string BurtGIScreenProbeTemporalRadianceName = "BurtGIScreenProbeTemporalRadiance";
 
         public const string BurtGIScreenProbeTemporalRadianceTextureShaderName = "_BurtGIScreenProbeTemporalRadianceTexture";
@@ -2442,6 +2454,36 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public BurtRenderTargetHandle GetBurtGIScreenProbeTraceHit()
         {
             return GetRenderTarget(BurtGIScreenProbeTraceHitName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTraceGeometryDistanceTexture()
+        {
+            return RegisterBurtGIScreenProbeTraceGeometryDistance(new RenderTargetIdentifier(BurtGIScreenProbeTraceGeometryDistanceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeTraceGeometryDistance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeTraceGeometryDistanceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeTraceGeometryDistance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeTraceGeometryDistanceName);
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeGatherGeometryDistanceTexture()
+        {
+            return RegisterBurtGIScreenProbeGatherGeometryDistance(new RenderTargetIdentifier(BurtGIScreenProbeGatherGeometryDistanceTextureId));
+        }
+
+        public BurtRenderTargetHandle RegisterBurtGIScreenProbeGatherGeometryDistance(RenderTargetIdentifier identifier)
+        {
+            return RegisterRenderTarget(BurtGIScreenProbeGatherGeometryDistanceName, identifier);
+        }
+
+        public BurtRenderTargetHandle GetBurtGIScreenProbeGatherGeometryDistance()
+        {
+            return GetRenderTarget(BurtGIScreenProbeGatherGeometryDistanceName);
         }
 
         public BurtRenderTargetHandle RegisterBurtGIScreenProbeTemporalRadianceTexture()

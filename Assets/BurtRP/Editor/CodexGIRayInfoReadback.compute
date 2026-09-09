@@ -1,0 +1,11 @@
+#pragma kernel ReadRayInfo
+Texture2D<uint> _RayInfo;
+RWStructuredBuffer<uint> _Values;
+int _Width;
+int _Height;
+[numthreads(8, 8, 1)]
+void ReadRayInfo(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < (uint)_Width && id.y < (uint)_Height)
+        _Values[id.y * (uint)_Width + id.x] = _RayInfo.Load(int3(id.xy, 0));
+}

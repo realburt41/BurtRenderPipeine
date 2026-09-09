@@ -100,13 +100,15 @@ int VoxelApplyMaterialIndexOffsetForClipmap;
 int VoxelProbeIndexOffsetClipmap;
 int VoxelProbeClipmapValidMask;
 
-float4 unity_SHAr;
-float4 unity_SHAg;
-float4 unity_SHAb;
-float4 unity_SHBr;
-float4 unity_SHBg;
-float4 unity_SHBb;
-float4 unity_SHC;
+// Use the camera-request SH uploaded by BurtIndirectLightingUtility.
+// Unity may overwrite its reserved unity_SH constants during per-draw setup.
+float4 _BurtAmbientSHAr;
+float4 _BurtAmbientSHAg;
+float4 _BurtAmbientSHAb;
+float4 _BurtAmbientSHBr;
+float4 _BurtAmbientSHBg;
+float4 _BurtAmbientSHBb;
+float4 _BurtAmbientSHC;
 
 groupshared float3 BurtGISharedProbeTraceSH[BURT_GI_XGI_PROBE_TRACE_SH_COEFFICIENT_COUNT * BURT_GI_XGI_PROBE_TRACE_SAMPLE_COUNT];
 
@@ -175,6 +177,15 @@ float4 BurtGIProbeClipmapCenterExtent(uint clipmapIndex)
 #else
     return clipmapIndex < 6u ? _BurtGISceneVoxelClipmapCenterExtent[clipmapIndex] : _BurtGISceneVoxelCenterExtent;
 #endif
+}
+float BurtGISceneVoxelBoundGeometryResolution()
+{
+    // Geometry and center/extent belong to the same currently bound clipmap.
+    uint width = 1u;
+    uint height = 1u;
+    uint depth = 1u;
+    _BurtGISceneVoxelGeometryReadTexture.GetDimensions(width, height, depth);
+    return max((float)width, 1.0);
 }
 float3 BurtGISceneVoxelLightingSafeNormalize(float3 value, float3 fallback)
 {
@@ -282,18 +293,18 @@ float3 BurtGISceneVoxelEvaluateAmbientSH(float3 normalWS)
 {
     float4 normal = float4(BurtGISceneVoxelLightingSafeNormalize(normalWS, float3(0.0, 1.0, 0.0)), 1.0);
     float3 sh = float3(
-        dot(unity_SHAr, normal),
-        dot(unity_SHAg, normal),
-        dot(unity_SHAb, normal));
+        dot(_BurtAmbientSHAr, normal),
+        dot(_BurtAmbientSHAg, normal),
+        dot(_BurtAmbientSHAb, normal));
 
     float4 vB = normal.xyzz * normal.yzzx;
     sh += float3(
-        dot(unity_SHBr, vB),
-        dot(unity_SHBg, vB),
-        dot(unity_SHBb, vB));
+        dot(_BurtAmbientSHBr, vB),
+        dot(_BurtAmbientSHBg, vB),
+        dot(_BurtAmbientSHBb, vB));
 
     float vC = normal.x * normal.x - normal.y * normal.y;
-    sh += unity_SHC.rgb * vC;
+    sh += _BurtAmbientSHC.rgb * vC;
     return max(sh, 0.0);
 }
 float3 BurtGISceneVoxelRecoverBoostedDiffuseColor(float3 storedRadiance)
@@ -309,10 +320,12 @@ bool BurtGISceneVoxelOctreeContainsVoxel(uint3 voxelCoord)
 {
     uint3 parentCoord = voxelCoord >> 4u;
     uint3 leafCoord = voxelCoord >> 2u;
-    uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+    uint3 rootCoord = parentCoord >> 2u;
+    uint3 rootChild = parentCoord & 3u;
+    uint rootBit = rootChild.x + rootChild.y * 4u + rootChild.z * 16u;
     if (!BurtGISceneVoxelOctreeMaskContains(
-            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
-            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootLowTexture[rootCoord],
+            _BurtGISceneVoxelOctreeRootHighTexture[rootCoord],
             rootBit))
     {
         return false;
@@ -396,10 +409,12 @@ bool BurtGIRayTraceSceneVoxelOctree(float3 originWS, float3 directionWS, float m
         uint3 voxelCoord = min((uint3)(localPosition / voxelSizeWS), volumeSize - 1u);
         uint3 parentCoord = voxelCoord >> 4u;
         uint3 leafCoord = voxelCoord >> 2u;
-        uint rootBit = parentCoord.x + parentCoord.y * 4u + parentCoord.z * 16u;
+        uint3 rootCoord = parentCoord >> 2u;
+        uint3 rootChild = parentCoord & 3u;
+        uint rootBit = rootChild.x + rootChild.y * 4u + rootChild.z * 16u;
         bool occupied = BurtGISceneVoxelOctreeMaskContains(
-            _BurtGISceneVoxelOctreeRootLowTexture[uint3(0u, 0u, 0u)],
-            _BurtGISceneVoxelOctreeRootHighTexture[uint3(0u, 0u, 0u)],
+            _BurtGISceneVoxelOctreeRootLowTexture[rootCoord],
+            _BurtGISceneVoxelOctreeRootHighTexture[rootCoord],
             rootBit);
         uint levelScale = 16u;
         if (occupied)
@@ -640,11 +655,10 @@ bool BurtGITrySampleSceneVoxelLightingResource(
     if (hitBackface != 0u)
     {
         float3 backNormalWS = -normalWS;
-        float backHemi = saturate(backNormalWS.y * 0.5 + 0.5);
         float skyLightEnabled = _BurtGISceneVoxelDirectLightTint.w > 0.5 ? 1.0 : 0.0;
-        float3 analyticSkyTint = lerp(float3(0.015, 0.018, 0.022), float3(0.08, 0.095, 0.12), backHemi);
         float3 ambientSkyTint = BurtGISceneVoxelEvaluateAmbientSH(backNormalWS);
-        float3 skyTint = max(ambientSkyTint, analyticSkyTint) * skyLightEnabled;
+        // Backface hits obey the same real-sky energy contract as front faces.
+        float3 skyTint = ambientSkyTint * skyLightEnabled;
         float3 estimatedEmission = max(storedRadiance.rgb - 0.12, 0.0);
         float3 storedDiffuseRadiance = max(storedRadiance.rgb - estimatedEmission, 0.0);
         float3 boostedDiffuseColor = BurtGISceneVoxelRecoverBoostedDiffuseColor(storedDiffuseRadiance);
@@ -653,13 +667,13 @@ bool BurtGITrySampleSceneVoxelLightingResource(
         mainLightDirection = mainLightDirectionLengthSq > 0.0001 ? mainLightDirection * rsqrt(mainLightDirectionLengthSq) : float3(0.0, 1.0, 0.0);
         float mainLightNdotL = saturate(dot(backNormalWS, mainLightDirection));
         float oneOverPreExposure = max(_BurtGISceneVoxelExposureParams.x, 0.0);
-        float normalBoost = lerp(0.75, 1.2, saturate(dot(backNormalWS, normalize(float3(0.35, 0.75, 0.45))) * 0.5 + 0.5));
         float3 mainLightRadiance = max(_BurtGIMainLightColor.rgb, 0.0) * mainLightNdotL;
         float sceneVoxelLightingType = _BurtGISceneVoxelRadianceCacheParams.y;
         float3 additionalLightRadiance = sceneVoxelLightingType >= 1.5
             ? BurtGISceneVoxelEvaluateAdditionalLights(samplePosition, backNormalWS)
             : 0.0;
-        float3 directLighting = (normalBoost.xxx + mainLightRadiance + additionalLightRadiance) *
+        // Backface relighting must not reintroduce the removed normal-only light source.
+        float3 directLighting = (mainLightRadiance + additionalLightRadiance) *
             (max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.z, 0.0) * oneOverPreExposure);
         const float xgiSecondaryBounceSkyScale = 0.2;
         float3 indirectLighting = skyTint * boostedDiffuseColor *
@@ -670,7 +684,9 @@ bool BurtGITrySampleSceneVoxelLightingResource(
             indirectLighting * storedRadiance.a;
         radiance = max(radiance, lightingRadiance * 0.2);
     }
-    return confidence > 0.001 && dot(radiance, radiance) > 0.0;
+    // Geometry occupancy and lighting validity were checked above. Black and
+    // low-confidence surfaces still stop a ray; confidence only weights energy.
+    return true;
 }
 bool BurtGITrySampleSceneVoxelLightingHit(
     uint clipmapLevel,
@@ -782,7 +798,14 @@ bool BurtGITraceSceneVoxelLighting(float3 worldPosition, float3 directionWS, flo
     float4 baseCenterExtent = _BurtGISceneVoxelCenterExtent;
     float voxelSizeWS = max(baseCenterExtent.w * 2.0 / max((float)volumeSize.x, 1.0), 0.001);
     float3 direction = BurtGISceneVoxelLightingSafeNormalize(directionWS, float3(0.0, 0.0, 1.0));
-    float startDistance = voxelSizeWS * 1.5;
+    // Probe placement chooses voxel centers, not surface points. Keep the
+    // offset inside that voxel: 1.5 cells can jump over an adjacent opaque cell.
+    float startDistance = voxelSizeWS * 0.25;
+    if (maxTraceDistance <= startDistance)
+    {
+        // Do not march backwards when the requested interval is empty.
+        return false;
+    }
     float traceDistance = 0.0;
 
     if (_BurtGISceneVoxelOctreeValid > 0.5 &&
@@ -810,71 +833,94 @@ bool BurtGITraceSceneVoxelLighting(float3 worldPosition, float3 directionWS, flo
         }
     }
 
-    uint maxTraceSteps = min((uint)max(_BurtGISceneVoxelTraceControls.x, 1.0), 64u);
-    float bestConfidence = 0.0;
-    float3 bestRadiance = 0.0;
-    [loop]
-    for (uint stepIndex = 0u; stepIndex < maxTraceSteps; ++stepIndex)
+    // Clip to the bound volume before traversing cells. This Probe kernel is
+    // dispatched separately for each clipmap; all bound textures use this box.
+    float3 boxMin = baseCenterExtent.xyz - baseCenterExtent.www;
+    float3 boxMax = baseCenterExtent.xyz + baseCenterExtent.www;
+    float traceBegin = startDistance;
+    float traceEnd = maxTraceDistance;
+    [unroll]
+    for (uint axis = 0u; axis < 3u; ++axis)
     {
-        float stepT = ((float)stepIndex + 0.5) / max((float)maxTraceSteps, 1.0);
-        float sampleDistance = lerp(startDistance, maxTraceDistance, stepT);
-        float sampleRadius = max(voxelSizeWS, sampleDistance * 0.08);
-        float3 samplePosition = worldPosition + direction * sampleDistance;
-        BurtGISceneVoxelOccupancySample occupancySample = BurtGITrySampleSceneVoxelOccupancyMip(samplePosition, sampleRadius);
-        if (occupancySample.Sampled == 0u)
+        if (abs(direction[axis]) < 0.000001)
         {
-            continue;
+            if (worldPosition[axis] < boxMin[axis] || worldPosition[axis] >= boxMax[axis])
+                return false;
         }
+        else
+        {
+            float axisT0 = (boxMin[axis] - worldPosition[axis]) / direction[axis];
+            float axisT1 = (boxMax[axis] - worldPosition[axis]) / direction[axis];
+            traceBegin = max(traceBegin, min(axisT0, axisT1));
+            traceEnd = min(traceEnd, max(axisT0, axisT1));
+        }
+    }
+    if (traceBegin >= traceEnd)
+        return false;
 
-        uint clipmapLevel = BurtGIResolveSceneVoxelClipmap(samplePosition);
-        float4 sampleCenterExtent = BurtGIProbeClipmapCenterExtent(clipmapLevel);
-        float hitBiasWS = max(sampleCenterExtent.w / 65536.0, 0.0005);
-        float3 hitPosition = samplePosition + direction * hitBiasWS;
+    uint occupancyWidth = 1u;
+    uint occupancyHeight = 1u;
+    uint occupancyDepth = 1u;
+    _BurtGISceneVoxelOccupancyMipReadTexture.GetDimensions(occupancyWidth, occupancyHeight, occupancyDepth);
+    uint3 occupancySize = max(uint3(occupancyWidth, occupancyHeight, occupancyDepth), uint3(1u, 1u, 1u));
+    float3 occupancyCellSize = (baseCenterExtent.w * 2.0) / (float3)occupancySize;
+    float boundaryEpsilon = voxelSizeWS * 0.0001;
+    float sampleDistance = min(traceBegin + boundaryEpsilon, (traceBegin + traceEnd) * 0.5);
+    uint maxTraceSteps = min((uint)max(_BurtGISceneVoxelTraceControls.x, 1.0), 64u);
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < maxTraceSteps && sampleDistance < traceEnd; ++stepIndex)
+    {
+        float3 samplePosition = worldPosition + direction * sampleDistance;
+        float3 uvw = saturate((samplePosition - boxMin) / (baseCenterExtent.w * 2.0));
+        uint3 occupancyCoord = min((uint3)(uvw * (float3)occupancySize), occupancySize - 1u);
+        float4 coarseOccupancy = _BurtGISceneVoxelOccupancyMipReadTexture.Load(int4((int3)occupancyCoord, 0));
+        uint3 voxelCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
+        float geometryOccupancy = _BurtGISceneVoxelGeometryReadTexture.Load(int4((int3)voxelCoord, 0)).a;
+        float sampleRadius = max(voxelSizeWS, sampleDistance * 0.08);
         float3 sampleRadiance = 0.0;
         float sampleConfidence = 0.0;
         uint hitBackface = 0u;
-        if (!BurtGITrySampleSceneVoxelLightingHit(
-                clipmapLevel,
-                hitPosition,
+        if (BurtGITrySampleSceneVoxelLightingHit(
+                0u,
+                samplePosition,
                 direction,
                 sampleRadius,
                 sampleRadiance,
                 sampleConfidence,
                 hitBackface))
         {
-            continue;
-        }
-
-        sampleConfidence *= occupancySample.Occupancy * (1.0 - stepT * 0.35);
-        if (sampleConfidence > 0.02)
-        {
+            BurtGISceneVoxelOccupancySample occupancySample = BurtGITrySampleSceneVoxelOccupancyMip(samplePosition, sampleRadius);
+            // A precise valid geometry hit is authoritative even if the coarse
+            // occupancy sample disagrees. Coarse confidence only weights energy.
+            float occupancyWeight = occupancySample.Sampled != 0u ? occupancySample.Occupancy : 1.0;
+            float distanceWeight = saturate((sampleDistance - startDistance) / (maxTraceDistance - startDistance));
+            sampleConfidence *= occupancyWeight * (1.0 - distanceWeight * 0.35);
             radiance = sampleRadiance * saturate(sampleConfidence);
-            return dot(radiance, radiance) > 0.0;
+            return true;
         }
 
-        if (sampleConfidence > bestConfidence)
+        // Skip an aligned coarse block only when it is empty. Otherwise cross
+        // exactly one voxel boundary, so a finite corner cannot fall between
+        // two fixed-distance samples. Do not increase the configured step cap.
+        bool coarseEmpty = max(coarseOccupancy.x, coarseOccupancy.y) <= 0.001 && geometryOccupancy <= 0.001;
+        float3 traversalCellSize = coarseEmpty ? occupancyCellSize : voxelSizeWS.xxx;
+        float3 traversalCell = floor((samplePosition - boxMin) / traversalCellSize);
+        float3 boundary = boxMin + (traversalCell + step(0.0, direction)) * traversalCellSize;
+        float nextDistance = traceEnd;
+        [unroll]
+        for (uint boundaryAxis = 0u; boundaryAxis < 3u; ++boundaryAxis)
         {
-            bestConfidence = sampleConfidence;
-            bestRadiance = sampleRadiance;
-            if (bestConfidence > 0.75)
-            {
-                break;
-            }
+            if (abs(direction[boundaryAxis]) >= 0.000001)
+                nextDistance = min(nextDistance, (boundary[boundaryAxis] - worldPosition[boundaryAxis]) / direction[boundaryAxis]);
         }
+        sampleDistance = max(nextDistance + boundaryEpsilon, sampleDistance + boundaryEpsilon);
     }
-
-    if (bestConfidence <= 0.001)
-    {
-        return false;
-    }
-
-    radiance = bestRadiance * saturate(bestConfidence);
-    return dot(radiance, radiance) > 0.0;
+    return false;
 }
 float BurtGITraceSceneVoxelDirectionalVisibility(float3 worldPosition, float3 direction, float maxDistance)
 {
     float4 octreeCenterExtent = _BurtGISceneVoxelCenterExtent;
-    float octreeVoxelSizeWS = max(octreeCenterExtent.w / 32.0, 0.001);
+    float octreeVoxelSizeWS = max(octreeCenterExtent.w * 2.0 / BurtGISceneVoxelBoundGeometryResolution(), 0.001);
     float3 octreeDirection = BurtGISceneVoxelLightingSafeNormalize(direction, float3(0.0, 0.0, 1.0));
     float octreeHitDistance = 0.0;
     if (BurtGIRayTraceSceneVoxelOctree(
@@ -970,7 +1016,7 @@ float3 BurtGISceneVoxelEvaluateAdditionalLights(float3 worldPosition, float3 nor
         float lightVisibility = 1.0;
         if (_BurtGISceneVoxelRadianceCacheParams.w > 0.5 && lightType >= 0.5)
         {
-            float normalBias = min(max(_BurtGISceneVoxelCenterExtent.w / 64.0, 0.01), 1.0);
+            float normalBias = min(max(_BurtGISceneVoxelCenterExtent.w / BurtGISceneVoxelBoundGeometryResolution(), 0.01), 1.0);
             lightVisibility = BurtGITraceSceneVoxelDirectionalVisibility(
                 worldPosition + normalWS * normalBias,
                 lightDirection,
@@ -1028,7 +1074,12 @@ void ProbeTraceRadiance(
     float3 tracedRadiance = 0.0;
     float maxTraceDistance = max(centerExtent.w * 2.0, 1.0);
     bool tracedSceneVoxel = BurtGITraceSceneVoxelLighting(worldPosition, rayDirectionWS, maxTraceDistance, tracedRadiance);
-    float3 ambientIrradiance = max(BurtGISceneVoxelEvaluateAmbientSH(rayDirectionWS), float3(0.015, 0.018, 0.022));
+    // A miss only receives the configured sky input. The old nonzero blue
+    // floor lit Scene Voxel Probes even with skylight disabled and zero SH,
+    // so deferred Probe GI added energy absent from the screen-probe result.
+    float3 ambientIrradiance = _BurtGISceneVoxelDirectLightTint.w > 0.5
+        ? max(BurtGISceneVoxelEvaluateAmbientSH(rayDirectionWS), 0.0)
+        : 0.0;
     float3 directIrradiance = max(BurtGISceneVoxelEvaluateAdditionalLights(worldPosition, rayDirectionWS), 0.0);
     float3 fallbackRadiance = max(
         ambientIrradiance * max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) +

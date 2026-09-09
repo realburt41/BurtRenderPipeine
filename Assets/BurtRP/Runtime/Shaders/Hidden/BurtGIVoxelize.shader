@@ -53,6 +53,9 @@ Shader "Hidden/Burt Render Pipeline/GI Voxelize"
             RWTexture3D<float4> _BurtGISceneVoxelRadianceTexture : register(u1);
             RWTexture3D<float4> _BurtGISceneVoxelGeometryTexture : register(u2);
             RWTexture3D<float4> _BurtGISceneVoxelLightingTexture : register(u3);
+            RWTexture3D<uint> _BurtGIVoxelizeOwnerTexture : register(u4);
+            uint _BurtGIVoxelizePrimitiveBase;
+            int _BurtGIVoxelizeResolvePhase;
 
             struct Attributes
             {
@@ -74,6 +77,7 @@ Shader "Hidden/Burt Render Pipeline/GI Voxelize"
                 float3 positionWS : TEXCOORD0;
                 float3 normalWS : TEXCOORD1;
                 float2 uv : TEXCOORD2;
+                nointerpolation uint ownerKey : TEXCOORD3;
             };
 
             VoxelVertex BurtGIVoxelizeVertex(Attributes input)
@@ -102,6 +106,7 @@ Shader "Hidden/Burt Render Pipeline/GI Voxelize"
             void BurtGIVoxelizeEmitTriangle(
                 VoxelVertex input[3],
                 uint axis,
+                uint primitiveID,
                 inout TriangleStream<VoxelFragment> stream)
             {
                 [unroll]
@@ -112,22 +117,29 @@ Shader "Hidden/Burt Render Pipeline/GI Voxelize"
                     output.positionWS = input[vertexIndex].positionWS;
                     output.normalWS = input[vertexIndex].normalWS;
                     output.uv = input[vertexIndex].uv;
+                    output.ownerKey = (_BurtGIVoxelizePrimitiveBase + primitiveID) * 3u + axis;
                     stream.Append(output);
                 }
                 stream.RestartStrip();
             }
 
             [maxvertexcount(9)]
-            void BurtGIVoxelizeGeometry(triangle VoxelVertex input[3], inout TriangleStream<VoxelFragment> stream)
+            void BurtGIVoxelizeGeometry(triangle VoxelVertex input[3], uint primitiveID : SV_PrimitiveID, inout TriangleStream<VoxelFragment> stream)
             {
-                BurtGIVoxelizeEmitTriangle(input, 0u, stream);
-                BurtGIVoxelizeEmitTriangle(input, 1u, stream);
-                BurtGIVoxelizeEmitTriangle(input, 2u, stream);
+                BurtGIVoxelizeEmitTriangle(input, 0u, primitiveID, stream);
+                BurtGIVoxelizeEmitTriangle(input, 1u, primitiveID, stream);
+                BurtGIVoxelizeEmitTriangle(input, 2u, primitiveID, stream);
             }
 
             float4 BurtGIVoxelizeFragment(VoxelFragment input) : SV_Target
             {
                 float2 baseUV = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+                // Derivatives must be evaluated before UAV-dependent control
+                // flow on D3D11. Explicit gradients also keep texture LOD equal
+                // between the selection and resolve draw sequences.
+                float2 baseDx = ddx(baseUV), baseDy = ddy(baseUV);
+                float2 emissionUV = input.uv * _EmissionMap_ST.xy + _EmissionMap_ST.zw;
+                float2 emissionDx = ddx(emissionUV), emissionDy = ddy(emissionUV);
                 float4 baseSample = tex2D(_BaseMap, baseUV) * _BaseColor;
                 if (_AlphaClip > 0.5)
                 {
@@ -147,10 +159,21 @@ Shader "Hidden/Burt Render Pipeline/GI Voxelize"
                 _BurtGISceneVoxelRadianceTexture.GetDimensions(width, height, depth);
                 uint3 volumeSize = max(uint3(width, height, depth), 1u);
                 uint3 voxelCoord = min((uint3)(uvw * (float3)volumeSize), volumeSize - 1u);
-                float metallic = saturate(_Metallic * tex2D(_MaskMap, baseUV).r);
+                // All candidate fragments first elect a deterministic owner.
+                // A second draw sequence writes only that triangle/projection.
+                // At one sample per pixel and matching voxel/raster resolution,
+                // a triangle/projection has at most one fragment in this cell.
+                // This avoids racing independent float4 material/normal writes,
+                // and preserves HDR values without integer color quantization.
+                if (_BurtGIVoxelizeResolvePhase == 0)
+                {
+                    InterlockedMin(_BurtGIVoxelizeOwnerTexture[voxelCoord], input.ownerKey);
+                    return 0.0;
+                }
+                if (_BurtGIVoxelizeOwnerTexture[voxelCoord] != input.ownerKey) discard;
+                float metallic = saturate(_Metallic * tex2Dgrad(_MaskMap, baseUV, baseDx, baseDy).r);
                 float3 albedo = max(baseSample.rgb * (1.0 - metallic), 0.0);
-                float2 emissionUV = input.uv * _EmissionMap_ST.xy + _EmissionMap_ST.zw;
-                float3 emission = max(tex2D(_EmissionMap, emissionUV).rgb * _EmissionColor.rgb, 0.0);
+                float3 emission = max(tex2Dgrad(_EmissionMap, emissionUV, emissionDx, emissionDy).rgb * _EmissionColor.rgb, 0.0);
                 emission = max(emission, albedo * max(_BurtGIVoxelizeEmissionMode, 0.0));
                 float3 boostedAlbedo = min(saturate(pow(albedo, max(_BurtGISceneVoxelLightingParams.x, 0.001))), 0.99);
                 float3 normalWS = normalize(input.normalWS);
