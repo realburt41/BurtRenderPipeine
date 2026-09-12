@@ -421,6 +421,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var descriptor = new RenderTextureDescriptor(width, height, GraphicsFormat.None, SelectCameraDepthStencilFormat()); // 显式创建 depth/stencil RT，避免 RenderTextureFormat.Depth 被平台回落成无 stencil 的 DepthAuto。
 
+            // Match XRender's depth allocation: an S8 attachment alone does not
+            // request a shader-readable stencil view for RenderTextureSubElement.Stencil.
+            descriptor.stencilFormat = SystemInfo.IsFormatSupported(GraphicsFormat.R8_UInt, FormatUsage.StencilSampling)
+                ? GraphicsFormat.R8_UInt
+                : GraphicsFormat.None;
+
             descriptor.msaaSamples = 1; // 当前阶段先关闭 MSAA，避免深度 RT 和相机颜色目标采样数不匹配。
 
             descriptor.useMipMap = false; // 深度缓冲不需要 mipmap，关闭后可以减少无意义资源开销。

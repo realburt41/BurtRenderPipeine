@@ -1079,6 +1079,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             #include "UnityCG.cginc"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelIds.hlsl"
 
+            #include "Assets/BurtRP/Runtime/TAA/BurtTemporalAABlend.hlsl"
+
             Texture2D _BurtPostProcessSourceTexture;
             Texture2D _BurtTAAHistoryTexture;
             sampler2D _BurtTAACurrentDepthTexture;
@@ -1251,8 +1253,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float3 BurtTaaFromPerceptualSpace(float3 color)
             {
-                color.x = min(color.x, 0.999);
-                return color * rcp(max(1.0 - color.x, 1e-4));
+                // Match XRender TSRCommon and the native compute resolve.
+                // Clamping perceptual Y at .999 imposes a different HDR ceiling.
+                return color * rcp(max(1.0 - color.x, 6.103515625e-5));
             }
 
             float3 BurtTaaToWorkingPerceptualSpace(float3 color)
@@ -1262,7 +1265,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             float3 BurtTaaFromWorkingPerceptualSpace(float3 color)
             {
-                return max(BurtTaaFromWorkingSpace(BurtTaaFromPerceptualSpace(color)), 0.0);
+                return BurtTaaFromWorkingSpace(BurtTaaFromPerceptualSpace(color));
             }
 
             float BurtTaaWorkingLuma(float3 workingColor)
@@ -1486,6 +1489,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float3 neighborhoodSum = 0.0;
                 float3 neighborhoodSumSq = 0.0;
                 float3 currentFilteredWorking = 0.0;
+                float2 chromaMin = float2(65504.0, 65504.0);
+                float2 chromaMax = -chromaMin;
                 float2 texel = _BurtTAATexelSize.xy;
 
                 [unroll]
@@ -1496,7 +1501,10 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                     {
                         float2 sampleUv = saturate(uv + texel * float2(x, y));
                         float3 sampleColor = BurtSampleCurrent(sampleUv);
-                        float3 sampleWorking = BurtTaaToWorkingPerceptualSpace(sampleColor);
+                        float3 sampleUncompressed = BurtTaaToWorkingSpace(sampleColor);
+                        float3 sampleWorking = BurtTaaToPerceptualSpace(sampleUncompressed);
+                        chromaMin = min(chromaMin, sampleUncompressed.yz);
+                        chromaMax = max(chromaMax, sampleUncompressed.yz);
                         float sampleCurrentWeight = BurtTaaCurrentSampleWeight(x, y);
                         neighborhoodSum += sampleWorking;
                         neighborhoodSumSq += sampleWorking * sampleWorking;
@@ -1529,7 +1537,10 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float geometryBreak = saturate(max(metadataBreak, max(historyBreak, outOfBoundsBreak)));
                 float motionPixels = length(velocityData * _BurtTAATexelSize.zw);
                 float surfaceWeight = BurtTaaValidSurfaceWeight(closestDepth);
-                float stencilResponsive = ((stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0) * surfaceWeight;
+                // A transparent surface can cover the sky without writing
+                // depth. XRender/compute trust its depth-tested stencil bit;
+                // opaque background depth must not disable responsiveness.
+                float stencilResponsive = (stencil & BURT_DEFERRED_STENCIL_RESPONSIVE_AA_BIT) != 0u ? 1.0 : 0.0;
                 float responsiveStrength = stencilResponsive;
                 float responsiveMask = responsiveStrength * finalHistoryAvailability;
 
@@ -1556,6 +1567,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float3 clampUnitVector = abs(historyOffset) / boxExtents;
                 float clampUnit = max(max(clampUnitVector.x, clampUnitVector.y), clampUnitVector.z);
                 float3 clippedHistoryWorking = clampUnit > 1.0 ? boxCenter + historyOffset / clampUnit : historyWorking;
+                clippedHistoryWorking = BurtTaaConstrainHistoryChroma(clippedHistoryWorking, chromaMin, chromaMax);
                 float velocityWeight = finalHistoryAvailability;
                 float velocityBreak = 0.0;
                 float clampBreak = saturate((clampUnit - 1.0) * 0.35);
@@ -1564,6 +1576,7 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float historyLuma = BurtTaaWorkingLuma(historyWorking);
                 float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 6.103515625e-5)));
                 float xrenderBaseBlend = max(0.05, lumaContrast);
+                xrenderBaseBlend = BurtTaaMotionAwareCurrentBlend(xrenderBaseBlend, motionPixels);
                 float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
                 currentBlend = lerp(currentBlend, 0.25, responsiveMask);
                 currentBlend = saturate(currentBlend);
@@ -1571,7 +1584,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
                 float3 resolvedWorking = lerp(clippedHistoryWorking, currentFilteredWorking, currentBlend);
                 resolvedWorking = lerp(currentFilteredWorking, resolvedWorking, finalHistoryAvailability);
-                float3 resolved = BurtTaaFromWorkingPerceptualSpace(max(resolvedWorking, 0.0));
+                // Working-space Co/Cg are signed for saturated HDR colors.
+                // Sanitize only after converting back to RGB, as XRender does.
+                float3 resolved = BurtTaaFromWorkingPerceptualSpace(resolvedWorking);
                 // XRender returns/stores raw scene color while native TSR history
                 // is unavailable. Keep the raster fallback identical to compute.
                 resolved = finalHistoryAvailability > 0.0 ? resolved : current;

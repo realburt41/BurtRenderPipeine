@@ -187,7 +187,8 @@ float BurtEvaluateMaterialPassOpacity(float Alpha, float2 BaseMapUV, float3 Posi
     #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE
         float AlphaMap = SAMPLE_TEXTURE2D_BIAS(_AlphaMap, sampler_LinearRepeat, BaseMapUV, -1.0f).r;
     #else
-        float AlphaMap = SAMPLE_TEXTURE2D(_AlphaMap, sampler_LinearRepeat, BaseMapUV).r;
+        // XRender's material sampling includes the native-resolution -0.5 mip bias.
+        float AlphaMap = SAMPLE_TEXTURE2D_BIAS(_AlphaMap, sampler_LinearRepeat, BaseMapUV, -0.5f).r;
     #endif
     float DistanceToCamera = distance(_WorldSpaceCameraPos.xyz, PositionWS);
     #if BURT_MATERIAL_COMPILE_GRASS_FOLIAGE

@@ -229,6 +229,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
         private static int BloomGaussianKernelCacheNextIndex;
 
+        // Native TAA reconstructs at the unjittered pixel center. Compensate
+        // for the pixel-shifted kernel's wider effective support with a narrower
+        // variance; keeping XRender's 0.22 here softens high-contrast detail.
+        private const float NativeTemporalAAReconstructionVariance = 0.16f;
+
         private static readonly Vector2Int[] TemporalAACurrentSampleOffsets =
         {
             new Vector2Int(0, 0),
@@ -2321,7 +2326,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalVector(TemporalAAUpscaleTexelSizeId, new Vector4(1f / width, 1f / height, width, height));
             var temporalAAUpscaleParams = new Vector4(cameraTargetWidth, cameraTargetHeight, cameraTargetWidth / (float)width, cameraTargetHeight / (float)height);
             cmd.SetGlobalVector(TemporalAAUpscaleParamsId, temporalAAUpscaleParams);
-            SetTemporalAAGlobals(cmd, temporalAA, width, height, historyValid);
+            SetTemporalAAGlobals(cmd, temporalAA, width, height, historyValid, useTemporalAAUpscale);
 
             cmd.SetRenderTarget(currentDepth);
             SetTemporalAAViewport(cmd, width, height);
@@ -2538,7 +2543,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     width,
                     height,
                     width,
-                    height)))
+                    height,
+                    useTemporalAAUpscale)))
             {
                 cmd.SetRenderTarget(resolveTarget);
                 SetTemporalAAViewport(cmd, width, height);
@@ -2571,6 +2577,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                 }
             }
 
+#if UNITY_EDITOR
+            // Read the previous depth before this frame overwrites the single
+            // persistent depth history; end-of-pass capture would be current depth.
+            BurtTemporalAADiagnostics.Capture?.Invoke(cmd, camera, temporalAA,
+                "history_depth", new RenderTargetIdentifier(histories.Depth), histories.Depth.descriptor);
+            BurtTemporalAADiagnostics.Capture?.Invoke(cmd, camera, temporalAA,
+                "history_color", new RenderTargetIdentifier(histories.PreviousColor), histories.PreviousColor.descriptor);
+            if (!useTemporalAAUpscale)
+                BurtTemporalAADiagnostics.Capture?.Invoke(cmd, camera, temporalAA,
+                    "resolved", resolveTarget, resolveDescriptor);
+#endif
             cmd.SetRenderTarget(histories.Depth);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, Mathf.Max(1, histories.Depth.width), Mathf.Max(1, histories.Depth.height));
             // XRender seeds native TSR's first depth history from scene depth
@@ -2616,6 +2633,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalFloat(ShadingDebugEnabledId, BurtShadingDebugSettings.IsDebugging ? 1f : 0f);
             cmd.SetGlobalFloat(TemporalAAHasDilatedHistoryRejectionId, 0f);
 
+#if UNITY_EDITOR
+            var diagnosticCapture = BurtTemporalAADiagnostics.Capture;
+            if (diagnosticCapture != null)
+            {
+                diagnosticCapture(cmd, camera, temporalAA, "source", cameraColorTarget.Identifier, colorDescriptor);
+                diagnosticCapture(cmd, camera, temporalAA, "velocity", dilatedVelocity, dilatedVelocityDescriptor);
+                diagnosticCapture(cmd, camera, temporalAA, "raw_velocity", velocity, velocityDescriptor);
+                diagnosticCapture(cmd, camera, temporalAA, "stencil", stencilMask, scalarDescriptor);
+                diagnosticCapture(cmd, camera, temporalAA, "validity", parallaxRejection, parallaxDescriptor);
+                diagnosticCapture(cmd, camera, temporalAA, "depth", currentDepth, scalarDescriptor);
+                diagnosticCapture(cmd, camera, temporalAA, "closest_depth", closestDepth, closestDepthDescriptor);
+                if (useTemporalAAComputeDilateDecimate)
+                    diagnosticCapture(cmd, camera, temporalAA, "dilate_mask", dilateMask, dilateMaskDescriptor);
+            }
+#endif
+
             if (useTemporalAADebugTexture)
             {
                 cmd.ReleaseTemporaryRT(TemporalAADebugTextureId);
@@ -2654,7 +2687,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             return true;
         }
 
-        private static void SetTemporalAAGlobals(CommandBuffer cmd, BurtTemporalAARequestState temporalAA, int width, int height, bool historyValid)
+        private static void SetTemporalAAGlobals(CommandBuffer cmd, BurtTemporalAARequestState temporalAA, int width, int height, bool historyValid, bool useTemporalAAUpscale)
         {
             cmd.SetGlobalMatrix(TemporalAAPreviousViewProjectionId, temporalAA.PreviousViewProjectionMatrix);
             cmd.SetGlobalMatrix(TemporalAAPreviousNonJitteredViewProjectionId, temporalAA.PreviousNonJitteredViewProjectionMatrix);
@@ -2673,7 +2706,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetGlobalVector(TemporalAAEdgeParamsId, new Vector4(temporalAA.Settings.MotionEdgeResponsiveStrength, temporalAA.Settings.DepthEdgeResponsiveStrength, 0f, 0f));
             cmd.SetGlobalFloat(TemporalAAHistoryExposureCorrectionId, temporalAA.HistoryExposureCorrection);
 
-            ComputeTemporalAACurrentSampleWeights(temporalAA.Jitter, out var weights0, out var weights1, out var weights2);
+            ComputeTemporalAACurrentSampleWeights(
+                useTemporalAAUpscale ? temporalAA.Jitter : -temporalAA.JitterPixels,
+                out var weights0, out var weights1, out var weights2,
+                useTemporalAAUpscale ? 0.22f : NativeTemporalAAReconstructionVariance);
             cmd.SetGlobalVector(TemporalAACurrentSampleWeights0Id, weights0);
             cmd.SetGlobalVector(TemporalAACurrentSampleWeights1Id, weights1);
             cmd.SetGlobalVector(TemporalAACurrentSampleWeights2Id, weights2);
@@ -2843,8 +2879,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             int width,
             int height,
             int stencilWidth,
-            int stencilHeight)
+            int stencilHeight,
+            bool useTemporalAAUpscale)
         {
+#if UNITY_EDITOR
+            if (!useTemporalAAUpscale && BurtTemporalAADiagnostics.ForceNativeRasterResolve)
+                return false;
+#endif
             if (cmd == null || !SystemInfo.supportsComputeShaders)
             {
                 return false;
@@ -2870,8 +2911,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetComputeVectorParam(shader, TemporalAAParamsId, new Vector4(0f, 0f, historyValid ? 1f : 0f, temporalAA != null ? temporalAA.FrameIndex : 0f));
             cmd.SetComputeFloatParam(shader, TemporalAAHistoryExposureCorrectionId, temporalAA != null ? temporalAA.HistoryExposureCorrection : 1f);
 
-            var jitter = temporalAA != null ? temporalAA.Jitter : Vector2.zero;
-            ComputeTemporalAACurrentSampleWeights(jitter, out var weights0, out var weights1, out var weights2);
+            var jitter = temporalAA != null
+                ? (useTemporalAAUpscale ? temporalAA.Jitter : -temporalAA.JitterPixels)
+                : Vector2.zero;
+            ComputeTemporalAACurrentSampleWeights(jitter, out var weights0, out var weights1, out var weights2,
+                useTemporalAAUpscale ? 0.22f : NativeTemporalAAReconstructionVariance);
             cmd.SetComputeVectorParam(shader, TemporalAACurrentSampleWeights0Id, weights0);
             cmd.SetComputeVectorParam(shader, TemporalAACurrentSampleWeights1Id, weights1);
             cmd.SetComputeVectorParam(shader, TemporalAACurrentSampleWeights2Id, weights2);
@@ -3076,14 +3120,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             return true;
         }
 
-        private static void ComputeTemporalAACurrentSampleWeights(Vector2 jitter, out Vector4 weights0, out Vector4 weights1, out Vector4 weights2)
+        private static void ComputeTemporalAACurrentSampleWeights(Vector2 jitter, out Vector4 weights0, out Vector4 weights1, out Vector4 weights2, float variance = 0.22f)
         {
             var totalWeight = 0f;
             for (var i = 0; i < TemporalAACurrentSampleWeights.Length; i++)
             {
                 var x = TemporalAACurrentSampleOffsets[i].x + jitter.x;
                 var y = TemporalAACurrentSampleOffsets[i].y + jitter.y;
-                var weight = Mathf.Exp((-0.5f / 0.22f) * (x * x + y * y));
+                var weight = Mathf.Exp((-0.5f / variance) * (x * x + y * y));
                 TemporalAACurrentSampleWeights[i] = weight;
                 totalWeight += weight;
             }

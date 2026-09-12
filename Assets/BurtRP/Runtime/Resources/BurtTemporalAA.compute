@@ -12,7 +12,12 @@
 #pragma kernel UpdateTAAUHistoryDebugAACS BURT_TAAU_FINAL_BLEND_DEBUG
 #pragma kernel ResolveTAAUHistoryAACS
 
+// Compute shaders do not implicitly include Unity's platform depth/UV macros.
+// Without these, D3D11 takes the forward-Z branch and dilates background depth
+// over foreground motion; UV reprojection also uses the wrong origin.
+#include "HLSLSupport.cginc"
 #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtShadingModelIds.hlsl"
+#include "Assets/BurtRP/Runtime/TAA/BurtTemporalAABlend.hlsl"
 
 #define BURT_TAA_USE_COUNT_QUANTIZATION 255.0
 #define BURT_TAA_INV_USE_COUNT_QUANTIZATION 0.00392156862745098
@@ -749,6 +754,8 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
     float3 neighborhoodSum = 0.0;
     float3 neighborhoodSumSq = 0.0;
     float3 currentFilteredWorking = 0.0;
+    float2 chromaMin = float2(65504.0, 65504.0);
+    float2 chromaMax = -chromaMin;
 
     [unroll]
     for (int y = -1; y <= 1; y++)
@@ -756,7 +763,10 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
         [unroll]
         for (int x = -1; x <= 1; x++)
         {
-            float3 sampleWorking = BurtTaaToWorkingPerceptualSpace(BurtTaaLoadCurrentRaw(pixel + int2(x, y)).rgb);
+            float3 sampleUncompressed = BurtTaaToWorkingSpace(BurtTaaLoadCurrentRaw(pixel + int2(x, y)).rgb);
+            float3 sampleWorking = BurtTaaToPerceptualSpace(sampleUncompressed);
+            chromaMin = min(chromaMin, sampleUncompressed.yz);
+            chromaMax = max(chromaMax, sampleUncompressed.yz);
             float sampleCurrentWeight = BurtTaaCurrentSampleWeight(x, y);
             neighborhoodSum += sampleWorking;
             neighborhoodSumSq += sampleWorking * sampleWorking;
@@ -804,6 +814,7 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
     float3 clampUnitVector = abs(historyOffset) / boxExtents;
     float clampUnit = max(max(clampUnitVector.x, clampUnitVector.y), clampUnitVector.z);
     float3 clippedHistoryWorking = clampUnit > 1.0 ? boxCenter + historyOffset / clampUnit : historyWorking;
+    clippedHistoryWorking = BurtTaaConstrainHistoryChroma(clippedHistoryWorking, chromaMin, chromaMax);
     float minBoundLuma = clampMin.x;
     float maxBoundLuma = clampMax.x;
     float historyLuma = historyWorking.x;
@@ -812,6 +823,8 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
             1.0 + max(maxBoundLuma - minBoundLuma, 0.0) /
             max(historyLuma, 6.103515625e-5)));
     float xrenderBaseBlend = max(0.05, lumaContrast);
+    float motionPixels = length(velocityData * _BurtTAATexelSize.zw);
+    xrenderBaseBlend = BurtTaaMotionAwareCurrentBlend(xrenderBaseBlend, motionPixels);
     float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
     // Match XRender's explicit responsive branch: responsive pixels use a
     // fixed 25% current-frame weight while their history UV remains in bounds.

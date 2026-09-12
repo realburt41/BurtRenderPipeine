@@ -140,7 +140,7 @@ float4 FragShadow(ShadowVaryings input) : SV_Target
         #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
             float alpha = SAMPLE_TEXTURE2D_BIAS(_AlphaMap, sampler_LinearRepeat, input.BaseMapUV, -1.0f).r;
         #else
-            float alpha = SAMPLE_TEXTURE2D(_AlphaMap, sampler_LinearRepeat, input.BaseMapUV).r;
+            float alpha = SAMPLE_TEXTURE2D_BIAS(_AlphaMap, sampler_LinearRepeat, input.BaseMapUV, -0.5f).r;
         #endif
         BurtApplyAlphaClip(alpha, _AlphaClip, _Cutoff);
     #else

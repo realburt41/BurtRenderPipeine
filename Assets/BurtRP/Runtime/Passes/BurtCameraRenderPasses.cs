@@ -3351,20 +3351,30 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
             // XRender never jitters the native Unity Camera; it keeps Halton jitter in its own
             // per-camera constants, so editor gizmos read the stable native projection. BurtRP
             // temporarily jitters Camera.projectionMatrix for regular scene draws, therefore
-            // expose the non-jittered projection while Unity records this editor-only draw and
-            // restore the jittered camera immediately afterwards for the pending SRP submit.
+            // keep the non-jittered projection alive until Unity submits this editor-only draw.
+            // DrawGizmos defers reading native camera state; restoring before Submit lets its
+            // screen-space icons inherit Halton jitter even if draw matrices were overridden.
+            // World-space wire gizmos also need stable GPU matrices; binding the camera
+            // attachments above restored the jittered matrices used by regular scene draws.
             var savedProjectionMatrix = camera.projectionMatrix;
             var savedNonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
             try
             {
                 camera.projectionMatrix = temporalAA.NonJitteredProjectionMatrix;
                 camera.nonJitteredProjectionMatrix = temporalAA.NonJitteredProjectionMatrix;
+                var cmd = context.AcquireCommandBuffer(Name);
+                cmd.SetViewProjectionMatrices(temporalAA.ViewMatrix, temporalAA.NonJitteredProjectionMatrix);
+                context.FlushCommandBuffer();
                 context.ScriptableContext.DrawGizmos(camera, GizmoSubset.PostImageEffects);
+                context.ScriptableContext.Submit();
             }
             finally
             {
                 camera.nonJitteredProjectionMatrix = savedNonJitteredProjectionMatrix;
                 camera.projectionMatrix = savedProjectionMatrix;
+                var cmd = context.AcquireCommandBuffer(Name);
+                BurtDrawingSettingsUtility.RestoreCameraMatricesForMainDraw(context, cmd);
+                context.FlushCommandBuffer();
             }
 #endif
         }

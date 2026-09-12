@@ -100,7 +100,7 @@ float BurtMotionVectorEvaluateOpacity(float alpha, float2 baseMapUV, float3 posi
         // bias can discard motion on pixels that still contribute color/depth.
         float alphaMap = tex2Dbias(_AlphaMap, float4(baseMapUV, 0.0f, -1.0f)).r;
     #else
-        float alphaMap = tex2D(_AlphaMap, baseMapUV).r;
+        float alphaMap = tex2Dbias(_AlphaMap, float4(baseMapUV, 0.0f, -0.5f)).r;
     #endif
     float distanceToCamera = distance(_WorldSpaceCameraPos.xyz, positionWS);
     #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
@@ -220,18 +220,13 @@ MotionVectorVaryings VertMotionVector(MotionVectorAttributes input)
 
     MotionVectorVaryings output;
     // A depth-equal GI receiver draw must reproduce GBuffer raster depth exactly:
-    // same object-to-clip operation and no motion-vector depth bias.
+    // use the same object-to-clip operation as its visible GBuffer pass.
     output.PositionCS = _BurtGIProbeReceiverMotion > 0.5f
         ? UnityObjectToClipPos(receiverRasterPositionOS)
         : mul(_BurtTAACurrentViewProjection, currentWorld);
-    if (_BurtGIProbeReceiverMotion < 0.5f)
-    {
-#if defined(UNITY_REVERSED_Z)
-    output.PositionCS.z -= unity_MotionVectorsParams.z * output.PositionCS.w;
-#else
-    output.PositionCS.z += unity_MotionVectorsParams.z * output.PositionCS.w;
-#endif
-    }
+    // Opaque motion passes use ZTest Equal against the visible depth. Applying
+    // Unity's motion-vector depth bias here changes that depth and rejects the
+    // very surface whose motion we need (notably forward-only Unlit props).
 
     output.CurrentClip = output.PositionCS;
     output.CurrentClipNoJitter = mul(_BurtTAACurrentNonJitteredViewProjection, currentWorld);

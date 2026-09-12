@@ -89,7 +89,7 @@ float4 FragDepth(DepthVaryings input) : SV_Target
         #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
             float alphaMap = SAMPLE_TEXTURE2D_BIAS(_AlphaMap, sampler_LinearRepeat, input.BaseMapUV, -1.0f).r;
         #else
-            float alphaMap = SAMPLE_TEXTURE2D(_AlphaMap, sampler_LinearRepeat, input.BaseMapUV).r;
+            float alphaMap = SAMPLE_TEXTURE2D_BIAS(_AlphaMap, sampler_LinearRepeat, input.BaseMapUV, -0.5f).r;
         #endif
         float distanceToCamera = distance(_WorldSpaceCameraPos.xyz, input.PositionWS);
         #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
