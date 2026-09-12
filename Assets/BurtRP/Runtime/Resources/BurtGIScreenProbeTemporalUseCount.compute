@@ -85,6 +85,10 @@ Texture2D<float> _BurtGIScreenProbeHistoryTraceHitTexture;
 Texture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
 Texture2D<float4> _BurtGIScreenProbeHistoryTraceRadianceTexture;
 Texture2D<float4> _BurtGIScreenProbeSceneVelocityTexture;
+// Native-resolution, depth-tested current-raster UV -> previous-raster UV.
+// Unlike the legacy coarse velocity field, this has no grid-center origin.
+Texture2D<float4> _BurtGIScreenProbeReceiverVelocityTexture;
+float4 _BurtGIScreenProbeReceiverVelocityParams; // xy=size, z=owned/available.
 #include "BurtGIScreenProbeAdaptiveData.hlsl"
 StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
 StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
@@ -154,6 +158,8 @@ float4 _BurtGISceneVoxelClipmapCenterExtent[6];
 uint _BurtGISceneVoxelClipmapValidMask;
 float4 _ZBufferParams;
 float4 _BurtDeferredCameraWorldPosition;
+// Unit world-space forward, bound per camera for perspective/orthographic eye depth.
+float4 _BurtGIScreenProbeTemporalCameraForward;
 float4x4 _BurtDeferredInverseViewProjectionMatrix;
 float4x4 _BurtGIScreenProbeViewProjectionMatrix;
 float4x4 _BurtGIPreviousViewProjectionMatrix;
@@ -510,26 +516,36 @@ float BurtGISampleScreenProbeUseCountHistoryWeight(float2 historyUV)
 }
 bool BurtGIResolveScreenProbeHistoryUV(uint2 probeCoord, uint2 gridSize, float3 positionWS, out float2 historyUV, out float projectedRawDepth)
 {
-    if (!BurtGIScreenProbeProjectPreviousPositionWS(positionWS, historyUV, projectedRawDepth))
-    {
-        return false;
-    }
+    bool projectedFromWorldPosition = BurtGIScreenProbeProjectPreviousPositionWS(positionWS, historyUV, projectedRawDepth);
 
-    uint2 velocitySize = max((uint2)_BurtGIScreenProbeUseCountParams.xy, uint2(1u, 1u));
-    uint2 velocityCoord = min((uint2)floor(saturate((float2(probeCoord) + 0.5f) / (float2)gridSize) * (float2)velocitySize), velocitySize - 1u);
-    float4 sceneVelocity = _BurtGIScreenProbeSceneVelocityTexture.Load(int3(velocityCoord, 0));
-    if (sceneVelocity.w > 0.5f)
+    if (_BurtGIScreenProbeReceiverVelocityParams.z > 0.5f)
     {
-        float2 velocityHistoryUV = saturate((float2(probeCoord) + 0.5f) / (float2)gridSize) - sceneVelocity.xy;
-        if (any(velocityHistoryUV < 0.0f) || any(velocityHistoryUV > 1.0f))
+        float4 currentClip = mul(_BurtGIScreenProbeViewProjectionMatrix, float4(positionWS, 1.0f));
+        if (currentClip.w <= 0.00001f)
         {
             return false;
         }
-
-        historyUV = velocityHistoryUV;
+        float2 currentUV = BurtGIScreenProbeClipToScreenUV(currentClip.xy / currentClip.w);
+        if (any(currentUV < 0.0f) || any(currentUV > 1.0f))
+        {
+            return false;
+        }
+        uint2 velocitySize = max((uint2)_BurtGIScreenProbeReceiverVelocityParams.xy, uint2(1u, 1u));
+        uint2 velocityCoord = min((uint2)floor(currentUV * (float2)velocitySize), velocitySize - 1u);
+        float4 sceneVelocity = _BurtGIScreenProbeReceiverVelocityTexture.Load(int3(velocityCoord, 0));
+        if (sceneVelocity.w > 0.5f && sceneVelocity.z > 0.5f)
+        {
+            float2 velocityHistoryUV = currentUV - sceneVelocity.xy;
+            if (any(velocityHistoryUV < 0.0f) || any(velocityHistoryUV > 1.0f))
+            {
+                return false;
+            }
+            historyUV = velocityHistoryUV;
+            return true;
+        }
     }
 
-    return true;
+    return projectedFromWorldPosition;
 }
 void BurtGIApplyScreenProbeTemporal(
     uint2 probeCoord,
@@ -750,10 +766,9 @@ void ScreenProbeDirectionalTemporalCS(uint3 dispatchThreadId : SV_DispatchThread
             BurtGIAdaptiveProbeData adaptive = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveIndex];
             positionData = float4(adaptive.positionWS, adaptive.valid);
             normalData = float4(adaptive.normalWS * 0.5f + 0.5f, adaptive.valid);
-            // Adaptive allocation order is not a persistent surface identity. Reproject
-            // the actual receiver into the uniform history, as XRender does. The
-            // uniform-tile velocity texture does not describe this adaptive receiver.
-            projected = BurtGIScreenProbeProjectPreviousPositionWS(adaptive.positionWS, historyUV, projectedRawDepth);
+            // Use the actual adaptive receiver's native pixel, never its atlas slot.
+            // Both adaptive and uniform probes reproject into uniform history.
+            projected = BurtGIResolveScreenProbeHistoryUV(probeCoord, gridSize, adaptive.positionWS, historyUV, projectedRawDepth);
         }
     }
 
@@ -784,7 +799,13 @@ void ScreenProbeDirectionalTemporalCS(uint3 dispatchThreadId : SV_DispatchThread
                             max(1.0f - _BurtGIScreenProbeReprojectionParams.w, 0.0001f))
                         : 0.0f;
                     float planeDistance = historyPosition.a > 0.5f ? abs(dot(float4(historyPosition.xyz, 1.0f), plane)) : 1e6f;
-                    float planeWeight = exp2(-1000.0f * planeDistance * planeDistance / max(dot(positionData.xyz - _BurtDeferredCameraWorldPosition.xyz, positionData.xyz - _BurtDeferredCameraWorldPosition.xyz), 0.01f));
+                    // Reject a different receiver plane before accumulating history.
+                    // A soft distance weight retained old object tops on exposed floors.
+                    // Match XRender's relative-plane validity test, retaining BRP's
+                    // bilinear, normal and hit weights for valid history samples.
+                    float eyeDepth = max(dot(positionData.xyz - _BurtDeferredCameraWorldPosition.xyz, _BurtGIScreenProbeTemporalCameraForward.xyz), 0.0001f);
+                    float relativePlaneDistance = planeDistance / eyeDepth;
+                    float planeWeight = historyPosition.a > 0.5f && exp2(-10000.0f * relativePlaneDistance * relativePlaneDistance) > 0.1f ? 1.0f : 0.0f;
                     float2 bilinear = float2(x == 0 ? 1.0f - historyFraction.x : historyFraction.x, y == 0 ? 1.0f - historyFraction.y : historyFraction.y);
                     float weight = bilinear.x * bilinear.y * normalWeight * planeWeight;
                     uint2 historyAtlasCoord = (uint2)historyProbe * traceResolution + directionTexel;
@@ -801,6 +822,40 @@ void ScreenProbeDirectionalTemporalCS(uint3 dispatchThreadId : SV_DispatchThread
         // Numerator and denominator must contain the same sample weights: a
         // constant radiance field must remain constant after temporal filtering.
         historyRadiance /= historyWeightSum;
+        // A receiver can remain on the same plane while a moving emitter or
+        // occluder changes its incident lighting. Bound stale directional RGB
+        // before spatial filtering spreads it into newly exposed receivers.
+        // Include the current sample and only current same-plane neighbors;
+        // valid black radiance stays valid, and the history blend is unchanged.
+        // Adaptive probes retain their existing path until their neighborhood
+        // reconstruction is independently validated.
+        if (all(probeCoord < gridSize))
+        {
+            float3 lower = currentRadiance.rgb;
+            float3 upper = currentRadiance.rgb;
+            float3 centerNormal = BurtGIScreenProbeDecodeNormalWS(normalData);
+            float eye = max(dot(positionData.xyz - _BurtDeferredCameraWorldPosition.xyz,
+                _BurtGIScreenProbeTemporalCameraForward.xyz), 0.0001f);
+            [unroll] for (int dy = -1; dy <= 1; ++dy)
+            [unroll] for (int dx = -1; dx <= 1; ++dx)
+            {
+                int2 q = (int2)probeCoord + int2(dx, dy);
+                if (any(q < 0) || any(q >= (int2)gridSize)) continue;
+                float4 p = _BurtGIScreenProbeWorldPositionTexture.Load(int3(q, 0));
+                float4 n = _BurtGIScreenProbeWorldNormalTexture.Load(int3(q, 0));
+                float relative = abs(dot(p.xyz - positionData.xyz, centerNormal)) / eye;
+                if (p.a > 0.5f && n.a > 0.5f &&
+                    dot(centerNormal, BurtGIScreenProbeDecodeNormalWS(n)) > _BurtGIScreenProbeReprojectionParams.w &&
+                    exp2(-10000.0f * relative * relative) > 0.1f)
+                {
+                    uint2 a = (uint2)q * traceResolution + directionTexel;
+                    float3 v = _BurtGIScreenProbeTraceRadianceTexture.Load(int3(a, 0)).rgb;
+                    lower = min(lower, v);
+                    upper = max(upper, v);
+                }
+            }
+            historyRadiance.rgb = clamp(historyRadiance.rgb, lower, upper);
+        }
         float currentHit = saturate(_BurtGIScreenProbeTraceHitTexture[atlasCoord]);
         float historyHit = saturate(historyHitSum / historyWeightSum);
         float hitWeight = 1.0f - smoothstep(0.15f, 0.6f, abs(currentHit - historyHit));

@@ -228,6 +228,8 @@ Shader "BurtRP/Silk"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Lighting/BurtGIRayTracingLit.hlsl"
             ENDHLSL
         }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelizeFineOccupancy"
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelizeFineMaterial"
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtLitShaderGUI"

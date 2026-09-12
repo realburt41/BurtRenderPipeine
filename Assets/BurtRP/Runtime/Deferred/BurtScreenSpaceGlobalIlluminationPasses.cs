@@ -2314,7 +2314,7 @@ namespace Burt.RenderPipeline
             if (probeDataBuffer.HasBuffer)
             {
                 // The count/header reset makes old records unreachable. Placement writes
-                // every field of each allocated 48-byte record before any consumer runs.
+                // every field of each allocated 64-byte record before any consumer runs.
                 cmd.SetGlobalBuffer(BurtGIScreenProbeAdaptiveProbeDataBufferId, probeDataBuffer.Buffer);
                 hasCommandBufferWork = true;
             }
@@ -3195,6 +3195,12 @@ namespace Burt.RenderPipeline
             BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass.DiagnosticTextureCapture?.Invoke(cmd, "ProbePosition", worldPositionTarget.Identifier);
 #endif
             context.ExecuteLegacyCommandBuffer(cmd);
+#if UNITY_EDITOR
+            // The integration command stream is complete here. A diagnostic
+            // can enqueue an isolated compute buffer through this live context
+            // without retaining frame-scoped resources or a pooled context.
+            BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass.DiagnosticContextCapture?.Invoke(context, cmd, "IntegrationRecorded");
+#endif
             context.ReleaseCommandBuffer(cmd);
         }
 
@@ -5026,7 +5032,10 @@ namespace Burt.RenderPipeline
 
         private static bool IsRadianceCacheHashGridKernel(string kernelName)
         {
-            return kernelName == "HashGridClearCountCS" ||
+            return kernelName == "HashGridPopulateSurfaceCellsCS" ||
+                kernelName == "HashGridResolveSurfaceCellsCS" ||
+                kernelName == "HashGridReconstructSurfaceCS" ||
+                kernelName == "HashGridClearCountCS" ||
                 kernelName == "RadianceCacheHashGridPrepareLiteCS" ||
                 kernelName == "HashGridPopulateCellsGenIndirectArgsCS" ||
                 kernelName == "HashGridPopulateCellsCS" ||
@@ -5077,7 +5086,8 @@ namespace Burt.RenderPipeline
 
         private static bool RequiresScreenProbeTraceRadianceRWTexture(string kernelName)
         {
-            return kernelName == "FilterProbeRadianceWithGatherCS" ||
+            return kernelName == "HashGridReconstructSurfaceCS" ||
+                kernelName == "FilterProbeRadianceWithGatherCS" ||
                 kernelName == "FilterProbeRadianceCS" ||
                 kernelName == "CalculateProbeIrradiance" ||
                 kernelName == "CalculateProbeIrradianceCS" ||
@@ -5149,7 +5159,7 @@ namespace Burt.RenderPipeline
             AppendMissingComputeResourceKernels(ref radianceCacheClipMapUpdateCacheComputeShader, RadianceCacheClipMapUpdateCacheComputeShaderResourcePath, "UpdateCacheForUsedProbesCS,UpdateCacheForUsedProbesLiteCS,AllocateUsedProbesCS", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref radianceCacheClipMapTraceFromProbesComputeShader, RadianceCacheClipMapTraceFromProbesComputeShaderResourcePath, "TraceFromProbesCS", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref radianceCacheClipMapIrradianceIntegrateComputeShader, RadianceCacheClipMapIrradianceIntegrateComputeShaderResourcePath, "IrradianceIntegrateCS", ref missing, ref missingCount, ref kernelCount);
-            AppendMissingComputeResourceKernels(ref radianceCacheHashGridComputeShader, RadianceCacheHashGridComputeShaderResourcePath, "HashGridClearCountCS,RadianceCacheHashGridPrepareLiteCS,HashGridPopulateCellsGenIndirectArgsCS,HashGridPopulateCellsCS,RadianceCacheHashGridPopulateScreenProbesLiteCS,HashGridUpdateTilesGenIndirectArgsCS,RadianceCacheHashGridUpdateTilesGenIndirectArgsLiteCS,HashGridUpdateTilesCS,RadianceCacheHashGridUpdateTilesLiteCS,HashGridResolveCellsCS,RadianceCacheHashGridResolveTraceRadianceLiteCS,HashGridPurgeTilesGenIndirectArgsCS,HashGridPurgeTilesCS,RadianceCacheHashGridPurgeTilesLiteCS,HashGridDebugGenIndirectArgsCS", ref missing, ref missingCount, ref kernelCount);
+            AppendMissingComputeResourceKernels(ref radianceCacheHashGridComputeShader, RadianceCacheHashGridComputeShaderResourcePath, "HashGridClearCountCS,RadianceCacheHashGridPrepareLiteCS,HashGridPopulateCellsGenIndirectArgsCS,HashGridPopulateCellsCS,RadianceCacheHashGridPopulateScreenProbesLiteCS,HashGridPopulateSurfaceCellsCS,HashGridResolveSurfaceCellsCS,HashGridReconstructSurfaceCS,HashGridUpdateTilesGenIndirectArgsCS,RadianceCacheHashGridUpdateTilesGenIndirectArgsLiteCS,HashGridUpdateTilesCS,RadianceCacheHashGridUpdateTilesLiteCS,HashGridResolveCellsCS,RadianceCacheHashGridResolveTraceRadianceLiteCS,HashGridPurgeTilesGenIndirectArgsCS,HashGridPurgeTilesCS,RadianceCacheHashGridPurgeTilesLiteCS,HashGridDebugGenIndirectArgsCS", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref radianceCacheUpdateStatsComputeShader, RadianceCacheUpdateStatsComputeShaderResourcePath, "RadianceCacheUpdateStatsCS", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref sceneVoxelBuildComputeShader, SceneVoxelBuildComputeShaderResourcePath, "SceneVoxelClearLiteCS,SceneVoxelReprojectHistoryCS,SceneVoxelPopulateScreenProbesLiteCS,SceneVoxelVoxelizeTrianglesCS,SceneVoxelBuildOccupancyMipLiteCS,SceneVoxelDownsampleOccupancyMipCS", ref missing, ref missingCount, ref kernelCount);
             AppendMissingComputeResourceKernels(ref sceneVoxelSdfComputeShader, SceneVoxelSdfComputeShaderResourcePath, "FillUV,JFA,Finalize", ref missing, ref missingCount, ref kernelCount);
@@ -5776,6 +5786,7 @@ namespace Burt.RenderPipeline
             cmd.SetComputeIntParam(shader, BurtGIRadianceCacheClipMapFinalProbeResolutionId, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapFinalProbeResolution(settings));
             cmd.SetComputeIntParam(shader, BurtGIRadianceCacheClipMapFinalIrradianceProbeResolutionId, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapFinalIrradianceProbeResolution(settings));
             cmd.SetComputeIntParam(shader, BurtGIRadianceCacheClipMapFinalOcclusionProbeResolutionId, BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapFinalOcclusionProbeResolution(settings));
+            cmd.SetComputeVectorParam(shader, "_BurtGIRadianceCacheHashGridAddressParams", BurtScreenSpaceGlobalIlluminationPassUtility.ResolveHashGridAddressParams(camera, settings));
             cmd.SetComputeVectorParam(shader, BurtGIRadianceCacheHashGridParams0Id, new Vector4(
                 BurtScreenSpaceGlobalIlluminationPassUtility.RadianceCacheHashGridCellSize,
                 BurtScreenSpaceGlobalIlluminationPassUtility.RadianceCacheHashGridTileCellRatio,
@@ -5969,6 +5980,7 @@ namespace Burt.RenderPipeline
                 case "HashGridPopulateCellsCS":
                 case "RadianceCacheHashGridPopulateScreenProbesLiteCS":
                     BindComputeTexture(cmd, shader, kernel, BurtGIScreenProbeWorldPositionTextureId, context.BurtGIScreenProbeWorldPositionTarget);
+                    BindHashGridProbeSources(cmd, shader, kernel, context);
                     BindHashGridFreshTraceState(cmd, shader, kernel, context);
                     BindComputeTexture(cmd, shader, kernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeHitDistanceTextureId, context.BurtGIScreenProbeHitDistanceTarget);
                     BindComputeTexture(cmd, shader, kernel, BurtGIScreenProbeTraceRadianceRWTextureId, context.BurtGIScreenProbeTraceRadianceTarget);
@@ -6166,13 +6178,26 @@ namespace Burt.RenderPipeline
 
         private static void BindRadianceCacheHashGridComputeResources(CommandBuffer cmd, ComputeShader shader, int kernel, BurtRenderGraphContext context)
         {
+            var surface = context.GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceSurfaceBufferName);
+            if (surface.HasBuffer)
+            {
+                cmd.SetComputeIntParam(shader, "_BurtGIScreenProbeTraceSurfaceEnabled", surface.Buffer.count > 1 ? 1 : 0);
+                cmd.SetComputeBufferParam(shader, kernel, "_BurtGIScreenProbeTraceSurfaceBuffer", surface.Buffer);
+            }
             BindHashGridFreshTraceState(cmd, shader, kernel, context);
+            BindHashGridProbeSources(cmd, shader, kernel, context);
             BindRadianceCacheHashGridComputeBuffers(cmd, shader, kernel, context);
             BindComputeTexture(cmd, shader, kernel, BurtGIScreenProbeWorldPositionTextureId, context.BurtGIScreenProbeWorldPositionTarget);
             BindComputeTexture(cmd, shader, kernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeHitDistanceTextureId, context.BurtGIScreenProbeHitDistanceTarget);
             BindComputeTexture(cmd, shader, kernel, BurtGIScreenProbeTraceRadianceRWTextureId, context.BurtGIScreenProbeTraceRadianceTarget);
             BindComputeTexture(cmd, shader, kernel, BurtGIScreenProbeTraceHitTextureId, context.BurtGIScreenProbeTraceHitTarget);
             BindComputeTexture(cmd, shader, kernel, BurtGIScreenProbeImportanceRayInfoTextureId, context.BurtGIScreenProbeImportanceRayInfoTarget);
+        }
+
+        private static void BindHashGridProbeSources(CommandBuffer cmd, ComputeShader shader, int kernel, BurtRenderGraphContext context)
+        {
+            BindComputeBuffer(cmd, shader, kernel, BurtGIScreenProbeAdaptiveProbeNumBufferId, context.BurtGIScreenProbeAdaptiveProbeNumBuffer);
+            BindComputeBuffer(cmd, shader, kernel, BurtGIScreenProbeAdaptiveProbeDataBufferId, context.BurtGIScreenProbeAdaptiveProbeDataBuffer);
         }
 
         private static void BindHashGridFreshTraceState(CommandBuffer cmd, ComputeShader shader, int kernel, BurtRenderGraphContext context)
@@ -6438,6 +6463,57 @@ namespace Burt.RenderPipeline
 
         private static GraphicsBuffer radianceCacheClipMapFallbackFloat4StructuredBuffer;
         private static GraphicsBuffer radianceCacheClipMapFallbackUInt4StructuredBuffer;
+        private static RenderTexture fineRadianceCacheFallbackIndirectionTexture;
+        private static readonly int FineDisabledCacheIndirectionId = Shader.PropertyToID("_BurtGIFineDisabledCacheIndirection");
+
+        private static RenderTexture FineRadianceCacheFallbackIndirectionTexture
+        {
+            get
+            {
+                if (fineRadianceCacheFallbackIndirectionTexture != null)
+                    return fineRadianceCacheFallbackIndirectionTexture;
+                RenderTexture texture = null;
+                try
+                {
+                    // Integer Load/Store is supported on devices that reject the
+                    // Texture2D constructor's Sample compatibility requirement.
+                    var descriptor = new RenderTextureDescriptor(1, 1)
+                    {
+                        graphicsFormat = GraphicsFormat.R32_UInt,
+                        depthBufferBits = 0,
+                        dimension = TextureDimension.Tex2D,
+                        volumeDepth = 1,
+                        msaaSamples = 1,
+                        enableRandomWrite = true,
+                        useMipMap = false,
+                        autoGenerateMips = false
+                    };
+                    texture = new RenderTexture(descriptor)
+                    {
+                        name = "BurtGI Fine Voxel Disabled RC Indirection",
+                        hideFlags = HideFlags.HideAndDontSave,
+                        filterMode = FilterMode.Point,
+                        wrapMode = TextureWrapMode.Clamp
+                    };
+                    if (!texture.Create())
+                        throw new System.InvalidOperationException("Cannot create fine voxel disabled RC integer placeholder.");
+                    // Initialization is recorded by the dedicated integer clear kernel
+                    // before every disabled-cache lighting dispatch, not assumed here.
+                    fineRadianceCacheFallbackIndirectionTexture = texture;
+                    return texture;
+                }
+                catch
+                {
+                    if (texture != null)
+                    {
+                        texture.Release();
+                        if (Application.isPlaying) Object.Destroy(texture);
+                        else Object.DestroyImmediate(texture);
+                    }
+                    throw;
+                }
+            }
+        }
 
 #if UNITY_EDITOR
         [UnityEditor.InitializeOnLoadMethod]
@@ -6484,6 +6560,14 @@ namespace Burt.RenderPipeline
 
         private static void ReleaseRadianceCacheClipMapFallbackBuffers()
         {
+            if (fineRadianceCacheFallbackIndirectionTexture != null)
+            {
+                fineRadianceCacheFallbackIndirectionTexture.Release();
+                if (Application.isPlaying) Object.Destroy(fineRadianceCacheFallbackIndirectionTexture);
+                else Object.DestroyImmediate(fineRadianceCacheFallbackIndirectionTexture);
+                fineRadianceCacheFallbackIndirectionTexture = null;
+            }
+
             if (radianceCacheClipMapFallbackFloat4StructuredBuffer != null)
             {
                 radianceCacheClipMapFallbackFloat4StructuredBuffer.Release();
@@ -6621,6 +6705,212 @@ namespace Burt.RenderPipeline
                 globalIlluminationSettings.SceneVoxelMaxSampleCount,
                 globalIlluminationSettings.SceneVoxelMultiBounce ? 1f : 0f));
             cmd.SetComputeIntParam(shader, XGISceneRepresentUpdateVoxelVoxelDirectionsNumId, globalIlluminationSettings.SceneVoxelDirectionCount);
+        }
+
+        // Explicit, record-only entry: no normal camera schedule calls this yet.
+        // The caller owns cmd and execution ordering, and must publish the returned
+        // lighting ticket only after successful execution. No coarse voxel inputs are bound.
+        // completedRadianceCacheInputs is a caller content/order contract: the current
+        // indirection, relocation offsets, irradiance and occlusion atlases must belong
+        // to the CURRENT resolved clipmap coordinate state (or have been remapped to it).
+        // Merely allocating those targets or supplying unmapped previous-frame atlases
+        // is not sufficient. Until the graph tracks a completion epoch, require an
+        // explicit assertion rather than inferring freshness from a valid handle.
+        // ownerLevel=-1 is reserved for independently owned, isolated test resources;
+        // production callers must supply their actual level to verify camera ownership.
+        internal static bool TryRecordFineSceneVoxelLighting(
+            CommandBuffer cmd,
+            BurtRenderGraphContext context,
+            BurtGISceneVoxelFineResources fine,
+            uint generation,
+            Vector4 bounds,
+            ulong sourceEpoch,
+            out uint lightingTicket,
+            out string failureReason,
+            bool completedRadianceCacheInputs = false,
+            int ownerLevel = -1,
+            int traceStepBudget = 512)
+        {
+            return TryRecordFineSceneVoxelLightingCore(cmd, context, fine, generation, bounds,
+                sourceEpoch, out lightingTicket, out failureReason, completedRadianceCacheInputs,
+                ownerLevel, traceStepBudget, null);
+        }
+
+        internal static bool TryRecordFineSceneVoxelFrameLighting(CommandBuffer cmd,
+            BurtRenderGraphContext context, BurtGISceneVoxelFineFrameTransaction frame,
+            out string failureReason, int traceStepBudget = 512)
+        {
+            failureReason = "MissingFineFrameTransaction";
+            return frame != null && TryRecordFineSceneVoxelLightingCore(cmd, context, frame.Owner,
+                frame.Generation, frame.Bounds, frame.SourceEpoch, out _, out failureReason,
+                false, frame.Level, traceStepBudget, frame);
+        }
+
+        private static bool TryRecordFineSceneVoxelLightingCore(CommandBuffer cmd,
+            BurtRenderGraphContext context, BurtGISceneVoxelFineResources fine, uint generation,
+            Vector4 bounds, ulong sourceEpoch, out uint lightingTicket, out string failureReason,
+            bool completedRadianceCacheInputs, int ownerLevel, int traceStepBudget,
+            BurtGISceneVoxelFineFrameTransaction frame)
+        {
+            lightingTicket = 0;
+            failureReason = null;
+            if (cmd == null || context == null || context.Request == null || context.Request.Camera == null)
+            {
+                failureReason = "MissingFineLightingContext";
+                return false;
+            }
+            if (fine == null || (frame == null
+                    ? !fine.MatchesSource(generation, bounds, sourceEpoch) || !fine.HierarchyValid
+                    : !ReferenceEquals(frame.Owner, fine) || !frame.CanRecordLighting(cmd)))
+            {
+                failureReason = "StaleFineLightingGeometryOrHierarchy";
+                return false;
+            }
+            var camera = context.Request.Camera;
+            if (ownerLevel < -1 || (ownerLevel >= 0 &&
+                (!BurtGISceneVoxelClipmapStateUtility.TryGetFineResources(camera, ownerLevel, out var ownedFine, out var ownedBounds) ||
+                 !ReferenceEquals(ownedFine, fine) || !ownedBounds.Equals(bounds))))
+            {
+                failureReason = "FineLightingCameraOwnershipMismatch";
+                return false;
+            }
+            var shader = GetSceneVoxelLightingComputeShader();
+            if (!TryFindRadianceCacheClipMapComputeKernel(shader, "SceneVoxelBuildFineLightingCS", out var kernel))
+            {
+                failureReason = "MissingFineLightingKernel";
+                return false;
+            }
+            shader.GetKernelThreadGroupSizes(kernel, out var threadX, out var threadY, out var threadZ);
+            if (threadX != 64 || threadY != 1 || threadZ != 1)
+            {
+                failureReason = "UnsupportedFineLightingKernelLayout";
+                return false;
+            }
+
+            var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context.Request, context.Asset);
+            var giSettings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationSettings(context.Request, context.Asset);
+            // Keep this predicate identical to UploadClipMapComputeParams. Do not silently
+            // turn off requested multibounce to make an incomplete test context succeed.
+            bool useRadianceCache = giSettings.SceneVoxelMultiBounce &&
+                settings.RadianceCacheEnableMultiBounceFromRadianceCache &&
+                BurtScreenSpaceGlobalIlluminationPassUtility.ShouldCalculateScreenSpaceGlobalIlluminationRadianceCacheIrradiance(context.Request, context.Asset);
+            RenderTexture indirection = null, irradiance = null, occlusion = null;
+            GraphicsBuffer worldOffsets = null;
+            if (useRadianceCache)
+            {
+                if (!completedRadianceCacheInputs)
+                {
+                    failureReason = "FineLightingRequiresCompletedRadianceCacheInputs";
+                    return false;
+                }
+                if (!TryGetFineLightingCacheTexture(context, context.BurtGIRadianceCacheClipMapIndirectionTarget,
+                        BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapIndirectionDescriptor(camera, settings), out indirection) ||
+                    !TryGetFineLightingCacheTexture(context, context.BurtGIRadianceCacheClipMapFinalIrradianceAtlasTarget,
+                        BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapFinalIrradianceAtlasDescriptor(camera, settings), out irradiance) ||
+                    !TryGetFineLightingCacheTexture(context, context.BurtGIRadianceCacheClipMapProbeOcclusionAtlasTarget,
+                        BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationRadianceCacheClipMapProbeOcclusionAtlasDescriptor(camera, settings), out occlusion))
+                {
+                    failureReason = "FineLightingRadianceCacheTextureContractMismatch";
+                    return false;
+                }
+                worldOffsets = context.BurtGIRadianceCacheClipMapProbeWorldOffsetBuffer.Buffer;
+                int maxProbeCount = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapMaxProbeCount(camera, settings);
+                if (worldOffsets == null || !worldOffsets.IsValid() || worldOffsets.stride != 16 ||
+                    worldOffsets.count < maxProbeCount || (worldOffsets.target & GraphicsBuffer.Target.Structured) == 0)
+                {
+                    failureReason = "FineLightingRadianceCacheWorldOffsetsMismatch";
+                    return false;
+                }
+            }
+
+            // Preserve the no-command, no-ticket contract for a zero logical pool.
+            if (fine.LogicalCapacity == 0)
+                return frame != null ? frame.RecordLighting(cmd, shader, traceStepBudget) :
+                    fine.RecordFineLighting(cmd, shader, generation, bounds, sourceEpoch, out lightingTicket, traceStepBudget);
+
+            int disabledCacheClearKernel = -1;
+            if (!useRadianceCache)
+            {
+                if (!TryFindRadianceCacheClipMapComputeKernel(shader, "ClearFineDisabledCacheIndirectionCS", out disabledCacheClearKernel))
+                {
+                    failureReason = "MissingFineDisabledCacheClearKernel";
+                    return false;
+                }
+                shader.GetKernelThreadGroupSizes(disabledCacheClearKernel, out var clearX, out var clearY, out var clearZ);
+                if (clearX != 1 || clearY != 1 || clearZ != 1)
+                {
+                    failureReason = "UnsupportedFineDisabledCacheClearKernelLayout";
+                    return false;
+                }
+            }
+
+            // Allocate disabled resources before recording. Texture2D.blackTexture is a
+            // float texture and is NOT a legal substitute for Texture2D<uint> indirection.
+            // The integer RT is a disabled placeholder, not valid cache contents.
+            Texture disabledIndirection = useRadianceCache ? null : FineRadianceCacheFallbackIndirectionTexture;
+            if (!useRadianceCache) worldOffsets = RadianceCacheClipMapFallbackFloat4StructuredBuffer;
+            try
+            {
+                if (!useRadianceCache)
+                {
+                    cmd.SetComputeTextureParam(shader, disabledCacheClearKernel, FineDisabledCacheIndirectionId, disabledIndirection);
+                    cmd.DispatchCompute(shader, disabledCacheClearKernel, 1, 1, 1);
+                }
+                UploadClipMapComputeParams(cmd, shader, context, default);
+                BurtIndirectLightingUtility.UploadAmbientProbeForCompute(cmd, shader, context.Request);
+                BurtGIXGILightGridUtility.BindCompute(cmd, shader, kernel, camera);
+                cmd.SetComputeTextureParam(shader, kernel, BurtGIRadianceCacheClipMapIndirectionTextureId,
+                    useRadianceCache ? (Texture)indirection : disabledIndirection);
+                cmd.SetComputeTextureParam(shader, kernel, BurtGIRadianceCacheClipMapFinalIrradianceAtlasTextureId,
+                    useRadianceCache ? (Texture)irradiance : Texture2D.blackTexture);
+                cmd.SetComputeTextureParam(shader, kernel, BurtGIRadianceCacheClipMapProbeOcclusionAtlasTextureId,
+                    useRadianceCache ? (Texture)occlusion : Texture2D.blackTexture);
+                cmd.SetComputeBufferParam(shader, kernel, BurtRenderGraphResourceRegistry.BurtGIRadianceCacheClipMapProbeWorldOffsetBufferId, worldOffsets);
+                if (!useRadianceCache)
+                {
+                    // Explicitly disable cache lookup, independently of all dummy SRVs.
+                    cmd.SetComputeVectorParam(shader, BurtGIRadianceCacheClipMapParamsId, Vector4.zero);
+                    cmd.SetComputeVectorParam(shader, BurtGIRadianceCacheClipMapIndirectionSizeId, Vector4.one);
+                }
+
+                // Must be LAST: the common environment uploader also sets base bounds.
+                // This overwrites them with the exact source-validated fine volume and
+                // binds only its masks, hierarchy and fine material/lighting buffers.
+                bool recorded = frame != null ? frame.RecordLighting(cmd, shader, traceStepBudget) :
+                    fine.RecordFineLighting(cmd, shader, generation, bounds, sourceEpoch, out lightingTicket, traceStepBudget);
+                if (!recorded)
+                    throw new System.InvalidOperationException("Fine lighting source changed during command recording.");
+                return true;
+            }
+            catch
+            {
+                fine.InvalidateLighting();
+                lightingTicket = 0;
+                // Do not clear unrelated caller commands. On a recording exception the
+                // caller must discard the ENTIRE command buffer, not execute its prefix.
+                throw;
+            }
+        }
+
+        private static bool TryGetFineLightingCacheTexture(
+            BurtRenderGraphContext context,
+            BurtRenderTargetHandle target,
+            RenderTextureDescriptor expected,
+            out RenderTexture texture)
+        {
+            texture = null;
+            // A valid logical handle alone does not prove allocation, type, or ownership.
+            // External/unverifiable imports are rejected by this initial bounded entry.
+            if (context.ResourceRegistry == null || !target.IsValid ||
+                !context.ResourceRegistry.TryGetAllocatedRenderTexture(target.Name, out var candidate) ||
+                candidate == null || !candidate.IsCreated() || !target.Identifier.Equals(new RenderTargetIdentifier(candidate)) ||
+                candidate.width != expected.width || candidate.height != expected.height ||
+                candidate.volumeDepth != expected.volumeDepth || candidate.dimension != expected.dimension ||
+                candidate.graphicsFormat != expected.graphicsFormat || candidate.antiAliasing != 1 ||
+                (expected.useMipMap && candidate.mipmapCount < expected.mipCount))
+                return false;
+            texture = candidate;
+            return true;
         }
 
         protected static bool TryDispatchSceneVoxelLightingCompute(
@@ -6955,6 +7245,8 @@ namespace Burt.RenderPipeline
                 !context.BurtGIScreenProbeTraceRadianceTarget.IsValid ||
                 !context.BurtGIScreenProbeTraceHitTarget.IsValid ||
                 !context.BurtGIScreenProbeImportanceRayInfoTarget.IsValid ||
+                !context.BurtGIScreenProbeAdaptiveProbeNumBuffer.HasBuffer ||
+                !context.BurtGIScreenProbeAdaptiveProbeDataBuffer.HasBuffer ||
                 (indirect && !indirectArgsBuffer.HasBuffer))
             {
                 return false;
@@ -6979,16 +7271,16 @@ namespace Burt.RenderPipeline
             }
 
 #if UNITY_EDITOR
-            if (kernelName == "HashGridPopulateCellsCS")
+            if (kernelName == "HashGridPopulateCellsCS" || kernelName == "HashGridPopulateSurfaceCellsCS")
             {
                 BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass.DiagnosticBufferCapture?.Invoke(
                     cmd, "HashGridUpdateList", context.GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTileBufferName).Buffer);
                 BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass.DiagnosticBufferCapture?.Invoke(
                     cmd, "HashGridPopulateCounts", context.GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridCountBufferName).Buffer);
             }
-            if (kernelName == "HashGridPopulateCellsCS" || kernelName == "HashGridResolveCellsCS")
+            if (kernelName == "HashGridPopulateCellsCS" || kernelName == "HashGridPopulateSurfaceCellsCS" || kernelName == "HashGridResolveCellsCS" || kernelName == "HashGridReconstructSurfaceCS")
                 BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass.DiagnosticTextureCapture?.Invoke(
-                    cmd, kernelName == "HashGridPopulateCellsCS" ? "HashGridPopulatedRadiance" : "HashGridResolvedRadiance",
+                    cmd, (kernelName == "HashGridPopulateCellsCS" || kernelName == "HashGridPopulateSurfaceCellsCS") ? "HashGridPopulatedRadiance" : "HashGridResolvedRadiance",
                     context.BurtGIScreenProbeTraceRadianceTarget.Identifier);
 #endif
             context.ExecuteLegacyCommandBuffer(cmd);
@@ -8486,13 +8778,13 @@ namespace Burt.RenderPipeline
             var clearGroupSize = BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelRadianceClearThreadGroupSize;
             var occupancyMipGroupSize = BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelOccupancyMipThreadGroupSize;
             var lightingGroupSize = BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelLightingThreadGroupSize;
-            var history = BurtGISceneVoxelHistoryUtility.EnsureHistoryTextures(
-                context.Request,
-                context.Asset,
-                globalIlluminationSettings,
-                screenProbeSettings,
-                globalIlluminationSettings.CreateSceneVoxelInjectionSignature(),
-                out var historyValid);
+            // Preserve the legacy history/update ordering when the rollout is off.
+            var history = default(BurtGISceneVoxelHistoryTextures);
+            bool historyValid = false;
+            if (!BurtGISceneVoxelFineRuntime.IsRequested(camera))
+                history = BurtGISceneVoxelHistoryUtility.EnsureHistoryTextures(
+                    context.Request, context.Asset, globalIlluminationSettings, screenProbeSettings,
+                    globalIlluminationSettings.CreateSceneVoxelInjectionSignature(), out historyValid);
             var clipMapState = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheClipMapState(camera, screenProbeSettings);
             var sceneVoxelCenterExtent = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveSceneVoxelCenterExtent(camera, screenProbeSettings, clipMapState, sceneVoxelResolution);
             var activeSceneVoxelClipmapCount = Mathf.Clamp(
@@ -8512,6 +8804,11 @@ namespace Burt.RenderPipeline
                 globalIlluminationSettings.SceneVoxelOriginUpdateDistance,
                 activeSceneVoxelClipmapCount,
                 sceneVoxelResolution);
+            if (BurtGISceneVoxelFineRuntime.IsRequested(camera))
+            {
+                BurtGISceneVoxelFineRuntime.Produce(context, globalIlluminationSettings);
+                return;
+            }
             if (!historyValid)
             {
                 BurtGISceneVoxelClipmapStateUtility.Invalidate(camera);
@@ -9465,11 +9762,15 @@ namespace Burt.RenderPipeline
             }
 
             builder.ReadBurtGIScreenProbeWorldPosition();
+            builder.ReadBurtGIScreenProbeHitDistance();
+            builder.ReadBurtGIScreenProbeAdaptiveProbeNumBuffer();
+            builder.ReadBurtGIScreenProbeAdaptiveProbeDataBuffer();
             builder.ReadBurtGIScreenProbeTraceRadiance();
             builder.ReadBurtGIScreenProbeTraceHit();
             builder.ReadBurtGIScreenProbeTraceGeometryDistance();
             builder.ReadBurtGIScreenProbeImportanceRayInfo();
             builder.WriteBurtGIScreenProbeTraceRadiance();
+            builder.WriteBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceSurfaceBufferName);
             WriteHashGridBuffers(builder);
         }
 
@@ -9485,20 +9786,26 @@ namespace Burt.RenderPipeline
             var camera = context != null && context.Request != null ? context.Request.Camera : null;
             var settings = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenSpaceGlobalIlluminationScreenProbeSettings(context != null ? context.Request : null, context != null ? context.Asset : null);
             var traceTexelCount = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheHashGridTraceTexelCount(camera, settings);
+            bool surfaceAddressing = BurtScreenSpaceGlobalIlluminationPassUtility.UsesHashGridSurfaceAddressing(camera, settings);
             var cellCount = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheHashGridCellCount();
             var tileCount = BurtScreenSpaceGlobalIlluminationPassUtility.ResolveRadianceCacheHashGridTileCount();
-            var updateCellValueCount = Mathf.Max(1, cellCount * 4);
-            var clearCount = Mathf.Max(Mathf.Max(cellCount, tileCount), Mathf.Max(updateCellValueCount, traceTexelCount));
+            var updateCellValueCount = Mathf.Max(1, cellCount * 5);
+            var clearCount = Mathf.Max(Mathf.Max(cellCount, tileCount), Mathf.Max(updateCellValueCount,
+                BurtScreenSpaceGlobalIlluminationPassUtility.ResolveHashGridQueryCapacity(camera, settings)));
             var clearGroups = DivRoundUpInt(clearCount, BurtScreenSpaceGlobalIlluminationPassUtility.RadianceCacheHashGridPrepareThreadGroupSize);
             var updateTilesIndirectArgsBuffer = context.GetBuffer(BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTilesIndirectArgsBufferName);
 
-            TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridClearCountCS", clearGroups, 1, 1, false, BurtRenderBufferHandle.Invalid(string.Empty), 0u);
+            TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridClearCountCS",
+                Mathf.Min(clearGroups, 65535), DivRoundUpInt(clearGroups, 65535), 1,
+                false, BurtRenderBufferHandle.Invalid(string.Empty), 0u);
             TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridPopulateCellsGenIndirectArgsCS", 1, 1, 1, false, BurtRenderBufferHandle.Invalid(string.Empty), 0u);
-            TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridPopulateCellsCS", 1, 1, 1, true, updateTilesIndirectArgsBuffer, 0u);
+            TryDispatchRadianceCacheHashGridCompute(context, Name, surfaceAddressing ? "HashGridPopulateSurfaceCellsCS" : "HashGridPopulateCellsCS", 1, 1, 1, true, updateTilesIndirectArgsBuffer, 0u);
             TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridUpdateTilesGenIndirectArgsCS", 1, 1, 1, false, BurtRenderBufferHandle.Invalid(string.Empty), 0u);
             TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridUpdateTilesCS", 1, 1, 1, true, updateTilesIndirectArgsBuffer, 0u);
             TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridPopulateCellsGenIndirectArgsCS", 1, 1, 1, false, BurtRenderBufferHandle.Invalid(string.Empty), 0u);
-            TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridResolveCellsCS", 1, 1, 1, true, updateTilesIndirectArgsBuffer, 0u);
+            TryDispatchRadianceCacheHashGridCompute(context, Name, surfaceAddressing ? "HashGridResolveSurfaceCellsCS" : "HashGridResolveCellsCS", 1, 1, 1, true, updateTilesIndirectArgsBuffer, 0u);
+            if (surfaceAddressing)
+                TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridReconstructSurfaceCS", DivRoundUpInt(traceTexelCount, 64), 1, 1, false, BurtRenderBufferHandle.Invalid(string.Empty), 0u);
             TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridPurgeTilesGenIndirectArgsCS", 1, 1, 1, false, BurtRenderBufferHandle.Invalid(string.Empty), 0u);
             TryDispatchRadianceCacheHashGridCompute(context, Name, "HashGridPurgeTilesCS", 1, 1, 1, true, updateTilesIndirectArgsBuffer, 0u);
             BurtRadianceCacheHashGridHistoryUtility.MarkHistoryValid(camera);
@@ -9682,6 +9989,7 @@ namespace Burt.RenderPipeline
         // already have been reused by later passes. No allocation when unobserved.
         internal static System.Action<CommandBuffer, string, RenderTargetIdentifier> DiagnosticTextureCapture;
         internal static System.Action<CommandBuffer, string, GraphicsBuffer> DiagnosticBufferCapture;
+        internal static System.Action<BurtRenderGraphContext, CommandBuffer, string> DiagnosticContextCapture;
 #endif
         private const int ScreenProbeTraceAtlasPassIndex = 15;
         private const string ScreenProbeTraceAtlasClearComputeShaderResourcePath = "BurtGIScreenProbeTraceAtlasClear";
@@ -9781,6 +10089,16 @@ namespace Burt.RenderPipeline
 
         private readonly bool fallbackOnly;
 
+        private static void BindTraceSurfaceRecords(CommandBuffer cmd, ComputeShader shader, int kernel,
+            BurtRenderGraphContext context)
+        {
+            var buffer = context.GetBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceSurfaceBufferName).Buffer;
+            if (buffer == null || !buffer.IsValid())
+                throw new System.InvalidOperationException("ScreenProbe surface provenance buffer unavailable.");
+            cmd.SetComputeIntParam(shader, "_BurtGIScreenProbeTraceSurfaceEnabled", buffer.count > 1 ? 1 : 0);
+            cmd.SetComputeBufferParam(shader, kernel, "_BurtGIScreenProbeTraceSurfaceBuffer", buffer);
+        }
+
         public BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass(bool fallbackOnly = false)
         {
             this.fallbackOnly = fallbackOnly;
@@ -9814,6 +10132,8 @@ namespace Burt.RenderPipeline
 
             if (fallbackOnly && !UsesSeparatedCacheUpdate(builder.Request, builder.Asset))
                 return;
+            if (!fallbackOnly)
+                BurtGISurfaceNormalUtility.Read(builder);
             if (fallbackOnly)
             {
                 builder.ReadBurtGIScreenProbeTraceRadiance();
@@ -9876,6 +10196,7 @@ namespace Burt.RenderPipeline
             builder.WriteBurtGIScreenProbeTraceRadiance();
             builder.WriteBurtGIScreenProbeTraceHit();
             builder.WriteBurtGIScreenProbeTraceGeometryDistance();
+            builder.WriteBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceSurfaceBufferName);
         }
 
         public override void Execute(BurtRenderGraphContext context)
@@ -9915,6 +10236,28 @@ namespace Burt.RenderPipeline
 
             var probeDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeDescriptor(camera, screenProbeSettings);
             var traceDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceDescriptor(camera, screenProbeSettings);
+            if (BurtGISceneVoxelFineRuntime.IsRequested(camera) && !BurtGISceneVoxelFineRuntime.IsPreparedFrame(context) &&
+                !BurtGISceneVoxelFineRuntime.CanContinueIndependentTrace(context))
+            {
+                // An explicitly requested but unsupported/failed fine source is not
+                // permission to render coarse data under a fine history signature.
+                var clearShader = GetScreenProbeTraceAtlasClearComputeShader();
+                if (!TryFindScreenProbeTraceAtlasKernel(clearShader, ScreenProbeTraceAtlasClearKernelName,
+                    out var clearKernel, ScreenProbeTraceAtlasClearFallbackKernelName))
+                    throw new System.InvalidOperationException("Fine GI rejected; trace clear kernel unavailable.");
+                var rejected = context.AcquireCommandBuffer(Name + " Rejected Fine Source");
+                rejected.SetComputeVectorParam(clearShader, BurtGIScreenProbeTraceParamsId,
+                    new Vector4(0f, traceDescriptor.width, traceDescriptor.height, 0f));
+                rejected.SetComputeTextureParam(clearShader, clearKernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceGeometryDistanceTextureId,
+                    context.BurtGIScreenProbeTraceGeometryDistanceTarget.Identifier);
+                BindCompactTraceAtlasOutputs(rejected, clearShader, clearKernel, traceRadianceTarget, traceHitTarget);
+                BindTraceSurfaceRecords(rejected, clearShader, clearKernel, context);
+                rejected.DispatchCompute(clearShader, clearKernel, DivRoundUpInt(traceDescriptor.width, ScreenProbeTraceAtlasClearThreadGroupSize),
+                    DivRoundUpInt(traceDescriptor.height, ScreenProbeTraceAtlasClearThreadGroupSize), 1);
+                context.ExecuteLegacyCommandBuffer(rejected);
+                context.ReleaseCommandBuffer(rejected);
+                return;
+            }
             if (!fallbackOnly && TryDispatchHardwareRayTracing(
                     context,
                     camera,
@@ -9949,6 +10292,8 @@ namespace Burt.RenderPipeline
                 return;
             }
 
+            if (BurtGISceneVoxelFineRuntime.IsRequested(camera))
+                throw new System.InvalidOperationException("Fine GI compact consumer unavailable; coarse fallback is not allowed.");
             if (fallbackOnly) return;
             var material = GetScreenSpaceGlobalIlluminationMaterial();
             if (material == null)
@@ -10073,7 +10418,8 @@ namespace Burt.RenderPipeline
             var useTraceScreen = runFresh && settings.TraceScreen;
             var useTraceHashGrid = runFallback && settings.TraceHashGridCache &&
                 BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationRadianceCacheHashGrid(context.Request, context.Asset);
-            var useTraceVoxel = runFresh && (settings.TraceVoxelOctree || settings.TraceSceneVoxel);
+            var useTraceVoxel = runFresh && (settings.TraceVoxelOctree || settings.TraceSceneVoxel) &&
+                (!BurtGISceneVoxelFineRuntime.IsRequested(camera) || BurtGISceneVoxelFineRuntime.IsPreparedFrame(context));
             var useTraceScreenGrid = runFallback && settings.TraceScreenGrid;
             var useTraceRadianceCacheClipMap = runFallback && settings.TraceUseWorldRadianceClipMap &&
                 BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIlluminationRadianceCacheClipMapContract(context.Request, context.Asset);
@@ -10085,7 +10431,7 @@ namespace Burt.RenderPipeline
                 (useTraceHashGrid &&
                     !TryResolveScreenProbeTraceHashGridShader(out traceHashGridShader, out traceHashGridKernel)) ||
                 (useTraceVoxel &&
-                    !TryResolveScreenProbeTraceVoxelShader(settings, giSettings.SceneVoxelClipMapCount, out traceVoxelShader, out traceVoxelKernel, out useTraceVoxelOctreeBaseOnly)) ||
+                    !TryResolveScreenProbeTraceVoxelShader(settings, giSettings.SceneVoxelClipMapCount, camera, out traceVoxelShader, out traceVoxelKernel, out useTraceVoxelOctreeBaseOnly)) ||
                 (useTraceScreenGrid &&
                     !TryResolveScreenProbeTraceScreenGridShader(out traceScreenGridShader, out traceScreenGridKernel)) ||
                 (useTraceRadianceCacheClipMap &&
@@ -10144,6 +10490,7 @@ namespace Burt.RenderPipeline
             {
                 cmd.SetComputeTextureParam(clearShader, clearKernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceGeometryDistanceTextureId, context.BurtGIScreenProbeTraceGeometryDistanceTarget.Identifier);
                 BindCompactTraceAtlasOutputs(cmd, clearShader, clearKernel, traceRadianceTarget, traceHitTarget);
+                BindTraceSurfaceRecords(cmd, clearShader, clearKernel, context);
                 cmd.DispatchCompute(
                     clearShader,
                     clearKernel,
@@ -10157,6 +10504,8 @@ namespace Burt.RenderPipeline
             if (useTraceScreen)
             {
                 cmd.SetComputeTextureParam(traceScreenShader, traceScreenKernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceGeometryDistanceTextureId, context.BurtGIScreenProbeTraceGeometryDistanceTarget.Identifier);
+                cmd.SetComputeTextureParam(traceScreenShader, traceScreenKernel, "_BurtGIScreenTraceSurfaceNormalTexture", BurtGISurfaceNormalUtility.Resolve(context).Identifier);
+                BindTraceSurfaceRecords(cmd, traceScreenShader, traceScreenKernel, context);
                 DispatchCompactTraceAtlasSubpass(cmd, traceScreenShader, traceScreenKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget);
 #if UNITY_EDITOR
                 DiagnosticTextureCapture?.Invoke(cmd, "ScreenTraceGeometryDistance", context.BurtGIScreenProbeTraceGeometryDistanceTarget.Identifier);
@@ -10184,7 +10533,9 @@ namespace Burt.RenderPipeline
             if (useTraceVoxel)
             {
                 cmd.SetComputeTextureParam(traceVoxelShader, traceVoxelKernel, BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceGeometryDistanceTextureId, context.BurtGIScreenProbeTraceGeometryDistanceTarget.Identifier);
-                DispatchCompactTraceAtlasSubpass(cmd, traceVoxelShader, traceVoxelKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget, useTraceVoxelOctreeBaseOnly);
+                if (traceVoxelShader.HasKernel("ScreenProbeTraceVoxelOctreeCS"))
+                    BindTraceSurfaceRecords(cmd, traceVoxelShader, traceVoxelKernel, context);
+                DispatchCompactTraceAtlasSubpass(cmd, traceVoxelShader, traceVoxelKernel, context, camera, settings, baseCenterExtent, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, traceRadianceTarget, traceHitTarget, useTraceVoxelOctreeBaseOnly, BurtGISceneVoxelFineRuntime.IsRequested(camera));
 #if UNITY_EDITOR
                 DiagnosticTextureCapture?.Invoke(cmd, "VoxelTraceGeometryDistance", context.BurtGIScreenProbeTraceGeometryDistanceTarget.Identifier);
 #endif
@@ -10244,11 +10595,18 @@ namespace Burt.RenderPipeline
         private static bool TryResolveScreenProbeTraceVoxelShader(
             BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings,
             int sceneVoxelClipmapCount,
+            Camera camera,
             out ComputeShader shader,
             out int kernel,
             out bool useVoxelOctreeBaseOnly)
         {
             useVoxelOctreeBaseOnly = false;
+            if (BurtGISceneVoxelFineRuntime.IsRequested(camera))
+            {
+                shader = GetScreenProbeTraceVoxelOctreeComputeShader();
+                return TryFindScreenProbeTraceAtlasKernel(shader, sceneVoxelClipmapCount <= 1 ?
+                    "ScreenProbeTraceVoxelFineCS" : "ScreenProbeTraceVoxelFineClipmapsCS", out kernel);
+            }
             var canUseStandaloneVoxelOctree = settings.TraceVoxelOctree;
 
             if (canUseStandaloneVoxelOctree)
@@ -10307,8 +10665,21 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle importanceRayInfoTarget,
             BurtRenderTargetHandle traceRadianceTarget,
             BurtRenderTargetHandle traceHitTarget,
-            bool useVoxelOctreeBaseOnly = false)
+            bool useVoxelOctreeBaseOnly = false,
+            bool useFineVoxel = false)
         {
+            if (useFineVoxel)
+            {
+                // The atlas was cleared above. Failed fine readiness stays unresolved;
+                // it must never fall through to the old coarse payload or raster path.
+                if (!BurtGISceneVoxelFineRuntime.BindTrace(cmd, shader, kernel, context)) return;
+                BindCompactTraceAtlasVoxelOctreeInputs(cmd, shader, kernel, radianceTarget, irradianceTarget,
+                    confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, context);
+                BindCompactTraceAtlasOutputs(cmd, shader, kernel, traceRadianceTarget, traceHitTarget);
+                cmd.DispatchCompute(shader, kernel, context.BurtGIScreenProbeTraceCompactIndirectArgsBuffer.Buffer, 0u);
+                BurtGISceneVoxelFineRuntime.MarkTraceRecorded(context);
+                return;
+            }
             if (useVoxelOctreeBaseOnly)
             {
                 BindCompactTraceAtlasVoxelOctreeInputs(cmd, shader, kernel, radianceTarget, irradianceTarget, confidenceTarget, hitDistanceTarget, importancePDFTarget, importanceRayInfoTarget, context);
@@ -10610,6 +10981,7 @@ namespace Burt.RenderPipeline
                 probeHeight,
                 BurtScreenSpaceGlobalIlluminationPassUtility.ResolveScreenProbeAdaptiveProbeIndexTileCapacity(settings),
                 maxAdaptiveProbes));
+            cmd.SetComputeVectorParam(shader, "_BurtGIRadianceCacheHashGridAddressParams", BurtScreenSpaceGlobalIlluminationPassUtility.ResolveHashGridAddressParams(camera, settings));
             cmd.SetComputeVectorParam(shader, BurtGIRadianceCacheHashGridParams0Id, new Vector4(
                 BurtScreenSpaceGlobalIlluminationPassUtility.RadianceCacheHashGridCellSize,
                 BurtScreenSpaceGlobalIlluminationPassUtility.RadianceCacheHashGridTileCellRatio,
@@ -11470,6 +11842,11 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGIScreenProbeSceneVelocityTextureId = Shader.PropertyToID("_BurtGIScreenProbeSceneVelocityTexture");
         private static readonly int BurtGIScreenProbeSceneVelocityOutputTextureId = Shader.PropertyToID("_BurtGIScreenProbeSceneVelocityOutputTexture");
         private static readonly int BurtTAACurrentDepthTextureId = Shader.PropertyToID("_BurtTAACurrentDepthTexture");
+        private static readonly int ProbeReceiverVelocityTextureId = Shader.PropertyToID("_BurtGIScreenProbeReceiverVelocityTexture");
+        private static readonly int ProbeReceiverVelocityParamsId = Shader.PropertyToID("_BurtGIScreenProbeReceiverVelocityParams");
+        private static readonly int ProbeMotionClipToPreviousId = Shader.PropertyToID("_BurtTAAClipToPreviousClip");
+        private static readonly int ProbeMotionJitterId = Shader.PropertyToID("_BurtTAAJitter");
+        private static readonly int ProbeReceiverMotionId = Shader.PropertyToID("_BurtGIProbeReceiverMotion");
         private static readonly int BurtTAACurrentViewProjectionId = Shader.PropertyToID("_BurtTAACurrentViewProjection");
         private static readonly int BurtTAACurrentNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAACurrentNonJitteredViewProjection");
         private static readonly int BurtTAAPreviousNonJitteredViewProjectionId = Shader.PropertyToID("_BurtTAAPreviousNonJitteredViewProjection");
@@ -11490,6 +11867,7 @@ namespace Burt.RenderPipeline
         private static readonly int BurtGIScreenProbeNumFramesAccumulatedWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeNumFramesAccumulatedWriteTexture");
         private static readonly int BurtGIScreenProbeDirectionalTemporalWriteTextureId = Shader.PropertyToID("_BurtGIScreenProbeDirectionalTemporalWriteTexture");
         private static readonly int BurtGIScreenProbeDirectionalTemporalTempTextureId = Shader.PropertyToID("_BurtGIScreenProbeDirectionalTemporalTempTexture");
+        private static readonly int BurtGIScreenProbeTemporalCameraForwardId = Shader.PropertyToID("_BurtGIScreenProbeTemporalCameraForward");
         private static readonly int TemporalAdaptiveProbeNumBufferId = Shader.PropertyToID("_BurtGIScreenProbeAdaptiveProbeNumBuffer");
         private static readonly int TemporalAdaptiveProbeDataBufferId = Shader.PropertyToID("_BurtGIScreenProbeAdaptiveProbeDataBuffer");
         private static ComputeShader screenProbeUseCountComputeShader;
@@ -11514,6 +11892,7 @@ namespace Burt.RenderPipeline
             builder.ReadBurtGIScreenProbeWorldPosition();
             builder.ReadBurtGIScreenProbeWorldNormal();
             builder.ReadBurtGIScreenProbeBentNormal();
+            builder.ReadCameraDepth(); // Receiver-aligned object motion needs the native depth attachment.
             builder.ReadBurtGIScreenProbeTraceRadiance();
             builder.WriteBurtGIScreenProbeTraceRadiance();
             builder.ReadBurtGIScreenProbeTraceHit();
@@ -11559,7 +11938,6 @@ namespace Burt.RenderPipeline
 
             var probeDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeDescriptor(camera, screenProbeSettings);
             var traceDescriptor = BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceDescriptor(camera, screenProbeSettings);
-            var useCountDescriptor = BurtScreenSpaceGlobalIlluminationScreenProbeHistoryUtility.CreateUseCountDescriptor(camera, screenProbeSettings);
             var screenProbeHistory = BurtScreenSpaceGlobalIlluminationScreenProbeHistoryUtility.EnsureHistoryTextures(context.Request, context.Asset, screenProbeSettings, out var screenProbeHistoryValid);
             var cmd = context.AcquireCommandBuffer(Name);
             var directionalHistoryValid = screenProbeHistoryValid && screenProbeSettings.TemporalFilter && screenProbeSettings.TemporalReprojection;
@@ -11571,14 +11949,10 @@ namespace Burt.RenderPipeline
                     context,
                     cmd,
                     camera,
-                    useCountDescriptor,
-                    screenDepthTarget,
-                    worldPositionTarget,
                     screenProbeHistory.PreviousViewProjectionMatrix);
-                sceneVelocityId = sceneVelocityAllocated ? new RenderTargetIdentifier(BurtGIScreenProbeSceneVelocityTextureId) : sceneVelocityId;
+                sceneVelocityId = sceneVelocityAllocated ? new RenderTargetIdentifier(ProbeReceiverVelocityTextureId) : sceneVelocityId;
             }
 
-            cmd.SetGlobalTexture(BurtGIScreenProbeSceneVelocityTextureId, sceneVelocityId);
             TryDispatchScreenProbeDirectionalTemporalFilter(
                 cmd,
                 context,
@@ -11590,6 +11964,7 @@ namespace Burt.RenderPipeline
                 worldPositionTarget,
                 worldNormalTarget,
                 sceneVelocityId,
+                sceneVelocityAllocated,
                 screenProbeHistory,
                 screenProbeHistoryValid);
 
@@ -11604,7 +11979,7 @@ namespace Burt.RenderPipeline
             CopyScreenProbeHistory(cmd, camera, temporalRadianceTarget, temporalIrradianceTarget, temporalConfidenceTarget, screenDepthTarget, worldPositionTarget, worldNormalTarget, bentNormalTarget, traceHitTarget, traceRadianceTarget, screenProbeHistory);
             if (sceneVelocityAllocated)
             {
-                cmd.ReleaseTemporaryRT(BurtGIScreenProbeSceneVelocityTextureId);
+                cmd.ReleaseTemporaryRT(ProbeReceiverVelocityTextureId);
             }
 
         }
@@ -11620,6 +11995,7 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle worldPositionTarget,
             BurtRenderTargetHandle worldNormalTarget,
             RenderTargetIdentifier sceneVelocityId,
+            bool receiverVelocityAvailable,
             BurtScreenSpaceGlobalIlluminationScreenProbeHistoryTextures history,
             bool historyValid)
         {
@@ -11648,11 +12024,16 @@ namespace Burt.RenderPipeline
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeWorldNormalTextureId, worldNormalTarget.Identifier);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHistoryWorldPositionTextureId, history.WorldPosition != null ? (Texture)history.WorldPosition : Texture2D.blackTexture);
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeHistoryWorldNormalTextureId, history.WorldNormal != null ? (Texture)history.WorldNormal : Texture2D.blackTexture);
-            cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeSceneVelocityTextureId, sceneVelocityId);
+            cmd.SetComputeTextureParam(shader, kernel, ProbeReceiverVelocityTextureId, sceneVelocityId);
+            var receiverDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraDepthDescriptor(context.Request.Camera);
+            cmd.SetComputeVectorParam(shader, ProbeReceiverVelocityParamsId, new Vector4(
+                receiverDescriptor.width, receiverDescriptor.height, receiverVelocityAvailable ? 1f : 0f, 0f));
+            cmd.SetComputeMatrixParam(shader, BurtGIScreenProbeViewProjectionMatrixId, ResolveCurrentViewProjection(context.Request.Camera));
             cmd.SetComputeTextureParam(shader, kernel, BurtGIScreenProbeDirectionalTemporalWriteTextureId, new RenderTargetIdentifier(BurtGIScreenProbeDirectionalTemporalTempTextureId));
             cmd.SetComputeMatrixParam(shader, BurtGIScreenProbePreviousViewProjectionMatrixId, history.PreviousViewProjectionMatrix);
             cmd.SetComputeVectorParam(shader, "_BurtGIScreenProbeHistoryGridMapping", history.UniformGridMapping);
             cmd.SetComputeVectorParam(shader, CameraWorldPositionId, Shader.GetGlobalVector(CameraWorldPositionId));
+            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeTemporalCameraForwardId, context.Request.Camera.transform.forward);
             cmd.SetComputeVectorParam(shader, BurtGIScreenProbeGridParamsId, new Vector4(
                 Mathf.Max(1, probeDescriptor.width),
                 Mathf.Max(1, probeDescriptor.height),
@@ -11804,27 +12185,22 @@ namespace Burt.RenderPipeline
             BurtRenderGraphContext context,
             CommandBuffer cmd,
             Camera camera,
-            RenderTextureDescriptor useCountDescriptor,
-            BurtRenderTargetHandle screenDepthTarget,
-            BurtRenderTargetHandle worldPositionTarget,
             Matrix4x4 previousViewProjectionMatrix)
         {
-            var shader = GetScreenProbeUseCountComputeShader();
-            if (!TryFindScreenProbeUseCountKernel(shader, ScreenProbeSceneVelocityKernelName, out var velocityKernel))
+            if (!context.CameraDepthTarget.IsValid)
             {
                 return false;
             }
 
-            var width = Mathf.Max(1, useCountDescriptor.width);
-            var height = Mathf.Max(1, useCountDescriptor.height);
-            var descriptor = useCountDescriptor;
-            descriptor.depthBufferBits = 0;
-            descriptor.msaaSamples = 1;
-            var velocityFormat = SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Render) &&
-                SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.LoadStore)
+            // Coarse raster centers do not coincide with jittered probe placement.
+            // Rasterize motion at native depth resolution and point-sample the actual
+            // uniform/adaptive receiver, following XRender's ScreenUV convention.
+            var depthDescriptor = BurtRenderTargetDescriptorUtility.CreateCameraDepthDescriptor(camera);
+            var width = Mathf.Max(1, depthDescriptor.width);
+            var height = Mathf.Max(1, depthDescriptor.height);
+            var velocityFormat = SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Render)
                     ? GraphicsFormat.R16G16B16A16_SFloat
-                    : (SystemInfo.IsFormatSupported(GraphicsFormat.R32G32B32A32_SFloat, FormatUsage.Render) &&
-                        SystemInfo.IsFormatSupported(GraphicsFormat.R32G32B32A32_SFloat, FormatUsage.LoadStore)
+                    : (SystemInfo.IsFormatSupported(GraphicsFormat.R32G32B32A32_SFloat, FormatUsage.Render)
                             ? GraphicsFormat.R32G32B32A32_SFloat
                             : GraphicsFormat.None);
             if (velocityFormat == GraphicsFormat.None)
@@ -11832,22 +12208,19 @@ namespace Burt.RenderPipeline
                 return false;
             }
 
-            descriptor.graphicsFormat = velocityFormat;
-            descriptor.enableRandomWrite = true;
-            cmd.GetTemporaryRT(BurtGIScreenProbeSceneVelocityTextureId, descriptor, FilterMode.Point);
-
-            var sceneVelocityTarget = new RenderTargetIdentifier(BurtGIScreenProbeSceneVelocityTextureId);
-            var groupsX = Mathf.CeilToInt(width / (float)ScreenProbeUseCountThreadGroupSize);
-            var groupsY = Mathf.CeilToInt(height / (float)ScreenProbeUseCountThreadGroupSize);
-            var useCountParams = new Vector4(width, height, 1f / width, 1f / height);
-            cmd.SetComputeVectorParam(shader, BurtGIScreenProbeUseCountParamsId, useCountParams);
-            cmd.SetComputeMatrixParam(shader, BurtGIScreenProbePreviousViewProjectionMatrixId, previousViewProjectionMatrix);
-            cmd.SetComputeTextureParam(shader, velocityKernel, BurtGIScreenProbeSceneVelocityOutputTextureId, sceneVelocityTarget);
-            cmd.SetComputeTextureParam(shader, velocityKernel, BurtGIScreenProbeWorldPositionTextureId, worldPositionTarget.Identifier);
-            cmd.SetComputeTextureParam(shader, velocityKernel, BurtGIScreenProbeScreenDepthTextureId, screenDepthTarget.Identifier);
-            cmd.DispatchCompute(shader, velocityKernel, groupsX, groupsY, 1);
-
-            DrawScreenProbeObjectMotionVectors(context, cmd, camera, sceneVelocityTarget, screenDepthTarget, previousViewProjectionMatrix, width, height);
+            var descriptor = new RenderTextureDescriptor(width, height, velocityFormat, 0)
+            {
+                msaaSamples = 1, sRGB = false, useMipMap = false, autoGenerateMips = false
+            };
+            cmd.GetTemporaryRT(ProbeReceiverVelocityTextureId, descriptor, FilterMode.Point);
+            var sceneVelocityTarget = new RenderTargetIdentifier(ProbeReceiverVelocityTextureId);
+            cmd.SetRenderTarget(sceneVelocityTarget, context.CameraDepthTarget.Identifier);
+            cmd.ClearRenderTarget(false, true, Color.clear); // Invalid pixels retain world-position reprojection.
+            DrawScreenProbeObjectMotionVectors(context, cmd, camera, sceneVelocityTarget,
+                context.CameraDepthTarget, previousViewProjectionMatrix, width, height, true);
+#if UNITY_EDITOR
+            BurtScreenSpaceGlobalIlluminationScreenProbeTraceAtlasPass.DiagnosticTextureCapture?.Invoke(cmd, "ProbeReceiverVelocity", sceneVelocityTarget);
+#endif
             return true;
         }
 
@@ -11859,7 +12232,8 @@ namespace Burt.RenderPipeline
             BurtRenderTargetHandle screenDepthTarget,
             Matrix4x4 previousViewProjectionMatrix,
             int width,
-            int height)
+            int height,
+            bool receiverAlignedProbe = false)
         {
             if (context == null || context.Request == null || camera == null || !screenDepthTarget.IsValid)
             {
@@ -11880,7 +12254,20 @@ namespace Burt.RenderPipeline
             cmd.SetGlobalMatrix(BurtTAAPreviousNonJitteredViewProjectionId, previousNonJitteredViewProjection);
             cmd.SetGlobalVector(BurtTAATexelSizeId, new Vector4(1f / width, 1f / height, width, height));
             cmd.SetGlobalTexture(BurtTAACurrentDepthTextureId, screenDepthTarget.Identifier);
-            cmd.SetRenderTarget(sceneVelocityTarget);
+            if (receiverAlignedProbe)
+            {
+                // GI owns its history matrices even with TAA disabled. Treat both
+                // endpoints as raster UV (including projection jitter) consistently.
+                BurtGIReceiverMotionHistory.Prepare(context.Request);
+                cmd.SetGlobalMatrix(BurtTAACurrentViewProjectionId, currentViewProjection);
+                cmd.SetGlobalMatrix(BurtTAACurrentNonJitteredViewProjectionId, currentViewProjection);
+                cmd.SetGlobalMatrix(BurtTAAPreviousNonJitteredViewProjectionId, previousViewProjectionMatrix);
+                cmd.SetGlobalMatrix(ProbeMotionClipToPreviousId, previousViewProjectionMatrix * currentViewProjection.inverse);
+                cmd.SetGlobalVector(ProbeMotionJitterId, Vector4.zero);
+                cmd.SetGlobalFloat(ProbeReceiverMotionId, 1f);
+                cmd.SetRenderTarget(sceneVelocityTarget, screenDepthTarget.Identifier);
+            }
+            else cmd.SetRenderTarget(sceneVelocityTarget);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
 
             camera.depthTextureMode |= DepthTextureMode.MotionVectors | DepthTextureMode.Depth;
@@ -11903,12 +12290,30 @@ namespace Burt.RenderPipeline
                 enableInstancing = true
             };
             var transparentFilteringSettings = new FilteringSettings(ScreenProbeTransparentMotionVectorQueueRange, camera.cullingMask);
-            context.DrawRendererList(context.Request.CullingResults, ref transparentDrawingSettings, ref transparentFilteringSettings);
+            if (!receiverAlignedProbe)
+                context.DrawRendererList(context.Request.CullingResults, ref transparentDrawingSettings, ref transparentFilteringSettings);
 
             BurtFurBlurPassUtility.UploadMotionVectorGlobals(cmd, context.Request, width, height);
-            cmd.SetRenderTarget(sceneVelocityTarget);
+            if (receiverAlignedProbe)
+            {
+                cmd.SetGlobalMatrix(BurtFurBlurPassUtility.CurrentNonJitteredViewProjectionId, currentViewProjection);
+                cmd.SetGlobalMatrix(BurtFurBlurPassUtility.PreviousNonJitteredViewProjectionId, previousViewProjectionMatrix);
+                cmd.SetRenderTarget(sceneVelocityTarget, screenDepthTarget.Identifier);
+            }
+            else cmd.SetRenderTarget(sceneVelocityTarget);
             BurtRenderTargetDescriptorUtility.SetViewport(cmd, width, height);
             BurtMultipassRenderer.DrawAll(cmd, context, BurtMultipassShaderPass.MotionVectors, RenderQueueRange.opaque);
+            if (receiverAlignedProbe)
+            {
+                cmd.SetGlobalFloat(ProbeReceiverMotionId, 0f);
+                cmd.SetGlobalMatrix(BurtTAACurrentNonJitteredViewProjectionId, currentNonJitteredViewProjection);
+                cmd.SetGlobalMatrix(BurtTAAPreviousNonJitteredViewProjectionId, previousNonJitteredViewProjection);
+                cmd.SetGlobalMatrix(ProbeMotionClipToPreviousId, temporalAA != null ? temporalAA.ClipToPreviousClipMatrix : previousViewProjectionMatrix * currentViewProjection.inverse);
+                cmd.SetGlobalVector(ProbeMotionJitterId, temporalAA != null
+                    ? new Vector4(temporalAA.Jitter.x, temporalAA.Jitter.y, temporalAA.JitterPixels.x, temporalAA.JitterPixels.y)
+                    : Vector4.zero);
+                BurtFurBlurPassUtility.UploadMotionVectorGlobals(cmd, context.Request, width, height);
+            }
         }
 
         private static Matrix4x4 ResolveCurrentViewProjection(Camera camera)
@@ -14360,7 +14765,7 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal abstract class BurtScreenSpaceGlobalIlluminationPass : BurtRenderPass
+    internal abstract class BurtScreenSpaceGlobalIlluminationPass : BurtRenderPass, System.IDisposable
     {
         protected const string ScreenSpaceGlobalIlluminationShaderName = BurtScreenSpaceGlobalIlluminationPassUtility.ScreenSpaceGlobalIlluminationShaderName;
         protected static readonly int CameraDepthTextureId = BurtRenderGraphResourceRegistry.CameraDepthTextureId;
@@ -14515,6 +14920,15 @@ namespace Burt.RenderPipeline
 
         private Material screenSpaceGlobalIlluminationMaterial;
         private bool hasLoggedMissingShader;
+
+        public void Dispose()
+        {
+            // Only this pass's lazy material is owned here. Loaded shaders and
+            // shared GI histories have their own lifetime and must not be destroyed.
+            CoreUtils.Destroy(screenSpaceGlobalIlluminationMaterial);
+            screenSpaceGlobalIlluminationMaterial = null;
+            hasLoggedMissingShader = false;
+        }
 
         protected Material GetScreenSpaceGlobalIlluminationMaterial()
         {
@@ -18302,6 +18716,15 @@ namespace Burt.RenderPipeline
             }
 
             return state.Texture;
+        }
+
+        public static void InvalidateHistory(Camera camera)
+        {
+            if (camera != null && CameraStates.TryGetValue(camera.GetInstanceID(), out var state) && state.Camera == camera)
+            {
+                state.Valid = false;
+                state.LastStoredFrame = -1;
+            }
         }
 
         public static Matrix4x4 GetPreviousViewProjectionMatrix(BurtRenderRequest request)
@@ -23026,6 +23449,15 @@ namespace Burt.RenderPipeline
     internal static class BurtGISceneVoxelGpuRasterizerUtility
     {
         private const string VoxelizeLightMode = "BurtGIVoxelize";
+        private const string FineOccupancyPass = "BurtGIVoxelizeFineOccupancy";
+        private const string FineMaterialPass = "BurtGIVoxelizeFineMaterial";
+        private static readonly int FineDummyTargetId = Shader.PropertyToID("_BurtGISceneVoxelFineRasterDummyTexture");
+        private static readonly int FineEmissionModeId = Shader.PropertyToID("_BurtGIVoxelizeEmissionMode");
+        private static readonly string[] FineRequiredMaterialProperties =
+        {
+            "_BaseMap", "_BaseColor", "_MaskMap", "_Metallic", "_EmissionMap",
+            "_EmissionColor", "_AlphaClip", "_Cutoff", "_Surface"
+        };
         private static readonly int OwnerTextureId = Shader.PropertyToID("_BurtGIVoxelizeOwnerTexture");
         private static readonly int PrimitiveBaseId = Shader.PropertyToID("_BurtGIVoxelizePrimitiveBase");
         private static readonly int ResolvePhaseId = Shader.PropertyToID("_BurtGIVoxelizeResolvePhase");
@@ -23049,6 +23481,315 @@ namespace Burt.RenderPipeline
         public static int LastDrawnRendererCount { get; private set; }
         public static int LastDrawnMaterialPassCount { get; private set; }
         public static string LastFailureReason { get; private set; } = "None";
+        public static int LastFineDrawnRendererCount { get; private set; }
+        public static int LastFineDrawnMaterialPassCount { get; private set; }
+        public static string LastFineFailureReason { get; private set; } = "NotRequested";
+
+        private readonly struct FineVoxelDraw
+        {
+            public readonly VoxelDraw Draw;
+            public readonly int OccupancyPass;
+            public FineVoxelDraw(VoxelDraw draw, int occupancyPass)
+            { Draw = draw; OccupancyPass = occupancyPass; }
+        }
+
+        // A dedicated, empty command buffer is required: failure can discard the
+        // entire unsubmitted transaction without losing unrelated caller commands.
+        // This opt-in entry has no production call site and never enables fine GI.
+        // The caller executes immediately, checks the source epoch is unchanged,
+        // then publishes Geometry/Hierarchy validity using recordedGeneration.
+        // Render target/viewport are caller-owned and must be rebound afterwards.
+        internal static bool TryRecordFineGeometry(
+            CommandBuffer cmd,
+            Camera camera,
+            Vector4 centerExtent,
+            BurtGISceneVoxelFineResources fine,
+            BurtScreenSpaceGlobalIlluminationSettings settings,
+            ComputeShader fineBuildShader,
+            ComputeShader octreeBuildShader,
+            out uint recordedGeneration,
+            out string failure)
+        {
+            return TryRecordFineGeometryOwned(cmd, camera, centerExtent, fine, settings,
+                fineBuildShader, octreeBuildShader, out recordedGeneration, out failure, false);
+        }
+
+        // An append-capable entry for a single exclusively owned private transaction.
+        // Any failure requires discarding the WHOLE buffer and every recorded level.
+        // Never pass a shared RenderGraph command buffer here.
+        internal static bool TryRecordFineGeometryOwned(CommandBuffer cmd, Camera camera,
+            Vector4 centerExtent, BurtGISceneVoxelFineResources fine,
+            BurtScreenSpaceGlobalIlluminationSettings settings, ComputeShader fineBuildShader,
+            ComputeShader octreeBuildShader, out uint recordedGeneration, out string failure,
+            bool appendToOwnedTransaction)
+        {
+            recordedGeneration = 0;
+            failure = "None";
+            LastFineDrawnRendererCount = 0;
+            LastFineDrawnMaterialPassCount = 0;
+            LastFineFailureReason = "None";
+            if (cmd == null || camera == null || fine == null || !fine.IsAllocated)
+                return RejectFineGeometry(fine, "InvalidFineBuildArguments", out failure);
+            if (!appendToOwnedTransaction && cmd.sizeInBytes != 0)
+                return RejectFineGeometry(fine, "FineBuildRequiresEmptyCommandBuffer", out failure);
+            if (!IsFiniteFineBounds(centerExtent) || centerExtent.w <= 0f)
+                return RejectFineGeometry(fine, "InvalidFineBuildBounds", out failure);
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsGeometryShaders ||
+                !SystemInfo.supports3DTextures || SystemInfo.supportedRandomWriteTargetCount < 7 ||
+                !SystemInfo.IsFormatSupported(GraphicsFormat.R32_UInt, FormatUsage.LoadStore) ||
+                !SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.LoadStore))
+                return RejectFineGeometry(fine, "UnsupportedFineRasterDevice", out failure);
+
+            try
+            {
+                // Validate the whole compute protocol before recording any clear.
+                RequireFineKernel(fineBuildShader, "ClearGeometry", 4, 4, 4);
+                RequireFineKernel(fineBuildShader, "ClearPool", 64, 1, 1);
+                RequireFineKernel(fineBuildShader, "ScanNodes", 256, 1, 1);
+                RequireFineKernel(fineBuildShader, "ScanGroups", 256, 1, 1);
+                RequireFineKernel(fineBuildShader, "ScanSuperGroups", 256, 1, 1);
+                RequireFineKernel(fineBuildShader, "FinalizeNodes", 256, 1, 1);
+                RequireFineKernel(fineBuildShader, "BuildCoarseSummary", 4, 4, 4);
+                RequireFineKernel(octreeBuildShader, "SceneVoxelBuildOctreeLeafCS", 1, 1, 1);
+                RequireFineKernel(octreeBuildShader, "SceneVoxelBuildOctreeParentCS", 1, 1, 1);
+                RequireFineKernel(octreeBuildShader, "SceneVoxelBuildOctreeRootCS", 1, 1, 1);
+
+                var draws = BuildFineClipmapDraws(camera, centerExtent, out failure);
+                if (draws == null) return RejectFineGeometry(fine, failure, out failure);
+
+                // Only these globals are touched; user materials and property
+                // blocks are never modified. Do not bind unrelated fine buffers.
+                var previousCenter = Shader.GetGlobalVector(SceneVoxelCenterExtentId);
+                var previousLighting = Shader.GetGlobalVector(SceneVoxelLightingParamsId);
+                var previousEmission = Shader.GetGlobalFloat(FineEmissionModeId);
+                var previousPrimitive = Shader.GetGlobalInt(PrimitiveBaseId);
+                var previousPhase = Shader.GetGlobalInt(ResolvePhaseId);
+                var previousResolution = Shader.GetGlobalInt(BurtGISceneVoxelFineResources.ResolutionName);
+                var previousCapacity = Shader.GetGlobalInt(BurtGISceneVoxelFineResources.CapacityName);
+                var previousLow = Shader.GetGlobalTexture(BurtGISceneVoxelFineResources.LowName);
+                var previousHigh = Shader.GetGlobalTexture(BurtGISceneVoxelFineResources.HighName);
+                var previousOffsets = Shader.GetGlobalTexture(BurtGISceneVoxelFineResources.OffsetsName);
+
+                fine.RecordClear(cmd, fineBuildShader);
+                var descriptor = new RenderTextureDescriptor(fine.FineResolution, fine.FineResolution,
+                    RenderTextureFormat.R8, 0)
+                {
+                    msaaSamples = 1, sRGB = false, useMipMap = false, autoGenerateMips = false
+                };
+                cmd.GetTemporaryRT(FineDummyTargetId, descriptor, FilterMode.Point);
+                cmd.SetGlobalVector(SceneVoxelCenterExtentId, centerExtent);
+                cmd.SetGlobalVector(SceneVoxelLightingParamsId, new Vector4(
+                    1f / Mathf.Clamp(settings.SceneVoxelDiffuseColorBoost, 1f, 4f),
+                    1f - Mathf.Clamp01(settings.SceneVoxelAvoidBleeding),
+                    settings.SceneVoxelDirectLightIntensity, settings.SceneVoxelIndirectLightIntensity));
+                // Lit has no material EmissionMode property; never inherit a
+                // preceding voxel-light/debug draw's global value.
+                cmd.SetGlobalFloat(FineEmissionModeId, 0f);
+                cmd.SetGlobalInt(BurtGISceneVoxelFineResources.ResolutionName, fine.Resolution);
+                cmd.SetGlobalInt(BurtGISceneVoxelFineResources.CapacityName, fine.LogicalCapacity);
+                cmd.SetRenderTarget(new RenderTargetIdentifier(FineDummyTargetId));
+                cmd.ClearRenderTarget(false, true, Color.clear);
+                cmd.SetViewport(new Rect(0f, 0f, fine.FineResolution, fine.FineResolution));
+                cmd.ClearRandomWriteTargets();
+                cmd.SetRandomWriteTarget(1, fine.Low);
+                cmd.SetRandomWriteTarget(2, fine.High);
+                RecordFineClipmapDraws(cmd, draws, true);
+                cmd.ClearRandomWriteTargets();
+
+                // Allocation uses complete geometry, including valid black
+                // occluders; capacity exhaustion cannot erase occupancy bits.
+                fine.RecordAllocate(cmd, fineBuildShader);
+                cmd.SetGlobalTexture(BurtGISceneVoxelFineResources.LowName, fine.Low);
+                cmd.SetGlobalTexture(BurtGISceneVoxelFineResources.HighName, fine.High);
+                cmd.SetGlobalTexture(BurtGISceneVoxelFineResources.OffsetsName, fine.Offsets);
+                cmd.SetRenderTarget(new RenderTargetIdentifier(FineDummyTargetId));
+                cmd.SetViewport(new Rect(0f, 0f, fine.FineResolution, fine.FineResolution));
+                cmd.SetRandomWriteTarget(1, fine.Owners);
+                cmd.SetRandomWriteTarget(2, fine.Materials);
+                cmd.SetGlobalInt(ResolvePhaseId, 0);
+                RecordFineClipmapDraws(cmd, draws, false);
+                cmd.ClearRandomWriteTargets();
+                cmd.SetRandomWriteTarget(1, fine.Owners);
+                cmd.SetRandomWriteTarget(2, fine.Materials);
+                cmd.SetGlobalInt(ResolvePhaseId, 1);
+                RecordFineClipmapDraws(cmd, draws, false);
+                cmd.ClearRandomWriteTargets();
+                fine.RecordBuildHierarchy(cmd, fineBuildShader, octreeBuildShader);
+
+                cmd.SetGlobalVector(SceneVoxelCenterExtentId, previousCenter);
+                cmd.SetGlobalVector(SceneVoxelLightingParamsId, previousLighting);
+                cmd.SetGlobalFloat(FineEmissionModeId, previousEmission);
+                cmd.SetGlobalInt(PrimitiveBaseId, previousPrimitive);
+                cmd.SetGlobalInt(ResolvePhaseId, previousPhase);
+                cmd.SetGlobalInt(BurtGISceneVoxelFineResources.ResolutionName, previousResolution);
+                cmd.SetGlobalInt(BurtGISceneVoxelFineResources.CapacityName, previousCapacity);
+                RestoreFineTextureGlobal(cmd, BurtGISceneVoxelFineResources.LowName, previousLow);
+                RestoreFineTextureGlobal(cmd, BurtGISceneVoxelFineResources.HighName, previousHigh);
+                RestoreFineTextureGlobal(cmd, BurtGISceneVoxelFineResources.OffsetsName, previousOffsets);
+                cmd.ReleaseTemporaryRT(FineDummyTargetId);
+                recordedGeneration = fine.Generation;
+                LastFineDrawnMaterialPassCount = draws.Count;
+                LastFineFailureReason = "None";
+                return true;
+            }
+            catch (System.Exception exception)
+            {
+                // None of this buffer was executed: removing the queued globals
+                // and temporary allocation also rolls back all recorded state.
+                cmd.Clear();
+                LastFineDrawnRendererCount = 0;
+                LastFineDrawnMaterialPassCount = 0;
+                return RejectFineGeometry(fine, "FineBuildRecordFailed(" + exception.Message + ")", out failure);
+            }
+        }
+
+        private static bool RejectFineGeometry(BurtGISceneVoxelFineResources fine, string reason, out string failure)
+        {
+            if (fine != null)
+            {
+                try { fine.Invalidate(); }
+                catch (System.ObjectDisposedException) { }
+            }
+            failure = reason;
+            LastFineFailureReason = reason;
+            LastFineDrawnRendererCount = 0;
+            LastFineDrawnMaterialPassCount = 0;
+            return false;
+        }
+
+        private static bool IsFiniteFineBounds(Vector4 value)
+        {
+            for (var i = 0; i < 4; ++i)
+                if (float.IsNaN(value[i]) || float.IsInfinity(value[i])) return false;
+            return true;
+        }
+
+        private static void RequireFineKernel(ComputeShader shader, string name, uint x, uint y, uint z)
+        {
+            if (shader == null || !shader.HasKernel(name))
+                throw new System.InvalidOperationException("MissingFineKernel(" + name + ")");
+            shader.GetKernelThreadGroupSizes(shader.FindKernel(name), out var actualX, out var actualY, out var actualZ);
+            if (actualX != x || actualY != y || actualZ != z)
+                throw new System.InvalidOperationException("FineKernelGroupSizeMismatch(" + name + ")");
+        }
+
+        private static void RestoreFineTextureGlobal(CommandBuffer cmd, string name, Texture previous)
+        {
+            cmd.SetGlobalTexture(name, previous != null
+                ? new RenderTargetIdentifier(previous) : new RenderTargetIdentifier(BuiltinRenderTextureType.None));
+        }
+
+        private static System.Collections.Generic.List<FineVoxelDraw> BuildFineClipmapDraws(
+            Camera camera, Vector4 centerExtent, out string failure)
+        {
+            failure = "None";
+            var bounds = new Bounds(centerExtent, Vector3.one * centerExtent.w * 2f);
+            // Terrain/trees/details and explicit voxel lights belong to legacy
+            // CPU producers. This native-only entry must not silently omit them.
+            foreach (var terrain in Object.FindObjectsOfType<Terrain>())
+            {
+                if (terrain == null || !terrain.isActiveAndEnabled || terrain.terrainData == null ||
+                    (camera.cullingMask & (1 << terrain.gameObject.layer)) == 0) continue;
+                // Terrain vegetation may extend beyond the heightfield bounds.
+                // Until that producer has its own fine contract, reject rather
+                // than accepting a supposedly empty bounds intersection.
+                failure = "UnsupportedFineTerrain(" + terrain.name + ")";
+                return null;
+            }
+            foreach (var light in BurtGIVoxelLight.Active)
+            {
+                if (light == null || !light.isActiveAndEnabled ||
+                    (camera.cullingMask & (1 << light.gameObject.layer)) == 0) continue;
+                var mesh = BurtGIVoxelLight.GetBuiltinMesh(light.Shape);
+                if (mesh == null || bounds.Intersects(TransformFineBounds(mesh.bounds, light.transform.localToWorldMatrix)))
+                { failure = "UnsupportedFineVoxelLight(" + light.name + ")"; return null; }
+            }
+
+            var draws = new System.Collections.Generic.List<FineVoxelDraw>();
+            ulong primitiveBase = 0;
+            // Explicit builds can occur outside a render request. Force a fresh
+            // sorted snapshot, then reuse exactly this list for all three draws.
+            cachedRenderers = null;
+            foreach (var renderer in GetFrameRenderers(camera))
+            {
+                if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy ||
+                    (camera.cullingMask & (1 << renderer.gameObject.layer)) == 0 ||
+                    !bounds.Intersects(renderer.bounds)) continue;
+                if (!(renderer is MeshRenderer))
+                { failure = "UnsupportedFineRenderer(" + renderer.name + ")"; return null; }
+                // Per-renderer overrides and skinned/procedural deformation have
+                // not passed the native-material parity tests yet.
+                if (renderer.HasPropertyBlock() && !BurtGIReceiverMotionHistory.HasOnlyOwnedMotionProperties(renderer))
+                { failure = "UnsupportedFinePropertyBlock(" + renderer.name + ")"; return null; }
+                var mesh = renderer.GetComponent<MeshFilter>()?.sharedMesh;
+                if (mesh == null || !mesh.HasVertexAttribute(VertexAttribute.Normal) ||
+                    !mesh.HasVertexAttribute(VertexAttribute.TexCoord0))
+                { failure = "UnsupportedFineMeshAttributes(" + renderer.name + ")"; return null; }
+                var materials = renderer.sharedMaterials;
+                if (materials == null || materials.Length != mesh.subMeshCount)
+                { failure = "UnsupportedFineMaterialMapping(" + renderer.name + ")"; return null; }
+                int firstRendererDraw = draws.Count;
+                for (var subMesh = 0; subMesh < mesh.subMeshCount; ++subMesh)
+                {
+                    var material = materials[subMesh];
+                    // Match the existing native scene-voxel source set: transparent
+                    // surfaces are not opaque geometry, rather than unsupported
+                    // opaque sources that may be silently discarded.
+                    if (material != null && material.renderQueue > (int)RenderQueue.GeometryLast)
+                        continue;
+                    if (material == null || material.shader == null || material.shader.name != "BurtRP/Lit" ||
+                        !material.shader.isSupported)
+                    { failure = "UnsupportedFineMaterial(" + renderer.name + "," + subMesh + ")"; return null; }
+                    foreach (var property in FineRequiredMaterialProperties)
+                    {
+                        if (material.HasProperty(property)) continue;
+                        failure = "MissingFineMaterialProperty(" + material.name + "," + property + ")";
+                        return null;
+                    }
+                    if (material.GetFloat("_Surface") != 0f)
+                    { failure = "UnsupportedFineSurface(" + material.name + ")"; return null; }
+                    int occupancyPass = material.FindPass(FineOccupancyPass);
+                    int materialPass = material.FindPass(FineMaterialPass);
+                    if (occupancyPass < 0 || materialPass < 0 ||
+                        !material.GetShaderPassEnabled(FineOccupancyPass) || !material.GetShaderPassEnabled(FineMaterialPass))
+                    { failure = "MissingFineMaterialPass(" + material.name + ")"; return null; }
+                    if (mesh.GetTopology(subMesh) != MeshTopology.Triangles || mesh.GetIndexCount(subMesh) % 3u != 0u)
+                    { failure = "UnsupportedFinePrimitiveIdentity(" + renderer.name + "," + subMesh + ")"; return null; }
+                    ulong primitiveCount = mesh.GetIndexCount(subMesh) / 3u;
+                    if ((primitiveBase + primitiveCount) * 3ul >= uint.MaxValue)
+                    { failure = "FinePrimitiveOwnerKeyOverflow"; return null; }
+                    draws.Add(new FineVoxelDraw(new VoxelDraw(renderer, material, subMesh, materialPass,
+                        (int)primitiveBase), occupancyPass));
+                    primitiveBase += primitiveCount;
+                }
+                if (draws.Count > firstRendererDraw) LastFineDrawnRendererCount++;
+            }
+            return draws;
+        }
+
+        private static Bounds TransformFineBounds(Bounds localBounds, Matrix4x4 localToWorld)
+        {
+            var center = localToWorld.MultiplyPoint3x4(localBounds.center);
+            var x = localToWorld.MultiplyVector(new Vector3(localBounds.extents.x, 0f, 0f));
+            var y = localToWorld.MultiplyVector(new Vector3(0f, localBounds.extents.y, 0f));
+            var z = localToWorld.MultiplyVector(new Vector3(0f, 0f, localBounds.extents.z));
+            return new Bounds(center, 2f * new Vector3(
+                Mathf.Abs(x.x) + Mathf.Abs(y.x) + Mathf.Abs(z.x),
+                Mathf.Abs(x.y) + Mathf.Abs(y.y) + Mathf.Abs(z.y),
+                Mathf.Abs(x.z) + Mathf.Abs(y.z) + Mathf.Abs(z.z)));
+        }
+
+        private static void RecordFineClipmapDraws(CommandBuffer cmd,
+            System.Collections.Generic.List<FineVoxelDraw> draws, bool occupancy)
+        {
+            foreach (var fineDraw in draws)
+            {
+                var draw = fineDraw.Draw;
+                cmd.SetGlobalInt(PrimitiveBaseId, draw.PrimitiveBase);
+                cmd.DrawRenderer(draw.Renderer, draw.Material, draw.SubMesh,
+                    occupancy ? fineDraw.OccupancyPass : draw.Pass);
+            }
+        }
 
         public static bool IsSupported =>
             SystemInfo.supportsComputeShaders &&
@@ -24522,7 +25263,7 @@ namespace Burt.RenderPipeline
             cameraStatePruneCounter = 0;
         }
 
-        private const int HistoryAlgorithmVersion = 35; // Directional spatial filter uses XRender relative-eye-depth support.
+        private const int HistoryAlgorithmVersion = 39; // Migrate once to bounded directional lighting history.
         private const int CameraStatePruneInterval = 128;
         private const float ProjectionChangeEpsilon = 0.0001f;
 
@@ -25583,8 +26324,10 @@ namespace Burt.RenderPipeline
 
     internal static class BurtRadianceCacheHashGridHistoryUtility
     {
-        // Discard global-frame timestamps when switching to a per-cache update clock.
-        private const int HistoryAlgorithmVersion = 16;
+        // Persistent HashGrid values now contain FP16 lanes, not UNorm16 [0,8].
+        // Readers must never reinterpret history from the previous encoding.
+        // Adaptive cache publication now uses its actual placement and trace ray.
+        private const int HistoryAlgorithmVersion = 24; // Sparse multi-surface entries and current RGB history bounds.
         private const int CameraStatePruneInterval = 128;
 
         private sealed class CameraState
@@ -25603,6 +26346,10 @@ namespace Burt.RenderPipeline
             public int FrameIndex;
             public int LastUnityFrameIndex = -1;
             public int UpdateParity;
+            // Logical invalidation must also retire GPU values before they are
+            // imported into the next request. Do not dispose buffers mid-request.
+            public bool NeedsClear;
+            public bool SurfaceAddressing;
             public string LastInvalidationReason = "NeverAllocated";
         }
 
@@ -25635,6 +26382,13 @@ namespace Burt.RenderPipeline
                 Matches(state.CountDescriptor, countDescriptor) &&
                 Matches(state.UpdateCellValueDescriptor, updateCellValueDescriptor);
 
+            bool surfaceAddressing = BurtScreenSpaceGlobalIlluminationPassUtility.UsesHashGridSurfaceAddressing(camera, settings);
+            if (state.SurfaceAddressing != surfaceAddressing)
+            {
+                state.NeedsClear = true;
+                state.SurfaceAddressing = surfaceAddressing;
+            }
+
             if (state.AlgorithmVersion != HistoryAlgorithmVersion)
             {
                 ReleaseHistory(state);
@@ -25651,6 +26405,12 @@ namespace Burt.RenderPipeline
                 state.CountDescriptor = countDescriptor;
                 state.UpdateCellValueDescriptor = updateCellValueDescriptor;
                 SetAllocationInvalidationReason(state, "DescriptorChanged");
+            }
+
+            if (state.NeedsClear)
+            {
+                ReleaseHistory(state);
+                state.NeedsClear = false;
             }
 
             // One tick per cache allocation/render request, even when the Editor
@@ -25727,6 +26487,7 @@ namespace Burt.RenderPipeline
             }
 
             state.HasValidHistory = false;
+            state.NeedsClear = true;
             state.LastInvalidationReason = string.IsNullOrEmpty(reason) ? "Manual" : reason;
         }
 
@@ -26661,7 +27422,7 @@ namespace Burt.RenderPipeline
             cameraStatePruneCounter = 0;
         }
 
-        private const int HistoryAlgorithmVersion = 35; // Invalidate integrated history after directional spatial filtering changes.
+        private const int HistoryAlgorithmVersion = 37; // Invalidate output accumulated with stale edit-mode object motion.
         private const int CameraStatePruneInterval = 128;
         private const float ProjectionChangeEpsilon = 0.0001f;
 
@@ -27090,6 +27851,140 @@ namespace Burt.RenderPipeline
         }
     }
 
+    // Unity's previous rigid matrix can remain at an old transform while an
+    // edit-mode SceneView renders repeatedly without advancing Time.frameCount.
+    // Keep the rigid endpoint in this camera's successful-request domain. Native
+    // renderer lists still own culling, material passes and skinned vertex data.
+    internal static class BurtGIReceiverMotionHistory
+    {
+#if UNITY_EDITOR
+        private static readonly int PreviousId = Shader.PropertyToID("_BurtGIReceiverPreviousObjectToWorld");
+        private static readonly int ValidId = Shader.PropertyToID("_BurtGIReceiverPreviousValid");
+        private sealed class CameraState
+        {
+            internal int Frame = -1;
+            internal System.Collections.Generic.Dictionary<Renderer, Matrix4x4> Matrices = new System.Collections.Generic.Dictionary<Renderer, Matrix4x4>();
+        }
+        private sealed class SavedBlock
+        {
+            internal Renderer Renderer;
+            internal int MaterialIndex;
+            internal MaterialPropertyBlock Original;
+            internal Matrix4x4 Expected;
+        }
+        private sealed class Scope
+        {
+            internal Camera Camera;
+            internal int Frame;
+            internal CameraState State;
+            internal readonly System.Collections.Generic.Dictionary<Renderer, Matrix4x4> Current = new System.Collections.Generic.Dictionary<Renderer, Matrix4x4>();
+            internal readonly System.Collections.Generic.List<SavedBlock> Blocks = new System.Collections.Generic.List<SavedBlock>();
+        }
+        private static readonly System.Collections.Generic.Dictionary<Camera, CameraState> states = new System.Collections.Generic.Dictionary<Camera, CameraState>();
+        private static readonly System.Collections.Generic.Dictionary<BurtRenderRequest, Scope> scopes = new System.Collections.Generic.Dictionary<BurtRenderRequest, Scope>();
+        private static readonly System.Collections.Generic.List<Camera> deadCameras = new System.Collections.Generic.List<Camera>();
+
+        internal static void Prepare(BurtRenderRequest request)
+        {
+            if (request == null || !request.Camera || request.Camera.cameraType != CameraType.SceneView || Application.isPlaying || scopes.ContainsKey(request)) return;
+            Prune();
+            var camera = request.Camera;
+            if (!states.TryGetValue(camera, out var state)) states.Add(camera, state = new CameraState());
+            var scope = new Scope { Camera = camera, Frame = request.RenderFrameIndex, State = state };
+            scopes.Add(request, scope); // Register before writes so exception cleanup owns every block.
+            try
+            {
+                var materials = new System.Collections.Generic.List<Material>();
+                foreach (var renderer in BurtGISceneVoxelGpuRasterizerUtility.GetFrameRenderers(camera))
+                {
+                    if (!renderer || !renderer.enabled || !renderer.gameObject.activeInHierarchy || renderer.forceRenderingOff
+                        || !(renderer is MeshRenderer || renderer is SkinnedMeshRenderer)
+                        || renderer.motionVectorGenerationMode != MotionVectorGenerationMode.Object
+                        || (camera.cullingMask & (1 << renderer.gameObject.layer)) == 0) continue;
+                    var current = renderer.localToWorldMatrix;
+                    var previous = state.Frame == scope.Frame - 1 && state.Matrices.TryGetValue(renderer, out var old) ? old : current;
+                    scope.Current.Add(renderer, current);
+                    OverrideBlock(scope, renderer, -1, previous);
+                    materials.Clear(); renderer.GetSharedMaterials(materials);
+                    // A material-specific block overrides the renderer-wide block.
+                    // Preserve that precedence and restore empty blocks as null.
+                    for (var i = 0; i < materials.Count; i++)
+                    {
+                        var block = new MaterialPropertyBlock(); renderer.GetPropertyBlock(block, i);
+                        if (!block.isEmpty) OverrideBlock(scope, renderer, i, previous);
+                    }
+                }
+            }
+            catch { Complete(request, false); throw; }
+        }
+        private static void OverrideBlock(Scope scope, Renderer renderer, int index, Matrix4x4 previous)
+        {
+            var original = new MaterialPropertyBlock(); var edited = new MaterialPropertyBlock();
+            if (index < 0) { renderer.GetPropertyBlock(original); renderer.GetPropertyBlock(edited); }
+            else { renderer.GetPropertyBlock(original, index); renderer.GetPropertyBlock(edited, index); }
+            scope.Blocks.Add(new SavedBlock { Renderer = renderer, MaterialIndex = index, Original = original, Expected = previous });
+            edited.SetMatrix(PreviousId, previous); edited.SetFloat(ValidId, 1f);
+            if (index < 0) renderer.SetPropertyBlock(edited); else renderer.SetPropertyBlock(edited, index);
+        }
+        internal static bool HasPending(BurtRenderRequest request) { return request != null && scopes.ContainsKey(request); }
+        internal static bool HasOnlyOwnedMotionProperties(Renderer renderer)
+        {
+            // Fine voxel material evaluation still rejects user property blocks.
+            // Our temporary rigid-history metadata does not override any material
+            // input; accept it only when the saved user block was truly empty.
+            if (!renderer) return false;
+            var found = false;
+            var actual = new MaterialPropertyBlock();
+            foreach (var scope in scopes.Values)
+                foreach (var saved in scope.Blocks)
+                {
+                    if (saved.Renderer != renderer) continue;
+                    if (!saved.Original.isEmpty || saved.MaterialIndex >= 0) return false;
+                    renderer.GetPropertyBlock(actual);
+                    if (actual.GetFloat(ValidId) != 1f || !actual.GetMatrix(PreviousId).Equals(saved.Expected)) return false;
+                    found = true;
+                }
+            if (!found) return false;
+            var materials = new System.Collections.Generic.List<Material>(); renderer.GetSharedMaterials(materials);
+            for (var i = 0; i < materials.Count; i++) { renderer.GetPropertyBlock(actual, i); if (!actual.isEmpty) return false; }
+            return true;
+        }
+        internal static void Complete(BurtRenderRequest request, bool submittedSuccessfully)
+        {
+            if (request == null || !scopes.TryGetValue(request, out var scope)) return;
+            scopes.Remove(request);
+            // Restoration occurs after Submit: renderer lists may read property
+            // blocks at execution, not when DrawRendererList was recorded.
+            for (var i = scope.Blocks.Count - 1; i >= 0; i--)
+            {
+                var saved = scope.Blocks[i]; if (!saved.Renderer) continue;
+                var block = saved.Original.isEmpty ? null : saved.Original;
+                if (saved.MaterialIndex < 0) saved.Renderer.SetPropertyBlock(block);
+                else saved.Renderer.SetPropertyBlock(block, saved.MaterialIndex);
+            }
+            scope.State.Frame = submittedSuccessfully ? scope.Frame : -1;
+            scope.State.Matrices = submittedSuccessfully ? scope.Current : new System.Collections.Generic.Dictionary<Renderer, Matrix4x4>();
+        }
+        internal static void Prune()
+        {
+            deadCameras.Clear(); foreach (var pair in states) if (!pair.Key) deadCameras.Add(pair.Key);
+            foreach (var camera in deadCameras) states.Remove(camera); deadCameras.Clear();
+        }
+        internal static void ReleaseAll()
+        {
+            foreach (var request in new System.Collections.Generic.List<BurtRenderRequest>(scopes.Keys)) Complete(request, false);
+            states.Clear(); deadCameras.Clear();
+        }
+#else
+        internal static void Prepare(BurtRenderRequest request) { }
+        internal static bool HasPending(BurtRenderRequest request) { return false; }
+        internal static bool HasOnlyOwnedMotionProperties(Renderer renderer) { return false; }
+        internal static void Complete(BurtRenderRequest request, bool submittedSuccessfully) { }
+        internal static void Prune() { }
+        internal static void ReleaseAll() { }
+#endif
+    }
+
     internal static class BurtScreenSpaceGlobalIlluminationPassUtility
     {
         private sealed class CameraRenderSequence
@@ -27129,6 +28024,7 @@ namespace Burt.RenderPipeline
         // Pipeline teardown owns every camera history, including live cameras.
         internal static void ReleaseCameraResources()
         {
+            BurtGIReceiverMotionHistory.ReleaseAll();
             BurtGITranslucencyVolumeHistoryUtility.ReleaseAll();
             BurtGIPreviousSceneColorHistoryUtility.ReleaseAll();
             BurtRadianceCacheClipMapHistoryUtility.ReleaseAll();
@@ -27136,6 +28032,7 @@ namespace Burt.RenderPipeline
             BurtRadianceCacheHashGridHistoryUtility.ReleaseAll();
             BurtGISceneVoxelHistoryUtility.ReleaseAll();
             BurtGISceneVoxelClipmapStateUtility.ReleaseAll();
+            BurtGISceneVoxelFineRuntime.ReleaseCameraStates();
             BurtGIXGILightGridUtility.ReleaseAll();
             BurtScreenSpaceGlobalIlluminationScreenProbeHistoryUtility.ReleaseAll();
             BurtScreenSpaceGlobalIlluminationHistoryUtility.ReleaseAll();
@@ -27146,6 +28043,7 @@ namespace Burt.RenderPipeline
         // Only destroyed cameras are removed; live/disabled cameras keep history.
         internal static void PruneDisposedCameraResources()
         {
+            BurtGIReceiverMotionHistory.Prune();
             BurtGITranslucencyVolumeHistoryUtility.PruneDisposedCameraStates(true);
             BurtGIPreviousSceneColorHistoryUtility.PruneDisposedCameras();
             BurtRadianceCacheClipMapHistoryUtility.PruneDisposedCameraStates(true);
@@ -27153,6 +28051,7 @@ namespace Burt.RenderPipeline
             BurtRadianceCacheHashGridHistoryUtility.PruneDisposedCameraStates(true);
             BurtGISceneVoxelHistoryUtility.PruneDisposedCameraStates(true);
             BurtGISceneVoxelClipmapStateUtility.PruneDisposedCameraStates(true);
+            BurtGISceneVoxelFineRuntime.PruneDisposedCameraStates();
             BurtGIXGILightGridUtility.PruneDisposedCameraStates(true);
             BurtScreenSpaceGlobalIlluminationScreenProbeHistoryUtility.PruneDisposedCameraStates(true);
             BurtScreenSpaceGlobalIlluminationHistoryUtility.PruneDisposedCameraStates(true);
@@ -27222,7 +28121,15 @@ namespace Burt.RenderPipeline
         public const float RadianceCacheClipMapSupersampleDistanceFromCamera = 20f;
         public const float RadianceCacheClipMapDownsampleDistanceFromCamera = 40f;
         public const int RadianceCacheClipMapForcedUniformTraceTileLevel = 1;
-        public const int RadianceCacheHashGridBucketCount = 512;
+        // Bounded 8192-tile budget. Surface-space keys exceeded the former
+        // 2048 tiles in native captures; 4096 still exhausted local probe windows.
+        // Cell precision and ray weights remain independent of capacity.
+        // Tile-dependent buffers: ~32 MiB/camera including transient debug/update
+        // storage, versus ~8 MiB previously. Query/surface buffers are separate.
+        // Layered surface keys must not compete in the former projected-slab
+        // budget. Native workload exceeds 26k tiles; keep the bounded 32-slot
+        // producer/reader search with 64k tiles. GPU cost remains a separate gate.
+        public const int RadianceCacheHashGridBucketCount = 16384;
         public const int RadianceCacheHashGridTilesPerBucket = 4;
         public const int RadianceCacheHashGridTileCellRatio = 8;
         public const int RadianceCacheHashGridCellsPerTile = 85;
@@ -27230,6 +28137,29 @@ namespace Burt.RenderPipeline
         public const int RadianceCacheHashGridPrepareThreadGroupSize = 64;
         public const int RadianceCacheHashGridPopulateThreadGroupSize = 64;
         public const float RadianceCacheHashGridCellSize = 32f;
+        public static bool UsesHashGridSurfaceAddressing(Camera camera, BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
+        {
+            // Dense/noncompact aggregates have no individual surface records.
+            return camera != null && settings.TraceCompact &&
+                (BurtGISceneVoxelFineRuntime.IsRequested(camera) || settings.TraceVoxelOctree || !settings.TraceSceneVoxel);
+        }
+
+        public static Vector4 ResolveHashGridAddressParams(Camera camera, BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
+        {
+            if (camera == null) return Vector4.zero;
+            float width = Mathf.Max(1, camera.pixelWidth), height = Mathf.Max(1, camera.pixelHeight);
+            float footprint = RadianceCacheHashGridCellSize * Mathf.Max(1f / height, height / (width * width));
+            float fov = camera.usePhysicalProperties ? camera.GetGateFittedFieldOfView() : camera.fieldOfView;
+            return new Vector4(Mathf.Tan(fov * Mathf.Deg2Rad * footprint),
+                2f * camera.orthographicSize * footprint, camera.orthographic ? 1f : 0f,
+                UsesHashGridSurfaceAddressing(camera, settings) ? 1f : 0f);
+        }
+
+        public static int ResolveHashGridQueryCapacity(Camera camera, BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
+        {
+            return checked(ResolveRadianceCacheHashGridTraceTexelCount(camera, settings) *
+                (UsesHashGridSurfaceAddressing(camera, settings) ? 4 : 1));
+        }
         public const int SceneVoxelRadianceResolution = 64;
         public const int SceneVoxelOccupancyMipResolution = 16;
         public const int SceneVoxelOccupancyMipCount = 5;
@@ -28991,6 +29921,17 @@ namespace Burt.RenderPipeline
                 BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelDataBufferName);
         }
 
+        public static BurtRenderBufferDescriptor CreateScreenProbeTraceSurfaceBufferDescriptor(Camera camera,
+            BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings, bool enabled)
+        {
+            var descriptor = CreateScreenSpaceGlobalIlluminationScreenProbeTraceDescriptor(camera, settings);
+            // One record when disabled provides a valid D3D11 binding; shader
+            // writes are disabled. Full storage is transient and HashGrid-only.
+            int count = enabled ? checked(Mathf.Max(1, descriptor.width * descriptor.height) * 4) : 1;
+            return new BurtRenderBufferDescriptor(count, 68, GraphicsBuffer.Target.Structured,
+                BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceSurfaceBufferName);
+        }
+
         public static BurtRenderBufferDescriptor CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferDescriptor()
         {
             return new BurtRenderBufferDescriptor(
@@ -29336,7 +30277,7 @@ namespace Burt.RenderPipeline
         public static BurtRenderBufferDescriptor CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridVisibilityCellQueryBufferDescriptor(Camera camera, BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
         {
             return new BurtRenderBufferDescriptor(
-                ResolveRadianceCacheHashGridTraceTexelCount(camera, settings),
+                ResolveHashGridQueryCapacity(camera, settings),
                 8,
                 GraphicsBuffer.Target.Structured,
                 BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridVisibilityCellQueryBufferName);
@@ -29345,7 +30286,7 @@ namespace Burt.RenderPipeline
         public static BurtRenderBufferDescriptor CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateCellValueBufferDescriptor()
         {
             return new BurtRenderBufferDescriptor(
-                ResolveRadianceCacheHashGridCellCount() * 4,
+                ResolveRadianceCacheHashGridCellCount() * 5,
                 4,
                 GraphicsBuffer.Target.Structured,
                 BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateCellValueBufferName);
@@ -29354,7 +30295,7 @@ namespace Burt.RenderPipeline
         public static BurtRenderBufferDescriptor CreateScreenSpaceGlobalIlluminationRadianceCacheHashGridUpdateTileBufferDescriptor(Camera camera, BurtScreenSpaceGlobalIlluminationScreenProbeSettings settings)
         {
             return new BurtRenderBufferDescriptor(
-                Mathf.Max(1, Mathf.Min(ResolveRadianceCacheHashGridTileCount(), ResolveRadianceCacheHashGridTraceTexelCount(camera, settings))),
+                Mathf.Max(1, Mathf.Min(ResolveRadianceCacheHashGridTileCount(), ResolveHashGridQueryCapacity(camera, settings))),
                 4,
                 GraphicsBuffer.Target.Structured,
                 BurtRenderGraphResourceRegistry.BurtGIRadianceCacheHashGridUpdateTileBufferName);

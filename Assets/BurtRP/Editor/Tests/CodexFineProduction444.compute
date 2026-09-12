@@ -1,0 +1,76 @@
+#pragma kernel SeedMasksCS
+#pragma kernel ReadNodesCS
+#pragma kernel ReadPoolCS
+#include "../../Runtime/Resources/BurtGISceneVoxelFineData.hlsl"
+
+RWTexture3D<uint> _BurtGISceneVoxelFineLow;
+RWTexture3D<uint> _BurtGISceneVoxelFineHigh;
+Texture3D<uint> _BurtGISceneVoxelFineOffsets;
+StructuredBuffer<uint> _BurtGISceneVoxelFineOwners;
+StructuredBuffer<uint> _BurtGISceneVoxelFineCellCoords;
+StructuredBuffer<BurtGISceneVoxelFineMaterialData> _BurtGISceneVoxelFineMaterials;
+StructuredBuffer<BurtGISceneVoxelFineLightingData> _BurtGISceneVoxelFineLighting;
+RWStructuredBuffer<uint4> _NodeReadback;
+struct PoolReadback
+{
+    uint4 metadata;
+    float4 albedo, normal, emission, radiance, lightingNormal;
+};
+RWStructuredBuffer<PoolReadback> _PoolReadback;
+uint _BurtGISceneVoxelFineResolution, _BurtGISceneVoxelFineCapacity, _Pattern;
+
+uint3 NodeCoord(uint index)
+{
+    uint n = _BurtGISceneVoxelFineResolution;
+    return uint3(index % n, (index / n) % n, index / (n*n));
+}
+[numthreads(256,1,1)]
+void SeedMasksCS(uint3 id : SV_DispatchThreadID)
+{
+    uint n = _BurtGISceneVoxelFineResolution, count = n*n*n, i = id.x;
+    if(i>=count) return;
+    uint low = 0u, high = 0u;
+    if (_Pattern == 1u && (i % 257u == 0u || i == count-1u))
+    {
+        low = 0x80000001u; high = 0x80000001u;
+    }
+    else if (_Pattern == 2u)
+    {
+        low = i * 747796405u + 2891336453u;
+        high = ((i ^ 0x9e3779b9u) * 277803737u) ^ (i >> 5u);
+    }
+    else if (_Pattern == 3u && (i == 255u || i == 256u || i == 65535u || i == 65536u || i == count-1u))
+    {
+        low = 0xffffffffu; high = 0xffffffffu;
+    }
+    else if (_Pattern == 4u && i == 0u)
+    {
+        low = 0xfu; high = 0xfu;
+    }
+    _BurtGISceneVoxelFineLow[NodeCoord(i)] = low;
+    _BurtGISceneVoxelFineHigh[NodeCoord(i)] = high;
+}
+[numthreads(256,1,1)]
+void ReadNodesCS(uint3 id : SV_DispatchThreadID)
+{
+    uint n = _BurtGISceneVoxelFineResolution;
+    if(id.x>=n*n*n) return;
+    uint3 c = NodeCoord(id.x);
+    _NodeReadback[id.x] = uint4(_BurtGISceneVoxelFineLow[c], _BurtGISceneVoxelFineHigh[c],
+        _BurtGISceneVoxelFineOffsets[c], 0u);
+}
+[numthreads(64,1,1)]
+void ReadPoolCS(uint3 id : SV_DispatchThreadID)
+{
+    if(id.x>=max(_BurtGISceneVoxelFineCapacity,1u)) return;
+    BurtGISceneVoxelFineMaterialData m = _BurtGISceneVoxelFineMaterials[id.x];
+    BurtGISceneVoxelFineLightingData l = _BurtGISceneVoxelFineLighting[id.x];
+    PoolReadback v;
+    v.metadata = uint4(_BurtGISceneVoxelFineOwners[id.x], _BurtGISceneVoxelFineCellCoords[id.x], 0u, 0u);
+    v.albedo = BurtGIFineUnpackHalf4(m.albedoAndValid);
+    v.normal = BurtGIFineUnpackHalf4(m.normalAndValid);
+    v.emission = BurtGIFineUnpackHalf4(m.emissionAndValid);
+    v.radiance = BurtGIFineUnpackHalf4(l.radianceAndValid);
+    v.lightingNormal = BurtGIFineUnpackHalf4(l.normalAndValid);
+    _PoolReadback[id.x] = v;
+}

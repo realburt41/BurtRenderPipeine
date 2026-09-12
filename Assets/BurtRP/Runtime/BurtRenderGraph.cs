@@ -32,6 +32,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
         private static readonly ProfilerMarker ConfigureGraphMarker = new ProfilerMarker("BRP.RenderGraph.Configure");
         private static readonly ProfilerMarker ExecuteGraphMarker = new ProfilerMarker("BRP.RenderGraph.Execute");
         private readonly List<BurtRenderPass> passes = new List<BurtRenderPass>(); // 创建一个可复用的 Pass 列表，避免每帧重复分配 List。
+        // Pass resources outlive a request. Keep previously used owners even when
+        // Clear removes a disabled feature from the next frame's execution list.
+        private readonly HashSet<IDisposable> passResourceOwners = new HashSet<IDisposable>();
 
         private readonly List<BurtRenderPassResourceUsage> resourceUsages = new List<BurtRenderPassResourceUsage>(); // 创建一个可复用的资源使用记录列表，用来保存每个 Pass 的读写声明。
 
@@ -521,6 +524,14 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                 return; // 直接结束导入，避免把无效 request 的目标注册进资源表。
             }
 
+            // Fine configuration/support transitions invalidate persistent GI data.
+            // Resolve them before importing history buffers, not during assembly
+            // after the old allocation has already been registered for this request.
+            if (request.GraphAssembler is BurtDeferredGraphAssembler)
+            {
+                BurtGISceneVoxelFineRuntime.PrepareRequest(request, asset);
+            }
+
             resources.RegisterFinalCameraTarget(request.TargetIdentifier); // 把 request 的原始输出目标注册为 FinalCameraTarget，FinalBlit 最后会把中间颜色拷贝到这里。
 
             resources.RegisterCameraColorTexture(); // 把 BurtRP 自己的临时颜色 RT 注册成 CameraColor，让场景绘制不再直接写 backbuffer。
@@ -712,6 +723,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
                             resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactIndirectArgsBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferDescriptor());
                             resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactThreadCountXBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferDescriptor());
                         }
+                        resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceSurfaceBufferName,
+                            BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenProbeTraceSurfaceBufferDescriptor(request.Camera, screenProbeSettings,
+                                useScreenProbeTraceCompact && useRadianceCacheHashGrid));
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeNumBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferDescriptor());
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeDataBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeDataBufferDescriptor(request.Camera, screenProbeSettings));
                         resources.RegisterBuffer(BurtRenderGraphResourceRegistry.BurtGIScreenProbeImportancePDFSHBufferName, BurtScreenSpaceGlobalIlluminationPassUtility.CreateScreenSpaceGlobalIlluminationScreenProbeImportancePDFSHBufferDescriptor(request.Camera, screenProbeSettings));
@@ -1061,6 +1075,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
             }
 
             passes.Add(pass); // 把有效 Pass 加入当前 RenderGraph 的执行列表。
+            if (pass is IDisposable resourceOwner)
+            {
+                passResourceOwners.Add(resourceOwner);
+            }
         }
 
         internal void RecordFeatureBlock(
@@ -1524,7 +1542,27 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类和
 
         public void DisposeResources()
         {
-            resources.DisposeResources();
+            try
+            {
+                resources.DisposeResources();
+            }
+            finally
+            {
+                foreach (var owner in passResourceOwners)
+                {
+                    try
+                    {
+                        owner.Dispose();
+                    }
+                    catch (Exception exception)
+                    {
+                        // One failing owner must not strand the remaining passes.
+                        Debug.LogException(exception);
+                    }
+                }
+
+                passResourceOwners.Clear();
+            }
         }
 
         public string DumpDebugInfo( // 定义带管线资产状态的 RenderGraph 调试文本入口。

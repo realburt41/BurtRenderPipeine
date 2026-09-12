@@ -1,0 +1,245 @@
+#pragma kernel ClearGeometry
+#pragma kernel ClearPool
+#pragma kernel ScanNodes
+#pragma kernel ScanGroups
+#pragma kernel ScanSuperGroups
+#pragma kernel FinalizeNodes
+#pragma kernel BuildCoarseSummary
+
+#include "BurtGISceneVoxelFineData.hlsl"
+
+RWTexture3D<uint> _BurtGISceneVoxelFineLow;
+RWTexture3D<uint> _BurtGISceneVoxelFineHigh;
+RWTexture3D<uint> _BurtGISceneVoxelFineOffsets;
+// Conservative geometry adapter for the existing occupancy/Octree builders.
+// RGB is intentionally not a material normal or radiance payload.
+RWTexture3D<float4> _BurtGISceneVoxelFineSummary;
+RWStructuredBuffer<uint> _BurtGISceneVoxelFineOwners;
+RWStructuredBuffer<BurtGISceneVoxelFineMaterialData> _BurtGISceneVoxelFineMaterials;
+RWStructuredBuffer<BurtGISceneVoxelFineLightingData> _BurtGISceneVoxelFineLighting;
+RWStructuredBuffer<uint> _BurtGISceneVoxelFineCellCoords;
+// Counts: demand fine cells, unallocated fine cells, allocated fine cells.
+RWStructuredBuffer<uint> _BurtGISceneVoxelFineCounts;
+RWStructuredBuffer<uint> _BurtGISceneVoxelFineGroupSums;
+RWStructuredBuffer<uint> _BurtGISceneVoxelFineGroupOffsets;
+RWStructuredBuffer<uint> _BurtGISceneVoxelFineSuperGroupSums;
+RWStructuredBuffer<uint> _BurtGISceneVoxelFineSuperGroupOffsets;
+
+// Resolution is COARSE N, not 4*N. The resource owner normalizes N to
+// 16/32/64/128 and allocates capacity in [0,1048576], physical size >=1.
+int _BurtGISceneVoxelFineResolution;
+int _BurtGISceneVoxelFineCapacity;
+
+groupshared uint BurtGIFineScanScratch[256];
+
+uint BurtGIFineBuildResolution()
+{
+    return (uint)clamp(_BurtGISceneVoxelFineResolution, 0, 128);
+}
+
+uint BurtGIFineBuildCapacity()
+{
+    return (uint)clamp(_BurtGISceneVoxelFineCapacity, 0, 1048576);
+}
+
+uint BurtGIFineBuildNodeCount()
+{
+    uint n = BurtGIFineBuildResolution();
+    return n * n * n;
+}
+
+uint BurtGIFineBuildGroupCount()
+{
+    return (BurtGIFineBuildNodeCount() + 255u) / 256u;
+}
+
+uint BurtGIFineBuildSuperGroupCount()
+{
+    return (BurtGIFineBuildGroupCount() + 255u) / 256u;
+}
+
+uint3 BurtGIFineBuildNodeCoord(uint index, uint n)
+{
+    return uint3(index % n, (index / n) % n, index / (n * n));
+}
+
+// Work-efficient Blelloch scan. Every lane, including zero-padded lanes,
+// must call this function; there are no divergent returns around barriers.
+// Total demand <=128^3*64=134217728, so every intermediate fits uint.
+uint BurtGIFineExclusiveScan256(uint value, uint lane, out uint total)
+{
+    BurtGIFineScanScratch[lane] = value;
+    GroupMemoryBarrierWithGroupSync();
+
+    [unroll]
+    for (uint upStride = 1u; upStride < 256u; upStride <<= 1u)
+    {
+        uint index = (lane + 1u) * (upStride << 1u) - 1u;
+        if (index < 256u)
+            BurtGIFineScanScratch[index] += BurtGIFineScanScratch[index - upStride];
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    total = BurtGIFineScanScratch[255];
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0u)
+        BurtGIFineScanScratch[255] = 0u;
+    GroupMemoryBarrierWithGroupSync();
+
+    [unroll]
+    for (uint downStride = 128u; downStride > 0u; downStride >>= 1u)
+    {
+        uint index = (lane + 1u) * (downStride << 1u) - 1u;
+        if (index < 256u)
+        {
+            uint left = BurtGIFineScanScratch[index - downStride];
+            BurtGIFineScanScratch[index - downStride] = BurtGIFineScanScratch[index];
+            BurtGIFineScanScratch[index] += left;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    return BurtGIFineScanScratch[lane];
+}
+
+[numthreads(4, 4, 4)]
+void ClearGeometry(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= BurtGIFineBuildResolution())) return;
+    _BurtGISceneVoxelFineLow[id] = 0u;
+    _BurtGISceneVoxelFineHigh[id] = 0u;
+    _BurtGISceneVoxelFineOffsets[id] = BURT_GI_FINE_INVALID_OFFSET;
+}
+
+// Summary is a separately owned N^3 RGBA16F texture, not the coarse raster
+// geometry. Rebuild it after the complete fine geometry pass, before building
+// the fine-owned coarse occupancy/Octree hierarchy. Every cell is overwritten.
+// Fine geometry remains opaque even when black, unresolved, or over capacity:
+// offsets, owners, materials, lighting, and capacity must not gate this mask.
+[numthreads(4, 4, 4)]
+void BuildCoarseSummary(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= BurtGIFineBuildResolution())) return;
+    uint occupied = _BurtGISceneVoxelFineLow[id] | _BurtGISceneVoxelFineHigh[id];
+    _BurtGISceneVoxelFineSummary[id] = float4(0.0, 0.0, 0.0, occupied != 0u ? 1.0 : 0.0);
+}
+
+[numthreads(64, 1, 1)]
+void ClearPool(uint3 id : SV_DispatchThreadID)
+{
+    // Logical zero capacity still has one bound dummy record in every pool.
+    uint physicalCount = max(BurtGIFineBuildCapacity(), 1u);
+    if (id.x >= physicalCount) return;
+    _BurtGISceneVoxelFineOwners[id.x] = BURT_GI_FINE_INVALID_OFFSET;
+    _BurtGISceneVoxelFineMaterials[id.x] = (BurtGISceneVoxelFineMaterialData)0;
+    _BurtGISceneVoxelFineLighting[id.x] = (BurtGISceneVoxelFineLightingData)0;
+    _BurtGISceneVoxelFineCellCoords[id.x] = 0u;
+}
+
+// Dispatch ceil(N^3/256) groups in X. Offsets are GROUP-LOCAL until finalize.
+[numthreads(256, 1, 1)]
+void ScanNodes(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID,
+               uint lane : SV_GroupIndex)
+{
+    uint nodeCount = BurtGIFineBuildNodeCount();
+    uint count = 0u;
+    uint3 coord = 0u;
+    if (id.x < nodeCount)
+    {
+        coord = BurtGIFineBuildNodeCoord(id.x, BurtGIFineBuildResolution());
+        count = countbits(_BurtGISceneVoxelFineLow[coord]) +
+                countbits(_BurtGISceneVoxelFineHigh[coord]);
+    }
+    uint total;
+    uint offset = BurtGIFineExclusiveScan256(count, lane, total);
+    if (id.x < nodeCount)
+        _BurtGISceneVoxelFineOffsets[coord] = offset;
+    if (lane == 0u && group.x < BurtGIFineBuildGroupCount())
+        _BurtGISceneVoxelFineGroupSums[group.x] = total;
+}
+
+// Dispatch ceil(groupCount/256) groups in X, at most 32 for N=128.
+[numthreads(256, 1, 1)]
+void ScanGroups(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID,
+                uint lane : SV_GroupIndex)
+{
+    uint groupCount = BurtGIFineBuildGroupCount();
+    uint value = 0u;
+    if (id.x < groupCount)
+        value = _BurtGISceneVoxelFineGroupSums[id.x];
+    uint total;
+    uint offset = BurtGIFineExclusiveScan256(value, lane, total);
+    if (id.x < groupCount)
+        _BurtGISceneVoxelFineGroupOffsets[id.x] = offset;
+    if (lane == 0u && group.x < BurtGIFineBuildSuperGroupCount())
+        _BurtGISceneVoxelFineSuperGroupSums[group.x] = total;
+}
+
+// Dispatch EXACTLY one 256-lane group; unused lanes contribute zero.
+[numthreads(256, 1, 1)]
+void ScanSuperGroups(uint lane : SV_GroupIndex)
+{
+    uint superGroupCount = BurtGIFineBuildSuperGroupCount();
+    uint value = 0u;
+    if (lane < superGroupCount)
+        value = _BurtGISceneVoxelFineSuperGroupSums[lane];
+    uint demand;
+    uint offset = BurtGIFineExclusiveScan256(value, lane, demand);
+    if (lane < superGroupCount)
+        _BurtGISceneVoxelFineSuperGroupOffsets[lane] = offset;
+    if (lane == 0u)
+    {
+        _BurtGISceneVoxelFineCounts[0] = demand;
+        _BurtGISceneVoxelFineCounts[1] = 0u;
+        _BurtGISceneVoxelFineCounts[2] = 0u;
+    }
+}
+
+// Dispatch ceil(N^3/256) groups. Whole-node allocations follow linear x/y/z
+// prefix order. A node that does not fully fit stays geometrically occupied
+// but has no material offset. No partial-node radiance can masquerade as valid.
+// Requires the preceding ClearPool, geometry producer and all three scans.
+// This kernel has seven UAVs, within the D3D11 per-stage UAV limit.
+[numthreads(256, 1, 1)]
+void FinalizeNodes(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= BurtGIFineBuildNodeCount()) return;
+    uint3 coord = BurtGIFineBuildNodeCoord(id.x, BurtGIFineBuildResolution());
+    uint2 mask = uint2(_BurtGISceneVoxelFineLow[coord], _BurtGISceneVoxelFineHigh[coord]);
+    uint count = countbits(mask.x) + countbits(mask.y);
+    if (count == 0u)
+    {
+        _BurtGISceneVoxelFineOffsets[coord] = BURT_GI_FINE_INVALID_OFFSET;
+        return;
+    }
+
+    uint group = id.x / 256u;
+    uint superGroup = group / 256u;
+    uint offset = _BurtGISceneVoxelFineOffsets[coord] +
+                  _BurtGISceneVoxelFineGroupOffsets[group] +
+                  _BurtGISceneVoxelFineSuperGroupOffsets[superGroup];
+    uint capacity = BurtGIFineBuildCapacity();
+    if (offset > capacity || count > capacity - offset)
+    {
+        _BurtGISceneVoxelFineOffsets[coord] = BURT_GI_FINE_INVALID_OFFSET;
+        InterlockedAdd(_BurtGISceneVoxelFineCounts[1], count);
+        return;
+    }
+
+    _BurtGISceneVoxelFineOffsets[coord] = offset;
+    InterlockedAdd(_BurtGISceneVoxelFineCounts[2], count);
+    uint slot = offset;
+    [loop]
+    for (uint word = 0u; word < 2u; ++word)
+    {
+        uint remaining = word == 0u ? mask.x : mask.y;
+        [loop]
+        while (remaining != 0u)
+        {
+            uint bit = (uint)firstbitlow(remaining) + word * 32u;
+            uint3 local = uint3(bit & 3u, (bit >> 2u) & 3u, bit >> 4u);
+            _BurtGISceneVoxelFineCellCoords[slot] = BurtGIFinePackCellCoord(coord * 4u + local);
+            ++slot;
+            remaining &= remaining - 1u;
+        }
+    }
+}

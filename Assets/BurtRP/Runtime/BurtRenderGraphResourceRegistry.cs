@@ -808,6 +808,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让资源注册
         public const string BurtGIScreenProbeTraceCompactTexelCountBufferName = "BurtGIScreenProbeTraceCompactTexelCountBuffer";
 
         public const string BurtGIScreenProbeTraceCompactTexelDataBufferName = "BurtGIScreenProbeTraceCompactTexelDataBuffer";
+        public const string BurtGIScreenProbeTraceSurfaceBufferName = "BurtGIScreenProbeTraceSurfaceBuffer";
 
         public const string BurtGIScreenProbeTraceCompactIndirectArgsBufferName = "BurtGIScreenProbeTraceCompactIndirectArgsBuffer";
 

@@ -13,6 +13,9 @@
 #pragma kernel HashGridPurgeTilesCS
 #pragma kernel RadianceCacheHashGridPurgeTilesLiteCS
 #pragma kernel HashGridDebugGenIndirectArgsCS
+#pragma kernel HashGridPopulateSurfaceCellsCS
+#pragma kernel HashGridResolveSurfaceCellsCS
+#pragma kernel HashGridReconstructSurfaceCS
 
 #define BURT_GI_HASH_GRID_PREPARE_THREADGROUP_SIZE 64
 #define BURT_GI_HASH_GRID_POPULATE_THREADGROUP_SIZE 64
@@ -23,6 +26,11 @@
 #define BURT_GI_HASH_GRID_TILE_MIP3_OFFSET 84u
 #define BURT_GI_HASH_GRID_TILE_DECAY_MAX 500u
 
+#include "BurtGIScreenProbeAdaptiveData.hlsl"
+StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
+StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+float4 _BurtGIScreenProbeGridParams;
+float4 _BurtGIScreenProbeAdaptiveParams;
 Texture2D<float4> _BurtGIScreenProbeWorldPositionTexture;
 Texture2D<float4> _BurtGIScreenProbeHitDistanceTexture;
 Texture2D<float> _BurtGIScreenProbeTraceHitTexture;
@@ -48,7 +56,10 @@ float4 _BurtGIRadianceCacheHashGridParams1;
 uint _BurtGIRadianceCacheHashGridFrameIndex;
 uint _BurtGIRadianceCacheHashGridPingPongIndex;
 uint _BurtGIScreenProbeRayFrameIndex;
-#include "BurtGIScreenProbeRaySampling.hlsl"
+#include "BurtGIScreenProbeRayLayout.hlsl"
+#include "BurtGIScreenProbeTraceSurface.hlsl"
+#include "BurtGIRadianceCacheHashGridAddress.hlsl"
+float4 _BurtDeferredCameraWorldPosition;
 
 groupshared uint2 BurtGIRadianceCacheHashGridUpdateTilesLDS[BURT_GI_HASH_GRID_UPDATE_TILE_THREADGROUP_SIZE][BURT_GI_HASH_GRID_UPDATE_TILE_THREADGROUP_SIZE];
 
@@ -61,6 +72,12 @@ uint BurtGIRadianceCacheHashGridCellCount()
 {
     return max(1u, (uint)_BurtGIRadianceCacheHashGridParams1.y);
 }
+
+#define BURT_GI_SURFACE_CACHE_EXTERNAL_RESOURCE
+#define _BurtGISurfaceCacheTable _BurtGIRadianceCacheHashGridValueBuffer
+#define _BurtGISurfaceCacheSlotCount (BurtGIRadianceCacheHashGridCellCount() / 2u)
+#define _BurtGISurfaceCacheProbeCount 64u
+#include "BurtGIHashSurfaceTable.hlsl"
 
 uint BurtGIRadianceCacheHashGridCellsPerTile()
 {
@@ -80,6 +97,12 @@ uint BurtGIRadianceCacheHashGridTilesPerBucket()
 uint BurtGIRadianceCacheHashGridTraceTexelCount()
 {
     return max(1u, (uint)_BurtGIRadianceCacheHashGridParams1.w);
+}
+
+uint BurtGIHashQueryCapacity()
+{
+    return BurtGIRadianceCacheHashGridTraceTexelCount() *
+        (_BurtGIRadianceCacheHashGridAddressParams.w > 0.5 ? 4u : 1u);
 }
 
 uint BurtGIRadianceCacheHashGridPingPong()
@@ -260,11 +283,12 @@ void BurtGIRadianceCacheHashGridClearTileCells(uint tileIndex)
     {
         uint cellIndex = BurtGIRadianceCacheHashGridCellIndexFromTile(tileIndex, localCellIndex);
         _BurtGIRadianceCacheHashGridValueBuffer[cellIndex] = uint4(0u, 0u, 0xffffffffu, 0u);
-        uint updateCellBase = cellIndex * 4u;
+        uint updateCellBase = cellIndex * 5u;
         _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 0u] = 0u;
         _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 1u] = 0u;
         _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 2u] = 0u;
         _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 3u] = 0u;
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 4u] = 0u;
         _BurtGIRadianceCacheHashGridDebugCellBuffer[cellIndex + 1u] = 0.0;
     }
 }
@@ -274,7 +298,7 @@ bool BurtGIRadianceCacheHashGridFindOrInsertTile(uint tileHash, out uint tileInd
     uint bucketIndex = BurtGIRadianceCacheHashGridHash(uint3(tileHash, tileHash >> 7, tileHash >> 17)) % BurtGIRadianceCacheHashGridBucketCount();
     uint tilesPerBucket = BurtGIRadianceCacheHashGridTilesPerBucket();
     uint tileCount = BurtGIRadianceCacheHashGridTileCount();
-    uint probeCount = min(tileCount, tilesPerBucket * 4u);
+    uint probeCount = BurtGIHashGridProbeCount(tileCount, tilesPerBucket);
     tileIndex = 0xffffffffu;
     isNewTile = false;
     // Search through purge holes before claiming any empty slot.
@@ -295,13 +319,11 @@ bool BurtGIRadianceCacheHashGridFindOrInsertTile(uint tileHash, out uint tileInd
     return false;
 }
 
+#include "BurtGIRadianceCacheHashGridPacking.hlsl"
+
 uint2 BurtGIRadianceCacheHashGridPackRadiance(float3 radiance, float confidence)
 {
-    uint3 encodedRadiance = (uint3)round(saturate(radiance / 8.0) * 65535.0);
-    uint encodedConfidence = (uint)round(saturate(confidence) * 65535.0);
-    return uint2(
-        (encodedRadiance.x & 0xffffu) | ((encodedRadiance.y & 0xffffu) << 16),
-        (encodedRadiance.z & 0xffffu) | ((encodedConfidence & 0xffffu) << 16));
+    return BurtGIHashGridPackPersistentRadiance(radiance, confidence);
 }
 
 uint4 BurtGIRadianceCacheHashGridQuantizeRadiance(float3 radiance, float sampleWeight)
@@ -328,12 +350,7 @@ float4 BurtGIRadianceCacheHashGridRecoverRadiance(uint4 quantized)
 
 float4 BurtGIRadianceCacheHashGridUnpackPackedRadiance(uint2 packedRadiance)
 {
-    float3 radiance = float3(
-        (float)(packedRadiance.x & 0xffffu),
-        (float)((packedRadiance.x >> 16) & 0xffffu),
-        (float)(packedRadiance.y & 0xffffu)) / 65535.0 * 8.0;
-    float sampleWeight = (float)((packedRadiance.y >> 16) & 0xffffu) / 65535.0;
-    return float4(radiance, sampleWeight);
+    return BurtGIHashGridUnpackPersistentRadiance(packedRadiance);
 }
 
 float4 BurtGIRadianceCacheHashGridUnpackRadiance(uint4 packedValue)
@@ -375,11 +392,30 @@ float4 BurtGIRadianceCacheHashGridCombineMipRadiance(float4 radiance00, float4 r
 
 void BurtGIRadianceCacheHashGridPrepare(uint3 dispatchThreadId)
 {
-    uint linearIndex = dispatchThreadId.x;
+    // CPU caps X at the D3D11 dispatch limit and spills larger clears into Y.
+    uint linearIndex = dispatchThreadId.x + dispatchThreadId.y *
+        (65535u * BURT_GI_HASH_GRID_PREPARE_THREADGROUP_SIZE);
     uint cellCount = BurtGIRadianceCacheHashGridCellCount();
     uint tileCount = BurtGIRadianceCacheHashGridTileCount();
-    uint traceTexelCount = BurtGIRadianceCacheHashGridTraceTexelCount();
-    uint updateCellValueCount = cellCount * 4u;
+    uint traceTexelCount = BurtGIHashQueryCapacity();
+    uint updateCellValueCount = cellCount * 5u;
+
+    // The sparse surface layout is independent of the legacy spatial tiles.
+    // Expire entries by their own last observation, before any publication.
+    // The payload's redundant fourth word elects a deterministic current owner.
+    if (_BurtGIRadianceCacheHashGridAddressParams.w > 0.5 && linearIndex < cellCount / 2u)
+    {
+        uint metadata = linearIndex * 2u;
+        uint payload = metadata + 1u;
+        if (_BurtGIRadianceCacheHashGridValueBuffer[metadata].x != 0u &&
+            BurtGIRadianceCacheHashGridFrameDelta(_BurtGIRadianceCacheHashGridFrameIndex,
+                _BurtGIRadianceCacheHashGridValueBuffer[payload].z) >= BURT_GI_HASH_GRID_TILE_DECAY_MAX)
+        {
+            _BurtGIRadianceCacheHashGridValueBuffer[metadata] = 0u;
+            _BurtGIRadianceCacheHashGridValueBuffer[payload] = uint4(0u, 0u, 0xffffffffu, 0u);
+        }
+        _BurtGIRadianceCacheHashGridValueBuffer[payload].w = 0xffffffffu;
+    }
 
     if (linearIndex < 2u)
     {
@@ -403,10 +439,13 @@ void BurtGIRadianceCacheHashGridPrepare(uint3 dispatchThreadId)
 
     if (linearIndex < updateCellValueCount)
     {
-        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[linearIndex] = 0u;
+        uint field = linearIndex % 10u;
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[linearIndex] =
+            _BurtGIRadianceCacheHashGridAddressParams.w > 0.5 && field >= 4u && field <= 6u
+            ? 0x7f800000u : 0u;
     }
 
-    if (linearIndex < min(traceTexelCount, cellCount))
+    if (linearIndex < min(traceTexelCount, tileCount))
     {
         _BurtGIRadianceCacheHashGridUpdateTileBuffer[linearIndex] = 0xffffffffu;
     }
@@ -430,6 +469,20 @@ void RadianceCacheHashGridPrepareLiteCS(uint3 dispatchThreadId : SV_DispatchThre
     BurtGIRadianceCacheHashGridPrepare(dispatchThreadId);
 }
 
+// Match XRender's close-hit cache bypass. Filtering directions whose first
+// surface is less than 0.5 world units away mixes nearby visibility boundaries.
+// Preserve their current trace rather than clearing/reconstructing it. A valid
+// finite-range miss has a negative distance and must still publish darkness.
+bool BurtGIRadianceCacheHashGridPreserveCloseTrace(uint2 traceCoord)
+{
+    if (_BurtGIHashGridFreshTraceStateAvailable == 0u)
+    {
+        return false;
+    }
+    float distance = _BurtGIScreenProbeTraceGeometryDistanceTexture.Load(int3(traceCoord, 0)).x;
+    return distance >= 0.0 && distance < 0.5;
+}
+
 void BurtGIRadianceCacheHashGridPopulateCells(uint3 dispatchThreadId)
 {
     uint linearIndex = dispatchThreadId.x;
@@ -447,6 +500,10 @@ void BurtGIRadianceCacheHashGridPopulateCells(uint3 dispatchThreadId)
         return;
     }
 
+    if (BurtGIRadianceCacheHashGridPreserveCloseTrace(uint2(traceX, traceY)))
+    {
+        return;
+    }
     float hitConfidence = _BurtGIScreenProbeTraceHitTexture.Load(int3((int)traceX, (int)traceY, 0));
     // A fully covered finite-range miss is a fresh observation of darkness,
     // not a missing sample. Publish it so old emissive cells can converge to zero.
@@ -463,37 +520,46 @@ void BurtGIRadianceCacheHashGridPopulateCells(uint3 dispatchThreadId)
     }
 
     uint octResolution = max(1u, (uint)_BurtGIScreenProbeTraceParams.x);
-    uint2 screenProbeCoord = uint2(traceX / octResolution, traceY / octResolution);
-    float4 worldPositionValue = _BurtGIScreenProbeWorldPositionTexture.Load(int3((int)screenProbeCoord.x, (int)screenProbeCoord.y, 0));
-    if (worldPositionValue.w <= 0.0001)
+    uint2 atlasProbeCoord = uint2(traceX / octResolution, traceY / octResolution);
+    uint2 uniformSize = max(uint2(1u, 1u), (uint2)_BurtGIScreenProbeGridParams.xy);
+    uint screenProbeIndex = atlasProbeCoord.y * uniformSize.x + atlasProbeCoord.x;
+    uint uniformCount = uniformSize.x * uniformSize.y;
+    bool isAdaptiveProbe = screenProbeIndex >= uniformCount;
+    float3 sourcePositionWS;
+    uint2 adaptiveSourcePixel = uint2(0u, 0u);
+    if (isAdaptiveProbe)
     {
-        return;
+        uint adaptiveIndex = screenProbeIndex - uniformCount;
+        uint adaptiveCount = min(_BurtGIScreenProbeAdaptiveProbeNumBuffer[0],
+            (uint)max(0.0, _BurtGIScreenProbeAdaptiveParams.w));
+        if (adaptiveIndex >= adaptiveCount) return;
+        BurtGIAdaptiveProbeData probe = _BurtGIScreenProbeAdaptiveProbeDataBuffer[adaptiveIndex];
+        if (probe.valid <= 0.5) return;
+        sourcePositionWS = probe.positionWS;
+        adaptiveSourcePixel = probe.sourcePixel;
+        // The uniform parent can be a different surface; its hit-distance
+        // classification must not discard this adaptive probe's fresh trace.
     }
-
-    float4 probeHitDistance = _BurtGIScreenProbeHitDistanceTexture.Load(int3((int)screenProbeCoord.x, (int)screenProbeCoord.y, 0));
-    if (max(probeHitDistance.z, probeHitDistance.w) > 0.0001 && probeHitDistance.y < 0.5)
+    else
     {
-        return;
+        float4 placement = _BurtGIScreenProbeWorldPositionTexture.Load(int3(atlasProbeCoord, 0));
+        if (placement.w <= 0.0001) return;
+        sourcePositionWS = placement.xyz;
+        float4 probeHitDistance = _BurtGIScreenProbeHitDistanceTexture.Load(int3(atlasProbeCoord, 0));
+        if (max(probeHitDistance.z, probeHitDistance.w) > 0.0001 && probeHitDistance.y < 0.5) return;
     }
-
+    if (!all(isfinite(sourcePositionWS))) return;
     uint2 traceTexelCoord = uint2(traceX % octResolution, traceY % octResolution);
-    uint2 sourceTraceTexelCoord = traceTexelCoord;
-    uint sourceTraceLevel = 0u;
-    BurtGIUnpackScreenProbeImportanceRayInfo(
-        _BurtGIScreenProbeImportanceRayInfoTexture.Load(int3((int)traceX, (int)traceY, 0)),
-        sourceTraceTexelCoord,
-        sourceTraceLevel);
-    uint maxImportanceTraceResolution = min(64u, max(octResolution, octResolution << 1u));
-    uint sourceMipSize = max(1u, maxImportanceTraceResolution >> min(sourceTraceLevel, 5u));
-    if (sourceTraceTexelCoord.x >= sourceMipSize || sourceTraceTexelCoord.y >= sourceMipSize)
-    {
-        sourceTraceTexelCoord = traceTexelCoord;
-        sourceMipSize = octResolution;
-    }
-
-    float2 octUV = (float2(sourceTraceTexelCoord) + BurtGIScreenProbeRayTexelCenter(screenProbeCoord, _BurtGIScreenProbeRayFrameIndex)) / (float)sourceMipSize;
+    uint packedRayInfo = isAdaptiveProbe ? 0u
+        : _BurtGIScreenProbeImportanceRayInfoTexture.Load(int3((int)traceX, (int)traceY, 0));
+    uint2 sourceTraceTexelCoord;
+    uint sourceTraceLevel, sourceMipSize;
+    float2 octUV;
+    BurtGIResolveScreenProbeRayLayout(traceTexelCoord, octResolution, isAdaptiveProbe,
+        packedRayInfo, atlasProbeCoord, adaptiveSourcePixel, _BurtGIScreenProbeRayFrameIndex,
+        sourceTraceTexelCoord, sourceTraceLevel, sourceMipSize, octUV);
     float3 rayDirection = BurtGIEquiAreaSphericalMapping(octUV);
-    uint tileHash = BurtGIRadianceCacheHashGridTileHash(worldPositionValue.xyz, rayDirection);
+    uint tileHash = BurtGIRadianceCacheHashGridTileHash(sourcePositionWS, rayDirection);
     uint tileIndex;
     bool isNewTile;
     if (!BurtGIRadianceCacheHashGridFindOrInsertTile(tileHash, tileIndex, isNewTile))
@@ -511,7 +577,7 @@ void BurtGIRadianceCacheHashGridPopulateCells(uint3 dispatchThreadId)
         // races other threads that already found the newly published tile hash.
     }
 
-    uint localCellIndex = BurtGIRadianceCacheHashGridLocalCell(worldPositionValue.xyz, rayDirection);
+    uint localCellIndex = BurtGIRadianceCacheHashGridLocalCell(sourcePositionWS, rayDirection);
     uint cellIndex = BurtGIRadianceCacheHashGridCellIndexFromTile(tileIndex, localCellIndex);
     uint tileCount = BurtGIRadianceCacheHashGridTileCount();
     uint updateTileCapacity = min(traceTexelCount, tileCount);
@@ -543,13 +609,13 @@ void BurtGIRadianceCacheHashGridPopulateCells(uint3 dispatchThreadId)
 
     _BurtGIScreenProbeTraceRadianceRWTexture[traceRadianceCoord] = 0.0;
 
-    uint updateCellBase = cellIndex * 4u;
+    uint updateCellBase = cellIndex * 5u;
     InterlockedAdd(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 0u], quantizedRadiance.x);
     InterlockedAdd(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 1u], quantizedRadiance.y);
     InterlockedAdd(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 2u], quantizedRadiance.z);
     InterlockedAdd(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 3u], quantizedRadiance.w);
     _BurtGIRadianceCacheHashGridDebugCellBuffer[cellIndex + 1u] = BurtGIRadianceCacheHashGridPackDebugCell(
-        BurtGIRadianceCacheHashGridDebugCellCenter(worldPositionValue.xyz),
+        BurtGIRadianceCacheHashGridDebugCellCenter(sourcePositionWS),
         rayDirection,
         max(0.001, _BurtGIRadianceCacheHashGridParams0.x),
         hitConfidence);
@@ -577,7 +643,7 @@ void BurtGIRadianceCacheHashGridWriteLinearIndirectArgs(uint threadCount, uint t
 [numthreads(1, 1, 1)]
 void HashGridPopulateCellsGenIndirectArgsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint traceTexelCount = BurtGIRadianceCacheHashGridTraceTexelCount();
+    uint traceTexelCount = BurtGIHashQueryCapacity();
     BurtGIRadianceCacheHashGridWriteLinearIndirectArgs(traceTexelCount, BURT_GI_HASH_GRID_POPULATE_THREADGROUP_SIZE);
 }
 
@@ -585,11 +651,13 @@ void BurtGIRadianceCacheHashGridUpdateTilesGenIndirectArgs(uint3 dispatchThreadI
 {
     uint updateTileCount = min(
         _BurtGIRadianceCacheHashGridCountBuffer[1],
-        min(BurtGIRadianceCacheHashGridTraceTexelCount(), BurtGIRadianceCacheHashGridTileCount()));
+        min(BurtGIHashQueryCapacity(), BurtGIRadianceCacheHashGridTileCount()));
     uint mip0CellCount = BURT_GI_HASH_GRID_UPDATE_TILE_THREADGROUP_SIZE * BURT_GI_HASH_GRID_UPDATE_TILE_THREADGROUP_SIZE;
     uint threadCount = BURT_GI_HASH_GRID_UPDATE_TILE_THREADGROUP_SIZE * BURT_GI_HASH_GRID_UPDATE_TILE_THREADGROUP_SIZE;
     uint tilesPerGroup = max(1u, threadCount / max(1u, mip0CellCount));
     uint groupCount = (updateTileCount + tilesPerGroup - 1u) / tilesPerGroup;
+    if (_BurtGIRadianceCacheHashGridAddressParams.w > 0.5)
+        groupCount = (min(_BurtGIRadianceCacheHashGridCountBuffer[0], BurtGIHashQueryCapacity()) + threadCount - 1u) / threadCount;
     uint groupCountX = max(1u, (uint)ceil(sqrt((float)groupCount)));
     uint groupCountY = max(1u, (uint)ceil((float)groupCount / (float)groupCountX));
     uint packedTileCount = min(
@@ -613,13 +681,75 @@ void RadianceCacheHashGridUpdateTilesGenIndirectArgsLiteCS(uint3 dispatchThreadI
     BurtGIRadianceCacheHashGridUpdateTilesGenIndirectArgs(dispatchThreadId);
 }
 
+void BurtGISurfaceCacheUpdateQuery(uint queryIndex)
+{
+    if (queryIndex >= min(_BurtGIRadianceCacheHashGridCountBuffer[0], BurtGIHashQueryCapacity())) return;
+    uint2 query = _BurtGIRadianceCacheHashGridVisibilityCellQueryBuffer[queryIndex];
+    uint cell = query.x;
+    if (cell >= BurtGIRadianceCacheHashGridCellCount() || (cell & 1u) == 0u) return;
+    uint previousFrame;
+    InterlockedExchange(_BurtGIRadianceCacheHashGridValueBuffer[cell].z,
+        _BurtGIRadianceCacheHashGridFrameIndex, previousFrame);
+    if (previousFrame == _BurtGIRadianceCacheHashGridFrameIndex) return;
+    uint4 previousPacked = _BurtGIRadianceCacheHashGridValueBuffer[cell];
+    previousPacked.z = previousFrame;
+    uint baseIndex = (cell / 2u) * 10u;
+    uint4 accumulated = uint4(
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex],
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + 1u],
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + 2u],
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + 3u]);
+    if (accumulated.w == 0u) return;
+    float weight = max((float)accumulated.w / 65535.0, 0.0001);
+    float4 current = BurtGIRadianceCacheHashGridRecoverRadiance(accumulated);
+    current.rgb /= weight;
+    current.a = saturate(weight);
+    float3 low = asfloat(uint3(
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + 4u],
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + 5u],
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + 6u]));
+    float3 high = asfloat(uint3(
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + 7u],
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + 8u],
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + 9u]));
+    float4 previous = BurtGIRadianceCacheHashGridUnpackRadiance(previousPacked);
+    previous.a *= BurtGIRadianceCacheHashGridAgeConfidenceScale(previousPacked);
+    // Rectify against current measurements of this same surface, not receiver
+    // neighbors or another material plane. RGB bounds also reject color changes;
+    // valid black makes both bounds zero without changing temporal weights/TTL.
+    previous.rgb = clamp(previous.rgb, low, high);
+    float historyWeight = previous.a > 0.0001 ? previous.a / (previous.a + current.a) : 0.0;
+    float4 resolved = float4(lerp(current.rgb, previous.rgb, historyWeight), saturate(previous.a + current.a));
+    uint2 packed = BurtGIRadianceCacheHashGridPackRadiance(resolved.rgb, resolved.a);
+    _BurtGIRadianceCacheHashGridValueBuffer[cell].xy = packed;
+
+    uint owner = previousPacked.w;
+    if (owner < BurtGIHashQueryCapacity())
+    {
+        BurtGITraceSurface s = _BurtGIScreenProbeTraceSurfaceBuffer[owner];
+        BurtGIHashSurfaceAddress a = BurtGIGetHashSurfaceAddress(_BurtDeferredCameraWorldPosition.xyz,
+            s.positionWS, s.directionWS, s.distanceFromOrigin, (uint)_BurtGIRadianceCacheHashGridParams0.y);
+        float plane = dot(BurtGISurfaceCacheNormal(s.packedNormal), s.positionWS - a.cellCenter) / a.cellSize;
+        _BurtGIRadianceCacheHashGridValueBuffer[cell - 1u].zw = uint2(s.packedNormal, asuint(plane));
+    }
+    float4 debugCell = _BurtGIRadianceCacheHashGridDebugCellBuffer[cell + 1u];
+    _BurtGIRadianceCacheHashGridDebugCellBuffer[cell + 1u] = BurtGIRadianceCacheHashGridUpdateDebugCellConfidence(debugCell, resolved.a);
+    [unroll] for (uint i = 0u; i < 10u; ++i)
+        _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex + i] = i >= 4u && i <= 6u ? 0x7f800000u : 0u;
+}
+
 void BurtGIRadianceCacheHashGridUpdateTiles(uint3 groupId, uint3 groupThreadId)
 {
     uint groupLinearIndex = groupId.y * max(1u, _BurtGIRadianceCacheHashGridUpdateTilesGroupCountXBuffer[0]) + groupId.x;
+    if (_BurtGIRadianceCacheHashGridAddressParams.w > 0.5)
+    {
+        BurtGISurfaceCacheUpdateQuery(groupLinearIndex * 64u + groupThreadId.y * 8u + groupThreadId.x);
+        return; // Uniform branch: the legacy mip LDS/barriers are not used.
+    }
     uint updateTileListIndex = groupLinearIndex;
     uint updateTileCount = min(
         _BurtGIRadianceCacheHashGridCountBuffer[1],
-        min(BurtGIRadianceCacheHashGridTraceTexelCount(), BurtGIRadianceCacheHashGridTileCount()));
+        min(BurtGIHashQueryCapacity(), BurtGIRadianceCacheHashGridTileCount()));
     bool validUpdateTile = updateTileListIndex < updateTileCount;
     uint tileIndex = validUpdateTile ? _BurtGIRadianceCacheHashGridUpdateTileBuffer[updateTileListIndex] : 0u;
     validUpdateTile = validUpdateTile && tileIndex < BurtGIRadianceCacheHashGridTileCount();
@@ -629,7 +759,7 @@ void BurtGIRadianceCacheHashGridUpdateTiles(uint3 groupId, uint3 groupThreadId)
     uint cellCount = BurtGIRadianceCacheHashGridCellCount();
     bool validCell = validUpdateTile && cellIndex < cellCount;
 
-    uint updateCellBase = cellIndex * 4u;
+    uint updateCellBase = cellIndex * 5u;
     uint4 accumulatedRadiance = validCell
         ? uint4(
             _BurtGIRadianceCacheHashGridUpdateCellValueBuffer[updateCellBase + 0u],
@@ -770,12 +900,22 @@ void BurtGIRadianceCacheHashGridResolveCells(uint3 dispatchThreadId)
         return;
     }
 
-    uint octResolution = max(1u, (uint)_BurtGIScreenProbeTraceParams.x);
-    uint2 screenProbeCoord = uint2(traceX / octResolution, traceY / octResolution);
-    float4 probeHitDistance = _BurtGIScreenProbeHitDistanceTexture.Load(int3((int)screenProbeCoord.x, (int)screenProbeCoord.y, 0));
-    if (max(probeHitDistance.z, probeHitDistance.w) > 0.0001 && probeHitDistance.y < 0.5)
+    if (BurtGIRadianceCacheHashGridPreserveCloseTrace(uint2(traceX, traceY)))
     {
         return;
+    }
+    uint octResolution = max(1u, (uint)_BurtGIScreenProbeTraceParams.x);
+    uint2 screenProbeCoord = uint2(traceX / octResolution, traceY / octResolution);
+    uint2 uniformSize = max(uint2(1u, 1u), (uint2)_BurtGIScreenProbeGridParams.xy);
+    // HitDistance contains only the uniform grid. Adaptive atlas rows were
+    // validated during publication and have no parent classification here.
+    if (all(screenProbeCoord < uniformSize))
+    {
+        float4 probeHitDistance = _BurtGIScreenProbeHitDistanceTexture.Load(int3(screenProbeCoord, 0));
+        if (max(probeHitDistance.z, probeHitDistance.w) > 0.0001 && probeHitDistance.y < 0.5)
+        {
+            return;
+        }
     }
 
     float4 traceRadiance = _BurtGIScreenProbeTraceRadianceRWTexture[uint2(traceX, traceY)];
@@ -794,6 +934,101 @@ void HashGridResolveCellsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 void RadianceCacheHashGridResolveTraceRadianceLiteCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     BurtGIRadianceCacheHashGridResolveCells(dispatchThreadId);
+}
+
+// Surface queries refer to unique record IDs, never to a shared atlas output.
+// A miss endpoint/unknown aggregate is not an opaque surface to cache.
+[numthreads(BURT_GI_HASH_GRID_POPULATE_THREADGROUP_SIZE, 1, 1)]
+void HashGridPopulateSurfaceCellsCS(uint3 id : SV_DispatchThreadID)
+{
+    uint recordIndex=id.x;
+    if (_BurtGIScreenProbeTraceSurfaceEnabled==0u ||
+        _BurtGIHashGridFreshTraceStateAvailable==0u || recordIndex>=BurtGIHashQueryCapacity()) return;
+    BurtGITraceSurface s=_BurtGIScreenProbeTraceSurfaceBuffer[recordIndex];
+    if (s.kind!=2u || s.confidence<=0.0001 || s.contribution<=0.0 || s.distanceFromOrigin<0.5 ||
+        !all(isfinite(s.positionWS)) || !all(isfinite(s.radiance)) || !all(isfinite(s.directionWS))) return;
+    uint texel=recordIndex/4u;uint width=(uint)_BurtGIScreenProbeTraceParams.y;
+    if (BurtGIRadianceCacheHashGridPreserveCloseTrace(uint2(texel%width,texel/width))) return;
+    BurtGIHashSurfaceAddress a=BurtGIGetHashSurfaceAddress(_BurtDeferredCameraWorldPosition.xyz,
+        s.positionWS,s.directionWS,s.distanceFromOrigin,(uint)_BurtGIRadianceCacheHashGridParams0.y);
+    uint localCell = a.cell.x + a.cell.y * (uint)_BurtGIRadianceCacheHashGridParams0.y;
+    uint signature = BurtGISurfaceCacheSignature(s.packedNormal, s.positionWS, a.cellSize, (recordIndex & 3u) == 0u);
+    uint2 surfaceKey = BurtGISurfaceCacheKey(a.hash, localCell, signature);
+    uint slot; bool isNewSurface;
+    if (!BurtGISurfaceCacheFindOrInsert(surfaceKey, slot, isNewSurface)) return;
+    uint tile;bool isNew;
+    if (!BurtGIRadianceCacheHashGridFindOrInsertTile(a.hash,tile,isNew)) return;
+    uint previousFrame;
+    InterlockedExchange(_BurtGIRadianceCacheHashGridTileBuffer[tile].y,_BurtGIRadianceCacheHashGridFrameIndex,previousFrame);
+    if (isNew) BurtGIRadianceCacheHashGridAppendPackedTile(tile);
+    uint cell = slot * 2u + 1u;
+    // All writes finish before Update/Resolve. Atomic minimum chooses the same
+    // geometric representative regardless of the thread that allocated a slot.
+    InterlockedMin(_BurtGIRadianceCacheHashGridValueBuffer[cell].w, recordIndex);
+    uint query;
+    InterlockedAdd(_BurtGIRadianceCacheHashGridCountBuffer[0],1u,query);
+    if (query<BurtGIHashQueryCapacity())
+        _BurtGIRadianceCacheHashGridVisibilityCellQueryBuffer[query]=uint2(cell,recordIndex);
+    if (previousFrame!=_BurtGIRadianceCacheHashGridFrameIndex)
+    {
+        uint index;InterlockedAdd(_BurtGIRadianceCacheHashGridCountBuffer[1],1u,index);
+        if (index<min(BurtGIHashQueryCapacity(),BurtGIRadianceCacheHashGridTileCount()))
+            _BurtGIRadianceCacheHashGridUpdateTileBuffer[index]=tile;
+    }
+    uint4 q=BurtGIRadianceCacheHashGridQuantizeRadiance(s.radiance,s.confidence);
+    uint baseIndex = slot * 10u;
+    InterlockedAdd(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+0u],q.x);
+    InterlockedAdd(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+1u],q.y);
+    InterlockedAdd(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+2u],q.z);
+    InterlockedAdd(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+3u],q.w);
+    uint3 rgb = asuint(clamp(s.radiance, 0.0, 8.0));
+    InterlockedMin(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+4u],rgb.x);
+    InterlockedMin(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+5u],rgb.y);
+    InterlockedMin(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+6u],rgb.z);
+    InterlockedMax(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+7u],rgb.x);
+    InterlockedMax(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+8u],rgb.y);
+    InterlockedMax(_BurtGIRadianceCacheHashGridUpdateCellValueBuffer[baseIndex+9u],rgb.z);
+    _BurtGIRadianceCacheHashGridDebugCellBuffer[cell+1u]=BurtGIRadianceCacheHashGridPackDebugCell(
+        a.cellCenter,s.directionWS,a.cellSize,s.confidence);
+}
+
+[numthreads(BURT_GI_HASH_GRID_POPULATE_THREADGROUP_SIZE, 1, 1)]
+void HashGridResolveSurfaceCellsCS(uint3 id : SV_DispatchThreadID)
+{
+    if (_BurtGIScreenProbeTraceSurfaceEnabled==0u || id.x>=min(_BurtGIRadianceCacheHashGridCountBuffer[0],BurtGIHashQueryCapacity())) return;
+    uint2 q=_BurtGIRadianceCacheHashGridVisibilityCellQueryBuffer[id.x];
+    if (q.x>=BurtGIRadianceCacheHashGridCellCount() || q.y>=BurtGIHashQueryCapacity()) return;
+    uint4 packed=_BurtGIRadianceCacheHashGridValueBuffer[q.x];
+    float4 value=BurtGIRadianceCacheHashGridUnpackRadiance(packed);
+    if (value.a*BurtGIRadianceCacheHashGridAgeConfidenceScale(packed)<=0.0001) return;
+    BurtGITraceSurface s=_BurtGIScreenProbeTraceSurfaceBuffer[q.y];
+    if ((q.x & 1u) == 0u) return;
+    BurtGIHashSurfaceAddress a = BurtGIGetHashSurfaceAddress(_BurtDeferredCameraWorldPosition.xyz,
+        s.positionWS, s.directionWS, s.distanceFromOrigin, (uint)_BurtGIRadianceCacheHashGridParams0.y);
+    uint signature = BurtGISurfaceCacheSignature(s.packedNormal, s.positionWS, a.cellSize, (q.y & 3u) == 0u);
+    uint2 key = BurtGISurfaceCacheKey(a.hash, a.cell.x + a.cell.y * (uint)_BurtGIRadianceCacheHashGridParams0.y, signature);
+    if (any(_BurtGIRadianceCacheHashGridValueBuffer[q.x - 1u].xy != key)) return;
+    // Valid black is an actual resolved value, not a miss.
+    s.filteredRadiance=value.rgb;
+    _BurtGIScreenProbeTraceSurfaceBuffer[q.y]=s;
+}
+
+[numthreads(BURT_GI_HASH_GRID_POPULATE_THREADGROUP_SIZE, 1, 1)]
+void HashGridReconstructSurfaceCS(uint3 id : SV_DispatchThreadID)
+{
+    if (_BurtGIScreenProbeTraceSurfaceEnabled==0u || id.x>=BurtGIRadianceCacheHashGridTraceTexelCount()) return;
+    float3 delta=0.0;
+    [unroll] for(uint lane=0u;lane<4u;++lane)
+    {
+        BurtGITraceSurface s=_BurtGIScreenProbeTraceSurfaceBuffer[id.x*4u+lane];
+        delta+=s.contribution*(s.filteredRadiance-s.radiance);
+    }
+    // No store for an unmodified texel: preserve its FP16 RGB/metadata exactly.
+    if (!any(delta!=0.0)) return;
+    uint width=(uint)_BurtGIScreenProbeTraceParams.y;uint2 coord=uint2(id.x%width,id.x/width);
+    float4 old=_BurtGIScreenProbeTraceRadianceRWTexture[coord];
+    old.rgb=max(old.rgb+delta,0.0);
+    _BurtGIScreenProbeTraceRadianceRWTexture[coord]=old;
 }
 
 [numthreads(1, 1, 1)]
@@ -831,7 +1066,8 @@ void BurtGIRadianceCacheHashGridPurgeTiles(uint3 dispatchThreadId)
     uint frameDelta = BurtGIRadianceCacheHashGridFrameDelta(_BurtGIRadianceCacheHashGridFrameIndex, tileValue.y);
     if (frameDelta >= BURT_GI_HASH_GRID_TILE_DECAY_MAX)
     {
-        BurtGIRadianceCacheHashGridClearTileCells(tileIndex);
+        if (_BurtGIRadianceCacheHashGridAddressParams.w < 0.5)
+            BurtGIRadianceCacheHashGridClearTileCells(tileIndex);
         _BurtGIRadianceCacheHashGridTileBuffer[tileIndex].x = 0xffffffffu;
         _BurtGIRadianceCacheHashGridTileBuffer[tileIndex].y = 0u;
         return;

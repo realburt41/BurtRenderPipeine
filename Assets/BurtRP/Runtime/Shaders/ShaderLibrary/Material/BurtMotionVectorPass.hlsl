@@ -34,9 +34,23 @@ float4x4 _BurtTAAClipToPreviousClip;
 float4x4 unity_MatrixPreviousM;
 float4 unity_MotionVectorsParams;
 float _BurtTAAPreviousRenderDeltaTime;
+float _BurtGIProbeReceiverMotion;
+
+UNITY_INSTANCING_BUFFER_START(BurtGIReceiverMotion)
+    UNITY_DEFINE_INSTANCED_PROP(float4x4, _BurtGIReceiverPreviousObjectToWorld)
+    UNITY_DEFINE_INSTANCED_PROP(float, _BurtGIReceiverPreviousValid)
+UNITY_INSTANCING_BUFFER_END(BurtGIReceiverMotion)
+
+float BurtGIHasReceiverMotionHistory()
+{
+    return _BurtGIProbeReceiverMotion > 0.5f
+        ? UNITY_ACCESS_INSTANCED_PROP(BurtGIReceiverMotion, _BurtGIReceiverPreviousValid) : 0.0f;
+}
 
 float4x4 BurtGetMotionVectorPreviousObjectToWorldMatrix()
 {
+    if (BurtGIHasReceiverMotionHistory() > 0.5f)
+        return UNITY_ACCESS_INSTANCED_PROP(BurtGIReceiverMotion, _BurtGIReceiverPreviousObjectToWorld);
 #if defined(UNITY_INSTANCING_ENABLED)
     return UNITY_ACCESS_INSTANCED_PROP(unity_Builtins3, unity_PrevObjectToWorldArray);
 #else
@@ -121,6 +135,7 @@ struct MotionVectorVaryings
     float4 PreviousClipNoJitter : TEXCOORD2;
     float2 BaseMapUV : TEXCOORD3;
     float3 PositionWS : TEXCOORD4;
+    float ReceiverMotionHistory : TEXCOORD5;
 };
 
 float2 BurtTaaClipToUv(float4 clipPosition)
@@ -179,23 +194,51 @@ MotionVectorVaryings VertMotionVector(MotionVectorAttributes input)
         float4 previousObjectWorld = mul(previousObjectToWorld, previousPositionOS);
     #endif
 
+    // Reproduce GBuffer's object-space deformation before its object-to-clip
+    // operation. Using the undeformed position here would fail ZTest Equal for
+    // trunk/foliage receivers even though rigid meshes passed the depth test.
+    float4 receiverRasterPositionOS = positionOS;
+    if (_BurtGIProbeReceiverMotion > 0.5f)
+    {
+        #if defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_TRUNK)
+            receiverRasterPositionOS = BurtApplyTrunkVertexAnimationObjectSpace(positionOS, input.Color, _Time.y);
+        #elif defined(BURT_MATERIAL_SELECTED_SHADING_MODEL_FOLIAGE)
+            #if defined(BURT_MATERIAL_SELECTED_FOLIAGE_IS_GRASS)
+                receiverRasterPositionOS = BurtApplyGrassVertexAnimationObjectSpace(positionOS, input.NormalOS, input.Color, _Time.y);
+            #else
+                receiverRasterPositionOS = BurtApplyFoliageVertexAnimationObjectSpace(positionOS, input.Color, _Time.y);
+            #endif
+        #endif
+        currentWorld = mul(unity_ObjectToWorld, receiverRasterPositionOS);
+    }
+
     // Use the same motion-source contract as XRender's GBuffer path.
     float cameraMotion = 1.0 - step(1e-6, abs(unity_MotionVectorsParams.w));
+    float receiverMotionHistory = BurtGIHasReceiverMotionHistory();
+    if (receiverMotionHistory > 0.5f) cameraMotion = 0.0f;
     float4 previousWorld = lerp(previousObjectWorld, currentWorld, cameraMotion);
 
     MotionVectorVaryings output;
-    output.PositionCS = mul(_BurtTAACurrentViewProjection, currentWorld);
+    // A depth-equal GI receiver draw must reproduce GBuffer raster depth exactly:
+    // same object-to-clip operation and no motion-vector depth bias.
+    output.PositionCS = _BurtGIProbeReceiverMotion > 0.5f
+        ? UnityObjectToClipPos(receiverRasterPositionOS)
+        : mul(_BurtTAACurrentViewProjection, currentWorld);
+    if (_BurtGIProbeReceiverMotion < 0.5f)
+    {
 #if defined(UNITY_REVERSED_Z)
     output.PositionCS.z -= unity_MotionVectorsParams.z * output.PositionCS.w;
 #else
     output.PositionCS.z += unity_MotionVectorsParams.z * output.PositionCS.w;
 #endif
+    }
 
     output.CurrentClip = output.PositionCS;
     output.CurrentClipNoJitter = mul(_BurtTAACurrentNonJitteredViewProjection, currentWorld);
     output.PreviousClipNoJitter = mul(_BurtTAAPreviousNonJitteredViewProjection, previousWorld);
     output.BaseMapUV = BurtMotionVectorTransformBaseMapUV(input.UV0);
     output.PositionWS = currentWorld.xyz;
+    output.ReceiverMotionHistory = receiverMotionHistory;
     return output;
 }
 
@@ -228,6 +271,7 @@ float4 FragMotionVector(MotionVectorVaryings input) : SV_Target
         _BurtTAAClipToPreviousClip,
         float4(currentClipXY, input.PositionCS.z, 1.0));
     float cameraMotion = 1.0 - step(1e-6, abs(unity_MotionVectorsParams.w));
+    if (input.ReceiverMotionHistory > 0.5f) cameraMotion = 0.0f;
     float4 previousClip = lerp(input.PreviousClipNoJitter, cameraPreviousClip, cameraMotion);
     float2 previousUv = BurtTaaClipToUv(previousClip);
 

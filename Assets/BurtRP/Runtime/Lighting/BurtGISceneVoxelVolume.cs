@@ -631,6 +631,8 @@ namespace Burt.RenderPipeline
         internal readonly BurtGISceneVoxelOctreeUtility.ResourceSet Octree = new BurtGISceneVoxelOctreeUtility.ResourceSet();
         internal readonly BurtXGISdfGenContext SdfContext = new BurtXGISdfGenContext();
         internal string SdfStatus = "Unconfigured";
+        // Optional ownership only. Dense construction does not allocate or enable fine voxels.
+        internal BurtGISceneVoxelFineResources Fine { get; private set; }
 
         internal int ProbeNodeSize => Mathf.Max(1, RadianceResolution >> 2);
         internal int ProbeIndexOffsetForClipmap => Mathf.Max(1, ProbeNodeSize * ProbeNodeSize * ProbeNodeSize);
@@ -708,18 +710,40 @@ namespace Burt.RenderPipeline
 
         internal void Release()
         {
-            ReleaseTexture(Radiance);
-            ReleaseTexture(Geometry);
-            ReleaseTexture(OccupancyMip);
-            ReleaseTexture(Lighting);
-            ReleaseTexture(ProbePageTable);
-            ReleaseTexture(ProbeIrradianceSHAmbient);
-            ReleaseTexture(ProbeIrradianceSHDirectional);
-            ReleaseBuffer(ProbeIndexBuffer);
-            ReleaseBuffer(ProbeArgsBuffer);
-            ReleaseBuffer(ProbeArgsParamsBuffer);
-            SdfContext.Dispose();
-            BurtGISceneVoxelOctreeUtility.Release(Octree);
+            try
+            {
+                ReleaseTexture(Radiance);
+                ReleaseTexture(Geometry);
+                ReleaseTexture(OccupancyMip);
+                ReleaseTexture(Lighting);
+                ReleaseTexture(ProbePageTable);
+                ReleaseTexture(ProbeIrradianceSHAmbient);
+                ReleaseTexture(ProbeIrradianceSHDirectional);
+                ReleaseBuffer(ProbeIndexBuffer);
+                ReleaseBuffer(ProbeArgsBuffer);
+                ReleaseBuffer(ProbeArgsParamsBuffer);
+                SdfContext.Dispose();
+                BurtGISceneVoxelOctreeUtility.Release(Octree);
+            }
+            finally
+            {
+                ReleaseFine();
+            }
+        }
+
+        internal BurtGISceneVoxelFineResources EnsureFine(int capacity, string name, out bool reallocated)
+        {
+            if (Fine == null) Fine = new BurtGISceneVoxelFineResources();
+            reallocated = Fine.Ensure(RadianceResolution, capacity, name);
+            return Fine;
+        }
+
+        internal void ReleaseFine()
+        {
+            if (Fine == null) return;
+            Fine.Dispose();
+            // Keep a failed cleanup target owned so a later release can retry.
+            Fine = null;
         }
 
         internal bool ConfigureSdfContext(bool useOccupy)
@@ -977,6 +1001,11 @@ namespace Burt.RenderPipeline
             public int RadianceResolution = BurtScreenSpaceGlobalIlluminationPassUtility.SceneVoxelRadianceResolution;
             public readonly BurtXGISdfGenContext BaseSdfContext = new BurtXGISdfGenContext();
             public string BaseSdfStatus = "Unconfigured";
+            public BurtGISceneVoxelFineResources BaseFine;
+            public Vector4 BaseFineCenterExtent;
+            public int ActiveClipmapCount = 1;
+            public bool FineResourcesEnabled;
+            public int FineModeSignature;
         }
 
         private static readonly Dictionary<int, CameraState> CameraStates = new Dictionary<int, CameraState>();
@@ -1010,11 +1039,26 @@ namespace Burt.RenderPipeline
                 state = new CameraState();
                 CameraStates.Add(camera.GetInstanceID(), state);
             }
+            else if (state.Camera != camera)
+            {
+                // A destroyed camera's instance ID must not transfer fine source ownership.
+                // Do not change the existing dense-resource update policy here.
+                ReleaseFineOwned(state, true);
+            }
             state.Camera = camera;
+
+            if (!state.BaseFineCenterExtent.Equals(baseCenterExtent))
+            {
+                state.BaseFine?.Invalidate();
+                // Base raster uses the caller's actual bounds, not the independently
+                // snapped state.Bounds[0] used by the legacy clipmap bookkeeping.
+                state.BaseFineCenterExtent = baseCenterExtent;
+            }
 
             var normalizedResolution = BurtScreenSpaceGlobalIlluminationPassUtility.NormalizeSceneVoxelRadianceResolution(radianceResolution);
             if (state.RadianceResolution != normalizedResolution)
             {
+                ReleaseBaseFine(state);
                 for (var level = 0; level < ClipmapCount; ++level)
                 {
                     state.Resources[level]?.Release();
@@ -1029,6 +1073,11 @@ namespace Burt.RenderPipeline
             }
 
             var activeCount = Mathf.Clamp(activeClipmapCount, 1, ClipmapCount);
+            if (state.ActiveClipmapCount != activeCount)
+            {
+                InvalidateFineOwned(state, -1);
+                state.ActiveClipmapCount = activeCount;
+            }
             for (var level = activeCount; level < ClipmapCount; ++level)
             {
                 state.ValidMask &= ~(1u << level);
@@ -1077,6 +1126,7 @@ namespace Burt.RenderPipeline
                 {
                     state.ValidMask &= ~(1u << level);
                     state.UpdateMask |= 1u << level;
+                    InvalidateFineOwned(state, level);
                 }
             }
 
@@ -1133,6 +1183,176 @@ namespace Burt.RenderPipeline
 
             state.ValidMask = 0u;
             state.UpdateMask |= (1u << ClipmapCount) - 1u;
+            InvalidateFineOwned(state, -1);
+        }
+
+        // Ownership gate only: default false, no allocations, no GI keyword/global
+        // mutation and no changes to legacy dense validity. Call after Update.
+        // A changed mode signature discards all previous fine source generations.
+        public static bool ConfigureFineResources(Camera camera, bool enabled, int modeSignature)
+        {
+            if (!TryGetFineCameraState(camera, out var state) || !state.Initialized)
+                return false;
+            if (state.FineResourcesEnabled != enabled || state.FineModeSignature != modeSignature)
+            {
+                ReleaseFineOwned(state, true);
+                state.FineResourcesEnabled = enabled;
+                state.FineModeSignature = modeSignature;
+            }
+            return true;
+        }
+
+        // Creates only after explicit opt-in. Capacity has no implicit budget/default.
+        // A true return establishes storage, not geometry/lighting readiness. The
+        // caller records the complete producer and uses Fine's generation/epoch marks.
+        public static bool TryEnsureFineResources(
+            Camera camera,
+            int level,
+            int capacity,
+            out BurtGISceneVoxelFineResources fine,
+            out Vector4 centerExtent,
+            out bool reallocated)
+        {
+            fine = null;
+            centerExtent = Vector4.zero;
+            reallocated = false;
+            if (!TryGetFineCameraState(camera, out var state) || !state.Initialized || !state.FineResourcesEnabled ||
+                level < 0 || level >= state.ActiveClipmapCount)
+                return false;
+            if (capacity < 0 || capacity > BurtGISceneVoxelFineResources.MaximumCapacity)
+                throw new System.ArgumentOutOfRangeException(nameof(capacity));
+
+            centerExtent = ResolveFineCenterExtent(state, level);
+            if (!IsValidFineCenterExtent(centerExtent))
+            {
+                centerExtent = Vector4.zero;
+                return false;
+            }
+
+            if (level == 0)
+            {
+                if (state.BaseFine == null) state.BaseFine = new BurtGISceneVoxelFineResources();
+                reallocated = state.BaseFine.Ensure(state.RadianceResolution, capacity, "BurtGI Base Fine " + camera.GetInstanceID());
+                fine = state.BaseFine;
+            }
+            else
+            {
+                // Persistent levels already have their own dense/Probe owner. Do
+                // not introduce a second parallel lifetime for the same level.
+                if (!TryGetResources(camera, level, out var resources, out centerExtent))
+                    return false;
+                fine = resources.EnsureFine(capacity, "BurtGI Clipmap " + level + " Fine " + camera.GetInstanceID(), out reallocated);
+            }
+            if (fine.GeometryValid && !fine.CenterExtent.Equals(centerExtent))
+                fine.Invalidate();
+            return fine.IsAllocated;
+        }
+
+        // Read-only lookup. This intentionally returns allocated but not-yet-ready
+        // resources so the producer can inspect them; consumers must test readiness
+        // and MatchesSource, never treat this return value as publication success.
+        public static bool TryGetFineResources(
+            Camera camera,
+            int level,
+            out BurtGISceneVoxelFineResources fine,
+            out Vector4 centerExtent)
+        {
+            fine = null;
+            centerExtent = Vector4.zero;
+            if (!TryGetFineCameraState(camera, out var state) || !state.Initialized || !state.FineResourcesEnabled ||
+                level < 0 || level >= state.ActiveClipmapCount)
+                return false;
+            var candidate = level == 0 ? state.BaseFine : state.Resources[level]?.Fine;
+            if (candidate == null || !candidate.IsAllocated)
+                return false;
+            centerExtent = ResolveFineCenterExtent(state, level);
+            if (!IsValidFineCenterExtent(centerExtent))
+            {
+                centerExtent = Vector4.zero;
+                return false;
+            }
+            fine = candidate;
+            return true;
+        }
+
+        // level=-1 invalidates every allocated fine generation; dense data is unchanged.
+        public static void InvalidateFine(Camera camera, int level = -1)
+        {
+            if (level < -1 || level >= ClipmapCount)
+                throw new System.ArgumentOutOfRangeException(nameof(level));
+            if (TryGetFineCameraState(camera, out var state))
+                InvalidateFineOwned(state, level);
+        }
+
+        // Explicit disabled/failure cleanup. A later producer must opt in again.
+        public static void ReleaseFine(Camera camera)
+        {
+            if (TryGetFineCameraState(camera, out var state))
+                ReleaseFineOwned(state, true);
+        }
+
+        private static bool TryGetFineCameraState(Camera camera, out CameraState state)
+        {
+            state = null;
+            return camera != null && CameraStates.TryGetValue(camera.GetInstanceID(), out state) && state.Camera == camera;
+        }
+
+        private static Vector4 ResolveFineCenterExtent(CameraState state, int level)
+        {
+            if (level == 0) return state.BaseFineCenterExtent;
+            var bounds = state.Bounds[level];
+            return new Vector4(bounds.center.x, bounds.center.y, bounds.center.z, bounds.extents.x);
+        }
+
+        private static bool IsValidFineCenterExtent(Vector4 bounds)
+        {
+            return !float.IsNaN(bounds.x) && !float.IsInfinity(bounds.x) &&
+                !float.IsNaN(bounds.y) && !float.IsInfinity(bounds.y) &&
+                !float.IsNaN(bounds.z) && !float.IsInfinity(bounds.z) &&
+                !float.IsNaN(bounds.w) && !float.IsInfinity(bounds.w) && bounds.w > 0f;
+        }
+
+        private static void InvalidateFineOwned(CameraState state, int level)
+        {
+            if (level <= 0) state.BaseFine?.Invalidate();
+            if (level == 0) return;
+            if (level > 0)
+            {
+                state.Resources[level]?.Fine?.Invalidate();
+                return;
+            }
+            for (var index = 1; index < ClipmapCount; ++index)
+                state.Resources[index]?.Fine?.Invalidate();
+        }
+
+        private static void ReleaseBaseFine(CameraState state)
+        {
+            if (state.BaseFine == null) return;
+            state.BaseFine.Dispose();
+            state.BaseFine = null;
+        }
+
+        private static void ReleaseFineOwned(CameraState state, bool disable)
+        {
+            if (disable)
+            {
+                state.FineResourcesEnabled = false;
+                state.FineModeSignature = 0;
+            }
+            List<System.Exception> failures = null;
+            try { ReleaseBaseFine(state); }
+            catch (System.Exception exception) { failures = new List<System.Exception> { exception }; }
+            for (var level = 1; level < ClipmapCount; ++level)
+            {
+                try { state.Resources[level]?.ReleaseFine(); }
+                catch (System.Exception exception)
+                {
+                    if (failures == null) failures = new List<System.Exception>();
+                    failures.Add(exception);
+                }
+            }
+            if (failures != null)
+                throw new System.AggregateException("Fine voxel ownership cleanup failed.", failures);
         }
 
         public static bool TryGetBounds(Camera camera, int level, out Bounds bounds)
@@ -1528,6 +1748,9 @@ namespace Burt.RenderPipeline
         {
             resources = null;
             centerExtent = Vector4.zero;
+            // Fine geometry/lighting does not rebuild the old dense Probe SH. The
+            // normal uploader will bind its existing invalid fallback for this camera.
+            if (BurtGISceneVoxelFineRuntime.IsRequested(camera)) return false;
             if (camera == null || !CameraStates.TryGetValue(camera.GetInstanceID(), out var state))
             {
                 return false;
@@ -1660,13 +1883,20 @@ namespace Burt.RenderPipeline
 
         private static void Release(CameraState state)
         {
-            for (var level = 0; level < state.Resources.Length; ++level)
+            try
             {
-                state.Resources[level]?.Release();
-                state.Resources[level] = null;
+                ReleaseFineOwned(state, true);
             }
-            state.BaseSdfContext.Dispose();
-            state.BaseSdfStatus = "Unconfigured";
+            finally
+            {
+                for (var level = 0; level < state.Resources.Length; ++level)
+                {
+                    state.Resources[level]?.Release();
+                    state.Resources[level] = null;
+                }
+                state.BaseSdfContext.Dispose();
+                state.BaseSdfStatus = "Unconfigured";
+            }
         }
     }
 

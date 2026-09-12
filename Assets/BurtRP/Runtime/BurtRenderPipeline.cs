@@ -438,9 +438,16 @@ namespace Burt.RenderPipeline
             // 通知 Unity 和外部监听者：这个相机开始渲染。
             BeginCameraRendering(context, camera);
 
+            // The camera-owned GI frame includes culling: Unity may snapshot
+            // renderer properties there, before the first renderer list exists.
+            using var giCameraFrame = BurtScreenSpaceGlobalIlluminationPassUtility.BeginCameraFrame(request);
+
             // 使用 try/finally，保证即使渲染过程中报错，也能发出 EndCameraRendering。
             try
             {
+                if (BurtScreenSpaceGlobalIlluminationPassUtility.ShouldUseScreenSpaceGlobalIllumination(request, asset))
+                    BurtGIReceiverMotionHistory.Prepare(request);
+
                 if (!request.TryCull(context, asset))
                 {
                     return;
@@ -452,6 +459,9 @@ namespace Burt.RenderPipeline
             }
             finally
             {
+                // Render() normally commits/restores after Submit. This also
+                // restores a request that failed culling or never entered it.
+                BurtGIReceiverMotionHistory.Complete(request, false);
                 // 通知 Unity 和外部监听者：这个相机结束渲染。
                 EndCameraRendering(context, camera);
             }

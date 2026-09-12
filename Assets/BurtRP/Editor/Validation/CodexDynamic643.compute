@@ -1,0 +1,67 @@
+#pragma kernel CaptureGeometry457
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+// Observation only. Never writes a production resource.
+Texture2D<float> _Depth457;
+Texture2D<float4> _Normal457;
+RWStructuredBuffer<float4> _Geometry457;
+RWTexture2D<float> _Index457;
+float4x4 _InverseVP457;
+int2 _Size457;
+int4 _Stamp457;
+float4 _ZBufferParams;
+float4 _ProjectionParams;
+
+[numthreads(8,8,1)]
+void CaptureGeometry457(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size457)) return;
+    uint pixel = id.y * _Size457.x + id.x;
+    uint count = _Size457.x * _Size457.y;
+    // Exact at the declared <=2,097,152-pixel bound. Read via the same native
+    // ReadPixels path as Applied, proving buffer-dispatch to image-row mapping.
+    _Index457[id.xy] = (float)(pixel + 1u);
+    if (pixel == 0)
+    {
+        _Geometry457[count*3] = _ZBufferParams;
+        _Geometry457[count*3+1] = _ProjectionParams;
+        _Geometry457[count*3+2] = (float4)_Stamp457;
+    }
+    uint dw,dh,nw,nh;
+    _Depth457.GetDimensions(dw,dh);_Normal457.GetDimensions(nw,nh);
+    if (dw != (uint)_Size457.x || dh != (uint)_Size457.y || nw != dw || nh != dh)
+    {
+        _Geometry457[pixel*3] = 0;
+        _Geometry457[pixel*3+1] = 0;
+        _Geometry457[pixel*3+2] = float4(0,0,0,-2);
+        return;
+    }
+    float z = _Depth457.Load(int3(id.xy,0));
+    float4 packedNormal = _Normal457.Load(int3(id.xy,0));
+    _Geometry457[pixel*3+1] = packedNormal;
+    bool sky;
+#if UNITY_REVERSED_Z
+    sky = z <= 1.0e-5f;
+#else
+    sky = z >= .99999f;
+#endif
+    if (sky)
+    {
+        _Geometry457[pixel*3] = float4(0,0,0,z);
+        _Geometry457[pixel*3+2] = 0;
+        return;
+    }
+    float2 clip = ((float2(id.xy)+.5f)/float2(_Size457))*2-1;
+#if UNITY_UV_STARTS_AT_TOP
+    clip.y = -clip.y;
+#endif
+    float4 p = mul(_InverseVP457,float4(clip,z,1));
+    float safeW = abs(p.w)>1.0e-6f?p.w:(p.w<0?-1.0e-6f:1.0e-6f);
+    uint3 q = (uint3)(saturate(packedNormal.rgb)*255.5f);
+    uint2 bits = q.xy | uint2((q.z&15u)<<8,(q.z>>4)<<8);
+    float2 f = float2(bits)/4095.0f*2-1;
+    float3 n = float3(f,1-abs(f.x)-abs(f.y));
+    float t=saturate(-n.z);n.x+=n.x>=0?-t:t;n.y+=n.y>=0?-t:t;
+    n *= rsqrt(max(dot(n,n),1.0e-8f));
+    _Geometry457[pixel*3] = float4(p.xyz/safeW,z);
+    _Geometry457[pixel*3+2] = float4(n,1);
+}

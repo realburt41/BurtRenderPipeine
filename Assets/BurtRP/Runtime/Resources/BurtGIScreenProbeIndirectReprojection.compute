@@ -448,7 +448,7 @@ float3 BurtGIIndirectConstrainHistory(uint2 pixelCoord, uint2 outputSize, float3
             dot(normal,centerNormal) < _BurtGIIndirectReprojectionParams1.y) continue;
         lo=min(lo,v.rgb);hi=max(hi,v.rgb);sum+=v.rgb;sum2+=v.rgb*v.rgb;count+=1.0f;
     }
-    if(count<4.0f) return history;
+    if(count<1.0f) return history;
     float3 mean=sum/count, sigma=sqrt(max(sum2/count-mean*mean,0.0f));
     return clamp(history,max(lo,mean-3.0f*sigma),min(hi,mean+3.0f*sigma));
 }

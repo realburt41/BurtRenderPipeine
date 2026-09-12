@@ -243,6 +243,8 @@ Shader "BurtRP/Eye"
             #include "Assets/BurtRP/Runtime/Shaders/ShaderLibrary/Material/BurtForwardPass.hlsl"
             ENDHLSL
         }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelizeFineOccupancy"
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelizeFineMaterial"
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtEyeShaderGUI"

@@ -186,6 +186,41 @@ Shader "Hidden/Burt Render Pipeline/GI Voxelize"
             }
             ENDHLSL
         }
+        Pass
+        {
+            Name "BurtGIVoxelizeFineOccupancy"
+            Tags { "LightMode" = "BurtGIVoxelizeFineOccupancy" }
+            Cull Off
+            ZWrite Off
+            ZTest Always
+            ColorMask 0
+            HLSLPROGRAM
+            #pragma target 5.0
+            #pragma require geometry
+            #pragma vertex BurtGIVoxelizeFineVertex
+            #pragma geometry BurtGIVoxelizeFineGeometry
+            #pragma fragment BurtGIVoxelizeFineFragment
+            #define BURT_GI_FINE_OCCUPANCY_PASS 1
+            #include "BurtGIVoxelizeFine.hlsl"
+            ENDHLSL
+        }
+        Pass
+        {
+            Name "BurtGIVoxelizeFineMaterial"
+            Tags { "LightMode" = "BurtGIVoxelizeFineMaterial" }
+            Cull Off
+            ZWrite Off
+            ZTest Always
+            ColorMask 0
+            HLSLPROGRAM
+            #pragma target 5.0
+            #pragma require geometry
+            #pragma vertex BurtGIVoxelizeFineVertex
+            #pragma geometry BurtGIVoxelizeFineGeometry
+            #pragma fragment BurtGIVoxelizeFineFragment
+            #include "BurtGIVoxelizeFine.hlsl"
+            ENDHLSL
+        }
     }
     Fallback Off
 }

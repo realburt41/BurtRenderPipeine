@@ -423,6 +423,8 @@ Shader "BurtRP/Lit"
             // Ends the HLSL program for this pass.
             ENDHLSL
         }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelizeFineOccupancy"
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelizeFineMaterial"
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtLitShaderGUI"

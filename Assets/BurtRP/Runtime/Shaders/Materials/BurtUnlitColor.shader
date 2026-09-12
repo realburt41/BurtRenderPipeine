@@ -381,6 +381,8 @@ Shader "BurtRP/UnlitColor"
             // 结束 HLSL shader 程序。
             ENDHLSL
         }
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelizeFineOccupancy"
+        UsePass "Hidden/Burt Render Pipeline/GI Voxelize/BurtGIVoxelizeFineMaterial"
     }
 
     CustomEditor "Burt.RenderPipeline.Editor.BurtUnlitShaderGUI"

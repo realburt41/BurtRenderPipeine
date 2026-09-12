@@ -1,6 +1,8 @@
 #pragma kernel ScreenProbeTraceVoxelOctreeCS
-#include "BurtGIScreenProbeRaySampling.hlsl"
+#include "BurtGIScreenProbeRayLayout.hlsl"
 #pragma kernel ScreenProbeTraceVoxelOctreeClipmapsCS BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_CLIPMAPS
+#pragma kernel ScreenProbeTraceVoxelFineCS BURT_GI_SCREEN_PROBE_TRACE_FINE
+#pragma kernel ScreenProbeTraceVoxelFineClipmapsCS BURT_GI_SCREEN_PROBE_TRACE_FINE BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_CLIPMAPS
 
 // Define the platform depth and texture-coordinate conventions used below.
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
@@ -111,16 +113,17 @@ RWTexture2D<float4> _BurtGIScreenProbeTraceRadianceTexture;
 RWTexture2D<float> _BurtGIScreenProbeTraceHitTexture;
 #include "BurtGIScreenProbeGeometryDistance.hlsl"
 RWTexture2D<float4> _BurtGIScreenProbeTraceGeometryDistanceTexture;
+#include "BurtGIScreenProbeTraceSurface.hlsl"
 Texture2D<float> _BurtGIScreenProbeImportancePDFReadTexture;
 Texture2D<uint> _BurtGIScreenProbeImportanceRayInfoReadTexture;
 
 
-RWStructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelCountBuffer;
-RWStructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelDataBuffer;
-RWStructuredBuffer<uint> _BurtGIScreenProbeTraceCompactThreadCountXBuffer;
-RWStructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
+StructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelCountBuffer;
+StructuredBuffer<uint> _BurtGIScreenProbeTraceCompactTexelDataBuffer;
+StructuredBuffer<uint> _BurtGIScreenProbeTraceCompactThreadCountXBuffer;
+StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
 #include "BurtGIScreenProbeAdaptiveData.hlsl"
-RWStructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
+StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 
 #define BURT_GI_RADIANCE_CACHE_MAX_CLIPMAPS 6
 #define BURT_GI_RADIANCE_CACHE_INVALID_PROBE_INDEX 0xffffffffu
@@ -244,7 +247,9 @@ uint _BurtGIScreenProbeTraceStageMask;
 
 bool BurtGIScreenProbeHasValidPlacement(uint2 screenProbeCoord);
 bool BurtGIVoxelOctreeRayTraceWithCompletion(float3 originWS, float3 directionWS, float maxDistance, out float hitDistance, out bool rangeComplete);
-#if defined(BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_CLIPMAPS)
+#if defined(BURT_GI_SCREEN_PROBE_TRACE_FINE)
+#include "FineScreenProbeSource.hlsl"
+#elif defined(BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_CLIPMAPS)
 #include "BurtGIScreenProbeVoxelOctreeClipmaps.hlsl"
 #endif
 
@@ -781,6 +786,7 @@ float3 BurtGIScreenProbeConeLaneDirection(float3 rayDirectionWS, uint laneIndex,
     return BurtGIScreenProbeTraceSafeNormalize(direction + coneOffset * laneAngle, direction);
 }
 bool BurtGIScreenProbeTrySampleSceneVoxelConeTraceLane(
+    uint surfaceRecordIndex,
     float3 rayOriginWS,
     float3 sourcePositionWS,
     float3 rayDirectionWS,
@@ -799,6 +805,37 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTraceLane(
     tracedConfidence = 0.0;
     tracedHitDistance = maxTraceDistance;
 
+#if defined(BURT_GI_SCREEN_PROBE_TRACE_FINE)
+    // The source already has a fine-scale geometric normal bias. Do not skip
+    // the old 0.75 coarse cell or reconstruct a coarse RGB coordinate after hit.
+    float3 fineDirection = BurtGIScreenProbeTraceSafeNormalize(rayDirectionWS, float3(0.0, 1.0, 0.0));
+    BurtGISceneVoxelFineTraceResult fineHit;
+    BurtGIFineScreenProbeTrace(rayOriginWS, fineDirection, maxTraceDistance, fineHit);
+    if (fineHit.occupied == 0u)
+    {
+        if (fineHit.rangeComplete != 0u) geometryHitDistance = BURT_GI_GEOMETRY_RANGE_COMPLETE;
+        if (fineHit.rangeComplete != 0u)
+            BurtGIWriteTraceSurface(surfaceRecordIndex, rayOriginWS + fineDirection * maxTraceDistance,
+                3u, 0.0, 0.0, fineDirection, maxTraceDistance);
+        return false;
+    }
+    laneTransmittance = 0.0f;
+    geometryHitDistance = length(rayOriginWS + fineDirection * fineHit.distance - sourcePositionWS);
+    tracedHitDistance = fineHit.distance;
+    BurtGIWriteTraceSurface(surfaceRecordIndex, rayOriginWS + fineDirection * fineHit.distance,
+        1u, 0.0, 0.0, fineDirection, fineHit.distance);
+    if (fineHit.normalAndValidity.w > 0.0)
+        BurtGISetTraceSurfaceNormal(surfaceRecordIndex, fineHit.normalAndValidity.xyz * 2.0 - 1.0);
+    if (fineHit.lightingValid == 0u) return false;
+    float3 fineNormal = BurtGIScreenProbeTraceSafeNormalize(fineHit.normalAndValidity.xyz * 2.0 - 1.0, float3(0.0, 1.0, 0.0));
+    float fineFacingWeight = saturate(abs(dot(fineNormal, -fineDirection)) * 0.85 + 0.15);
+    tracedRadiance = max(fineHit.radiance.rgb, 0.0);
+    tracedConfidence = saturate(fineHit.radiance.a * fineFacingWeight);
+    BurtGIWriteTraceSurface(surfaceRecordIndex, rayOriginWS + fineDirection * fineHit.distance,
+        2u, tracedRadiance, tracedConfidence, fineDirection, fineHit.distance);
+    BurtGISetTraceSurfaceNormal(surfaceRecordIndex, fineNormal);
+    return tracedConfidence > 0.001; // Valid black is a radiance sample and opaque.
+#else
     uint width;
     uint height;
     uint depth;
@@ -837,12 +874,17 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTraceLane(
         if (!octreeHit)
         {
             if (octreeRangeComplete) geometryHitDistance = BURT_GI_GEOMETRY_RANGE_COMPLETE;
+            if (octreeRangeComplete)
+                BurtGIWriteTraceSurface(surfaceRecordIndex, rayOriginWS + direction * maxTraceDistance,
+                    3u, 0.0, 0.0, direction, maxTraceDistance);
             return false;
         }
 
         laneTransmittance = 0.0f; // An octree occupancy hit is opaque, even without lighting.
         float hitDistance = minTraceDistance + octreeHitDistance;
         geometryHitDistance = length(rayOriginWS + direction * hitDistance - sourcePositionWS);
+        BurtGIWriteTraceSurface(surfaceRecordIndex, rayOriginWS + direction * hitDistance,
+            1u, 0.0, 0.0, direction, hitDistance);
 #if defined(BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_CLIPMAPS)
         voxelSizeWS = BurtGIScreenProbeVoxelOctreeCellSize(octreeClipmapLevel);
 #endif
@@ -871,6 +913,9 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTraceLane(
         tracedRadiance = hitRadiance;
         tracedConfidence = saturate(hitRadianceConfidence * hitOccupancy * hitNormalFacingWeight);
         tracedHitDistance = hitDistance;
+        BurtGIWriteTraceSurface(surfaceRecordIndex, rayOriginWS + direction * hitDistance,
+            2u, tracedRadiance, tracedConfidence, direction, hitDistance);
+        BurtGISetTraceSurfaceNormal(surfaceRecordIndex, hitNormal);
         return tracedConfidence > 0.001;
     }
 
@@ -958,8 +1003,10 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTraceLane(
 
     return tracedConfidence > 0.001;
 #endif
+#endif
 }
 bool BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
+    uint surfaceTexelIndex,
     float3 rayOriginWS,
     float3 sourcePositionWS,
     float3 rayDirectionWS,
@@ -989,7 +1036,11 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
     float totalAngularWeight = 0.0;
     bool allLaneRangesComplete = true;
 
+#if defined(BURT_GI_SCREEN_PROBE_TRACE_FINE)
+    [loop]
+#else
     [unroll]
+#endif
     for (uint laneIndex = 0u; laneIndex < 3u; ++laneIndex)
     {
         float laneWeight = laneIndex == 0u ? 1.0 : 0.55;
@@ -1001,6 +1052,7 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
         float laneGeometryDistance;
         float laneTransmittance;
         bool laneLightingHit = BurtGIScreenProbeTrySampleSceneVoxelConeTraceLane(
+                surfaceTexelIndex * 4u + 1u + laneIndex,
                 rayOriginWS,
                 sourcePositionWS,
                 laneDirection,
@@ -1028,6 +1080,7 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
 
         float distanceWeight = 1.0 - saturate(laneHitDistance / max(maxTraceDistance, 0.001)) * 0.28;
         float sampleWeight = laneWeight * laneConfidence * distanceWeight;
+        BurtGISetTraceSurfaceContribution(surfaceTexelIndex * 4u + 1u + laneIndex, sampleWeight);
         hitAngularWeight += laneWeight;
         radianceSum += laneRadiance * sampleWeight;
         confidenceSum += laneConfidence * sampleWeight;
@@ -1047,6 +1100,7 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
 
     if (weightSum <= 0.0001)
     {
+        BurtGIScaleTraceSurfaceContributions(surfaceTexelIndex, 1u, 0.0);
         return false;
     }
 
@@ -1054,6 +1108,9 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
     // their angular weight instead of expanding a small emitter to the full cone.
     tracedRadiance = (radianceSum / weightSum) * (hitAngularWeight / max(totalAngularWeight, 0.0001));
     tracedConfidence = saturate(max(tracedConfidence, confidenceSum / weightSum));
+    BurtGIScaleTraceSurfaceContributions(surfaceTexelIndex, 1u,
+        tracedConfidence > 0.001
+            ? (hitAngularWeight / max(totalAngularWeight, 0.0001)) / weightSum : 0.0);
     return tracedConfidence > 0.001;
 }
 bool BurtGIScreenProbeShouldSkipScreenTraceHit(uint2 screenProbeCoord)
@@ -1263,31 +1320,15 @@ void BurtGIScreenProbeTraceAtlasFromCompactStage(uint3 dispatchThreadId, uint tr
         return;
     }
     float geometryDistance = traceState.x;
-    uint2 sourceTraceTexelCoord = traceTexelCoord;
-    uint sourceTraceLevel = 0u;
-    if (!isAdaptiveProbe)
-    {
-        uint rayInfo = _BurtGIScreenProbeImportanceRayInfoReadTexture[atlasCoord];
-        BurtGIUnpackScreenProbeImportanceRayInfo(rayInfo, sourceTraceTexelCoord, sourceTraceLevel);
-    }
-    uint maxImportanceTraceResolution = min(64u, max(traceResolution, traceResolution << 1u));
-    // Adaptive probes use the unrefined trace grid, not the doubled importance grid.
-    uint sourceMipSize = isAdaptiveProbe ? traceResolution
-        : max(1u, maxImportanceTraceResolution >> min(sourceTraceLevel, 5u));
-    if (sourceTraceTexelCoord.x >= sourceMipSize || sourceTraceTexelCoord.y >= sourceMipSize)
-    {
-        sourceTraceTexelCoord = traceTexelCoord;
-        sourceTraceLevel = 0u;
-        sourceMipSize = traceResolution;
-    }
-
-    // Adaptive atlas slots are assigned atomically and may be reordered even
-    // for fixed jitter. Seed the physical probe, not its transient storage slot.
-    uint2 raySeedCoord = isAdaptiveProbe
-        ? (_BurtGIScreenProbeAdaptiveProbeDataBuffer[screenProbeIndex - uniformProbeCount].sourcePixel ^ uint2(0x80000000u, 0u))
-        : screenProbeCoord;
-    float2 rayTexelCenter = BurtGIScreenProbeRayTexelCenter(raySeedCoord, _BurtGIRadianceCacheClipMapFrameIndex);
-    float2 octUV = (float2(sourceTraceTexelCoord) + rayTexelCenter) / (float)sourceMipSize;
+    uint2 sourceTraceTexelCoord;
+    uint sourceTraceLevel, sourceMipSize;
+    float2 octUV;
+    uint packedRayInfo = isAdaptiveProbe ? 0u : _BurtGIScreenProbeImportanceRayInfoReadTexture[atlasCoord];
+    uint2 adaptiveSourcePixel = isAdaptiveProbe
+        ? _BurtGIScreenProbeAdaptiveProbeDataBuffer[screenProbeIndex - uniformProbeCount].sourcePixel : uint2(0u, 0u);
+    BurtGIResolveScreenProbeRayLayout(traceTexelCoord, traceResolution, isAdaptiveProbe,
+        packedRayInfo, screenProbeCoord, adaptiveSourcePixel, _BurtGIRadianceCacheClipMapFrameIndex,
+        sourceTraceTexelCoord, sourceTraceLevel, sourceMipSize, octUV);
     float3 rayDirection = BurtGIEquiAreaSphericalMapping(octUV);
     uint2 importanceTraceTexelCoord = min((uint2)((float2(sourceTraceTexelCoord) + 0.5) * ((float)traceResolution / (float)sourceMipSize)), traceResolution - 1u);
     uint2 importancePDFProbeCoord = isAdaptiveProbe ? atlasScreenProbeCoord : screenProbeCoord;
@@ -1335,6 +1376,9 @@ void BurtGIScreenProbeTraceAtlasFromCompactStage(uint3 dispatchThreadId, uint tr
         bool backfaceSourceRay = dot(rayDirection, sourceNormalWS) < 0.0f;
         bool skipBackfaceSourceScreenTrace = backfaceSourceRay && sourceBackfaceSkipMaterial;
         float3 traceBiasNormalWS = skipBackfaceSourceScreenTrace ? -sourceNormalWS : sourceNormalWS;
+#if defined(BURT_GI_SCREEN_PROBE_TRACE_FINE)
+        float voxelTraceNormalBias = BurtGIFineScreenProbeSourceCellSize(sourcePositionWS);
+#else
         // Voxel occupancy covers a whole cell around a rasterized surface.
         // A screen-pixel-sized bias can start the ray inside its own (valid,
         // black) receiver voxel. Match XRender's voxel-normal + half-ray bias;
@@ -1346,6 +1390,7 @@ void BurtGIScreenProbeTraceAtlasFromCompactStage(uint3 dispatchThreadId, uint tr
         float voxelTraceNormalBias = max(2.0f * sourceClipmapExtent / max((float)sourceVoxelWidth, 1.0f), 0.001f);
 #if defined(BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_CLIPMAPS)
         voxelTraceNormalBias = BurtGIScreenProbeVoxelOctreeCellSize(sourceClipmap);
+#endif
 #endif
         float3 traceOriginWS = sourcePositionWS + voxelTraceNormalBias * (traceBiasNormalWS + 0.5f * rayDirection);
         float clipMapMinTraceDistanceBeforeInterpolation = max(1.0f, _BurtGIScreenProbeTraceParams.w);
@@ -1373,6 +1418,7 @@ void BurtGIScreenProbeTraceAtlasFromCompactStage(uint3 dispatchThreadId, uint tr
             float voxelTransmittance;
             float voxelFreshCoverage;
             bool voxelLightingHit = BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
+                atlasCoord.y * (uint)_BurtGIScreenProbeTraceParams.y + atlasCoord.x,
                 traceOriginWS,
                 sourcePositionWS,
                 BurtGIScreenProbeTraceSafeNormalize(rayDirection, traceBiasNormalWS),
@@ -1394,6 +1440,9 @@ void BurtGIScreenProbeTraceAtlasFromCompactStage(uint3 dispatchThreadId, uint tr
             // Sampling PDF / trace level and world Z must not rescale its RGB.
             // Keep hit validity and confidence weighting separate and unchanged.
             traceRadiance += sceneVoxelRadiance * (voxelTraceWeight * incomingTraceWeight);
+            BurtGIScaleTraceSurfaceContributions(
+                atlasCoord.y * (uint)_BurtGIScreenProbeTraceParams.y + atlasCoord.x,
+                1u, voxelTraceWeight * incomingTraceWeight);
             hitRatio = max(hitRatio, voxelTraceWeight);
             confidence = max(confidence, sceneVoxelConfidence);
             sceneTraceHit = max(sceneTraceHit, voxelTraceWeight);
@@ -1405,11 +1454,17 @@ void BurtGIScreenProbeTraceAtlasFromCompactStage(uint3 dispatchThreadId, uint tr
     if ((traceStageMask & BURT_GI_SCREEN_PROBE_TRACE_STAGE_SKY) != 0u)
     {
         traceRadiance *= max(_BurtGIScreenProbeTraceIntensityParams.x, 0.0f);
+        BurtGIScaleTraceSurfaceContributions(
+            atlasCoord.y * (uint)_BurtGIScreenProbeTraceParams.y + atlasCoord.x,
+            0u, max(_BurtGIScreenProbeTraceIntensityParams.x, 0.0f));
         float maxRayIntensity = max(_BurtGIScreenProbeTraceModeParams.z, 0.01f);
         float maxTraceRadiance = max(traceRadiance.r, max(traceRadiance.g, traceRadiance.b));
         if (maxTraceRadiance > maxRayIntensity)
         {
             traceRadiance *= maxRayIntensity / maxTraceRadiance;
+            BurtGIScaleTraceSurfaceContributions(
+                atlasCoord.y * (uint)_BurtGIScreenProbeTraceParams.y + atlasCoord.x,
+                0u, maxRayIntensity / maxTraceRadiance);
         }
     }
 
@@ -1419,7 +1474,11 @@ void BurtGIScreenProbeTraceAtlasFromCompactStage(uint3 dispatchThreadId, uint tr
     _BurtGIScreenProbeTraceGeometryDistanceTexture[atlasCoord] = traceState;
 }
 [numthreads(BURT_GI_SCREEN_PROBE_TRACE_COMPACT_THREADGROUP_SIZE, 1, 1)]
-#if defined(BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_CLIPMAPS)
+#if defined(BURT_GI_SCREEN_PROBE_TRACE_FINE) && defined(BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_CLIPMAPS)
+void ScreenProbeTraceVoxelFineClipmapsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+#elif defined(BURT_GI_SCREEN_PROBE_TRACE_FINE)
+void ScreenProbeTraceVoxelFineCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+#elif defined(BURT_GI_SCREEN_PROBE_TRACE_VOXEL_OCTREE_CLIPMAPS)
 void ScreenProbeTraceVoxelOctreeClipmapsCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 #else
 void ScreenProbeTraceVoxelOctreeCS(uint3 dispatchThreadId : SV_DispatchThreadID)

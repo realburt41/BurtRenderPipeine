@@ -1,0 +1,83 @@
+#pragma kernel Query
+#pragma kernel QueryInterval
+#pragma kernel QueryIntervalNormalized
+#include "../../Runtime/Resources/BurtGISceneVoxelFineTrace.hlsl"
+
+// Eight geometry SRVs. No payload/offset/owner resources are declared.
+Texture3D<uint> _BurtGISceneVoxelFineLow;
+Texture3D<uint> _BurtGISceneVoxelFineHigh;
+Texture3D<uint> _BurtGISceneVoxelOctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeRootHighTexture;
+uint _BurtGISceneVoxelFineResolution;
+float4 _BurtGISceneVoxelCenterExtent, _FineTraceReadiness;
+uint _RayCount, _StepBudget;
+struct RayInput { float4 originMax, directionMin; };
+struct RayOutput { uint4 flags; float4 distanceSteps; uint4 cell; float4 radiance, normalAndValidity; };
+StructuredBuffer<RayInput> _Rays;
+RWStructuredBuffer<RayOutput> _Results;
+
+void StoreResult(uint index, BurtGISceneVoxelFineTraceResult hit)
+{
+    RayOutput value;
+    value.flags = uint4(hit.occupied,hit.materialValid,hit.lightingValid,hit.rangeComplete);
+    value.distanceSteps = float4(hit.distance,hit.hierarchySteps,hit.fineSteps,hit.budgetExhausted);
+    value.cell = uint4(hit.fineCoord,hit.poolIndex);
+    value.radiance = hit.radiance;
+    value.normalAndValidity = hit.normalAndValidity;
+    _Results[index] = value;
+}
+[numthreads(64,1,1)]
+void QueryIntervalNormalized(uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= _RayCount) return;
+    RayInput ray = _Rays[id.x];
+    BurtGISceneVoxelFineTraceResult hit;
+    BurtGIFineTraceGeometryIntervalNormalizedResourceWithCompletion(
+        _BurtGISceneVoxelFineLow, _BurtGISceneVoxelFineHigh,
+        _BurtGISceneVoxelOctreeLeafLowTexture, _BurtGISceneVoxelOctreeLeafHighTexture,
+        _BurtGISceneVoxelOctreeParentLowTexture, _BurtGISceneVoxelOctreeParentHighTexture,
+        _BurtGISceneVoxelOctreeRootLowTexture, _BurtGISceneVoxelOctreeRootHighTexture,
+        _BurtGISceneVoxelFineResolution,
+        _FineTraceReadiness.x > .5 ? 1u : 0u, _FineTraceReadiness.y > .5 ? 1u : 0u,
+        _BurtGISceneVoxelCenterExtent,ray.originMax.xyz,ray.directionMin.xyz,
+        ray.directionMin.w,ray.originMax.w,_StepBudget,hit);
+    StoreResult(id.x,hit);
+}
+[numthreads(64,1,1)]
+void Query(uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= _RayCount) return;
+    RayInput ray = _Rays[id.x];
+    BurtGISceneVoxelFineTraceResult hit;
+    BurtGIFineTraceGeometryResourceWithCompletion(
+        _BurtGISceneVoxelFineLow, _BurtGISceneVoxelFineHigh,
+        _BurtGISceneVoxelOctreeLeafLowTexture, _BurtGISceneVoxelOctreeLeafHighTexture,
+        _BurtGISceneVoxelOctreeParentLowTexture, _BurtGISceneVoxelOctreeParentHighTexture,
+        _BurtGISceneVoxelOctreeRootLowTexture, _BurtGISceneVoxelOctreeRootHighTexture,
+        _BurtGISceneVoxelFineResolution,
+        _FineTraceReadiness.x > .5 ? 1u : 0u, _FineTraceReadiness.y > .5 ? 1u : 0u,
+        _BurtGISceneVoxelCenterExtent,ray.originMax.xyz,ray.directionMin.xyz,
+        ray.originMax.w,_StepBudget,hit);
+    StoreResult(id.x,hit);
+}
+[numthreads(64,1,1)]
+void QueryInterval(uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= _RayCount) return;
+    RayInput ray = _Rays[id.x];
+    BurtGISceneVoxelFineTraceResult hit;
+    BurtGIFineTraceGeometryIntervalResourceWithCompletion(
+        _BurtGISceneVoxelFineLow, _BurtGISceneVoxelFineHigh,
+        _BurtGISceneVoxelOctreeLeafLowTexture, _BurtGISceneVoxelOctreeLeafHighTexture,
+        _BurtGISceneVoxelOctreeParentLowTexture, _BurtGISceneVoxelOctreeParentHighTexture,
+        _BurtGISceneVoxelOctreeRootLowTexture, _BurtGISceneVoxelOctreeRootHighTexture,
+        _BurtGISceneVoxelFineResolution,
+        _FineTraceReadiness.x > .5 ? 1u : 0u, _FineTraceReadiness.y > .5 ? 1u : 0u,
+        _BurtGISceneVoxelCenterExtent,ray.originMax.xyz,ray.directionMin.xyz,
+        ray.directionMin.w,ray.originMax.w,_StepBudget,hit);
+    StoreResult(id.x,hit);
+}

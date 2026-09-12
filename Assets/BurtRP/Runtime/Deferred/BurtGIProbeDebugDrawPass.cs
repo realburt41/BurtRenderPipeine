@@ -5,7 +5,7 @@ using UnityEngine.Rendering;
 
 namespace Burt.RenderPipeline
 {
-    internal sealed class BurtGIProbeDebugDrawPass : BurtRenderPass
+    internal sealed class BurtGIProbeDebugDrawPass : BurtRenderPass, System.IDisposable
     {
         private const int MaxInstancesPerDraw = 1023;
         private const int ProbesPerBrick = BurtGIVirtualProbePhysicalPool.BrickProbeCountPerDimension *
@@ -18,20 +18,39 @@ namespace Burt.RenderPipeline
         private static readonly int DebugLayerId = Shader.PropertyToID("_BurtXGICompatDebugLayer");
         private static readonly int InstanceColorId = Shader.PropertyToID("_BurtXGICompatInstanceColor");
         private static readonly int ProbeAtlasIndexId = Shader.PropertyToID("_BurtXGICompatProbeAtlasIndex");
-        private static readonly List<BurtGIVirtualProbeCellStreamer> ActiveStreamers = new List<BurtGIVirtualProbeCellStreamer>();
-        private static readonly Matrix4x4[] InstanceMatrices = new Matrix4x4[MaxInstancesPerDraw];
-        private static readonly Vector4[] InstanceColors = new Vector4[MaxInstancesPerDraw];
-        private static readonly Vector4[] InstanceProbeAtlasIndices = new Vector4[MaxInstancesPerDraw];
-        private static readonly MaterialPropertyBlock InstanceProperties = new MaterialPropertyBlock();
-        private static Mesh probeMesh;
-        private static Mesh virtualOffsetMesh;
-        private static Material probeMaterial;
-        private static Material virtualOffsetMaterial;
-        private static bool hasLoggedMissingProbeShader;
-        private static bool hasLoggedMissingVirtualOffsetShader;
+        private readonly List<BurtGIVirtualProbeCellStreamer> ActiveStreamers = new List<BurtGIVirtualProbeCellStreamer>();
+        private readonly Matrix4x4[] InstanceMatrices = new Matrix4x4[MaxInstancesPerDraw];
+        private readonly Vector4[] InstanceColors = new Vector4[MaxInstancesPerDraw];
+        private readonly Vector4[] InstanceProbeAtlasIndices = new Vector4[MaxInstancesPerDraw];
+        private readonly MaterialPropertyBlock InstanceProperties = new MaterialPropertyBlock();
+        private Mesh probeMesh;
+        private Mesh virtualOffsetMesh;
+        private Material probeMaterial;
+        private Material virtualOffsetMaterial;
+        private bool hasLoggedMissingProbeShader;
+        private bool hasLoggedMissingVirtualOffsetShader;
         private static DebugDrawStats lastStats;
 
         public override string Name => "Burt XGI Probe Debug Draw";
+
+        public void Dispose()
+        {
+            // The graph retains IDisposable pass owners across per-frame Clear.
+            // Only destroy this pass's generated objects, never shared shaders
+            // or another camera/pipeline's debug resources.
+            CoreUtils.Destroy(probeMesh);
+            CoreUtils.Destroy(virtualOffsetMesh);
+            CoreUtils.Destroy(probeMaterial);
+            CoreUtils.Destroy(virtualOffsetMaterial);
+            probeMesh = null;
+            virtualOffsetMesh = null;
+            probeMaterial = null;
+            virtualOffsetMaterial = null;
+            ActiveStreamers.Clear();
+            InstanceProperties.Clear();
+            hasLoggedMissingProbeShader = false;
+            hasLoggedMissingVirtualOffsetShader = false;
+        }
 
         private struct DebugDrawStats
         {
@@ -264,7 +283,7 @@ namespace Burt.RenderPipeline
             stats.HasSkyDirection |= volume.HasVirtualSkyShadingDirection;
         }
 
-        private static int DrawProbeInstances(
+        private int DrawProbeInstances(
             CommandBuffer cmd,
             BurtGIVirtualProbeCellStreamer streamer,
             BurtXGIProbeBakedDataAsset asset,
@@ -335,7 +354,7 @@ namespace Burt.RenderPipeline
             return totalCount;
         }
 
-        private static int DrawVirtualOffsetInstances(
+        private int DrawVirtualOffsetInstances(
             CommandBuffer cmd,
             BurtGIVirtualProbeCellStreamer streamer,
             BurtXGIProbeBakedDataAsset asset,
@@ -443,7 +462,7 @@ namespace Burt.RenderPipeline
             return false;
         }
 
-        private static void DrawBatch(CommandBuffer cmd, Mesh mesh, Material material, int count, bool useInstanceColors)
+        private void DrawBatch(CommandBuffer cmd, Mesh mesh, Material material, int count, bool useInstanceColors)
         {
             if (count <= 0 || cmd == null || mesh == null || material == null)
             {
@@ -622,7 +641,7 @@ namespace Burt.RenderPipeline
             return color;
         }
 
-        private static bool TryGetProbeMaterial(out Material material)
+        private bool TryGetProbeMaterial(out Material material)
         {
             material = probeMaterial;
             if (material != null)
@@ -648,7 +667,7 @@ namespace Burt.RenderPipeline
             return true;
         }
 
-        private static bool TryGetVirtualOffsetMaterial(out Material material)
+        private bool TryGetVirtualOffsetMaterial(out Material material)
         {
             material = virtualOffsetMaterial;
             if (material != null)
@@ -674,7 +693,7 @@ namespace Burt.RenderPipeline
             return true;
         }
 
-        private static Mesh GetProbeMesh()
+        private Mesh GetProbeMesh()
         {
             if (probeMesh != null)
             {
@@ -686,7 +705,7 @@ namespace Burt.RenderPipeline
             return probeMesh;
         }
 
-        private static Mesh GetVirtualOffsetMesh()
+        private Mesh GetVirtualOffsetMesh()
         {
             if (virtualOffsetMesh != null)
             {

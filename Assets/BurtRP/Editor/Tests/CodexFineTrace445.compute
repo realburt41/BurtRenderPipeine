@@ -1,0 +1,58 @@
+#pragma kernel Query
+#include "../../Runtime/Resources/BurtGISceneVoxelFineTrace.hlsl"
+
+Texture3D<uint> _BurtGISceneVoxelFineLow;
+Texture3D<uint> _BurtGISceneVoxelFineHigh;
+Texture3D<uint> _BurtGISceneVoxelFineOffsets;
+Texture3D<uint> _BurtGISceneVoxelOctreeLeafLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeLeafHighTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeParentLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeParentHighTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeRootLowTexture;
+Texture3D<uint> _BurtGISceneVoxelOctreeRootHighTexture;
+StructuredBuffer<uint> _BurtGISceneVoxelFineOwners;
+StructuredBuffer<BurtGISceneVoxelFineMaterialData> _BurtGISceneVoxelFineMaterials;
+StructuredBuffer<BurtGISceneVoxelFineLightingData> _BurtGISceneVoxelFineLighting;
+uint _BurtGISceneVoxelFineResolution, _BurtGISceneVoxelFineCapacity;
+float4 _BurtGISceneVoxelCenterExtent;
+// x geometry, y hierarchy, z material, w lighting; all from the same epoch.
+float4 _FineTraceReadiness;
+uint _RayCount, _StepBudget;
+
+struct RayInput { float4 originMax, directionPad; }; // 32 bytes
+struct RayOutput // 80 bytes; independent raw fields, no bool packing.
+{
+    uint4 flags; // occupied, materialValid, lightingValid, rangeComplete
+    float4 distanceSteps; // distance, hierarchySteps, fineSteps, budgetExhausted
+    uint4 cell; // fine x/y/z, pool index (UINTMAX if unresolved/unallocated)
+    float4 radiance;
+    float4 normalAndValidity;
+};
+StructuredBuffer<RayInput> _Rays;
+RWStructuredBuffer<RayOutput> _Results;
+
+[numthreads(64,1,1)]
+void Query(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _RayCount) return;
+    RayInput ray = _Rays[id.x];
+    BurtGISceneVoxelFineTraceResult hit;
+    BurtGIFineTraceResourceWithCompletion(
+        _BurtGISceneVoxelFineLow, _BurtGISceneVoxelFineHigh, _BurtGISceneVoxelFineOffsets,
+        _BurtGISceneVoxelOctreeLeafLowTexture, _BurtGISceneVoxelOctreeLeafHighTexture,
+        _BurtGISceneVoxelOctreeParentLowTexture, _BurtGISceneVoxelOctreeParentHighTexture,
+        _BurtGISceneVoxelOctreeRootLowTexture, _BurtGISceneVoxelOctreeRootHighTexture,
+        _BurtGISceneVoxelFineOwners, _BurtGISceneVoxelFineMaterials, _BurtGISceneVoxelFineLighting,
+        _BurtGISceneVoxelFineResolution, _BurtGISceneVoxelFineCapacity,
+        _FineTraceReadiness.x > 0.5 ? 1u : 0u, _FineTraceReadiness.y > 0.5 ? 1u : 0u,
+        _FineTraceReadiness.z > 0.5 ? 1u : 0u, _FineTraceReadiness.w > 0.5 ? 1u : 0u,
+        _BurtGISceneVoxelCenterExtent, ray.originMax.xyz, ray.directionPad.xyz,
+        ray.originMax.w, _StepBudget, hit);
+    RayOutput result;
+    result.flags = uint4(hit.occupied, hit.materialValid, hit.lightingValid, hit.rangeComplete);
+    result.distanceSteps = float4(hit.distance, hit.hierarchySteps, hit.fineSteps, hit.budgetExhausted);
+    result.cell = uint4(hit.fineCoord, hit.poolIndex);
+    result.radiance = hit.radiance;
+    result.normalAndValidity = hit.normalAndValidity;
+    _Results[id.x] = result;
+}

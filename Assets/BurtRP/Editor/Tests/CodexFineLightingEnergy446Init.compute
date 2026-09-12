@@ -1,0 +1,10 @@
+#pragma kernel InitRC
+RWTexture2D<uint> _Index;
+uint _Value;
+[numthreads(4, 4, 1)]
+void InitRC(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    _Index.GetDimensions(width, height);
+    if (id.x < width && id.y < height) _Index[id.xy] = _Value;
+}

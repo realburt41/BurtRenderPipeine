@@ -1,0 +1,50 @@
+#pragma kernel CaptureReceiver453
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
+// Temporary measurement only: exact production SimpleSH reconstruction/decode.
+Texture2D<float> _Depth453;
+Texture2D<float4> _Normal453;
+RWTexture2D<float4> _Position453;
+RWTexture2D<float4> _Decoded453;
+float4x4 _InverseVP453;
+int2 _Size453;
+
+[numthreads(8,8,1)]
+void CaptureReceiver453(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size453)) return;
+    uint dw, dh, nw, nh;
+    _Depth453.GetDimensions(dw,dh);
+    _Normal453.GetDimensions(nw,nh);
+    if (dw != (uint)_Size453.x || dh != (uint)_Size453.y || nw != dw || nh != dh)
+    {
+        _Position453[id.xy] = float4(0,0,0,-2);
+        _Decoded453[id.xy] = 0;
+        return;
+    }
+    float z = _Depth453.Load(int3(id.xy,0));
+    bool sky;
+#if UNITY_REVERSED_Z
+    sky = z <= 1.0e-5f;
+#else
+    sky = z >= .99999f;
+#endif
+    if (sky) { _Position453[id.xy]=0; _Decoded453[id.xy]=float4(0,0,0,z); return; }
+    float2 uv = (float2(id.xy)+.5f)/float2(_Size453);
+    float2 clip = uv*2-1;
+#if UNITY_UV_STARTS_AT_TOP
+    clip.y = -clip.y;
+#endif
+    float4 p = mul(_InverseVP453,float4(clip,z,1));
+    float safeW = abs(p.w)>1.0e-6f?p.w:(p.w<0?-1.0e-6f:1.0e-6f);
+    uint3 q = (uint3)(saturate(_Normal453.Load(int3(id.xy,0)).rgb)*255.5f);
+    uint2 packed = q.xy | uint2((q.z&15u)<<8,(q.z>>4)<<8);
+    float2 f = (float2(packed)/4095.0f)*2-1;
+    float3 n = float3(f,1-abs(f.x)-abs(f.y));
+    float t = saturate(-n.z);
+    n.x += n.x>=0?-t:t;
+    n.y += n.y>=0?-t:t;
+    n *= rsqrt(max(dot(n,n),1.0e-8f));
+    _Position453[id.xy]=float4(p.xyz/safeW,1);
+    _Decoded453[id.xy]=float4(n,z);
+}

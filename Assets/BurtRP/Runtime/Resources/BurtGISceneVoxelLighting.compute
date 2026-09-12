@@ -1,4 +1,16 @@
 #pragma kernel SceneVoxelBuildLightingLiteCS
+#pragma kernel SceneVoxelBuildFineLightingCS BURT_GI_FINE_LIGHTING
+#pragma kernel ClearFineDisabledCacheIndirectionCS
+
+#include "BurtGISceneVoxelFineData.hlsl"
+#include "BurtGISceneVoxelFineTrace.hlsl"
+
+RWTexture2D<uint> _BurtGIFineDisabledCacheIndirection;
+[numthreads(1, 1, 1)]
+void ClearFineDisabledCacheIndirectionCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    _BurtGIFineDisabledCacheIndirection[uint2(0u, 0u)] = 0xffffffffu;
+}
 
 #define BURT_GI_SCENE_VOXEL_OCCUPANCY_MIP_COUNT 5u
 #define BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE 4
@@ -23,6 +35,19 @@ Texture3D<float4> _BurtGISceneVoxelRadianceReadTexture;
 Texture3D<float4> _BurtGISceneVoxelGeometryReadTexture;
 Texture3D<float4> _BurtGISceneVoxelOccupancyMipReadTexture;
 RWTexture3D<float4> _BurtGISceneVoxelLightingTexture;
+StructuredBuffer<BurtGISceneVoxelFineMaterialData> _BurtGISceneVoxelFineMaterials;
+StructuredBuffer<uint> _BurtGISceneVoxelFineCellCoords;
+StructuredBuffer<uint> _BurtGISceneVoxelFineOwners;
+RWStructuredBuffer<BurtGISceneVoxelFineLightingData> _BurtGISceneVoxelFineLighting;
+uint _BurtGISceneVoxelFineCapacity;
+// The resource/allocator binding supplies COARSE N; packed fine coordinates
+// and fine world-position centers use the actual 4*N geometric resolution.
+uint _BurtGISceneVoxelFineResolution;
+Texture3D<uint> _BurtGISceneVoxelFineLow;
+Texture3D<uint> _BurtGISceneVoxelFineHigh;
+uint _BurtGISceneVoxelFineGeometryReady;
+uint _BurtGISceneVoxelFineHierarchyReady;
+uint _BurtGISceneVoxelFineTraceStepBudget;
 Texture2D<uint> _BurtGIRadianceCacheClipMapIndirectionTexture;
 Texture2D<float4> _BurtGIRadianceCacheClipMapFinalIrradianceAtlasTexture;
 Texture2D<float2> _BurtGIRadianceCacheClipMapProbeOcclusionAtlasTexture;
@@ -670,6 +695,7 @@ BurtGISceneVoxelOccupancySample BurtGITrySampleSceneVoxelOccupancyMip(float3 sam
     float occupancy = saturate(max(occupancyMip.x, occupancyMip.y));
     return BurtGIMakeSceneVoxelOccupancySample(occupancy > 0.001 ? 1u : 0u, occupancy);
 }
+#if !defined(BURT_GI_FINE_LIGHTING)
 float BurtGITraceSceneVoxelDirectionalVisibility(float3 worldPosition, float3 direction, float maxDistance)
 {
     float4 octreeCenterExtent = _BurtGISceneVoxelCenterExtent;
@@ -721,6 +747,75 @@ float BurtGITraceSceneVoxelDirectionalVisibility(float3 worldPosition, float3 di
 
     return saturate(transmittance);
 }
+#endif
+#if defined(BURT_GI_FINE_LIGHTING)
+// Bounded-volume visibility, not proof of visibility beyond this clipmap.
+// Starting inside a known occupied fine cell, skip ONLY that cell's ray
+// interval. Keep the original origin and distances: neither a coarse-cell
+// bias nor an epsilon may erase a neighboring black/thin occluder.
+float2 BurtGITraceSceneVoxelFineVisibility(
+    float3 worldPosition, float3 direction, float maxDistance,
+    uint3 startingCell)
+{
+    float lengthSq = dot(direction, direction);
+    if (!isfinite(lengthSq) || lengthSq <= 0.0 ||
+        !isfinite(maxDistance) || maxDistance < 0.0)
+    {
+        return float2(0.0, 0.0);
+    }
+    float3 rayDirection = direction * rsqrt(lengthSq);
+    float4 bounds = _BurtGISceneVoxelCenterExtent;
+    float3 volumeMin = bounds.xyz - bounds.w;
+    float coarseSize = bounds.w * 2.0 / (float)_BurtGISceneVoxelFineResolution;
+    // Use the same coarse+local boundary arithmetic as the shared DDA.
+    float3 coarseMin = volumeMin + (float3)(startingCell >> 2u) * coarseSize;
+    float3 cellMin = coarseMin + (float3)(startingCell & 3u) * (coarseSize * 0.25);
+    float3 cellMax = coarseMin + (float3)((startingCell & 3u) + 1u) * (coarseSize * 0.25);
+    if (!all(isfinite(worldPosition)) || any(worldPosition < cellMin) || any(worldPosition >= cellMax))
+        return float2(0.0, 0.0);
+    // This is a proven interior point, so only the positive boundary crossings
+    // are needed. Two extra general slab state machines before the shared DDA
+    // trigger an FXC optimizing-compiler stack overflow even at one call site.
+    float3 selfCrossing = 3.402823466e+38;
+    float3 volumeCrossing = 3.402823466e+38;
+    [unroll]
+    for (uint axis = 0u; axis < 3u; ++axis)
+    {
+        if (rayDirection[axis] != 0.0)
+        {
+            float selfBoundary = rayDirection[axis] > 0.0 ? cellMax[axis] : cellMin[axis];
+            float volumeBoundary = rayDirection[axis] > 0.0 ? bounds[axis] + bounds.w : volumeMin[axis];
+            selfCrossing[axis] = (selfBoundary - worldPosition[axis]) / rayDirection[axis];
+            volumeCrossing[axis] = (volumeBoundary - worldPosition[axis]) / rayDirection[axis];
+        }
+    }
+    float selfExit = min(selfCrossing.x, min(selfCrossing.y, selfCrossing.z));
+    float volumeExit = min(volumeCrossing.x, min(volumeCrossing.y, volumeCrossing.z));
+    if (selfExit <= 0.0) return float2(0.0, 0.0);
+    float stopDistance = min(maxDistance, volumeExit);
+    // A light inside the starting cell, or the outward face of an edge cell,
+    // has no other fine-cell interval to test within this bounded domain.
+    if (stopDistance <= selfExit) return float2(1.0, 1.0);
+    BurtGISceneVoxelFineTraceResult trace;
+    BurtGIFineTraceGeometryIntervalNormalizedResourceWithCompletion(
+        _BurtGISceneVoxelFineLow, _BurtGISceneVoxelFineHigh,
+        _BurtGISceneVoxelOctreeLeafLowTexture, _BurtGISceneVoxelOctreeLeafHighTexture,
+        _BurtGISceneVoxelOctreeParentLowTexture, _BurtGISceneVoxelOctreeParentHighTexture,
+        _BurtGISceneVoxelOctreeRootLowTexture, _BurtGISceneVoxelOctreeRootHighTexture,
+        _BurtGISceneVoxelFineResolution, _BurtGISceneVoxelFineGeometryReady,
+        _BurtGISceneVoxelFineHierarchyReady, bounds, worldPosition, rayDirection,
+        selfExit, stopDistance, _BurtGISceneVoxelFineTraceStepBudget, trace);
+    if (trace.occupied != 0u) return float2(0.0, 1.0);
+    if (trace.rangeComplete == 0u)
+    {
+        // Unknown is neither clear nor a valid black lighting sample.
+        return float2(0.0, 0.0);
+    }
+    return float2(1.0, 1.0);
+}
+#endif
+
+#if !defined(BURT_GI_FINE_LIGHTING)
 float3 BurtGISceneVoxelEvaluateAdditionalLights(float3 worldPosition, float3 normalWS)
 {
     float3 lighting = 0.0;
@@ -781,6 +876,7 @@ float3 BurtGISceneVoxelEvaluateAdditionalLights(float3 worldPosition, float3 nor
 
     return lighting;
 }
+#endif
 uint BurtGISceneVoxelResolveXGILightGridLevel(float3 worldPosition)
 {
     [unroll]
@@ -808,6 +904,7 @@ uint BurtGISceneVoxelResolveXGILightGridCell(float3 worldPosition, uint level)
             : min((uint2)floor(normalizedPosition.xy * resolution), resolution - 1u);
     return level * resolution * resolution + coord.x + coord.y * resolution;
 }
+#if !defined(BURT_GI_FINE_LIGHTING)
 float3 BurtGISceneVoxelEvaluateXGILightGrid(float3 worldPosition, float3 normalWS)
 {
     float3 lighting = 0.0;
@@ -884,6 +981,207 @@ float3 BurtGISceneVoxelEvaluateXGILightGrid(float3 worldPosition, float3 normalW
 
     return lighting;
 }
+// Both callers use the same real main/additional/sky/cache lighting. The
+// literal useBoostedAlbedo argument is folded per kernel: the legacy caller
+// keeps its original half-RT diffuse recovery expression at its original
+// position in the evaluator, while fine material supplies boosted albedo
+// directly (never the raster's albedo*0.12+emission approximation).
+float4 BurtGISceneVoxelEvaluateLighting(
+    float3 worldPosition, float3 normalWS, float traceDistance,
+    float4 radiance, float3 prelitRadiance, float occupancy,
+    float3 boostedAlbedo, bool useBoostedAlbedo)
+{
+    float sceneVoxelLightingType = _BurtGISceneVoxelRadianceCacheParams.y;
+    float skyVisibilityTrace = BurtGITraceSceneVoxelDirectionalVisibility(worldPosition, normalWS, traceDistance);
+    float skyVisibility = lerp(1.0, skyVisibilityTrace, saturate(_BurtGISceneVoxelIndirectLightTint.w));
+    float skyLightEnabled = _BurtGISceneVoxelDirectLightTint.w > 0.5 ? 1.0 : 0.0;
+    float3 ambientSkyTint = BurtGISceneVoxelEvaluateAmbientSH(normalWS);
+    // Match XRender's real sky SH evaluation. An enabled sky flag must not
+    // invent radiance or add unrelated colors when the supplied SH is dark.
+    float3 skyTint = ambientSkyTint * skyVisibility * skyLightEnabled;
+    float3 mainLightDirection = _BurtGIMainLightDirection.xyz;
+    float mainLightDirectionLengthSq = dot(mainLightDirection, mainLightDirection);
+    mainLightDirection = mainLightDirectionLengthSq > 0.0001 ? mainLightDirection * rsqrt(mainLightDirectionLengthSq) : float3(0.0, 1.0, 0.0);
+    float mainLightNdotL = saturate(dot(normalWS, mainLightDirection));
+    float mainLightVisibility = _BurtGISceneVoxelRadianceCacheParams.z > 0.5
+        ? BurtGITraceSceneVoxelDirectionalVisibility(worldPosition, mainLightDirection, traceDistance)
+        : 1.0;
+    float3 mainLightRadiance = max(_BurtGIMainLightColor.rgb, 0.0) * (mainLightNdotL * mainLightVisibility);
+    float3 additionalLightRadiance = sceneVoxelLightingType >= 1.5
+        ? BurtGISceneVoxelEvaluateXGILightGrid(worldPosition, normalWS)
+        : 0.0;
+    float oneOverPreExposure = max(_BurtGISceneVoxelExposureParams.x, 0.0);
+    // Only real light sources contribute energy; a normal-only term lights an unlit scene.
+    float3 directLighting = (mainLightRadiance + additionalLightRadiance) *
+        (max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.z, 0.0) * oneOverPreExposure);
+    const float xgiSecondaryBounceSkyScale = 0.2;
+    float3 storedDiffuseRadiance = max(radiance.rgb - prelitRadiance, 0.0);
+    float3 boostedDiffuseColor = BurtGISceneVoxelRecoverBoostedDiffuseColor(storedDiffuseRadiance);
+    if (useBoostedAlbedo)
+    {
+        boostedDiffuseColor = boostedAlbedo;
+    }
+    float3 indirectLighting = skyTint * boostedDiffuseColor * (max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.w, 0.0) * xgiSecondaryBounceSkyScale);
+    float3 radianceCacheIrradiance = 0.0;
+    if (_BurtGISceneVoxelRadianceCacheParams.x > 0.5 &&
+        BurtGISceneVoxelSampleRadianceCacheIrradiance(worldPosition, normalWS, radianceCacheIrradiance))
+    {
+        indirectLighting = radianceCacheIrradiance * boostedDiffuseColor *
+            (max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.w, 0.0));
+    }
+    float3 lighting =
+        prelitRadiance +
+        boostedDiffuseColor * directLighting +
+        indirectLighting * radiance.a;
+
+    float grey = dot(lighting, float3(0.299, 0.587, 0.114));
+    float3 adjustedLighting = lerp(grey.xxx, lighting, saturate(_BurtGISceneVoxelLightingParams.y));
+    lighting = lighting.g > (lighting.b + lighting.r) * 0.6 ? adjustedLighting : lighting;
+
+    // Occupancy controls visibility, not light chromaticity. Only the explicit
+    // Avoid Bleeding control above may desaturate the evaluated lighting.
+    lighting = max(lighting, 0.0);
+    return float4(lighting, saturate(radiance.a * occupancy));
+}
+#endif
+#if defined(BURT_GI_FINE_LIGHTING)
+// Enumerate sources through one visibility call site, without disabling
+// optimization or changing ray budgets. Accumulate light radiance separately
+// and retain the legacy final material/energy arithmetic order.
+float4 BurtGISceneVoxelEvaluateFineLighting(
+    float3 worldPosition, float3 normalWS, uint3 fineCell, float traceDistance,
+    float4 albedo, float3 emission, float occupancy, inout uint visibilityComplete)
+{
+    float3 directScale = max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0) *
+        max(_BurtGISceneVoxelLightingParams.z, 0.0) * max(_BurtGISceneVoxelExposureParams.x, 0.0);
+    float3 indirectScale = max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) *
+        max(_BurtGISceneVoxelLightingParams.w, 0.0);
+    float3 mainRadiance = 0.0, additionalRadiance = 0.0;
+    float skyVisibility = 1.0;
+    float3 irradiance = 0.0;
+    bool cacheReplacesSky = _BurtGISceneVoxelRadianceCacheParams.x > 0.5 &&
+        BurtGISceneVoxelSampleRadianceCacheIrradiance(worldPosition, normalWS, irradiance);
+
+    uint gridLevelPlusOne = _BurtGIXGILightGridValid != 0u
+        ? BurtGISceneVoxelResolveXGILightGridLevel(worldPosition) : 0u;
+    uint gridCell = gridLevelPlusOne != 0u
+        ? BurtGISceneVoxelResolveXGILightGridCell(worldPosition, gridLevelPlusOne - 1u) : 0u;
+    uint additionalCount = 0u;
+    if (_BurtGISceneVoxelRadianceCacheParams.y >= 1.5 && any(directScale * albedo.rgb > 0.0))
+        additionalCount = gridLevelPlusOne != 0u
+            ? min(_BurtGIXGILightGridCount[gridCell], _BurtGIXGILightGridMaxLights)
+            : min(_BurtGIAdditionalLightCount, 8u);
+    [loop]
+    for (uint sourceIndex = 0u; sourceIndex < additionalCount + 2u; ++sourceIndex)
+    {
+        float3 direction = normalWS;
+        float distanceLimit = traceDistance;
+        float3 contribution = 0.0;
+        float lightWeight = 1.0;
+        float3 activeScale = albedo.rgb * directScale;
+        float visibilityBlend = 0.0;
+        if (sourceIndex == 0u)
+        {
+            if (cacheReplacesSky || _BurtGISceneVoxelDirectLightTint.w <= 0.5) continue;
+            contribution = BurtGISceneVoxelEvaluateAmbientSH(normalWS);
+            activeScale = albedo.rgb * indirectScale * albedo.a;
+            visibilityBlend = saturate(_BurtGISceneVoxelIndirectLightTint.w);
+        }
+        else if (sourceIndex == 1u)
+        {
+            direction = _BurtGIMainLightDirection.xyz;
+            float lengthSq = dot(direction, direction);
+            direction = lengthSq > 0.0001 ? direction * rsqrt(lengthSq) : float3(0.0, 1.0, 0.0);
+            contribution = max(_BurtGIMainLightColor.rgb, 0.0);
+            lightWeight = saturate(dot(normalWS, direction));
+            visibilityBlend = _BurtGISceneVoxelRadianceCacheParams.z > 0.5 ? 1.0 : 0.0;
+        }
+        else
+        {
+            uint index = sourceIndex - 2u;
+            float4 positionAndRange = 0.0, colorAndType = 0.0, directionAndSpot = 0.0, spotParams = 0.0;
+            if (gridLevelPlusOne != 0u)
+            {
+                uint lightIndex = _BurtGIXGILightGridList[gridCell * _BurtGIXGILightGridMaxLights + index];
+                uint dataIndex = lightIndex * 4u;
+                positionAndRange = _BurtGIXGILightData[dataIndex];
+                colorAndType = _BurtGIXGILightData[dataIndex + 1u];
+                directionAndSpot = _BurtGIXGILightData[dataIndex + 2u];
+                spotParams = _BurtGIXGILightData[dataIndex + 3u];
+            }
+            else
+            {
+                positionAndRange = _BurtGIAdditionalLightPositionAndRange[index];
+                colorAndType = _BurtGIAdditionalLightColorAndType[index];
+                directionAndSpot = _BurtGIAdditionalLightDirectionAndSpot[index];
+                spotParams = _BurtGIAdditionalLightSpotParams[index];
+            }
+            float attenuation = 1.0;
+            direction = directionAndSpot.xyz;
+            if (colorAndType.w >= 0.5)
+            {
+                float3 toLight = positionAndRange.xyz - worldPosition;
+                float distanceToLight = length(toLight);
+                float lightRange = max(positionAndRange.w, 0.001);
+                if (distanceToLight >= lightRange) continue;
+                direction = toLight / max(distanceToLight, 0.0001);
+                distanceLimit = distanceToLight;
+                float distanceSqr = max(distanceToLight * distanceToLight, 0.0001);
+                // Preserve the existing grid/array attenuation contracts.
+                attenuation = gridLevelPlusOne != 0u
+                    ? BurtGISceneVoxelSmoothDistanceAttenuation(distanceSqr, lightRange)
+                    : BurtGISceneVoxelAdditionalLightDistanceAttenuation(distanceSqr, lightRange, spotParams.w);
+                if (colorAndType.w > 1.5)
+                {
+                    float3 forward = BurtGISceneVoxelLightingSafeNormalize(directionAndSpot.xyz, float3(0.0, 0.0, 1.0));
+                    attenuation *= BurtGISceneVoxelSpotAngleAttenuation(-direction, forward, spotParams.y, spotParams.z);
+                }
+                visibilityBlend = _BurtGISceneVoxelRadianceCacheParams.w > 0.5 ? 1.0 : 0.0;
+            }
+            else if (gridLevelPlusOne == 0u)
+            {
+                direction = BurtGISceneVoxelLightingSafeNormalize(direction, float3(0.0, 1.0, 0.0));
+            }
+            if (gridLevelPlusOne != 0u)
+            {
+                float lengthSq = dot(direction, direction);
+                direction = lengthSq > 0.0001 ? direction * rsqrt(lengthSq) : float3(0.0, 1.0, 0.0);
+            }
+            contribution = max(colorAndType.rgb, 0.0);
+            lightWeight = saturate(dot(normalWS, direction)) * attenuation;
+        }
+        if (!any(contribution * activeScale > 0.0) || lightWeight <= 0.0) continue;
+        float visibility = 1.0;
+        if (visibilityBlend > 0.0)
+        {
+            float2 query = BurtGITraceSceneVoxelFineVisibility(worldPosition, direction,
+                distanceLimit, fineCell);
+            visibility = query.x;
+            if (query.y == 0.0)
+            {
+                visibilityComplete = 0u;
+                return 0.0;
+            }
+        }
+        float sourceVisibility = lerp(1.0, visibility, visibilityBlend);
+        if (sourceIndex == 0u) skyVisibility = sourceVisibility;
+        else if (sourceIndex == 1u) mainRadiance = contribution * (lightWeight * sourceVisibility);
+        else additionalRadiance += contribution * (lightWeight * sourceVisibility);
+    }
+    float3 directLighting = (mainRadiance + additionalRadiance) * directScale;
+    float skyEnabled = _BurtGISceneVoxelDirectLightTint.w > 0.5 ? 1.0 : 0.0;
+    float3 skyTint = BurtGISceneVoxelEvaluateAmbientSH(normalWS) * skyVisibility * skyEnabled;
+    float3 indirectLighting = skyTint * albedo.rgb * (indirectScale * 0.2);
+    if (cacheReplacesSky) indirectLighting = irradiance * albedo.rgb * indirectScale;
+    float3 lighting = emission + albedo.rgb * directLighting + indirectLighting * albedo.a;
+    float grey = dot(lighting, float3(0.299, 0.587, 0.114));
+    float3 adjusted = lerp(grey.xxx, lighting, saturate(_BurtGISceneVoxelLightingParams.y));
+    lighting = lighting.g > (lighting.b + lighting.r) * 0.6 ? adjusted : lighting;
+    return float4(max(lighting, 0.0), saturate(albedo.a * occupancy));
+}
+#endif
+
+#if !defined(BURT_GI_FINE_LIGHTING)
 void BurtGISceneVoxelBuildLighting(uint3 dispatchThreadId)
 {
     uint width = 1u;
@@ -914,56 +1212,99 @@ void BurtGISceneVoxelBuildLighting(uint3 dispatchThreadId)
     float4 centerExtent = _BurtGISceneVoxelCenterExtent;
     float traceDistance = max(centerExtent.w * 1.25, 1.0);
     float3 worldPosition = centerExtent.xyz + (((float3(dispatchThreadId) + 0.5) / (float3)fullSize) - 0.5) * (centerExtent.w * 2.0);
-    float sceneVoxelLightingType = _BurtGISceneVoxelRadianceCacheParams.y;
-    float skyVisibilityTrace = BurtGITraceSceneVoxelDirectionalVisibility(worldPosition, normalWS, traceDistance);
-    float skyVisibility = lerp(1.0, skyVisibilityTrace, saturate(_BurtGISceneVoxelIndirectLightTint.w));
-    float skyLightEnabled = _BurtGISceneVoxelDirectLightTint.w > 0.5 ? 1.0 : 0.0;
-    float3 ambientSkyTint = BurtGISceneVoxelEvaluateAmbientSH(normalWS);
-    // Match XRender's real sky SH evaluation. An enabled sky flag must not
-    // invent radiance or add unrelated colors when the supplied SH is dark.
-    float3 skyTint = ambientSkyTint * skyVisibility * skyLightEnabled;
-    float3 mainLightDirection = _BurtGIMainLightDirection.xyz;
-    float mainLightDirectionLengthSq = dot(mainLightDirection, mainLightDirection);
-    mainLightDirection = mainLightDirectionLengthSq > 0.0001 ? mainLightDirection * rsqrt(mainLightDirectionLengthSq) : float3(0.0, 1.0, 0.0);
-    float mainLightNdotL = saturate(dot(normalWS, mainLightDirection));
-    float mainLightVisibility = _BurtGISceneVoxelRadianceCacheParams.z > 0.5
-        ? BurtGITraceSceneVoxelDirectionalVisibility(worldPosition, mainLightDirection, traceDistance)
-        : 1.0;
-    float3 mainLightRadiance = max(_BurtGIMainLightColor.rgb, 0.0) * (mainLightNdotL * mainLightVisibility);
-    float3 additionalLightRadiance = sceneVoxelLightingType >= 1.5
-        ? BurtGISceneVoxelEvaluateXGILightGrid(worldPosition, normalWS)
-        : 0.0;
-    float oneOverPreExposure = max(_BurtGISceneVoxelExposureParams.x, 0.0);
-    // Only real light sources contribute energy; a normal-only term lights an unlit scene.
-    float3 directLighting = (mainLightRadiance + additionalLightRadiance) *
-        (max(_BurtGISceneVoxelDirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.z, 0.0) * oneOverPreExposure);
-    const float xgiSecondaryBounceSkyScale = 0.2;
-    float3 storedDiffuseRadiance = max(radiance.rgb - prelitRadiance, 0.0);
-    float3 boostedDiffuseColor = BurtGISceneVoxelRecoverBoostedDiffuseColor(storedDiffuseRadiance);
-    float3 indirectLighting = skyTint * boostedDiffuseColor * (max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.w, 0.0) * xgiSecondaryBounceSkyScale);
-    float3 radianceCacheIrradiance = 0.0;
-    if (_BurtGISceneVoxelRadianceCacheParams.x > 0.5 &&
-        BurtGISceneVoxelSampleRadianceCacheIrradiance(worldPosition, normalWS, radianceCacheIrradiance))
-    {
-        indirectLighting = radianceCacheIrradiance * boostedDiffuseColor *
-            (max(_BurtGISceneVoxelIndirectLightTint.rgb, 0.0) * max(_BurtGISceneVoxelLightingParams.w, 0.0));
-    }
-    float3 lighting =
-        prelitRadiance +
-        boostedDiffuseColor * directLighting +
-        indirectLighting * radiance.a;
-
-    float grey = dot(lighting, float3(0.299, 0.587, 0.114));
-    float3 adjustedLighting = lerp(grey.xxx, lighting, saturate(_BurtGISceneVoxelLightingParams.y));
-    lighting = lighting.g > (lighting.b + lighting.r) * 0.6 ? adjustedLighting : lighting;
-
-    // Occupancy controls visibility, not light chromaticity. Only the explicit
-    // Avoid Bleeding control above may desaturate the evaluated lighting.
-    lighting = max(lighting, 0.0);
-    _BurtGISceneVoxelLightingTexture[dispatchThreadId] = float4(lighting, saturate(radiance.a * occupancy));
+    _BurtGISceneVoxelLightingTexture[dispatchThreadId] = BurtGISceneVoxelEvaluateLighting(
+        worldPosition, normalWS, traceDistance, radiance, prelitRadiance, occupancy, 0.0, false);
 }
 [numthreads(BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE, BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE)]
 void SceneVoxelBuildLightingLiteCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     BurtGISceneVoxelBuildLighting(dispatchThreadId);
 }
+
+#endif
+#if defined(BURT_GI_FINE_LIGHTING)
+[numthreads(BURT_GI_SCENE_VOXEL_LIGHTING_THREADGROUP_SIZE_1D, 1, 1)]
+void SceneVoxelBuildFineLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint index = dispatchThreadId.x;
+    if (index >= _BurtGISceneVoxelFineCapacity)
+    {
+        return;
+    }
+
+    BurtGISceneVoxelFineLightingData result = (BurtGISceneVoxelFineLightingData)0;
+    if (_BurtGISceneVoxelFineOwners[index] == BURT_GI_FINE_INVALID_OFFSET ||
+        (_BurtGISceneVoxelFineResolution != 16u && _BurtGISceneVoxelFineResolution != 32u &&
+         _BurtGISceneVoxelFineResolution != 64u && _BurtGISceneVoxelFineResolution != 128u) ||
+        _BurtGISceneVoxelFineGeometryReady == 0u || _BurtGISceneVoxelFineHierarchyReady == 0u ||
+        !all(isfinite(_BurtGISceneVoxelCenterExtent)) || _BurtGISceneVoxelCenterExtent.w <= 0.0)
+    {
+        _BurtGISceneVoxelFineLighting[index] = result;
+        return;
+    }
+
+    uint fineResolution = _BurtGISceneVoxelFineResolution * 4u;
+    uint3 fineCell = BurtGIFineUnpackCellCoord(_BurtGISceneVoxelFineCellCoords[index]);
+    if (any(fineCell >= fineResolution))
+    {
+        _BurtGISceneVoxelFineLighting[index] = result;
+        return;
+    }
+    uint width = 0u, height = 0u, depth = 0u;
+    _BurtGISceneVoxelFineLow.GetDimensions(width, height, depth);
+    bool dimensionsValid = all(uint3(width, height, depth) == _BurtGISceneVoxelFineResolution);
+    _BurtGISceneVoxelFineHigh.GetDimensions(width, height, depth);
+    dimensionsValid = dimensionsValid && all(uint3(width, height, depth) == _BurtGISceneVoxelFineResolution);
+    dimensionsValid = dimensionsValid && BurtGIFineTraceHierarchyDimensionsValid(
+        _BurtGISceneVoxelOctreeLeafLowTexture, _BurtGISceneVoxelOctreeLeafHighTexture,
+        _BurtGISceneVoxelOctreeParentLowTexture, _BurtGISceneVoxelOctreeParentHighTexture,
+        _BurtGISceneVoxelOctreeRootLowTexture, _BurtGISceneVoxelOctreeRootHighTexture,
+        _BurtGISceneVoxelFineResolution);
+    if (!dimensionsValid || !BurtGIFineOccupancyContains(
+        uint2(_BurtGISceneVoxelFineLow[fineCell >> 2u], _BurtGISceneVoxelFineHigh[fineCell >> 2u]), fineCell & 3u))
+    {
+        _BurtGISceneVoxelFineLighting[index] = result;
+        return;
+    }
+
+    BurtGISceneVoxelFineMaterialData material = _BurtGISceneVoxelFineMaterials[index];
+    float4 albedo = BurtGIFineUnpackHalf4(material.albedoAndValid);
+    float4 geometry = BurtGIFineUnpackHalf4(material.normalAndValid);
+    float4 emission = BurtGIFineUnpackHalf4(material.emissionAndValid);
+    float occupancy = saturate(geometry.a);
+    // Geometry validity is not inferred from light energy or material RGB.
+    // Preserve valid geometry even if an incomplete material cannot be lit.
+    if (all(isfinite(geometry)) && occupancy > 0.001)
+    {
+        result.normalAndValid = material.normalAndValid;
+    }
+    if (!all(isfinite(albedo)) || !all(isfinite(geometry)) || !all(isfinite(emission)) ||
+        occupancy <= 0.001 || albedo.a <= 0.001 || emission.a <= 0.001)
+    {
+        _BurtGISceneVoxelFineLighting[index] = result;
+        return;
+    }
+
+    float3 normalWS = geometry.rgb * 2.0 - 1.0;
+    float normalLengthSq = dot(normalWS, normalWS);
+    normalWS = normalLengthSq > 0.0001 ? normalWS * rsqrt(normalLengthSq) : float3(0.0, 1.0, 0.0);
+
+    float4 centerExtent = _BurtGISceneVoxelCenterExtent;
+    // Directional/sky rays cover the entire current cube (diagonal <4*extent).
+    // The visibility helper clips this request to its exact volume exit;
+    // punctual callers instead supply the real distance to their light.
+    float traceDistance = centerExtent.w * 4.0;
+    float3 worldPosition = centerExtent.xyz + (((float3(fineCell) + 0.5) / (float)fineResolution) - 0.5) * (centerExtent.w * 2.0);
+    uint visibilityComplete = 1u;
+    float4 lighting = 0.0;
+#if defined(BURT_GI_FINE_LIGHTING)
+    lighting = BurtGISceneVoxelEvaluateFineLighting(worldPosition, normalWS, fineCell,
+        traceDistance, albedo, max(emission.rgb, 0.0), occupancy, visibilityComplete);
+#endif
+    // A dark valid surface writes RGB=0 with nonzero validity, never empty.
+    // Missing traversal coverage stays unresolved, distinct from that black hit.
+    if (visibilityComplete != 0u && all(isfinite(lighting)))
+        result.radianceAndValid = BurtGIFinePackHalf4(lighting);
+    _BurtGISceneVoxelFineLighting[index] = result;
+}
+#endif

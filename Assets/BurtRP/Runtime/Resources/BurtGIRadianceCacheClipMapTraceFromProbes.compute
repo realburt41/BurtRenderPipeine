@@ -126,6 +126,7 @@ float4 _BurtGIScreenProbeAdaptiveParams;
 float4 _BurtGIScreenProbeTraceParams;
 float4 _BurtGIRadianceCacheClipMapIndirectionSize;
 float4 _BurtGIRadianceCacheHashGridParams0;
+#include "BurtGIRadianceCacheHashGridAddress.hlsl"
 float4 _BurtGIRadianceCacheHashGridParams1;
 float4 _BurtDeferredCameraWorldPosition;
 float4x4 _BurtDeferredInverseViewProjectionMatrix;
@@ -493,7 +494,7 @@ bool BurtGIRadianceCacheHashGridFindTileRead(uint tileHash, out uint tileIndex)
     uint bucketIndex = BurtGIRadianceCacheHashGridHash(uint3(tileHash, tileHash >> 7, tileHash >> 17)) % BurtGIRadianceCacheHashGridBucketCount();
     uint tilesPerBucket = BurtGIRadianceCacheHashGridTilesPerBucket();
     uint tileCount = BurtGIRadianceCacheHashGridTileCount();
-    uint probeCount = min(tileCount, tilesPerBucket * 4u);
+    uint probeCount = BurtGIHashGridProbeCount(tileCount, tilesPerBucket);
     tileIndex = 0xffffffffu;
 
     // Search through purge holes before claiming any empty slot.
@@ -505,14 +506,11 @@ bool BurtGIRadianceCacheHashGridFindTileRead(uint tileHash, out uint tileIndex)
     }
     return false;
 }
+#include "BurtGIRadianceCacheHashGridPacking.hlsl"
+
 float4 BurtGIRadianceCacheHashGridUnpackPackedRadiance(uint2 packedRadiance)
 {
-    float3 radiance = float3(
-        (float)(packedRadiance.x & 0xffffu),
-        (float)((packedRadiance.x >> 16) & 0xffffu),
-        (float)(packedRadiance.y & 0xffffu)) / 65535.0 * 8.0;
-    float sampleWeight = (float)((packedRadiance.y >> 16) & 0xffffu) / 65535.0;
-    return float4(radiance, sampleWeight);
+    return BurtGIHashGridUnpackPersistentRadiance(packedRadiance);
 }
 float4 BurtGIRadianceCacheHashGridUnpackRadiance(uint4 packedValue)
 {
@@ -1050,6 +1048,14 @@ bool BurtGITrySampleSceneVoxelConeTrace(
     confidence = saturate(accumulatedWeight * 0.35);
     return confidence > 0.001;
 }
+#define BURT_GI_SURFACE_CACHE_EXTERNAL_RESOURCE
+#define BURT_GI_SURFACE_CACHE_READ_ONLY
+#define _BurtGISurfaceCacheTable _BurtGIRadianceCacheHashGridValueReadBuffer
+#define _BurtGISurfaceCacheSlotCount (BurtGIRadianceCacheHashGridCellCount() / 2u)
+#define _BurtGISurfaceCacheProbeCount 64u
+#include "BurtGIHashSurfaceTable.hlsl"
+#include "BurtGIHashSurfaceTrace.hlsl"
+
 bool BurtGITrySampleRadianceCacheHashGridSceneCache(
     float3 probeWorldCenter,
     float3 direction,
@@ -1075,12 +1081,16 @@ bool BurtGITrySampleRadianceCacheHashGridSceneCache(
     float accumulatedWeight = 0.0;
     float nearestHitDistance = maxTraceDistance;
     float hashGridCellSize = max(0.001, _BurtGIRadianceCacheHashGridParams0.x);
+    if (_BurtGIRadianceCacheHashGridAddressParams.w > 0.5)
+        return BurtGISurfaceCacheTrace(probeWorldCenter, direction, minTraceDistance,
+            maxTraceDistance, radiance, confidence, hitDistance);
     float tanConeHalfAngle = min(tan(coneHalfAngle), 8.0);
     float traceRange = max(maxTraceDistance - minTraceDistance, 0.001);
     float traceDistance = minTraceDistance;
+    bool surfaceAddressing = _BurtGIRadianceCacheHashGridAddressParams.w > 0.5;
 
     [loop]
-    for (uint stepIndex = 0u; stepIndex < 8u; ++stepIndex)
+    for (uint stepIndex = 0u; stepIndex < (surfaceAddressing ? 50u : 8u); ++stepIndex)
     {
         if (traceDistance >= maxTraceDistance)
         {
@@ -1088,11 +1098,22 @@ bool BurtGITrySampleRadianceCacheHashGridSceneCache(
         }
 
         float sampleRadius = max(minSampleRadius, traceDistance * tanConeHalfAngle);
+        if (surfaceAddressing)
+            hashGridCellSize = BurtGIHashSurfaceCellSize(_BurtDeferredCameraWorldPosition.xyz, probeWorldCenter + direction * traceDistance);
         float stepLength = max(hashGridCellSize * 0.5, sampleRadius * max(stepFactor, 0.25));
+        if (surfaceAddressing) stepLength = hashGridCellSize;
         float sampleDistance = min(traceDistance + stepLength * 0.5, maxTraceDistance);
         float stepFraction = saturate((sampleDistance - minTraceDistance) / traceRange);
         float3 samplePosition = probeWorldCenter + direction * sampleDistance;
         uint tileHash = BurtGIRadianceCacheHashGridTileHash(samplePosition, direction);
+        uint localCellIndex = BurtGIRadianceCacheHashGridLocalCell(samplePosition, direction);
+        if (surfaceAddressing)
+        {
+            BurtGIHashSurfaceAddress address = BurtGIGetHashSurfaceAddress(_BurtDeferredCameraWorldPosition.xyz,
+                samplePosition, direction, sampleDistance, (uint)_BurtGIRadianceCacheHashGridParams0.y);
+            tileHash = address.hash;
+            localCellIndex = address.cell.x + address.cell.y * (uint)_BurtGIRadianceCacheHashGridParams0.y;
+        }
         uint tileIndex = 0xffffffffu;
         if (!BurtGIRadianceCacheHashGridFindTileRead(tileHash, tileIndex))
         {
@@ -1100,11 +1121,17 @@ bool BurtGITrySampleRadianceCacheHashGridSceneCache(
             continue;
         }
 
-        uint localCellIndex = BurtGIRadianceCacheHashGridLocalCell(samplePosition, direction);
         uint cellIndex = BurtGIRadianceCacheHashGridCellIndexFromTile(tileIndex, localCellIndex);
         uint4 packedValue = _BurtGIRadianceCacheHashGridValueReadBuffer[cellIndex];
         float4 cachedRadiance = BurtGIRadianceCacheHashGridUnpackRadiance(packedValue);
         float cachedConfidence = saturate(cachedRadiance.a * BurtGIRadianceCacheHashGridAgeConfidenceScale(packedValue));
+        if (surfaceAddressing && cachedConfidence > 0.001)
+        {
+            radiance = cachedRadiance.rgb;
+            hitDistance = sampleDistance;
+            confidence = cachedConfidence;
+            return true; // Valid black is an opaque resolved surface too.
+        }
         if (cachedConfidence <= 0.001 || dot(cachedRadiance.rgb, cachedRadiance.rgb) <= 0.0)
         {
             traceDistance += stepLength;

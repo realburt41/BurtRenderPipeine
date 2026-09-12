@@ -55,6 +55,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeIntegrateTileClassificationPass = new BurtAllocateBurtGIScreenProbeIntegrateTileClassificationPass();
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelCountBufferName);
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelDataBufferName);
+        private readonly BurtRenderPass allocateScreenProbeTraceSurfaceBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceSurfaceBufferName);
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactIndirectArgsBufferName);
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactThreadCountXBufferName);
         private readonly BurtRenderPass allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass = new BurtAllocateRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeAdaptiveProbeNumBufferName);
@@ -306,6 +307,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactThreadCountXBufferName);
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactIndirectArgsBufferName);
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelDataBufferName);
+        private readonly BurtRenderPass releaseScreenProbeTraceSurfaceBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceSurfaceBufferName);
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeTraceCompactTexelCountBufferName);
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIndirectArgsBufferName);
         private readonly BurtRenderPass releaseScreenSpaceGlobalIlluminationScreenProbeIntegrateTileDataAllBufferPass = new BurtReleaseRenderBufferPass(BurtRenderGraphResourceRegistry.BurtGIScreenProbeIntegrateTileDataAllBufferName);
@@ -1193,6 +1195,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass);
+                graph.AddPass(allocateScreenProbeTraceSurfaceBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass);
                 graph.AddPass(allocateScreenSpaceGlobalIlluminationScreenProbeAdaptiveProbeNumBufferPass);
@@ -1475,6 +1478,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass);
+                    graph.AddPass(releaseScreenProbeTraceSurfaceBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferPass);
                     if (useBurtGIIntegrateTileClassification)
@@ -2060,6 +2064,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactThreadCountXBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactIndirectArgsBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelDataBufferPass);
+                    graph.AddPass(releaseScreenProbeTraceSurfaceBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeTraceCompactTexelCountBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeIndirectArgsBufferPass);
                     graph.AddPass(releaseScreenSpaceGlobalIlluminationScreenProbeHitDistancePass);

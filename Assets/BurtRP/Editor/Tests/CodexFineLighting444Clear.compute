@@ -1,0 +1,9 @@
+#pragma kernel ClearUIntCS
+RWTexture3D<uint> _EmptyTree3D;
+RWTexture2D<uint> _EmptyCache2D;
+[numthreads(1,1,1)]
+void ClearUIntCS(uint3 id : SV_DispatchThreadID)
+{
+    _EmptyTree3D[uint3(0,0,0)] = 0u;
+    _EmptyCache2D[uint2(0,0)] = 0xffffffffu;
+}

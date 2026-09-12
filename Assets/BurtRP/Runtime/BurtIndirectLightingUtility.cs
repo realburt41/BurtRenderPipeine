@@ -174,7 +174,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             }
 
             var skyLightActive = TryResolveActiveSkyLight(camera, out var skyLight);
-            var ambientProbe = skyLightActive ? ResolveSkyLightAmbientProbe(skyLight) : RenderSettings.ambientProbe;
+            var ambientProbe = ResolveAmbientProbe(skyLightActive, skyLight);
             var skyReflection = skyLightActive ? ResolveSkyLightReflection(cmd, request, camera, skyLight) : ResolveSkyReflection(cmd, request, camera);
             var lowerHemisphere = skyLightActive ? ResolveSkyLightLowerHemisphere(skyLight) : CreateDisabledLowerHemisphere();
             var renderSettingsReflectionIntensity = IsPreviewCamera(camera) ? 1f : Mathf.Max(0f, RenderSettings.reflectionIntensity);
@@ -489,15 +489,55 @@ namespace Burt.RenderPipeline // 定义 BurtRP 运行时命名空间，让 Setup
             return texture != null ? texture.name : "<none>";
         }
 
+        private static SphericalHarmonicsL2 ResolveAmbientProbe(bool skyLightActive, BurtSkyLight skyLight)
+        {
+            return skyLightActive ? ResolveSkyLightAmbientProbe(skyLight) : RenderSettings.ambientProbe;
+        }
+
+        // Compute-only environment upload. Do not invoke the global IBL/Virtual Probe
+        // uploader here: recording an isolated voxel pass must not update those systems.
+        internal static void UploadAmbientProbeForCompute(CommandBuffer cmd, ComputeShader shader, BurtRenderRequest request)
+        {
+            if (cmd == null) throw new System.ArgumentNullException(nameof(cmd));
+            if (shader == null) throw new System.ArgumentNullException(nameof(shader));
+            var camera = request != null ? request.Camera : null;
+            var skyLightActive = TryResolveActiveSkyLight(camera, out var skyLight);
+            var packed = new PackedAmbientProbe(ResolveAmbientProbe(skyLightActive, skyLight));
+            cmd.SetComputeVectorParam(shader, AmbientSHArId, packed.Ar);
+            cmd.SetComputeVectorParam(shader, AmbientSHAgId, packed.Ag);
+            cmd.SetComputeVectorParam(shader, AmbientSHAbId, packed.Ab);
+            cmd.SetComputeVectorParam(shader, AmbientSHBrId, packed.Br);
+            cmd.SetComputeVectorParam(shader, AmbientSHBgId, packed.Bg);
+            cmd.SetComputeVectorParam(shader, AmbientSHBbId, packed.Bb);
+            cmd.SetComputeVectorParam(shader, AmbientSHCId, packed.C);
+        }
+
+        private readonly struct PackedAmbientProbe
+        {
+            internal readonly Vector4 Ar, Ag, Ab, Br, Bg, Bb, C;
+
+            internal PackedAmbientProbe(SphericalHarmonicsL2 ambientProbe)
+            {
+                Ar = CreateUnitySHA(ambientProbe, 0);
+                Ag = CreateUnitySHA(ambientProbe, 1);
+                Ab = CreateUnitySHA(ambientProbe, 2);
+                Br = CreateUnitySHB(ambientProbe, 0);
+                Bg = CreateUnitySHB(ambientProbe, 1);
+                Bb = CreateUnitySHB(ambientProbe, 2);
+                C = CreateUnitySHC(ambientProbe);
+            }
+        }
+
         private static void UploadAmbientProbe(CommandBuffer cmd, SphericalHarmonicsL2 ambientProbe) // 上传 ambient probe 的 SH 常量。
         {
-            var shAr = CreateUnitySHA(ambientProbe, 0); // 计算 R 通道 L0/L1 打包结果。
-            var shAg = CreateUnitySHA(ambientProbe, 1); // 计算 G 通道 L0/L1 打包结果。
-            var shAb = CreateUnitySHA(ambientProbe, 2); // 计算 B 通道 L0/L1 打包结果。
-            var shBr = CreateUnitySHB(ambientProbe, 0); // 计算 R 通道 L2 打包结果。
-            var shBg = CreateUnitySHB(ambientProbe, 1); // 计算 G 通道 L2 打包结果。
-            var shBb = CreateUnitySHB(ambientProbe, 2); // 计算 B 通道 L2 打包结果。
-            var shC = CreateUnitySHC(ambientProbe); // 计算 RGB 三通道共用的 L2 C 打包结果。
+            var packed = new PackedAmbientProbe(ambientProbe);
+            var shAr = packed.Ar;
+            var shAg = packed.Ag;
+            var shAb = packed.Ab;
+            var shBr = packed.Br;
+            var shBg = packed.Bg;
+            var shBb = packed.Bb;
+            var shC = packed.C;
 
             cmd.SetGlobalVector(AmbientSHArId, shAr); // 上传 BurtRP 自有 R 通道 L0/L1 SH。
             cmd.SetGlobalVector(AmbientSHAgId, shAg); // 上传 BurtRP 自有 G 通道 L0/L1 SH。

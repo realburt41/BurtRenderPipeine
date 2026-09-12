@@ -869,6 +869,12 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
     internal sealed class BurtFinalBlitPass : BurtRenderPass // 定义最终拷贝 Pass，负责把中间 CameraColor 输出到 request 指定的最终目标。
     {
+#if UNITY_EDITOR
+        // Test-only observation of the real final draw stream. No subscriber means
+        // no additional commands, targets, allocation or submission. A subscriber
+        // may append copies to cmd but must not retain the pooled context.
+        internal static System.Action<BurtRenderGraphContext, CommandBuffer, string> DiagnosticCapture;
+#endif
         private const string FinalBlitShaderName = "Hidden/BurtRP/FinalBlit"; // 定义 FinalBlit shader 的查找名称，必须和 shader 文件里的 Shader 名称一致。
 
         private static readonly int FinalBlitScaleBiasId = Shader.PropertyToID("_BurtFinalBlitScaleBias");
@@ -944,6 +950,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1); // 绘制一个全屏三角形，把中间颜色纹理采样并输出到最终目标。
 
+#if UNITY_EDITOR
+            DiagnosticCapture?.Invoke(context, cmd, "AfterFinalBlitDraw");
+#endif
             context.ExecuteAndReleaseCommandBuffer(cmd); // 在 Pass 边界统一提交。
         }
 
