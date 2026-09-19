@@ -189,19 +189,25 @@ namespace Burt.RenderPipeline
         public RenderTexture Depth { get; }
         public RenderTexture PreviousGuide { get; }
         public RenderTexture CurrentGuide { get; }
+        public RenderTexture PreviousMotionRefresh { get; }
+        public RenderTexture CurrentMotionRefresh { get; }
 
         public BurtTemporalAAHistoryTextures(
             RenderTexture previousColor,
             RenderTexture currentColor,
             RenderTexture depth,
             RenderTexture previousGuide,
-            RenderTexture currentGuide)
+            RenderTexture currentGuide,
+            RenderTexture previousMotionRefresh = null,
+            RenderTexture currentMotionRefresh = null)
         {
             PreviousColor = previousColor;
             CurrentColor = currentColor;
             Depth = depth;
             PreviousGuide = previousGuide;
             CurrentGuide = currentGuide;
+            PreviousMotionRefresh = previousMotionRefresh;
+            CurrentMotionRefresh = currentMotionRefresh;
         }
     }
 
@@ -252,7 +258,7 @@ namespace Burt.RenderPipeline
         private const int TAAUMaxHistoryDimension = 6144;
         private const int CameraStatePruneInterval = 128;
         private const string PostProcessShaderName = "Hidden/BurtRP/PostProcessCopy";
-        private const int HistoryLayoutVersion = 39;
+        private const int HistoryLayoutVersion = 40;
 
         private sealed class CameraState
         {
@@ -283,9 +289,12 @@ namespace Burt.RenderPipeline
             public RenderTexture DepthHistory;
             public RenderTexture GuideHistory;
             public RenderTexture CurrentGuideHistory;
+            public RenderTexture MotionRefreshHistory;
+            public RenderTexture CurrentMotionRefreshHistory;
             public RenderTextureDescriptor ColorDescriptor;
             public RenderTextureDescriptor DepthDescriptor;
             public RenderTextureDescriptor GuideDescriptor;
+            public RenderTextureDescriptor MotionRefreshDescriptor;
             public int HistoryLayoutVersion;
             public bool HasValidHistory;
             public bool HasPreviousCameraState;
@@ -695,13 +704,47 @@ namespace Burt.RenderPipeline
                 state.GuideDescriptor = default;
             }
 
+            // Native-only temporal motion confidence, separate from color alpha
+            // and TAAU's guide. It shares the camera's reset/swap/release epoch.
+            var needsMotionRefresh = !needsGuideHistory;
+#if UNITY_EDITOR
+            needsMotionRefresh &= !BurtTemporalAADiagnostics.DisableNativeMotionRefresh;
+#endif
+            var motionDescriptor = CreateMotionRefreshHistoryDescriptor(camera);
+            if (needsMotionRefresh &&
+                (state.MotionRefreshHistory == null || state.CurrentMotionRefreshHistory == null ||
+                 !Matches(state.MotionRefreshDescriptor, motionDescriptor)))
+            {
+                ReleaseTexture(state.MotionRefreshHistory);
+                ReleaseTexture(state.CurrentMotionRefreshHistory);
+                state.MotionRefreshDescriptor = motionDescriptor;
+                state.MotionRefreshHistory = CreateHistoryTexture(motionDescriptor, "Burt TAA Previous Motion Refresh " + camera.GetInstanceID(), FilterMode.Bilinear);
+                state.CurrentMotionRefreshHistory = CreateHistoryTexture(motionDescriptor, "Burt TAA Current Motion Refresh " + camera.GetInstanceID(), FilterMode.Bilinear);
+                state.HasValidHistory = false;
+                state.FirstValidFrameIndex = 0;
+                SetAllocationInvalidationReason(state, "MotionRefreshHistoryAllocated");
+            }
+            else if (!needsMotionRefresh && state.MotionRefreshHistory != null)
+            {
+                ReleaseTexture(state.MotionRefreshHistory);
+                ReleaseTexture(state.CurrentMotionRefreshHistory);
+                state.MotionRefreshHistory = null;
+                state.CurrentMotionRefreshHistory = null;
+                state.MotionRefreshDescriptor = default;
+                state.HasValidHistory = false;
+                state.FirstValidFrameIndex = 0;
+                SetAllocationInvalidationReason(state, "MotionRefreshHistoryReleased");
+            }
+
             historyValid = state.HasValidHistory;
             return new BurtTemporalAAHistoryTextures(
                 state.ColorHistory,
                 state.CurrentColorHistory,
                 state.DepthHistory,
                 state.GuideHistory,
-                state.CurrentGuideHistory);
+                state.CurrentGuideHistory,
+                state.MotionRefreshHistory,
+                state.CurrentMotionRefreshHistory);
         }
 
         public static RenderTexture EnsureHistoryTexture(Camera camera, out bool historyValid)
@@ -723,6 +766,10 @@ namespace Burt.RenderPipeline
             }
 
             Swap(ref state.ColorHistory, ref state.CurrentColorHistory);
+            if (state.MotionRefreshHistory != null && state.CurrentMotionRefreshHistory != null)
+            {
+                Swap(ref state.MotionRefreshHistory, ref state.CurrentMotionRefreshHistory);
+            }
             if (state.GuideHistory != null && state.CurrentGuideHistory != null)
             {
                 Swap(ref state.GuideHistory, ref state.CurrentGuideHistory);
@@ -888,6 +935,19 @@ namespace Burt.RenderPipeline
             var temporary = previous;
             previous = current;
             current = temporary;
+        }
+
+        private static RenderTextureDescriptor CreateMotionRefreshHistoryDescriptor(Camera camera)
+        {
+            var descriptor = CreateScalarHistoryDescriptor(camera);
+            var format = UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat;
+            if (!SystemInfo.IsFormatSupported(format, UnityEngine.Experimental.Rendering.FormatUsage.Render) ||
+                !SystemInfo.IsFormatSupported(format, UnityEngine.Experimental.Rendering.FormatUsage.Sample))
+                format = UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat;
+            descriptor.graphicsFormat = format;
+            // Raster update also supports the native non-compute fallback.
+            descriptor.enableRandomWrite = false;
+            return descriptor;
         }
 
         private static RenderTextureDescriptor CreateGuideHistoryDescriptor(Camera camera)
@@ -1165,6 +1225,11 @@ namespace Burt.RenderPipeline
             state.DepthHistory = null;
             state.GuideHistory = null;
             state.CurrentGuideHistory = null;
+            ReleaseTexture(state.MotionRefreshHistory);
+            ReleaseTexture(state.CurrentMotionRefreshHistory);
+            state.MotionRefreshHistory = null;
+            state.CurrentMotionRefreshHistory = null;
+            state.MotionRefreshDescriptor = default;
             state.HistoryLayoutVersion = 0;
             state.HasValidHistory = false;
             state.FirstValidFrameIndex = 0;

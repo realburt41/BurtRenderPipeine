@@ -9,6 +9,14 @@ float BurtTaaMotionAwareCurrentBlend(float staticBlend, float motionPixels)
     return lerp(staticBlend, max(staticBlend, 0.2), saturate(motionPixels));
 }
 
+// BRP native extension, not XRender's static blend policy. Avoid immediately
+// dropping to 5% current color at a motion stop while mixed-edge history is
+// still inside the variance box. Expire exactly after eight stationary frames.
+float BurtTaaAdvanceMotionRefresh(float motionPixels, float previousStrength, float historyValidity)
+{
+    return max(saturate(motionPixels), max(saturate(previousStrength) * saturate(historyValidity) - 0.125, 0.0));
+}
+
 // Native TAA extension to XRender's perceptual variance clip. Its offset
 // YCoCg chroma is divided by (1 + Y), so a black/white neighborhood spans a
 // wide chroma AABB even though it contains no color. Constrain history in

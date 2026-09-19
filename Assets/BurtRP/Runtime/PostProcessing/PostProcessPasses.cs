@@ -95,7 +95,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             SMAANeighborhoodBlending = 24,
             LensFlare = 25,
             DiaphragmDepthOfField = 26,
-            PlainCopy = 27
+            PlainCopy = 27,
+            TemporalAAMotionRefresh = 28
         }
 
         private static int ShaderPass(PostProcessShaderPass pass)
@@ -108,6 +109,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
         private static readonly int BloomTextureId = Shader.PropertyToID("_BurtBloomTexture"); // 缓存 Bloom 合成纹理属性 ID，最终合成时采样 mip0。
 
         private static readonly int TemporalAAHistoryTextureId = Shader.PropertyToID("_BurtTAAHistoryTexture");
+        private static readonly int TemporalAAMotionRefreshTextureId = Shader.PropertyToID("_BurtTAAMotionRefreshTexture");
+        private static readonly int TemporalAAPreviousMotionRefreshTextureId = Shader.PropertyToID("_BurtTAAPreviousMotionRefreshTexture");
+        private static readonly int TemporalAAMotionRefreshEnabledId = Shader.PropertyToID("_BurtTAAMotionRefreshEnabled");
         private static readonly int TemporalAADepthHistoryTextureId = Shader.PropertyToID("_BurtTAADepthHistoryTexture");
         private static readonly int TemporalAACurrentDepthTextureId = Shader.PropertyToID("_BurtTAACurrentDepthTexture");
         private static readonly int TemporalAARawVelocityTextureId = Shader.PropertyToID("_BurtTAARawVelocityTexture");
@@ -2097,6 +2101,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 
             var histories = BurtTemporalAAUtility.EnsureHistoryTextures(camera, out var historyValid);
             temporalAA.HistoryValid = historyValid;
+            var useNativeMotionRefresh = !useTemporalAAUpscale &&
+                histories.PreviousMotionRefresh != null && histories.CurrentMotionRefresh != null;
+            if (useNativeMotionRefresh && material.passCount <= ShaderPass(PostProcessShaderPass.TemporalAAMotionRefresh))
+            {
+                BurtTemporalAAUtility.InvalidateHistory(camera, "MotionRefreshShaderPassMissing");
+                return false;
+            }
             if (histories.PreviousColor == null ||
                 histories.CurrentColor == null ||
                 histories.Depth == null ||
@@ -2470,7 +2481,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     dilatedHistoryRejection,
                     temporalAA.HistoryExposureCorrection,
                     width,
-                    height);
+                    height,
+                    historyValid ? historyWidth : width,
+                    historyValid ? historyHeight : height);
                 cmd.SetGlobalTexture(TemporalAADilatedHistoryRejectionTextureId, dilatedHistoryRejection);
                 cmd.SetGlobalFloat(TemporalAAHasDilatedHistoryRejectionId, 1f);
             }
@@ -2478,6 +2491,22 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             {
                 cmd.SetGlobalFloat(TemporalAAHasDilatedHistoryRejectionId, 0f);
             }
+
+            // Raster update keeps both native resolve paths on the same motion
+            // history contract, including platforms without compute support.
+            var motionRefresh = blackTexture;
+            if (useNativeMotionRefresh)
+            {
+                motionRefresh = new RenderTargetIdentifier(histories.CurrentMotionRefresh);
+                cmd.SetRenderTarget(motionRefresh);
+                SetTemporalAAViewport(cmd, width, height);
+                cmd.SetGlobalTexture(TemporalAAPreviousMotionRefreshTextureId, histories.PreviousMotionRefresh);
+                cmd.SetGlobalTexture(TemporalAAVelocityTextureId, dilatedVelocity);
+                cmd.SetGlobalTexture(TemporalAAParallaxRejectionTextureId, parallaxRejection);
+                cmd.DrawProcedural(Matrix4x4.identity, material, ShaderPass(PostProcessShaderPass.TemporalAAMotionRefresh), MeshTopology.Triangles, 3, 1);
+            }
+            cmd.SetGlobalTexture(TemporalAAMotionRefreshTextureId, motionRefresh);
+            cmd.SetGlobalFloat(TemporalAAMotionRefreshEnabledId, useNativeMotionRefresh ? 1f : 0f);
 
             // TAAU history is larger than the input, so even on a reset frame bind the
             // correctly-sized persistent texture and let the history-valid flag bypass it.
@@ -2536,6 +2565,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     parallaxRejection,
                     useLegacyTemporalAAUpscaleRejection ? dilatedHistoryRejection : parallaxRejection,
                     metadata,
+                    motionRefresh,
                     stencilMask,
                     resolveTarget,
                     temporalAA,
@@ -2544,7 +2574,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
                     height,
                     width,
                     height,
-                    useTemporalAAUpscale)))
+                    historyWidth,
+                    historyHeight,
+                    useTemporalAAUpscale,
+                    useNativeMotionRefresh)))
             {
                 cmd.SetRenderTarget(resolveTarget);
                 SetTemporalAAViewport(cmd, width, height);
@@ -2580,6 +2613,13 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
 #if UNITY_EDITOR
             // Read the previous depth before this frame overwrites the single
             // persistent depth history; end-of-pass capture would be current depth.
+            if (useNativeMotionRefresh)
+                BurtTemporalAADiagnostics.Capture?.Invoke(cmd, camera, temporalAA,
+                    "motion_refresh", motionRefresh, histories.CurrentMotionRefresh.descriptor);
+            if (!useTemporalAAUpscale)
+                BurtTemporalAADiagnostics.NativeResolveExperiment?.Invoke(cmd, camera, temporalAA,
+                    cameraColorTarget.Identifier, historyColorTarget, dilatedVelocity,
+                    parallaxRejection, stencilMask, resolveTarget, resolveDescriptor);
             BurtTemporalAADiagnostics.Capture?.Invoke(cmd, camera, temporalAA,
                 "history_depth", new RenderTargetIdentifier(histories.Depth), histories.Depth.descriptor);
             BurtTemporalAADiagnostics.Capture?.Invoke(cmd, camera, temporalAA,
@@ -2837,7 +2877,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             RenderTargetIdentifier dilatedHistoryRejection,
             float historyExposureCorrection,
             int width,
-            int height)
+            int height,
+            int historyWidth,
+            int historyHeight)
         {
             var shader = GetTemporalAAComputeShader();
             var buildKernel = shader.FindKernel("BuildHistoryRejectionAACS");
@@ -2848,6 +2890,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetComputeTextureParam(shader, buildKernel, TemporalAAMetadataTextureId, metadata);
             cmd.SetComputeTextureParam(shader, buildKernel, TemporalAAStencilMaskTextureId, stencilMask);
             cmd.SetComputeTextureParam(shader, buildKernel, TemporalAAHistoryRejectionOutputTextureId, historyRejection);
+            cmd.SetComputeVectorParam(shader, TemporalAAHistoryTexelSizeId, new Vector4(
+                1f / Mathf.Max(1, historyWidth), 1f / Mathf.Max(1, historyHeight), historyWidth, historyHeight));
             cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
             cmd.SetComputeVectorParam(shader, TemporalAAStencilTexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
             cmd.SetComputeFloatParam(shader, TemporalAAHistoryExposureCorrectionId, historyExposureCorrection);
@@ -2872,6 +2916,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             RenderTargetIdentifier parallaxRejection,
             RenderTargetIdentifier dilatedHistoryRejection,
             RenderTargetIdentifier metadata,
+            RenderTargetIdentifier motionRefresh,
             RenderTargetIdentifier stencilMask,
             RenderTargetIdentifier resolveTarget,
             BurtTemporalAARequestState temporalAA,
@@ -2880,7 +2925,10 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             int height,
             int stencilWidth,
             int stencilHeight,
-            bool useTemporalAAUpscale)
+            int historyWidth,
+            int historyHeight,
+            bool useTemporalAAUpscale,
+            bool useNativeMotionRefresh)
         {
 #if UNITY_EDITOR
             if (!useTemporalAAUpscale && BurtTemporalAADiagnostics.ForceNativeRasterResolve)
@@ -2904,8 +2952,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理 Pa
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAParallaxRejectionTextureId, parallaxRejection);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAADilatedHistoryRejectionTextureId, dilatedHistoryRejection);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAMetadataTextureId, metadata);
+            cmd.SetComputeTextureParam(shader, kernel, TemporalAAMotionRefreshTextureId, motionRefresh);
+            cmd.SetComputeFloatParam(shader, TemporalAAMotionRefreshEnabledId, useNativeMotionRefresh ? 1f : 0f);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAStencilMaskTextureId, stencilMask);
             cmd.SetComputeTextureParam(shader, kernel, TemporalAAResolveTextureId, resolveTarget);
+            // Compute-local constants outlive a camera/dispatch and can shadow
+            // SetGlobalVector after TAAU or another resolution used this shader.
+            // Catmull-Rom must address the texture bound for THIS history, not
+            // a stale size left by a previous camera or upscale dispatch.
+            cmd.SetComputeVectorParam(shader, TemporalAAHistoryTexelSizeId, new Vector4(
+                1f / Mathf.Max(1, historyWidth), 1f / Mathf.Max(1, historyHeight), historyWidth, historyHeight));
             cmd.SetComputeVectorParam(shader, TemporalAATexelSizeId, new Vector4(1f / Mathf.Max(1, width), 1f / Mathf.Max(1, height), width, height));
             cmd.SetComputeVectorParam(shader, TemporalAAStencilTexelSizeId, new Vector4(1f / Mathf.Max(1, stencilWidth), 1f / Mathf.Max(1, stencilHeight), stencilWidth, stencilHeight));
             cmd.SetComputeVectorParam(shader, TemporalAAParamsId, new Vector4(0f, 0f, historyValid ? 1f : 0f, temporalAA != null ? temporalAA.FrameIndex : 0f));

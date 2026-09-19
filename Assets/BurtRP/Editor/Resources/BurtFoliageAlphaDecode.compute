@@ -1,0 +1,11 @@
+#pragma kernel DecodeMip
+Texture2D<float4> _Source;
+RWTexture2D<float> _Output;
+int _Mip;
+int2 _Size;
+[numthreads(8,8,1)]
+void DecodeMip(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size)) return;
+    _Output[id.xy] = _Source.Load(int3(id.xy, _Mip)).r;
+}

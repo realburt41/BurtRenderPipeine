@@ -1083,6 +1083,8 @@ Shader "Hidden/BurtRP/PostProcessCopy"
 
             Texture2D _BurtPostProcessSourceTexture;
             Texture2D _BurtTAAHistoryTexture;
+            Texture2D<float> _BurtTAAMotionRefreshTexture;
+            float _BurtTAAMotionRefreshEnabled;
             sampler2D _BurtTAACurrentDepthTexture;
             sampler2D _BurtTAAClosestDepthTexture;
             sampler2D _BurtTAADepthHistoryTexture;
@@ -1576,7 +1578,9 @@ Shader "Hidden/BurtRP/PostProcessCopy"
                 float historyLuma = BurtTaaWorkingLuma(historyWorking);
                 float lumaContrast = saturate(0.25 * rcp(1.0 + max(maxBoundLuma - minBoundLuma, 0.0) / max(historyLuma, 6.103515625e-5)));
                 float xrenderBaseBlend = max(0.05, lumaContrast);
-                xrenderBaseBlend = BurtTaaMotionAwareCurrentBlend(xrenderBaseBlend, motionPixels);
+                float motionRefresh = _BurtTAAMotionRefreshEnabled > 0.5
+                    ? _BurtTAAMotionRefreshTexture.SampleLevel(sampler_PointClamp, uv, 0) : 0.0;
+                xrenderBaseBlend = BurtTaaMotionAwareCurrentBlend(xrenderBaseBlend, max(motionPixels, motionRefresh));
                 float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
                 currentBlend = lerp(currentBlend, 0.25, responsiveMask);
                 currentBlend = saturate(currentBlend);
@@ -3506,7 +3510,53 @@ Shader "Hidden/BurtRP/PostProcessCopy"
             ENDHLSL
         }
 
+        Pass
+        {
+            Name "TemporalAA Motion Refresh"
+            Cull Off
+            ZWrite Off
+            ZTest Always
 
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex Vert
+            #pragma fragment Frag
+            #include "UnityCG.cginc"
+            #include "Assets/BurtRP/Runtime/TAA/BurtTemporalAABlend.hlsl"
+
+            Texture2D<float2> _BurtTAAVelocityTexture;
+            Texture2D<float> _BurtTAAParallaxRejectionTexture;
+            Texture2D<float> _BurtTAAPreviousMotionRefreshTexture;
+            SamplerState sampler_LinearClamp;
+            float4 _BurtTAATexelSize;
+            float4 _BurtTAAParams;
+
+            struct Attributes { uint vertexID : SV_VertexID; };
+            struct Varyings { float4 positionCS : SV_POSITION; };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
+                output.positionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                return output;
+            }
+
+            float Frag(Varyings input) : SV_Target
+            {
+                int2 pixel = int2(input.positionCS.xy);
+                float2 uv = (float2(pixel) + 0.5) * _BurtTAATexelSize.xy;
+                float2 velocity = _BurtTAAVelocityTexture.Load(int3(pixel, 0));
+                float2 historyUv = uv - velocity;
+                float previous = 0.0;
+                // Do not sample uninitialized/reallocated history on a reset.
+                if (_BurtTAAParams.z > 0.5 && all(historyUv >= 0.0) && all(historyUv <= 1.0))
+                    previous = _BurtTAAPreviousMotionRefreshTexture.SampleLevel(sampler_LinearClamp, historyUv, 0);
+                float validity = _BurtTAAParallaxRejectionTexture.Load(int3(pixel, 0));
+                return BurtTaaAdvanceMotionRefresh(length(velocity * _BurtTAATexelSize.zw), previous, validity);
+            }
+            ENDHLSL
+        }
     }
 
     // 禁用 fallback，避免后处理拷贝失败时悄悄走其他管线 shader。

@@ -82,6 +82,8 @@ float4 _BurtTAACurrentSampleWeights1;
 float4 _BurtTAACurrentSampleWeights2;
 float4 _ZBufferParams;
 float _BurtTAAHistoryExposureCorrection;
+Texture2D<float> _BurtTAAMotionRefreshTexture;
+float _BurtTAAMotionRefreshEnabled;
 
 bool BurtTaaAnyNonFinite(float3 value)
 {
@@ -824,7 +826,9 @@ void ResolveTemporalAACS(uint3 id : SV_DispatchThreadID)
             max(historyLuma, 6.103515625e-5)));
     float xrenderBaseBlend = max(0.05, lumaContrast);
     float motionPixels = length(velocityData * _BurtTAATexelSize.zw);
-    xrenderBaseBlend = BurtTaaMotionAwareCurrentBlend(xrenderBaseBlend, motionPixels);
+    float motionRefresh = _BurtTAAMotionRefreshEnabled > 0.5
+        ? _BurtTAAMotionRefreshTexture.Load(int3(pixel, 0)) : 0.0;
+    xrenderBaseBlend = BurtTaaMotionAwareCurrentBlend(xrenderBaseBlend, max(motionPixels, motionRefresh));
     float currentBlend = lerp(1.0, xrenderBaseBlend, finalRejection);
     // Match XRender's explicit responsive branch: responsive pixels use a
     // fixed 25% current-frame weight while their history UV remains in bounds.
