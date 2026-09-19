@@ -252,6 +252,37 @@ Shader "Hidden/BurtRP/DeferredLighting"
             #pragma fragment Frag
             ENDHLSL
         }
+        // Clear only GBuffer shading-model pixels. Stencil zero belongs to the
+        // background/forward path and must retain the camera's clear or seed.
+        Pass
+        {
+            Name "Burt Clear Deferred Geometry"
+            Cull Off
+            ZWrite Off
+            ZTest Always
+            Blend Off
+            Stencil
+            {
+                Ref 0
+                ReadMask [_BurtDeferredStencilShadingModelMask]
+                Comp NotEqual
+                Pass Keep
+            }
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex ClearVert
+            #pragma fragment ClearFrag
+            Varyings ClearVert(Attributes input)
+            {
+                Varyings output;
+                float2 uv = float2((input.VertexID << 1) & 2, input.VertexID & 2);
+                output.PositionCS = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+                output.ScreenUV = uv;
+                return output;
+            }
+            float4 ClearFrag(Varyings input) : SV_Target { return 0.0; }
+            ENDHLSL
+        }
     }
 
     // Disable fallback so missing deferred lighting fails visibly instead of using an unrelated shader.

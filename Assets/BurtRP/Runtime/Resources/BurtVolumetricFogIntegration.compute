@@ -269,12 +269,6 @@ float3 BurtVFSafeNormalize(float3 value, float3 fallback)
     return lengthSq > 1.0e-8f ? value * rsqrt(lengthSq) : fallback;
 }
 
-float3 BurtVFNormalizeLightColor(float3 lightColor)
-{
-    float peak = max(max(lightColor.r, lightColor.g), lightColor.b);
-    return peak > 0.001f ? lightColor / peak : 1.0f;
-}
-
 float BurtVFHenyeyGreensteinPhase(float cosTheta, float anisotropy)
 {
     float g2 = anisotropy * anisotropy;
@@ -830,8 +824,11 @@ float4 BurtVFEvaluateLightingVolumeSample(uint3 gridPosition, float3 sampleOffse
     float3 mainLightDirection = BurtVFSafeNormalize(
         _BurtVolumetricFogIntegratedMainLightDirection.xyz,
         float3(0.0f, 1.0f, 0.0f));
-    float3 legacyLightColor = BurtVFNormalizeLightColor(
-        max(_BurtVolumetricFogIntegratedLegacyLightColorScale.rgb, 0.0f))
+    // RGB already contains outer-space illuminance * atmosphere transmittance.
+    // Preserve its magnitude: hue normalization discards sunset extinction and
+    // its former white fallback turned an extinguished sun into white fog.
+    float3 legacyLightColor = max(
+        _BurtVolumetricFogIntegratedLegacyLightColorScale.rgb, 0.0f)
         * max(_BurtVolumetricFogIntegratedLegacyLightColorScale.w, 0.0f);
     float mainLightPhase = BurtVFHenyeyGreensteinPhase(
         dot(mainLightDirection, viewDirection),

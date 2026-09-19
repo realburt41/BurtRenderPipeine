@@ -107,6 +107,23 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
         [SerializeField] private Shader postProcessCopyShader;
         [SerializeField] private Shader finalBlitShader;
 
+        // Explicit dependencies retain hidden fullscreen shaders in Player builds.
+        [Header("Atmosphere and Fog")]
+        [SerializeField] private Shader atmosphereScatteringShader;
+        [SerializeField] private Shader volumetricFogShader;
+        [SerializeField] private Shader fogShader;
+        [SerializeField] private Shader lightShaftOcclusionShader;
+
+#if UNITY_EDITOR
+        internal void EnsureAtmosphereShaders()
+        {
+            if (atmosphereScatteringShader == null) atmosphereScatteringShader = Shader.Find("Hidden/BurtRP/AtmosphereScattering");
+            if (volumetricFogShader == null) volumetricFogShader = Shader.Find("Hidden/BurtRP/VolumetricFog");
+            if (fogShader == null) fogShader = Shader.Find("Hidden/BurtRP/Fog");
+            if (lightShaftOcclusionShader == null) lightShaftOcclusionShader = Shader.Find("Hidden/BurtRP/LightShaftOcclusion");
+        }
+#endif
+
         public Shader ScreenSpaceGlobalIlluminationShader => screenSpaceGlobalIlluminationShader;
         public Shader HiZDepthPyramidShader => hiZDepthPyramidShader;
         public Shader PostProcessCopyShader => postProcessCopyShader;
@@ -556,6 +573,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让管线资产
             {
                 runtimeResources = new BurtRenderPipelineRuntimeResources();
             }
+#if UNITY_EDITOR
+            runtimeResources.EnsureAtmosphereShaders();
+#endif
             EnsurePostProcessSettings(); // 确保后处理设置对象存在，避免旧资产在 Inspector 中显示为空。
             EnsureScreenSpaceSubsurfaceProfileList();
             if (screenSpaceSubsurfaceProfiles.Count > BurtSubsurfaceProfilePalette.MaxProfiles - 1)

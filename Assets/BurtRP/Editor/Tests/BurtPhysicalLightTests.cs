@@ -26,6 +26,16 @@ namespace Burt.RenderPipeline.Tests
             Assert.That(light.intensity, Is.EqualTo(2f).Within(0.0001f));
         }
 
+        [TestCase(1f)]
+        [TestCase(5f)]
+        [TestCase(30f)]
+        public void ExactSpotUnitRoundTripPreservesNarrowConeOutput(float angle)
+        {
+            var lumens = BurtPhysicalLightUnitUtility.SpotCandelaToLumen(100f, angle, true);
+            Assert.That(BurtPhysicalLightUnitUtility.SpotLumenToCandela(lumens, angle, true),
+                Is.EqualTo(100f).Within(0.0001f));
+        }
+
         [Test]
         public void ChangingPointUnitPreservesNativeOutput()
         {

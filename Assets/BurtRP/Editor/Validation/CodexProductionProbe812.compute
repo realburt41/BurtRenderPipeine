@@ -5,7 +5,6 @@
 float _BurtGIReactiveHistory;
 #pragma kernel ScreenProbeReprojectionCS
 #pragma kernel ScreenProbeDirectionalTemporalCS
-#pragma kernel ScreenProbeDirectionalCopyCS
 #pragma kernel ScreenProbeSceneVelocityCS
 #pragma kernel ScreenProbeClearUseCountCS
 #pragma kernel XGIScreenProbeUseCountScatterCS
@@ -91,7 +90,7 @@ Texture2D<float4> _BurtGIScreenProbeSceneVelocityTexture;
 // Unlike the legacy coarse velocity field, this has no grid-center origin.
 Texture2D<float4> _BurtGIScreenProbeReceiverVelocityTexture;
 float4 _BurtGIScreenProbeReceiverVelocityParams; // xy=size, z=owned/available.
-#include "BurtGIScreenProbeAdaptiveData.hlsl"
+#include "D:/GitProject/BurtRenderPipeine/Assets/BurtRP/Runtime/Resources/BurtGIScreenProbeAdaptiveData.hlsl"
 StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
 StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 float _BurtGISceneVoxelOctreeValid;
@@ -730,15 +729,6 @@ void ScreenProbeReprojectionCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     _BurtGIScreenProbeNumFramesAccumulatedWriteTexture[probeCoord] = numFramesAccumulated;
 }
 [numthreads(BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, 1)]
-void ScreenProbeDirectionalCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    uint2 size = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
-    if (any(dispatchThreadId.xy >= size)) return;
-    _BurtGIScreenProbeDirectionalTemporalWriteTexture[dispatchThreadId.xy] =
-        _BurtGIScreenProbeTraceRadianceTexture.Load(int3(dispatchThreadId.xy, 0));
-}
-
-[numthreads(BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, 1)]
 void ScreenProbeDirectionalTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 atlasSize = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
@@ -995,3 +985,14 @@ void ScreenProbeUseCountScatterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     BurtGIScreenProbeUseCountScatter(dispatchThreadId);
 }
+
+
+#pragma kernel CodexObserveProduction812
+cbuffer CodexObservationStamp812 { int4 _CodexStamp812; };
+RWStructuredBuffer<float4> _CodexObservation812;
+[numthreads(1,1,1)]
+void CodexObserveProduction812(uint3 id:SV_DispatchThreadID)
+{
+ _CodexObservation812[0]=float4(_BurtGIReactiveHistory,_CodexStamp812.x,_CodexStamp812.y,1.0f);
+}
+

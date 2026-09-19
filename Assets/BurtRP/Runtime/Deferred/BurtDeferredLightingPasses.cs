@@ -134,14 +134,22 @@ namespace Burt.RenderPipeline
         }
     }
 
-    internal sealed class BurtClearDeferredLightingTargetPass : BurtRenderPass
+    internal sealed class BurtClearDeferredLightingTargetPass : BurtRenderPass, System.IDisposable
     {
+        private Material clearMaterial;
+        public void Dispose()
+        {
+            CoreUtils.Destroy(clearMaterial);
+            clearMaterial = null;
+        }
         public override string Name => "Burt Clear Deferred Lighting Target";
 
         public override BurtRenderPassKind Kind => BurtRenderPassKind.Clear;
 
         public override void Configure(BurtRenderPassBuilder builder)
         {
+            builder.ReadCameraColor();
+            builder.ReadCameraDepth();
             builder.WriteCameraColor();
         }
 
@@ -155,10 +163,25 @@ namespace Burt.RenderPipeline
                 return;
             }
 
+            var depthTarget = context.CameraDepthTarget;
+            if (!depthTarget.IsValid)
+            {
+                return;
+            }
+            if (clearMaterial == null)
+            {
+                var shader = Shader.Find("Hidden/BurtRP/DeferredLighting");
+                if (shader == null) return;
+                clearMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            }
+            var clearPass = clearMaterial.FindPass("Burt Clear Deferred Geometry");
+            if (clearPass < 0) return;
             var cmd = context.AcquireCommandBuffer(Name);
-            cmd.SetRenderTarget(cameraColorTarget.Identifier);
+            cmd.SetRenderTarget(cameraColorTarget.Identifier, depthTarget.Identifier);
             BurtRenderTargetDescriptorUtility.SetCameraTargetViewport(cmd, context.Request != null ? context.Request.Camera : null);
-            cmd.ClearRenderTarget(false, true, Color.clear);
+            // Additive shading models need a zero destination, but background and
+            // inherited overlay pixels must retain the camera clear/seed color.
+            cmd.DrawProcedural(Matrix4x4.identity, clearMaterial, clearPass, MeshTopology.Triangles, 3, 1);
             context.ExecuteAndReleaseCommandBuffer(cmd);
         }
     }

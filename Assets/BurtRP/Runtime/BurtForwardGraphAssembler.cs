@@ -449,7 +449,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这个类可
                 return false; // 返回 false，避免从还没 FinalBlit 的最终目标复制旧画面覆盖 Base 结果。
             }
 
-            return request.Type == BurtRenderRequestType.OverlayCamera && !request.OverlayClearsColor; // 非共享 Overlay 默认不清颜色时需要复制最终目标作为底图。
+            return (request.Type == BurtRenderRequestType.OverlayCamera || request.Type == BurtRenderRequestType.UICamera) && !request.OverlayClearsColor; // 非共享叠加相机继承最终目标。
         }
 
         private static bool IsPreviewRequest(BurtRenderRequest request) // 判断当前 request 是否来自 Unity 编辑器 Preview。

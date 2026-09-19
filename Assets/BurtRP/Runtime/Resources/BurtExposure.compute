@@ -166,7 +166,8 @@ float BurtComputeAverageSceneLuminance()
 
 float BurtExponentialAdaptation(float current, float target, float frameTime, float speed, float slopeModifier)
 {
-    return current + (target - current) * (1.0 - exp2(-frameTime * speed)) * slopeModifier;
+    // A long frame can make the transition slope modifier overshoot the target.
+    return lerp(current, target, saturate((1.0 - exp2(-frameTime * speed)) * slopeModifier));
 }
 
 float BurtLinearAdaptation(float current, float target, float frameTime, float speed)
@@ -177,8 +178,9 @@ float BurtLinearAdaptation(float current, float target, float frameTime, float s
 
 float BurtComputeAutoExposure(float oldExposure, float targetExposure)
 {
-    float logTarget = log2(max(targetExposure, 1e-4));
-    float logOld = log2(max(oldExposure, 1e-4));
+    // Exposure supports EV -16 (2^-16); a 1e-4 floor silently clipped that range.
+    float logTarget = log2(max(targetExposure, 1e-8));
+    float logOld = log2(max(oldExposure, 1e-8));
     float difference = logTarget - logOld;
     float speed = difference > 0.0 ? _BurtExposureAdaptationParams.y : _BurtExposureAdaptationParams.z;
     float slopeModifier = difference > 0.0 ? _BurtExposureAdaptationShape.x : _BurtExposureAdaptationShape.y;
@@ -190,6 +192,8 @@ float BurtComputeAutoExposure(float oldExposure, float targetExposure)
 
 float BurtComputeCompensation(float oldCompensation, float targetCompensation)
 {
+    if (targetCompensation <= 0.0)
+        return 0.0;
     if (oldCompensation <= 0.0 || _BurtExposureAdaptationParams.w > 0.5)
         return targetCompensation;
     float logOld = log2(max(oldCompensation, 1e-4));
@@ -261,8 +265,8 @@ void HistogramAutoExposureCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float estimatedExposure = BurtComputeAutoExposure(oldExposure, targetExposure);
     float compensation = BurtComputeCompensation(oldData.w, targetCompensation);
     float4 output = float4(
-        compensation / max(estimatedExposure, 1e-4),
-        compensation / max(targetExposure, 1e-4),
+        compensation / max(estimatedExposure, 1e-8),
+        compensation / max(targetExposure, 1e-8),
         averageSceneLuminance,
         compensation);
     float averageLocalExposure = BurtComputeAverageLocalExposure(output.x, output.w);

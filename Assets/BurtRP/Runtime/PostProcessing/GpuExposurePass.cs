@@ -281,7 +281,7 @@ namespace Burt.RenderPipeline
                 : Texture2D.whiteTexture;
 
             var localExposure = VolumeManager.instance.stack.GetComponent<LocalExposureVolumeComponent>();
-            var requestLocalExposure = useAutomaticExposure && localExposure != null && localExposure.IsEnabled();
+            var requestLocalExposure = localExposure != null && localExposure.IsEnabled();
             state.LocalExposureValid = false;
 
             if (useAutomaticExposure)
@@ -343,6 +343,15 @@ namespace Burt.RenderPipeline
             else
             {
                 UploadCommonParameters(cmd, component, state.ForceTarget, invPreExposure, sceneWidth, sceneHeight);
+                // Local exposure is also valid with fixed EV/physical camera
+                // exposure. Generate its spatial inputs without running auto
+                // adaptation or replacing the authored global exposure.
+                if (requestLocalExposure &&
+                    EnsureLocalExposureDownsampleTextures(state, sceneWidth, sceneHeight, LocalExposureDownsampleStageCount) &&
+                    ExecuteSceneDownsampleChain(cmd, cameraColor, state, sceneWidth, sceneHeight, LocalExposureDownsampleStageCount))
+                {
+                    state.LocalExposureValid = ExecuteLocalExposure(cmd, state, localExposure, state.LocalDownsampleTextures[0]);
+                }
                 UploadLocalExposureAutoParameters(cmd, null, state.AverageLuminance, false);
                 cmd.BeginSample("Manual Exposure Pass");
                 cmd.SetComputeTextureParam(computeShader, manualExposureKernel, OutputUavId, outputTexture);
@@ -365,13 +374,19 @@ namespace Burt.RenderPipeline
                 Swap(ref minEv100, ref maxEv100);
             var histogramMin = exposure != null ? exposure.autoHistogramMinEV100.value : PhysicalExposureSettings.DefaultAutoHistogramMinEv100;
             var histogramMax = exposure != null ? exposure.autoHistogramMaxEV100.value : PhysicalExposureSettings.DefaultAutoHistogramMaxEv100;
-            if (histogramMax <= histogramMin)
+            if (histogramMax < histogramMin)
+                Swap(ref histogramMin, ref histogramMax);
+            if (histogramMax == histogramMin)
                 histogramMax = histogramMin + 0.001f;
             var histogramScale = 1f / (histogramMax - histogramMin);
             var histogramBias = -histogramMin * histogramScale;
             var lowPercent = Mathf.Clamp(exposure != null ? exposure.autoLowPercent.value : 10f, 1f, 99f) * 0.01f;
             var highPercent = Mathf.Clamp(exposure != null ? exposure.autoHighPercent.value : 90f, 1f, 99f) * 0.01f;
-            lowPercent = Mathf.Min(lowPercent, highPercent);
+            if (lowPercent > highPercent)
+                Swap(ref lowPercent, ref highPercent);
+            // Keep a non-empty integration interval, including 99/99 input.
+            highPercent = Mathf.Min(0.99f, Mathf.Max(highPercent, lowPercent + 0.01f));
+            lowPercent = Mathf.Min(lowPercent, highPercent - 0.01f);
             var speedUp = Mathf.Max(exposure != null ? exposure.autoSpeedUp.value : 3f, 0.001f);
             var speedDown = Mathf.Max(exposure != null ? exposure.autoSpeedDown.value : 1f, 0.001f);
             var exponentialUpM = CalculateExponentialSlopeModifier(speedUp);
@@ -788,10 +803,12 @@ namespace Burt.RenderPipeline
             if (data.Length < 1)
                 return;
             var exposure = data[0];
-            state.CurrentScale = SanitizeScale(exposure.x);
-            state.TargetScale = SanitizeScale(exposure.y);
+            // Keep the measured exposure (including zero calibration) in diagnostics.
+            // Raster pre-exposure has its own safe reciprocal clamp at consumption.
+            state.CurrentScale = Mathf.Max(SanitizeFinite(exposure.x, 1f), 0f);
+            state.TargetScale = Mathf.Max(SanitizeFinite(exposure.y, 1f), 0f);
             state.AverageLuminance = Mathf.Max(SanitizeFinite(exposure.z, 1f), 0.000001f);
-            state.CompensationScale = SanitizeScale(exposure.w);
+            state.CompensationScale = Mathf.Max(SanitizeFinite(exposure.w, 1f), 0f);
             state.AverageLocalExposure = data.Length > 1
                 ? SanitizeScale(data[1].x)
                 : 1f;

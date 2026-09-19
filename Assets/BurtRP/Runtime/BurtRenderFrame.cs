@@ -29,7 +29,10 @@ namespace Burt.RenderPipeline
         // 返回这个组是否有多个 Base 相机，这种情况暂时不适合启用 Stack 级 RT 共享。
         public bool HasMultipleBaseCameras => BaseCameraCount > 1;
         // 返回这个组是否适合使用 Stack 级颜色和深度 RT；当前只作计划诊断。
-        public bool ShouldUseSharedRenderTargets => !IsEditorCameraGroup && BaseCameraCount == 1;
+        // RenderGraph resources and post-exposure state are currently request-local.
+        // Multiple cameras must composite through the final target until the graph
+        // can import persistent stack attachments (including ping-pong color).
+        public bool ShouldUseSharedRenderTargets => !IsEditorCameraGroup && BaseCameraCount == 1 && requests.Count == 1;
         // 返回这个组未来是否应该只做一次 FinalBlit，和共享 RT 条件保持一致。
         public bool ShouldUseSingleFinalBlit => ShouldUseSharedRenderTargets;
         // 根据当前组内角色和目标返回一个简短的 RT 计划名称，便于 Console 里快速阅读。
@@ -59,7 +62,7 @@ namespace Burt.RenderPipeline
                 if (HasOverlayOrUICamera)
                 {
                     // 返回多相机栈的共享 RT 计划名称。
-                    return "SharedStackRT";
+                    return "IsolatedStackComposite";
                 }
                 // 只有单个 Base 时仍然可以用 Stack 级 RT 生命周期，方便后处理插入。
                 return "SingleBaseStackRT";

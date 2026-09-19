@@ -1,11 +1,14 @@
+// Private current-source candidate; not imported or enabled in production.
+#pragma multi_compile_local _ CODEX_TRANSIENT_779
+#if defined(CODEX_TRANSIENT_779)
+cbuffer CodexTransient779 { float _CodexReactive779; };
+#endif
 #pragma kernel ScreenProbeFilterTemporalCS
 
 // Define the platform depth and texture-coordinate conventions used below.
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-float _BurtGIReactiveHistory;
 #pragma kernel ScreenProbeReprojectionCS
 #pragma kernel ScreenProbeDirectionalTemporalCS
-#pragma kernel ScreenProbeDirectionalCopyCS
 #pragma kernel ScreenProbeSceneVelocityCS
 #pragma kernel ScreenProbeClearUseCountCS
 #pragma kernel XGIScreenProbeUseCountScatterCS
@@ -91,7 +94,7 @@ Texture2D<float4> _BurtGIScreenProbeSceneVelocityTexture;
 // Unlike the legacy coarse velocity field, this has no grid-center origin.
 Texture2D<float4> _BurtGIScreenProbeReceiverVelocityTexture;
 float4 _BurtGIScreenProbeReceiverVelocityParams; // xy=size, z=owned/available.
-#include "BurtGIScreenProbeAdaptiveData.hlsl"
+#include "D:/GitProject/BurtRenderPipeine/Assets/BurtRP/Runtime/Resources/BurtGIScreenProbeAdaptiveData.hlsl"
 StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
 StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 float _BurtGISceneVoxelOctreeValid;
@@ -518,43 +521,36 @@ float BurtGISampleScreenProbeUseCountHistoryWeight(float2 historyUV)
 }
 bool BurtGIResolveScreenProbeHistoryUV(uint2 probeCoord, uint2 gridSize, float3 positionWS, out float2 historyUV, out float projectedRawDepth)
 {
-    float2 resolvedUV = 0.0f;
-    float resolvedDepth = 0.0f;
-    bool projected = BurtGIScreenProbeProjectPreviousPositionWS(positionWS, resolvedUV, resolvedDepth);
+    bool projectedFromWorldPosition = BurtGIScreenProbeProjectPreviousPositionWS(positionWS, historyUV, projectedRawDepth);
 
     if (_BurtGIScreenProbeReceiverVelocityParams.z > 0.5f)
     {
         float4 currentClip = mul(_BurtGIScreenProbeViewProjectionMatrix, float4(positionWS, 1.0f));
         if (currentClip.w <= 0.00001f)
         {
-            projected = false;
+            return false;
         }
-        else
+        float2 currentUV = BurtGIScreenProbeClipToScreenUV(currentClip.xy / currentClip.w);
+        if (any(currentUV < 0.0f) || any(currentUV > 1.0f))
         {
-            float2 currentUV = BurtGIScreenProbeClipToScreenUV(currentClip.xy / currentClip.w);
-            if (any(currentUV < 0.0f) || any(currentUV > 1.0f))
+            return false;
+        }
+        uint2 velocitySize = max((uint2)_BurtGIScreenProbeReceiverVelocityParams.xy, uint2(1u, 1u));
+        uint2 velocityCoord = min((uint2)floor(currentUV * (float2)velocitySize), velocitySize - 1u);
+        float4 sceneVelocity = _BurtGIScreenProbeReceiverVelocityTexture.Load(int3(velocityCoord, 0));
+        if (sceneVelocity.w > 0.5f && sceneVelocity.z > 0.5f)
+        {
+            float2 velocityHistoryUV = currentUV - sceneVelocity.xy;
+            if (any(velocityHistoryUV < 0.0f) || any(velocityHistoryUV > 1.0f))
             {
-                projected = false;
+                return false;
             }
-            else
-            {
-                uint2 velocitySize = max((uint2)_BurtGIScreenProbeReceiverVelocityParams.xy, uint2(1u, 1u));
-                uint2 velocityCoord = min((uint2)floor(currentUV * (float2)velocitySize), velocitySize - 1u);
-                float4 sceneVelocity = _BurtGIScreenProbeReceiverVelocityTexture.Load(int3(velocityCoord, 0));
-                if (sceneVelocity.w > 0.5f && sceneVelocity.z > 0.5f)
-                {
-                    float2 velocityHistoryUV = currentUV - sceneVelocity.xy;
-                    projected = !any(velocityHistoryUV < 0.0f) && !any(velocityHistoryUV > 1.0f);
-                    if (projected) resolvedUV = velocityHistoryUV;
-                }
-            }
+            historyUV = velocityHistoryUV;
+            return true;
         }
     }
 
-    // Assign both outputs at one exit, including rejected velocity projections.
-    historyUV = resolvedUV;
-    projectedRawDepth = resolvedDepth;
-    return projected;
+    return projectedFromWorldPosition;
 }
 void BurtGIApplyScreenProbeTemporal(
     uint2 probeCoord,
@@ -730,15 +726,6 @@ void ScreenProbeReprojectionCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     _BurtGIScreenProbeNumFramesAccumulatedWriteTexture[probeCoord] = numFramesAccumulated;
 }
 [numthreads(BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, 1)]
-void ScreenProbeDirectionalCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    uint2 size = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
-    if (any(dispatchThreadId.xy >= size)) return;
-    _BurtGIScreenProbeDirectionalTemporalWriteTexture[dispatchThreadId.xy] =
-        _BurtGIScreenProbeTraceRadianceTexture.Load(int3(dispatchThreadId.xy, 0));
-}
-
-[numthreads(BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, 1)]
 void ScreenProbeDirectionalTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 atlasSize = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
@@ -878,8 +865,10 @@ void ScreenProbeDirectionalTemporalCS(uint3 dispatchThreadId : SV_DispatchThread
         float historyHit = saturate(historyHitSum / historyWeightSum);
         float hitWeight = 1.0f - smoothstep(0.15f, 0.6f, abs(currentHit - historyHit));
         float temporalWeight = saturate(_BurtGIScreenProbeTemporalParams.x) * saturate(historyWeightSum) * hitWeight;
-        // Content changes, not stochastic RGB noise, bound stale lighting feedback.
-        if (_BurtGIReactiveHistory > 0.5f) temporalWeight = min(temporalWeight, 0.25f);
+#if defined(CODEX_TRANSIENT_779)
+        // Explicit content-change response; never triggered by stochastic RGB alone.
+        if (_CodexReactive779 > 0.5f) temporalWeight = min(temporalWeight, 0.25f);
+#endif
         currentRadiance = lerp(currentRadiance, historyRadiance, temporalWeight);
     }
 
@@ -994,4 +983,18 @@ void XGIScreenProbeUseCountScatterCS(uint3 dispatchThreadId : SV_DispatchThreadI
 void ScreenProbeUseCountScatterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     BurtGIScreenProbeUseCountScatter(dispatchThreadId);
+}
+
+
+#pragma kernel CodexObserveTransient779
+cbuffer CodexObservationStamp779 { int4 _CodexStamp779; };
+RWStructuredBuffer<float4> _CodexObservation779;
+[numthreads(1,1,1)]
+void CodexObserveTransient779(uint3 id : SV_DispatchThreadID)
+{
+#if defined(CODEX_TRANSIENT_779)
+    _CodexObservation779[0] = float4(_CodexReactive779, _CodexStamp779.x, _CodexStamp779.y, 1.0f);
+#else
+    _CodexObservation779[0] = float4(-1.0f, _CodexStamp779.x, _CodexStamp779.y, 0.0f);
+#endif
 }

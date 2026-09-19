@@ -775,7 +775,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
         {
             var request = context.Request; // 从 GraphContext 中取出当前渲染请求，用来确认是否仍然是 Overlay。
 
-            if (request == null || request.Type != BurtRenderRequestType.OverlayCamera || request.OverlayClearsColor) // 只服务于不清颜色的 Overlay request。
+            if (request == null || (request.Type != BurtRenderRequestType.OverlayCamera && request.Type != BurtRenderRequestType.UICamera) || request.OverlayClearsColor) // Overlay 与 UI 都继承底图。
             {
                 return; // 其他 request 不需要复制最终目标，直接跳过。
             }
@@ -793,7 +793,11 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流。
 
-            cmd.Blit(finalCameraTarget.Identifier, cameraColorTarget.Identifier); // 把已有最终颜色复制到 Overlay 的中间颜色 RT，作为不清颜色叠加的底图。
+            // Blit uses texture UVs while our final fullscreen pass uses raster UVs.
+            // Restore raster orientation before the overlay's next FinalBlit.
+            var flipY = SystemInfo.graphicsUVStartsAtTop;
+            cmd.Blit(finalCameraTarget.Identifier, cameraColorTarget.Identifier,
+                new Vector2(1f, flipY ? -1f : 1f), new Vector2(0f, flipY ? 1f : 0f));
 
             context.ExecuteAndReleaseCommandBuffer(cmd); // 在 Pass 边界统一提交。
         }
@@ -822,7 +826,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
 
             var clearMode = BurtCameraClearUtility.ResolveClearMode(request); // 统一解析清屏模式，让 SceneView/Preview 没有 BurtCameraData 时也能跟随 Unity clearFlags。
 
-            var isOverlayRequest = request.Type == BurtRenderRequestType.OverlayCamera; // Overlay 相机使用显式清屏意图，不再直接套用 Base 的清屏模式。
+            var isOverlayRequest = request.Type == BurtRenderRequestType.OverlayCamera || request.Type == BurtRenderRequestType.UICamera; // UI 同样使用显式清屏意图。
 
             var clearDepth = true; // Base/SceneView/Preview 保持旧行为：只要不是 DontClear，就清理深度。
 
@@ -858,6 +862,17 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 RenderTarge
             }
 
             var clearColor = BurtCameraClearUtility.ResolveClearColor(request, asset, clearMode); // 统一解析清屏颜色，保证 Skybox 和编辑器相机使用正确背景色。
+
+            // Atmosphere sky adds pre-exposed radiance while preserving destination
+            // color. A camera background here would survive as an unexposed offset.
+            // Only replace a fresh sky background; never erase an overlay's seed
+            // color or change an explicitly requested SolidColor clear.
+            if (!isOverlayRequest && clearColorBuffer &&
+                clearMode == BurtCameraClearMode.Skybox &&
+                BurtAtmosphereUtility.ShouldUseAtmosphere(request))
+            {
+                clearColor = Color.black;
+            }
 
             var cmd = context.AcquireCommandBuffer(Name); // 复用 RenderGraph 当前的统一命令流。
 

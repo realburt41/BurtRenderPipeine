@@ -1,0 +1,19 @@
+#pragma kernel CopyRayInfo
+#pragma kernel InitControl
+Texture2D<uint> _Source;
+RWTexture2D<float> _Output;
+RWTexture2D<uint> _Control;
+int2 _Size;
+[numthreads(8,8,1)]
+void CopyRayInfo(uint3 id : SV_DispatchThreadID)
+{
+    if(any(id.xy >= (uint2)_Size)) return;
+    // The producer is R16_UInt: every value is exactly representable in FP32.
+    _Output[id.xy] = (float)_Source.Load(int3(id.xy,0));
+}
+[numthreads(8,1,1)]
+void InitControl(uint3 id : SV_DispatchThreadID)
+{
+    static const uint values[8] = {0,1,63,4096,8192,32767,65534,65535};
+    if(id.x < 8) _Control[uint2(id.x,0)] = values[id.x];
+}

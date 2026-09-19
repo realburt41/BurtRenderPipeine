@@ -87,11 +87,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         private static readonly ShaderTagId BurtRefractionDistortion = new ShaderTagId("BurtRefractionDistortion");
 
-        public static DrawingSettings CreateForwardDrawingSettings(SortingSettings sortingSettings) // 创建 BurtRP 常规前向颜色绘制使用的 DrawingSettings。
+        public static DrawingSettings CreateForwardDrawingSettings(SortingSettings sortingSettings, bool allowUI = false) // UI 相机额外支持 Unity UI 的通用 Pass。
         {
             var drawingSettings = new DrawingSettings(BurtForward, sortingSettings); // 只匹配 BurtForward，让主渲染路径严格由 BurtRP 自己的 shader pass 驱动。
 
             drawingSettings.SetShaderPassName(1, BurtForwardOnly); // Forward-only 模型也必须能在纯 Forward 管线与透明队列中被找到。
+            if (allowUI)
+            {
+                drawingSettings.SetShaderPassName(2, SRPDefaultUnlit);
+                drawingSettings.SetShaderPassName(3, Always);
+            }
 
             drawingSettings.perObjectData = ForwardPerObjectData; // 让 Unity 在 DrawRenderers 时真正上传 SH、Reflection Probe 等 per-object 间接光数据。
 
@@ -116,13 +121,16 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
         public static DrawingSettings CreateUnsupportedDrawingSettings( // 创建 Unsupported Shader Debug Pass 使用的 DrawingSettings。
             SortingSettings sortingSettings, // 接收当前相机的排序规则，保证错误材质绘制顺序稳定。
-            Material errorMaterial) // 接收用于覆盖不支持材质的错误材质。
+            Material errorMaterial, bool allowUI = false) // UI 已支持的 Pass 不再由错误材质覆盖。
         {
-            var drawingSettings = new DrawingSettings(UnsupportedShaderTagIds[0], sortingSettings); // 使用第一个不支持 LightMode 作为 DrawingSettings 的主 shader pass 名称。
+            var drawingSettings = new DrawingSettings(allowUI ? ForwardBase : UnsupportedShaderTagIds[0], sortingSettings);
+            var outputIndex = 0;
 
-            for (var shaderTagIndex = 1; shaderTagIndex < UnsupportedShaderTagIds.Length; shaderTagIndex++) // 遍历剩余所有不支持的 LightMode。
+            for (var shaderTagIndex = 0; shaderTagIndex < UnsupportedShaderTagIds.Length; shaderTagIndex++)
             {
-                drawingSettings.SetShaderPassName(shaderTagIndex, UnsupportedShaderTagIds[shaderTagIndex]); // 把当前不支持 LightMode 注册到对应 DrawingSettings 槽位。
+                var tag = UnsupportedShaderTagIds[shaderTagIndex];
+                if (allowUI && (tag == SRPDefaultUnlit || tag == Always)) continue;
+                drawingSettings.SetShaderPassName(outputIndex++, tag);
             }
 
             drawingSettings.overrideMaterial = errorMaterial; // 强制匹配到的不支持 shader 使用 Unity 错误材质绘制。
@@ -2672,7 +2680,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             sortingSettings.criteria = SortingCriteria.CommonOpaque; // 设置不透明物体排序规则，通常有利于 early-z 和减少 overdraw。
 
-            var drawingSettings = BurtDrawingSettingsUtility.CreateForwardDrawingSettings(sortingSettings); // 创建前向颜色绘制设置，匹配 BurtForward 等颜色 Pass。
+            var drawingSettings = BurtDrawingSettingsUtility.CreateForwardDrawingSettings(sortingSettings, request.Type == BurtRenderRequestType.UICamera);
 
             var filteringSettings = new FilteringSettings(RenderQueueRange.opaque); // 创建过滤设置，只允许渲染队列属于 opaque 范围的物体通过。
 
@@ -2946,7 +2954,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             sortingSettings.criteria = SortingCriteria.CommonTransparent; // 设置透明物体排序规则，通常从后往前绘制以保证混合正确。
 
-            var drawingSettings = BurtDrawingSettingsUtility.CreateForwardDrawingSettings(sortingSettings); // 创建前向颜色绘制设置，匹配 BurtForward 等颜色 Pass。
+            var drawingSettings = BurtDrawingSettingsUtility.CreateForwardDrawingSettings(sortingSettings, request.Type == BurtRenderRequestType.UICamera);
 
             var filteringSettings = new FilteringSettings(RenderQueueRange.transparent); // 创建过滤设置，只允许渲染队列属于 transparent 范围的物体通过。
 
@@ -3012,7 +3020,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让这些 Pass 
 
             sortingSettings.criteria = SortingCriteria.CommonOpaque; // 使用稳定的不透明排序，保证调试覆盖绘制顺序可预测。
 
-            var drawingSettings = BurtDrawingSettingsUtility.CreateUnsupportedDrawingSettings(sortingSettings, material); // 创建会匹配已知非 BurtRP LightMode 的 DrawingSettings。
+            var drawingSettings = BurtDrawingSettingsUtility.CreateUnsupportedDrawingSettings(sortingSettings, material, request.Type == BurtRenderRequestType.UICamera);
 
             var filteringSettings = FilteringSettings.defaultValue; // 使用默认过滤，让任意队列中的不支持 shader 都有机会被报告。
 

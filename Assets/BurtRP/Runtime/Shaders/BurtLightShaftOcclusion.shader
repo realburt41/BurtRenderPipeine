@@ -10,6 +10,7 @@ Shader "Hidden/BurtRP/LightShaftOcclusion"
         UNITY_DECLARE_DEPTH_TEXTURE(_BurtCameraDepthTexture);
         sampler2D _BurtLightShaftInputTexture;
         sampler2D _BurtLightShaftSceneColorTexture;
+        float4 _BurtLightShaftBloomTexelSize; // xy: full resolution; zw: shaft resolution.
 
         float4 _BurtLightShaftParameters;
         float4 _BurtLightShaftTextureSpaceOrigin;
@@ -109,14 +110,14 @@ Shader "Hidden/BurtRP/LightShaftOcclusion"
             return lerp(finalOcclusion, 1.0f, blurOriginDistanceMask);
         }
 
-        float4 BloomSetupFrag(Varyings input) : SV_Target
+        float3 SampleBloomSetup(float2 uv)
         {
             float3 sceneColor = max(tex2Dlod(
                 _BurtLightShaftSceneColorTexture,
-                float4(input.ScreenUV, 0.0f, 0.0f)).rgb, 0.0f);
+                float4(uv, 0.0f, 0.0f)).rgb, 0.0f);
             float deviceDepth = SAMPLE_DEPTH_TEXTURE(
                 _BurtCameraDepthTexture,
-                input.ScreenUV);
+                uv);
             float sceneDepth = LinearEyeDepth(deviceDepth);
             float luminance = max(
                 dot(sceneColor, float3(0.3f, 0.59f, 0.11f)),
@@ -133,23 +134,46 @@ Shader "Hidden/BurtRP/LightShaftOcclusion"
                 (sceneDepth - 0.5f / max(_BurtLightShaftParameters.x, 1.0e-6f))
                 * _BurtLightShaftParameters.x);
             float blurOriginDistanceMask = 1.0f - saturate(
-                length(_BurtLightShaftTextureSpaceOrigin.xy - input.ScreenUV)
+                length(_BurtLightShaftTextureSpaceOrigin.xy - uv)
                 * 2.0f);
-            float edgeMask = CalcEdgeMask(input.ScreenUV);
+            float edgeMask = CalcEdgeMask(uv);
             float3 outputColor = bloomColor
                 * max(_BurtLightShaftBloomTintAndThreshold.rgb, 0.0f)
                 * bloomDistanceMask
                 * (1.0f - edgeMask)
                 * blurOriginDistanceMask
                 * blurOriginDistanceMask;
-            return float4(outputColor, 1.0f);
+            return outputColor;
+        }
+
+        float4 BloomSetupFrag(Varyings input) : SV_Target
+        {
+            // Filter extracted radiance, not averaged depth/luminance: foreground
+            // silhouettes must not generate shafts from a neighboring sky sample.
+            float2 offset = 0.5f * _BurtLightShaftBloomTexelSize.xy;
+            float3 color = SampleBloomSetup(input.ScreenUV + offset * float2(-1, -1));
+            color += SampleBloomSetup(input.ScreenUV + offset * float2(1, -1));
+            color += SampleBloomSetup(input.ScreenUV + offset * float2(-1, 1));
+            color += SampleBloomSetup(input.ScreenUV + offset * float2(1, 1));
+            return float4(color * 0.25f, 1.0f);
         }
 
         float4 BloomFinalFrag(Varyings input) : SV_Target
         {
-            return tex2Dlod(
-                _BurtLightShaftInputTexture,
-                float4(input.ScreenUV, 0.0f, 0.0f));
+            // Normalized tent reconstruction also filters the blur origin, where
+            // radial blur alone has zero footprint and exposes the half-res grid.
+            float3 color = 0.0f;
+            [unroll] for (int y = -1; y <= 1; ++y)
+            {
+                [unroll] for (int x = -1; x <= 1; ++x)
+                {
+                    float weight = (x == 0 ? 2.0f : 1.0f) * (y == 0 ? 2.0f : 1.0f);
+                    float2 uv = clamp(input.ScreenUV + float2(x, y) * _BurtLightShaftBloomTexelSize.zw,
+                        _BurtLightShaftBlurUVMinMax.xy, _BurtLightShaftBlurUVMinMax.zw);
+                    color += tex2Dlod(_BurtLightShaftInputTexture, float4(uv, 0, 0)).rgb * weight;
+                }
+            }
+            return float4(color * (1.0f / 16.0f), 1.0f);
         }
         ENDHLSL
 

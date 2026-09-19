@@ -1,5 +1,9 @@
+// Private current-source candidate; not imported or enabled in production.
+#pragma multi_compile_local _ CODEX_TRANSIENT_779
+#if defined(CODEX_TRANSIENT_779)
+cbuffer CodexTransient779 { float _CodexReactive779; };
+#endif
 #pragma kernel ScreenProbeIndirectReprojectionCS
-#pragma kernel ScreenProbeIndirectCopyCS
 
 // Define the platform depth and texture-coordinate conventions used below.
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
@@ -50,16 +54,6 @@ float4 _BurtGIIndirectReprojectionParams2; // x=scene velocity valid.
 float4x4 _BurtGIPreviousViewProjectionMatrix;
 float4x4 _BurtDeferredInverseViewProjectionMatrix;
 float4 _ZBufferParams;
-
-[numthreads(BURT_GI_REPROJECTION_THREAD_GROUP_SIZE, BURT_GI_REPROJECTION_THREAD_GROUP_SIZE, 1)]
-void ScreenProbeIndirectCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    uint2 pixel = dispatchThreadId.xy;
-    if (any(pixel >= (uint2)_BurtGIIndirectReprojectionParams.xy)) return;
-    _BurtGIDiffuseIndirectOutputTexture[pixel] = _BurtGIDiffuseIndirectCurrentTexture.Load(int3(pixel, 0));
-    _BurtGIBackfaceDiffuseIndirectOutputTexture[pixel] = _BurtGIBackfaceDiffuseIndirectCurrentTexture.Load(int3(pixel, 0));
-    _BurtGIRoughSpecularIndirectOutputTexture[pixel] = _BurtGIRoughSpecularIndirectCurrentTexture.Load(int3(pixel, 0));
-}
 
 float3 BurtGIIndirectReprojectionSafeNormalize(float3 value)
 {
@@ -511,9 +505,10 @@ void ScreenProbeIndirectReprojectionCS(uint3 dispatchThreadId : SV_DispatchThrea
     float historyFrames = _BurtGIIndirectNumFramesAccumulatedHistoryTexture.SampleLevel(sampler_BurtGIIndirectNumFramesAccumulatedHistoryTexture, historySampleUV, 0.0f).x * maxFrames;
     float maxFramesFromVisibility = historyWeight / max(1.0f - historyWeight, 1.0e-4f);
     float newFrames = min(min(historyFrames + 1.0f, maxFrames), maxFramesFromVisibility);
-    // N/(1+N) is the history fraction: N <= 1/3 limits it to 1/4.
-    // Keep the stationary estimator unchanged outside real content changes.
-    if (_BurtGIReactiveHistory > 0.5f) newFrames = min(newFrames, 1.0f / 3.0f);
+#if defined(CODEX_TRANSIENT_779)
+    // N/(1+N) <= 0.25; stationary history remains unmodified.
+    if (_CodexReactive779 > 0.5f) newFrames = min(newFrames, 1.0f / 3.0f);
+#endif
     float alpha = historyWeight > 0.0f ? rcp(1.0f + newFrames) : 1.0f;
 
     float exposureCorrection = max(_BurtGIIndirectReprojectionParams1.z, 0.0f);
@@ -540,4 +535,18 @@ void ScreenProbeIndirectReprojectionCS(uint3 dispatchThreadId : SV_DispatchThrea
     _BurtGIBackfaceDiffuseIndirectOutputTexture[pixelCoord] = max(resolvedBackface, 0.0f);
     _BurtGIRoughSpecularIndirectOutputTexture[pixelCoord] = max(resolvedRoughSpecular, 0.0f);
     _BurtGIIndirectNumFramesAccumulatedOutputTexture[pixelCoord] = float2(newFrames / maxFrames, 0.0f);
+}
+
+
+#pragma kernel CodexObserveTransient779
+cbuffer CodexObservationStamp779 { int4 _CodexStamp779; };
+RWStructuredBuffer<float4> _CodexObservation779;
+[numthreads(1,1,1)]
+void CodexObserveTransient779(uint3 id : SV_DispatchThreadID)
+{
+#if defined(CODEX_TRANSIENT_779)
+    _CodexObservation779[0] = float4(_CodexReactive779, _CodexStamp779.x, _CodexStamp779.y, 1.0f);
+#else
+    _CodexObservation779[0] = float4(-1.0f, _CodexStamp779.x, _CodexStamp779.y, 0.0f);
+#endif
 }

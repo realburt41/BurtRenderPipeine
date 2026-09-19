@@ -474,7 +474,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return false; // 返回 false，避免创建尺寸不明确的 PostProcessColor RT。
             }
 
-            if (IsPreviewOrReflectionRequest(request)) // Unity Inspector/Asset Preview 和 ReflectionProbe 捕获不应该被项目里的 Volume Tonemapping 或调色影响。
+            if (IsPreviewOrReflectionRequest(request) || request.Type == BurtRenderRequestType.UICamera) // UI 是显示空间叠加，不对底图重复曝光与色调映射。
             {
                 return false; // 返回 false，避免 Cubemap/ReflectionProbe 等辅助渲染被后处理链改变颜色或曝光。
             }
@@ -505,7 +505,8 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
                 return temporalAADebugRequested || bloomDebugRequested || autoExposureDebugRequested; // Post-backed debug should fail visibly instead of being silently skipped.
             }
 
-            return temporalAADebugRequested || bloomDebugRequested || autoExposureDebugRequested || HasActiveExposureVolume() || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume() || HasActiveColorGradingVolume() || HasActiveVignetteVolume() || HasActiveLensFlareVolume() || HasActiveDiaphragmDepthOfFieldVolume() || HasActiveRCASVolume() || HasActiveFastApproximateAAVolume() || HasActiveSubpixelMorphologicalAAVolume() || HasActiveBloomVolume() || HasActiveTemporalAASource(request); // Only real post effects allocate and run the framework; pure No-op is skipped.
+            return temporalAADebugRequested || bloomDebugRequested || autoExposureDebugRequested || HasActiveExposureVolume() || HasActiveTonemappingVolume() || HasActiveColorAdjustmentsVolume() || HasActiveColorGradingVolume() || HasActiveVignetteVolume() || HasActiveLensFlareVolume() || HasActiveDiaphragmDepthOfFieldVolume() || HasActiveRCASVolume() || HasActiveFastApproximateAAVolume() || HasActiveSubpixelMorphologicalAAVolume() || HasActiveBloomVolume() || HasActiveTemporalAASource(request)
+                || BurtLightShaftOcclusionUtility.ShouldUseLightShaftBloom(request); // Light shaft bloom also requires the post stack when it is the only enabled effect.
         }
 
         public static bool ShouldUseBloom( // 定义判断当前 request 是否需要 Bloom 的统一入口。
@@ -1466,8 +1467,9 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让后处理工
         private static bool HasActiveExposureVolume()
         {
             var exposure = GetExposureVolumeComponent();
-
-            return exposure != null && exposure.IsEnabled();
+            var localExposure = VolumeManager.instance.stack.GetComponent<LocalExposureVolumeComponent>();
+            return (exposure != null && exposure.IsEnabled()) ||
+                (localExposure != null && localExposure.IsEnabled());
         }
 
         private static bool HasActiveColorAdjustmentsVolume() // 定义判断当前 VolumeStack 是否存在有效 Color Adjustments 的辅助函数。

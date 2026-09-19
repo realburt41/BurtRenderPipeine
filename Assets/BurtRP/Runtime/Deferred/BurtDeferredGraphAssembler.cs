@@ -367,7 +367,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
         private readonly BurtRenderPass furBlurStoreHistoryPass = new BurtFurBlurStoreHistoryPass();
         private readonly BurtRenderPass furBlurCompositePass = new BurtFurBlurCompositePass();
         private readonly BurtRenderPass furBlurDebugPass = new BurtFurBlurDebugPass();
-        private readonly BurtRenderPass clearDeferredLightingTargetPass = new BurtClearDeferredLightingTargetPass(); // 创建 Deferred Lighting 黑场清理 Pass，配合 stencil 分 pass 防止跳过像素保留相机 clear color。
+        private readonly BurtRenderPass clearDeferredLightingTargetPass = new BurtClearDeferredLightingTargetPass(); // 仅清理 GBuffer 着色像素，保留背景和 Overlay 继承颜色。
         private readonly BurtRenderPass deferredLitLightingPass = new BurtDeferredLitLightingPass(); // 创建 Default Lit Deferred Lighting Pass，只处理 Default Lit GBuffer 像素。
         private readonly BurtRenderPass deferredHairLightingPass = new BurtDeferredHairLightingPass(); // 创建 Hair Deferred Lighting Pass，只处理 Hair GBuffer 像素。
         private readonly BurtRenderPass deferredClearCoatLightingPass = new BurtDeferredClearCoatLightingPass();
@@ -1717,7 +1717,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return; // 直接返回，避免 Deferred Lighting 读取无效 GBuffer。
             }
 
-            graph.AddPass(clearDeferredLightingTargetPass); // 先把 lighting target 清黑；后续 stencil pass 跳过的像素不会继承相机 clear color。
+            graph.AddPass(clearDeferredLightingTargetPass); // 仅把参与延迟着色的像素清黑，为 additive shading model 初始化累积目标。
             graph.AddPass(deferredLitLightingPass); // 先写入 Default Lit 像素；后续 shading model pass 以 additive 方式补齐专用模型。
             graph.AddPass(deferredHairLightingPass); // 叠加 Hair 像素；shader pass 和 GBuffer model id 都使用 1。
             if (ShouldUseDeferredClearCoatLighting(request, asset, useLocalGBufferTargets))
@@ -2338,7 +2338,7 @@ namespace Burt.RenderPipeline // 定义 BurtRP 的命名空间，让 Deferred �
                 return false; // 返回 false，避免从尚未 FinalBlit 的最终目标复制旧画面。
             }
 
-            return request.Type == BurtRenderRequestType.OverlayCamera && !request.OverlayClearsColor; // 非共享 Overlay 且不清颜色时才需要复制最终目标作为底图。
+            return (request.Type == BurtRenderRequestType.OverlayCamera || request.Type == BurtRenderRequestType.UICamera) && !request.OverlayClearsColor; // 非共享叠加相机继承最终目标。
         }
 
         private static bool ShouldUseDepthPrepass(BurtRenderPipelineAsset asset) // 判断是否启用 Depth Prepass。

@@ -1080,9 +1080,15 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
 
         float distanceWeight = 1.0 - saturate(laneHitDistance / max(maxTraceDistance, 0.001)) * 0.28;
         float sampleWeight = laneWeight * laneConfidence * distanceWeight;
-        BurtGISetTraceSurfaceContribution(surfaceTexelIndex * 4u + 1u + laneIndex, sampleWeight);
+        float radianceWeight = sampleWeight;
+#if defined(BURT_GI_SCREEN_PROBE_TRACE_FINE)
+        // A valid fine hit supplies incident radiance, including opaque black.
+        // Confidence describes reliability, not a cosine/distance attenuation.
+        radianceWeight = laneWeight;
+#endif
+        BurtGISetTraceSurfaceContribution(surfaceTexelIndex * 4u + 1u + laneIndex, radianceWeight);
         hitAngularWeight += laneWeight;
-        radianceSum += laneRadiance * sampleWeight;
+        radianceSum += laneRadiance * radianceWeight;
         confidenceSum += laneConfidence * sampleWeight;
         weightSum += sampleWeight;
         if (laneConfidence > tracedConfidence)
@@ -1106,11 +1112,19 @@ bool BurtGIScreenProbeTrySampleSceneVoxelConeTrace(
 
     // Misses are black incident directions, not unavailable samples. Preserve
     // their angular weight instead of expanding a small emitter to the full cone.
+#if defined(BURT_GI_SCREEN_PROBE_TRACE_FINE)
+    tracedRadiance = radianceSum / max(totalAngularWeight, 0.0001);
+#else
     tracedRadiance = (radianceSum / weightSum) * (hitAngularWeight / max(totalAngularWeight, 0.0001));
+#endif
     tracedConfidence = saturate(max(tracedConfidence, confidenceSum / weightSum));
     BurtGIScaleTraceSurfaceContributions(surfaceTexelIndex, 1u,
         tracedConfidence > 0.001
+#if defined(BURT_GI_SCREEN_PROBE_TRACE_FINE)
+            ? rcp(max(totalAngularWeight, 0.0001)) : 0.0);
+#else
             ? (hitAngularWeight / max(totalAngularWeight, 0.0001)) / weightSum : 0.0);
+#endif
     return tracedConfidence > 0.001;
 }
 bool BurtGIScreenProbeShouldSkipScreenTraceHit(uint2 screenProbeCoord)
@@ -1438,11 +1452,15 @@ void BurtGIScreenProbeTraceAtlasFromCompactStage(uint3 dispatchThreadId, uint tr
             float voxelTraceWeight = saturate(sceneVoxelConfidence * voxelDistanceWeight);
             // Radiance is a directional sample, not energy allocated to a ray.
             // Sampling PDF / trace level and world Z must not rescale its RGB.
-            // Keep hit validity and confidence weighting separate and unchanged.
-            traceRadiance += sceneVoxelRadiance * (voxelTraceWeight * incomingTraceWeight);
+            // Keep hit validity/confidence metadata separate from fine radiance.
+            float voxelRadianceWeight = voxelTraceWeight * incomingTraceWeight;
+#if defined(BURT_GI_SCREEN_PROBE_TRACE_FINE)
+            voxelRadianceWeight = incomingTraceWeight;
+#endif
+            traceRadiance += sceneVoxelRadiance * voxelRadianceWeight;
             BurtGIScaleTraceSurfaceContributions(
                 atlasCoord.y * (uint)_BurtGIScreenProbeTraceParams.y + atlasCoord.x,
-                1u, voxelTraceWeight * incomingTraceWeight);
+                1u, voxelRadianceWeight);
             hitRatio = max(hitRatio, voxelTraceWeight);
             confidence = max(confidence, sceneVoxelConfidence);
             sceneTraceHit = max(sceneTraceHit, voxelTraceWeight);

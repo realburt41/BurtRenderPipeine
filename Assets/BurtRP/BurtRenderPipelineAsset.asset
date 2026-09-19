@@ -38,6 +38,13 @@ MonoBehaviour:
     postProcessCopyShader: {fileID: 4800000, guid: 53eb69872950410e8524f1ca1b3d9378,
       type: 3}
     finalBlitShader: {fileID: 4800000, guid: 3e63e7c35c6243d1a7bff8f3e0b88a7d, type: 3}
+    atmosphereScatteringShader: {fileID: 4800000, guid: 428d204cb0ba4ca5b7b44c782bb49078,
+      type: 3}
+    volumetricFogShader: {fileID: 4800000, guid: 3502da48164c478c9d1d16ca0135d3a7,
+      type: 3}
+    fogShader: {fileID: 4800000, guid: 7c837d2a097945aaaef2ca6bb0cbd806, type: 3}
+    lightShaftOcclusionShader: {fileID: 4800000, guid: ae9338c731f2fa14aa1e2069798169f0,
+      type: 3}
   clearColor: {r: 0, g: 0, b: 0, a: 1}
   enableDepthPrepass: 1
   enableDepthDebugView: 0

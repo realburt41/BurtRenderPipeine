@@ -5,7 +5,6 @@
 float _BurtGIReactiveHistory;
 #pragma kernel ScreenProbeReprojectionCS
 #pragma kernel ScreenProbeDirectionalTemporalCS
-#pragma kernel ScreenProbeDirectionalCopyCS
 #pragma kernel ScreenProbeSceneVelocityCS
 #pragma kernel ScreenProbeClearUseCountCS
 #pragma kernel XGIScreenProbeUseCountScatterCS
@@ -91,7 +90,7 @@ Texture2D<float4> _BurtGIScreenProbeSceneVelocityTexture;
 // Unlike the legacy coarse velocity field, this has no grid-center origin.
 Texture2D<float4> _BurtGIScreenProbeReceiverVelocityTexture;
 float4 _BurtGIScreenProbeReceiverVelocityParams; // xy=size, z=owned/available.
-#include "BurtGIScreenProbeAdaptiveData.hlsl"
+#include "D:/GitProject/BurtRenderPipeine/Assets/BurtRP/Runtime/Resources/BurtGIScreenProbeAdaptiveData.hlsl"
 StructuredBuffer<uint> _BurtGIScreenProbeAdaptiveProbeNumBuffer;
 StructuredBuffer<BurtGIAdaptiveProbeData> _BurtGIScreenProbeAdaptiveProbeDataBuffer;
 float _BurtGISceneVoxelOctreeValid;
@@ -730,15 +729,6 @@ void ScreenProbeReprojectionCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     _BurtGIScreenProbeNumFramesAccumulatedWriteTexture[probeCoord] = numFramesAccumulated;
 }
 [numthreads(BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, 1)]
-void ScreenProbeDirectionalCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    uint2 size = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
-    if (any(dispatchThreadId.xy >= size)) return;
-    _BurtGIScreenProbeDirectionalTemporalWriteTexture[dispatchThreadId.xy] =
-        _BurtGIScreenProbeTraceRadianceTexture.Load(int3(dispatchThreadId.xy, 0));
-}
-
-[numthreads(BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, BURT_GI_SCREEN_PROBE_TEMPORAL_THREADGROUP_SIZE, 1)]
 void ScreenProbeDirectionalTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 atlasSize = max((uint2)_BurtGIScreenProbeTraceParams.yz, uint2(1u, 1u));
@@ -995,3 +985,53 @@ void ScreenProbeUseCountScatterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     BurtGIScreenProbeUseCountScatter(dispatchThreadId);
 }
+
+
+bool BurtGIResolveScreenProbeHistoryUVBefore811(uint2 probeCoord, uint2 gridSize, float3 positionWS, out float2 historyUV, out float projectedRawDepth)
+{
+    bool projectedFromWorldPosition = BurtGIScreenProbeProjectPreviousPositionWS(positionWS, historyUV, projectedRawDepth);
+
+    if (_BurtGIScreenProbeReceiverVelocityParams.z > 0.5f)
+    {
+        float4 currentClip = mul(_BurtGIScreenProbeViewProjectionMatrix, float4(positionWS, 1.0f));
+        if (currentClip.w <= 0.00001f)
+        {
+            return false;
+        }
+        float2 currentUV = BurtGIScreenProbeClipToScreenUV(currentClip.xy / currentClip.w);
+        if (any(currentUV < 0.0f) || any(currentUV > 1.0f))
+        {
+            return false;
+        }
+        uint2 velocitySize = max((uint2)_BurtGIScreenProbeReceiverVelocityParams.xy, uint2(1u, 1u));
+        uint2 velocityCoord = min((uint2)floor(currentUV * (float2)velocitySize), velocitySize - 1u);
+        float4 sceneVelocity = _BurtGIScreenProbeReceiverVelocityTexture.Load(int3(velocityCoord, 0));
+        if (sceneVelocity.w > 0.5f && sceneVelocity.z > 0.5f)
+        {
+            float2 velocityHistoryUV = currentUV - sceneVelocity.xy;
+            if (any(velocityHistoryUV < 0.0f) || any(velocityHistoryUV > 1.0f))
+            {
+                return false;
+            }
+            historyUV = velocityHistoryUV;
+            return true;
+        }
+    }
+
+    return projectedFromWorldPosition;
+}
+
+#pragma kernel UVContract811CS
+StructuredBuffer<float4> _UVPositions811;
+RWStructuredBuffer<float4> _UVResults811;
+[numthreads(64,1,1)]
+void UVContract811CS(uint3 tid:SV_DispatchThreadID)
+{
+ uint i=tid.x;if(i>=256)return;
+ float2 oldUV=0,newUV=0;float oldDepth=0,newDepth=0;
+ bool oldValid=BurtGIResolveScreenProbeHistoryUVBefore811(uint2(0,0),uint2(4,4),_UVPositions811[i].xyz,oldUV,oldDepth);
+ bool newValid=BurtGIResolveScreenProbeHistoryUV(uint2(0,0),uint2(4,4),_UVPositions811[i].xyz,newUV,newDepth);
+ _UVResults811[i*2]=float4(oldUV,oldDepth,oldValid?1:0);
+ _UVResults811[i*2+1]=float4(newUV,newDepth,newValid?1:0);
+}
+

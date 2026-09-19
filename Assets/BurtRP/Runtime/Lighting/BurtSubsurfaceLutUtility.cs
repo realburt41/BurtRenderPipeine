@@ -372,23 +372,23 @@ namespace Burt.RenderPipeline
             return profileParamLut;
         }
 
-        public static void InvalidateCachedTextures()
+        public static void InvalidateCachedTextures(bool immediate = false)
         {
-            DestroyTexture(preIntegratedLut);
+            DestroyTexture(preIntegratedLut, immediate);
             preIntegratedLut = null;
-            DestroyRenderTexture(gpuPreIntegratedLut);
+            DestroyRenderTexture(gpuPreIntegratedLut, immediate);
             gpuPreIntegratedLut = null;
             preIntegratedLutHash = 0;
             preIntegratedProfileHashesValid = false;
-            DestroyTexture(shLut);
+            DestroyTexture(shLut, immediate);
             shLut = null;
-            DestroyRenderTexture(gpuSHLut);
+            DestroyRenderTexture(gpuSHLut, immediate);
             gpuSHLut = null;
             shLutHash = 0;
             shProfileHashesValid = false;
-            DestroyTexture(profileParamLut);
+            DestroyTexture(profileParamLut, immediate);
             profileParamLut = null;
-            DestroyRenderTexture(gpuProfileParamLut);
+            DestroyRenderTexture(gpuProfileParamLut, immediate);
             gpuProfileParamLut = null;
             gpuProfileParamLutRandomWrite = false;
             profileParamLutHash = 0;
@@ -396,6 +396,58 @@ namespace Burt.RenderPipeline
             ReleaseProfileParamSettingsBuffer();
             hasLastPaletteHashes = false;
         }
+
+        public static void Release(bool immediate = false)
+        {
+#if UNITY_EDITOR
+            UnregisterEditorTextureRebuild();
+            lastInteractiveTime = 0;
+#endif
+            Shader.SetGlobalFloat(EnabledId, 0f);
+            Shader.SetGlobalFloat(SHLutEnabledId, 0f);
+            Shader.SetGlobalFloat(ProfileParamLutEnabledId, 0f);
+            Shader.SetGlobalTexture(TextureId, (Texture)null);
+            Shader.SetGlobalTexture(SHLutId, (Texture)null);
+            Shader.SetGlobalTexture(ProfileParamLutId, (Texture)null);
+            InvalidateCachedTextures(immediate);
+            DestroyTexture(fallbackPreIntegratedLut, immediate);
+            fallbackPreIntegratedLut = null;
+            DestroyTexture(fallbackSHLut, immediate);
+            fallbackSHLut = null;
+            DestroyTexture(fallbackProfileParamLut, immediate);
+            fallbackProfileParamLut = null;
+            preIntegratedSlicePixels = null;
+            shSlicePixels = null;
+            profileParamRowPixels = null;
+            profileParamSettingsBufferData = null;
+            lutBakerShader = null;
+            profileParamKernel = preIntegratedKernel = shKernel = -1;
+            lutBakerUnavailable = loggedGpuFallback = false;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetRuntimeResources()
+        {
+            // Also reset static GPU state when Enter Play Mode skips domain reload.
+            Release();
+        }
+
+#if UNITY_EDITOR
+        [InitializeOnLoadMethod]
+        private static void RegisterResourceCleanup()
+        {
+            AssemblyReloadEvents.beforeAssemblyReload -= ReleaseBeforeAssemblyReload;
+            AssemblyReloadEvents.beforeAssemblyReload += ReleaseBeforeAssemblyReload;
+            EditorApplication.quitting -= ReleaseBeforeAssemblyReload;
+            EditorApplication.quitting += ReleaseBeforeAssemblyReload;
+        }
+
+        private static void ReleaseBeforeAssemblyReload()
+        {
+            // Deferred destruction cannot be relied on across a managed reload.
+            Release(true);
+        }
+#endif
 
         public static void RequestEditorTextureRebuild()
         {
@@ -1492,14 +1544,14 @@ namespace Burt.RenderPipeline
             return hash * 31 + Mathf.RoundToInt(value * 10000f);
         }
 
-        private static void DestroyTexture(Texture texture)
+        private static void DestroyTexture(Texture texture, bool immediate = false)
         {
             if (texture == null)
             {
                 return;
             }
 
-            if (Application.isPlaying)
+            if (Application.isPlaying && !immediate)
             {
                 Object.Destroy(texture);
             }
@@ -1509,7 +1561,7 @@ namespace Burt.RenderPipeline
             }
         }
 
-        private static void DestroyRenderTexture(RenderTexture texture)
+        private static void DestroyRenderTexture(RenderTexture texture, bool immediate = false)
         {
             if (texture == null)
             {
@@ -1521,7 +1573,7 @@ namespace Burt.RenderPipeline
                 texture.Release();
             }
 
-            DestroyTexture(texture);
+            DestroyTexture(texture, immediate);
         }
 
         private static void ReleaseProfileParamSettingsBuffer()

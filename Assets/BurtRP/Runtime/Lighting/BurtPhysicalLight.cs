@@ -40,7 +40,9 @@ namespace Burt.RenderPipeline
                 return Mathf.Max(candela, 0f) * Mathf.PI;
             var fullAngleRadians = fullAngleDegrees * Mathf.Deg2Rad;
             var solidAngle = 2f * Mathf.PI * (1f - Mathf.Cos(fullAngleRadians * 0.5f));
-            return Mathf.Max(candela, 0f) * solidAngle;
+            // Match the denominator used by SpotLumenToCandela, including its
+            // narrow-cone safety floor, so switching units preserves output.
+            return Mathf.Max(candela, 0f) * Mathf.Max(solidAngle, MinimumSpotSolidAngle);
         }
 
         public static float RectangleLumenToNits(float lumen, Vector2 size)

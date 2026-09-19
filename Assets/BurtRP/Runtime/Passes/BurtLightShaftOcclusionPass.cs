@@ -394,6 +394,8 @@ namespace Burt.RenderPipeline
             var linearBloomTint = settings.BloomTint.linear;
 
             var cmd = context.AcquireCommandBuffer(Name);
+            cmd.SetGlobalVector("_BurtLightShaftBloomTexelSize", new Vector4(
+                1f / fullWidth, 1f / fullHeight, 1f / halfWidth, 1f / halfHeight));
             cmd.SetGlobalTexture(CameraDepthTextureId, cameraDepth.Identifier);
             cmd.SetGlobalTexture(SceneColorTextureId, cameraColor.Identifier);
             cmd.SetGlobalVector(ParametersId, new Vector4(

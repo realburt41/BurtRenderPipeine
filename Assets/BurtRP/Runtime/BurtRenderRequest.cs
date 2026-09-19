@@ -188,13 +188,13 @@ namespace Burt.RenderPipeline
             // 记录逻辑栈编号；没有 BurtCameraData 的 Unity 内部相机默认归到 0 号栈。
             request.StackId = cameraData != null ? cameraData.StackId : 0;
 
-            // 判断当前 request 是否真的是 Overlay 相机，因为只有 Overlay 需要这两个清屏意图。
-            var isOverlayCamera = request.CameraRole == BurtCameraRole.Overlay;
+            // Overlay 和显示空间 UI 都通过显式清屏意图继承已有底图。
+            var isOverlayCamera = request.CameraRole == BurtCameraRole.Overlay || request.CameraRole == BurtCameraRole.UI;
 
-            // 只在 Overlay 相机上记录是否清理颜色，避免 Base/SceneView 日志显示出无意义的 Overlay 字段。
+            // Base/SceneView 仍使用自身清屏模式。
             request.OverlayClearsColor = isOverlayCamera && cameraData != null && cameraData.OverlayClearsColor;
 
-            // 只在 Overlay 相机上记录是否清理深度，后续共享 StackDepth 时就不会误读 Base 相机的值。
+            // 叠加相机单独决定是否清理深度。
             request.OverlayClearsDepth = isOverlayCamera && cameraData != null && cameraData.OverlayClearsDepth;
 
             // 记录原生相机。

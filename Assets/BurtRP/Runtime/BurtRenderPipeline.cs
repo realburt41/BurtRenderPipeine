@@ -113,6 +113,7 @@ namespace Burt.RenderPipeline
             BurtAtmosphereLutUtility.Release();
             BurtVolumetricFogIntegratedUtility.Release();
             BurtImageBasedFilterUtility.Release();
+            BurtSubsurfaceLutUtility.Release();
             BurtScreenSpaceGlobalIlluminationPassUtility.ReleaseCameraResources();
             BurtGISceneVoxelMeshRasterizerUtility.ReleaseAll();
             BurtGISceneVoxelOctreeUtility.Release();

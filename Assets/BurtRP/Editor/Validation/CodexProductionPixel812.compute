@@ -1,5 +1,4 @@
 #pragma kernel ScreenProbeIndirectReprojectionCS
-#pragma kernel ScreenProbeIndirectCopyCS
 
 // Define the platform depth and texture-coordinate conventions used below.
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
@@ -50,16 +49,6 @@ float4 _BurtGIIndirectReprojectionParams2; // x=scene velocity valid.
 float4x4 _BurtGIPreviousViewProjectionMatrix;
 float4x4 _BurtDeferredInverseViewProjectionMatrix;
 float4 _ZBufferParams;
-
-[numthreads(BURT_GI_REPROJECTION_THREAD_GROUP_SIZE, BURT_GI_REPROJECTION_THREAD_GROUP_SIZE, 1)]
-void ScreenProbeIndirectCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    uint2 pixel = dispatchThreadId.xy;
-    if (any(pixel >= (uint2)_BurtGIIndirectReprojectionParams.xy)) return;
-    _BurtGIDiffuseIndirectOutputTexture[pixel] = _BurtGIDiffuseIndirectCurrentTexture.Load(int3(pixel, 0));
-    _BurtGIBackfaceDiffuseIndirectOutputTexture[pixel] = _BurtGIBackfaceDiffuseIndirectCurrentTexture.Load(int3(pixel, 0));
-    _BurtGIRoughSpecularIndirectOutputTexture[pixel] = _BurtGIRoughSpecularIndirectCurrentTexture.Load(int3(pixel, 0));
-}
 
 float3 BurtGIIndirectReprojectionSafeNormalize(float3 value)
 {
@@ -541,3 +530,14 @@ void ScreenProbeIndirectReprojectionCS(uint3 dispatchThreadId : SV_DispatchThrea
     _BurtGIRoughSpecularIndirectOutputTexture[pixelCoord] = max(resolvedRoughSpecular, 0.0f);
     _BurtGIIndirectNumFramesAccumulatedOutputTexture[pixelCoord] = float2(newFrames / maxFrames, 0.0f);
 }
+
+
+#pragma kernel CodexObserveProduction812
+cbuffer CodexObservationStamp812 { int4 _CodexStamp812; };
+RWStructuredBuffer<float4> _CodexObservation812;
+[numthreads(1,1,1)]
+void CodexObserveProduction812(uint3 id:SV_DispatchThreadID)
+{
+ _CodexObservation812[0]=float4(_BurtGIReactiveHistory,_CodexStamp812.x,_CodexStamp812.y,1.0f);
+}
+
